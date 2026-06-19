@@ -1,0 +1,27 @@
+{
+  "name": "emotors-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EMOTORS OS Phase 1 monorepo",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "build": "npm run build -w @emotors/api && npm run build -w @emotors/web",
+    "dev:api": "npm run dev -w @emotors/api",
+    "dev:web": "npm run dev -w @emotors/web",
+    "lint": "npm run lint -w @emotors/api && npm run lint -w @emotors/web"
+  },
+  "engines": {
+    "node": ">=20.11.0",
+    "npm": ">=10.0.0"
+  },
+  "overrides": {
+    "next@16.2.9": {
+      "postcss": "8.5.15"
+    },
+    "postcss": "8.5.15",
+    "typescript": "5.8.3"
+  }
+}
