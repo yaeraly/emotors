@@ -106,6 +106,24 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {t('nav.sales')}
               </Link>
             ) : null}
+            <div className="border-t border-slate-100 pt-2">
+              {[
+                'nav.dashboard',
+                'nav.service',
+                'nav.inventory',
+                'nav.finance',
+                'nav.reports',
+                'nav.users',
+                'nav.settings',
+              ].map((key) => (
+                <p
+                  key={key}
+                  className="rounded-xl px-3 py-2 text-sm font-semibold text-slate-400"
+                >
+                  {t(key)}
+                </p>
+              ))}
+            </div>
           </nav>
         </aside>
 

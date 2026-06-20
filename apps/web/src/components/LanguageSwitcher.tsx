@@ -1,25 +1,35 @@
 'use client';
 
-import { languageLabels, languages } from '@/i18n/translations';
+import {
+  languageLabels,
+  languageShortLabels,
+  languages,
+} from '@/i18n/translations';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export function LanguageSwitcher() {
   const { language, setLanguage } = useTranslation();
 
   return (
-    <label className="block">
-      <span className="sr-only">Language</span>
-      <select
-        value={language}
-        onChange={(event) => setLanguage(event.target.value as typeof language)}
-        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none ring-blue-500 focus:ring-2"
-      >
+    <div
+      aria-label="Language"
+      className="inline-flex rounded-xl border border-slate-300 bg-white p-1"
+    >
         {languages.map((item) => (
-          <option key={item} value={item}>
-            {languageLabels[item]}
-          </option>
+        <button
+          key={item}
+          onClick={() => setLanguage(item)}
+          type="button"
+          title={languageLabels[item]}
+          className={`rounded-lg px-2.5 py-1.5 text-xs font-bold transition ${
+            language === item
+              ? 'bg-blue-600 text-white'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          {languageShortLabels[item]}
+        </button>
         ))}
-      </select>
-    </label>
+    </div>
   );
 }

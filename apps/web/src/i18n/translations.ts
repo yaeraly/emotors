@@ -3,12 +3,18 @@ export const languages = ['ky', 'ru', 'en'] as const;
 export type Language = (typeof languages)[number];
 
 export const DEFAULT_LANGUAGE: Language = 'ky';
-export const LANGUAGE_STORAGE_KEY = 'emotors_language';
+export const LANGUAGE_STORAGE_KEY = 'emotors-language';
 
 export const languageLabels: Record<Language, string> = {
   ky: 'Кыргызча',
   ru: 'Русский',
   en: 'English',
+};
+
+export const languageShortLabels: Record<Language, string> = {
+  ky: 'KG',
+  ru: 'RU',
+  en: 'EN',
 };
 
 export const translations: Record<Language, Record<string, string>> = {
@@ -52,6 +58,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'nav.users': 'Колдонуучулар',
     'nav.settings': 'Жөндөөлөр',
     'nav.modules': 'Модулдар',
+    'nav.dashboard': 'Башкы панель',
+    'nav.reports': 'Отчеттор',
     'nav.noCrmAccess': 'CRM жеткиликсиз',
 
     'crm.title': 'Кардарлар',
@@ -109,6 +117,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.paidAmount': 'Төлөнгөн сумма',
     'sales.debtAmount': 'Карыз сумма',
     'sales.profitAmount': 'Пайда',
+    'sales.revenue': 'Киреше',
     'sales.salesAndPayments': 'Сатуулар жана төлөмдөр',
     'sales.searchPlaceholder': 'Кардар, телефон же чек боюнча издөө',
     'sales.dailySales': 'Бүгүнкү сатуу',
@@ -134,6 +143,19 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.addPayment': 'Төлөм кошуу',
     'sales.paymentHistory': 'Төлөм тарыхы',
     'sales.printReceipt': 'Чекти басып чыгаруу',
+    'service.diagnostics': 'Диагностика',
+    'service.workOrder': 'Жумуш тапшырмасы',
+    'service.repair': 'Оңдоо',
+    'service.warranty': 'Кепилдик',
+    'inventory.products': 'Товарлар',
+    'inventory.stock': 'Калдык',
+    'inventory.quantity': 'Саны',
+    'inventory.incoming': 'Киреше',
+    'inventory.outgoing': 'Чыгаша',
+    'finance.income': 'Киреше',
+    'finance.expenses': 'Чыгымдар',
+    'finance.cashRegister': 'Касса',
+    'finance.profit': 'Пайда',
   },
   ru: {
     'app.name': 'EMOTORS OS',
@@ -175,6 +197,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'nav.users': 'Пользователи',
     'nav.settings': 'Настройки',
     'nav.modules': 'Модули',
+    'nav.dashboard': 'Панель',
+    'nav.reports': 'Отчеты',
     'nav.noCrmAccess': 'Нет доступа к CRM',
 
     'crm.title': 'Клиенты',
@@ -232,6 +256,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.paidAmount': 'Оплачено',
     'sales.debtAmount': 'Долг',
     'sales.profitAmount': 'Прибыль',
+    'sales.revenue': 'Выручка',
     'sales.salesAndPayments': 'Продажи и платежи',
     'sales.searchPlaceholder': 'Поиск клиента, телефона или чека',
     'sales.dailySales': 'Продажи сегодня',
@@ -257,6 +282,19 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.addPayment': 'Добавить платеж',
     'sales.paymentHistory': 'История платежей',
     'sales.printReceipt': 'Печать чека',
+    'service.diagnostics': 'Диагностика',
+    'service.workOrder': 'Заказ-наряд',
+    'service.repair': 'Ремонт',
+    'service.warranty': 'Гарантия',
+    'inventory.products': 'Товары',
+    'inventory.stock': 'Остаток',
+    'inventory.quantity': 'Количество',
+    'inventory.incoming': 'Приход',
+    'inventory.outgoing': 'Расход',
+    'finance.income': 'Доход',
+    'finance.expenses': 'Расходы',
+    'finance.cashRegister': 'Касса',
+    'finance.profit': 'Прибыль',
   },
   en: {
     'app.name': 'EMOTORS OS',
@@ -298,6 +336,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'nav.users': 'Users',
     'nav.settings': 'Settings',
     'nav.modules': 'Modules',
+    'nav.dashboard': 'Dashboard',
+    'nav.reports': 'Reports',
     'nav.noCrmAccess': 'No CRM access',
 
     'crm.title': 'Customers',
@@ -355,6 +395,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.paidAmount': 'Paid Amount',
     'sales.debtAmount': 'Debt Amount',
     'sales.profitAmount': 'Profit Amount',
+    'sales.revenue': 'Revenue',
     'sales.salesAndPayments': 'Sales & Payments',
     'sales.searchPlaceholder': 'Search customer, phone, receipt',
     'sales.dailySales': 'Sales today',
@@ -380,5 +421,18 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.addPayment': 'Add Payment',
     'sales.paymentHistory': 'Payment History',
     'sales.printReceipt': 'Print Receipt',
+    'service.diagnostics': 'Diagnostics',
+    'service.workOrder': 'Work Order',
+    'service.repair': 'Repair',
+    'service.warranty': 'Warranty',
+    'inventory.products': 'Products',
+    'inventory.stock': 'Stock',
+    'inventory.quantity': 'Quantity',
+    'inventory.incoming': 'Incoming',
+    'inventory.outgoing': 'Outgoing',
+    'finance.income': 'Income',
+    'finance.expenses': 'Expenses',
+    'finance.cashRegister': 'Cash Register',
+    'finance.profit': 'Profit',
   },
 };
