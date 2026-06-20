@@ -48,6 +48,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     user?.role === 'OWNER' ||
     user?.role === 'MANAGER' ||
     user?.role === 'ACCOUNTANT';
+  const canSeeInventory = Boolean(user);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -106,11 +107,18 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {t('nav.sales')}
               </Link>
             ) : null}
+            {canSeeInventory ? (
+              <Link
+                href="/inventory"
+                className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {t('nav.inventory')}
+              </Link>
+            ) : null}
             <div className="border-t border-slate-100 pt-2">
               {[
                 'nav.dashboard',
                 'nav.service',
-                'nav.inventory',
                 'nav.finance',
                 'nav.reports',
                 'nav.users',

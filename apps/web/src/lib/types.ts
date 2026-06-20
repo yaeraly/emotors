@@ -28,6 +28,13 @@ export type PaymentMethod =
   | 'ELCART'
   | 'BALANCE';
 export type InstallmentStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE';
+export type StockMovementType =
+  | 'IN'
+  | 'OUT'
+  | 'TRANSFER'
+  | 'ADJUSTMENT'
+  | 'SALE'
+  | 'SERVICE_USE';
 export type SaleStatus =
   | 'DRAFT'
   | 'SENT_TO_CUSTOMER'
@@ -131,6 +138,7 @@ export type FollowUp = {
 export type SaleItem = {
   id: string;
   saleId: string;
+  productId?: string | null;
   productName: string;
   productSku?: string | null;
   quantity: number;
@@ -140,6 +148,118 @@ export type SaleItem = {
   totalCost: number;
   profitAmount: number;
   createdAt: string;
+};
+
+export type Warehouse = {
+  id: string;
+  branchId: string;
+  name: string;
+  code: string;
+  address?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Product = {
+  id: string;
+  branchId: string;
+  warehouseId: string;
+  warehouse?: Warehouse;
+  name: string;
+  sku: string;
+  category: string;
+  photoUrl?: string | null;
+  description?: string | null;
+  characteristics?: unknown;
+  weightKg: number;
+  purchasePriceYuan: number;
+  latestYuanRate: number;
+  purchaseCostKgs: number;
+  transportCostKgs: number;
+  finalCostKgs: number;
+  sellingPriceKgs: number;
+  marginAmount: number;
+  marginPercent: number;
+  minStockLevel: number;
+  quantity: number;
+  lowStock: boolean;
+  isActive: boolean;
+  priceHistory?: ProductPriceHistory[];
+  stockMovements?: StockMovement[];
+  inventoryBalances?: InventoryBalance[];
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+};
+
+export type ProductListResponse = {
+  items: Product[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type ProductPriceHistory = {
+  id: string;
+  productId: string;
+  purchasePriceYuan: number | string;
+  yuanRate: number | string;
+  purchaseCostKgs: number | string;
+  transportCostKgs: number | string;
+  finalCostKgs: number | string;
+  sellingPriceKgs: number | string;
+  marginAmount: number | string;
+  marginPercent: number | string;
+  effectiveFrom: string;
+  createdAt: string;
+};
+
+export type YuanRateHistory = {
+  id: string;
+  rate: number | string;
+  effectiveFrom: string;
+  createdAt: string;
+};
+
+export type StockMovement = {
+  id: string;
+  branchId: string;
+  warehouseId: string;
+  warehouse?: Warehouse;
+  productId: string;
+  product?: Product;
+  type: StockMovementType;
+  quantity: number;
+  unitCostKgs: number | string;
+  totalCostKgs: number | string;
+  note?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
+  createdAt: string;
+};
+
+export type InventoryBalance = {
+  id: string;
+  branchId: string;
+  warehouseId: string;
+  warehouse: Warehouse;
+  productId: string;
+  product: Product;
+  sku: string;
+  quantity: number;
+  averageCostKgs: number;
+  totalValueKgs: number;
+  minStockLevel: number;
+  lowStock: boolean;
+  updatedAt: string;
+};
+
+export type StockValueReport = {
+  totalQuantity: number;
+  totalStockValueKgs: number;
+  byWarehouse: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
+  byCategory: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
 };
 
 export type Payment = {

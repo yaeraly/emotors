@@ -70,6 +70,15 @@ enum InstallmentStatus {
   OVERDUE
 }
 
+enum StockMovementType {
+  IN
+  OUT
+  TRANSFER
+  ADJUSTMENT
+  SALE
+  SERVICE_USE
+}
+
 model Branch {
   id             String          @id @default(cuid())
   name           String
@@ -82,6 +91,10 @@ model Branch {
   payments       Payment[]
   installments   InstallmentSchedule[]
   receipts       Receipt[]
+  warehouses     Warehouse[]
+  products       Product[]
+  stockMovements StockMovement[]
+  inventoryBalances InventoryBalance[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
@@ -98,6 +111,9 @@ model User {
   followUps      FollowUp[]
   sales          Sale[]          @relation("SaleSeller")
   payments       Payment[]       @relation("PaymentCreator")
+  productPriceHistory ProductPriceHistory[] @relation("ProductPriceHistoryCreator")
+  yuanRateHistory YuanRateHistory[] @relation("YuanRateHistoryCreator")
+  stockMovements StockMovement[] @relation("StockMovementCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -217,6 +233,8 @@ model SaleItem {
   saleId       String
   sale         Sale     @relation(fields: [saleId], references: [id])
   productName  String
+  productId    String?
+  product      Product? @relation(fields: [productId], references: [id])
   productSku   String?
   quantity     Int
   unitPrice    Decimal  @db.Decimal(14, 2)
@@ -227,6 +245,7 @@ model SaleItem {
   createdAt    DateTime @default(now())
 
   @@index([saleId])
+  @@index([productId])
 }
 
 model Payment {
@@ -288,4 +307,140 @@ model Receipt {
 
   @@index([branchId])
   @@index([receiptNumber])
+}
+
+model Warehouse {
+  id        String    @id @default(cuid())
+  branchId  String
+  branch    Branch    @relation(fields: [branchId], references: [id])
+  name      String
+  code      String
+  address   String?
+  isActive  Boolean   @default(true)
+  products  Product[]
+  stockMovements StockMovement[]
+  inventoryBalances InventoryBalance[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([branchId, code])
+  @@index([branchId])
+}
+
+model Product {
+  id                String    @id @default(cuid())
+  branchId          String
+  branch            Branch    @relation(fields: [branchId], references: [id])
+  warehouseId       String
+  warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
+  name              String
+  sku               String
+  category          String
+  photoUrl          String?
+  description       String?
+  characteristics   Json?
+  weightKg          Decimal   @default(0) @db.Decimal(14, 3)
+  purchasePriceYuan Decimal   @default(0) @db.Decimal(14, 2)
+  latestYuanRate    Decimal   @default(0) @db.Decimal(14, 4)
+  purchaseCostKgs   Decimal   @default(0) @db.Decimal(14, 2)
+  transportCostKgs  Decimal   @default(0) @db.Decimal(14, 2)
+  finalCostKgs      Decimal   @default(0) @db.Decimal(14, 2)
+  sellingPriceKgs   Decimal   @default(0) @db.Decimal(14, 2)
+  marginAmount      Decimal   @default(0) @db.Decimal(14, 2)
+  marginPercent     Decimal   @default(0) @db.Decimal(8, 2)
+  minStockLevel     Int       @default(0)
+  isActive          Boolean   @default(true)
+  priceHistory      ProductPriceHistory[]
+  stockMovements    StockMovement[]
+  inventoryBalances InventoryBalance[]
+  saleItems         SaleItem[]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  @@unique([branchId, sku])
+  @@index([branchId])
+  @@index([warehouseId])
+  @@index([category])
+  @@index([isActive])
+}
+
+model ProductPriceHistory {
+  id                String   @id @default(cuid())
+  productId         String
+  product           Product  @relation(fields: [productId], references: [id])
+  purchasePriceYuan Decimal  @db.Decimal(14, 2)
+  yuanRate          Decimal  @db.Decimal(14, 4)
+  purchaseCostKgs   Decimal  @db.Decimal(14, 2)
+  transportCostKgs  Decimal  @db.Decimal(14, 2)
+  finalCostKgs      Decimal  @db.Decimal(14, 2)
+  sellingPriceKgs   Decimal  @db.Decimal(14, 2)
+  marginAmount      Decimal  @db.Decimal(14, 2)
+  marginPercent     Decimal  @db.Decimal(8, 2)
+  effectiveFrom     DateTime @default(now())
+  createdAt         DateTime @default(now())
+  createdById       String
+  createdBy         User     @relation("ProductPriceHistoryCreator", fields: [createdById], references: [id])
+
+  @@index([productId])
+  @@index([createdById])
+  @@index([effectiveFrom])
+}
+
+model YuanRateHistory {
+  id            String   @id @default(cuid())
+  rate          Decimal  @db.Decimal(14, 4)
+  effectiveFrom DateTime @default(now())
+  createdAt     DateTime @default(now())
+  createdById   String
+  createdBy     User     @relation("YuanRateHistoryCreator", fields: [createdById], references: [id])
+
+  @@index([effectiveFrom])
+  @@index([createdById])
+}
+
+model StockMovement {
+  id            String            @id @default(cuid())
+  branchId      String
+  branch        Branch            @relation(fields: [branchId], references: [id])
+  warehouseId   String
+  warehouse     Warehouse         @relation(fields: [warehouseId], references: [id])
+  productId     String
+  product       Product           @relation(fields: [productId], references: [id])
+  type          StockMovementType
+  quantity      Int
+  unitCostKgs   Decimal           @default(0) @db.Decimal(14, 2)
+  totalCostKgs  Decimal           @default(0) @db.Decimal(14, 2)
+  note          String?
+  referenceType String?
+  referenceId   String?
+  createdById   String
+  createdBy     User              @relation("StockMovementCreator", fields: [createdById], references: [id])
+  createdAt     DateTime          @default(now())
+
+  @@index([branchId])
+  @@index([warehouseId])
+  @@index([productId])
+  @@index([type])
+  @@index([createdById])
+  @@index([createdAt])
+}
+
+model InventoryBalance {
+  id            String    @id @default(cuid())
+  branchId      String
+  branch        Branch    @relation(fields: [branchId], references: [id])
+  warehouseId   String
+  warehouse     Warehouse @relation(fields: [warehouseId], references: [id])
+  productId     String
+  product       Product   @relation(fields: [productId], references: [id])
+  quantity      Int       @default(0)
+  averageCostKgs Decimal  @default(0) @db.Decimal(14, 2)
+  totalValueKgs Decimal   @default(0) @db.Decimal(14, 2)
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([branchId, warehouseId, productId])
+  @@index([branchId])
+  @@index([warehouseId])
+  @@index([productId])
 }

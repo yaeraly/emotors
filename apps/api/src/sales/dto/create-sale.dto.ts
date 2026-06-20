@@ -15,6 +15,10 @@ import {
 } from 'class-validator';
 
 export class CreateSaleItemDto {
+  @IsOptional()
+  @IsString()
+  productId?: string;
+
   @IsString()
   @MinLength(1)
   productName!: string;

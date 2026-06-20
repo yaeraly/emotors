@@ -12,8 +12,10 @@ import {
   Prisma,
   Role,
   SaleStatus,
+  StockMovementType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -23,7 +25,10 @@ type PrismaTx = Prisma.TransactionClient;
 
 @Injectable()
 export class SalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryService,
+  ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
     return this.createDraft(user, dto);
@@ -370,6 +375,23 @@ export class SalesService {
         },
       });
 
+      for (const item of refreshed.items) {
+        if (!item.productId) {
+          continue;
+        }
+
+        await this.inventoryService.createStockMovementInTx(tx, user, {
+          productId: item.productId,
+          warehouseId: await this.getProductWarehouseId(tx, item.productId),
+          type: StockMovementType.SALE,
+          quantity: item.quantity,
+          unitCostKgs: Number(item.unitCost),
+          referenceType: 'SALE',
+          referenceId: sale.id,
+          note: `Sale ${sale.receiptNumber}`,
+        });
+      }
+
       await this.refreshCustomerFinancials(tx, sale.customerId);
     });
 
@@ -484,6 +506,7 @@ export class SalesService {
       const profitAmount = this.roundMoney(totalPrice - totalCost);
 
       return {
+        productId: item.productId,
         productName: item.productName,
         productSku: item.productSku,
         quantity: item.quantity,
@@ -637,6 +660,19 @@ export class SalesService {
     }
 
     return { branchId: user.branchId };
+  }
+
+  private async getProductWarehouseId(tx: PrismaTx, productId: string) {
+    const product = await tx.product.findUnique({
+      where: { id: productId },
+      select: { warehouseId: true },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    return product.warehouseId;
   }
 
   private ensureBranchAccess(user: AuthUser, branchId: string) {
