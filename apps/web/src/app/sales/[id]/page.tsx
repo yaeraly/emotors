@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { PaymentMethod, Sale } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const paymentMethods: PaymentMethod[] = [
   'CASH',
@@ -17,6 +18,7 @@ const paymentMethods: PaymentMethod[] = [
 ];
 
 export default function SaleDetailPage() {
+  const { t } = useTranslation();
   const params = useParams<{ id: string }>();
   const saleId = params.id;
   const [sale, setSale] = useState<Sale | null>(null);
@@ -80,7 +82,7 @@ export default function SaleDetailPage() {
           href="/sales"
           className="inline-flex text-sm font-semibold text-blue-700 hover:text-blue-800"
         >
-          Back to sales
+          {t('nav.sales')}
         </Link>
 
         {error ? (
@@ -105,7 +107,7 @@ export default function SaleDetailPage() {
                 <div className="flex flex-col justify-between gap-4 md:flex-row">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                      Sale Details
+                      {t('sales.title')}
                     </p>
                     <h2 className="mt-2 text-3xl font-bold text-slate-950">
                       {sale.receiptNumber}
@@ -115,22 +117,22 @@ export default function SaleDetailPage() {
                     </p>
                   </div>
                   <span className="h-fit rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
-                    {sale.paymentStatus}
+                    {t(`paymentStatus.${sale.paymentStatus}`)}
                   </span>
                 </div>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Info label="Customer" value={sale.customer?.fullName ?? ''} />
-                  <Info label="Phone" value={sale.customer?.phone ?? ''} />
+                  <Info label={t('sales.customer')} value={sale.customer?.fullName ?? ''} />
+                  <Info label={t('crm.phone')} value={sale.customer?.phone ?? ''} />
                   <Info label="Seller" value={sale.seller?.fullName ?? ''} />
-                  <Info label="Branch" value={sale.branch?.name ?? ''} />
+                  <Info label={t('crm.branch')} value={sale.branch?.name ?? ''} />
                 </div>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-4">
-                  <Metric label="Total" value={formatKgs(sale.totalAmount)} />
-                  <Metric label="Paid" value={formatKgs(sale.paidAmount)} />
-                  <Metric label="Debt" value={formatKgs(sale.debtAmount)} />
-                  <Metric label="Profit" value={formatKgs(sale.profitAmount)} />
+                  <Metric label={t('sales.totalAmount')} value={formatKgs(sale.totalAmount)} />
+                  <Metric label={t('sales.paidAmount')} value={formatKgs(sale.paidAmount)} />
+                  <Metric label={t('sales.debtAmount')} value={formatKgs(sale.debtAmount)} />
+                  <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
                 </div>
               </article>
 
@@ -138,11 +140,11 @@ export default function SaleDetailPage() {
                 onSubmit={addPayment}
                 className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
               >
-                <h3 className="text-lg font-bold text-slate-950">Add payment</h3>
+                <h3 className="text-lg font-bold text-slate-950">{t('sales.addPayment')}</h3>
                 <div className="mt-4 space-y-3">
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">
-                      Amount
+                      {t('sales.paidAmount')}
                     </span>
                     <input
                       value={amount}
@@ -157,7 +159,7 @@ export default function SaleDetailPage() {
                   </label>
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">
-                      Method
+                      {t('sales.paymentMethod')}
                     </span>
                     <select
                       value={method}
@@ -175,7 +177,7 @@ export default function SaleDetailPage() {
                   </label>
                   <label className="block">
                     <span className="text-sm font-semibold text-slate-700">
-                      Note
+                      {t('crm.notes')}
                     </span>
                     <textarea
                       value={note}
@@ -189,24 +191,24 @@ export default function SaleDetailPage() {
                   className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                   type="submit"
                 >
-                  {savingPayment ? 'Adding...' : 'Add payment'}
+                  {savingPayment ? t('common.loading') : t('sales.addPayment')}
                 </button>
               </form>
             </div>
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h3 className="text-lg font-bold text-slate-950">Items</h3>
+              <h3 className="text-lg font-bold text-slate-950">{t('sales.saleItems')}</h3>
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-[860px] divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">Product</th>
-                      <th className="px-4 py-3">SKU</th>
-                      <th className="px-4 py-3">Qty</th>
-                      <th className="px-4 py-3">Unit Price</th>
-                      <th className="px-4 py-3">Unit Cost</th>
-                      <th className="px-4 py-3">Total</th>
-                      <th className="px-4 py-3">Profit</th>
+                      <th className="px-4 py-3">{t('sales.product')}</th>
+                      <th className="px-4 py-3">{t('sales.sku')}</th>
+                      <th className="px-4 py-3">{t('sales.quantity')}</th>
+                      <th className="px-4 py-3">{t('sales.unitPrice')}</th>
+                      <th className="px-4 py-3">{t('sales.unitCost')}</th>
+                      <th className="px-4 py-3">{t('sales.totalAmount')}</th>
+                      <th className="px-4 py-3">{t('sales.profitAmount')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -229,7 +231,7 @@ export default function SaleDetailPage() {
             </section>
 
             <div className="grid gap-6 xl:grid-cols-2">
-              <Panel title="Payment history">
+              <Panel title={t('sales.paymentHistory')}>
                 {sale.payments?.length ? (
                   <div className="space-y-3">
                     {sale.payments.map((payment) => (
@@ -261,7 +263,7 @@ export default function SaleDetailPage() {
                 )}
               </Panel>
 
-              <Panel title="Installment schedule">
+              <Panel title={t('sales.installment')}>
                 {sale.installments?.length ? (
                   <div className="space-y-3">
                     {sale.installments.map((installment) => (
@@ -281,7 +283,7 @@ export default function SaleDetailPage() {
                           Due {new Date(installment.dueDate).toLocaleDateString()}
                         </p>
                         <p className="mt-1 text-sm text-slate-600">
-                          Paid {formatKgs(installment.paidAmount)}
+                          {t('sales.paidAmount')} {formatKgs(installment.paidAmount)}
                         </p>
                       </div>
                     ))}
@@ -296,13 +298,13 @@ export default function SaleDetailPage() {
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm print:shadow-none">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-950">Receipt</h3>
+                <h3 className="text-lg font-bold text-slate-950">{t('sales.receipt')}</h3>
                 <button
                   onClick={() => window.print()}
                   className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 print:hidden"
                   type="button"
                 >
-                  Print receipt
+                  {t('sales.printReceipt')}
                 </button>
               </div>
               <div className="mt-4 rounded-2xl border border-dashed border-slate-300 p-5">
@@ -310,8 +312,8 @@ export default function SaleDetailPage() {
                 <p className="mt-2 font-bold">{sale.receiptNumber}</p>
                 <p>Date: {new Date(sale.saleDate).toLocaleString()}</p>
                 <p>Seller: {sale.seller?.fullName}</p>
-                <p>Customer: {sale.customer?.fullName}</p>
-                <p>Phone: {sale.customer?.phone}</p>
+                <p>{t('sales.customer')}: {sale.customer?.fullName}</p>
+                <p>{t('crm.phone')}: {sale.customer?.phone}</p>
                 <div className="my-4 border-t border-slate-200 pt-4">
                   {sale.items?.map((item) => (
                     <div key={item.id} className="flex justify-between text-sm">
@@ -322,10 +324,10 @@ export default function SaleDetailPage() {
                     </div>
                   ))}
                 </div>
-                <p>Total: {formatKgs(sale.totalAmount)}</p>
-                <p>Paid: {formatKgs(sale.paidAmount)}</p>
-                <p>Debt: {formatKgs(sale.debtAmount)}</p>
-                <p>Status: {sale.paymentStatus}</p>
+                <p>{t('sales.totalAmount')}: {formatKgs(sale.totalAmount)}</p>
+                <p>{t('sales.paidAmount')}: {formatKgs(sale.paidAmount)}</p>
+                <p>{t('sales.debtAmount')}: {formatKgs(sale.debtAmount)}</p>
+                <p>{t('common.status')}: {t(`paymentStatus.${sale.paymentStatus}`)}</p>
                 <pre className="mt-4 whitespace-pre-wrap rounded-xl bg-slate-100 p-4 text-xs">
                   {sale.receipt?.qrCodeData ?? 'QR placeholder'}
                 </pre>

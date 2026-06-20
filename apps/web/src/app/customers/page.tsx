@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
 import type { Branch, Customer, CustomerStatus } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const TOKEN_KEY = 'emotors_access_token';
 const businessStatuses: CustomerStatus[] = ['ACTIVE', 'VIP', 'RISK', 'INACTIVE'];
@@ -68,6 +69,7 @@ const pageSizeOptions = [10, 25, 50];
 
 export default function CustomersPage() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState('');
@@ -183,7 +185,7 @@ export default function CustomersPage() {
       });
       setForm(initialCreateState);
       await loadCustomers();
-      showSuccess('Customer created successfully');
+      showSuccess(t('crm.customerCreated'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create customer');
     } finally {
@@ -281,7 +283,7 @@ export default function CustomersPage() {
 
       await loadCustomers();
       closeEditCustomer();
-      showSuccess('Customer updated successfully');
+      showSuccess(t('crm.customerUpdated'));
     } catch (err) {
       console.error('Customer update failed', err);
       setEditError(
@@ -293,7 +295,7 @@ export default function CustomersPage() {
   }
 
   async function deleteCustomer(customer: Customer) {
-    if (!window.confirm('Soft delete this customer?')) {
+    if (!window.confirm(t('crm.confirmDelete'))) {
       return;
     }
 
@@ -354,7 +356,7 @@ export default function CustomersPage() {
       }
 
       await loadCustomers();
-      showSuccess('Customer deleted successfully');
+      showSuccess(t('crm.customerDeleted'));
     } catch (err) {
       console.error('Customer delete failed', err);
       setError(err instanceof Error ? err.message : 'Could not delete customer');
@@ -384,11 +386,11 @@ export default function CustomersPage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              CRM Intelligence
+              {t('crm.intelligenceTitle')}
             </p>
-            <h2 className="text-3xl font-bold text-slate-950">Customers</h2>
+            <h2 className="text-3xl font-bold text-slate-950">{t('crm.title')}</h2>
             <p className="mt-2 text-slate-500">
-              Customer profile, purchasing, profit, debt, and relationship view.
+              {t('crm.customerHistory')}
             </p>
           </div>
 
@@ -396,7 +398,7 @@ export default function CustomersPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name, phone, WhatsApp"
+              placeholder={t('crm.searchPlaceholder')}
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             />
             <select
@@ -404,7 +406,7 @@ export default function CustomersPage() {
               onChange={(event) => setBranchId(event.target.value)}
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             >
-              <option value="">All branches</option>
+              <option value="">{t('common.all')} {t('crm.branch')}</option>
               {branches.map((branch) => (
                 <option key={branch.id} value={branch.id}>
                   {branch.name}
@@ -416,10 +418,10 @@ export default function CustomersPage() {
               onChange={(event) => setStatus(event.target.value)}
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             >
-              <option value="">All statuses</option>
+              <option value="">{t('common.all')} {t('common.status')}</option>
               {businessStatuses.map((item) => (
                 <option key={item} value={item}>
-                  {item}
+                  {t(`status.${item}`)}
                 </option>
               ))}
             </select>
@@ -455,7 +457,7 @@ export default function CustomersPage() {
             className="h-fit max-h-[calc(100vh-180px)] shrink-0 self-start overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:w-[380px]"
           >
             <h3 className="text-lg font-bold text-slate-950">
-              Create Customer
+              {t('crm.createCustomer')}
             </h3>
             <p className="mt-1 text-sm text-slate-500">
               This card keeps a fixed width while the customer table scrolls.
@@ -469,7 +471,7 @@ export default function CustomersPage() {
               {branches.length > 1 ? (
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">
-                    Branch
+                    {t('crm.branch')}
                   </span>
                   <select
                     value={form.branchId}
@@ -521,7 +523,7 @@ export default function CustomersPage() {
               className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
               type="submit"
             >
-              {saving ? 'Creating...' : 'Create customer'}
+              {saving ? t('common.loading') : t('crm.addCustomer')}
             </button>
           </form>
 
@@ -529,22 +531,22 @@ export default function CustomersPage() {
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white p-5">
               <div>
                 <h3 className="text-lg font-bold text-slate-950">
-                  Customer intelligence table
+                  {t('crm.customerList')}
                 </h3>
                 <p className="text-sm text-slate-500">
-                  Showing {visibleCustomers.length} of {sortedCustomers.length}
+                  {visibleCustomers.length} / {sortedCustomers.length}
                 </p>
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600">
-                Page {page} / {totalPages}
+                {t('common.page')} {page} / {totalPages}
               </span>
             </div>
 
             {loading ? (
-              <p className="p-5 text-slate-500">Loading customers...</p>
+              <p className="p-5 text-slate-500">{t('common.loading')}</p>
             ) : sortedCustomers.length === 0 ? (
               <p className="m-5 rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
-                No customers found.
+                {t('crm.noCustomers')}
               </p>
             ) : (
               <>
@@ -553,83 +555,83 @@ export default function CustomersPage() {
                     <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                       <tr>
                         <SortableHeader
-                          label="Full Name"
+                          label={t('crm.fullName')}
                           sortKey="fullName"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Phone Number"
+                          label={t('crm.phone')}
                           sortKey="phone"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="WhatsApp Number"
+                          label={t('crm.whatsappPhone')}
                           sortKey="whatsappPhone"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Branch"
+                          label={t('crm.branch')}
                           sortKey="branch"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Status"
+                          label={t('crm.status')}
                           sortKey="status"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Total Purchases"
+                          label={t('crm.totalPurchaseAmount')}
                           sortKey="totalPurchases"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Total Profit"
+                          label={t('crm.totalProfitAmount')}
                           sortKey="totalProfit"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Outstanding Debt"
+                          label={t('crm.totalDebtAmount')}
                           sortKey="totalDebt"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Purchase History"
+                          label={t('crm.purchaseHistory')}
                           sortKey="purchaseCount"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Last Purchase"
+                          label={t('crm.previousPurchasedProducts')}
                           sortKey="lastPurchaseDate"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
                         <SortableHeader
-                          label="Created Date"
+                          label={t('common.createdDate')}
                           sortKey="createdAt"
                           activeKey={sortKey}
                           direction={sortDirection}
                           onSort={changeSort}
                         />
-                        <th className="px-4 py-3">Actions</th>
+                        <th className="px-4 py-3">{t('common.actions')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -648,7 +650,7 @@ export default function CustomersPage() {
                             {customer.phone}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
-                            {customer.whatsappPhone || 'Not set'}
+                            {customer.whatsappPhone || '-'}
                           </td>
                           <td className="px-4 py-3 text-slate-700">
                             {customer.branch?.name ?? customer.branchId}
@@ -671,7 +673,7 @@ export default function CustomersPage() {
                               className="rounded-lg bg-slate-100 px-3 py-1 font-semibold text-slate-700 hover:bg-slate-200"
                               type="button"
                             >
-                              {customer.purchaseCount} purchases
+                              {customer.purchaseCount} {t('crm.purchaseHistory')}
                             </button>
                           </td>
                           <td className="px-4 py-3 text-slate-700">
@@ -686,7 +688,7 @@ export default function CustomersPage() {
                                 href={`/customers/${customer.id}`}
                                 className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                               >
-                                Open
+                                {t('common.open')}
                               </Link>
                               <button
                                 onClick={() => openEditCustomer(customer)}
@@ -694,7 +696,7 @@ export default function CustomersPage() {
                                 type="button"
                               >
                                 <PencilIcon />
-                                Edit
+                                {t('common.edit')}
                               </button>
                               <button
                                 onClick={() => void deleteCustomer(customer)}
@@ -703,8 +705,8 @@ export default function CustomersPage() {
                                 type="button"
                               >
                                 {deletingCustomerId === customer.id
-                                  ? 'Deleting...'
-                                  : 'Delete'}
+                                  ? t('common.loading')
+                                  : t('common.delete')}
                               </button>
                             </div>
                           </td>
@@ -721,10 +723,10 @@ export default function CustomersPage() {
                     className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     type="button"
                   >
-                    Previous
+                    {t('common.previous')}
                   </button>
                   <p className="text-sm text-slate-500">
-                    Page {page} of {totalPages}
+                    {t('common.page')} {page} {t('common.of')} {totalPages}
                   </p>
                   <button
                     onClick={() =>
@@ -734,7 +736,7 @@ export default function CustomersPage() {
                     className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                     type="button"
                   >
-                    Next
+                    {t('common.next')}
                   </button>
                 </div>
               </>
@@ -758,7 +760,7 @@ export default function CustomersPage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                    Edit Customer
+                    {t('crm.editCustomer')}
                   </p>
                   <h3 className="mt-1 text-2xl font-bold text-slate-950">
                     {editingCustomer.fullName}
@@ -799,7 +801,7 @@ export default function CustomersPage() {
                   type="button"
                   disabled={editSaving}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   disabled={
@@ -810,7 +812,7 @@ export default function CustomersPage() {
                   className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                   type="submit"
                 >
-                  {editSaving ? 'Saving...' : 'Save changes'}
+                  {editSaving ? t('common.loading') : t('common.save')}
                 </button>
               </div>
             </form>
@@ -828,6 +830,7 @@ function CustomerProfileDrawer({
   customer: Customer;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const totalPayments = customer.totalPayments ?? Math.max(customer.totalPurchases - customer.totalDebt, 0);
   const averageOrderValue =
     customer.averageOrderValue ??
@@ -841,13 +844,13 @@ function CustomerProfileDrawer({
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              Customer Profile
+              {t('crm.customerProfile')}
             </p>
             <h3 className="mt-1 text-3xl font-bold text-slate-950">
               {customer.fullName}
             </h3>
             <p className="mt-2 text-slate-500">
-              Complete customer snapshot and business intelligence summary.
+              {t('crm.customerHistory')}
             </p>
           </div>
           <button
@@ -860,25 +863,25 @@ function CustomerProfileDrawer({
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <Info label="Full Name" value={customer.fullName} />
-          <Info label="Phone" value={customer.phone} />
-          <Info label="WhatsApp" value={customer.whatsappPhone ?? 'Not set'} />
-          <Info label="Branch" value={customer.branch?.name ?? customer.branchId} />
-          <Info label="Status" value={customer.status} />
-          <Info label="Created" value={formatDate(customer.createdAt)} />
+          <Info label={t('crm.fullName')} value={customer.fullName} />
+          <Info label={t('crm.phone')} value={customer.phone} />
+          <Info label={t('crm.whatsappPhone')} value={customer.whatsappPhone ?? '-'} />
+          <Info label={t('crm.branch')} value={customer.branch?.name ?? customer.branchId} />
+          <Info label={t('crm.status')} value={t(`status.${customer.status}`)} />
+          <Info label={t('common.createdDate')} value={formatDate(customer.createdAt)} />
         </div>
 
-        <Panel title="Financial Summary">
+        <Panel title={t('crm.financialSummary')}>
           <div className="grid gap-3 md:grid-cols-2">
-            <Metric label="Total Purchases" value={formatKgs(customer.totalPurchases)} />
-            <Metric label="Total Profit" value={formatKgs(customer.totalProfit)} />
-            <Metric label="Total Debt" value={formatKgs(customer.totalDebt)} />
-            <Metric label="Total Payments" value={formatKgs(totalPayments)} />
+            <Metric label={t('crm.totalPurchaseAmount')} value={formatKgs(customer.totalPurchases)} />
+            <Metric label={t('crm.totalProfitAmount')} value={formatKgs(customer.totalProfit)} />
+            <Metric label={t('crm.totalDebtAmount')} value={formatKgs(customer.totalDebt)} />
+            <Metric label={t('sales.paidAmount')} value={formatKgs(totalPayments)} />
             <Metric label="Average Order Value" value={formatKgs(averageOrderValue)} />
           </div>
         </Panel>
 
-        <Panel title="Purchase History">
+        <Panel title={t('crm.purchaseHistory')}>
           <p className="text-sm text-slate-500">
             {customer.purchaseCount} purchase records found. Full invoice rows
             will appear here when the Sales module is connected.
@@ -887,11 +890,11 @@ function CustomerProfileDrawer({
             href={`/customers/${customer.id}`}
             className="mt-3 inline-flex rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
           >
-            Open full profile
+            {t('common.open')}
           </Link>
         </Panel>
 
-        <Panel title="Service History">
+        <Panel title={t('crm.serviceHistory')}>
           <p className="text-sm text-slate-500">
             Diagnostics, repairs, and warranty records will appear here when the
             Service module is connected. CRM service events are available on the
@@ -910,28 +913,30 @@ function CustomerForm({
   form: CustomerFormFields;
   onChange: (updates: Partial<CustomerFormFields>) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <>
       <CustomerInput
-        label="Full name"
+        label={t('crm.fullName')}
         value={form.fullName}
         onChange={(value) => onChange({ fullName: value })}
         required
       />
       <CustomerInput
-        label="Phone"
+        label={t('crm.phone')}
         value={form.phone}
         onChange={(value) => onChange({ phone: value })}
         required
       />
       <CustomerInput
-        label="WhatsApp phone"
+        label={t('crm.whatsappPhone')}
         value={form.whatsappPhone}
         onChange={(value) => onChange({ whatsappPhone: value })}
       />
 
       <label className="block">
-        <span className="text-sm font-semibold text-slate-700">Status</span>
+        <span className="text-sm font-semibold text-slate-700">{t('crm.status')}</span>
         <select
           value={form.status}
           onChange={(event) =>
@@ -941,14 +946,14 @@ function CustomerForm({
         >
           {allStatuses.map((item) => (
             <option key={item} value={item}>
-              {item}
+              {t(`status.${item}`)}
             </option>
           ))}
         </select>
       </label>
 
       <label className="block">
-        <span className="text-sm font-semibold text-slate-700">Notes</span>
+        <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
         <textarea
           value={form.notes}
           onChange={(event) => onChange({ notes: event.target.value })}
@@ -1018,6 +1023,7 @@ function SortableHeader({
 }
 
 function StatusPill({ status }: { status: CustomerStatus }) {
+  const { t } = useTranslation();
   const tone =
     status === 'VIP'
       ? 'bg-amber-100 text-amber-800'
@@ -1029,7 +1035,7 @@ function StatusPill({ status }: { status: CustomerStatus }) {
 
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
-      {status}
+      {t(`status.${status}`)}
     </span>
   );
 }

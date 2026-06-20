@@ -5,10 +5,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { DailySalesReport, PaymentStatus, Sale } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIAL', 'DEBT'];
 
 export default function SalesPage() {
+  const { t } = useTranslation();
   const [sales, setSales] = useState<Sale[]>([]);
   const [report, setReport] = useState<DailySalesReport | null>(null);
   const [search, setSearch] = useState('');
@@ -57,20 +59,20 @@ export default function SalesPage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              Sales
+              {t('sales.title')}
             </p>
             <h2 className="text-3xl font-bold text-slate-950">
-              Sales & Payments
+              {t('sales.salesAndPayments')}
             </h2>
             <p className="mt-2 text-slate-500">
-              Register product sales, track payments, debt, and receipts.
+              {t('sales.payments')}
             </p>
           </div>
           <Link
             href="/sales/new"
             className="rounded-xl bg-blue-600 px-5 py-3 text-center font-semibold text-white hover:bg-blue-700"
           >
-            New Sale
+            {t('sales.newSale')}
           </Link>
         </div>
 
@@ -81,17 +83,17 @@ export default function SalesPage() {
         ) : null}
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard label="Sales today" value={formatKgs(report?.totalSalesAmount)} />
-          <SummaryCard label="Paid today" value={formatKgs(report?.totalPaidAmount)} />
-          <SummaryCard label="Debt today" value={formatKgs(report?.totalDebtAmount)} />
-          <SummaryCard label="Profit today" value={formatKgs(report?.totalProfitAmount)} />
+          <SummaryCard label={t('sales.dailySales')} value={formatKgs(report?.totalSalesAmount)} />
+          <SummaryCard label={t('sales.dailyPaid')} value={formatKgs(report?.totalPaidAmount)} />
+          <SummaryCard label={t('sales.dailyDebt')} value={formatKgs(report?.totalDebtAmount)} />
+          <SummaryCard label={t('sales.dailyProfit')} value={formatKgs(report?.totalProfitAmount)} />
         </div>
 
         <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2">
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search customer, phone, receipt"
+            placeholder={t('sales.searchPlaceholder')}
             className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
           />
           <select
@@ -99,10 +101,10 @@ export default function SalesPage() {
             onChange={(event) => setPaymentStatus(event.target.value)}
             className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
           >
-            <option value="">All payment statuses</option>
+            <option value="">{t('common.all')} {t('common.status')}</option>
             {paymentStatuses.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {t(`paymentStatus.${status}`)}
               </option>
             ))}
           </select>
@@ -113,29 +115,29 @@ export default function SalesPage() {
             <table className="min-w-[1120px] divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Receipt</th>
-                  <th className="px-4 py-3">Customer</th>
-                  <th className="px-4 py-3">Phone</th>
-                  <th className="px-4 py-3">Sale Date</th>
-                  <th className="px-4 py-3">Total</th>
-                  <th className="px-4 py-3">Paid</th>
-                  <th className="px-4 py-3">Debt</th>
-                  <th className="px-4 py-3">Profit</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Actions</th>
+                  <th className="px-4 py-3">{t('sales.receiptNumber')}</th>
+                  <th className="px-4 py-3">{t('sales.customer')}</th>
+                  <th className="px-4 py-3">{t('crm.phone')}</th>
+                  <th className="px-4 py-3">{t('sales.saleDate')}</th>
+                  <th className="px-4 py-3">{t('sales.totalAmount')}</th>
+                  <th className="px-4 py-3">{t('sales.paidAmount')}</th>
+                  <th className="px-4 py-3">{t('sales.debtAmount')}</th>
+                  <th className="px-4 py-3">{t('sales.profitAmount')}</th>
+                  <th className="px-4 py-3">{t('common.status')}</th>
+                  <th className="px-4 py-3">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
                     <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
-                      Loading sales...
+                      {t('sales.loadingSales')}
                     </td>
                   </tr>
                 ) : sales.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
-                      No sales found.
+                      {t('sales.noSales')}
                     </td>
                   </tr>
                 ) : (
@@ -173,7 +175,7 @@ export default function SalesPage() {
                           href={`/sales/${sale.id}`}
                           className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         >
-                          Open
+                          {t('common.open')}
                         </Link>
                       </td>
                     </tr>
@@ -200,6 +202,7 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 }
 
 function PaymentStatusPill({ status }: { status: PaymentStatus }) {
+  const { t } = useTranslation();
   const tone =
     status === 'PAID'
       ? 'bg-emerald-100 text-emerald-700'
@@ -209,7 +212,7 @@ function PaymentStatusPill({ status }: { status: PaymentStatus }) {
 
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
-      {status}
+      {t(`paymentStatus.${status}`)}
     </span>
   );
 }

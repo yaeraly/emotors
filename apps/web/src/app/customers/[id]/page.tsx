@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { useTranslation } from '@/i18n/useTranslation';
 import type {
   Customer,
   CustomerEvent,
@@ -37,6 +38,7 @@ type TimelineResponse = {
 };
 
 export default function CustomerDetailPage() {
+  const { t } = useTranslation();
   const params = useParams<{ id: string }>();
   const customerId = params.id;
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -150,7 +152,7 @@ export default function CustomerDetailPage() {
           href="/customers"
           className="inline-flex text-sm font-semibold text-blue-700 hover:text-blue-800"
         >
-          Back to customers
+          {t('nav.customers')}
         </Link>
 
         {error ? (
@@ -161,7 +163,7 @@ export default function CustomerDetailPage() {
 
         {loading ? (
           <p className="rounded-3xl border border-slate-200 bg-white p-8 text-slate-500 shadow-sm">
-            Loading customer...
+            {t('common.loading')}
           </p>
         ) : customer ? (
           <>
@@ -170,7 +172,7 @@ export default function CustomerDetailPage() {
                 <div className="flex flex-col justify-between gap-4 lg:flex-row">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                      Personal Information
+                      {t('crm.personalInformation')}
                     </p>
                     <h2 className="mt-2 text-3xl font-bold text-slate-950">
                       {customer.fullName}
@@ -183,35 +185,35 @@ export default function CustomerDetailPage() {
                 </div>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Info label="Full Name" value={customer.fullName} />
-                  <Info label="Phone" value={customer.phone} />
+                  <Info label={t('crm.fullName')} value={customer.fullName} />
+                  <Info label={t('crm.phone')} value={customer.phone} />
                   <Info
-                    label="WhatsApp"
-                    value={customer.whatsappPhone ?? 'Not set'}
+                    label={t('crm.whatsappPhone')}
+                    value={customer.whatsappPhone ?? '-'}
                   />
                   <Info
-                    label="Branch"
+                    label={t('crm.branch')}
                     value={customer.branch?.name ?? customer.branchId}
                   />
-                  <Info label="Status" value={customer.status} />
+                  <Info label={t('crm.status')} value={t(`status.${customer.status}`)} />
                   <Info
-                    label="Created"
+                    label={t('common.createdDate')}
                     value={new Date(customer.createdAt).toLocaleDateString()}
                   />
                 </div>
 
                 <h3 className="mt-8 text-lg font-bold text-slate-950">
-                  Financial Summary
+                  {t('crm.financialSummary')}
                 </h3>
                 <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                   <Amount
-                    label="Total purchases"
+                    label={t('crm.totalPurchaseAmount')}
                     value={customer.totalPurchases}
                   />
-                  <Amount label="Total profit" value={customer.totalProfit} />
-                  <Amount label="Total debt" value={customer.totalDebt} />
+                  <Amount label={t('crm.totalProfitAmount')} value={customer.totalProfit} />
+                  <Amount label={t('crm.totalDebtAmount')} value={customer.totalDebt} />
                   <Amount
-                    label="Total payments"
+                    label={t('sales.paidAmount')}
                     value={
                       customer.totalPayments ??
                       Math.max(customer.totalPurchases - customer.totalDebt, 0)
@@ -231,7 +233,7 @@ export default function CustomerDetailPage() {
 
               <aside className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-slate-950">
-                  Add follow-up
+                  {t('crm.addFollowUp')}
                 </h3>
                 <form onSubmit={addFollowUp} className="mt-4 space-y-3">
                   <input
@@ -260,7 +262,7 @@ export default function CustomerDetailPage() {
                     className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
                     type="submit"
                   >
-                    Add follow-up
+                    {t('crm.addFollowUp')}
                   </button>
                 </form>
               </aside>
@@ -269,7 +271,7 @@ export default function CustomerDetailPage() {
             <div className="grid gap-6 xl:grid-cols-2">
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-slate-950">
-                  Add customer event
+                  {t('crm.addEvent')}
                 </h3>
                 <form onSubmit={addEvent} className="mt-4 space-y-3">
                   <select
@@ -296,14 +298,14 @@ export default function CustomerDetailPage() {
                     className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800"
                     type="submit"
                   >
-                    Add event
+                    {t('crm.addEvent')}
                   </button>
                 </form>
               </section>
 
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-slate-950">
-                  Add WhatsApp history
+                  {t('crm.whatsappHistory')}
                 </h3>
                 <form onSubmit={addWhatsAppEvent} className="mt-4 space-y-3">
                   <textarea
@@ -317,7 +319,7 @@ export default function CustomerDetailPage() {
                     className="rounded-xl bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700"
                     type="submit"
                   >
-                    Save WhatsApp event
+                    {t('common.save')}
                   </button>
                 </form>
               </section>
@@ -327,7 +329,7 @@ export default function CustomerDetailPage() {
               <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                 <div>
                   <h3 className="text-lg font-bold text-slate-950">
-                    Purchase History
+                    {t('crm.purchaseHistory')}
                   </h3>
                   <p className="text-sm text-slate-500">
                     Invoice-level rows will be populated from the Sales module
@@ -349,7 +351,7 @@ export default function CustomerDetailPage() {
                       <th className="px-4 py-3">Quantity</th>
                       <th className="px-4 py-3">Total Amount</th>
                       <th className="px-4 py-3">Profit</th>
-                      <th className="px-4 py-3">Payment Status</th>
+                      <th className="px-4 py-3">{t('common.status')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -383,7 +385,7 @@ export default function CustomerDetailPage() {
                             {formatKgs(purchase.profit)}
                           </td>
                           <td className="px-4 py-3">
-                            {purchase.paymentStatus}
+                            {t(`paymentStatus.${purchase.paymentStatus}`)}
                           </td>
                         </tr>
                       ))
@@ -395,7 +397,7 @@ export default function CustomerDetailPage() {
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-950">
-                Service History
+                {t('crm.serviceHistory')}
               </h3>
               <p className="mt-1 text-sm text-slate-500">
                 Diagnostics, repairs, and warranty records will be fully
@@ -422,11 +424,11 @@ export default function CustomerDetailPage() {
 
             <div className="grid gap-6 xl:grid-cols-3">
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
-                <h3 className="text-lg font-bold text-slate-950">Timeline</h3>
+                <h3 className="text-lg font-bold text-slate-950">{t('crm.timeline')}</h3>
                 <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-2">
                   {timeline.length === 0 ? (
                     <p className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
-                      No timeline entries yet.
+                      {t('crm.timeline')}
                     </p>
                   ) : (
                     timeline.map((entry) => (
@@ -437,10 +439,10 @@ export default function CustomerDetailPage() {
               </section>
 
               <section className="space-y-6">
-                <Panel title="WhatsApp history">
+                <Panel title={t('crm.whatsappHistory')}>
                   {whatsappEvents.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                      No WhatsApp events yet.
+                      {t('crm.whatsappHistory')}
                     </p>
                   ) : (
                     whatsappEvents.map((event) => (
@@ -457,10 +459,10 @@ export default function CustomerDetailPage() {
                   )}
                 </Panel>
 
-                <Panel title="Follow-ups">
+                <Panel title={t('crm.followUps')}>
                   {followUps.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                      No follow-ups yet.
+                      {t('crm.followUps')}
                     </p>
                   ) : (
                     followUps.map((followUp) => (
@@ -492,7 +494,7 @@ export default function CustomerDetailPage() {
                             className="mt-3 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                             type="button"
                           >
-                            Mark done
+                            {t('crm.markDone')}
                           </button>
                         ) : null}
                       </div>
@@ -588,6 +590,8 @@ function Panel({
 }
 
 function TimelineRow({ entry }: { entry: TimelineEntry }) {
+  const { t } = useTranslation();
+
   if (entry.kind === 'event') {
     return (
       <div className="rounded-2xl border border-slate-200 p-4">
@@ -614,7 +618,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-wide text-blue-700">
-              PURCHASE · {entry.item.paymentStatus}
+              {t('crm.purchaseHistory')} · {t(`paymentStatus.${entry.item.paymentStatus}`)}
             </p>
             <p className="mt-1 font-semibold text-slate-950">
               {entry.item.receiptNumber} · {formatKgs(entry.item.totalAmount)}
@@ -634,7 +638,7 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-wide text-emerald-700">
-              PAYMENT · {entry.item.method}
+              {t('sales.payments')} · {entry.item.method}
             </p>
             <p className="mt-1 font-semibold text-slate-950">
               {entry.item.receiptNumber} · {formatKgs(entry.item.amount)}

@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Customer, PaymentMethod, Sale } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type SaleItemForm = {
   productName: string;
@@ -33,6 +34,7 @@ const emptyItem: SaleItemForm = {
 
 export default function NewSalePage() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
   const [items, setItems] = useState<SaleItemForm[]>([{ ...emptyItem }]);
@@ -89,7 +91,7 @@ export default function NewSalePage() {
     setError('');
 
     if (!customerId) {
-      setError('Customer is required');
+      setError(t('sales.selectCustomer'));
       return;
     }
 
@@ -147,14 +149,13 @@ export default function NewSalePage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              New Sale
+              {t('sales.newSale')}
             </p>
             <h2 className="text-3xl font-bold text-slate-950">
-              Register product sale
+              {t('sales.registerSale')}
             </h2>
             <p className="mt-2 text-slate-500">
-              Select a CRM customer, add products, payment, and installment
-              details.
+              {t('sales.selectCustomer')}
             </p>
           </div>
           <button
@@ -162,7 +163,7 @@ export default function NewSalePage() {
             className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             type="submit"
           >
-            {saving ? 'Saving sale...' : 'Save sale'}
+            {saving ? t('common.loading') : t('common.save')}
           </button>
         </div>
 
@@ -173,14 +174,14 @@ export default function NewSalePage() {
         ) : null}
 
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-950">Customer</h3>
+          <h3 className="text-lg font-bold text-slate-950">{t('sales.customer')}</h3>
           <select
             value={customerId}
             onChange={(event) => setCustomerId(event.target.value)}
             className="mt-4 w-full rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             required
           >
-            <option value="">Select customer</option>
+            <option value="">{t('sales.selectCustomer')}</option>
             {customers.map((customer) => (
               <option key={customer.id} value={customer.id}>
                 {customer.fullName} · {customer.phone}
@@ -191,13 +192,13 @@ export default function NewSalePage() {
 
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-slate-950">Sale items</h3>
+            <h3 className="text-lg font-bold text-slate-950">{t('sales.saleItems')}</h3>
             <button
               onClick={addItem}
               className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
               type="button"
             >
-              Add item
+              {t('sales.addItem')}
             </button>
           </div>
 
@@ -215,32 +216,32 @@ export default function NewSalePage() {
                   className="grid gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-7"
                 >
                   <SaleInput
-                    label="Product"
+                    label={t('sales.product')}
                     value={item.productName}
                     onChange={(value) => updateItem(index, { productName: value })}
                     required
                   />
                   <SaleInput
-                    label="SKU"
+                    label={t('sales.sku')}
                     value={item.productSku}
                     onChange={(value) => updateItem(index, { productSku: value })}
                   />
                   <SaleInput
-                    label="Qty"
+                    label={t('sales.quantity')}
                     type="number"
                     value={item.quantity}
                     onChange={(value) => updateItem(index, { quantity: value })}
                     required
                   />
                   <SaleInput
-                    label="Unit price"
+                    label={t('sales.unitPrice')}
                     type="number"
                     value={item.unitPrice}
                     onChange={(value) => updateItem(index, { unitPrice: value })}
                     required
                   />
                   <SaleInput
-                    label="Unit cost"
+                    label={t('sales.unitCost')}
                     type="number"
                     value={item.unitCost}
                     onChange={(value) => updateItem(index, { unitCost: value })}
@@ -248,7 +249,7 @@ export default function NewSalePage() {
                   />
                   <div className="rounded-xl bg-slate-50 p-3 text-sm">
                     <p className="text-xs font-semibold uppercase text-slate-400">
-                      Total / Profit
+                      {t('sales.totalAmount')} / {t('sales.profitAmount')}
                     </p>
                     <p className="font-bold text-slate-900">
                       {formatKgs(itemTotal)}
@@ -261,7 +262,7 @@ export default function NewSalePage() {
                     className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
                     type="button"
                   >
-                    Remove
+                    {t('common.delete')}
                   </button>
                 </div>
               );
@@ -271,17 +272,17 @@ export default function NewSalePage() {
 
         <div className="grid gap-6 xl:grid-cols-2">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">Payment</h3>
+            <h3 className="text-lg font-bold text-slate-950">{t('sales.payments')}</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <SaleInput
-                label="Paid amount"
+                label={t('sales.paidAmount')}
                 type="number"
                 value={paidAmount}
                 onChange={setPaidAmount}
               />
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">
-                  Payment method
+                  {t('sales.paymentMethod')}
                 </span>
                 <select
                   value={paymentMethod}
@@ -301,10 +302,10 @@ export default function NewSalePage() {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">Installment</h3>
+            <h3 className="text-lg font-bold text-slate-950">{t('sales.installment')}</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <SaleInput
-                label="Installment days"
+                label={t('sales.installment')}
                 type="number"
                 value={installmentDays}
                 onChange={setInstallmentDays}
@@ -317,7 +318,7 @@ export default function NewSalePage() {
               />
             </div>
             <label className="mt-4 block">
-              <span className="text-sm font-semibold text-slate-700">Notes</span>
+              <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
               <textarea
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
@@ -328,10 +329,10 @@ export default function NewSalePage() {
         </div>
 
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
-          <Summary label="Sale total" value={formatKgs(totals.totalAmount)} />
-          <Summary label="Profit" value={formatKgs(totals.profit)} />
-          <Summary label="Paid" value={formatKgs(totals.paid)} />
-          <Summary label="Debt" value={formatKgs(totals.debt)} />
+          <Summary label={t('sales.totalAmount')} value={formatKgs(totals.totalAmount)} />
+          <Summary label={t('sales.profitAmount')} value={formatKgs(totals.profit)} />
+          <Summary label={t('sales.paidAmount')} value={formatKgs(totals.paid)} />
+          <Summary label={t('sales.debtAmount')} value={formatKgs(totals.debt)} />
         </section>
       </form>
     </ProtectedShell>

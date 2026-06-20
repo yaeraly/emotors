@@ -3,9 +3,12 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getToken, login, setToken } from '@/lib/api';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [email, setEmail] = useState('owner@emotors.kg');
   const [password, setPassword] = useState('password123');
   const [error, setError] = useState('');
@@ -27,7 +30,7 @@ export default function LoginPage() {
       setToken(response.accessToken);
       router.replace('/customers');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : t('auth.invalidCredentials'));
     } finally {
       setLoading(false);
     }
@@ -39,18 +42,23 @@ export default function LoginPage() {
         onSubmit={onSubmit}
         className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-xl"
       >
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-600">
-          EMOTORS OS
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-600">
+            {t('app.name')}
+          </p>
+          <LanguageSwitcher />
+        </div>
         <h1 className="mt-3 text-3xl font-bold text-slate-950">
-          Login to CRM
+          {t('auth.login')}
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Phase 1 includes only foundation, branches, roles, and CRM.
+          {t('auth.welcome')}
         </p>
 
         <label className="mt-8 block">
-          <span className="text-sm font-semibold text-slate-700">Email</span>
+          <span className="text-sm font-semibold text-slate-700">
+            {t('auth.email')}
+          </span>
           <input
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -62,7 +70,9 @@ export default function LoginPage() {
         </label>
 
         <label className="mt-4 block">
-          <span className="text-sm font-semibold text-slate-700">Password</span>
+          <span className="text-sm font-semibold text-slate-700">
+            {t('auth.password')}
+          </span>
           <input
             value={password}
             onChange={(event) => setPassword(event.target.value)}
@@ -84,11 +94,11 @@ export default function LoginPage() {
           className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
           type="submit"
         >
-          {loading ? 'Signing in...' : 'Sign in'}
+          {loading ? t('auth.signingIn') : t('auth.signIn')}
         </button>
 
         <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
-          <p className="font-semibold text-slate-800">Default login</p>
+          <p className="font-semibold text-slate-800">{t('auth.defaultLogin')}</p>
           <p>owner@emotors.kg</p>
           <p>password123</p>
         </div>

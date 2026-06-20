@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
+import { LanguageSwitcher } from './LanguageSwitcher';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type ProtectedShellProps = {
   children: ReactNode;
@@ -12,6 +14,7 @@ type ProtectedShellProps = {
 
 export function ProtectedShell({ children }: ProtectedShellProps) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -35,7 +38,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   if (loading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">
-        Loading EMOTORS OS...
+        {t('common.loading')}
       </main>
     );
   }
@@ -52,11 +55,14 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-600">
-              EMOTORS OS
+              {t('app.name')}
             </p>
-            <h1 className="text-xl font-bold text-slate-950">CRM Phase 1</h1>
+            <h1 className="text-xl font-bold text-slate-950">
+              {t('app.name')}
+            </h1>
           </div>
           <div className="flex items-center gap-4">
+            <LanguageSwitcher />
             <div className="text-right text-sm">
               <p className="font-semibold text-slate-900">{user?.fullName}</p>
               <p className="text-slate-500">
@@ -68,7 +74,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               type="button"
             >
-              Logout
+              {t('common.logout')}
             </button>
           </div>
         </div>
@@ -77,7 +83,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
       <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-6 lg:grid-cols-[220px_1fr]">
         <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-            Modules
+            {t('nav.modules')}
           </p>
           <nav className="space-y-2">
             {canSeeCrm ? (
@@ -85,11 +91,11 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 href="/customers"
                 className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700"
               >
-                CRM
+                {t('nav.customers')}
               </Link>
             ) : (
               <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                No CRM access
+                {t('nav.noCrmAccess')}
               </p>
             )}
             {canSeeSales ? (
@@ -97,7 +103,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 href="/sales"
                 className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
-                Sales
+                {t('nav.sales')}
               </Link>
             ) : null}
           </nav>
