@@ -3,13 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  CustomerEvent,
-  CustomerEventType,
-  FollowUpStatus,
-  Prisma,
-  Role,
-} from '@prisma/client';
+import { CustomerEvent, CustomerEventType, FollowUpStatus, Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddCustomerEventDto } from './dto/add-customer-event.dto';
@@ -18,12 +12,30 @@ import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
-type CustomerEventWithCreator = CustomerEvent & {
-  createdBy?: {
+type CustomerSaleHistory = {
+  id: string;
+  receiptNumber: string;
+  saleDate: Date;
+  totalAmount: Prisma.Decimal;
+  profitAmount: Prisma.Decimal;
+  paidAmount: Prisma.Decimal;
+  debtAmount: Prisma.Decimal;
+  paymentStatus: string;
+  items?: Array<{
     id: string;
-    fullName: string;
-    role: Role;
-  };
+    productName: string;
+    productSku: string | null;
+    quantity: number;
+    totalPrice: Prisma.Decimal;
+    profitAmount: Prisma.Decimal;
+  }>;
+  payments?: Array<{
+    id: string;
+    amount: Prisma.Decimal;
+    method: string;
+    paidAt: Date;
+    note: string | null;
+  }>;
 };
 
 @Injectable()
@@ -70,20 +82,20 @@ export class CustomersService {
         totalDebtAmount: true,
         createdAt: true,
         updatedAt: true,
-        events: {
-          where: { type: CustomerEventType.SALE },
+        sales: {
+          where: { deletedAt: null },
           select: {
             id: true,
-            createdAt: true,
+            saleDate: true,
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { saleDate: 'desc' },
         },
       },
       orderBy: { updatedAt: 'desc' },
     });
 
     return customers.map((customer) =>
-      this.toCustomerListItem(customer, customer.events),
+      this.toCustomerListItem(customer, customer.sales),
     );
   }
 
@@ -103,15 +115,15 @@ export class CustomersService {
         totalProfitAmount: dto.totalProfitAmount,
         totalDebtAmount: dto.totalDebtAmount,
       },
-      include: { branch: true, events: true },
+      include: { branch: true, events: true, sales: true },
     });
 
-    return this.toCustomerProfile(customer, customer.events);
+    return this.toCustomerProfile(customer, customer.events, customer.sales);
   }
 
   async findOne(user: AuthUser, id: string) {
     const customer = await this.getAccessibleCustomer(user, id);
-    return this.toCustomerProfile(customer, customer.events);
+    return this.toCustomerProfile(customer, customer.events, customer.sales);
   }
 
   async update(user: AuthUser, id: string, dto: UpdateCustomerDto) {
@@ -129,10 +141,10 @@ export class CustomersService {
         totalProfitAmount: dto.totalProfitAmount,
         totalDebtAmount: dto.totalDebtAmount,
       },
-      include: { branch: true, events: true },
+      include: { branch: true, events: true, sales: true },
     });
 
-    return this.toCustomerProfile(customer, customer.events);
+    return this.toCustomerProfile(customer, customer.events, customer.sales);
   }
 
   async softDelete(user: AuthUser, id: string) {
@@ -265,6 +277,22 @@ export class CustomersService {
     ]);
 
     const timeline = [
+      ...customer.sales.map((sale) => ({
+        kind: 'sale' as const,
+        at: sale.saleDate,
+        item: sale,
+      })),
+      ...customer.sales.flatMap((sale) =>
+        sale.payments.map((payment) => ({
+          kind: 'payment' as const,
+          at: payment.paidAt,
+          item: {
+            ...payment,
+            saleId: sale.id,
+            receiptNumber: sale.receiptNumber,
+          },
+        })),
+      ),
       ...events.map((event) => ({
         kind: 'event' as const,
         at: event.createdAt,
@@ -278,13 +306,13 @@ export class CustomersService {
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
     return {
-      customer: this.toCustomerProfile(customer, events),
+      customer: this.toCustomerProfile(customer, events, customer.sales),
       events,
       whatsappEvents: events.filter(
         (event) => event.type === CustomerEventType.WHATSAPP,
       ),
       followUps,
-      purchaseHistory: this.toPurchaseHistory(events),
+      purchaseHistory: this.toPurchaseHistory(customer.sales),
       serviceHistory: {
         diagnostics: [],
         repairs: events
@@ -348,6 +376,17 @@ export class CustomersService {
         events: {
           orderBy: { createdAt: 'desc' },
         },
+        sales: {
+          where: { deletedAt: null },
+          include: {
+            items: true,
+            payments: {
+              orderBy: { paidAt: 'desc' },
+            },
+            receipt: true,
+          },
+          orderBy: { saleDate: 'desc' },
+        },
       },
     });
 
@@ -373,9 +412,9 @@ export class CustomersService {
       createdAt: Date;
       updatedAt: Date;
     },
-  >(customer: T, saleEvents: { id: string; createdAt: Date }[]) {
-    const purchaseCount = saleEvents.length;
-    const lastPurchaseDate = saleEvents[0]?.createdAt ?? null;
+  >(customer: T, sales: { id: string; saleDate: Date }[]) {
+    const purchaseCount = sales.length;
+    const lastPurchaseDate = sales[0]?.saleDate ?? null;
     const totalPurchases = Number(customer.totalPurchaseAmount);
     const totalProfit = Number(customer.totalProfitAmount);
     const totalDebt = Number(customer.totalDebtAmount);
@@ -418,14 +457,11 @@ export class CustomersService {
       updatedAt: Date;
       deletedAt: Date | null;
     },
-  >(customer: T, events: CustomerEvent[]) {
-    const saleEvents = events.filter(
-      (event) => event.type === CustomerEventType.SALE,
-    );
+  >(customer: T, _events: CustomerEvent[], sales: CustomerSaleHistory[]) {
     const totalPurchases = Number(customer.totalPurchaseAmount);
     const totalProfit = Number(customer.totalProfitAmount);
     const totalDebt = Number(customer.totalDebtAmount);
-    const purchaseCount = saleEvents.length;
+    const purchaseCount = sales.length;
     const totalPayments = Math.max(totalPurchases - totalDebt, 0);
     const averageOrderValue =
       purchaseCount > 0 ? totalPurchases / purchaseCount : 0;
@@ -445,7 +481,7 @@ export class CustomersService {
       totalPayments,
       averageOrderValue,
       purchaseCount,
-      lastPurchaseDate: saleEvents[0]?.createdAt ?? null,
+      lastPurchaseDate: sales[0]?.saleDate ?? null,
       createdAt: customer.createdAt,
       updatedAt: customer.updatedAt,
       deletedAt: customer.deletedAt,
@@ -455,19 +491,19 @@ export class CustomersService {
     };
   }
 
-  private toPurchaseHistory(events: CustomerEventWithCreator[]) {
-    return events
-      .filter((event) => event.type === CustomerEventType.SALE)
-      .map((event, index) => ({
-        id: event.id,
-        date: event.createdAt,
-        invoiceNumber: `CRM-SALE-${String(index + 1).padStart(4, '0')}`,
-        products: event.message,
-        quantity: null,
-        totalAmount: null,
-        profit: null,
-        paymentStatus: 'Not linked to Sales module',
-        createdBy: event.createdBy,
-      }));
+  private toPurchaseHistory(sales: CustomerSaleHistory[]) {
+    return sales.map((sale) => ({
+      id: sale.id,
+      date: sale.saleDate,
+      invoiceNumber: sale.receiptNumber,
+      products:
+        sale.items?.map((item) => item.productName).join(', ') ||
+        'Manual sale',
+      quantity:
+        sale.items?.reduce((sum, item) => sum + item.quantity, 0) ?? null,
+      totalAmount: Number(sale.totalAmount),
+      profit: Number(sale.profitAmount),
+      paymentStatus: sale.paymentStatus,
+    }));
   }
 }

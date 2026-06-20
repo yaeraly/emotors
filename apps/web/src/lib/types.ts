@@ -18,6 +18,15 @@ export type CustomerEventType =
   | 'FOLLOW_UP';
 
 export type FollowUpStatus = 'OPEN' | 'DONE' | 'CANCELLED';
+export type PaymentStatus = 'PAID' | 'PARTIAL' | 'DEBT';
+export type PaymentMethod =
+  | 'CASH'
+  | 'CARD'
+  | 'TRANSFER'
+  | 'MBANK'
+  | 'ELCART'
+  | 'BALANCE';
+export type InstallmentStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE';
 
 export type Branch = {
   id: string;
@@ -112,6 +121,94 @@ export type FollowUp = {
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
 };
 
+export type SaleItem = {
+  id: string;
+  saleId: string;
+  productName: string;
+  productSku?: string | null;
+  quantity: number;
+  unitPrice: number;
+  unitCost: number;
+  totalPrice: number;
+  totalCost: number;
+  profitAmount: number;
+  createdAt: string;
+};
+
+export type Payment = {
+  id: string;
+  branchId: string;
+  saleId: string;
+  customerId: string;
+  amount: number;
+  method: PaymentMethod;
+  paidAt: string;
+  note?: string | null;
+  createdById: string;
+  createdAt: string;
+  createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
+};
+
+export type InstallmentSchedule = {
+  id: string;
+  branchId: string;
+  saleId: string;
+  customerId: string;
+  dueDate: string;
+  amount: number;
+  paidAmount: number;
+  status: InstallmentStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Receipt = {
+  id: string;
+  branchId: string;
+  saleId: string;
+  receiptNumber: string;
+  qrCodeData: string;
+  printedAt?: string | null;
+  createdAt: string;
+};
+
+export type Sale = {
+  id: string;
+  branchId: string;
+  branch?: Branch;
+  customerId: string;
+  customer: Customer;
+  sellerId: string;
+  seller?: Pick<User, 'id' | 'fullName' | 'email' | 'role'>;
+  receiptNumber: string;
+  saleDate: string;
+  totalAmount: number;
+  totalCost: number;
+  profitAmount: number;
+  paidAmount: number;
+  debtAmount: number;
+  paymentStatus: PaymentStatus;
+  notes?: string | null;
+  items?: SaleItem[];
+  payments?: Payment[];
+  installments?: InstallmentSchedule[];
+  receipt?: Receipt | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+};
+
+export type DailySalesReport = {
+  totalSalesAmount: number;
+  totalPaidAmount: number;
+  totalDebtAmount: number;
+  totalProfitAmount: number;
+  saleCount: number;
+  cashPayments: number;
+  transferPayments: number;
+  cardPayments: number;
+};
+
 export type TimelineEntry =
   | {
       kind: 'event';
@@ -122,4 +219,16 @@ export type TimelineEntry =
       kind: 'followUp';
       at: string;
       item: FollowUp;
+    }
+  | {
+      kind: 'sale';
+      at: string;
+      item: Sale;
+    }
+  | {
+      kind: 'payment';
+      at: string;
+      item: Payment & {
+        receiptNumber: string;
+      };
     };

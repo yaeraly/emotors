@@ -608,6 +608,46 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
     );
   }
 
+  if (entry.kind === 'sale') {
+    return (
+      <div className="rounded-2xl border border-slate-200 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wide text-blue-700">
+              PURCHASE · {entry.item.paymentStatus}
+            </p>
+            <p className="mt-1 font-semibold text-slate-950">
+              {entry.item.receiptNumber} · {formatKgs(entry.item.totalAmount)}
+            </p>
+          </div>
+          <time className="shrink-0 text-right text-xs text-slate-500">
+            {new Date(entry.at).toLocaleString()}
+          </time>
+        </div>
+      </div>
+    );
+  }
+
+  if (entry.kind === 'payment') {
+    return (
+      <div className="rounded-2xl border border-slate-200 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wide text-emerald-700">
+              PAYMENT · {entry.item.method}
+            </p>
+            <p className="mt-1 font-semibold text-slate-950">
+              {entry.item.receiptNumber} · {formatKgs(entry.item.amount)}
+            </p>
+          </div>
+          <time className="shrink-0 text-right text-xs text-slate-500">
+            {new Date(entry.at).toLocaleString()}
+          </time>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
       <div className="flex items-start justify-between gap-4">

@@ -1,0 +1,82 @@
+import { PaymentMethod } from '@prisma/client';
+import { Type } from 'class-transformer';
+import {
+  ArrayMinSize,
+  IsArray,
+  IsDate,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
+
+export class CreateSaleItemDto {
+  @IsString()
+  @MinLength(1)
+  productName!: string;
+
+  @IsOptional()
+  @IsString()
+  productSku?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  quantity!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitCost!: number;
+}
+
+export class CreateSaleDto {
+  @IsString()
+  @MinLength(1)
+  customerId!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateSaleItemDto)
+  items!: CreateSaleItemDto[];
+
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  saleDate?: Date;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  paidAmount?: number;
+
+  @IsOptional()
+  @IsEnum(PaymentMethod)
+  paymentMethod?: PaymentMethod;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  installmentDays?: number;
+
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  dueDate?: Date;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}

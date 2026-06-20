@@ -39,6 +39,28 @@ enum FollowUpStatus {
   CANCELLED
 }
 
+enum PaymentStatus {
+  PAID
+  PARTIAL
+  DEBT
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  MBANK
+  ELCART
+  BALANCE
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
 model Branch {
   id             String          @id @default(cuid())
   name           String
@@ -47,6 +69,10 @@ model Branch {
   customers      Customer[]
   customerEvents CustomerEvent[]
   followUps      FollowUp[]
+  sales          Sale[]
+  payments       Payment[]
+  installments   InstallmentSchedule[]
+  receipts       Receipt[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 }
@@ -61,6 +87,8 @@ model User {
   branch         Branch          @relation(fields: [branchId], references: [id])
   customerEvents CustomerEvent[]
   followUps      FollowUp[]
+  sales          Sale[]          @relation("SaleSeller")
+  payments       Payment[]       @relation("PaymentCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -81,6 +109,9 @@ model Customer {
   totalDebtAmount     Decimal         @default(0) @db.Decimal(14, 2)
   events              CustomerEvent[]
   followUps           FollowUp[]
+  sales               Sale[]
+  payments            Payment[]
+  installments        InstallmentSchedule[]
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   deletedAt           DateTime?
@@ -129,4 +160,115 @@ model FollowUp {
   @@index([createdById])
   @@index([status])
   @@index([dueAt])
+}
+
+model Sale {
+  id              String                @id @default(cuid())
+  branchId        String
+  branch          Branch                @relation(fields: [branchId], references: [id])
+  customerId      String
+  customer        Customer              @relation(fields: [customerId], references: [id])
+  sellerId        String
+  seller          User                  @relation("SaleSeller", fields: [sellerId], references: [id])
+  receiptNumber   String                @unique
+  saleDate        DateTime              @default(now())
+  totalAmount     Decimal               @default(0) @db.Decimal(14, 2)
+  totalCost       Decimal               @default(0) @db.Decimal(14, 2)
+  profitAmount    Decimal               @default(0) @db.Decimal(14, 2)
+  paidAmount      Decimal               @default(0) @db.Decimal(14, 2)
+  debtAmount      Decimal               @default(0) @db.Decimal(14, 2)
+  paymentStatus   PaymentStatus
+  notes           String?
+  items           SaleItem[]
+  payments        Payment[]
+  installments    InstallmentSchedule[]
+  receipt         Receipt?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  deletedAt       DateTime?
+
+  @@index([branchId])
+  @@index([customerId])
+  @@index([sellerId])
+  @@index([paymentStatus])
+  @@index([saleDate])
+  @@index([receiptNumber])
+}
+
+model SaleItem {
+  id           String   @id @default(cuid())
+  saleId       String
+  sale         Sale     @relation(fields: [saleId], references: [id])
+  productName  String
+  productSku   String?
+  quantity     Int
+  unitPrice    Decimal  @db.Decimal(14, 2)
+  unitCost     Decimal  @db.Decimal(14, 2)
+  totalPrice   Decimal  @db.Decimal(14, 2)
+  totalCost    Decimal  @db.Decimal(14, 2)
+  profitAmount Decimal  @db.Decimal(14, 2)
+  createdAt    DateTime @default(now())
+
+  @@index([saleId])
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  branchId    String
+  branch      Branch        @relation(fields: [branchId], references: [id])
+  saleId      String
+  sale        Sale          @relation(fields: [saleId], references: [id])
+  customerId  String
+  customer    Customer      @relation(fields: [customerId], references: [id])
+  amount      Decimal       @db.Decimal(14, 2)
+  method      PaymentMethod
+  paidAt      DateTime      @default(now())
+  note        String?
+  createdById String
+  createdBy   User          @relation("PaymentCreator", fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now())
+
+  @@index([branchId])
+  @@index([saleId])
+  @@index([customerId])
+  @@index([createdById])
+  @@index([paidAt])
+  @@index([method])
+}
+
+model InstallmentSchedule {
+  id         String            @id @default(cuid())
+  branchId   String
+  branch     Branch            @relation(fields: [branchId], references: [id])
+  saleId     String
+  sale       Sale              @relation(fields: [saleId], references: [id])
+  customerId String
+  customer   Customer          @relation(fields: [customerId], references: [id])
+  dueDate    DateTime
+  amount     Decimal           @db.Decimal(14, 2)
+  paidAmount Decimal           @default(0) @db.Decimal(14, 2)
+  status     InstallmentStatus @default(PENDING)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([branchId])
+  @@index([saleId])
+  @@index([customerId])
+  @@index([status])
+  @@index([dueDate])
+}
+
+model Receipt {
+  id            String    @id @default(cuid())
+  branchId      String
+  branch        Branch    @relation(fields: [branchId], references: [id])
+  saleId        String    @unique
+  sale          Sale      @relation(fields: [saleId], references: [id])
+  receiptNumber String    @unique
+  qrCodeData    String
+  printedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([branchId])
+  @@index([receiptNumber])
 }

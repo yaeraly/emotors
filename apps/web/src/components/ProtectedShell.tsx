@@ -41,6 +41,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   }
 
   const canSeeCrm = user?.role === 'OWNER' || user?.role === 'MANAGER';
+  const canSeeSales =
+    user?.role === 'OWNER' ||
+    user?.role === 'MANAGER' ||
+    user?.role === 'ACCOUNTANT';
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -88,6 +92,14 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 No CRM access
               </p>
             )}
+            {canSeeSales ? (
+              <Link
+                href="/sales"
+                className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Sales
+              </Link>
+            ) : null}
           </nav>
         </aside>
 
