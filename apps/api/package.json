@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npm run prisma:generate",
     "dev": "nest start --watch",
+    "prebuild": "npm run prisma:generate",
     "build": "nest build",
     "start": "node dist/main.js",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
