@@ -47,7 +47,7 @@ export default function SalesPage() {
       setSales(salesResult);
       setReport(reportResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load sales');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }

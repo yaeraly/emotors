@@ -44,7 +44,7 @@ export default function SaleDetailPage() {
       const result = await apiFetch<Sale>(`/sales/${saleId}`);
       setSale(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load sale');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -70,7 +70,7 @@ export default function SaleDetailPage() {
       setNote('');
       setSuccess('Payment added successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not add payment');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingPayment(false);
     }
@@ -95,7 +95,7 @@ export default function SaleDetailPage() {
 
       setSuccess('Sale updated successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update sale');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -122,7 +122,7 @@ export default function SaleDetailPage() {
 
         {loading ? (
           <p className="rounded-3xl border border-slate-200 bg-white p-8 text-slate-500 shadow-sm">
-            Loading sale...
+            {t('common.loading')}
           </p>
         ) : sale ? (
           <>
@@ -148,7 +148,7 @@ export default function SaleDetailPage() {
                 <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <Info label={t('sales.customer')} value={sale.customer?.fullName ?? ''} />
                   <Info label={t('crm.phone')} value={sale.customer?.phone ?? ''} />
-                  <Info label="Seller" value={sale.seller?.fullName ?? ''} />
+                  <Info label={t('sales.seller')} value={sale.seller?.fullName ?? ''} />
                   <Info label={t('crm.branch')} value={sale.branch?.name ?? ''} />
                 </div>
 
@@ -317,7 +317,7 @@ export default function SaleDetailPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-slate-500">No payments yet.</p>
+                  <p className="text-sm text-slate-500">{t('sales.noPayments')}</p>
                 )}
               </Panel>
 
@@ -338,7 +338,7 @@ export default function SaleDetailPage() {
                           </span>
                         </div>
                         <p className="mt-1 text-sm text-slate-500">
-                          Due {new Date(installment.dueDate).toLocaleDateString()}
+                          {t('common.date')} {new Date(installment.dueDate).toLocaleDateString()}
                         </p>
                         <p className="mt-1 text-sm text-slate-600">
                           {t('sales.paidAmount')} {formatKgs(installment.paidAmount)}
@@ -348,7 +348,7 @@ export default function SaleDetailPage() {
                   </div>
                 ) : (
                   <p className="text-sm text-slate-500">
-                    No installment schedule.
+                    {t('sales.noInstallments')}
                   </p>
                 )}
               </Panel>
@@ -369,7 +369,7 @@ export default function SaleDetailPage() {
                 <p className="text-2xl font-black text-slate-950">EMOTORS</p>
                 <p className="mt-2 font-bold">{sale.receiptNumber}</p>
                 <p>Date: {new Date(sale.saleDate).toLocaleString()}</p>
-                <p>Seller: {sale.seller?.fullName}</p>
+                <p>{t('sales.seller')}: {sale.seller?.fullName}</p>
                 <p>{t('sales.customer')}: {sale.customer?.fullName}</p>
                 <p>{t('crm.phone')}: {sale.customer?.phone}</p>
                 <div className="my-4 border-t border-slate-200 pt-4">

@@ -4,10 +4,12 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Product, ProductListResponse, StockMovement, StockMovementType, Warehouse } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 const movementTypes: StockMovementType[] = ['IN', 'OUT', 'TRANSFER', 'ADJUSTMENT', 'SALE', 'SERVICE_USE'];
 
 export default function StockMovementsPage() {
+  const { t } = useTranslation();
   const [products, setProducts] = useState<Product[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
@@ -41,7 +43,7 @@ export default function StockMovementsPage() {
         warehouseId: current.warehouseId || warehouseResult[0]?.id || '',
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load movements');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -62,7 +64,7 @@ export default function StockMovementsPage() {
       setForm((current) => ({ ...current, quantity: '1', note: '' }));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create movement');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -70,28 +72,28 @@ export default function StockMovementsPage() {
     <ProtectedShell>
       <section className="space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Inventory</p>
-          <h2 className="text-3xl font-bold text-slate-950">Stock movements</h2>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('inventory.title')}</p>
+          <h2 className="text-3xl font-bold text-slate-950">{t('stockMovement.title')}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <form onSubmit={submit} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
-          <Select label="Product" value={form.productId} onChange={(value) => setForm({ ...form, productId: value })} options={products.map((p) => ({ value: p.id, label: `${p.sku} · ${p.name}` }))} />
-          <Select label="Warehouse" value={form.warehouseId} onChange={(value) => setForm({ ...form, warehouseId: value })} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
-          <Select label="Type" value={form.type} onChange={(value) => setForm({ ...form, type: value as StockMovementType })} options={movementTypes.map((type) => ({ value: type, label: type }))} />
-          <Input label="Quantity" type="number" value={form.quantity} onChange={(value) => setForm({ ...form, quantity: value })} />
-          <Input label="Unit cost KGS" type="number" value={form.unitCostKgs} onChange={(value) => setForm({ ...form, unitCostKgs: value })} />
-          <Input label="Note" value={form.note} onChange={(value) => setForm({ ...form, note: value })} />
-          <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-3" type="submit">Create movement</button>
+          <Select label={t('stockMovement.product')} value={form.productId} onChange={(value) => setForm({ ...form, productId: value })} options={products.map((p) => ({ value: p.id, label: `${p.sku} · ${p.name}` }))} />
+          <Select label={t('stockMovement.warehouse')} value={form.warehouseId} onChange={(value) => setForm({ ...form, warehouseId: value })} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+          <Select label={t('stockMovement.type')} value={form.type} onChange={(value) => setForm({ ...form, type: value as StockMovementType })} options={movementTypes.map((type) => ({ value: type, label: movementTypeLabel(type, t) }))} />
+          <Input label={t('stockMovement.quantity')} type="number" value={form.quantity} onChange={(value) => setForm({ ...form, quantity: value })} />
+          <Input label={t('stockMovement.unitCost')} type="number" value={form.unitCostKgs} onChange={(value) => setForm({ ...form, unitCostKgs: value })} />
+          <Input label={t('stockMovement.note')} value={form.note} onChange={(value) => setForm({ ...form, note: value })} />
+          <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-3" type="submit">{t('inventory.createStockMovement')}</button>
         </form>
 
         <div className="h-[calc(100vh-360px)] min-h-[360px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-              <tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Product</th><th className="px-4 py-3">Warehouse</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Cost</th></tr>
+              <tr><th className="px-4 py-3">{t('stockMovement.createdAt')}</th><th className="px-4 py-3">{t('stockMovement.product')}</th><th className="px-4 py-3">{t('stockMovement.warehouse')}</th><th className="px-4 py-3">{t('stockMovement.type')}</th><th className="px-4 py-3">{t('stockMovement.quantity')}</th><th className="px-4 py-3">{t('stockMovement.totalCost')}</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {movements.map((movement) => (
-                <tr key={movement.id}><td className="px-4 py-3">{new Date(movement.createdAt).toLocaleString()}</td><td className="px-4 py-3">{movement.product?.name}</td><td className="px-4 py-3">{movement.warehouse?.name}</td><td className="px-4 py-3">{movement.type}</td><td className="px-4 py-3">{movement.quantity}</td><td className="px-4 py-3">{formatKgs(movement.totalCostKgs)}</td></tr>
+                <tr key={movement.id}><td className="px-4 py-3">{new Date(movement.createdAt).toLocaleString()}</td><td className="px-4 py-3">{movement.product?.name}</td><td className="px-4 py-3">{movement.warehouse?.name}</td><td className="px-4 py-3">{movementTypeLabel(movement.type, t)}</td><td className="px-4 py-3">{movement.quantity}</td><td className="px-4 py-3">{formatKgs(movement.totalCostKgs)}</td></tr>
               ))}
             </tbody>
           </table>
@@ -111,4 +113,16 @@ function Select({ label, value, onChange, options }: { label: string; value: str
 
 function formatKgs(value: number | string | null | undefined) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
+}
+
+function movementTypeLabel(type: StockMovementType, t: (key: string) => string) {
+  const keys: Record<StockMovementType, string> = {
+    IN: 'inventory.stockIn',
+    OUT: 'inventory.stockOut',
+    TRANSFER: 'inventory.transfer',
+    ADJUSTMENT: 'inventory.adjustment',
+    SALE: 'inventory.sale',
+    SERVICE_USE: 'inventory.serviceUse',
+  };
+  return t(keys[type]);
 }

@@ -5,8 +5,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { ProductListResponse } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductsPage() {
+  const { t } = useTranslation();
   const [data, setData] = useState<ProductListResponse | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
@@ -21,9 +23,9 @@ export default function ProductsPage() {
     apiFetch<ProductListResponse>(`/inventory/products?${query}`)
       .then(setData)
       .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Could not load products'),
+        setError(err instanceof Error ? err.message : t('common.error')),
       );
-  }, [query]);
+  }, [query, t]);
 
   return (
     <ProtectedShell>
@@ -31,19 +33,19 @@ export default function ProductsPage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              Products
+              {t('inventory.products')}
             </p>
-            <h2 className="text-3xl font-bold text-slate-950">Product catalog</h2>
+            <h2 className="text-3xl font-bold text-slate-950">{t('inventory.productList')}</h2>
           </div>
           <Link href="/products/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
-            New product
+            {t('inventory.createProduct')}
           </Link>
         </div>
 
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search name, SKU, category"
+          placeholder={t('inventory.searchPlaceholder')}
           className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
         />
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -53,17 +55,17 @@ export default function ProductsPage() {
             <table className="min-w-[1180px] divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Photo</th>
-                  <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Category</th>
-                  <th className="px-4 py-3">Warehouse</th>
-                  <th className="px-4 py-3">Quantity</th>
-                  <th className="px-4 py-3">Final cost</th>
-                  <th className="px-4 py-3">Selling price</th>
-                  <th className="px-4 py-3">Margin %</th>
-                  <th className="px-4 py-3">Low stock</th>
-                  <th className="px-4 py-3">Actions</th>
+                  <th className="px-4 py-3">{t('inventory.photo')}</th>
+                  <th className="px-4 py-3">{t('inventory.sku')}</th>
+                  <th className="px-4 py-3">{t('inventory.name')}</th>
+                  <th className="px-4 py-3">{t('inventory.category')}</th>
+                  <th className="px-4 py-3">{t('inventory.warehouse')}</th>
+                  <th className="px-4 py-3">{t('inventory.quantity')}</th>
+                  <th className="px-4 py-3">{t('inventory.finalCost')}</th>
+                  <th className="px-4 py-3">{t('inventory.sellingPriceKgs')}</th>
+                  <th className="px-4 py-3">{t('inventory.marginPercent')}</th>
+                  <th className="px-4 py-3">{t('inventory.lowStock')}</th>
+                  <th className="px-4 py-3">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -89,7 +91,7 @@ export default function ProductsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <Link href={`/products/${product.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                        Open
+                        {t('common.open')}
                       </Link>
                     </td>
                   </tr>
@@ -104,7 +106,8 @@ export default function ProductsPage() {
 }
 
 function StockBadge({ quantity, lowStock }: { quantity: number; lowStock: boolean }) {
-  const label = quantity <= 0 ? 'Out of Stock' : lowStock ? 'Low Stock' : 'In Stock';
+  const { t } = useTranslation();
+  const label = quantity <= 0 ? t('inventory.outOfStock') : lowStock ? t('inventory.lowStockAlert') : t('inventory.inStock');
   const tone = quantity <= 0 ? 'bg-red-100 text-red-700' : lowStock ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700';
   return <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>{label}</span>;
 }

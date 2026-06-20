@@ -90,7 +90,7 @@ export default function CustomerDetailPage() {
       );
       setTimeline(result.timeline);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load customer');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -345,7 +345,7 @@ export default function CustomerDetailPage() {
                 <table className="min-w-[900px] divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">{t('common.date')}</th>
                       <th className="px-4 py-3">Invoice Number</th>
                       <th className="px-4 py-3">Products</th>
                       <th className="px-4 py-3">Quantity</th>
@@ -361,8 +361,7 @@ export default function CustomerDetailPage() {
                           colSpan={7}
                           className="px-4 py-8 text-center text-slate-500"
                         >
-                          No purchase rows yet. CRM SALE events will appear
-                          here until the Sales module is connected.
+                          {t('crm.noPurchaseRows')}
                         </td>
                       </tr>
                     ) : (
@@ -376,7 +375,7 @@ export default function CustomerDetailPage() {
                           </td>
                           <td className="px-4 py-3">{purchase.products}</td>
                           <td className="px-4 py-3">
-                            {purchase.quantity ?? 'Not linked'}
+                            {purchase.quantity ?? t('crm.notLinked')}
                           </td>
                           <td className="px-4 py-3">
                             {formatKgs(purchase.totalAmount)}
@@ -406,17 +405,17 @@ export default function CustomerDetailPage() {
               <div className="mt-4 grid gap-4 lg:grid-cols-3">
                 <HistoryBucket
                   title="Diagnostics"
-                  empty="No diagnostics yet."
+                  empty={t('service.noDiagnostics')}
                   items={serviceHistory.diagnostics}
                 />
                 <HistoryBucket
                   title="Repairs"
-                  empty="No repair records yet."
+                  empty={t('service.noRepairs')}
                   items={serviceHistory.repairs}
                 />
                 <HistoryBucket
                   title="Warranty records"
-                  empty="No warranty records yet."
+                  empty={t('service.noWarranty')}
                   items={serviceHistory.warrantyRecords}
                 />
               </div>
@@ -476,7 +475,7 @@ export default function CustomerDetailPage() {
                               {followUp.title}
                             </p>
                             <p className="text-sm text-slate-500">
-                              Due {new Date(followUp.dueAt).toLocaleString()}
+                              {new Date(followUp.dueAt).toLocaleString()}
                             </p>
                           </div>
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">

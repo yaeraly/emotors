@@ -152,7 +152,7 @@ export default function CustomersPage() {
         current ? result.find((customer) => customer.id === current.id) ?? null : null,
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not load customers');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -187,7 +187,7 @@ export default function CustomersPage() {
       await loadCustomers();
       showSuccess(t('crm.customerCreated'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create customer');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -287,7 +287,7 @@ export default function CustomersPage() {
     } catch (err) {
       console.error('Customer update failed', err);
       setEditError(
-        err instanceof Error ? err.message : 'Could not update customer',
+        err instanceof Error ? err.message : t('common.error'),
       );
     } finally {
       setEditSaving(false);
@@ -351,7 +351,7 @@ export default function CustomersPage() {
         }
 
         throw new Error(
-          responseBody || `Could not delete customer. Status ${response.status}.`,
+          responseBody || t('common.error'),
         );
       }
 
@@ -359,7 +359,7 @@ export default function CustomersPage() {
       showSuccess(t('crm.customerDeleted'));
     } catch (err) {
       console.error('Customer delete failed', err);
-      setError(err instanceof Error ? err.message : 'Could not delete customer');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeletingCustomerId(null);
     }
@@ -1130,7 +1130,7 @@ function formatKgs(value: number | string | null | undefined) {
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
-    return 'No purchases yet';
+    return '-';
   }
 
   return new Date(value).toLocaleDateString();

@@ -5,8 +5,10 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { InventoryBalance, ProductListResponse, StockValueReport } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export default function InventoryPage() {
+  const { t } = useTranslation();
   const [stockValue, setStockValue] = useState<StockValueReport | null>(null);
   const [lowStock, setLowStock] = useState<InventoryBalance[]>([]);
   const [products, setProducts] = useState<ProductListResponse | null>(null);
@@ -25,9 +27,9 @@ export default function InventoryPage() {
         setProducts(productsResult);
       })
       .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Could not load inventory'),
+        setError(err instanceof Error ? err.message : t('common.error')),
       );
-  }, []);
+  }, [t]);
 
   async function createYuanRate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,7 +42,7 @@ export default function InventoryPage() {
       });
       setYuanRate('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create yuan rate');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -50,27 +52,27 @@ export default function InventoryPage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              Inventory
+              {t('inventory.title')}
             </p>
             <h2 className="text-3xl font-bold text-slate-950">
-              Stock dashboard
+              {t('inventory.dashboard')}
             </h2>
             <p className="mt-2 text-slate-500">
-              Spare parts, warehouses, stock value, and low-stock alerts.
+              {t('inventory.stockValue')} · {t('inventory.lowStock')}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" href="/products/new">
-              New product
+              {t('inventory.createProduct')}
             </Link>
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/products">
-              Products
+              {t('inventory.products')}
             </Link>
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/warehouses">
-              Warehouses
+              {t('inventory.warehouses')}
             </Link>
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/stock-movements">
-              Stock movement
+              {t('inventory.stockMovements')}
             </Link>
           </div>
         </div>
@@ -78,18 +80,18 @@ export default function InventoryPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <Card label="Total products" value={String(products?.total ?? 0)} />
-          <Card label="Total stock value" value={formatKgs(stockValue?.totalStockValueKgs)} />
-          <Card label="Low stock count" value={String(lowStock.length)} />
-          <Card label="Total quantity" value={String(stockValue?.totalQuantity ?? 0)} />
+          <Card label={t('inventory.totalProducts')} value={String(products?.total ?? 0)} />
+          <Card label={t('inventory.totalStockValue')} value={formatKgs(stockValue?.totalStockValueKgs)} />
+          <Card label={t('inventory.lowStockCount')} value={String(lowStock.length)} />
+          <Card label={t('inventory.totalQuantity')} value={String(stockValue?.totalQuantity ?? 0)} />
         </div>
 
         <div className="grid gap-6 xl:grid-cols-3">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-1">
-            <h3 className="text-lg font-bold text-slate-950">Low stock alerts</h3>
+            <h3 className="text-lg font-bold text-slate-950">{t('inventory.lowStockAlert')}</h3>
             <div className="mt-4 space-y-3">
               {lowStock.length === 0 ? (
-                <p className="text-sm text-slate-500">No low-stock products.</p>
+                <p className="text-sm text-slate-500">{t('inventory.noLowStock')}</p>
               ) : (
                 lowStock.map((item) => (
                   <Link
@@ -99,7 +101,7 @@ export default function InventoryPage() {
                   >
                     <p className="font-bold text-red-800">{item.product.name}</p>
                     <p className="text-red-700">
-                      {item.sku} · Qty {item.quantity} / Min {item.minStockLevel}
+                      {item.sku} · {t('inventory.quantity')} {item.quantity} / {t('inventory.minStockLevel')} {item.minStockLevel}
                     </p>
                   </Link>
                 ))
@@ -107,13 +109,13 @@ export default function InventoryPage() {
             </div>
           </section>
 
-          <Breakdown title="Stock value by warehouse" items={stockValue?.byWarehouse ?? []} />
-          <Breakdown title="Stock value by category" items={stockValue?.byCategory ?? []} />
+          <Breakdown title={`${t('inventory.stockValue')} · ${t('inventory.warehouse')}`} items={stockValue?.byWarehouse ?? []} empty={t('inventory.noStockValue')} quantityLabel={t('inventory.quantity')} />
+          <Breakdown title={`${t('inventory.stockValue')} · ${t('inventory.category')}`} items={stockValue?.byCategory ?? []} empty={t('inventory.noStockValue')} quantityLabel={t('inventory.quantity')} />
         </div>
 
         <form onSubmit={createYuanRate} className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-end">
           <label className="flex-1">
-            <span className="text-sm font-semibold text-slate-700">New Yuan rate</span>
+            <span className="text-sm font-semibold text-slate-700">{t('inventory.addYuanRate')}</span>
             <input
               value={yuanRate}
               onChange={(event) => setYuanRate(event.target.value)}
@@ -125,7 +127,7 @@ export default function InventoryPage() {
             />
           </label>
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" type="submit">
-            Save rate
+            {t('common.save')}
           </button>
         </form>
       </section>
@@ -145,22 +147,26 @@ function Card({ label, value }: { label: string; value: string }) {
 function Breakdown({
   title,
   items,
+  empty,
+  quantityLabel,
 }: {
   title: string;
   items: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
+  empty: string;
+  quantityLabel: string;
 }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <h3 className="text-lg font-bold text-slate-950">{title}</h3>
       <div className="mt-4 space-y-3">
         {items.length === 0 ? (
-          <p className="text-sm text-slate-500">No stock value yet.</p>
+          <p className="text-sm text-slate-500">{empty}</p>
         ) : (
           items.map((item) => (
             <div key={item.name} className="rounded-2xl bg-slate-50 p-4 text-sm">
               <p className="font-bold text-slate-950">{item.name}</p>
               <p className="text-slate-600">
-                Qty {item.quantity} · {formatKgs(item.totalStockValueKgs)}
+                {quantityLabel} {item.quantity} · {formatKgs(item.totalStockValueKgs)}
               </p>
             </div>
           ))

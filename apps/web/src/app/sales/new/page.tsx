@@ -65,7 +65,7 @@ export default function NewSalePage() {
     apiFetch<Customer[]>('/customers')
       .then(setCustomers)
       .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Could not load customers'),
+        setError(err instanceof Error ? err.message : t('common.error')),
       );
   }, []);
 
@@ -201,7 +201,7 @@ export default function NewSalePage() {
       setDraftSale(sale);
       return sale;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save draft');
+      setError(err instanceof Error ? err.message : t('common.error'));
       return null;
     } finally {
       setSaving(false);
@@ -229,7 +229,7 @@ export default function NewSalePage() {
       window.open(response.whatsappLink, '_blank', 'noopener,noreferrer');
       setError('Draft receipt sent to customer');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send WhatsApp');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -243,7 +243,7 @@ export default function NewSalePage() {
       });
       setDraftSale(approved);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not approve sale');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -267,7 +267,7 @@ export default function NewSalePage() {
       });
       router.push(`/sales/${finalized.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not finalize sale');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -280,7 +280,7 @@ export default function NewSalePage() {
       });
       setDraftSale(cancelled);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not cancel sale');
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -478,7 +478,7 @@ export default function NewSalePage() {
                 onChange={setInstallmentDays}
               />
               <SaleInput
-                label="Due date"
+                label={t('common.date')}
                 type="date"
                 value={dueDate}
                 onChange={setDueDate}

@@ -5,9 +5,11 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Product, Warehouse, YuanRateHistory } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewProductPage() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -42,9 +44,9 @@ export default function NewProductPage() {
         }));
       })
       .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Could not load form data'),
+        setError(err instanceof Error ? err.message : t('common.error')),
       );
-  }, []);
+  }, [t]);
 
   const preview = useMemo(() => {
     const purchaseCostKgs =
@@ -84,7 +86,7 @@ export default function NewProductPage() {
       });
       router.push(`/products/${product.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create product');
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -98,47 +100,47 @@ export default function NewProductPage() {
     <ProtectedShell>
       <form onSubmit={submit} className="space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">Products</p>
-          <h2 className="text-3xl font-bold text-slate-950">Create product</h2>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('inventory.products')}</p>
+          <h2 className="text-3xl font-bold text-slate-950">{t('inventory.createProduct')}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
           <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-            <Input label="Name" value={form.name} onChange={(value) => setField('name', value)} required />
-            <Input label="SKU" value={form.sku} onChange={(value) => setField('sku', value)} required />
-            <Input label="Category" value={form.category} onChange={(value) => setField('category', value)} required />
+            <Input label={t('inventory.name')} value={form.name} onChange={(value) => setField('name', value)} required />
+            <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => setField('sku', value)} required />
+            <Input label={t('inventory.category')} value={form.category} onChange={(value) => setField('category', value)} required />
             <label className="block">
-              <span className="text-sm font-semibold text-slate-700">Warehouse</span>
+              <span className="text-sm font-semibold text-slate-700">{t('inventory.warehouse')}</span>
               <select value={form.warehouseId} onChange={(event) => setField('warehouseId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
                 {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
               </select>
             </label>
-            <Input label="Photo URL" value={form.photoUrl} onChange={(value) => setField('photoUrl', value)} />
-            <Input label="Weight kg" type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} />
-            <Input label="Purchase price ¥" type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
-            <Input label="Yuan rate" type="number" value={form.latestYuanRate} onChange={(value) => setField('latestYuanRate', value)} />
-            <Input label="Transport cost/kg" type="number" value={form.transportCostPerKg} onChange={(value) => setField('transportCostPerKg', value)} />
-            <Input label="Selling price KGS" type="number" value={form.sellingPriceKgs} onChange={(value) => setField('sellingPriceKgs', value)} />
-            <Input label="Min stock" type="number" value={form.minStockLevel} onChange={(value) => setField('minStockLevel', value)} />
-            <Input label="Initial quantity" type="number" value={form.initialQuantity} onChange={(value) => setField('initialQuantity', value)} />
+            <Input label={t('inventory.photo')} value={form.photoUrl} onChange={(value) => setField('photoUrl', value)} />
+            <Input label={t('inventory.weightKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} />
+            <Input label={t('inventory.purchasePriceYuan')} type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
+            <Input label={t('inventory.latestYuanRate')} type="number" value={form.latestYuanRate} onChange={(value) => setField('latestYuanRate', value)} />
+            <Input label={t('inventory.transportCost')} type="number" value={form.transportCostPerKg} onChange={(value) => setField('transportCostPerKg', value)} />
+            <Input label={t('inventory.sellingPriceKgs')} type="number" value={form.sellingPriceKgs} onChange={(value) => setField('sellingPriceKgs', value)} />
+            <Input label={t('inventory.minStockLevel')} type="number" value={form.minStockLevel} onChange={(value) => setField('minStockLevel', value)} />
+            <Input label={t('inventory.initialQuantity')} type="number" value={form.initialQuantity} onChange={(value) => setField('initialQuantity', value)} />
             <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">Description</span>
+              <span className="text-sm font-semibold text-slate-700">{t('inventory.description')}</span>
               <textarea value={form.description} onChange={(event) => setField('description', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" />
             </label>
             <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">Characteristics JSON</span>
+              <span className="text-sm font-semibold text-slate-700">{t('inventory.characteristics')}</span>
               <textarea value={form.characteristics} onChange={(event) => setField('characteristics', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder='{"voltage":"60V"}' />
             </label>
           </section>
           <aside className="h-fit rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">Cost preview</h3>
-            <Preview label="Purchase cost" value={formatKgs(preview.purchaseCostKgs)} />
-            <Preview label="Transport cost" value={formatKgs(preview.transportCostKgs)} />
-            <Preview label="Final cost" value={formatKgs(preview.finalCostKgs)} />
-            <Preview label="Margin" value={formatKgs(preview.marginAmount)} />
-            <Preview label="Margin %" value={`${preview.marginPercent.toFixed(2)}%`} />
+            <h3 className="text-lg font-bold text-slate-950">{t('inventory.costPreview')}</h3>
+            <Preview label={t('inventory.purchaseCostKgs')} value={formatKgs(preview.purchaseCostKgs)} />
+            <Preview label={t('inventory.transportCostKgs')} value={formatKgs(preview.transportCostKgs)} />
+            <Preview label={t('inventory.finalCostKgs')} value={formatKgs(preview.finalCostKgs)} />
+            <Preview label={t('inventory.marginAmount')} value={formatKgs(preview.marginAmount)} />
+            <Preview label={t('inventory.marginPercent')} value={`${preview.marginPercent.toFixed(2)}%`} />
             <button disabled={saving} className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300" type="submit">
-              {saving ? 'Saving...' : 'Create product'}
+              {saving ? t('common.loading') : t('inventory.createProduct')}
             </button>
           </aside>
         </div>

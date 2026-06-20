@@ -6,8 +6,10 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Product } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductDetailPage() {
+  const { t } = useTranslation();
   const params = useParams<{ id: string }>();
   const [product, setProduct] = useState<Product | null>(null);
   const [error, setError] = useState('');
@@ -16,14 +18,14 @@ export default function ProductDetailPage() {
     apiFetch<Product>(`/inventory/products/${params.id}`)
       .then(setProduct)
       .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Could not load product'),
+        setError(err instanceof Error ? err.message : t('common.error')),
       );
   }, [params.id]);
 
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <Link href="/products" className="text-sm font-semibold text-blue-700">Back to products</Link>
+        <Link href="/products" className="text-sm font-semibold text-blue-700">{t('inventory.products')}</Link>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {product ? (
           <>
@@ -35,35 +37,35 @@ export default function ProductDetailPage() {
                   <h2 className="mt-2 text-3xl font-bold text-slate-950">{product.name}</h2>
                   <p className="mt-2 text-slate-500">{product.description}</p>
                   <div className="mt-6 grid gap-4 md:grid-cols-4">
-                    <Info label="Category" value={product.category} />
-                    <Info label="Warehouse" value={product.warehouse?.name ?? ''} />
-                    <Info label="Quantity" value={String(product.quantity)} />
-                    <Info label="Low stock" value={product.lowStock ? 'Yes' : 'No'} />
+                    <Info label={t('inventory.category')} value={product.category} />
+                    <Info label={t('inventory.warehouse')} value={product.warehouse?.name ?? ''} />
+                    <Info label={t('inventory.quantity')} value={String(product.quantity)} />
+                    <Info label={t('inventory.lowStock')} value={product.lowStock ? t('inventory.lowStockAlert') : t('inventory.inStock')} />
                   </div>
                 </div>
               </div>
             </article>
 
             <div className="grid gap-6 xl:grid-cols-3">
-              <Panel title="Cost and pricing">
-                <Info label="Yuan price" value={formatYuan(product.purchasePriceYuan)} />
-                <Info label="Yuan rate" value={String(product.latestYuanRate)} />
-                <Info label="Final cost" value={formatKgs(product.finalCostKgs)} />
-                <Info label="Selling price" value={formatKgs(product.sellingPriceKgs)} />
-                <Info label="Margin" value={`${formatKgs(product.marginAmount)} (${Number(product.marginPercent).toFixed(2)}%)`} />
+              <Panel title={t('inventory.productDetail')}>
+                <Info label={t('inventory.purchasePriceYuan')} value={formatYuan(product.purchasePriceYuan)} />
+                <Info label={t('inventory.latestYuanRate')} value={String(product.latestYuanRate)} />
+                <Info label={t('inventory.finalCostKgs')} value={formatKgs(product.finalCostKgs)} />
+                <Info label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} />
+                <Info label={t('inventory.marginAmount')} value={`${formatKgs(product.marginAmount)} (${Number(product.marginPercent).toFixed(2)}%)`} />
               </Panel>
-              <Panel title="Price history">
+              <Panel title={t('inventory.priceHistory')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">
                   {product.priceHistory?.length ? product.priceHistory.map((item) => (
                     <div key={item.id} className="rounded-2xl bg-slate-50 p-4 text-sm">
                       <p className="font-bold">{formatKgs(item.finalCostKgs)} → {formatKgs(item.sellingPriceKgs)}</p>
-                      <p className="text-slate-500">¥{Number(item.purchasePriceYuan).toFixed(2)} · rate {Number(item.yuanRate).toFixed(4)}</p>
+                      <p className="text-slate-500">¥{Number(item.purchasePriceYuan).toFixed(2)} · {t('inventory.latestYuanRate')} {Number(item.yuanRate).toFixed(4)}</p>
                       <p className="text-slate-500">{new Date(item.effectiveFrom).toLocaleDateString()}</p>
                     </div>
-                  )) : <p className="text-sm text-slate-500">No price history.</p>}
+                  )) : <p className="text-sm text-slate-500">{t('inventory.noPriceHistory')}</p>}
                 </div>
               </Panel>
-              <Panel title="Stock movements">
+              <Panel title={t('inventory.stockMovements')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">
                   {product.stockMovements?.length ? product.stockMovements.map((movement) => (
                     <div key={movement.id} className="rounded-2xl bg-slate-50 p-4 text-sm">
@@ -71,7 +73,7 @@ export default function ProductDetailPage() {
                       <p className="text-slate-500">{movement.warehouse?.name}</p>
                       <p className="text-slate-500">{new Date(movement.createdAt).toLocaleString()}</p>
                     </div>
-                  )) : <p className="text-sm text-slate-500">No movements.</p>}
+                  )) : <p className="text-sm text-slate-500">{t('inventory.noMovements')}</p>}
                 </div>
               </Panel>
             </div>
