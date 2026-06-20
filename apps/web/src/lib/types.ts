@@ -1,6 +1,12 @@
 export type Role = 'OWNER' | 'MANAGER' | 'MASTER' | 'ACCOUNTANT';
 
-export type CustomerStatus = 'NEW' | 'ACTIVE' | 'VIP' | 'SLEEPING' | 'RISK';
+export type CustomerStatus =
+  | 'NEW'
+  | 'ACTIVE'
+  | 'VIP'
+  | 'SLEEPING'
+  | 'RISK'
+  | 'INACTIVE';
 
 export type CustomerEventType =
   | 'NOTE'
@@ -37,12 +43,48 @@ export type Customer = {
   branch?: Branch;
   status: CustomerStatus;
   notes?: string | null;
-  totalPurchaseAmount: string;
-  totalProfitAmount: string;
-  totalDebtAmount: string;
+  totalPurchases: number;
+  totalProfit: number;
+  totalDebt: number;
+  totalPayments?: number;
+  averageOrderValue?: number;
+  purchaseCount: number;
+  lastPurchaseDate?: string | null;
+  totalPurchaseAmount: number | string;
+  totalProfitAmount: number | string;
+  totalDebtAmount: number | string;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+};
+
+export type PurchaseHistoryRow = {
+  id: string;
+  date: string;
+  invoiceNumber: string;
+  products: string;
+  quantity: number | null;
+  totalAmount: number | null;
+  profit: number | null;
+  paymentStatus: string;
+};
+
+export type ServiceHistory = {
+  diagnostics: Array<{
+    id: string;
+    date: string;
+    description: string;
+  }>;
+  repairs: Array<{
+    id: string;
+    date: string;
+    description: string;
+  }>;
+  warrantyRecords: Array<{
+    id: string;
+    date: string;
+    description: string;
+  }>;
 };
 
 export type CustomerEvent = {

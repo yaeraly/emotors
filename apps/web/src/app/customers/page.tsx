@@ -8,7 +8,15 @@ import type { Branch, Customer, CustomerStatus } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 
 const TOKEN_KEY = 'emotors_access_token';
-const statuses: CustomerStatus[] = ['NEW', 'ACTIVE', 'VIP', 'SLEEPING', 'RISK'];
+const businessStatuses: CustomerStatus[] = ['ACTIVE', 'VIP', 'RISK', 'INACTIVE'];
+const allStatuses: CustomerStatus[] = [
+  'ACTIVE',
+  'VIP',
+  'RISK',
+  'INACTIVE',
+  'NEW',
+  'SLEEPING',
+];
 
 type CustomerFormFields = {
   fullName: string;
@@ -25,11 +33,26 @@ type CreateCustomerState = CustomerFormFields & {
   totalDebtAmount: string;
 };
 
+type SortKey =
+  | 'fullName'
+  | 'phone'
+  | 'whatsappPhone'
+  | 'branch'
+  | 'status'
+  | 'totalPurchases'
+  | 'totalProfit'
+  | 'totalDebt'
+  | 'purchaseCount'
+  | 'lastPurchaseDate'
+  | 'createdAt';
+
+type SortDirection = 'asc' | 'desc';
+
 const initialCustomerFormFields: CustomerFormFields = {
   fullName: '',
   phone: '',
   whatsappPhone: '',
-  status: 'NEW',
+  status: 'ACTIVE',
   notes: '',
 };
 
@@ -41,14 +64,18 @@ const initialCreateState: CreateCustomerState = {
   totalDebtAmount: '0',
 };
 
+const pageSizeOptions = [10, 25, 50];
+
 export default function CustomersPage() {
   const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [branchId, setBranchId] = useState('');
   const [form, setForm] = useState<CreateCustomerState>(initialCreateState);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [editForm, setEditForm] = useState<CustomerFormFields>(
     initialCustomerFormFields,
   );
@@ -61,6 +88,10 @@ export default function CustomersPage() {
   const [error, setError] = useState('');
   const [editError, setEditError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('createdAt');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -70,10 +101,37 @@ export default function CustomersPage() {
     if (status) {
       params.set('status', status);
     }
+    if (branchId) {
+      params.set('branchId', branchId);
+    }
 
     const value = params.toString();
     return value ? `?${value}` : '';
-  }, [search, status]);
+  }, [branchId, search, status]);
+
+  const sortedCustomers = useMemo(() => {
+    return [...customers].sort((a, b) => {
+      const first = getSortValue(a, sortKey);
+      const second = getSortValue(b, sortKey);
+      const direction = sortDirection === 'asc' ? 1 : -1;
+
+      if (typeof first === 'number' && typeof second === 'number') {
+        return (first - second) * direction;
+      }
+
+      return String(first).localeCompare(String(second)) * direction;
+    });
+  }, [customers, sortDirection, sortKey]);
+
+  const totalPages = Math.max(Math.ceil(sortedCustomers.length / pageSize), 1);
+  const visibleCustomers = sortedCustomers.slice(
+    (page - 1) * pageSize,
+    page * pageSize,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [branchId, pageSize, search, status]);
 
   useEffect(() => {
     void loadCustomers();
@@ -88,6 +146,9 @@ export default function CustomersPage() {
     try {
       const result = await apiFetch<Customer[]>(`/customers${query}`);
       setCustomers(result);
+      setSelectedCustomer((current) =>
+        current ? result.find((customer) => customer.id === current.id) ?? null : null,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load customers');
     } finally {
@@ -302,6 +363,16 @@ export default function CustomersPage() {
     }
   }
 
+  function changeSort(nextKey: SortKey) {
+    if (nextKey === sortKey) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+
+    setSortKey(nextKey);
+    setSortDirection('asc');
+  }
+
   function showSuccess(message: string) {
     setSuccessMessage(message);
     window.setTimeout(() => setSuccessMessage(''), 3000);
@@ -313,15 +384,15 @@ export default function CustomersPage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              CRM
+              CRM Intelligence
             </p>
             <h2 className="text-3xl font-bold text-slate-950">Customers</h2>
             <p className="mt-2 text-slate-500">
-              Manage customer profiles, WhatsApp history, and follow-ups.
+              Customer profile, purchasing, profit, debt, and relationship view.
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -329,14 +400,37 @@ export default function CustomersPage() {
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             />
             <select
+              value={branchId}
+              onChange={(event) => setBranchId(event.target.value)}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+            >
+              <option value="">All branches</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>
+                  {branch.name}
+                </option>
+              ))}
+            </select>
+            <select
               value={status}
               onChange={(event) => setStatus(event.target.value)}
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             >
               <option value="">All statuses</option>
-              {statuses.map((item) => (
+              {businessStatuses.map((item) => (
                 <option key={item} value={item}>
                   {item}
+                </option>
+              ))}
+            </select>
+            <select
+              value={pageSize}
+              onChange={(event) => setPageSize(Number(event.target.value))}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+            >
+              {pageSizeOptions.map((size) => (
+                <option key={size} value={size}>
+                  {size} per page
                 </option>
               ))}
             </select>
@@ -364,7 +458,7 @@ export default function CustomersPage() {
               Create Customer
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              This card keeps a fixed width and does not stretch with the list.
+              This card keeps a fixed width while the customer table scrolls.
             </p>
 
             <div className="mt-5 space-y-4">
@@ -420,7 +514,6 @@ export default function CustomersPage() {
                   }
                 />
               </div>
-
             </div>
 
             <button
@@ -432,77 +525,229 @@ export default function CustomersPage() {
             </button>
           </form>
 
-          <div className="h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-slate-950">
-                Customer list
-              </h3>
+          <div className="h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white p-5">
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">
+                  Customer intelligence table
+                </h3>
+                <p className="text-sm text-slate-500">
+                  Showing {visibleCustomers.length} of {sortedCustomers.length}
+                </p>
+              </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600">
-                {customers.length}
+                Page {page} / {totalPages}
               </span>
             </div>
 
             {loading ? (
-              <p className="text-slate-500">Loading customers...</p>
-            ) : customers.length === 0 ? (
-              <p className="rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
+              <p className="p-5 text-slate-500">Loading customers...</p>
+            ) : sortedCustomers.length === 0 ? (
+              <p className="m-5 rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
                 No customers found.
               </p>
             ) : (
-              <div className="space-y-3">
-                {customers.map((customer) => (
-                  <div
-                    key={customer.id}
-                    className="rounded-2xl border border-slate-200 p-4 hover:border-blue-200 hover:bg-blue-50/40"
-                  >
-                    <div className="flex flex-col justify-between gap-3 md:flex-row">
-                      <Link href={`/customers/${customer.id}`}>
-                        <p className="text-lg font-bold text-slate-950">
-                          {customer.fullName}
-                        </p>
-                        <p className="text-sm text-slate-500">
-                          {customer.phone}
-                          {customer.whatsappPhone
-                            ? ` · WhatsApp ${customer.whatsappPhone}`
-                            : ''}
-                        </p>
-                      </Link>
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">
-                          {customer.status}
-                        </span>
-                        <button
-                          onClick={() => openEditCustomer(customer)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
-                          type="button"
-                        >
-                          <PencilIcon />
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => void deleteCustomer(customer)}
-                          disabled={deletingCustomerId === customer.id}
-                          className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
-                          type="button"
-                        >
-                          {deletingCustomerId === customer.id
-                            ? 'Deleting...'
-                            : 'Delete'}
-                        </button>
-                      </div>
-                    </div>
+              <>
+                <div className="overflow-x-auto">
+                  <table className="min-w-[1320px] divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <SortableHeader
+                          label="Full Name"
+                          sortKey="fullName"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Phone Number"
+                          sortKey="phone"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="WhatsApp Number"
+                          sortKey="whatsappPhone"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Branch"
+                          sortKey="branch"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Status"
+                          sortKey="status"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Total Purchases"
+                          sortKey="totalPurchases"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Total Profit"
+                          sortKey="totalProfit"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Outstanding Debt"
+                          sortKey="totalDebt"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Purchase History"
+                          sortKey="purchaseCount"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Last Purchase"
+                          sortKey="lastPurchaseDate"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <SortableHeader
+                          label="Created Date"
+                          sortKey="createdAt"
+                          activeKey={sortKey}
+                          direction={sortDirection}
+                          onSort={changeSort}
+                        />
+                        <th className="px-4 py-3">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {visibleCustomers.map((customer) => (
+                        <tr key={customer.id} className="hover:bg-blue-50/40">
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => setSelectedCustomer(customer)}
+                              className="font-bold text-blue-700 hover:text-blue-900"
+                              type="button"
+                            >
+                              {customer.fullName}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {customer.phone}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {customer.whatsappPhone || 'Not set'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {customer.branch?.name ?? customer.branchId}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusPill status={customer.status} />
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            {formatKgs(customer.totalPurchases)}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-emerald-700">
+                            {formatKgs(customer.totalProfit)}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-red-700">
+                            {formatKgs(customer.totalDebt)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => setSelectedCustomer(customer)}
+                              className="rounded-lg bg-slate-100 px-3 py-1 font-semibold text-slate-700 hover:bg-slate-200"
+                              type="button"
+                            >
+                              {customer.purchaseCount} purchases
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatDate(customer.lastPurchaseDate)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700">
+                            {formatDate(customer.createdAt)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <Link
+                                href={`/customers/${customer.id}`}
+                                className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                Open
+                              </Link>
+                              <button
+                                onClick={() => openEditCustomer(customer)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                                type="button"
+                              >
+                                <PencilIcon />
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => void deleteCustomer(customer)}
+                                disabled={deletingCustomerId === customer.id}
+                                className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
+                                type="button"
+                              >
+                                {deletingCustomerId === customer.id
+                                  ? 'Deleting...'
+                                  : 'Delete'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
-                    <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
-                      <Amount label="Purchase" value={customer.totalPurchaseAmount} />
-                      <Amount label="Profit" value={customer.totalProfitAmount} />
-                      <Amount label="Debt" value={customer.totalDebtAmount} />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                <div className="flex items-center justify-between border-t border-slate-200 p-4">
+                  <button
+                    onClick={() => setPage((value) => Math.max(value - 1, 1))}
+                    disabled={page === 1}
+                    className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                  >
+                    Previous
+                  </button>
+                  <p className="text-sm text-slate-500">
+                    Page {page} of {totalPages}
+                  </p>
+                  <button
+                    onClick={() =>
+                      setPage((value) => Math.min(value + 1, totalPages))
+                    }
+                    disabled={page === totalPages}
+                    className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                  >
+                    Next
+                  </button>
+                </div>
+              </>
             )}
           </div>
         </div>
+
+        {selectedCustomer ? (
+          <CustomerProfileDrawer
+            customer={selectedCustomer}
+            onClose={() => setSelectedCustomer(null)}
+          />
+        ) : null}
 
         {editingCustomer ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
@@ -576,6 +821,88 @@ export default function CustomersPage() {
   );
 }
 
+function CustomerProfileDrawer({
+  customer,
+  onClose,
+}: {
+  customer: Customer;
+  onClose: () => void;
+}) {
+  const totalPayments = customer.totalPayments ?? Math.max(customer.totalPurchases - customer.totalDebt, 0);
+  const averageOrderValue =
+    customer.averageOrderValue ??
+    (customer.purchaseCount > 0
+      ? customer.totalPurchases / customer.purchaseCount
+      : 0);
+
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/40">
+      <aside className="h-full w-full max-w-2xl overflow-y-auto bg-white p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+              Customer Profile
+            </p>
+            <h3 className="mt-1 text-3xl font-bold text-slate-950">
+              {customer.fullName}
+            </h3>
+            <p className="mt-2 text-slate-500">
+              Complete customer snapshot and business intelligence summary.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-full border border-slate-200 px-3 py-1 text-sm font-bold text-slate-500 hover:bg-slate-50"
+            type="button"
+          >
+            x
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <Info label="Full Name" value={customer.fullName} />
+          <Info label="Phone" value={customer.phone} />
+          <Info label="WhatsApp" value={customer.whatsappPhone ?? 'Not set'} />
+          <Info label="Branch" value={customer.branch?.name ?? customer.branchId} />
+          <Info label="Status" value={customer.status} />
+          <Info label="Created" value={formatDate(customer.createdAt)} />
+        </div>
+
+        <Panel title="Financial Summary">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Metric label="Total Purchases" value={formatKgs(customer.totalPurchases)} />
+            <Metric label="Total Profit" value={formatKgs(customer.totalProfit)} />
+            <Metric label="Total Debt" value={formatKgs(customer.totalDebt)} />
+            <Metric label="Total Payments" value={formatKgs(totalPayments)} />
+            <Metric label="Average Order Value" value={formatKgs(averageOrderValue)} />
+          </div>
+        </Panel>
+
+        <Panel title="Purchase History">
+          <p className="text-sm text-slate-500">
+            {customer.purchaseCount} purchase records found. Full invoice rows
+            will appear here when the Sales module is connected.
+          </p>
+          <Link
+            href={`/customers/${customer.id}`}
+            className="mt-3 inline-flex rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          >
+            Open full profile
+          </Link>
+        </Panel>
+
+        <Panel title="Service History">
+          <p className="text-sm text-slate-500">
+            Diagnostics, repairs, and warranty records will appear here when the
+            Service module is connected. CRM service events are available on the
+            full profile timeline.
+          </p>
+        </Panel>
+      </aside>
+    </div>
+  );
+}
+
 function CustomerForm({
   form,
   onChange,
@@ -612,7 +939,7 @@ function CustomerForm({
           }
           className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
         >
-          {statuses.map((item) => (
+          {allStatuses.map((item) => (
             <option key={item} value={item}>
               {item}
             </option>
@@ -661,6 +988,89 @@ function CustomerInput({
   );
 }
 
+function SortableHeader({
+  label,
+  sortKey,
+  activeKey,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeKey: SortKey;
+  direction: SortDirection;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === activeKey;
+
+  return (
+    <th className="px-4 py-3">
+      <button
+        onClick={() => onSort(sortKey)}
+        className="inline-flex items-center gap-1 hover:text-blue-700"
+        type="button"
+      >
+        {label}
+        <span>{active ? (direction === 'asc' ? '↑' : '↓') : '↕'}</span>
+      </button>
+    </th>
+  );
+}
+
+function StatusPill({ status }: { status: CustomerStatus }) {
+  const tone =
+    status === 'VIP'
+      ? 'bg-amber-100 text-amber-800'
+      : status === 'RISK'
+        ? 'bg-red-100 text-red-700'
+        : status === 'INACTIVE' || status === 'SLEEPING'
+          ? 'bg-slate-100 text-slate-600'
+          : 'bg-blue-100 text-blue-700';
+
+  return (
+    <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
+      {status}
+    </span>
+  );
+}
+
+function Panel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h4 className="text-lg font-bold text-slate-950">{title}</h4>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+      </p>
+      <p className="mt-1 text-xl font-bold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {label}
+      </p>
+      <p className="mt-1 font-bold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
 function PencilIcon() {
   return (
     <svg
@@ -685,13 +1095,37 @@ function PencilIcon() {
   );
 }
 
-function Amount({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-slate-50 px-3 py-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-        {label}
-      </p>
-      <p className="font-bold text-slate-900">{Number(value).toFixed(2)}</p>
-    </div>
-  );
+function getSortValue(customer: Customer, key: SortKey) {
+  switch (key) {
+    case 'branch':
+      return customer.branch?.name ?? '';
+    case 'lastPurchaseDate':
+      return customer.lastPurchaseDate
+        ? new Date(customer.lastPurchaseDate).getTime()
+        : 0;
+    case 'createdAt':
+      return new Date(customer.createdAt).getTime();
+    case 'totalPurchases':
+    case 'totalProfit':
+    case 'totalDebt':
+    case 'purchaseCount':
+      return customer[key] ?? 0;
+    default:
+      return customer[key] ?? '';
+  }
+}
+
+function formatKgs(value: number | string | null | undefined) {
+  return `${Number(value ?? 0).toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })} KGS`;
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) {
+    return 'No purchases yet';
+  }
+
+  return new Date(value).toLocaleDateString();
 }

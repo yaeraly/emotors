@@ -11,6 +11,8 @@ import type {
   CustomerEvent,
   CustomerEventType,
   FollowUp,
+  PurchaseHistoryRow,
+  ServiceHistory,
   TimelineEntry,
 } from '@/lib/types';
 
@@ -29,6 +31,8 @@ type TimelineResponse = {
   events: CustomerEvent[];
   whatsappEvents: CustomerEvent[];
   followUps: FollowUp[];
+  purchaseHistory: PurchaseHistoryRow[];
+  serviceHistory: ServiceHistory;
   timeline: TimelineEntry[];
 };
 
@@ -39,6 +43,14 @@ export default function CustomerDetailPage() {
   const [events, setEvents] = useState<CustomerEvent[]>([]);
   const [whatsappEvents, setWhatsappEvents] = useState<CustomerEvent[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [purchaseHistory, setPurchaseHistory] = useState<PurchaseHistoryRow[]>(
+    [],
+  );
+  const [serviceHistory, setServiceHistory] = useState<ServiceHistory>({
+    diagnostics: [],
+    repairs: [],
+    warrantyRecords: [],
+  });
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [eventType, setEventType] = useState<CustomerEventType>('NOTE');
   const [eventMessage, setEventMessage] = useState('');
@@ -66,6 +78,14 @@ export default function CustomerDetailPage() {
       setEvents(result.events);
       setWhatsappEvents(result.whatsappEvents);
       setFollowUps(result.followUps);
+      setPurchaseHistory(result.purchaseHistory ?? []);
+      setServiceHistory(
+        result.serviceHistory ?? {
+          diagnostics: [],
+          repairs: [],
+          warrantyRecords: [],
+        },
+      );
       setTimeline(result.timeline);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load customer');
@@ -150,7 +170,7 @@ export default function CustomerDetailPage() {
                 <div className="flex flex-col justify-between gap-4 lg:flex-row">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                      Customer Profile
+                      Personal Information
                     </p>
                     <h2 className="mt-2 text-3xl font-bold text-slate-950">
                       {customer.fullName}
@@ -163,6 +183,7 @@ export default function CustomerDetailPage() {
                 </div>
 
                 <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <Info label="Full Name" value={customer.fullName} />
                   <Info label="Phone" value={customer.phone} />
                   <Info
                     label="WhatsApp"
@@ -172,19 +193,39 @@ export default function CustomerDetailPage() {
                     label="Branch"
                     value={customer.branch?.name ?? customer.branchId}
                   />
+                  <Info label="Status" value={customer.status} />
                   <Info
                     label="Created"
                     value={new Date(customer.createdAt).toLocaleDateString()}
                   />
                 </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-3">
+                <h3 className="mt-8 text-lg font-bold text-slate-950">
+                  Financial Summary
+                </h3>
+                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                   <Amount
                     label="Total purchases"
-                    value={customer.totalPurchaseAmount}
+                    value={customer.totalPurchases}
                   />
-                  <Amount label="Total profit" value={customer.totalProfitAmount} />
-                  <Amount label="Total debt" value={customer.totalDebtAmount} />
+                  <Amount label="Total profit" value={customer.totalProfit} />
+                  <Amount label="Total debt" value={customer.totalDebt} />
+                  <Amount
+                    label="Total payments"
+                    value={
+                      customer.totalPayments ??
+                      Math.max(customer.totalPurchases - customer.totalDebt, 0)
+                    }
+                  />
+                  <Amount
+                    label="Average order"
+                    value={
+                      customer.averageOrderValue ??
+                      (customer.purchaseCount > 0
+                        ? customer.totalPurchases / customer.purchaseCount
+                        : 0)
+                    }
+                  />
                 </div>
               </article>
 
@@ -281,6 +322,103 @@ export default function CustomerDetailPage() {
                 </form>
               </section>
             </div>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-950">
+                    Purchase History
+                  </h3>
+                  <p className="text-sm text-slate-500">
+                    Invoice-level rows will be populated from the Sales module
+                    when it is implemented.
+                  </p>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600">
+                  {purchaseHistory.length} records
+                </span>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-[900px] divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Invoice Number</th>
+                      <th className="px-4 py-3">Products</th>
+                      <th className="px-4 py-3">Quantity</th>
+                      <th className="px-4 py-3">Total Amount</th>
+                      <th className="px-4 py-3">Profit</th>
+                      <th className="px-4 py-3">Payment Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {purchaseHistory.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={7}
+                          className="px-4 py-8 text-center text-slate-500"
+                        >
+                          No purchase rows yet. CRM SALE events will appear
+                          here until the Sales module is connected.
+                        </td>
+                      </tr>
+                    ) : (
+                      purchaseHistory.map((purchase) => (
+                        <tr key={purchase.id}>
+                          <td className="px-4 py-3">
+                            {new Date(purchase.date).toLocaleDateString()}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            {purchase.invoiceNumber}
+                          </td>
+                          <td className="px-4 py-3">{purchase.products}</td>
+                          <td className="px-4 py-3">
+                            {purchase.quantity ?? 'Not linked'}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatKgs(purchase.totalAmount)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatKgs(purchase.profit)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {purchase.paymentStatus}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-950">
+                Service History
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Diagnostics, repairs, and warranty records will be fully
+                populated when the Service module is added.
+              </p>
+              <div className="mt-4 grid gap-4 lg:grid-cols-3">
+                <HistoryBucket
+                  title="Diagnostics"
+                  empty="No diagnostics yet."
+                  items={serviceHistory.diagnostics}
+                />
+                <HistoryBucket
+                  title="Repairs"
+                  empty="No repair records yet."
+                  items={serviceHistory.repairs}
+                />
+                <HistoryBucket
+                  title="Warranty records"
+                  empty="No warranty records yet."
+                  items={serviceHistory.warrantyRecords}
+                />
+              </div>
+            </section>
 
             <div className="grid gap-6 xl:grid-cols-3">
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
@@ -385,15 +523,51 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Amount({ label, value }: { label: string; value: string }) {
+function Amount({
+  label,
+  value,
+}: {
+  label: string;
+  value: number | string | null | undefined;
+}) {
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
         {label}
       </p>
       <p className="mt-1 text-2xl font-bold text-slate-950">
-        {Number(value).toFixed(2)}
+        {formatKgs(value)}
       </p>
+    </div>
+  );
+}
+
+function HistoryBucket({
+  title,
+  empty,
+  items,
+}: {
+  title: string;
+  empty: string;
+  items: Array<{ id: string; date: string; description: string }>;
+}) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <h4 className="font-bold text-slate-950">{title}</h4>
+      <div className="mt-3 space-y-3">
+        {items.length === 0 ? (
+          <p className="text-sm text-slate-500">{empty}</p>
+        ) : (
+          items.map((item) => (
+            <div key={item.id} className="rounded-xl bg-white p-3 text-sm">
+              <p className="font-semibold text-slate-900">{item.description}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {new Date(item.date).toLocaleString()}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -456,4 +630,11 @@ function TimelineRow({ entry }: { entry: TimelineEntry }) {
       </div>
     </div>
   );
+}
+
+function formatKgs(value: number | string | null | undefined) {
+  return `${Number(value ?? 0).toLocaleString('en-US', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })} KGS`;
 }

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CustomerEvent,
   CustomerEventType,
   FollowUpStatus,
   Prisma,
@@ -17,15 +18,22 @@ import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
+type CustomerEventWithCreator = CustomerEvent & {
+  createdBy?: {
+    id: string;
+    fullName: string;
+    role: Role;
+  };
+};
+
 @Injectable()
 export class CustomersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(user: AuthUser, query: CustomerQueryDto) {
-    const branchId = this.resolveBranchId(user, query.branchId);
     const where: Prisma.CustomerWhereInput = {
       deletedAt: null,
-      branchId,
+      ...this.buildBranchWhere(user, query.branchId),
     };
 
     if (query.status) {
@@ -41,26 +49,49 @@ export class CustomersService {
       ];
     }
 
-    return this.prisma.customer.findMany({
+    const customers = await this.prisma.customer.findMany({
       where,
-      include: {
-        branch: true,
-        _count: {
+      select: {
+        id: true,
+        fullName: true,
+        phone: true,
+        whatsappPhone: true,
+        status: true,
+        branchId: true,
+        branch: {
           select: {
-            events: true,
-            followUps: true,
+            id: true,
+            name: true,
+            code: true,
           },
+        },
+        totalPurchaseAmount: true,
+        totalProfitAmount: true,
+        totalDebtAmount: true,
+        createdAt: true,
+        updatedAt: true,
+        events: {
+          where: { type: CustomerEventType.SALE },
+          select: {
+            id: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'desc' },
         },
       },
       orderBy: { updatedAt: 'desc' },
     });
+
+    return customers.map((customer) =>
+      this.toCustomerListItem(customer, customer.events),
+    );
   }
 
   async create(user: AuthUser, dto: CreateCustomerDto) {
     const branchId = this.resolveBranchId(user, dto.branchId);
     await this.ensureBranchExists(branchId);
 
-    return this.prisma.customer.create({
+    const customer = await this.prisma.customer.create({
       data: {
         fullName: dto.fullName,
         phone: dto.phone,
@@ -72,18 +103,21 @@ export class CustomersService {
         totalProfitAmount: dto.totalProfitAmount,
         totalDebtAmount: dto.totalDebtAmount,
       },
-      include: { branch: true },
+      include: { branch: true, events: true },
     });
+
+    return this.toCustomerProfile(customer, customer.events);
   }
 
   async findOne(user: AuthUser, id: string) {
-    return this.getAccessibleCustomer(user, id);
+    const customer = await this.getAccessibleCustomer(user, id);
+    return this.toCustomerProfile(customer, customer.events);
   }
 
   async update(user: AuthUser, id: string, dto: UpdateCustomerDto) {
     await this.getAccessibleCustomer(user, id);
 
-    return this.prisma.customer.update({
+    const customer = await this.prisma.customer.update({
       where: { id },
       data: {
         fullName: dto.fullName,
@@ -95,8 +129,10 @@ export class CustomersService {
         totalProfitAmount: dto.totalProfitAmount,
         totalDebtAmount: dto.totalDebtAmount,
       },
-      include: { branch: true },
+      include: { branch: true, events: true },
     });
+
+    return this.toCustomerProfile(customer, customer.events);
   }
 
   async softDelete(user: AuthUser, id: string) {
@@ -242,14 +278,39 @@ export class CustomersService {
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
     return {
-      customer,
+      customer: this.toCustomerProfile(customer, events),
       events,
       whatsappEvents: events.filter(
         (event) => event.type === CustomerEventType.WHATSAPP,
       ),
       followUps,
+      purchaseHistory: this.toPurchaseHistory(events),
+      serviceHistory: {
+        diagnostics: [],
+        repairs: events
+          .filter((event) => event.type === CustomerEventType.SERVICE)
+          .map((event) => ({
+            id: event.id,
+            date: event.createdAt,
+            description: event.message,
+            createdBy: event.createdBy,
+          })),
+        warrantyRecords: [],
+      },
       timeline,
     };
+  }
+
+  private buildBranchWhere(user: AuthUser, requestedBranchId?: string) {
+    if (user.role === Role.OWNER) {
+      return requestedBranchId ? { branchId: requestedBranchId } : {};
+    }
+
+    if (requestedBranchId && requestedBranchId !== user.branchId) {
+      throw new ForbiddenException('You can only access your own branch');
+    }
+
+    return { branchId: user.branchId };
   }
 
   private resolveBranchId(user: AuthUser, requestedBranchId?: string) {
@@ -284,6 +345,9 @@ export class CustomersService {
       },
       include: {
         branch: true,
+        events: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
@@ -292,5 +356,118 @@ export class CustomersService {
     }
 
     return customer;
+  }
+
+  private toCustomerListItem<
+    T extends {
+      id: string;
+      fullName: string;
+      phone: string;
+      whatsappPhone: string | null;
+      status: string;
+      branchId: string;
+      branch: { id: string; name: string; code: string };
+      totalPurchaseAmount: Prisma.Decimal;
+      totalProfitAmount: Prisma.Decimal;
+      totalDebtAmount: Prisma.Decimal;
+      createdAt: Date;
+      updatedAt: Date;
+    },
+  >(customer: T, saleEvents: { id: string; createdAt: Date }[]) {
+    const purchaseCount = saleEvents.length;
+    const lastPurchaseDate = saleEvents[0]?.createdAt ?? null;
+    const totalPurchases = Number(customer.totalPurchaseAmount);
+    const totalProfit = Number(customer.totalProfitAmount);
+    const totalDebt = Number(customer.totalDebtAmount);
+
+    return {
+      id: customer.id,
+      fullName: customer.fullName,
+      phone: customer.phone,
+      whatsappPhone: customer.whatsappPhone,
+      status: customer.status,
+      branchId: customer.branchId,
+      branch: customer.branch,
+      totalPurchases,
+      totalProfit,
+      totalDebt,
+      purchaseCount,
+      lastPurchaseDate,
+      createdAt: customer.createdAt,
+      updatedAt: customer.updatedAt,
+      totalPurchaseAmount: totalPurchases,
+      totalProfitAmount: totalProfit,
+      totalDebtAmount: totalDebt,
+    };
+  }
+
+  private toCustomerProfile<
+    T extends {
+      id: string;
+      fullName: string;
+      phone: string;
+      whatsappPhone: string | null;
+      branchId: string;
+      branch: { id: string; name: string; code: string };
+      status: string;
+      notes: string | null;
+      totalPurchaseAmount: Prisma.Decimal;
+      totalProfitAmount: Prisma.Decimal;
+      totalDebtAmount: Prisma.Decimal;
+      createdAt: Date;
+      updatedAt: Date;
+      deletedAt: Date | null;
+    },
+  >(customer: T, events: CustomerEvent[]) {
+    const saleEvents = events.filter(
+      (event) => event.type === CustomerEventType.SALE,
+    );
+    const totalPurchases = Number(customer.totalPurchaseAmount);
+    const totalProfit = Number(customer.totalProfitAmount);
+    const totalDebt = Number(customer.totalDebtAmount);
+    const purchaseCount = saleEvents.length;
+    const totalPayments = Math.max(totalPurchases - totalDebt, 0);
+    const averageOrderValue =
+      purchaseCount > 0 ? totalPurchases / purchaseCount : 0;
+
+    return {
+      id: customer.id,
+      fullName: customer.fullName,
+      phone: customer.phone,
+      whatsappPhone: customer.whatsappPhone,
+      branchId: customer.branchId,
+      branch: customer.branch,
+      status: customer.status,
+      notes: customer.notes,
+      totalPurchases,
+      totalProfit,
+      totalDebt,
+      totalPayments,
+      averageOrderValue,
+      purchaseCount,
+      lastPurchaseDate: saleEvents[0]?.createdAt ?? null,
+      createdAt: customer.createdAt,
+      updatedAt: customer.updatedAt,
+      deletedAt: customer.deletedAt,
+      totalPurchaseAmount: totalPurchases,
+      totalProfitAmount: totalProfit,
+      totalDebtAmount: totalDebt,
+    };
+  }
+
+  private toPurchaseHistory(events: CustomerEventWithCreator[]) {
+    return events
+      .filter((event) => event.type === CustomerEventType.SALE)
+      .map((event, index) => ({
+        id: event.id,
+        date: event.createdAt,
+        invoiceNumber: `CRM-SALE-${String(index + 1).padStart(4, '0')}`,
+        products: event.message,
+        quantity: null,
+        totalAmount: null,
+        profit: null,
+        paymentStatus: 'Not linked to Sales module',
+        createdBy: event.createdBy,
+      }));
   }
 }
