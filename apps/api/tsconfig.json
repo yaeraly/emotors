@@ -3,7 +3,7 @@
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
-    "incremental": true,
+    "incremental": false,
     "sourceMap": true,
     "declaration": true,
     "removeComments": true

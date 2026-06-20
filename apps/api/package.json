@@ -18,7 +18,7 @@
     "@nestjs/jwt": "latest",
     "@nestjs/passport": "latest",
     "@nestjs/platform-fastify": "latest",
-    "@prisma/client": "latest",
+    "@prisma/client": "^6.19.3",
     "bcryptjs": "latest",
     "class-transformer": "latest",
     "class-validator": "latest",
@@ -29,10 +29,9 @@
   },
   "devDependencies": {
     "@nestjs/cli": "latest",
-    "@types/bcryptjs": "latest",
     "@types/node": "latest",
     "@types/passport-jwt": "latest",
-    "prisma": "latest",
+    "prisma": "^6.19.3",
     "ts-node": "latest",
     "typescript": "5.8.3"
   }

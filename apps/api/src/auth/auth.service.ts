@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import { JwtSignOptions, JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,10 +45,14 @@ export class AuthService {
       branchId: user.branchId,
     };
 
-    const accessToken = await this.jwtService.signAsync(payload, {
+    const expiresIn =
+      this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ?? '15m';
+    const signOptions: JwtSignOptions = {
       secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
-      expiresIn: this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ?? '15m',
-    });
+      expiresIn: expiresIn as JwtSignOptions['expiresIn'],
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload, signOptions);
 
     return {
       accessToken,

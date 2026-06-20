@@ -414,21 +414,40 @@ function Panel({
 }
 
 function TimelineRow({ entry }: { entry: TimelineEntry }) {
-  const isEvent = entry.kind === 'event';
-  const item = entry.item;
+  if (entry.kind === 'event') {
+    return (
+      <div className="rounded-2xl border border-slate-200 p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wide text-blue-700">
+              {entry.item.type}
+            </p>
+            <p className="mt-1 font-semibold text-slate-950">
+              {entry.item.message}
+            </p>
+          </div>
+          <time className="shrink-0 text-right text-xs text-slate-500">
+            {new Date(entry.at).toLocaleString()}
+          </time>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-slate-200 p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-bold uppercase tracking-wide text-blue-700">
-            {isEvent ? item.type : `FOLLOW_UP · ${item.status}`}
+            FOLLOW_UP · {entry.item.status}
           </p>
           <p className="mt-1 font-semibold text-slate-950">
-            {isEvent ? item.message : item.title}
+            {entry.item.title}
           </p>
-          {!isEvent && item.description ? (
-            <p className="mt-1 text-sm text-slate-600">{item.description}</p>
+          {entry.item.description ? (
+            <p className="mt-1 text-sm text-slate-600">
+              {entry.item.description}
+            </p>
           ) : null}
         </div>
         <time className="shrink-0 text-right text-xs text-slate-500">
