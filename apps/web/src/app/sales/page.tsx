@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { DailySalesReport, PaymentStatus, Sale } from '@/lib/types';
+import type { DailySalesReport, PaymentStatus, Sale, SaleStatus } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIAL', 'DEBT'];
@@ -124,19 +124,20 @@ export default function SalesPage() {
                   <th className="px-4 py-3">{t('sales.debtAmount')}</th>
                   <th className="px-4 py-3">{t('sales.profitAmount')}</th>
                   <th className="px-4 py-3">{t('common.status')}</th>
+                  <th className="px-4 py-3">Sale Status</th>
                   <th className="px-4 py-3">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
                       {t('sales.loadingSales')}
                     </td>
                   </tr>
                 ) : sales.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
                       {t('sales.noSales')}
                     </td>
                   </tr>
@@ -169,6 +170,9 @@ export default function SalesPage() {
                       </td>
                       <td className="px-4 py-3">
                         <PaymentStatusPill status={sale.paymentStatus} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <SaleStatusPill status={sale.status} />
                       </td>
                       <td className="px-4 py-3">
                         <Link
@@ -213,6 +217,32 @@ function PaymentStatusPill({ status }: { status: PaymentStatus }) {
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
       {t(`paymentStatus.${status}`)}
+    </span>
+  );
+}
+
+function SaleStatusPill({ status }: { status: SaleStatus }) {
+  const labels: Record<SaleStatus, string> = {
+    DRAFT: 'Draft',
+    SENT_TO_CUSTOMER: 'Sent',
+    APPROVED_BY_CUSTOMER: 'Approved',
+    FINALIZED: 'Finalized',
+    CANCELLED: 'Cancelled',
+  };
+  const tone =
+    status === 'FINALIZED'
+      ? 'bg-emerald-100 text-emerald-700'
+      : status === 'CANCELLED'
+        ? 'bg-red-100 text-red-700'
+        : status === 'APPROVED_BY_CUSTOMER'
+          ? 'bg-amber-100 text-amber-800'
+          : status === 'SENT_TO_CUSTOMER'
+            ? 'bg-blue-100 text-blue-700'
+            : 'bg-slate-100 text-slate-600';
+
+  return (
+    <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
+      {labels[status]}
     </span>
   );
 }

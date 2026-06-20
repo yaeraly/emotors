@@ -21,12 +21,19 @@ export type FollowUpStatus = 'OPEN' | 'DONE' | 'CANCELLED';
 export type PaymentStatus = 'PAID' | 'PARTIAL' | 'DEBT';
 export type PaymentMethod =
   | 'CASH'
+  | 'QR'
   | 'CARD'
-  | 'TRANSFER'
+  | 'BANK_TRANSFER'
   | 'MBANK'
   | 'ELCART'
   | 'BALANCE';
 export type InstallmentStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE';
+export type SaleStatus =
+  | 'DRAFT'
+  | 'SENT_TO_CUSTOMER'
+  | 'APPROVED_BY_CUSTOMER'
+  | 'FINALIZED'
+  | 'CANCELLED';
 
 export type Branch = {
   id: string;
@@ -188,6 +195,13 @@ export type Sale = {
   paidAmount: number;
   debtAmount: number;
   paymentStatus: PaymentStatus;
+  status: SaleStatus;
+  draftReceiptText?: string | null;
+  whatsappMessageText?: string | null;
+  sentToCustomerAt?: string | null;
+  approvedAt?: string | null;
+  finalizedAt?: string | null;
+  cancelledAt?: string | null;
   notes?: string | null;
   items?: SaleItem[];
   payments?: Payment[];
@@ -196,6 +210,12 @@ export type Sale = {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+};
+
+export type WhatsAppDraftResponse = {
+  sale: Sale;
+  whatsappLink: string;
+  whatsappMessageText: string;
 };
 
 export type DailySalesReport = {

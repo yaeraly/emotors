@@ -3,7 +3,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CustomerEvent, CustomerEventType, FollowUpStatus, Prisma, Role } from '@prisma/client';
+import {
+  CustomerEvent,
+  CustomerEventType,
+  FollowUpStatus,
+  Prisma,
+  Role,
+  SaleStatus,
+} from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddCustomerEventDto } from './dto/add-customer-event.dto';
@@ -83,7 +90,7 @@ export class CustomersService {
         createdAt: true,
         updatedAt: true,
         sales: {
-          where: { deletedAt: null },
+          where: { deletedAt: null, status: SaleStatus.FINALIZED },
           select: {
             id: true,
             saleDate: true,
@@ -377,7 +384,7 @@ export class CustomersService {
           orderBy: { createdAt: 'desc' },
         },
         sales: {
-          where: { deletedAt: null },
+          where: { deletedAt: null, status: SaleStatus.FINALIZED },
           include: {
             items: true,
             payments: {

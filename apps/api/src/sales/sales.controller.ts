@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -30,6 +31,12 @@ export class SalesController {
     return this.salesService.create(user, dto);
   }
 
+  @Post('draft')
+  @Roles(Role.OWNER, Role.MANAGER)
+  createDraft(@CurrentUser() user: AuthUser, @Body() dto: CreateSaleDto) {
+    return this.salesService.createDraft(user, dto);
+  }
+
   @Get()
   findAll(@CurrentUser() user: AuthUser, @Query() query: SaleQueryDto) {
     return this.salesService.findAll(user, query);
@@ -45,6 +52,28 @@ export class SalesController {
     return this.salesService.findOne(user, id);
   }
 
+  @Put(':id')
+  @Roles(Role.OWNER, Role.MANAGER)
+  updateDraft(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CreateSaleDto,
+  ) {
+    return this.salesService.updateDraft(user, id, dto);
+  }
+
+  @Post(':id/send-whatsapp')
+  @Roles(Role.OWNER, Role.MANAGER)
+  sendWhatsApp(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.salesService.sendWhatsApp(user, id);
+  }
+
+  @Post(':id/approve')
+  @Roles(Role.OWNER, Role.MANAGER)
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.salesService.approve(user, id);
+  }
+
   @Post(':id/payments')
   addPayment(
     @CurrentUser() user: AuthUser,
@@ -52,6 +81,18 @@ export class SalesController {
     @Body() dto: AddPaymentDto,
   ) {
     return this.salesService.addPayment(user, id, dto);
+  }
+
+  @Post(':id/finalize')
+  @Roles(Role.OWNER, Role.MANAGER)
+  finalize(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.salesService.finalize(user, id);
+  }
+
+  @Post(':id/cancel')
+  @Roles(Role.OWNER, Role.MANAGER)
+  cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.salesService.cancel(user, id);
   }
 
   @Get(':id/receipt')

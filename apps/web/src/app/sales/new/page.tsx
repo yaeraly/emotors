@@ -4,7 +4,12 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { Customer, PaymentMethod, Sale } from '@/lib/types';
+import type {
+  Customer,
+  PaymentMethod,
+  Sale,
+  WhatsAppDraftResponse,
+} from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type SaleItemForm = {
@@ -17,12 +22,19 @@ type SaleItemForm = {
 
 const paymentMethods: PaymentMethod[] = [
   'CASH',
+  'QR',
   'CARD',
-  'TRANSFER',
+  'BANK_TRANSFER',
   'MBANK',
   'ELCART',
   'BALANCE',
 ];
+
+type PaymentRow = {
+  amount: string;
+  method: PaymentMethod;
+  note: string;
+};
 
 const emptyItem: SaleItemForm = {
   productName: '',
@@ -38,8 +50,11 @@ export default function NewSalePage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState('');
   const [items, setItems] = useState<SaleItemForm[]>([{ ...emptyItem }]);
-  const [paidAmount, setPaidAmount] = useState('0');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
+  const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
+    { amount: '0', method: 'CASH', note: '' },
+  ]);
+  const [draftSale, setDraftSale] = useState<Sale | null>(null);
+  const [paymentsSynced, setPaymentsSynced] = useState(false);
   const [installmentDays, setInstallmentDays] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
@@ -64,11 +79,14 @@ export default function NewSalePage() {
       0,
     );
     const profit = totalAmount - totalCost;
-    const paid = Math.min(Number(paidAmount || 0), totalAmount);
+    const paid = Math.min(
+      paymentRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+      totalAmount,
+    );
     const debt = Math.max(totalAmount - paid, 0);
 
     return { totalAmount, totalCost, profit, paid, debt };
-  }, [items, paidAmount]);
+  }, [items, paymentRows]);
 
   function updateItem(index: number, updates: Partial<SaleItemForm>) {
     setItems((current) =>
@@ -86,13 +104,34 @@ export default function NewSalePage() {
     setItems((current) => current.filter((_, itemIndex) => itemIndex !== index));
   }
 
-  async function saveSale(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function updatePayment(index: number, updates: Partial<PaymentRow>) {
+    setPaymentsSynced(false);
+    setPaymentRows((current) =>
+      current.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, ...updates } : row,
+      ),
+    );
+  }
+
+  function addPaymentRow() {
+    setPaymentsSynced(false);
+    setPaymentRows((current) => [
+      ...current,
+      { amount: '0', method: 'CASH', note: '' },
+    ]);
+  }
+
+  function removePaymentRow(index: number) {
+    setPaymentsSynced(false);
+    setPaymentRows((current) => current.filter((_, rowIndex) => rowIndex !== index));
+  }
+
+  function buildSalePayload() {
     setError('');
 
     if (!customerId) {
       setError(t('sales.selectCustomer'));
-      return;
+      return null;
     }
 
     const validItems = items.map((item) => ({
@@ -114,32 +153,134 @@ export default function NewSalePage() {
       )
     ) {
       setError('Every item needs a product name, quantity > 0, and valid prices');
-      return;
+      return null;
     }
 
+    return {
+      customerId,
+      items: validItems,
+      installmentDays: installmentDays ? Number(installmentDays) : undefined,
+      dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+      notes: notes.trim() || undefined,
+    };
+  }
+
+  async function saveDraft() {
+    const payload = buildSalePayload();
+    if (!payload) {
+      return null;
+    }
     setSaving(true);
 
     try {
-      const sale = await apiFetch<Sale>('/sales', {
-        method: 'POST',
-        body: JSON.stringify({
-          customerId,
-          items: validItems,
-          paidAmount: Number(paidAmount || 0),
-          paymentMethod,
-          installmentDays: installmentDays
-            ? Number(installmentDays)
-            : undefined,
-          dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
-          notes: notes.trim() || undefined,
-        }),
-      });
+      let sale = await apiFetch<Sale>(
+        draftSale ? `/sales/${draftSale.id}` : '/sales/draft',
+        {
+          method: draftSale ? 'PUT' : 'POST',
+          body: JSON.stringify(payload),
+        },
+      );
 
-      router.push(`/sales/${sale.id}`);
+      if (!paymentsSynced) {
+        for (const row of paymentRows) {
+          const amount = Number(row.amount || 0);
+          if (amount > 0) {
+            sale = await apiFetch<Sale>(`/sales/${sale.id}/payments`, {
+              method: 'POST',
+              body: JSON.stringify({
+                amount,
+                method: row.method,
+                note: row.note.trim() || undefined,
+              }),
+            });
+          }
+        }
+        setPaymentsSynced(true);
+      }
+
+      setDraftSale(sale);
+      return sale;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save sale');
+      setError(err instanceof Error ? err.message : 'Could not save draft');
+      return null;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveSale(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sale = await saveDraft();
+    if (sale) {
+      setError('');
+    }
+  }
+
+  async function sendWhatsApp() {
+    const sale = await saveDraft();
+    if (!sale) return;
+
+    try {
+      const response = await apiFetch<WhatsAppDraftResponse>(
+        `/sales/${sale.id}/send-whatsapp`,
+        { method: 'POST' },
+      );
+      setDraftSale(response.sale);
+      window.open(response.whatsappLink, '_blank', 'noopener,noreferrer');
+      setError('Draft receipt sent to customer');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send WhatsApp');
+    }
+  }
+
+  async function approveSale() {
+    const sale = await saveDraft();
+    if (!sale) return;
+
+    try {
+      const approved = await apiFetch<Sale>(`/sales/${sale.id}/approve`, {
+        method: 'POST',
+      });
+      setDraftSale(approved);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not approve sale');
+    }
+  }
+
+  async function finalizeSale() {
+    if (!draftSale) {
+      setError('Cannot finalize sale before approval');
+      return;
+    }
+
+    if (
+      draftSale.status !== 'APPROVED_BY_CUSTOMER' &&
+      draftSale.status !== 'SENT_TO_CUSTOMER'
+    ) {
+      setError('Cannot finalize sale before approval');
+      return;
+    }
+
+    try {
+      const finalized = await apiFetch<Sale>(`/sales/${draftSale.id}/finalize`, {
+        method: 'POST',
+      });
+      router.push(`/sales/${finalized.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not finalize sale');
+    }
+  }
+
+  async function cancelSale() {
+    if (!draftSale) return;
+
+    try {
+      const cancelled = await apiFetch<Sale>(`/sales/${draftSale.id}/cancel`, {
+        method: 'POST',
+      });
+      setDraftSale(cancelled);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not cancel sale');
     }
   }
 
@@ -163,7 +304,7 @@ export default function NewSalePage() {
             className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             type="submit"
           >
-            {saving ? t('common.loading') : t('common.save')}
+            {saving ? t('common.loading') : 'Save Draft'}
           </button>
         </div>
 
@@ -273,31 +414,57 @@ export default function NewSalePage() {
         <div className="grid gap-6 xl:grid-cols-2">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-lg font-bold text-slate-950">{t('sales.payments')}</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <SaleInput
-                label={t('sales.paidAmount')}
-                type="number"
-                value={paidAmount}
-                onChange={setPaidAmount}
-              />
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">
-                  {t('sales.paymentMethod')}
-                </span>
-                <select
-                  value={paymentMethod}
-                  onChange={(event) =>
-                    setPaymentMethod(event.target.value as PaymentMethod)
-                  }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                >
-                  {paymentMethods.map((method) => (
-                    <option key={method} value={method}>
-                      {method}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="mt-4 space-y-3">
+              {paymentRows.map((row, index) => (
+                <div key={index} className="grid gap-3 rounded-2xl bg-slate-50 p-3 md:grid-cols-4">
+                  <SaleInput
+                    label={t('sales.paidAmount')}
+                    type="number"
+                    value={row.amount}
+                    onChange={(value) => updatePayment(index, { amount: value })}
+                  />
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {t('sales.paymentMethod')}
+                    </span>
+                    <select
+                      value={row.method}
+                      onChange={(event) =>
+                        updatePayment(index, {
+                          method: event.target.value as PaymentMethod,
+                        })
+                      }
+                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                    >
+                      {paymentMethods.map((method) => (
+                        <option key={method} value={method}>
+                          {method}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <SaleInput
+                    label={t('crm.notes')}
+                    value={row.note}
+                    onChange={(value) => updatePayment(index, { note: value })}
+                  />
+                  <button
+                    onClick={() => removePaymentRow(index)}
+                    disabled={paymentRows.length === 1}
+                    type="button"
+                    className="self-end rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 disabled:opacity-50"
+                  >
+                    {t('common.delete')}
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={addPaymentRow}
+                type="button"
+                className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+              >
+                {t('sales.addPayment')}
+              </button>
             </div>
           </section>
 
@@ -333,6 +500,61 @@ export default function NewSalePage() {
           <Summary label={t('sales.profitAmount')} value={formatKgs(totals.profit)} />
           <Summary label={t('sales.paidAmount')} value={formatKgs(totals.paid)} />
           <Summary label={t('sales.debtAmount')} value={formatKgs(totals.debt)} />
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+            <div>
+              <h3 className="text-lg font-bold text-slate-950">Draft receipt</h3>
+              <pre className="mt-3 whitespace-pre-wrap rounded-2xl bg-slate-100 p-4 text-sm text-slate-700">
+                {draftSale?.draftReceiptText ??
+                  `EMOTORS DRAFT RECEIPT\n${t('sales.totalAmount')}: ${formatKgs(totals.totalAmount)}\n${t('sales.paidAmount')}: ${formatKgs(totals.paid)}\n${t('sales.debtAmount')}: ${formatKgs(totals.debt)}`}
+              </pre>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2 lg:min-w-80">
+              <button
+                onClick={() => void saveDraft()}
+                type="button"
+                className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+              >
+                Save Draft
+              </button>
+              <button
+                onClick={() => void sendWhatsApp()}
+                type="button"
+                className="rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50"
+              >
+                Send to WhatsApp
+              </button>
+              <button
+                onClick={() => void approveSale()}
+                type="button"
+                className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50"
+              >
+                Mark as Approved
+              </button>
+              <button
+                onClick={() => void finalizeSale()}
+                type="button"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Finalize Sale
+              </button>
+              <button
+                onClick={() => void cancelSale()}
+                disabled={!draftSale || draftSale.status === 'CANCELLED'}
+                type="button"
+                className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Cancel Sale
+              </button>
+              {draftSale ? (
+                <p className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
+                  {draftSale.status}
+                </p>
+              ) : null}
+            </div>
+          </div>
         </section>
       </form>
     </ProtectedShell>

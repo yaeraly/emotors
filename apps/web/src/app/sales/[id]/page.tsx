@@ -10,8 +10,9 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 const paymentMethods: PaymentMethod[] = [
   'CASH',
+  'QR',
   'CARD',
-  'TRANSFER',
+  'BANK_TRANSFER',
   'MBANK',
   'ELCART',
   'BALANCE',
@@ -75,6 +76,29 @@ export default function SaleDetailPage() {
     }
   }
 
+  async function runSaleAction(
+    path: 'send-whatsapp' | 'approve' | 'finalize' | 'cancel',
+  ) {
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await apiFetch<any>(`/sales/${saleId}/${path}`, {
+        method: 'POST',
+      });
+      const nextSale = response.sale ?? response;
+      setSale(nextSale);
+
+      if (response.whatsappLink) {
+        window.open(response.whatsappLink, '_blank', 'noopener,noreferrer');
+      }
+
+      setSuccess('Sale updated successfully');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update sale');
+    }
+  }
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -117,7 +141,7 @@ export default function SaleDetailPage() {
                     </p>
                   </div>
                   <span className="h-fit rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
-                    {t(`paymentStatus.${sale.paymentStatus}`)}
+                    {sale.status} · {t(`paymentStatus.${sale.paymentStatus}`)}
                   </span>
                 </div>
 
@@ -133,6 +157,40 @@ export default function SaleDetailPage() {
                   <Metric label={t('sales.paidAmount')} value={formatKgs(sale.paidAmount)} />
                   <Metric label={t('sales.debtAmount')} value={formatKgs(sale.debtAmount)} />
                   <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
+                </div>
+                <div className="mt-6 flex flex-wrap gap-2 print:hidden">
+                  <button
+                    onClick={() => void runSaleAction('send-whatsapp')}
+                    disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
+                    className="rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-50"
+                    type="button"
+                  >
+                    Send WhatsApp
+                  </button>
+                  <button
+                    onClick={() => void runSaleAction('approve')}
+                    disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
+                    className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                    type="button"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => void runSaleAction('finalize')}
+                    disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
+                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    type="button"
+                  >
+                    Finalize
+                  </button>
+                  <button
+                    onClick={() => void runSaleAction('cancel')}
+                    disabled={sale.status === 'CANCELLED'}
+                    className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    type="button"
+                  >
+                    Cancel
+                  </button>
                 </div>
               </article>
 

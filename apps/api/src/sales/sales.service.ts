@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -10,6 +11,7 @@ import {
   PaymentStatus,
   Prisma,
   Role,
+  SaleStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -23,57 +25,29 @@ type PrismaTx = Prisma.TransactionClient;
 export class SalesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(user: AuthUser, dto: CreateSaleDto) {
+  create(user: AuthUser, dto: CreateSaleDto) {
+    return this.createDraft(user, dto);
+  }
+
+  async createDraft(user: AuthUser, dto: CreateSaleDto) {
     return this.prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.findFirst({
-        where: { id: dto.customerId, deletedAt: null },
-        include: { branch: true },
-      });
-
-      if (!customer) {
-        throw new NotFoundException('Customer not found');
-      }
-
-      this.ensureBranchAccess(user, customer.branchId);
-
+      const customer = await this.getCustomerForSale(tx, user, dto.customerId);
       const saleDate = dto.saleDate ?? new Date();
       const receiptNumber = await this.generateReceiptNumber(tx, saleDate);
-      const calculatedItems = dto.items.map((item) => {
-        const totalPrice = this.roundMoney(item.quantity * item.unitPrice);
-        const totalCost = this.roundMoney(item.quantity * item.unitCost);
-        const profitAmount = this.roundMoney(totalPrice - totalCost);
-
-        return {
-          productName: item.productName,
-          productSku: item.productSku,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          unitCost: item.unitCost,
-          totalPrice,
-          totalCost,
-          profitAmount,
-        };
+      const totals = this.calculateSale(dto);
+      const draftReceiptText = this.buildReceiptText({
+        receiptNumber,
+        customerName: customer.fullName,
+        customerPhone: customer.phone,
+        sellerName: user.fullName,
+        saleDate,
+        items: dto.items,
+        totalAmount: totals.totalAmount,
+        paidAmount: 0,
+        debtAmount: totals.totalAmount,
+        paymentStatus: PaymentStatus.DEBT,
+        receiptStatus: 'DRAFT',
       });
-      const totalAmount = this.roundMoney(
-        calculatedItems.reduce((sum, item) => sum + item.totalPrice, 0),
-      );
-      const totalCost = this.roundMoney(
-        calculatedItems.reduce((sum, item) => sum + item.totalCost, 0),
-      );
-      const profitAmount = this.roundMoney(totalAmount - totalCost);
-      const paidAmount = this.roundMoney(
-        Math.min(dto.paidAmount ?? 0, totalAmount),
-      );
-      const debtAmount = this.roundMoney(Math.max(totalAmount - paidAmount, 0));
-      const paymentStatus = this.getPaymentStatus(totalAmount, paidAmount);
-      const qrCodeData = [
-        'EMOTORS',
-        `Receipt: ${receiptNumber}`,
-        `Customer: ${customer.fullName}`,
-        `Total: ${totalAmount}`,
-        `Paid: ${paidAmount}`,
-        `Debt: ${debtAmount}`,
-      ].join('\n');
 
       const sale = await tx.sale.create({
         data: {
@@ -82,72 +56,114 @@ export class SalesService {
           sellerId: user.id,
           receiptNumber,
           saleDate,
-          totalAmount,
-          totalCost,
-          profitAmount,
-          paidAmount,
-          debtAmount,
-          paymentStatus,
+          totalAmount: totals.totalAmount,
+          totalCost: totals.totalCost,
+          profitAmount: totals.profitAmount,
+          paidAmount: 0,
+          debtAmount: totals.totalAmount,
+          paymentStatus: PaymentStatus.DEBT,
+          status: SaleStatus.DRAFT,
+          draftReceiptText,
           notes: dto.notes,
-          items: {
-            create: calculatedItems,
-          },
-          payments:
-            paidAmount > 0
-              ? {
-                  create: {
-                    branchId: customer.branchId,
-                    customerId: customer.id,
-                    amount: paidAmount,
-                    method: dto.paymentMethod ?? PaymentMethod.CASH,
-                    paidAt: saleDate,
-                    note: 'Initial sale payment',
-                    createdById: user.id,
-                  },
-                }
-              : undefined,
-          installments:
-            debtAmount > 0 && (dto.installmentDays || dto.dueDate)
-              ? {
-                  create: {
-                    branchId: customer.branchId,
-                    customerId: customer.id,
-                    dueDate:
-                      dto.dueDate ??
-                      new Date(
-                        saleDate.getTime() +
-                          (dto.installmentDays ?? 0) * 24 * 60 * 60 * 1000,
-                      ),
-                    amount: debtAmount,
-                    paidAmount: 0,
-                    status: InstallmentStatus.PENDING,
-                  },
-                }
-              : undefined,
+          items: { create: totals.items },
+          installments: this.buildInstallmentCreate(
+            dto,
+            customer.branchId,
+            customer.id,
+            totals.totalAmount,
+            saleDate,
+          ),
           receipt: {
             create: {
               branchId: customer.branchId,
               receiptNumber,
-              qrCodeData,
+              qrCodeData: draftReceiptText,
             },
           },
         },
         include: this.saleInclude(),
       });
 
-      await tx.customerEvent.create({
+      return this.toSaleResponse(sale);
+    });
+  }
+
+  async updateDraft(user: AuthUser, id: string, dto: CreateSaleDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await this.getAccessibleSaleInTx(tx, user, id);
+
+      if (
+        sale.status !== SaleStatus.DRAFT &&
+        sale.status !== SaleStatus.SENT_TO_CUSTOMER
+      ) {
+        throw new BadRequestException('Cannot edit finalized or approved sale');
+      }
+
+      const customer = await this.getCustomerForSale(tx, user, dto.customerId);
+      const saleDate = dto.saleDate ?? sale.saleDate;
+      const totals = this.calculateSale(dto);
+      const paymentAggregate = await tx.payment.aggregate({
+        where: { saleId: sale.id },
+        _sum: { amount: true },
+      });
+      const paidAmount = this.roundMoney(
+        Number(paymentAggregate._sum.amount ?? 0),
+      );
+      const debtAmount = this.roundMoney(
+        Math.max(totals.totalAmount - paidAmount, 0),
+      );
+      const paymentStatus = this.getPaymentStatus(totals.totalAmount, paidAmount);
+      const draftReceiptText = this.buildReceiptText({
+        receiptNumber: sale.receiptNumber,
+        customerName: customer.fullName,
+        customerPhone: customer.phone,
+        sellerName: user.fullName,
+        saleDate,
+        items: dto.items,
+        totalAmount: totals.totalAmount,
+        paidAmount,
+        debtAmount,
+        paymentStatus,
+        receiptStatus: 'DRAFT',
+      });
+
+      await tx.saleItem.deleteMany({ where: { saleId: sale.id } });
+      await tx.installmentSchedule.deleteMany({ where: { saleId: sale.id } });
+
+      const updated = await tx.sale.update({
+        where: { id: sale.id },
         data: {
           customerId: customer.id,
           branchId: customer.branchId,
-          type: CustomerEventType.SALE,
-          message: `Sale ${receiptNumber}: ${totalAmount.toFixed(2)} KGS`,
-          createdById: user.id,
+          saleDate,
+          totalAmount: totals.totalAmount,
+          totalCost: totals.totalCost,
+          profitAmount: totals.profitAmount,
+          paidAmount,
+          debtAmount,
+          paymentStatus,
+          draftReceiptText,
+          notes: dto.notes,
+          items: { create: totals.items },
+          installments: this.buildInstallmentCreate(
+            dto,
+            customer.branchId,
+            customer.id,
+            debtAmount,
+            saleDate,
+          ),
+          receipt: {
+            update: {
+              branchId: customer.branchId,
+              qrCodeData: draftReceiptText,
+            },
+          },
         },
+        include: this.saleInclude(),
       });
 
-      await this.refreshCustomerFinancials(tx, customer.id);
-
-      return this.toSaleResponse(sale);
+      await this.refreshInstallments(tx, sale.id, paidAmount);
+      return this.toSaleResponse(updated);
     });
   }
 
@@ -209,14 +225,71 @@ export class SalesService {
     return this.toSaleResponse(sale);
   }
 
+  async sendWhatsApp(user: AuthUser, id: string) {
+    const sale = await this.getAccessibleSale(user, id);
+
+    if (sale.status === SaleStatus.FINALIZED || sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException('Cannot send finalized or cancelled sale');
+    }
+
+    const message = sale.draftReceiptText ?? sale.receipt?.qrCodeData ?? '';
+    const phone = (sale.customer.whatsappPhone || sale.customer.phone).replace(
+      /\D/g,
+      '',
+    );
+    const whatsappMessageText = `Саламатсызбы! EMOTORS сатуу чеги:\n\n${message}`;
+    const whatsappLink = `https://wa.me/${phone}?text=${encodeURIComponent(
+      whatsappMessageText,
+    )}`;
+
+    const updated = await this.prisma.sale.update({
+      where: { id: sale.id },
+      data: {
+        status: SaleStatus.SENT_TO_CUSTOMER,
+        whatsappMessageText,
+        sentToCustomerAt: new Date(),
+      },
+      include: this.saleInclude(),
+    });
+
+    return {
+      sale: this.toSaleResponse(updated),
+      whatsappLink,
+      whatsappMessageText,
+    };
+  }
+
+  async approve(user: AuthUser, id: string) {
+    const sale = await this.getAccessibleSale(user, id);
+
+    if (sale.status === SaleStatus.CANCELLED || sale.status === SaleStatus.FINALIZED) {
+      throw new BadRequestException('Cannot approve this sale');
+    }
+
+    const updated = await this.prisma.sale.update({
+      where: { id: sale.id },
+      data: {
+        status: SaleStatus.APPROVED_BY_CUSTOMER,
+        approvedAt: new Date(),
+      },
+      include: this.saleInclude(),
+    });
+
+    return this.toSaleResponse(updated);
+  }
+
   async addPayment(user: AuthUser, id: string, dto: AddPaymentDto) {
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
-      const currentDebt = Number(sale.debtAmount);
-      const amount = this.roundMoney(Math.min(dto.amount, currentDebt));
+
+      if (sale.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException('Cannot add payment to cancelled sale');
+      }
+
+      const amount = this.roundMoney(dto.amount);
 
       if (amount <= 0) {
-        throw new ForbiddenException('Sale is already fully paid');
+        throw new BadRequestException('Payment amount must be greater than 0');
       }
 
       await tx.payment.create({
@@ -232,27 +305,100 @@ export class SalesService {
         },
       });
 
-      const paymentAggregate = await tx.payment.aggregate({
-        where: { saleId: sale.id },
-        _sum: { amount: true },
+      await this.refreshSalePaymentState(tx, sale.id);
+
+      if (sale.status === SaleStatus.FINALIZED) {
+        await this.refreshCustomerFinancials(tx, sale.customerId);
+      }
+    });
+
+    return this.findOne(user, id);
+  }
+
+  async finalize(user: AuthUser, id: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const sale = await this.getAccessibleSaleInTx(tx, user, id);
+
+      if (
+        sale.status !== SaleStatus.APPROVED_BY_CUSTOMER &&
+        sale.status !== SaleStatus.SENT_TO_CUSTOMER
+      ) {
+        throw new BadRequestException('Cannot finalize sale before approval');
+      }
+
+      await this.refreshSalePaymentState(tx, sale.id);
+      const refreshed = await tx.sale.findUniqueOrThrow({
+        where: { id: sale.id },
+        include: { payments: true, customer: true, seller: true, items: true },
       });
-      const paidAmount = this.roundMoney(
-        Number(paymentAggregate._sum.amount ?? 0),
-      );
-      const totalAmount = Number(sale.totalAmount);
-      const debtAmount = this.roundMoney(Math.max(totalAmount - paidAmount, 0));
+      const finalReceiptText = this.buildReceiptText({
+        receiptNumber: refreshed.receiptNumber,
+        customerName: refreshed.customer.fullName,
+        customerPhone: refreshed.customer.phone,
+        sellerName: refreshed.seller.fullName,
+        saleDate: refreshed.saleDate,
+        items: refreshed.items,
+        totalAmount: Number(refreshed.totalAmount),
+        paidAmount: Number(refreshed.paidAmount),
+        debtAmount: Number(refreshed.debtAmount),
+        paymentStatus: refreshed.paymentStatus,
+        receiptStatus: 'FINAL',
+      });
 
       await tx.sale.update({
         where: { id: sale.id },
         data: {
-          paidAmount,
-          debtAmount,
-          paymentStatus: this.getPaymentStatus(totalAmount, paidAmount),
+          status: SaleStatus.FINALIZED,
+          finalizedAt: new Date(),
+          receipt: {
+            update: {
+              qrCodeData: finalReceiptText,
+            },
+          },
         },
       });
 
-      await this.refreshInstallments(tx, sale.id, paidAmount);
+      await tx.customerEvent.create({
+        data: {
+          customerId: sale.customerId,
+          branchId: sale.branchId,
+          type: CustomerEventType.SALE,
+          message: `Finalized sale ${sale.receiptNumber}: ${Number(
+            sale.totalAmount,
+          ).toFixed(2)} KGS`,
+          createdById: user.id,
+        },
+      });
+
       await this.refreshCustomerFinancials(tx, sale.customerId);
+    });
+
+    return this.findOne(user, id);
+  }
+
+  async cancel(user: AuthUser, id: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const sale = await this.getAccessibleSaleInTx(tx, user, id);
+
+      if (sale.status === SaleStatus.FINALIZED && user.role !== Role.OWNER) {
+        throw new ForbiddenException('Only OWNER can cancel finalized sale');
+      }
+
+      if (sale.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException('Sale is already cancelled');
+      }
+
+      await tx.sale.update({
+        where: { id: sale.id },
+        data: {
+          status: SaleStatus.CANCELLED,
+          cancelledAt: new Date(),
+        },
+      });
+
+      if (sale.status === SaleStatus.FINALIZED) {
+        await this.refreshCustomerFinancials(tx, sale.customerId);
+      }
     });
 
     return this.findOne(user, id);
@@ -260,8 +406,16 @@ export class SalesService {
 
   async receipt(user: AuthUser, id: string) {
     const sale = await this.getAccessibleSale(user, id);
+    const receiptStatus =
+      sale.status === SaleStatus.FINALIZED ? 'FINAL' : 'DRAFT';
+
     return {
       ...this.toSaleResponse(sale),
+      receiptStatus,
+      receiptText:
+        receiptStatus === 'FINAL'
+          ? sale.receipt?.qrCodeData
+          : sale.draftReceiptText ?? sale.receipt?.qrCodeData,
       qrCodeData: sale.receipt?.qrCodeData,
       printedAt: sale.receipt?.printedAt,
     };
@@ -280,6 +434,7 @@ export class SalesService {
       this.prisma.sale.findMany({
         where: {
           deletedAt: null,
+          status: SaleStatus.FINALIZED,
           ...branchWhere,
           saleDate: { gte: from, lte: to },
         },
@@ -293,6 +448,7 @@ export class SalesService {
       this.prisma.payment.findMany({
         where: {
           ...branchWhere,
+          sale: { status: SaleStatus.FINALIZED },
           paidAt: { gte: from, lte: to },
         },
         select: {
@@ -312,11 +468,72 @@ export class SalesService {
       saleCount: sales.length,
       cashPayments: this.sumPayments(payments, [PaymentMethod.CASH]),
       transferPayments: this.sumPayments(payments, [
-        PaymentMethod.TRANSFER,
+        PaymentMethod.BANK_TRANSFER,
+        PaymentMethod.QR,
         PaymentMethod.MBANK,
         PaymentMethod.ELCART,
       ]),
       cardPayments: this.sumPayments(payments, [PaymentMethod.CARD]),
+    };
+  }
+
+  private calculateSale(dto: CreateSaleDto) {
+    const items = dto.items.map((item) => {
+      const totalPrice = this.roundMoney(item.quantity * item.unitPrice);
+      const totalCost = this.roundMoney(item.quantity * item.unitCost);
+      const profitAmount = this.roundMoney(totalPrice - totalCost);
+
+      return {
+        productName: item.productName,
+        productSku: item.productSku,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        unitCost: item.unitCost,
+        totalPrice,
+        totalCost,
+        profitAmount,
+      };
+    });
+    const totalAmount = this.roundMoney(
+      items.reduce((sum, item) => sum + item.totalPrice, 0),
+    );
+    const totalCost = this.roundMoney(
+      items.reduce((sum, item) => sum + item.totalCost, 0),
+    );
+
+    return {
+      items,
+      totalAmount,
+      totalCost,
+      profitAmount: this.roundMoney(totalAmount - totalCost),
+    };
+  }
+
+  private buildInstallmentCreate(
+    dto: CreateSaleDto,
+    branchId: string,
+    customerId: string,
+    debtAmount: number,
+    saleDate: Date,
+  ) {
+    if (!(debtAmount > 0 && (dto.installmentDays || dto.dueDate))) {
+      return undefined;
+    }
+
+    return {
+      create: {
+        branchId,
+        customerId,
+        dueDate:
+          dto.dueDate ??
+          new Date(
+            saleDate.getTime() +
+              (dto.installmentDays ?? 0) * 24 * 60 * 60 * 1000,
+          ),
+        amount: debtAmount,
+        paidAmount: 0,
+        status: InstallmentStatus.PENDING,
+      },
     };
   }
 
@@ -352,6 +569,24 @@ export class SalesService {
     };
   }
 
+  private async getCustomerForSale(
+    tx: PrismaTx,
+    user: AuthUser,
+    customerId: string,
+  ) {
+    const customer = await tx.customer.findFirst({
+      where: { id: customerId, deletedAt: null },
+      include: { branch: true },
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    this.ensureBranchAccess(user, customer.branchId);
+    return customer;
+  }
+
   private async getAccessibleSale(user: AuthUser, id: string) {
     const sale = await this.prisma.sale.findFirst({
       where: {
@@ -381,9 +616,7 @@ export class SalesService {
         ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
       },
       include: {
-        installments: {
-          orderBy: { dueDate: 'asc' },
-        },
+        installments: { orderBy: { dueDate: 'asc' } },
       },
     });
 
@@ -429,6 +662,32 @@ export class SalesService {
     return `EM-${datePart}-${String(count + 1).padStart(5, '0')}`;
   }
 
+  private async refreshSalePaymentState(tx: PrismaTx, saleId: string) {
+    const sale = await tx.sale.findUniqueOrThrow({
+      where: { id: saleId },
+      select: { totalAmount: true },
+    });
+    const paymentAggregate = await tx.payment.aggregate({
+      where: { saleId },
+      _sum: { amount: true },
+    });
+    const paidAmount = this.roundMoney(
+      Number(paymentAggregate._sum.amount ?? 0),
+    );
+    const totalAmount = Number(sale.totalAmount);
+    const debtAmount = this.roundMoney(Math.max(totalAmount - paidAmount, 0));
+
+    await tx.sale.update({
+      where: { id: saleId },
+      data: {
+        paidAmount,
+        debtAmount,
+        paymentStatus: this.getPaymentStatus(totalAmount, paidAmount),
+      },
+    });
+    await this.refreshInstallments(tx, saleId, paidAmount);
+  }
+
   private getPaymentStatus(totalAmount: number, paidAmount: number) {
     if (paidAmount >= totalAmount) {
       return PaymentStatus.PAID;
@@ -449,9 +708,7 @@ export class SalesService {
     const sale = await tx.sale.findUnique({
       where: { id: saleId },
       include: {
-        installments: {
-          orderBy: { dueDate: 'asc' },
-        },
+        installments: { orderBy: { dueDate: 'asc' } },
       },
     });
 
@@ -476,10 +733,7 @@ export class SalesService {
 
       await tx.installmentSchedule.update({
         where: { id: installment.id },
-        data: {
-          paidAmount,
-          status,
-        },
+        data: { paidAmount, status },
       });
     }
   }
@@ -489,6 +743,7 @@ export class SalesService {
       where: {
         customerId,
         deletedAt: null,
+        status: SaleStatus.FINALIZED,
       },
       select: {
         totalAmount: true,
@@ -509,6 +764,51 @@ export class SalesService {
         totalDebtAmount: this.sumDecimals(sales.map((sale) => sale.debtAmount)),
       },
     });
+  }
+
+  private buildReceiptText(input: {
+    receiptNumber: string;
+    customerName: string;
+    customerPhone: string;
+    sellerName: string;
+    saleDate: Date;
+    items: Array<{
+      productName: string;
+      quantity: number;
+      unitPrice?: number | Prisma.Decimal;
+      totalPrice?: number | Prisma.Decimal;
+    }>;
+    totalAmount: number;
+    paidAmount: number;
+    debtAmount: number;
+    paymentStatus: PaymentStatus;
+    receiptStatus: 'DRAFT' | 'FINAL';
+  }) {
+    const itemLines = input.items
+      .map((item) => {
+        const total =
+          item.totalPrice !== undefined
+            ? Number(item.totalPrice)
+            : item.quantity * Number(item.unitPrice ?? 0);
+        return `- ${item.productName} x ${item.quantity}: ${total.toFixed(2)} KGS`;
+      })
+      .join('\n');
+
+    return [
+      `EMOTORS ${input.receiptStatus} RECEIPT`,
+      `Receipt: ${input.receiptNumber}`,
+      `Date: ${input.saleDate.toLocaleString()}`,
+      `Seller: ${input.sellerName}`,
+      `Customer: ${input.customerName}`,
+      `Phone: ${input.customerPhone}`,
+      '',
+      itemLines,
+      '',
+      `Total: ${input.totalAmount.toFixed(2)} KGS`,
+      `Paid: ${input.paidAmount.toFixed(2)} KGS`,
+      `Debt: ${input.debtAmount.toFixed(2)} KGS`,
+      `Status: ${input.paymentStatus}`,
+    ].join('\n');
   }
 
   private toSaleResponse(sale: any) {

@@ -47,11 +47,20 @@ enum PaymentStatus {
 
 enum PaymentMethod {
   CASH
+  QR
   CARD
-  TRANSFER
+  BANK_TRANSFER
   MBANK
   ELCART
   BALANCE
+}
+
+enum SaleStatus {
+  DRAFT
+  SENT_TO_CUSTOMER
+  APPROVED_BY_CUSTOMER
+  FINALIZED
+  CANCELLED
 }
 
 enum InstallmentStatus {
@@ -177,7 +186,14 @@ model Sale {
   profitAmount    Decimal               @default(0) @db.Decimal(14, 2)
   paidAmount      Decimal               @default(0) @db.Decimal(14, 2)
   debtAmount      Decimal               @default(0) @db.Decimal(14, 2)
-  paymentStatus   PaymentStatus
+  paymentStatus   PaymentStatus         @default(DEBT)
+  status          SaleStatus            @default(DRAFT)
+  draftReceiptText String?
+  whatsappMessageText String?
+  sentToCustomerAt DateTime?
+  approvedAt      DateTime?
+  finalizedAt     DateTime?
+  cancelledAt     DateTime?
   notes           String?
   items           SaleItem[]
   payments        Payment[]
@@ -191,6 +207,7 @@ model Sale {
   @@index([customerId])
   @@index([sellerId])
   @@index([paymentStatus])
+  @@index([status])
   @@index([saleDate])
   @@index([receiptNumber])
 }
