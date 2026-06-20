@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { Branch, Customer, CustomerStatus } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const statuses: CustomerStatus[] = ['NEW', 'ACTIVE', 'VIP', 'SLEEPING', 'RISK'];
 
 type CustomerFormFields = {
@@ -40,6 +42,7 @@ const initialCreateState: CreateCustomerState = {
 };
 
 export default function CustomersPage() {
+  const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState('');
@@ -158,8 +161,19 @@ export default function CustomersPage() {
     setEditError('');
 
     try {
-      await apiFetch<Customer>(`/customers/${editingCustomer.id}`, {
+      const token = getToken();
+
+      if (!token) {
+        router.replace('/login');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/customers/${editingCustomer.id}`, {
         method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
           fullName: editForm.fullName.trim(),
           phone: editForm.phone.trim(),
@@ -168,10 +182,26 @@ export default function CustomersPage() {
           notes: editForm.notes.trim(),
         }),
       });
+
+      if (response.status === 401) {
+        clearToken();
+        router.replace('/login');
+        return;
+      }
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        const message =
+          errorBody?.message ??
+          `Update failed with status ${response.status}`;
+        throw new Error(Array.isArray(message) ? message.join(', ') : message);
+      }
+
       await loadCustomers();
       closeEditCustomer();
       showSuccess('Customer updated successfully');
     } catch (err) {
+      console.error('Customer update failed', err);
       setEditError(
         err instanceof Error ? err.message : 'Could not update customer',
       );
