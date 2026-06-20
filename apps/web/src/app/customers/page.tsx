@@ -8,25 +8,32 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 
 const statuses: CustomerStatus[] = ['NEW', 'ACTIVE', 'VIP', 'SLEEPING', 'RISK'];
 
-type CreateCustomerState = {
+type CustomerFormFields = {
   fullName: string;
   phone: string;
   whatsappPhone: string;
-  branchId: string;
   status: CustomerStatus;
   notes: string;
+};
+
+type CreateCustomerState = CustomerFormFields & {
+  branchId: string;
   totalPurchaseAmount: string;
   totalProfitAmount: string;
   totalDebtAmount: string;
 };
 
-const initialCreateState: CreateCustomerState = {
+const initialCustomerFormFields: CustomerFormFields = {
   fullName: '',
   phone: '',
   whatsappPhone: '',
-  branchId: '',
   status: 'NEW',
   notes: '',
+};
+
+const initialCreateState: CreateCustomerState = {
+  ...initialCustomerFormFields,
+  branchId: '',
   totalPurchaseAmount: '0',
   totalProfitAmount: '0',
   totalDebtAmount: '0',
@@ -38,9 +45,16 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [form, setForm] = useState<CreateCustomerState>(initialCreateState);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [editForm, setEditForm] = useState<CustomerFormFields>(
+    initialCustomerFormFields,
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
   const [error, setError] = useState('');
+  const [editError, setEditError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -77,6 +91,11 @@ export default function CustomersPage() {
 
   async function createCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!form.fullName.trim() || !form.phone.trim()) {
+      setError('Full name and phone are required');
+      return;
+    }
+
     setSaving(true);
     setError('');
 
@@ -84,12 +103,12 @@ export default function CustomersPage() {
       await apiFetch<Customer>('/customers', {
         method: 'POST',
         body: JSON.stringify({
-          fullName: form.fullName,
-          phone: form.phone,
-          whatsappPhone: form.whatsappPhone || undefined,
+          fullName: form.fullName.trim(),
+          phone: form.phone.trim(),
+          whatsappPhone: form.whatsappPhone.trim() || undefined,
           branchId: form.branchId || undefined,
           status: form.status,
-          notes: form.notes || undefined,
+          notes: form.notes.trim() || undefined,
           totalPurchaseAmount: Number(form.totalPurchaseAmount || 0),
           totalProfitAmount: Number(form.totalProfitAmount || 0),
           totalDebtAmount: Number(form.totalDebtAmount || 0),
@@ -97,10 +116,67 @@ export default function CustomersPage() {
       });
       setForm(initialCreateState);
       await loadCustomers();
+      showSuccess('Customer created successfully');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create customer');
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openEditCustomer(customer: Customer) {
+    setEditingCustomer(customer);
+    setEditError('');
+    setEditForm({
+      fullName: customer.fullName,
+      phone: customer.phone,
+      whatsappPhone: customer.whatsappPhone ?? '',
+      status: customer.status,
+      notes: customer.notes ?? '',
+    });
+  }
+
+  function closeEditCustomer() {
+    setEditingCustomer(null);
+    setEditError('');
+    setEditForm(initialCustomerFormFields);
+  }
+
+  async function updateCustomer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingCustomer) {
+      return;
+    }
+
+    if (!editForm.fullName.trim() || !editForm.phone.trim()) {
+      setEditError('Full name and phone are required');
+      return;
+    }
+
+    setEditSaving(true);
+    setEditError('');
+
+    try {
+      await apiFetch<Customer>(`/customers/${editingCustomer.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          fullName: editForm.fullName.trim(),
+          phone: editForm.phone.trim(),
+          whatsappPhone: editForm.whatsappPhone.trim(),
+          status: editForm.status,
+          notes: editForm.notes.trim(),
+        }),
+      });
+      await loadCustomers();
+      closeEditCustomer();
+      showSuccess('Customer updated successfully');
+    } catch (err) {
+      setEditError(
+        err instanceof Error ? err.message : 'Could not update customer',
+      );
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -111,6 +187,11 @@ export default function CustomersPage() {
 
     await apiFetch(`/customers/${customerId}`, { method: 'DELETE' });
     await loadCustomers();
+  }
+
+  function showSuccess(message: string) {
+    setSuccessMessage(message);
+    window.setTimeout(() => setSuccessMessage(''), 3000);
   }
 
   return (
@@ -155,6 +236,12 @@ export default function CustomersPage() {
           </p>
         ) : null}
 
+        {successMessage ? (
+          <p className="rounded-xl bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
+            {successMessage}
+          </p>
+        ) : null}
+
         <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]">
           <form
             onSubmit={createCustomer}
@@ -168,46 +255,10 @@ export default function CustomersPage() {
             </p>
 
             <div className="mt-5 space-y-4">
-              <CustomerInput
-                label="Full name"
-                value={form.fullName}
-                onChange={(value) => setForm({ ...form, fullName: value })}
-                required
+              <CustomerForm
+                form={form}
+                onChange={(updates) => setForm({ ...form, ...updates })}
               />
-              <CustomerInput
-                label="Phone"
-                value={form.phone}
-                onChange={(value) => setForm({ ...form, phone: value })}
-                required
-              />
-              <CustomerInput
-                label="WhatsApp phone"
-                value={form.whatsappPhone}
-                onChange={(value) => setForm({ ...form, whatsappPhone: value })}
-              />
-
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">
-                  Status
-                </span>
-                <select
-                  value={form.status}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      status: event.target.value as CustomerStatus,
-                    })
-                  }
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                >
-                  {statuses.map((item) => (
-                    <option key={item} value={item}>
-                      {item}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
               {branches.length > 1 ? (
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">
@@ -257,18 +308,6 @@ export default function CustomersPage() {
                 />
               </div>
 
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">
-                  Notes
-                </span>
-                <textarea
-                  value={form.notes}
-                  onChange={(event) =>
-                    setForm({ ...form, notes: event.target.value })
-                  }
-                  className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                />
-              </label>
             </div>
 
             <button
@@ -320,6 +359,14 @@ export default function CustomersPage() {
                           {customer.status}
                         </span>
                         <button
+                          onClick={() => openEditCustomer(customer)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                          type="button"
+                        >
+                          <PencilIcon />
+                          Edit
+                        </button>
+                        <button
                           onClick={() => void deleteCustomer(customer.id)}
                           className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
                           type="button"
@@ -340,8 +387,132 @@ export default function CustomersPage() {
             )}
           </div>
         </div>
+
+        {editingCustomer ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+            <form
+              onSubmit={updateCustomer}
+              className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                    Edit Customer
+                  </p>
+                  <h3 className="mt-1 text-2xl font-bold text-slate-950">
+                    {editingCustomer.fullName}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Update profile details using the existing CRM endpoint.
+                  </p>
+                </div>
+                <button
+                  onClick={closeEditCustomer}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-sm font-bold text-slate-500 hover:bg-slate-50"
+                  type="button"
+                  aria-label="Close edit form"
+                >
+                  x
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                <CustomerForm
+                  form={editForm}
+                  onChange={(updates) =>
+                    setEditForm({ ...editForm, ...updates })
+                  }
+                />
+              </div>
+
+              {editError ? (
+                <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {editError}
+                </p>
+              ) : null}
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={closeEditCustomer}
+                  className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+                  type="button"
+                  disabled={editSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={
+                    editSaving ||
+                    !editForm.fullName.trim() ||
+                    !editForm.phone.trim()
+                  }
+                  className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                  type="submit"
+                >
+                  {editSaving ? 'Saving...' : 'Save changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
       </section>
     </ProtectedShell>
+  );
+}
+
+function CustomerForm({
+  form,
+  onChange,
+}: {
+  form: CustomerFormFields;
+  onChange: (updates: Partial<CustomerFormFields>) => void;
+}) {
+  return (
+    <>
+      <CustomerInput
+        label="Full name"
+        value={form.fullName}
+        onChange={(value) => onChange({ fullName: value })}
+        required
+      />
+      <CustomerInput
+        label="Phone"
+        value={form.phone}
+        onChange={(value) => onChange({ phone: value })}
+        required
+      />
+      <CustomerInput
+        label="WhatsApp phone"
+        value={form.whatsappPhone}
+        onChange={(value) => onChange({ whatsappPhone: value })}
+      />
+
+      <label className="block">
+        <span className="text-sm font-semibold text-slate-700">Status</span>
+        <select
+          value={form.status}
+          onChange={(event) =>
+            onChange({ status: event.target.value as CustomerStatus })
+          }
+          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+        >
+          {statuses.map((item) => (
+            <option key={item} value={item}>
+              {item}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block">
+        <span className="text-sm font-semibold text-slate-700">Notes</span>
+        <textarea
+          value={form.notes}
+          onChange={(event) => onChange({ notes: event.target.value })}
+          className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+        />
+      </label>
+    </>
   );
 }
 
@@ -371,6 +542,30 @@ function CustomerInput({
         className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
       />
     </label>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-3.5 w-3.5"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L9.38 17.273 5.75 18.25l.977-3.63L16.862 4.487Z"
+      />
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M19.5 7.125 16.875 4.5"
+      />
+    </svg>
   );
 }
 
