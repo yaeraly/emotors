@@ -1,0 +1,131 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  MASTER
+  ACCOUNTANT
+}
+
+enum CustomerStatus {
+  NEW
+  ACTIVE
+  VIP
+  SLEEPING
+  RISK
+}
+
+enum CustomerEventType {
+  NOTE
+  CALL
+  WHATSAPP
+  VISIT
+  SALE
+  SERVICE
+  FOLLOW_UP
+}
+
+enum FollowUpStatus {
+  OPEN
+  DONE
+  CANCELLED
+}
+
+model Branch {
+  id             String          @id @default(cuid())
+  name           String
+  code           String          @unique
+  users          User[]
+  customers      Customer[]
+  customerEvents CustomerEvent[]
+  followUps      FollowUp[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  passwordHash   String
+  fullName       String
+  role           Role            @default(MANAGER)
+  branchId       String
+  branch         Branch          @relation(fields: [branchId], references: [id])
+  customerEvents CustomerEvent[]
+  followUps      FollowUp[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([branchId])
+}
+
+model Customer {
+  id                  String          @id @default(cuid())
+  fullName            String
+  phone               String
+  whatsappPhone       String?
+  branchId            String
+  branch              Branch          @relation(fields: [branchId], references: [id])
+  status              CustomerStatus  @default(NEW)
+  notes               String?
+  totalPurchaseAmount Decimal         @default(0) @db.Decimal(14, 2)
+  totalProfitAmount   Decimal         @default(0) @db.Decimal(14, 2)
+  totalDebtAmount     Decimal         @default(0) @db.Decimal(14, 2)
+  events              CustomerEvent[]
+  followUps           FollowUp[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
+
+  @@index([branchId])
+  @@index([branchId, status])
+  @@index([fullName])
+  @@index([phone])
+  @@index([whatsappPhone])
+}
+
+model CustomerEvent {
+  id          String            @id @default(cuid())
+  customerId  String
+  customer    Customer          @relation(fields: [customerId], references: [id])
+  branchId    String
+  branch      Branch            @relation(fields: [branchId], references: [id])
+  type        CustomerEventType
+  message     String
+  createdById String
+  createdBy   User              @relation(fields: [createdById], references: [id])
+  createdAt   DateTime          @default(now())
+
+  @@index([customerId])
+  @@index([branchId])
+  @@index([createdById])
+}
+
+model FollowUp {
+  id          String         @id @default(cuid())
+  customerId  String
+  customer    Customer       @relation(fields: [customerId], references: [id])
+  branchId    String
+  branch      Branch         @relation(fields: [branchId], references: [id])
+  title       String
+  description String?
+  dueAt       DateTime
+  status      FollowUpStatus @default(OPEN)
+  createdById String
+  createdBy   User           @relation(fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([customerId])
+  @@index([branchId])
+  @@index([createdById])
+  @@index([status])
+  @@index([dueAt])
+}

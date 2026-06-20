@@ -1,0 +1,20 @@
+{
+  "name": "emotors-os",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @emotors/api\" \"npm run dev -w @emotors/web\"",
+    "build": "npm run build -w @emotors/api && npm run build -w @emotors/web",
+    "prisma:generate": "npx prisma generate --schema apps/api/prisma/schema.prisma",
+    "prisma:migrate": "npx prisma migrate dev --schema apps/api/prisma/schema.prisma --name init",
+    "prisma:seed": "npm run prisma:seed -w @emotors/api"
+  },
+  "devDependencies": {
+    "concurrently": "latest",
+    "typescript": "5.8.3"
+  }
+}
