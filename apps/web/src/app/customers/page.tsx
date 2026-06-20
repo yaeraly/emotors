@@ -55,6 +55,9 @@ export default function CustomersPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
+  const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState('');
   const [editError, setEditError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -228,13 +231,75 @@ export default function CustomersPage() {
     }
   }
 
-  async function deleteCustomer(customerId: string) {
+  async function deleteCustomer(customer: Customer) {
     if (!window.confirm('Soft delete this customer?')) {
       return;
     }
 
-    await apiFetch(`/customers/${customerId}`, { method: 'DELETE' });
-    await loadCustomers();
+    setDeletingCustomerId(customer.id);
+    setError('');
+
+    try {
+      const token = window.localStorage.getItem(TOKEN_KEY);
+
+      if (!token) {
+        clearToken();
+        router.replace('/login');
+        return;
+      }
+
+      if (!process.env.NEXT_PUBLIC_API_URL) {
+        throw new Error(
+          'API server is not reachable. Check backend on port 3001.',
+        );
+      }
+
+      const url = `${process.env.NEXT_PUBLIC_API_URL}/customers/${customer.id}`;
+      console.log('Deleting customer URL:', url);
+
+      let response: Response;
+
+      try {
+        response = await fetch(url, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch (fetchError) {
+        console.error('Customer delete network error', fetchError);
+        throw new Error(
+          'API server is not reachable. Check backend on port 3001.',
+        );
+      }
+
+      if (!response.ok) {
+        const responseBody = await response.text();
+        console.error('Customer delete failed', {
+          status: response.status,
+          url,
+          responseBody,
+        });
+
+        if (response.status === 401) {
+          clearToken();
+          router.replace('/login');
+          return;
+        }
+
+        throw new Error(
+          responseBody || `Could not delete customer. Status ${response.status}.`,
+        );
+      }
+
+      await loadCustomers();
+      showSuccess('Customer deleted successfully');
+    } catch (err) {
+      console.error('Customer delete failed', err);
+      setError(err instanceof Error ? err.message : 'Could not delete customer');
+    } finally {
+      setDeletingCustomerId(null);
+    }
   }
 
   function showSuccess(message: string) {
@@ -415,11 +480,14 @@ export default function CustomersPage() {
                           Edit
                         </button>
                         <button
-                          onClick={() => void deleteCustomer(customer.id)}
+                          onClick={() => void deleteCustomer(customer)}
+                          disabled={deletingCustomerId === customer.id}
                           className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
                           type="button"
                         >
-                          Delete
+                          {deletingCustomerId === customer.id
+                            ? 'Deleting...'
+                            : 'Delete'}
                         </button>
                       </div>
                     </div>
