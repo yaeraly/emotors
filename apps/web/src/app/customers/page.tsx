@@ -3,11 +3,11 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { apiFetch, clearToken, getToken } from '@/lib/api';
+import { apiFetch, clearToken } from '@/lib/api';
 import type { Branch, Customer, CustomerStatus } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
+const TOKEN_KEY = 'emotors_access_token';
 const statuses: CustomerStatus[] = ['NEW', 'ACTIVE', 'VIP', 'SLEEPING', 'RISK'];
 
 type CustomerFormFields = {
@@ -161,27 +161,45 @@ export default function CustomersPage() {
     setEditError('');
 
     try {
-      const token = getToken();
+      const token = window.localStorage.getItem(TOKEN_KEY);
 
       if (!token) {
         router.replace('/login');
         return;
       }
 
-      const response = await fetch(`${API_URL}/customers/${editingCustomer.id}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fullName: editForm.fullName.trim(),
-          phone: editForm.phone.trim(),
-          whatsappPhone: editForm.whatsappPhone.trim(),
-          status: editForm.status,
-          notes: editForm.notes.trim(),
-        }),
-      });
+      if (!process.env.NEXT_PUBLIC_API_URL) {
+        throw new Error(
+          'NEXT_PUBLIC_API_URL is not configured. Set it to http://localhost:3001 in apps/web/.env.local.',
+        );
+      }
+
+      const updateUrl = `${process.env.NEXT_PUBLIC_API_URL}/customers/${editingCustomer.id}`;
+      console.log('Customer update URL:', updateUrl);
+
+      let response: Response;
+
+      try {
+        response = await fetch(updateUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            fullName: editForm.fullName.trim(),
+            phone: editForm.phone.trim(),
+            whatsappPhone: editForm.whatsappPhone.trim(),
+            status: editForm.status,
+            notes: editForm.notes.trim(),
+          }),
+        });
+      } catch (fetchError) {
+        console.error('Customer update network error', fetchError);
+        throw new Error(
+          `API server is not reachable at ${process.env.NEXT_PUBLIC_API_URL}. Confirm the API is running on http://localhost:3001.`,
+        );
+      }
 
       if (response.status === 401) {
         clearToken();
