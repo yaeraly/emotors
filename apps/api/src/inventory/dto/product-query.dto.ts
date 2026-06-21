@@ -15,6 +15,10 @@ export class ProductQueryDto {
   warehouseId?: string;
 
   @IsOptional()
+  @IsString()
+  categoryId?: string;
+
+  @IsOptional()
   @Transform(({ value }) => value === 'true')
   @IsBoolean()
   isActive?: boolean;

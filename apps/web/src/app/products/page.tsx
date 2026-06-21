@@ -4,24 +4,33 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { ProductListResponse } from '@/lib/types';
+import type { ProductCategory, ProductListResponse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductsPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [data, setData] = useState<ProductListResponse | null>(null);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [search, setSearch] = useState('');
+  const [categoryId, setCategoryId] = useState('');
   const [error, setError] = useState('');
 
   const query = useMemo(() => {
     const params = new URLSearchParams({ pageSize: '50' });
     if (search.trim()) params.set('search', search.trim());
+    if (categoryId) params.set('categoryId', categoryId);
     return params.toString();
-  }, [search]);
+  }, [categoryId, search]);
 
   useEffect(() => {
-    apiFetch<ProductListResponse>(`/inventory/products?${query}`)
-      .then(setData)
+    Promise.all([
+      apiFetch<ProductListResponse>(`/inventory/products?${query}`),
+      apiFetch<ProductCategory[]>('/inventory/categories'),
+    ])
+      .then(([productsResult, categoryResult]) => {
+        setData(productsResult);
+        setCategories(categoryResult);
+      })
       .catch((err) =>
         setError(err instanceof Error ? err.message : t('common.error')),
       );
@@ -42,12 +51,26 @@ export default function ProductsPage() {
           </Link>
         </div>
 
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={t('inventory.searchPlaceholder')}
-          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-        />
+        <div className="grid gap-3 md:grid-cols-2">
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t('inventory.searchPlaceholder')}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+          />
+          <select
+            value={categoryId}
+            onChange={(event) => setCategoryId(event.target.value)}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+          >
+            <option value="">{t('inventory.allCategories')}</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {categoryName(category, language)}
+              </option>
+            ))}
+          </select>
+        </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
         <div className="h-[calc(100vh-250px)] min-h-[420px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -80,7 +103,11 @@ export default function ProductsPage() {
                     </td>
                     <td className="px-4 py-3 font-bold text-slate-900">{product.sku}</td>
                     <td className="px-4 py-3">{product.name}</td>
-                    <td className="px-4 py-3">{product.category}</td>
+                    <td className="px-4 py-3">
+                      {product.productCategory
+                        ? categoryName(product.productCategory, language)
+                        : product.category}
+                    </td>
                     <td className="px-4 py-3">{product.warehouse?.name}</td>
                     <td className="px-4 py-3">{product.quantity}</td>
                     <td className="px-4 py-3">{formatKgs(product.finalCostKgs)}</td>
@@ -117,4 +144,10 @@ function formatKgs(value: number | string | null | undefined) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   })} сом`;
+}
+
+function categoryName(category: ProductCategory, language: string) {
+  if (language === 'ky') return category.nameKy;
+  if (language === 'ru') return category.nameRu;
+  return category.nameEn;
 }

@@ -15,6 +15,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
+import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
@@ -22,6 +23,7 @@ import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { CreateYuanRateDto } from './dto/create-yuan-rate.dto';
 import { ProductQueryDto } from './dto/product-query.dto';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { InventoryService } from './inventory.service';
@@ -31,6 +33,36 @@ import { InventoryService } from './inventory.service';
 @Roles(Role.OWNER, Role.MANAGER, Role.MASTER, Role.ACCOUNTANT)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
+
+  @Get('categories')
+  @Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+  categories(@Query('search') search?: string) {
+    return this.inventoryService.categories(search);
+  }
+
+  @Post('categories')
+  @Roles(Role.OWNER, Role.MANAGER)
+  createCategory(@Body() dto: CreateCategoryDto) {
+    return this.inventoryService.createCategory(dto);
+  }
+
+  @Get('categories/:id')
+  @Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+  category(@Param('id') id: string) {
+    return this.inventoryService.category(id);
+  }
+
+  @Put('categories/:id')
+  @Roles(Role.OWNER, Role.MANAGER)
+  updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
+    return this.inventoryService.updateCategory(id, dto);
+  }
+
+  @Delete('categories/:id')
+  @Roles(Role.OWNER, Role.MANAGER)
+  deleteCategory(@Param('id') id: string) {
+    return this.inventoryService.deleteCategory(id);
+  }
 
   @Post('products')
   @Roles(Role.OWNER, Role.MANAGER)

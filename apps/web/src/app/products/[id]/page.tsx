@@ -2,25 +2,76 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { Product } from '@/lib/types';
+import type { Product, ProductCategory } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductDetailPage() {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const params = useParams<{ id: string }>();
   const [product, setProduct] = useState<Product | null>(null);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    sku: '',
+    categoryId: '',
+    sellingPriceKgs: '0',
+    minStockLevel: '0',
+  });
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    apiFetch<Product>(`/inventory/products/${params.id}`)
-      .then(setProduct)
+    Promise.all([
+      apiFetch<Product>(`/inventory/products/${params.id}`),
+      apiFetch<ProductCategory[]>('/inventory/categories'),
+    ])
+      .then(([productResult, categoryResult]) => {
+        setProduct(productResult);
+        setCategories(categoryResult);
+        setEditForm({
+          name: productResult.name,
+          sku: productResult.sku,
+          categoryId: productResult.categoryId,
+          sellingPriceKgs: String(productResult.sellingPriceKgs),
+          minStockLevel: String(productResult.minStockLevel),
+        });
+      })
       .catch((err) =>
         setError(err instanceof Error ? err.message : t('common.error')),
       );
-  }, [params.id]);
+  }, [params.id, t]);
+
+  async function saveProduct(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+
+    try {
+      if (!editForm.categoryId) {
+        setError(t('inventory.categoryRequired'));
+        return;
+      }
+
+      const updated = await apiFetch<Product>(`/inventory/products/${params.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: editForm.name,
+          sku: editForm.sku,
+          categoryId: editForm.categoryId,
+          sellingPriceKgs: Number(editForm.sellingPriceKgs),
+          minStockLevel: Number(editForm.minStockLevel),
+        }),
+      });
+      setProduct(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <ProtectedShell>
@@ -37,7 +88,7 @@ export default function ProductDetailPage() {
                   <h2 className="mt-2 text-3xl font-bold text-slate-950">{product.name}</h2>
                   <p className="mt-2 text-slate-500">{product.description}</p>
                   <div className="mt-6 grid gap-4 md:grid-cols-4">
-                    <Info label={t('inventory.category')} value={product.category} />
+                    <Info label={t('inventory.category')} value={product.productCategory ? categoryName(product.productCategory, language) : product.category} />
                     <Info label={t('inventory.warehouse')} value={product.warehouse?.name ?? ''} />
                     <Info label={t('inventory.quantity')} value={String(product.quantity)} />
                     <Info label={t('inventory.lowStock')} value={product.lowStock ? t('inventory.lowStockAlert') : t('inventory.inStock')} />
@@ -45,6 +96,21 @@ export default function ProductDetailPage() {
                 </div>
               </div>
             </article>
+
+            <form onSubmit={saveProduct} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-5">
+              <Input label={t('inventory.name')} value={editForm.name} onChange={(value) => setEditForm({ ...editForm, name: value })} />
+              <Input label={t('inventory.sku')} value={editForm.sku} onChange={(value) => setEditForm({ ...editForm, sku: value })} />
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
+                <select value={editForm.categoryId} onChange={(event) => setEditForm({ ...editForm, categoryId: event.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" required>
+                  <option value="">{t('inventory.selectCategory')}</option>
+                  {categories.map((category) => <option key={category.id} value={category.id}>{categoryName(category, language)}</option>)}
+                </select>
+              </label>
+              <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
+              <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
+              <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
+            </form>
 
             <div className="grid gap-6 xl:grid-cols-3">
               <Panel title={t('inventory.productDetail')}>
@@ -92,10 +158,20 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase text-slate-400">{label}</p><p className="font-bold text-slate-950">{value}</p></div>;
 }
 
+function Input({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+  return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} type={type} min={type === 'number' ? 0 : undefined} step={type === 'number' ? '0.01' : undefined} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
+}
+
 function formatKgs(value: number | string | null | undefined) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
 }
 
 function formatYuan(value: number | string | null | undefined) {
   return `¥${Number(value ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+}
+
+function categoryName(category: ProductCategory, language: string) {
+  if (language === 'ky') return category.nameKy;
+  if (language === 'ru') return category.nameRu;
+  return category.nameEn;
 }

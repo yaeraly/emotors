@@ -108,12 +108,28 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </Link>
             ) : null}
             {canSeeInventory ? (
-              <Link
-                href="/inventory"
-                className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                {t('nav.inventory')}
-              </Link>
+              <div className="rounded-xl px-3 py-2">
+                <Link
+                  href="/inventory"
+                  className="block text-sm font-semibold text-slate-700 hover:text-blue-700"
+                >
+                  {t('nav.inventory')}
+                </Link>
+                <div className="mt-2 space-y-1 pl-2">
+                  <Link href="/products" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                    {t('inventory.products')}
+                  </Link>
+                  <Link href="/stock-movements" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                    {t('inventory.stockMovements')}
+                  </Link>
+                  <Link href="/warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                    {t('inventory.warehouses')}
+                  </Link>
+                  <Link href="/inventory/categories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                    {t('inventory.categories')}
+                  </Link>
+                </div>
+              </div>
             ) : null}
             <div className="border-t border-slate-100 pt-2">
               {[

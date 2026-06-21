@@ -4,19 +4,20 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { Product, Warehouse, YuanRateHistory } from '@/lib/types';
+import type { Product, ProductCategory, Warehouse, YuanRateHistory } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewProductPage() {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '',
     sku: '',
-    category: '',
+    categoryId: '',
     photoUrl: '',
     description: '',
     characteristics: '',
@@ -34,12 +35,15 @@ export default function NewProductPage() {
     Promise.all([
       apiFetch<Warehouse[]>('/inventory/warehouses'),
       apiFetch<YuanRateHistory | null>('/inventory/yuan-rates/latest'),
+      apiFetch<ProductCategory[]>('/inventory/categories'),
     ])
-      .then(([warehouseResult, rate]) => {
+      .then(([warehouseResult, rate, categoryResult]) => {
         setWarehouses(warehouseResult);
+        setCategories(categoryResult);
         setForm((current) => ({
           ...current,
           warehouseId: warehouseResult[0]?.id ?? '',
+          categoryId: categoryResult[0]?.id ?? '',
           latestYuanRate: rate ? String(rate.rate) : current.latestYuanRate,
         }));
       })
@@ -68,6 +72,12 @@ export default function NewProductPage() {
     setSaving(true);
 
     try {
+      if (!form.categoryId) {
+        setError(t('inventory.categoryRequired'));
+        setSaving(false);
+        return;
+      }
+
       const product = await apiFetch<Product>('/inventory/products', {
         method: 'POST',
         body: JSON.stringify({
@@ -75,6 +85,7 @@ export default function NewProductPage() {
           characteristics: form.characteristics
             ? JSON.parse(form.characteristics)
             : undefined,
+          categoryId: form.categoryId,
           weightKg: Number(form.weightKg),
           purchasePriceYuan: Number(form.purchasePriceYuan),
           latestYuanRate: Number(form.latestYuanRate),
@@ -108,7 +119,13 @@ export default function NewProductPage() {
           <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
             <Input label={t('inventory.name')} value={form.name} onChange={(value) => setField('name', value)} required />
             <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => setField('sku', value)} required />
-            <Input label={t('inventory.category')} value={form.category} onChange={(value) => setField('category', value)} required />
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
+              <select value={form.categoryId} onChange={(event) => setField('categoryId', event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
+                <option value="">{t('inventory.selectCategory')}</option>
+                {categories.map((category) => <option key={category.id} value={category.id}>{categoryName(category, language)}</option>)}
+              </select>
+            </label>
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('inventory.warehouse')}</span>
               <select value={form.warehouseId} onChange={(event) => setField('warehouseId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
@@ -164,4 +181,10 @@ function Preview({ label, value }: { label: string; value: string }) {
 
 function formatKgs(value: number | string | null | undefined) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
+}
+
+function categoryName(category: ProductCategory, language: string) {
+  if (language === 'ky') return category.nameKy;
+  if (language === 'ru') return category.nameRu;
+  return category.nameEn;
 }

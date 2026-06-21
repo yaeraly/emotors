@@ -71,6 +71,9 @@ export default function InventoryPage() {
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/warehouses">
               {t('inventory.warehouses')}
             </Link>
+            <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/inventory/categories">
+              {t('inventory.categories')}
+            </Link>
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/stock-movements">
               {t('inventory.stockMovements')}
             </Link>

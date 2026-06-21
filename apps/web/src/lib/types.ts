@@ -166,6 +166,8 @@ export type Product = {
   branchId: string;
   warehouseId: string;
   warehouse?: Warehouse;
+  categoryId: string;
+  productCategory?: ProductCategory;
   name: string;
   sku: string;
   category: string;
@@ -260,6 +262,19 @@ export type StockValueReport = {
   totalStockValueKgs: number;
   byWarehouse: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
   byCategory: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
+};
+
+export type ProductCategory = {
+  id: string;
+  code: string;
+  nameKy: string;
+  nameRu: string;
+  nameEn: string;
+  description?: string | null;
+  isActive: boolean;
+  productCount?: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Payment = {

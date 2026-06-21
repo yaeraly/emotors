@@ -8,6 +8,7 @@ import {
 import { Prisma, Role, StockMovementType } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
@@ -15,6 +16,7 @@ import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { CreateYuanRateDto } from './dto/create-yuan-rate.dto';
 import { ProductQueryDto } from './dto/product-query.dto';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
+import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 
@@ -23,6 +25,108 @@ type PrismaTx = Prisma.TransactionClient;
 @Injectable()
 export class InventoryService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async categories(search?: string) {
+    const where: Prisma.ProductCategoryWhereInput = {};
+
+    if (search?.trim()) {
+      const value = search.trim();
+      where.OR = [
+        { code: { contains: value, mode: 'insensitive' } },
+        { nameKy: { contains: value, mode: 'insensitive' } },
+        { nameRu: { contains: value, mode: 'insensitive' } },
+        { nameEn: { contains: value, mode: 'insensitive' } },
+      ];
+    }
+
+    const categories = await this.prisma.productCategory.findMany({
+      where,
+      include: {
+        _count: {
+          select: { products: true },
+        },
+      },
+      orderBy: { nameEn: 'asc' },
+    });
+
+    return categories.map((category) => ({
+      id: category.id,
+      code: category.code,
+      nameKy: category.nameKy,
+      nameRu: category.nameRu,
+      nameEn: category.nameEn,
+      description: category.description,
+      isActive: category.isActive,
+      createdAt: category.createdAt,
+      updatedAt: category.updatedAt,
+      productCount: category._count.products,
+    }));
+  }
+
+  async createCategory(dto: CreateCategoryDto) {
+    await this.ensureCategoryCodeAvailable(dto.code);
+    return this.prisma.productCategory.create({
+      data: {
+        code: dto.code.toUpperCase(),
+        nameKy: dto.nameKy,
+        nameRu: dto.nameRu,
+        nameEn: dto.nameEn,
+        description: dto.description,
+        isActive: dto.isActive ?? true,
+      },
+    });
+  }
+
+  async category(id: string) {
+    const category = await this.prisma.productCategory.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { products: true } },
+      },
+    });
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    return {
+      ...category,
+      productCount: category._count.products,
+    };
+  }
+
+  async updateCategory(id: string, dto: UpdateCategoryDto) {
+    await this.category(id);
+
+    if (dto.code) {
+      await this.ensureCategoryCodeAvailable(dto.code, id);
+    }
+
+    return this.prisma.productCategory.update({
+      where: { id },
+      data: {
+        code: dto.code?.toUpperCase(),
+        nameKy: dto.nameKy,
+        nameRu: dto.nameRu,
+        nameEn: dto.nameEn,
+        description: dto.description,
+        isActive: dto.isActive,
+      },
+    });
+  }
+
+  async deleteCategory(id: string) {
+    const category = await this.category(id);
+
+    if (category.productCount > 0) {
+      return this.prisma.productCategory.update({
+        where: { id },
+        data: { isActive: false },
+      });
+    }
+
+    return this.prisma.productCategory.delete({ where: { id } });
+  }
 
   async createProduct(user: AuthUser, dto: CreateProductDto) {
     return this.prisma.$transaction(async (tx) => {
@@ -33,6 +137,7 @@ export class InventoryService {
         throw new BadRequestException('Warehouse does not belong to branch');
       }
 
+      const category = await this.getActiveCategory(tx, dto.categoryId);
       await this.ensureSkuAvailable(tx, branchId, dto.sku);
       const costs = this.calculateCosts({
         weightKg: dto.weightKg,
@@ -50,7 +155,8 @@ export class InventoryService {
           warehouseId: warehouse.id,
           name: dto.name,
           sku: dto.sku,
-          category: dto.category,
+          categoryId: category.id,
+          category: category.nameEn,
           photoUrl: dto.photoUrl,
           description: dto.description,
           characteristics: dto.characteristics as Prisma.InputJsonValue,
@@ -97,6 +203,7 @@ export class InventoryService {
       deletedAt: null,
       ...this.buildBranchWhere(user, query.branchId),
       ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
+      ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
     };
 
@@ -106,6 +213,9 @@ export class InventoryService {
         { name: { contains: search, mode: 'insensitive' } },
         { sku: { contains: search, mode: 'insensitive' } },
         { category: { contains: search, mode: 'insensitive' } },
+        { productCategory: { nameKy: { contains: search, mode: 'insensitive' } } },
+        { productCategory: { nameRu: { contains: search, mode: 'insensitive' } } },
+        { productCategory: { nameEn: { contains: search, mode: 'insensitive' } } },
       ];
     }
 
@@ -175,6 +285,9 @@ export class InventoryService {
           throw new BadRequestException('Warehouse does not belong to branch');
         }
       }
+      const category = dto.categoryId
+        ? await this.getActiveCategory(tx, dto.categoryId)
+        : null;
 
       const next = {
         weightKg: dto.weightKg ?? Number(current.weightKg),
@@ -210,7 +323,8 @@ export class InventoryService {
         data: {
           name: dto.name,
           sku: dto.sku,
-          category: dto.category,
+          categoryId: category?.id,
+          category: category?.nameEn,
           warehouseId: dto.warehouseId,
           photoUrl: dto.photoUrl,
           description: dto.description,
@@ -411,7 +525,7 @@ export class InventoryService {
   async stockValue(user: AuthUser, branchId?: string) {
     const balances = await this.prisma.inventoryBalance.findMany({
       where: this.buildBranchWhere(user, branchId),
-      include: { product: true, warehouse: true },
+      include: { product: { include: { productCategory: true } }, warehouse: true },
     });
     const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
     const totalStockValueKgs = balances.reduce(
@@ -424,7 +538,7 @@ export class InventoryService {
     );
     const byCategory = this.groupStockValue(
       balances,
-      (item) => item.product.category,
+      (item) => item.product.productCategory?.nameEn ?? item.product.category,
     );
 
     return {
@@ -554,6 +668,7 @@ export class InventoryService {
     return {
       branch: true,
       warehouse: true,
+      productCategory: true,
       inventoryBalances: { include: { warehouse: true } },
     };
   }
@@ -601,6 +716,32 @@ export class InventoryService {
     if (existing) {
       throw new ConflictException('Duplicate SKU in this branch');
     }
+  }
+
+  private async ensureCategoryCodeAvailable(code: string, exceptId?: string) {
+    const existing = await this.prisma.productCategory.findFirst({
+      where: {
+        code: code.toUpperCase(),
+        ...(exceptId ? { NOT: { id: exceptId } } : {}),
+      },
+      select: { id: true },
+    });
+
+    if (existing) {
+      throw new ConflictException('Category code already exists');
+    }
+  }
+
+  private async getActiveCategory(tx: PrismaTx, id: string) {
+    const category = await tx.productCategory.findFirst({
+      where: { id, isActive: true },
+    });
+
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+
+    return category;
   }
 
   private async getProductForRead(user: AuthUser, id: string) {

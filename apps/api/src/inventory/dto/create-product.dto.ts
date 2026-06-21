@@ -20,7 +20,7 @@ export class CreateProductDto {
 
   @IsString()
   @MinLength(1)
-  category!: string;
+  categoryId!: string;
 
   @IsString()
   @MinLength(1)

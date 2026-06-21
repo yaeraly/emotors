@@ -333,6 +333,8 @@ model Product {
   branch            Branch    @relation(fields: [branchId], references: [id])
   warehouseId       String
   warehouse         Warehouse @relation(fields: [warehouseId], references: [id])
+  categoryId        String
+  productCategory   ProductCategory @relation(fields: [categoryId], references: [id])
   name              String
   sku               String
   category          String
@@ -361,8 +363,22 @@ model Product {
   @@unique([branchId, sku])
   @@index([branchId])
   @@index([warehouseId])
+  @@index([categoryId])
   @@index([category])
   @@index([isActive])
+}
+
+model ProductCategory {
+  id          String    @id @default(cuid())
+  code        String    @unique
+  nameKy      String
+  nameRu      String
+  nameEn      String
+  description String?
+  isActive    Boolean   @default(true)
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model ProductPriceHistory {
