@@ -408,11 +408,28 @@ export class InventoryService {
 
   async deleteProduct(user: AuthUser, id: string) {
     await this.getProductForWrite(this.prisma, user, id);
-    return this.prisma.product.update({
+    const [stockMovements, saleItems, balances, priceHistory] =
+      await Promise.all([
+        this.prisma.stockMovement.count({ where: { productId: id } }),
+        this.prisma.saleItem.count({ where: { productId: id } }),
+        this.prisma.inventoryBalance.count({ where: { productId: id } }),
+        this.prisma.productPriceHistory.count({ where: { productId: id } }),
+      ]);
+    const hasHistory =
+      stockMovements > 0 || saleItems > 0 || balances > 0 || priceHistory > 0;
+
+    await this.prisma.product.update({
       where: { id },
       data: { deletedAt: new Date(), isActive: false },
-      select: { id: true, deletedAt: true },
     });
+
+    return {
+      success: true,
+      message: hasHistory
+        ? 'Product was deactivated because it has sales or stock history.'
+        : 'Product deleted successfully',
+      deactivated: hasHistory,
+    };
   }
 
   async addPriceHistory(

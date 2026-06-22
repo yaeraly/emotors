@@ -1,20 +1,24 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { API_URL } from '@/lib/api';
+import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
-import type { ProductCategory, ProductListResponse } from '@/lib/types';
+import type { Product, ProductCategory, ProductListResponse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductsPage() {
+  const router = useRouter();
   const { t, language } = useTranslation();
   const [data, setData] = useState<ProductListResponse | null>(null);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({ pageSize: '50' });
@@ -23,19 +27,80 @@ export default function ProductsPage() {
     return params.toString();
   }, [categoryId, search]);
 
-  useEffect(() => {
-    Promise.all([
+  async function loadProducts() {
+    setError('');
+    try {
+      const [productsResult, categoryResult] = await Promise.all([
       apiFetch<ProductListResponse>(`/inventory/products?${query}`),
       apiFetch<ProductCategory[]>('/inventory/categories'),
-    ])
-      .then(([productsResult, categoryResult]) => {
-        setData(productsResult);
-        setCategories(categoryResult);
-      })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : t('common.error')),
+      ]);
+      setData(productsResult);
+      setCategories(categoryResult);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  useEffect(() => {
+    void loadProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  async function deleteProduct(product: Product) {
+    if (!window.confirm(t('inventory.confirmDeleteProduct'))) return;
+
+    const token = getToken();
+    if (!token) {
+      router.replace('/login');
+      return;
+    }
+
+    const url = `${API_URL}/inventory/products/${product.id}`;
+    setDeletingProductId(product.id);
+    setError('');
+    setSuccessMessage('');
+
+    try {
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch (fetchError) {
+        console.error('Product delete network error', fetchError);
+        throw new Error(t('inventory.apiNotReachable'));
+      }
+
+      if (response.status === 401) {
+        clearToken();
+        router.replace('/login');
+        return;
+      }
+
+      if (!response.ok) {
+        const responseBody = await response.text();
+        console.error('Product delete failed', {
+          status: response.status,
+          url,
+          responseBody,
+        });
+        if (response.status === 403) throw new Error(t('inventory.noDeletePermission'));
+        if (response.status === 404) throw new Error(t('inventory.productNotFound'));
+        throw new Error(t('inventory.deleteFailed'));
+      }
+
+      const result = (await response.json()) as { success: boolean; deactivated?: boolean };
+      setSuccessMessage(
+        result.deactivated ? t('inventory.productDeactivated') : t('inventory.productDeleted'),
       );
-  }, [query, t]);
+      await loadProducts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('inventory.deleteFailed'));
+    } finally {
+      setDeletingProductId(null);
+    }
+  }
 
   return (
     <ProtectedShell>
@@ -73,6 +138,7 @@ export default function ProductsPage() {
           </select>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {successMessage ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p> : null}
 
         <div className="h-[calc(100vh-250px)] min-h-[420px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
@@ -118,9 +184,19 @@ export default function ProductsPage() {
                       <StockBadge quantity={product.quantity} lowStock={product.lowStock} />
                     </td>
                     <td className="px-4 py-3">
-                      <Link href={`/products/${product.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
+                      <div className="flex gap-2">
+                        <Link href={`/products/${product.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
+                          {t('common.open')}
+                        </Link>
+                        <button
+                          onClick={() => void deleteProduct(product)}
+                          disabled={deletingProductId === product.id}
+                          className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          type="button"
+                        >
+                          {deletingProductId === product.id ? t('common.loading') : t('common.delete')}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
