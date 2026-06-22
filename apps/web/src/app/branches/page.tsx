@@ -42,8 +42,14 @@ export default function BranchesPage() {
 
   useEffect(() => {
     void loadBranches();
+    if (window.localStorage.getItem('emotors-branch-created')) {
+      window.localStorage.removeItem('emotors-branch-created');
+      setSuccess(t('branches.created'));
+      void loadBranches();
+      router.refresh();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router, t]);
 
   async function loadBranches() {
     try {
