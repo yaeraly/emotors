@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.types';
@@ -34,6 +34,12 @@ export class BranchesController {
   @Roles(Role.OWNER)
   update(@Param('id') id: string, @Body() dto: UpdateBranchDto) {
     return this.branchesService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @Roles(Role.OWNER)
+  delete(@Param('id') id: string) {
+    return this.branchesService.delete(id);
   }
 
   @Get(':id/dashboard')

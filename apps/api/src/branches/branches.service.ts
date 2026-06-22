@@ -1,5 +1,10 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Role, SaleStatus } from '@prisma/client';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { BranchStatus, Role, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
@@ -27,25 +32,81 @@ export class BranchesService {
   findAll(user: AuthUser) {
     if (user.role === Role.OWNER) {
       return this.prisma.branch.findMany({
+        where: { deletedAt: null },
         orderBy: { name: 'asc' },
       });
     }
 
     return this.prisma.branch.findMany({
-      where: { id: user.branchId },
+      where: { id: user.branchId, deletedAt: null },
       orderBy: { name: 'asc' },
     });
   }
 
   async findOne(user: AuthUser, id: string) {
     this.ensureBranchAccess(user, id);
-    const branch = await this.prisma.branch.findUnique({ where: { id } });
+    const branch = await this.prisma.branch.findFirst({
+      where: { id, deletedAt: null },
+    });
     if (!branch) throw new NotFoundException('Branch not found');
     return branch;
   }
 
-  update(id: string, dto: UpdateBranchDto) {
+  async update(id: string, dto: UpdateBranchDto) {
+    const branch = await this.prisma.branch.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!branch) throw new NotFoundException('Branch not found');
+
+    if (dto.code && dto.code !== branch.code) {
+      const duplicate = await this.prisma.branch.findUnique({
+        where: { code: dto.code },
+      });
+      if (duplicate) throw new ConflictException('Branch code already exists');
+    }
+
     return this.prisma.branch.update({ where: { id }, data: dto });
+  }
+
+  async delete(id: string) {
+    const branch = await this.prisma.branch.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!branch) throw new NotFoundException('Branch not found');
+
+    const [
+      users,
+      customers,
+      sales,
+      products,
+      stockMovements,
+      warehouses,
+    ] = await Promise.all([
+      this.prisma.user.count({ where: { branchId: id } }),
+      this.prisma.customer.count({ where: { branchId: id } }),
+      this.prisma.sale.count({ where: { branchId: id } }),
+      this.prisma.product.count({ where: { branchId: id } }),
+      this.prisma.stockMovement.count({ where: { branchId: id } }),
+      this.prisma.warehouse.count({ where: { branchId: id } }),
+    ]);
+    const hasRelatedData =
+      users + customers + sales + products + stockMovements + warehouses > 0;
+
+    await this.prisma.branch.update({
+      where: { id },
+      data: {
+        status: BranchStatus.INACTIVE,
+        deletedAt: new Date(),
+      },
+    });
+
+    return {
+      success: true,
+      message: hasRelatedData
+        ? 'Branch deactivated because it has related data.'
+        : 'Branch deactivated successfully',
+      deactivated: true,
+    };
   }
 
   async dashboard(user: AuthUser, id: string) {

@@ -62,6 +62,7 @@ export type Branch = {
   ownerName?: string | null;
   status?: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
   openedAt?: string | null;
+  deletedAt?: string | null;
 };
 
 export type User = {
