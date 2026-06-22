@@ -15,6 +15,7 @@ import {
   StockMovementType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPaymentDto } from './dto/add-payment.dto';
@@ -28,6 +29,7 @@ export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly commissionsService: CommissionsService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -393,6 +395,7 @@ export class SalesService {
       }
 
       await this.refreshCustomerFinancials(tx, sale.customerId);
+      await this.commissionsService.createSalesCommission(tx, sale.id);
     });
 
     return this.findOne(user, id);

@@ -77,6 +77,57 @@ export class KpiService {
     );
   }
 
+  async employeeKpis(user: AuthUser) {
+    const employeeWhere =
+      user.role === Role.OWNER || user.role === Role.MANAGER || user.role === Role.ACCOUNTANT
+        ? user.role === Role.OWNER
+          ? {}
+          : { branchId: user.branchId }
+        : { id: user.id };
+    const employees = await this.prisma.user.findMany({
+      where: employeeWhere,
+      include: {
+        salesCommissions: true,
+        repairCommissions: true,
+        employeeKpis: { orderBy: { createdAt: 'desc' }, take: 1 },
+      },
+      orderBy: { fullName: 'asc' },
+    });
+
+    return employees.map((employee) => {
+      const salesCommission = employee.salesCommissions.reduce(
+        (sum, item) => sum + Number(item.commissionAmount),
+        0,
+      );
+      const repairCommission = employee.repairCommissions.reduce(
+        (sum, item) => sum + Number(item.commissionAmount),
+        0,
+      );
+      const salesRevenue = employee.salesCommissions.reduce(
+        (sum, item) => sum + Number(item.revenue),
+        0,
+      );
+      const repairRevenue = employee.repairCommissions.reduce(
+        (sum, item) => sum + Number(item.revenue),
+        0,
+      );
+
+      return {
+        employee: {
+          id: employee.id,
+          fullName: employee.fullName,
+          role: employee.role,
+          branchId: employee.branchId,
+        },
+        revenue: salesRevenue,
+        repairRevenue,
+        commissionEarned: salesCommission + repairCommission,
+        repairsCount: employee.repairCommissions.length,
+        planAchievement: Number(employee.employeeKpis[0]?.planAchievement ?? 0),
+      };
+    }).sort((a, b) => b.commissionEarned - a.commissionEarned);
+  }
+
   createNps(user: AuthUser, dto: any) {
     const branchId = this.resolveBranchId(user, dto.branchId);
     return this.prisma.npsSurvey.create({

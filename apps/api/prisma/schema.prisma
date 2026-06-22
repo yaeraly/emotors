@@ -254,6 +254,17 @@ enum WarrantyStatus {
   CANCELLED
 }
 
+enum BonusType {
+  FIXED
+  PERCENT
+}
+
+enum PayrollStatus {
+  DRAFT
+  APPROVED
+  PAID
+}
+
 model Branch {
   id             String          @id @default(cuid())
   name           String
@@ -294,6 +305,8 @@ model Branch {
   branchAccountBalance BranchAccountBalance?
   serviceOrders ServiceOrder[]
   warranties Warranty[]
+  employeeCompensationRules EmployeeCompensationRule[]
+  bonusRules BonusRule[]
   stockRequests BranchStockRequest[]
   stockForecasts StockForecast[]
   taxProfiles TaxProfile[]
@@ -352,6 +365,11 @@ model User {
   diagnoses Diagnosis[] @relation("DiagnosisMaster")
   repairs Repair[] @relation("RepairMaster")
   partsConsumptions PartsConsumption[] @relation("PartsConsumptionCreator")
+  compensationRules EmployeeCompensationRule[] @relation("EmployeeCompensationRuleEmployee")
+  salesCommissions SalesCommission[] @relation("SalesCommissionEmployee")
+  repairCommissions RepairCommission[] @relation("RepairCommissionEmployee")
+  payrollRecords PayrollRecord[] @relation("PayrollRecordEmployee")
+  employeeKpis EmployeeKPI[] @relation("EmployeeKPIEmployee")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -455,6 +473,7 @@ model Sale {
   payments        Payment[]
   installments    InstallmentSchedule[]
   receipt         Receipt?
+  salesCommissions SalesCommission[]
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   deletedAt       DateTime?
@@ -1377,6 +1396,7 @@ model ServiceOrder {
   repairs            Repair[]
   parts              PartsConsumption[]
   warranties         Warranty[]
+  repairCommissions  RepairCommission[]
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   completedAt        DateTime?
@@ -1472,6 +1492,114 @@ model Warranty {
   @@index([productId])
   @@index([branchId])
   @@index([status])
+}
+
+model EmployeeCompensationRule {
+  id                       String   @id @default(cuid())
+  branchId                 String
+  branch                   Branch   @relation(fields: [branchId], references: [id])
+  employeeId               String
+  employee                 User     @relation("EmployeeCompensationRuleEmployee", fields: [employeeId], references: [id])
+  role                     Role
+  fixedSalary              Decimal  @default(0) @db.Decimal(14, 2)
+  salesCommissionPercent   Decimal  @default(0) @db.Decimal(8, 2)
+  repairCommissionPercent  Decimal  @default(0) @db.Decimal(8, 2)
+  partsCommissionPercent   Decimal  @default(0) @db.Decimal(8, 2)
+  bonusPercent             Decimal  @default(0) @db.Decimal(8, 2)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([branchId])
+  @@index([employeeId])
+  @@index([role])
+}
+
+model SalesCommission {
+  id                String   @id @default(cuid())
+  employeeId        String
+  employee          User     @relation("SalesCommissionEmployee", fields: [employeeId], references: [id])
+  saleId            String
+  sale              Sale     @relation(fields: [saleId], references: [id])
+  revenue           Decimal  @db.Decimal(14, 2)
+  commissionPercent Decimal  @db.Decimal(8, 2)
+  commissionAmount  Decimal  @db.Decimal(14, 2)
+  createdAt         DateTime @default(now())
+
+  @@unique([employeeId, saleId])
+  @@index([employeeId])
+  @@index([saleId])
+}
+
+model RepairCommission {
+  id                String       @id @default(cuid())
+  employeeId        String
+  employee          User         @relation("RepairCommissionEmployee", fields: [employeeId], references: [id])
+  serviceOrderId    String
+  serviceOrder      ServiceOrder @relation(fields: [serviceOrderId], references: [id])
+  revenue           Decimal      @db.Decimal(14, 2)
+  commissionPercent Decimal      @db.Decimal(8, 2)
+  commissionAmount  Decimal      @db.Decimal(14, 2)
+  createdAt         DateTime     @default(now())
+
+  @@unique([employeeId, serviceOrderId])
+  @@index([employeeId])
+  @@index([serviceOrderId])
+}
+
+model BonusRule {
+  id            String    @id @default(cuid())
+  branchId      String
+  branch        Branch    @relation(fields: [branchId], references: [id])
+  role          Role
+  targetRevenue Decimal   @default(0) @db.Decimal(14, 2)
+  targetProfit  Decimal   @default(0) @db.Decimal(14, 2)
+  bonusType     BonusType
+  bonusValue    Decimal   @default(0) @db.Decimal(14, 2)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([branchId])
+  @@index([role])
+}
+
+model PayrollRecord {
+  id               String        @id @default(cuid())
+  employeeId       String
+  employee         User          @relation("PayrollRecordEmployee", fields: [employeeId], references: [id])
+  payrollMonth     Int
+  payrollYear      Int
+  fixedSalary      Decimal       @default(0) @db.Decimal(14, 2)
+  salesCommission  Decimal       @default(0) @db.Decimal(14, 2)
+  repairCommission Decimal       @default(0) @db.Decimal(14, 2)
+  bonus            Decimal       @default(0) @db.Decimal(14, 2)
+  deductions       Decimal       @default(0) @db.Decimal(14, 2)
+  totalPayable     Decimal       @default(0) @db.Decimal(14, 2)
+  status           PayrollStatus @default(DRAFT)
+  createdAt        DateTime      @default(now())
+
+  @@unique([employeeId, payrollMonth, payrollYear])
+  @@index([employeeId])
+  @@index([payrollYear, payrollMonth])
+  @@index([status])
+}
+
+model EmployeeKPI {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        User     @relation("EmployeeKPIEmployee", fields: [employeeId], references: [id])
+  month           Int
+  year            Int
+  revenue         Decimal  @default(0) @db.Decimal(14, 2)
+  profit          Decimal  @default(0) @db.Decimal(14, 2)
+  repairRevenue   Decimal  @default(0) @db.Decimal(14, 2)
+  repairsCount    Int      @default(0)
+  newCustomers    Int      @default(0)
+  planAchievement Decimal  @default(0) @db.Decimal(8, 2)
+  createdAt       DateTime @default(now())
+
+  @@unique([employeeId, month, year])
+  @@index([employeeId])
+  @@index([year, month])
 }
 
 model BranchStockRequest {

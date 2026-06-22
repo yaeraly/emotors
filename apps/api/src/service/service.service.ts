@@ -14,6 +14,7 @@ import {
   WarrantyStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddDiagnosisDto } from './dto/add-diagnosis.dto';
@@ -29,6 +30,7 @@ export class ServiceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly commissionsService: CommissionsService,
   ) {}
 
   async create(user: AuthUser, dto: CreateServiceOrderDto) {
@@ -257,6 +259,7 @@ export class ServiceService {
           createdById: user.id,
         },
       });
+      await this.commissionsService.createRepairCommission(tx, order.id);
       return this.toResponse(updated);
     });
   }

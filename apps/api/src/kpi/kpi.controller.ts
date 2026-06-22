@@ -9,13 +9,23 @@ import { KpiService } from './kpi.service';
 
 @Controller('kpi')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+@Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT, Role.MASTER, Role.SALESPERSON)
 export class KpiController {
   constructor(private readonly kpiService: KpiService) {}
 
   @Get('dashboard')
   dashboard(@CurrentUser() user: AuthUser) {
     return this.kpiService.dashboard(user);
+  }
+
+  @Get('employees')
+  employees(@CurrentUser() user: AuthUser) {
+    return this.kpiService.employeeKpis(user);
+  }
+
+  @Get('branches')
+  branches(@CurrentUser() user: AuthUser) {
+    return this.kpiService.branchComparison(user);
   }
 
   @Get('branches/:branchId')
