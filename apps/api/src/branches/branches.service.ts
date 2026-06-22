@@ -4,9 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchStatus, Role, SaleStatus } from '@prisma/client';
+import { BranchStatus, Prisma, Role, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { BranchQueryDto } from './dto/branch-query.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
@@ -29,16 +30,37 @@ export class BranchesService {
     });
   }
 
-  findAll(user: AuthUser) {
-    if (user.role === Role.OWNER) {
-      return this.prisma.branch.findMany({
-        where: { deletedAt: null },
-        orderBy: { name: 'asc' },
-      });
+  findAll(user: AuthUser, query: BranchQueryDto = {}) {
+    const where: Prisma.BranchWhereInput = {
+      deletedAt: null,
+      ...(user.role === Role.OWNER ? {} : { id: user.branchId }),
+    };
+
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { code: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (query.city?.trim()) {
+      where.city = { equals: query.city.trim(), mode: 'insensitive' };
+    }
+
+    if (query.status) {
+      where.status = query.status;
+    }
+
+    if (query.ownerName?.trim()) {
+      where.ownerName = {
+        contains: query.ownerName.trim(),
+        mode: 'insensitive',
+      };
     }
 
     return this.prisma.branch.findMany({
-      where: { id: user.branchId, deletedAt: null },
+      where,
       orderBy: { name: 'asc' },
     });
   }

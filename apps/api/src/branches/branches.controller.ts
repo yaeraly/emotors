@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.types';
@@ -7,6 +7,7 @@ import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { BranchesService } from './branches.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
+import { BranchQueryDto } from './dto/branch-query.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 
 @Controller('branches')
@@ -21,8 +22,8 @@ export class BranchesController {
   }
 
   @Get()
-  findAll(@CurrentUser() user: AuthUser) {
-    return this.branchesService.findAll(user);
+  findAll(@CurrentUser() user: AuthUser, @Query() query: BranchQueryDto) {
+    return this.branchesService.findAll(user, query);
   }
 
   @Get(':id')

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
@@ -33,12 +33,35 @@ export default function BranchesPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [allBranches, setAllBranches] = useState<Branch[]>([]);
+  const [filters, setFilters] = useState({
+    search: '',
+    city: '',
+    status: '',
+    ownerName: '',
+  });
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
   const [form, setForm] = useState<BranchForm>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [deletingBranchId, setDeletingBranchId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const query = useMemo(() => {
+    const params = new URLSearchParams();
+    if (filters.search.trim()) params.set('search', filters.search.trim());
+    if (filters.city) params.set('city', filters.city);
+    if (filters.status) params.set('status', filters.status);
+    if (filters.ownerName.trim()) params.set('ownerName', filters.ownerName.trim());
+    const value = params.toString();
+    return value ? `?${value}` : '';
+  }, [filters]);
+  const cityOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(allBranches.map((branch) => branch.city).filter(Boolean) as string[]),
+      ).sort(),
+    [allBranches],
+  );
 
   useEffect(() => {
     void loadBranches();
@@ -49,14 +72,23 @@ export default function BranchesPage() {
       router.refresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, t]);
+  }, [router, t, query]);
 
   async function loadBranches() {
     try {
-      setBranches(await apiFetch<Branch[]>('/branches'));
+      const [filtered, all] = await Promise.all([
+        apiFetch<Branch[]>(`/branches${query}`),
+        apiFetch<Branch[]>('/branches'),
+      ]);
+      setBranches(filtered);
+      setAllBranches(all);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
+  }
+
+  function clearFilters() {
+    setFilters({ search: '', city: '', status: '', ownerName: '' });
   }
 
   function openEdit(branch: Branch) {
@@ -164,6 +196,51 @@ export default function BranchesPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-950">{t('branches.filter')}</h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <input
+              value={filters.search}
+              onChange={(event) => setFilters({ ...filters, search: event.target.value })}
+              placeholder={t('branches.search')}
+              className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+            />
+            <select
+              value={filters.city}
+              onChange={(event) => setFilters({ ...filters, city: event.target.value })}
+              className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+            >
+              <option value="">{t('branches.allCities')}</option>
+              {cityOptions.map((city) => (
+                <option key={city} value={city}>{city}</option>
+              ))}
+            </select>
+            <select
+              value={filters.status}
+              onChange={(event) => setFilters({ ...filters, status: event.target.value })}
+              className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+            >
+              <option value="">{t('branches.allStatuses')}</option>
+              {['ACTIVE', 'INACTIVE', 'PENDING', 'SUSPENDED'].map((status) => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+            <input
+              value={filters.ownerName}
+              onChange={(event) => setFilters({ ...filters, ownerName: event.target.value })}
+              placeholder={t('branches.ownerName')}
+              className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+            />
+            <button
+              onClick={clearFilters}
+              className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+              type="button"
+            >
+              {t('branches.clearFilters')}
+            </button>
+          </div>
+        </section>
+
         <div className="h-[calc(100vh-240px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
             <table className="min-w-[960px] divide-y divide-slate-200 text-sm">
@@ -179,7 +256,13 @@ export default function BranchesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {branches.map((branch) => (
+                {branches.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                      {t('branches.noBranchesFound')}
+                    </td>
+                  </tr>
+                ) : branches.map((branch) => (
                   <tr key={branch.id}>
                     <td className="px-4 py-3 font-bold">{branch.name}</td>
                     <td className="px-4 py-3">{branch.code}</td>
