@@ -55,7 +55,12 @@ export type BranchDistributionOrderStatus =
   | 'DRAFT'
   | 'APPROVED'
   | 'SENT'
+  | 'RECEIVED'
+  | 'RECEIVED_WITH_DIFFERENCE'
   | 'CANCELLED';
+export type GoodsReceivingStatus = 'DRAFT' | 'COMPLETED' | 'CANCELLED';
+export type ShortageReportStatus = 'OPEN' | 'RESOLVED' | 'CANCELLED';
+export type ShortageReportItemType = 'SHORTAGE' | 'OVERAGE';
 
 export type Branch = {
   id: string;
@@ -328,6 +333,78 @@ export type BranchDistributionOrder = {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+};
+
+export type GoodsReceivingItem = {
+  id: string;
+  receivingId: string;
+  distributionOrderItemId: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  sentQuantity: number;
+  receivedQuantity: number;
+  differenceQuantity: number;
+  unitCost: number | string;
+  unitPrice: number | string;
+  note?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoodsReceiving = {
+  id: string;
+  receivingNumber: string;
+  distributionOrderId: string;
+  distributionOrder?: BranchDistributionOrder;
+  branchId: string;
+  branch?: Branch;
+  warehouseId: string;
+  warehouse?: Warehouse;
+  status: GoodsReceivingStatus;
+  receivedById: string;
+  receivedBy?: Pick<User, 'id' | 'fullName' | 'role'>;
+  receivedAt: string;
+  note?: string | null;
+  items?: GoodsReceivingItem[];
+  shortageReport?: ShortageReport | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShortageReportItem = {
+  id: string;
+  shortageReportId: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  expectedQuantity: number;
+  receivedQuantity: number;
+  differenceQuantity: number;
+  type: ShortageReportItemType;
+  note?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShortageReport = {
+  id: string;
+  reportNumber: string;
+  goodsReceivingId: string;
+  goodsReceiving?: GoodsReceiving;
+  distributionOrderId: string;
+  distributionOrder?: BranchDistributionOrder;
+  branchId: string;
+  branch?: Branch;
+  warehouseId: string;
+  warehouse?: Warehouse;
+  status: ShortageReportStatus;
+  createdById: string;
+  createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
+  items?: ShortageReportItem[];
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string | null;
 };
 
 export type ProductCategory = {

@@ -7,7 +7,14 @@ import { apiFetch } from '@/lib/api';
 import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
-const statuses: BranchDistributionOrderStatus[] = ['DRAFT', 'APPROVED', 'SENT', 'CANCELLED'];
+const statuses: BranchDistributionOrderStatus[] = [
+  'DRAFT',
+  'APPROVED',
+  'SENT',
+  'RECEIVED',
+  'RECEIVED_WITH_DIFFERENCE',
+  'CANCELLED',
+];
 
 export default function DistributionOrdersPage() {
   const { t } = useTranslation();

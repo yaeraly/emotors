@@ -4,17 +4,30 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchDistributionOrderStatus, Prisma, Role } from '@prisma/client';
+import {
+  BranchDistributionOrderStatus,
+  Prisma,
+  Role,
+  ShortageReportItemType,
+  ShortageReportStatus,
+  StockMovementType,
+} from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
+import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
+import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
 
 type PrismaTx = Prisma.TransactionClient;
 
 @Injectable()
 export class DistributionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryService,
+  ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
     return this.prisma.$transaction(async (tx) => {
@@ -140,6 +153,201 @@ export class DistributionService {
     });
   }
 
+  async receive(user: AuthUser, id: string, dto: ReceiveDistributionOrderDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        },
+        include: { items: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      if (order.status !== BranchDistributionOrderStatus.SENT) {
+        throw new BadRequestException('Order must be SENT before receiving');
+      }
+
+      const warehouse = await tx.warehouse.findFirst({
+        where: { id: dto.warehouseId, branchId: order.branchId },
+      });
+      if (!warehouse) {
+        throw new BadRequestException('Warehouse must belong to order branch');
+      }
+
+      const receivedMap = new Map(
+        dto.items.map((item) => [item.distributionOrderItemId, item]),
+      );
+      if (receivedMap.size !== order.items.length) {
+        throw new BadRequestException('All order items must be included');
+      }
+      for (const item of order.items) {
+        if (!receivedMap.has(item.id)) {
+          throw new BadRequestException('All order items must be included');
+        }
+      }
+
+      const receiving = await tx.goodsReceiving.create({
+        data: {
+          receivingNumber: await this.generateReceivingNumber(tx),
+          distributionOrderId: order.id,
+          branchId: order.branchId,
+          warehouseId: warehouse.id,
+          receivedById: user.id,
+          receivedAt: new Date(),
+          note: dto.note,
+        },
+      });
+
+      const receivingItems = [];
+      const shortageItems = [];
+
+      for (const orderItem of order.items) {
+        const received = receivedMap.get(orderItem.id)!;
+        const receivedQuantity = Number(received.receivedQuantity);
+        const sentQuantity = Number(orderItem.quantity);
+        const difference = receivedQuantity - sentQuantity;
+
+        if (receivedQuantity > 0) {
+          await this.inventoryService.createStockMovementInTx(tx, user, {
+            productId: orderItem.productId,
+            warehouseId: warehouse.id,
+            type: StockMovementType.IN,
+            quantity: receivedQuantity,
+            unitCostKgs: Number(orderItem.unitCost),
+            referenceType: 'GOODS_RECEIVING',
+            referenceId: receiving.id,
+            note: `Receiving ${receiving.receivingNumber}`,
+          });
+        }
+
+        receivingItems.push({
+          receivingId: receiving.id,
+          distributionOrderItemId: orderItem.id,
+          productId: orderItem.productId,
+          sku: orderItem.sku,
+          productName: orderItem.productName,
+          sentQuantity,
+          receivedQuantity,
+          differenceQuantity: difference,
+          unitCost: orderItem.unitCost,
+          unitPrice: orderItem.unitPrice,
+          note: received.note,
+        });
+
+        if (difference !== 0) {
+          shortageItems.push({
+            productId: orderItem.productId,
+            sku: orderItem.sku,
+            productName: orderItem.productName,
+            expectedQuantity: sentQuantity,
+            receivedQuantity,
+            differenceQuantity: Math.abs(difference),
+            type:
+              difference < 0
+                ? ShortageReportItemType.SHORTAGE
+                : ShortageReportItemType.OVERAGE,
+            note: received.note,
+          });
+        }
+      }
+
+      await tx.goodsReceivingItem.createMany({ data: receivingItems });
+
+      let shortageReport = null;
+      if (shortageItems.length > 0) {
+        shortageReport = await tx.shortageReport.create({
+          data: {
+            reportNumber: await this.generateShortageReportNumber(tx),
+            goodsReceivingId: receiving.id,
+            distributionOrderId: order.id,
+            branchId: order.branchId,
+            warehouseId: warehouse.id,
+            createdById: user.id,
+            items: { create: shortageItems },
+          },
+          include: this.shortageInclude(),
+        });
+      }
+
+      await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: {
+          status:
+            shortageItems.length > 0
+              ? BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE
+              : BranchDistributionOrderStatus.RECEIVED,
+        },
+      });
+
+      return {
+        receiving: await this.receivingInTx(tx, user, receiving.id),
+        shortageReport,
+      };
+    });
+  }
+
+  receivings(user: AuthUser, query: DistributionReportQueryDto) {
+    this.assertQueryBranchAccess(user, query.branchId);
+    return this.prisma.goodsReceiving.findMany({
+      where: {
+        deletedAt: null,
+        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(query.branchId ? { branchId: query.branchId } : {}),
+      },
+      include: this.receivingInclude(),
+      orderBy: { receivedAt: 'desc' },
+    });
+  }
+
+  async receiving(user: AuthUser, id: string) {
+    const receiving = await this.prisma.goodsReceiving.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+      },
+      include: this.receivingInclude(),
+    });
+    if (!receiving) throw new NotFoundException('Receiving not found');
+    return receiving;
+  }
+
+  shortageReports(user: AuthUser, query: DistributionReportQueryDto) {
+    this.assertQueryBranchAccess(user, query.branchId);
+    return this.prisma.shortageReport.findMany({
+      where: {
+        deletedAt: null,
+        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(query.branchId ? { branchId: query.branchId } : {}),
+      },
+      include: this.shortageInclude(),
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async shortageReport(user: AuthUser, id: string) {
+    const report = await this.prisma.shortageReport.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+      },
+      include: this.shortageInclude(),
+    });
+    if (!report) throw new NotFoundException('Shortage report not found');
+    return report;
+  }
+
+  async resolveShortageReport(user: AuthUser, id: string) {
+    const report = await this.shortageReport(user, id);
+    return this.prisma.shortageReport.update({
+      where: { id: report.id },
+      data: { status: ShortageReportStatus.RESOLVED, resolvedAt: new Date() },
+      include: this.shortageInclude(),
+    });
+  }
+
   private async transition(
     user: AuthUser,
     id: string,
@@ -211,6 +419,16 @@ export class DistributionService {
     return `BDO-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
   }
 
+  private async generateReceivingNumber(tx: PrismaTx) {
+    const count = await tx.goodsReceiving.count();
+    return `GR-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
+  }
+
+  private async generateShortageReportNumber(tx: PrismaTx) {
+    const count = await tx.shortageReport.count();
+    return `SR-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
+  }
+
   private include() {
     return {
       branch: true,
@@ -220,6 +438,39 @@ export class DistributionService {
       approvedBy: { select: { id: true, fullName: true, role: true } },
       items: { include: { product: true } },
     };
+  }
+
+  private receivingInclude() {
+    return {
+      distributionOrder: true,
+      branch: true,
+      warehouse: true,
+      receivedBy: { select: { id: true, fullName: true, role: true } },
+      items: true,
+      shortageReport: { include: { items: true } },
+    };
+  }
+
+  private shortageInclude() {
+    return {
+      distributionOrder: true,
+      goodsReceiving: true,
+      branch: true,
+      warehouse: true,
+      createdBy: { select: { id: true, fullName: true, role: true } },
+      items: true,
+    };
+  }
+
+  private receivingInTx(tx: PrismaTx, user: AuthUser, id: string) {
+    return tx.goodsReceiving.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+      },
+      include: this.receivingInclude(),
+    });
   }
 
   private async getAccessibleOrder(user: AuthUser, id: string) {
@@ -249,6 +500,12 @@ export class DistributionService {
 
   private canManage(user: AuthUser) {
     return user.role === Role.OWNER || user.role === Role.SUPPLY_CHAIN_MANAGER;
+  }
+
+  private assertQueryBranchAccess(user: AuthUser, branchId?: string) {
+    if (!this.canManage(user) && branchId && branchId !== user.branchId) {
+      throw new ForbiddenException('Forbidden branch');
+    }
   }
 
   private toResponse(order: any) {

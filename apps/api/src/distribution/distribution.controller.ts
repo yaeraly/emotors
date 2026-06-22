@@ -7,6 +7,8 @@ import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
+import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
+import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
 import { DistributionService } from './distribution.service';
 
 @Controller('distribution')
@@ -53,5 +55,40 @@ export class DistributionController {
   @Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER)
   cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.cancel(user, id);
+  }
+
+  @Post('orders/:id/receive')
+  receive(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ReceiveDistributionOrderDto,
+  ) {
+    return this.distributionService.receive(user, id, dto);
+  }
+
+  @Get('receivings')
+  receivings(@CurrentUser() user: AuthUser, @Query() query: DistributionReportQueryDto) {
+    return this.distributionService.receivings(user, query);
+  }
+
+  @Get('receivings/:id')
+  receiving(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.receiving(user, id);
+  }
+
+  @Get('shortage-reports')
+  shortageReports(@CurrentUser() user: AuthUser, @Query() query: DistributionReportQueryDto) {
+    return this.distributionService.shortageReports(user, query);
+  }
+
+  @Get('shortage-reports/:id')
+  shortageReport(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.shortageReport(user, id);
+  }
+
+  @Post('shortage-reports/:id/resolve')
+  @Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER)
+  resolveShortageReport(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.resolveShortageReport(user, id);
   }
 }
