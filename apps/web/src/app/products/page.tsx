@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { API_URL } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
 import type { ProductCategory, ProductListResponse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -96,7 +97,7 @@ export default function ProductsPage() {
                   <tr key={product.id} className="hover:bg-blue-50/40">
                     <td className="px-4 py-3">
                       {product.photoUrl ? (
-                        <img src={product.photoUrl} alt="" className="h-12 w-12 rounded-xl object-cover" />
+                        <img src={`${API_URL}${product.photoUrl}`} alt="" className="h-12 w-12 rounded-xl object-cover" />
                       ) : (
                         <div className="h-12 w-12 rounded-xl bg-slate-100" />
                       )}

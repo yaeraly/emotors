@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
 import type { Product, ProductCategory, Warehouse, YuanRateHistory } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -117,6 +118,12 @@ export default function NewProductPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
           <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+            <div className="md:col-span-2">
+              <ProductImageUploader
+                photoUrl={form.photoUrl}
+                onChange={(value) => setField('photoUrl', value)}
+              />
+            </div>
             <Input label={t('inventory.name')} value={form.name} onChange={(value) => setField('name', value)} required />
             <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => setField('sku', value)} required />
             <label className="block">
@@ -132,7 +139,6 @@ export default function NewProductPage() {
                 {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
               </select>
             </label>
-            <Input label={t('inventory.photo')} value={form.photoUrl} onChange={(value) => setField('photoUrl', value)} />
             <Input label={t('inventory.weightKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} />
             <Input label={t('inventory.purchasePriceYuan')} type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
             <Input label={t('inventory.latestYuanRate')} type="number" value={form.latestYuanRate} onChange={(value) => setField('latestYuanRate', value)} />

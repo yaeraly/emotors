@@ -2,6 +2,9 @@ import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
+import { join } from 'node:path';
 import {
   FastifyAdapter,
   NestFastifyApplication,
@@ -17,6 +20,17 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const webOrigin = configService.get<string>('WEB_ORIGIN') ?? 'http://localhost:3000';
   const port = Number(configService.get<string>('PORT') ?? 3001);
+
+  await app.register(multipart, {
+    limits: {
+      fileSize: 5 * 1024 * 1024,
+      files: 1,
+    },
+  });
+  await app.register(fastifyStatic, {
+    root: join(process.cwd(), 'uploads'),
+    prefix: '/uploads/',
+  });
 
   app.enableCors({
     origin: webOrigin,

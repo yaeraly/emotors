@@ -6,6 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, Role, StockMovementType } from '@prisma/client';
+import { MultipartFile } from '@fastify/multipart';
+import { FastifyRequest } from 'fastify';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -25,6 +30,54 @@ type PrismaTx = Prisma.TransactionClient;
 @Injectable()
 export class InventoryService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async uploadProductImage(request: FastifyRequest) {
+    let image: MultipartFile | undefined;
+
+    try {
+      image = await request.file();
+    } catch {
+      throw new BadRequestException('File is too large');
+    }
+
+    if (!image) {
+      throw new BadRequestException('Image file is required');
+    }
+
+    if (image.fieldname !== 'image') {
+      throw new BadRequestException('Invalid upload field');
+    }
+
+    const allowedMimeTypes = new Map([
+      ['image/jpeg', '.jpg'],
+      ['image/png', '.png'],
+      ['image/webp', '.webp'],
+    ]);
+    const extensionFromMime = allowedMimeTypes.get(image.mimetype);
+    const originalExtension = extname(image.filename).toLowerCase();
+    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+
+    if (!extensionFromMime || !allowedExtensions.includes(originalExtension)) {
+      throw new BadRequestException('Invalid file format');
+    }
+
+    const buffer = await image.toBuffer();
+
+    if (buffer.length > 5 * 1024 * 1024) {
+      throw new BadRequestException('File is too large');
+    }
+
+    const uploadDirectory = join(process.cwd(), 'uploads', 'products');
+    await mkdir(uploadDirectory, { recursive: true });
+
+    const extension = originalExtension === '.jpeg' ? '.jpg' : extensionFromMime;
+    const filename = `${randomUUID()}${extension}`;
+    await writeFile(join(uploadDirectory, filename), buffer);
+
+    return {
+      url: `/uploads/products/${filename}`,
+    };
+  }
 
   async categories(search?: string) {
     const where: Prisma.ProductCategoryWhereInput = {};

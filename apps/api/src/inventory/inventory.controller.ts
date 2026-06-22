@@ -7,9 +7,11 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
+import { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -68,6 +70,12 @@ export class InventoryController {
   @Roles(Role.OWNER, Role.MANAGER)
   createProduct(@CurrentUser() user: AuthUser, @Body() dto: CreateProductDto) {
     return this.inventoryService.createProduct(user, dto);
+  }
+
+  @Post('products/upload-image')
+  @Roles(Role.OWNER, Role.MANAGER)
+  uploadProductImage(@Req() request: FastifyRequest) {
+    return this.inventoryService.uploadProductImage(request);
   }
 
   @Get('products')

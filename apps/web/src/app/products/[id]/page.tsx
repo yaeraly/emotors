@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
 import type { Product, ProductCategory } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -17,6 +18,7 @@ export default function ProductDetailPage() {
     name: '',
     sku: '',
     categoryId: '',
+    photoUrl: '',
     sellingPriceKgs: '0',
     minStockLevel: '0',
   });
@@ -35,6 +37,7 @@ export default function ProductDetailPage() {
           name: productResult.name,
           sku: productResult.sku,
           categoryId: productResult.categoryId,
+          photoUrl: productResult.photoUrl ?? '',
           sellingPriceKgs: String(productResult.sellingPriceKgs),
           minStockLevel: String(productResult.minStockLevel),
         });
@@ -61,6 +64,7 @@ export default function ProductDetailPage() {
           name: editForm.name,
           sku: editForm.sku,
           categoryId: editForm.categoryId,
+          photoUrl: editForm.photoUrl || null,
           sellingPriceKgs: Number(editForm.sellingPriceKgs),
           minStockLevel: Number(editForm.minStockLevel),
         }),
@@ -82,7 +86,7 @@ export default function ProductDetailPage() {
           <>
             <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-6 md:flex-row">
-                {product.photoUrl ? <img src={product.photoUrl} alt="" className="h-40 w-40 rounded-3xl object-cover" /> : <div className="h-40 w-40 rounded-3xl bg-slate-100" />}
+                {product.photoUrl ? <img src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${product.photoUrl}`} alt="" className="h-40 w-40 rounded-3xl object-cover" /> : <div className="h-40 w-40 rounded-3xl bg-slate-100" />}
                 <div className="flex-1">
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{product.sku}</p>
                   <h2 className="mt-2 text-3xl font-bold text-slate-950">{product.name}</h2>
@@ -98,6 +102,12 @@ export default function ProductDetailPage() {
             </article>
 
             <form onSubmit={saveProduct} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-5">
+              <div className="md:col-span-5">
+                <ProductImageUploader
+                  photoUrl={editForm.photoUrl}
+                  onChange={(value) => setEditForm({ ...editForm, photoUrl: value })}
+                />
+              </div>
               <Input label={t('inventory.name')} value={editForm.name} onChange={(value) => setEditForm({ ...editForm, name: value })} />
               <Input label={t('inventory.sku')} value={editForm.sku} onChange={(value) => setEditForm({ ...editForm, sku: value })} />
               <label className="block">
