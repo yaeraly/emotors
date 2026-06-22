@@ -3,6 +3,7 @@ export type Role =
   | 'MANAGER'
   | 'MASTER'
   | 'ACCOUNTANT'
+  | 'SALESPERSON'
   | 'ACADEMY_MANAGER'
   | 'MARKETING_MANAGER'
   | 'PROCUREMENT_MANAGER'
@@ -28,6 +29,15 @@ export type CustomerEventType =
   | 'FOLLOW_UP';
 
 export type FollowUpStatus = 'OPEN' | 'DONE' | 'CANCELLED';
+export type ServiceOrderStatus =
+  | 'NEW'
+  | 'DIAGNOSIS'
+  | 'IN_REPAIR'
+  | 'WAITING_PARTS'
+  | 'COMPLETED'
+  | 'CANCELLED';
+export type RepairStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
+export type WarrantyStatus = 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
 export type PaymentStatus = 'PAID' | 'PARTIAL' | 'DEBT';
 export type PaymentMethod =
   | 'CASH'
@@ -120,6 +130,83 @@ export type Customer = {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+};
+
+export type ServiceOrder = {
+  id: string;
+  orderNumber: string;
+  branchId: string;
+  branch?: Branch;
+  customerId: string;
+  customer?: Customer;
+  masterId: string;
+  master?: Pick<User, 'id' | 'fullName' | 'role'>;
+  status: ServiceOrderStatus;
+  problemDescription: string;
+  diagnosisResult?: string | null;
+  laborCost: number;
+  partsCost: number;
+  totalAmount: number;
+  paidAmount: number;
+  debtAmount: number;
+  warrantyUntil?: string | null;
+  diagnoses?: Diagnosis[];
+  repairs?: Repair[];
+  parts?: PartsConsumption[];
+  warranties?: Warranty[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+};
+
+export type Diagnosis = {
+  id: string;
+  problem: string;
+  result: string;
+  recommendedRepair?: string | null;
+  diagnosisFee: number;
+  createdAt: string;
+};
+
+export type Repair = {
+  id: string;
+  description: string;
+  laborCost: number;
+  status: RepairStatus;
+  startedAt?: string | null;
+  completedAt?: string | null;
+};
+
+export type PartsConsumption = {
+  id: string;
+  productId: string;
+  product?: Product;
+  warehouseId: string;
+  warehouse?: Warehouse;
+  quantity: number;
+  unitCost: number;
+  unitPrice: number;
+  totalCost: number;
+  totalPrice: number;
+  createdAt: string;
+};
+
+export type Warranty = {
+  id: string;
+  serviceOrderId: string;
+  serviceOrder?: ServiceOrder;
+  customerId: string;
+  customer?: Customer;
+  productId?: string | null;
+  product?: Product | null;
+  branchId: string;
+  branch?: Branch;
+  warrantyNumber: string;
+  startsAt: string;
+  expiresAt: string;
+  status: WarrantyStatus;
+  note?: string | null;
 };
 
 export type PurchaseHistoryRow = {

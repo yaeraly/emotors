@@ -12,6 +12,7 @@ enum Role {
   MANAGER
   MASTER
   ACCOUNTANT
+  SALESPERSON
   ACADEMY_MANAGER
   MARKETING_MANAGER
   PROCUREMENT_MANAGER
@@ -231,6 +232,28 @@ enum AiInsightType {
   SLOW_MOVING_PRODUCT
 }
 
+enum ServiceOrderStatus {
+  NEW
+  DIAGNOSIS
+  IN_REPAIR
+  WAITING_PARTS
+  COMPLETED
+  CANCELLED
+}
+
+enum RepairStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum WarrantyStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
 model Branch {
   id             String          @id @default(cuid())
   name           String
@@ -269,6 +292,8 @@ model Branch {
   branchInvoices BranchInvoice[]
   branchPayments BranchPayment[]
   branchAccountBalance BranchAccountBalance?
+  serviceOrders ServiceOrder[]
+  warranties Warranty[]
   stockRequests BranchStockRequest[]
   stockForecasts StockForecast[]
   taxProfiles TaxProfile[]
@@ -322,6 +347,11 @@ model User {
   shortageReports ShortageReport[] @relation("ShortageReportCreator")
   branchInvoices BranchInvoice[] @relation("BranchInvoiceCreator")
   branchPayments BranchPayment[] @relation("BranchPaymentCreator")
+  assignedServiceOrders ServiceOrder[] @relation("ServiceOrderMaster")
+  createdServiceOrders ServiceOrder[] @relation("ServiceOrderCreator")
+  diagnoses Diagnosis[] @relation("DiagnosisMaster")
+  repairs Repair[] @relation("RepairMaster")
+  partsConsumptions PartsConsumption[] @relation("PartsConsumptionCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -345,6 +375,8 @@ model Customer {
   sales               Sale[]
   payments            Payment[]
   installments        InstallmentSchedule[]
+  serviceOrders       ServiceOrder[]
+  warranties          Warranty[]
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   deletedAt           DateTime?
@@ -532,6 +564,7 @@ model Warehouse {
   destinationDistributionOrders BranchDistributionOrder[] @relation("DistributionDestinationWarehouse")
   goodsReceivings GoodsReceiving[]
   shortageReports ShortageReport[]
+  partsConsumptions PartsConsumption[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -571,6 +604,8 @@ model Product {
   distributionOrderItems BranchDistributionOrderItem[]
   goodsReceivingItems GoodsReceivingItem[]
   shortageReportItems ShortageReportItem[]
+  partsConsumptions PartsConsumption[]
+  warranties Warranty[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
@@ -1316,6 +1351,127 @@ model BranchAccountBalance {
   totalPaid     Decimal   @default(0) @db.Decimal(14, 2)
   lastPaymentAt DateTime?
   updatedAt     DateTime  @updatedAt
+}
+
+model ServiceOrder {
+  id                 String             @id @default(cuid())
+  orderNumber        String             @unique
+  branchId           String
+  branch             Branch             @relation(fields: [branchId], references: [id])
+  customerId         String
+  customer           Customer           @relation(fields: [customerId], references: [id])
+  masterId           String
+  master             User               @relation("ServiceOrderMaster", fields: [masterId], references: [id])
+  status             ServiceOrderStatus @default(NEW)
+  problemDescription String
+  diagnosisResult    String?
+  laborCost          Decimal            @default(0) @db.Decimal(14, 2)
+  partsCost          Decimal            @default(0) @db.Decimal(14, 2)
+  totalAmount        Decimal            @default(0) @db.Decimal(14, 2)
+  paidAmount         Decimal            @default(0) @db.Decimal(14, 2)
+  debtAmount         Decimal            @default(0) @db.Decimal(14, 2)
+  warrantyUntil      DateTime?
+  createdById        String
+  createdBy          User               @relation("ServiceOrderCreator", fields: [createdById], references: [id])
+  diagnoses          Diagnosis[]
+  repairs            Repair[]
+  parts              PartsConsumption[]
+  warranties         Warranty[]
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  deletedAt          DateTime?
+
+  @@index([branchId])
+  @@index([customerId])
+  @@index([masterId])
+  @@index([status])
+}
+
+model Diagnosis {
+  id                String       @id @default(cuid())
+  serviceOrderId    String
+  serviceOrder      ServiceOrder @relation(fields: [serviceOrderId], references: [id])
+  masterId          String
+  master            User         @relation("DiagnosisMaster", fields: [masterId], references: [id])
+  problem           String
+  result            String
+  recommendedRepair String?
+  diagnosisFee      Decimal      @default(0) @db.Decimal(14, 2)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([serviceOrderId])
+  @@index([masterId])
+}
+
+model Repair {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id])
+  masterId       String
+  master         User         @relation("RepairMaster", fields: [masterId], references: [id])
+  description    String
+  laborCost      Decimal      @default(0) @db.Decimal(14, 2)
+  status         RepairStatus @default(PENDING)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([serviceOrderId])
+  @@index([masterId])
+  @@index([status])
+}
+
+model PartsConsumption {
+  id             String       @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder @relation(fields: [serviceOrderId], references: [id])
+  productId      String
+  product        Product      @relation(fields: [productId], references: [id])
+  warehouseId    String
+  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id])
+  quantity       Int
+  unitCost       Decimal      @db.Decimal(14, 2)
+  unitPrice      Decimal      @db.Decimal(14, 2)
+  totalCost      Decimal      @db.Decimal(14, 2)
+  totalPrice     Decimal      @db.Decimal(14, 2)
+  createdById    String
+  createdBy      User         @relation("PartsConsumptionCreator", fields: [createdById], references: [id])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([serviceOrderId])
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([createdById])
+}
+
+model Warranty {
+  id             String         @id @default(cuid())
+  serviceOrderId String
+  serviceOrder   ServiceOrder   @relation(fields: [serviceOrderId], references: [id])
+  customerId      String
+  customer        Customer       @relation(fields: [customerId], references: [id])
+  productId       String?
+  product         Product?       @relation(fields: [productId], references: [id])
+  branchId        String
+  branch          Branch         @relation(fields: [branchId], references: [id])
+  warrantyNumber  String         @unique
+  startsAt        DateTime       @default(now())
+  expiresAt       DateTime
+  status          WarrantyStatus @default(ACTIVE)
+  note            String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([serviceOrderId])
+  @@index([customerId])
+  @@index([productId])
+  @@index([branchId])
+  @@index([status])
 }
 
 model BranchStockRequest {

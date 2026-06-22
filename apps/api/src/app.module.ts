@@ -16,6 +16,7 @@ import { ProcurementModule } from './procurement/procurement.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RoyaltyModule } from './royalty/royalty.module';
 import { SalesModule } from './sales/sales.module';
+import { ServiceModule } from './service/service.module';
 import { SupplyChainModule } from './supply-chain/supply-chain.module';
 import { TaxModule } from './tax/tax.module';
 
@@ -31,6 +32,7 @@ import { TaxModule } from './tax/tax.module';
     DistributionModule,
     InventoryModule,
     SalesModule,
+    ServiceModule,
     KpiModule,
     AcademyModule,
     MarketingModule,

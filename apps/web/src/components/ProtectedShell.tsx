@@ -49,6 +49,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     user?.role === 'MANAGER' ||
     user?.role === 'ACCOUNTANT';
   const canSeeInventory = Boolean(user);
+  const canSeeService =
+    user?.role === 'OWNER' ||
+    user?.role === 'MANAGER' ||
+    user?.role === 'MASTER' ||
+    user?.role === 'ACCOUNTANT' ||
+    user?.role === 'SALESPERSON';
   const canSeeHq =
     user?.role === 'OWNER' || user?.role === 'ACCOUNTANT';
   const canSeeAcademy =
@@ -148,6 +154,16 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 </div>
               </div>
             ) : null}
+            {canSeeService ? (
+              <div className="rounded-xl px-3 py-2">
+                <Link href="/service" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('service.title')}</Link>
+                <div className="mt-2 space-y-1 pl-2">
+                  <Link href="/service/new" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.newOrder')}</Link>
+                  <Link href="/service/warranties" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.warranties')}</Link>
+                  <Link href="/service/reports" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('nav.reports')}</Link>
+                </div>
+              </div>
+            ) : null}
             <div className="border-t border-slate-100 pt-2">
               <p className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                 {t('phase2.title')}
@@ -182,7 +198,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeeAi ? <Link href="/ai" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('ai.title')}</Link> : null}
               {[
                 'nav.dashboard',
-                'nav.service',
                 'nav.finance',
                 'nav.reports',
                 'nav.users',

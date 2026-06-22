@@ -322,15 +322,29 @@ export class CustomersService {
       purchaseHistory: this.toPurchaseHistory(customer.sales),
       serviceHistory: {
         diagnostics: [],
-        repairs: events
-          .filter((event) => event.type === CustomerEventType.SERVICE)
-          .map((event) => ({
-            id: event.id,
-            date: event.createdAt,
-            description: event.message,
-            createdBy: event.createdBy,
+        repairs: [
+          ...customer.serviceOrders.map((order) => ({
+            id: order.id,
+            date: order.completedAt ?? order.createdAt,
+            description: `${order.orderNumber}: ${order.problemDescription}`,
+            status: order.status,
+            totalAmount: Number(order.totalAmount),
           })),
-        warrantyRecords: [],
+          ...events
+            .filter((event) => event.type === CustomerEventType.SERVICE)
+            .map((event) => ({
+              id: event.id,
+              date: event.createdAt,
+              description: event.message,
+              createdBy: event.createdBy,
+            })),
+        ],
+        warrantyRecords: customer.warranties.map((warranty) => ({
+          id: warranty.id,
+          date: warranty.startsAt,
+          description: warranty.warrantyNumber,
+          status: warranty.status,
+        })),
       },
       timeline,
     };
@@ -393,6 +407,13 @@ export class CustomersService {
             receipt: true,
           },
           orderBy: { saleDate: 'desc' },
+        },
+        serviceOrders: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+        },
+        warranties: {
+          orderBy: { expiresAt: 'desc' },
         },
       },
     });
