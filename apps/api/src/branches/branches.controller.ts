@@ -1,16 +1,43 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Role } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Roles } from '../roles/roles.decorator';
+import { RolesGuard } from '../roles/roles.guard';
 import { BranchesService } from './branches.service';
+import { CreateBranchDto } from './dto/create-branch.dto';
+import { UpdateBranchDto } from './dto/update-branch.dto';
 
 @Controller('branches')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
+
+  @Post()
+  @Roles(Role.OWNER)
+  create(@Body() dto: CreateBranchDto) {
+    return this.branchesService.create(dto);
+  }
 
   @Get()
   findAll(@CurrentUser() user: AuthUser) {
     return this.branchesService.findAll(user);
+  }
+
+  @Get(':id')
+  findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.branchesService.findOne(user, id);
+  }
+
+  @Put(':id')
+  @Roles(Role.OWNER)
+  update(@Param('id') id: string, @Body() dto: UpdateBranchDto) {
+    return this.branchesService.update(id, dto);
+  }
+
+  @Get(':id/dashboard')
+  dashboard(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.branchesService.dashboard(user, id);
   }
 }

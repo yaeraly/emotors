@@ -79,6 +79,38 @@ async function main() {
       },
     });
   }
+
+  const branches = [
+    {
+      code: 'OSH',
+      name: 'Osh Branch',
+      city: 'Osh',
+      address: 'Osh',
+      ownerName: 'Franchise Owner',
+    },
+    {
+      code: 'KARAKOL',
+      name: 'Karakol Branch',
+      city: 'Karakol',
+      address: 'Karakol',
+      ownerName: 'Franchise Owner',
+    },
+    {
+      code: 'JALAL_ABAD',
+      name: 'Jalal-Abad Branch',
+      city: 'Jalal-Abad',
+      address: 'Jalal-Abad',
+      ownerName: 'Franchise Owner',
+    },
+  ];
+
+  for (const item of branches) {
+    await prisma.branch.upsert({
+      where: { code: item.code },
+      update: item,
+      create: item,
+    });
+  }
 }
 
 main()

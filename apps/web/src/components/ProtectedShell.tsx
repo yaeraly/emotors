@@ -49,6 +49,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     user?.role === 'MANAGER' ||
     user?.role === 'ACCOUNTANT';
   const canSeeInventory = Boolean(user);
+  const canSeeHq =
+    user?.role === 'OWNER' || user?.role === 'ACCOUNTANT';
+  const canSeeAcademy =
+    user?.role === 'OWNER' || user?.role === 'ACADEMY_MANAGER';
+  const canSeeMarketing =
+    user?.role === 'OWNER' || user?.role === 'MARKETING_MANAGER';
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -132,6 +138,19 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </div>
             ) : null}
             <div className="border-t border-slate-100 pt-2">
+              <p className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                {t('phase2.title')}
+              </p>
+              {canSeeHq ? (
+                <>
+                  <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link>
+                  <Link href="/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.kpi')}</Link>
+                  <Link href="/royalty" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.royalty')}</Link>
+                  <Link href="/analytics" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.analytics')}</Link>
+                </>
+              ) : null}
+              {canSeeAcademy ? <Link href="/academy" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.academy')}</Link> : null}
+              {canSeeMarketing ? <Link href="/marketing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.marketing')}</Link> : null}
               {[
                 'nav.dashboard',
                 'nav.service',

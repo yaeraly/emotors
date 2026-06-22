@@ -1,4 +1,10 @@
-export type Role = 'OWNER' | 'MANAGER' | 'MASTER' | 'ACCOUNTANT';
+export type Role =
+  | 'OWNER'
+  | 'MANAGER'
+  | 'MASTER'
+  | 'ACCOUNTANT'
+  | 'ACADEMY_MANAGER'
+  | 'MARKETING_MANAGER';
 
 export type CustomerStatus =
   | 'NEW'
@@ -46,6 +52,12 @@ export type Branch = {
   id: string;
   name: string;
   code: string;
+  city?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  ownerName?: string | null;
+  status?: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
+  openedAt?: string | null;
 };
 
 export type User = {
