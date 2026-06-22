@@ -178,6 +178,24 @@ enum ShortageReportItemType {
   OVERAGE
 }
 
+enum BranchInvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum BranchPaymentMethod {
+  CASH
+  QR
+  BANK
+  TRANSFER
+  INSTALLMENT
+  BALANCE
+}
+
 enum InvestmentDealStatus {
   NEW
   IN_DISCUSSION
@@ -248,6 +266,9 @@ model Branch {
   distributionOrders BranchDistributionOrder[]
   goodsReceivings GoodsReceiving[]
   shortageReports ShortageReport[]
+  branchInvoices BranchInvoice[]
+  branchPayments BranchPayment[]
+  branchAccountBalance BranchAccountBalance?
   stockRequests BranchStockRequest[]
   stockForecasts StockForecast[]
   taxProfiles TaxProfile[]
@@ -299,6 +320,8 @@ model User {
   approvedDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderApprover")
   goodsReceivings GoodsReceiving[] @relation("GoodsReceivingReceiver")
   shortageReports ShortageReport[] @relation("ShortageReportCreator")
+  branchInvoices BranchInvoice[] @relation("BranchInvoiceCreator")
+  branchPayments BranchPayment[] @relation("BranchPaymentCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -1099,6 +1122,7 @@ model BranchDistributionOrder {
   items                  BranchDistributionOrderItem[]
   goodsReceivings        GoodsReceiving[]
   shortageReports        ShortageReport[]
+  branchInvoice          BranchInvoice?
   createdAt              DateTime                      @default(now())
   updatedAt              DateTime                      @updatedAt
   deletedAt              DateTime?
@@ -1149,6 +1173,7 @@ model GoodsReceiving {
   note                String?
   items               GoodsReceivingItem[]
   shortageReport      ShortageReport?
+  branchInvoice       BranchInvoice?
   createdAt           DateTime                   @default(now())
   updatedAt           DateTime                   @updatedAt
   deletedAt           DateTime?
@@ -1230,6 +1255,67 @@ model ShortageReportItem {
   @@index([shortageReportId])
   @@index([productId])
   @@index([type])
+}
+
+model BranchInvoice {
+  id                  String              @id @default(cuid())
+  invoiceNumber       String              @unique
+  branchId            String
+  branch              Branch              @relation(fields: [branchId], references: [id])
+  distributionOrderId String              @unique
+  distributionOrder   BranchDistributionOrder @relation(fields: [distributionOrderId], references: [id])
+  goodsReceivingId    String              @unique
+  goodsReceiving      GoodsReceiving      @relation(fields: [goodsReceivingId], references: [id])
+  status              BranchInvoiceStatus @default(ISSUED)
+  totalAmount         Decimal             @default(0) @db.Decimal(14, 2)
+  paidAmount          Decimal             @default(0) @db.Decimal(14, 2)
+  debtAmount          Decimal             @default(0) @db.Decimal(14, 2)
+  dueDate             DateTime
+  issuedAt            DateTime            @default(now())
+  createdById         String
+  createdBy           User                @relation("BranchInvoiceCreator", fields: [createdById], references: [id])
+  payments            BranchPayment[]
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  deletedAt           DateTime?
+
+  @@index([branchId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([createdById])
+}
+
+model BranchPayment {
+  id          String              @id @default(cuid())
+  branchId    String
+  branch      Branch              @relation(fields: [branchId], references: [id])
+  invoiceId   String
+  invoice     BranchInvoice       @relation(fields: [invoiceId], references: [id])
+  amount      Decimal             @db.Decimal(14, 2)
+  method      BranchPaymentMethod
+  note        String?
+  paidAt      DateTime            @default(now())
+  createdById String
+  createdBy   User                @relation("BranchPaymentCreator", fields: [createdById], references: [id])
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  deletedAt   DateTime?
+
+  @@index([branchId])
+  @@index([invoiceId])
+  @@index([method])
+  @@index([paidAt])
+  @@index([createdById])
+}
+
+model BranchAccountBalance {
+  id            String    @id @default(cuid())
+  branchId      String    @unique
+  branch        Branch    @relation(fields: [branchId], references: [id])
+  totalDebt     Decimal   @default(0) @db.Decimal(14, 2)
+  totalPaid     Decimal   @default(0) @db.Decimal(14, 2)
+  lastPaymentAt DateTime?
+  updatedAt     DateTime  @updatedAt
 }
 
 model BranchStockRequest {

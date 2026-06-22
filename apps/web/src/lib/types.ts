@@ -61,6 +61,20 @@ export type BranchDistributionOrderStatus =
 export type GoodsReceivingStatus = 'DRAFT' | 'COMPLETED' | 'CANCELLED';
 export type ShortageReportStatus = 'OPEN' | 'RESOLVED' | 'CANCELLED';
 export type ShortageReportItemType = 'SHORTAGE' | 'OVERAGE';
+export type BranchInvoiceStatus =
+  | 'DRAFT'
+  | 'ISSUED'
+  | 'PARTIALLY_PAID'
+  | 'PAID'
+  | 'OVERDUE'
+  | 'CANCELLED';
+export type BranchPaymentMethod =
+  | 'CASH'
+  | 'QR'
+  | 'BANK'
+  | 'TRANSFER'
+  | 'INSTALLMENT'
+  | 'BALANCE';
 
 export type Branch = {
   id: string;
@@ -330,9 +344,55 @@ export type BranchDistributionOrder = {
   sentAt?: string | null;
   cancelledAt?: string | null;
   items?: BranchDistributionOrderItem[];
+  branchInvoice?: BranchInvoice | null;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+};
+
+export type BranchPayment = {
+  id: string;
+  branchId: string;
+  invoiceId: string;
+  amount: number;
+  method: BranchPaymentMethod;
+  note?: string | null;
+  paidAt: string;
+  createdById: string;
+  createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BranchInvoice = {
+  id: string;
+  invoiceNumber: string;
+  branchId: string;
+  branch?: Branch;
+  distributionOrderId: string;
+  distributionOrder?: BranchDistributionOrder;
+  goodsReceivingId: string;
+  goodsReceiving?: GoodsReceiving;
+  status: BranchInvoiceStatus;
+  totalAmount: number;
+  paidAmount: number;
+  debtAmount: number;
+  dueDate: string;
+  issuedAt: string;
+  createdById: string;
+  createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
+  payments?: BranchPayment[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BranchAccountBalance = {
+  id?: string;
+  branchId: string;
+  branch?: Branch;
+  totalDebt: number;
+  totalPaid: number;
+  lastPaymentAt?: string | null;
 };
 
 export type GoodsReceivingItem = {
@@ -368,6 +428,7 @@ export type GoodsReceiving = {
   note?: string | null;
   items?: GoodsReceivingItem[];
   shortageReport?: ShortageReport | null;
+  branchInvoice?: BranchInvoice | null;
   createdAt: string;
   updatedAt: string;
 };

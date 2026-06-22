@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   BranchDistributionOrderStatus,
+  BranchInvoiceStatus,
   Prisma,
   Role,
   ShortageReportItemType,
@@ -15,6 +16,8 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
+import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
@@ -279,10 +282,20 @@ export class DistributionService {
               : BranchDistributionOrderStatus.RECEIVED,
         },
       });
+      const invoice = await this.createInvoiceForReceiving(
+        tx,
+        user,
+        order.id,
+        receiving.id,
+        order.branchId,
+        receivingItems,
+      );
+      await this.refreshBranchAccountBalance(tx, order.branchId);
 
       return {
         receiving: await this.receivingInTx(tx, user, receiving.id),
         shortageReport,
+        invoice,
       };
     });
   }
@@ -346,6 +359,124 @@ export class DistributionService {
       data: { status: ShortageReportStatus.RESOLVED, resolvedAt: new Date() },
       include: this.shortageInclude(),
     });
+  }
+
+  invoices(user: AuthUser, query: BranchInvoiceQueryDto) {
+    this.assertQueryBranchAccessForFinance(user, query.branchId);
+    const where: Prisma.BranchInvoiceWhereInput = {
+      deletedAt: null,
+      ...(this.canManageFinance(user) ? {} : { branchId: user.branchId }),
+      ...(query.branchId ? { branchId: query.branchId } : {}),
+    };
+    if (query.status) where.status = query.status;
+    if (query.search?.trim()) {
+      where.invoiceNumber = { contains: query.search.trim(), mode: 'insensitive' };
+    }
+    if (query.dateFrom || query.dateTo) {
+      where.issuedAt = {
+        ...(query.dateFrom ? { gte: query.dateFrom } : {}),
+        ...(query.dateTo ? { lte: query.dateTo } : {}),
+      };
+    }
+
+    return this.prisma.branchInvoice.findMany({
+      where,
+      include: this.invoiceInclude(),
+      orderBy: { issuedAt: 'desc' },
+    }).then((items) => items.map((item) => this.toInvoiceResponse(item)));
+  }
+
+  async invoice(user: AuthUser, id: string) {
+    const invoice = await this.prisma.branchInvoice.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canManageFinance(user) ? {} : { branchId: user.branchId }),
+      },
+      include: this.invoiceInclude(),
+    });
+    if (!invoice) throw new NotFoundException('Branch invoice not found');
+    return this.toInvoiceResponse(invoice);
+  }
+
+  async addInvoicePayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canManageFinance(user) ? {} : { branchId: user.branchId }),
+        },
+      });
+      if (!invoice) throw new NotFoundException('Branch invoice not found');
+      if (invoice.status === BranchInvoiceStatus.CANCELLED) {
+        throw new BadRequestException('Cannot pay cancelled invoice');
+      }
+      const amount = this.roundMoney(Number(dto.amount));
+      if (amount <= 0) throw new BadRequestException('Payment amount must be greater than 0');
+      if (amount > Number(invoice.debtAmount)) {
+        throw new BadRequestException('Payment amount cannot exceed invoice debt');
+      }
+
+      await tx.branchPayment.create({
+        data: {
+          branchId: invoice.branchId,
+          invoiceId: invoice.id,
+          amount,
+          method: dto.method,
+          note: dto.note,
+          createdById: user.id,
+          paidAt: new Date(),
+        },
+      });
+
+      const paidAggregate = await tx.branchPayment.aggregate({
+        where: { invoiceId: invoice.id, deletedAt: null },
+        _sum: { amount: true },
+      });
+      const paidAmount = this.roundMoney(Number(paidAggregate._sum.amount ?? 0));
+      const totalAmount = Number(invoice.totalAmount);
+      const debtAmount = this.roundMoney(Math.max(totalAmount - paidAmount, 0));
+      const status =
+        debtAmount === 0
+          ? BranchInvoiceStatus.PAID
+          : paidAmount > 0
+            ? BranchInvoiceStatus.PARTIALLY_PAID
+            : BranchInvoiceStatus.ISSUED;
+
+      await tx.branchInvoice.update({
+        where: { id: invoice.id },
+        data: { paidAmount, debtAmount, status },
+      });
+      await this.refreshBranchAccountBalance(tx, invoice.branchId);
+
+      const updated = await tx.branchInvoice.findUniqueOrThrow({
+        where: { id: invoice.id },
+        include: this.invoiceInclude(),
+      });
+      return this.toInvoiceResponse(updated);
+    });
+  }
+
+  async branchAccountBalance(user: AuthUser, branchId: string) {
+    if (!this.canManageFinance(user) && branchId !== user.branchId) {
+      throw new ForbiddenException('Forbidden branch');
+    }
+    const balance = await this.prisma.branchAccountBalance.findUnique({
+      where: { branchId },
+      include: { branch: true },
+    });
+    return balance
+      ? this.toBalanceResponse(balance)
+      : { branchId, totalDebt: 0, totalPaid: 0, lastPaymentAt: null };
+  }
+
+  branchBalances(user: AuthUser) {
+    if (!this.canManageFinance(user)) throw new ForbiddenException('Forbidden');
+    return this.prisma.branchAccountBalance.findMany({
+      include: { branch: true },
+      orderBy: { totalDebt: 'desc' },
+    }).then((items) => items.map((item) => this.toBalanceResponse(item)));
   }
 
   private async transition(
@@ -437,6 +568,7 @@ export class DistributionService {
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
       items: { include: { product: true } },
+      branchInvoice: true,
     };
   }
 
@@ -448,6 +580,22 @@ export class DistributionService {
       receivedBy: { select: { id: true, fullName: true, role: true } },
       items: true,
       shortageReport: { include: { items: true } },
+      branchInvoice: true,
+    };
+  }
+
+  private invoiceInclude() {
+    return {
+      branch: true,
+      distributionOrder: true,
+      goodsReceiving: true,
+      payments: {
+        include: {
+          createdBy: { select: { id: true, fullName: true, role: true } },
+        },
+        orderBy: { paidAt: 'desc' as const },
+      },
+      createdBy: { select: { id: true, fullName: true, role: true } },
     };
   }
 
@@ -470,6 +618,90 @@ export class DistributionService {
         ...(this.canManage(user) ? {} : { branchId: user.branchId }),
       },
       include: this.receivingInclude(),
+    });
+  }
+
+  private async generateInvoiceNumber(tx: PrismaTx) {
+    const count = await tx.branchInvoice.count();
+    return `BI-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
+  }
+
+  private async createInvoiceForReceiving(
+    tx: PrismaTx,
+    user: AuthUser,
+    distributionOrderId: string,
+    goodsReceivingId: string,
+    branchId: string,
+    receivingItems: Array<{
+      receivedQuantity: number;
+      unitPrice: Prisma.Decimal;
+    }>,
+  ) {
+    const existing = await tx.branchInvoice.findFirst({
+      where: { distributionOrderId, goodsReceivingId, deletedAt: null },
+      include: this.invoiceInclude(),
+    });
+    if (existing) return this.toInvoiceResponse(existing);
+
+    const totalAmount = this.roundMoney(
+      receivingItems.reduce(
+        (sum, item) => sum + item.receivedQuantity * Number(item.unitPrice),
+        0,
+      ),
+    );
+    const issuedAt = new Date();
+    const invoice = await tx.branchInvoice.create({
+      data: {
+        invoiceNumber: await this.generateInvoiceNumber(tx),
+        branchId,
+        distributionOrderId,
+        goodsReceivingId,
+        totalAmount,
+        paidAmount: 0,
+        debtAmount: totalAmount,
+        dueDate: new Date(issuedAt.getTime() + 15 * 24 * 60 * 60 * 1000),
+        issuedAt,
+        createdById: user.id,
+      },
+      include: this.invoiceInclude(),
+    });
+    return this.toInvoiceResponse(invoice);
+  }
+
+  private async refreshBranchAccountBalance(tx: PrismaTx, branchId: string) {
+    const [invoices, paymentAggregate] = await Promise.all([
+      tx.branchInvoice.findMany({
+        where: {
+          branchId,
+          deletedAt: null,
+          NOT: { status: BranchInvoiceStatus.CANCELLED },
+        },
+        select: { debtAmount: true, paidAmount: true },
+      }),
+      tx.branchPayment.aggregate({
+        where: { branchId, deletedAt: null },
+        _max: { paidAt: true },
+      }),
+    ]);
+    const totalDebt = this.roundMoney(
+      invoices.reduce((sum, invoice) => sum + Number(invoice.debtAmount), 0),
+    );
+    const totalPaid = this.roundMoney(
+      invoices.reduce((sum, invoice) => sum + Number(invoice.paidAmount), 0),
+    );
+    return tx.branchAccountBalance.upsert({
+      where: { branchId },
+      create: {
+        branchId,
+        totalDebt,
+        totalPaid,
+        lastPaymentAt: paymentAggregate._max.paidAt,
+      },
+      update: {
+        totalDebt,
+        totalPaid,
+        lastPaymentAt: paymentAggregate._max.paidAt,
+      },
     });
   }
 
@@ -502,8 +734,18 @@ export class DistributionService {
     return user.role === Role.OWNER || user.role === Role.SUPPLY_CHAIN_MANAGER;
   }
 
+  private canManageFinance(user: AuthUser) {
+    return this.canManage(user) || user.role === Role.ACCOUNTANT;
+  }
+
   private assertQueryBranchAccess(user: AuthUser, branchId?: string) {
     if (!this.canManage(user) && branchId && branchId !== user.branchId) {
+      throw new ForbiddenException('Forbidden branch');
+    }
+  }
+
+  private assertQueryBranchAccessForFinance(user: AuthUser, branchId?: string) {
+    if (!this.canManageFinance(user) && branchId && branchId !== user.branchId) {
       throw new ForbiddenException('Forbidden branch');
     }
   }
@@ -522,6 +764,30 @@ export class DistributionService {
         totalPrice: Number(item.totalPrice),
         profit: Number(item.profit),
       })),
+      branchInvoice: order.branchInvoice
+        ? this.toInvoiceResponse(order.branchInvoice)
+        : order.branchInvoice,
+    };
+  }
+
+  private toInvoiceResponse(invoice: any) {
+    return {
+      ...invoice,
+      totalAmount: Number(invoice.totalAmount),
+      paidAmount: Number(invoice.paidAmount),
+      debtAmount: Number(invoice.debtAmount),
+      payments: invoice.payments?.map((payment: any) => ({
+        ...payment,
+        amount: Number(payment.amount),
+      })),
+    };
+  }
+
+  private toBalanceResponse(balance: any) {
+    return {
+      ...balance,
+      totalDebt: Number(balance.totalDebt),
+      totalPaid: Number(balance.totalPaid),
     };
   }
 

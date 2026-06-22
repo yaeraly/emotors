@@ -5,6 +5,8 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
+import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
+import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
@@ -13,7 +15,7 @@ import { DistributionService } from './distribution.service';
 
 @Controller('distribution')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.MANAGER)
+@Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.MANAGER, Role.ACCOUNTANT)
 export class DistributionController {
   constructor(private readonly distributionService: DistributionService) {}
 
@@ -90,5 +92,36 @@ export class DistributionController {
   @Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER)
   resolveShortageReport(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.resolveShortageReport(user, id);
+  }
+
+  @Get('invoices')
+  invoices(@CurrentUser() user: AuthUser, @Query() query: BranchInvoiceQueryDto) {
+    return this.distributionService.invoices(user, query);
+  }
+
+  @Get('invoices/:id')
+  invoice(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.invoice(user, id);
+  }
+
+  @Post('invoices/:id/payments')
+  @Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT)
+  addInvoicePayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AddBranchPaymentDto,
+  ) {
+    return this.distributionService.addInvoicePayment(user, id, dto);
+  }
+
+  @Get('branches/:branchId/account-balance')
+  branchAccountBalance(@CurrentUser() user: AuthUser, @Param('branchId') branchId: string) {
+    return this.distributionService.branchAccountBalance(user, branchId);
+  }
+
+  @Get('branch-balances')
+  @Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT)
+  branchBalances(@CurrentUser() user: AuthUser) {
+    return this.distributionService.branchBalances(user);
   }
 }

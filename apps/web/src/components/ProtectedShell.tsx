@@ -169,6 +169,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                     <Link href="/distribution/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.orders')}</Link>
                     <Link href="/distribution/receivings" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.receiveGoods')}</Link>
                     <Link href="/distribution/shortage-reports" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.shortageReports')}</Link>
+                    <Link href="/distribution/invoices" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.invoices')}</Link>
+                    <Link href="/distribution/branch-balances" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.branchBalances')}</Link>
                   </div>
                 </div>
               ) : null}

@@ -130,6 +130,20 @@ export default function DistributionOrderDetailPage() {
                 {(order.status === 'DRAFT' || order.status === 'APPROVED') ? <button onClick={() => void action('cancel', t('distribution.orderCancelled'))} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">{t('distribution.cancel')}</button> : null}
               </div>
             </section>
+            {order.branchInvoice ? (
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold">{t('distribution.invoice')}</h3>
+                <div className="mt-4 grid gap-4 md:grid-cols-4">
+                  <Info label={t('distribution.invoiceNumber')} value={order.branchInvoice.invoiceNumber} />
+                  <Info label={t('distribution.totalAmount')} value={formatKgs(order.branchInvoice.totalAmount)} />
+                  <Info label={t('distribution.paidAmount')} value={formatKgs(order.branchInvoice.paidAmount)} />
+                  <Info label={t('distribution.debtAmount')} value={formatKgs(order.branchInvoice.debtAmount)} />
+                </div>
+                <a href={`/distribution/invoices/${order.branchInvoice.id}`} className="mt-4 inline-flex rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
+                  {t('common.open')}
+                </a>
+              </section>
+            ) : null}
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-bold">{t('distribution.items')}</h3>
               <div className="mt-4 overflow-x-auto">
