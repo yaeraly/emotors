@@ -192,7 +192,7 @@ export class InventoryService {
         });
       }
 
-      return this.product(user, product.id);
+      return this.getProductResponseInTx(tx, user, product.id);
     });
   }
 
@@ -349,7 +349,7 @@ export class InventoryService {
         },
       });
 
-      return this.product(user, id);
+      return this.getProductResponseInTx(tx, user, id);
     });
   }
 
@@ -758,6 +758,43 @@ export class InventoryService {
     }
 
     return product;
+  }
+
+  private async getProductResponseInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    id: string,
+  ) {
+    const product = await tx.product.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+      },
+      include: {
+        ...this.productInclude(),
+        priceHistory: {
+          include: {
+            createdBy: { select: { id: true, fullName: true, role: true } },
+          },
+          orderBy: { effectiveFrom: 'desc' },
+        },
+        stockMovements: {
+          include: {
+            warehouse: true,
+            createdBy: { select: { id: true, fullName: true, role: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 100,
+        },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    return this.toProductResponse(product);
   }
 
   private async getProductForWrite(tx: PrismaTx | PrismaService, user: AuthUser, id: string) {
