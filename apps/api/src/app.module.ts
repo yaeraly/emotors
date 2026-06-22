@@ -6,6 +6,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
 import { BranchesModule } from './branches/branches.module';
 import { CustomersModule } from './customers/customers.module';
+import { DistributionModule } from './distribution/distribution.module';
 import { ExpansionModule } from './expansion/expansion.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { InvestmentModule } from './investment/investment.module';
@@ -27,6 +28,7 @@ import { TaxModule } from './tax/tax.module';
     AuthModule,
     BranchesModule,
     CustomersModule,
+    DistributionModule,
     InventoryModule,
     SalesModule,
     KpiModule,

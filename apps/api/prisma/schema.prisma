@@ -152,6 +152,13 @@ enum StockTransferStatus {
   CANCELLED
 }
 
+enum BranchDistributionOrderStatus {
+  DRAFT
+  APPROVED
+  SENT
+  CANCELLED
+}
+
 enum InvestmentDealStatus {
   NEW
   IN_DISCUSSION
@@ -219,6 +226,7 @@ model Branch {
   purchaseOrders PurchaseOrder[]
   stockTransferFrom StockTransfer[] @relation("StockTransferFromBranch")
   stockTransferTo StockTransfer[] @relation("StockTransferToBranch")
+  distributionOrders BranchDistributionOrder[]
   stockRequests BranchStockRequest[]
   stockForecasts StockForecast[]
   taxProfiles TaxProfile[]
@@ -266,6 +274,8 @@ model User {
   royaltyRules RoyaltyRule[] @relation("RoyaltyRuleCreator")
   royaltyInvoices RoyaltyInvoice[] @relation("RoyaltyInvoiceCreator")
   royaltyPayments RoyaltyPayment[] @relation("RoyaltyPaymentCreator")
+  createdDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderCreator")
+  approvedDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderApprover")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -472,6 +482,8 @@ model Warehouse {
   products  Product[]
   stockMovements StockMovement[]
   inventoryBalances InventoryBalance[]
+  sourceDistributionOrders BranchDistributionOrder[] @relation("DistributionSourceWarehouse")
+  destinationDistributionOrders BranchDistributionOrder[] @relation("DistributionDestinationWarehouse")
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -508,6 +520,7 @@ model Product {
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
+  distributionOrderItems BranchDistributionOrderItem[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
@@ -1032,6 +1045,61 @@ model StockTransferItem {
   createdAt       DateTime      @default(now())
 
   @@index([stockTransferId])
+  @@index([productId])
+}
+
+model BranchDistributionOrder {
+  id                     String                        @id @default(cuid())
+  orderNumber            String                        @unique
+  branchId               String
+  branch                 Branch                        @relation(fields: [branchId], references: [id])
+  sourceWarehouseId      String
+  sourceWarehouse        Warehouse                     @relation("DistributionSourceWarehouse", fields: [sourceWarehouseId], references: [id])
+  destinationWarehouseId String
+  destinationWarehouse   Warehouse                     @relation("DistributionDestinationWarehouse", fields: [destinationWarehouseId], references: [id])
+  status                 BranchDistributionOrderStatus @default(DRAFT)
+  totalAmount            Decimal                       @default(0) @db.Decimal(14, 2)
+  totalCost              Decimal                       @default(0) @db.Decimal(14, 2)
+  totalProfit            Decimal                       @default(0) @db.Decimal(14, 2)
+  note                   String?
+  createdById            String
+  createdBy              User                          @relation("DistributionOrderCreator", fields: [createdById], references: [id])
+  approvedById           String?
+  approvedBy             User?                         @relation("DistributionOrderApprover", fields: [approvedById], references: [id])
+  approvedAt             DateTime?
+  sentAt                 DateTime?
+  cancelledAt            DateTime?
+  items                  BranchDistributionOrderItem[]
+  createdAt              DateTime                      @default(now())
+  updatedAt              DateTime                      @updatedAt
+  deletedAt              DateTime?
+
+  @@index([branchId])
+  @@index([sourceWarehouseId])
+  @@index([destinationWarehouseId])
+  @@index([status])
+  @@index([createdById])
+  @@index([approvedById])
+}
+
+model BranchDistributionOrderItem {
+  id          String                  @id @default(cuid())
+  orderId     String
+  order       BranchDistributionOrder @relation(fields: [orderId], references: [id])
+  productId   String
+  product     Product                 @relation(fields: [productId], references: [id])
+  sku         String
+  productName String
+  quantity    Int
+  unitCost    Decimal                 @db.Decimal(14, 2)
+  unitPrice   Decimal                 @db.Decimal(14, 2)
+  totalCost   Decimal                 @db.Decimal(14, 2)
+  totalPrice  Decimal                 @db.Decimal(14, 2)
+  profit      Decimal                 @db.Decimal(14, 2)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+
+  @@index([orderId])
   @@index([productId])
 }
 

@@ -59,6 +59,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     user?.role === 'OWNER' || user?.role === 'PROCUREMENT_MANAGER';
   const canSeeSupplyChain =
     user?.role === 'OWNER' || user?.role === 'SUPPLY_CHAIN_MANAGER' || user?.role === 'MANAGER';
+  const canSeeDistribution = canSeeSupplyChain;
   const canSeeInvestment =
     user?.role === 'OWNER' || user?.role === 'INVESTMENT_MANAGER';
   const canSeeExpansion =
@@ -161,6 +162,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               ) : null}
               {canSeeAcademy ? <Link href="/academy" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.academy')}</Link> : null}
               {canSeeMarketing ? <Link href="/marketing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.marketing')}</Link> : null}
+              {canSeeDistribution ? <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link> : null}
               {canSeeProcurement ? <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.title')}</Link> : null}
               {canSeeSupplyChain ? <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyChain.title')}</Link> : null}
               {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}

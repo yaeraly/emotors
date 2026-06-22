@@ -51,6 +51,11 @@ export type SaleStatus =
   | 'APPROVED_BY_CUSTOMER'
   | 'FINALIZED'
   | 'CANCELLED';
+export type BranchDistributionOrderStatus =
+  | 'DRAFT'
+  | 'APPROVED'
+  | 'SENT'
+  | 'CANCELLED';
 
 export type Branch = {
   id: string;
@@ -279,6 +284,50 @@ export type StockValueReport = {
   totalStockValueKgs: number;
   byWarehouse: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
   byCategory: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
+};
+
+export type BranchDistributionOrderItem = {
+  id: string;
+  orderId: string;
+  productId: string;
+  product?: Product;
+  sku: string;
+  productName: string;
+  quantity: number;
+  unitCost: number;
+  unitPrice: number;
+  totalCost: number;
+  totalPrice: number;
+  profit: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BranchDistributionOrder = {
+  id: string;
+  orderNumber: string;
+  branchId: string;
+  branch?: Branch;
+  sourceWarehouseId: string;
+  sourceWarehouse?: Warehouse;
+  destinationWarehouseId: string;
+  destinationWarehouse?: Warehouse;
+  status: BranchDistributionOrderStatus;
+  totalAmount: number;
+  totalCost: number;
+  totalProfit: number;
+  note?: string | null;
+  createdById: string;
+  createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
+  approvedById?: string | null;
+  approvedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;
+  approvedAt?: string | null;
+  sentAt?: string | null;
+  cancelledAt?: string | null;
+  items?: BranchDistributionOrderItem[];
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
 };
 
 export type ProductCategory = {
