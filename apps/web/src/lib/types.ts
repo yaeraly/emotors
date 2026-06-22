@@ -4,7 +4,11 @@ export type Role =
   | 'MASTER'
   | 'ACCOUNTANT'
   | 'ACADEMY_MANAGER'
-  | 'MARKETING_MANAGER';
+  | 'MARKETING_MANAGER'
+  | 'PROCUREMENT_MANAGER'
+  | 'SUPPLY_CHAIN_MANAGER'
+  | 'INVESTMENT_MANAGER'
+  | 'EXPANSION_MANAGER';
 
 export type CustomerStatus =
   | 'NEW'

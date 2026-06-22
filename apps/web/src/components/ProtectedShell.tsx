@@ -55,6 +55,16 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     user?.role === 'OWNER' || user?.role === 'ACADEMY_MANAGER';
   const canSeeMarketing =
     user?.role === 'OWNER' || user?.role === 'MARKETING_MANAGER';
+  const canSeeProcurement =
+    user?.role === 'OWNER' || user?.role === 'PROCUREMENT_MANAGER';
+  const canSeeSupplyChain =
+    user?.role === 'OWNER' || user?.role === 'SUPPLY_CHAIN_MANAGER' || user?.role === 'MANAGER';
+  const canSeeInvestment =
+    user?.role === 'OWNER' || user?.role === 'INVESTMENT_MANAGER';
+  const canSeeExpansion =
+    user?.role === 'OWNER' || user?.role === 'EXPANSION_MANAGER';
+  const canSeeTax = user?.role === 'OWNER' || user?.role === 'ACCOUNTANT';
+  const canSeeAi = Boolean(user);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -151,6 +161,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               ) : null}
               {canSeeAcademy ? <Link href="/academy" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.academy')}</Link> : null}
               {canSeeMarketing ? <Link href="/marketing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.marketing')}</Link> : null}
+              {canSeeProcurement ? <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.title')}</Link> : null}
+              {canSeeSupplyChain ? <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyChain.title')}</Link> : null}
+              {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}
+              {canSeeExpansion ? <Link href="/expansion" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('expansion.title')}</Link> : null}
+              {canSeeTax ? <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('tax.title')}</Link> : null}
+              {canSeeAi ? <Link href="/ai" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('ai.title')}</Link> : null}
               {[
                 'nav.dashboard',
                 'nav.service',
