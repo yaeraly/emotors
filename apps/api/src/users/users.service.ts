@@ -144,7 +144,7 @@ export class UsersService {
     if (role && requiresBranch(role) && !branchId) {
       throw new BadRequestException('Branch is required for this role');
     }
-    if (FULL_ACCESS_ROLES.includes(user.role)) return branchId ?? null;
+    if (FULL_ACCESS_ROLES.includes(user.role)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }

@@ -2,10 +2,10 @@ import { Role } from '@prisma/client';
 
 export type AuthUser = {
   id: string;
-  email: string | null;
+  email: string;
   fullName: string;
   role: Role;
-  branchId: string | null;
+  branchId: string;
   status?: string;
   permissions?: string[];
 };

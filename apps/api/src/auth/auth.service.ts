@@ -11,9 +11,9 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 
 type JwtPayload = {
   sub: string;
-  email: string | null;
+  email: string;
   role: Role;
-  branchId: string | null;
+  branchId: string;
 };
 
 @Injectable()

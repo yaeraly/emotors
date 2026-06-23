@@ -8,9 +8,9 @@ import { AuthUser } from './auth.types';
 
 type JwtPayload = {
   sub: string;
-  email: string | null;
+  email: string;
   role: AuthUser['role'];
-  branchId: string | null;
+  branchId: string;
 };
 
 @Injectable()
