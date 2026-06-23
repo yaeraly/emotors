@@ -3,13 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../prisma/prisma.service';
+import { permissionsForRole, requiresBranch } from '../rbac/rbac';
 import { AuthUser } from './auth.types';
 
 type JwtPayload = {
   sub: string;
-  email: string;
+  email: string | null;
   role: AuthUser['role'];
-  branchId: string;
+  branchId: string | null;
 };
 
 @Injectable()
@@ -42,6 +43,29 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User no longer exists');
     }
 
-    return user;
+    if (requiresBranch(user.role) && !user.branchId) {
+      throw new UnauthorizedException('User branch is not assigned');
+    }
+
+    const userRoles = await this.prisma.userRole.findMany({
+      where: { userId: user.id },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: { permission: true },
+            },
+          },
+        },
+      },
+    });
+    const permissions = userRoles.flatMap((userRole) =>
+      userRole.role.permissions.map((rolePermission) => rolePermission.permission.code),
+    );
+
+    return {
+      ...user,
+      permissions: permissions.length ? Array.from(new Set(permissions)) : permissionsForRole(user.role),
+    };
   }
 }

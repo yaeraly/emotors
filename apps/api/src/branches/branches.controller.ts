@@ -16,7 +16,7 @@ export class BranchesController {
   constructor(private readonly branchesService: BranchesService) {}
 
   @Post()
-  @Roles(Role.OWNER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_DIRECTOR)
   create(@Body() dto: CreateBranchDto) {
     return this.branchesService.create(dto);
   }
@@ -32,13 +32,13 @@ export class BranchesController {
   }
 
   @Put(':id')
-  @Roles(Role.OWNER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_DIRECTOR)
   update(@Param('id') id: string, @Body() dto: UpdateBranchDto) {
     return this.branchesService.update(id, dto);
   }
 
   @Delete(':id')
-  @Roles(Role.OWNER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_DIRECTOR)
   delete(@Param('id') id: string) {
     return this.branchesService.delete(id);
   }

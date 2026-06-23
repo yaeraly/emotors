@@ -13,6 +13,7 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -296,7 +297,7 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
       },
       include: {
         ...this.productInclude(),
@@ -527,7 +528,7 @@ export class InventoryService {
 
   async warehouse(user: AuthUser, id: string) {
     const warehouse = await this.prisma.warehouse.findFirst({
-      where: { id, ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }) },
+      where: { id, ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }) },
     });
 
     if (!warehouse) {
@@ -649,7 +650,7 @@ export class InventoryService {
     const currentQuantity = current?.quantity ?? 0;
     const nextQuantity = currentQuantity + quantityDelta;
 
-    if (nextQuantity < 0 && !(user.role === Role.OWNER && dto.type === StockMovementType.ADJUSTMENT)) {
+    if (nextQuantity < 0 && !(isFullAccessRole(user.role) && dto.type === StockMovementType.ADJUSTMENT)) {
       throw new BadRequestException('Negative stock is not allowed');
     }
 
@@ -914,7 +915,11 @@ export class InventoryService {
   }
 
   private canAccessAllInventory(user: AuthUser) {
-    return user.role === Role.OWNER || user.role === Role.SUPPLY_CHAIN_MANAGER;
+    return (
+      isFullAccessRole(user.role) ||
+      user.role === Role.SUPPLY_CHAIN_MANAGER ||
+      user.role === Role.WAREHOUSE_MANAGER
+    );
   }
 
   private toProductResponse(product: any) {

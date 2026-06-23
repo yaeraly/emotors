@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { AiInsightType, Role, SaleStatus } from '@prisma/client';
+import { AiInsightType, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 
 @Injectable()
 export class AiService {
@@ -9,13 +10,13 @@ export class AiService {
 
   insights(user: AuthUser) {
     return this.prisma.aiInsight.findMany({
-      where: user.role === Role.OWNER ? {} : { branchId: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { branchId: user.branchId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async generateInsights(user: AuthUser) {
-    const branchWhere = user.role === Role.OWNER ? {} : { branchId: user.branchId };
+    const branchWhere = canAccessAllBranches(user.role) ? {} : { branchId: user.branchId };
     const lowStock = await this.prisma.inventoryBalance.findMany({
       where: branchWhere,
       include: { product: true },
@@ -38,16 +39,16 @@ export class AiService {
 
   async salesForecast(user: AuthUser) {
     const sales = await this.prisma.sale.findMany({
-      where: { status: SaleStatus.FINALIZED, ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }) },
+      where: { status: SaleStatus.FINALIZED, ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }) },
       select: { totalAmount: true, branchId: true },
     });
     const total = sales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0);
-    return [{ expectedRevenue: total * 1.1, confidence: 70, branchId: user.role === Role.OWNER ? null : user.branchId }];
+    return [{ expectedRevenue: total * 1.1, confidence: 70, branchId: canAccessAllBranches(user.role) ? null : user.branchId }];
   }
 
   stockRisk(user: AuthUser) {
     return this.prisma.inventoryBalance.findMany({
-      where: user.role === Role.OWNER ? {} : { branchId: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { branchId: user.branchId },
       include: { product: true, branch: true },
       orderBy: { updatedAt: 'desc' },
     });
@@ -55,7 +56,7 @@ export class AiService {
 
   customerPredictions(user: AuthUser) {
     return this.prisma.customer.findMany({
-      where: user.role === Role.OWNER ? { deletedAt: null } : { branchId: user.branchId, deletedAt: null },
+      where: canAccessAllBranches(user.role) ? { deletedAt: null } : { branchId: user.branchId, deletedAt: null },
       take: 50,
       orderBy: { updatedAt: 'desc' },
     });
@@ -63,7 +64,7 @@ export class AiService {
 
   kpiRecommendations(user: AuthUser) {
     return this.prisma.kpiRecommendation.findMany({
-      where: user.role === Role.OWNER ? {} : { branchId: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { branchId: user.branchId },
       orderBy: { createdAt: 'desc' },
     });
   }

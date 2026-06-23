@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma, Role, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 
 @Injectable()
 export class KpiService {
@@ -79,8 +80,8 @@ export class KpiService {
 
   async employeeKpis(user: AuthUser) {
     const employeeWhere =
-      user.role === Role.OWNER || user.role === Role.MANAGER || user.role === Role.ACCOUNTANT
-        ? user.role === Role.OWNER
+      canAccessAllBranches(user.role) || user.role === Role.MANAGER || user.role === Role.ACCOUNTANT
+        ? canAccessAllBranches(user.role)
           ? {}
           : { branchId: user.branchId }
         : { id: user.id };
@@ -144,19 +145,19 @@ export class KpiService {
 
   private accessibleBranches(user: AuthUser) {
     return this.prisma.branch.findMany({
-      where: user.role === Role.OWNER ? {} : { id: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
       orderBy: { name: 'asc' },
     });
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (user.role === Role.OWNER) return branchId ?? user.branchId;
+    if (canAccessAllBranches(user.role)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }
 
   private ensureBranchAccess(user: AuthUser, branchId: string) {
-    if (user.role !== Role.OWNER && user.branchId !== branchId) throw new ForbiddenException('Forbidden branch');
+    if (!canAccessAllBranches(user.role) && user.branchId !== branchId) throw new ForbiddenException('Forbidden branch');
   }
 
   private monthStart() {

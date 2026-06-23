@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -88,7 +89,7 @@ export class CommissionsService {
   createRule(user: AuthUser, dto: any) {
     return this.prisma.employeeCompensationRule.create({
       data: {
-        branchId: user.role === Role.OWNER ? dto.branchId ?? user.branchId : user.branchId,
+        branchId: canAccessAllBranches(user.role) ? dto.branchId ?? user.branchId : user.branchId,
         employeeId: dto.employeeId,
         role: dto.role,
         fixedSalary: Number(dto.fixedSalary ?? 0),
@@ -106,7 +107,7 @@ export class CommissionsService {
     return this.prisma.employeeCompensationRule.findMany({
       where: {
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
       },
       include: { employee: true, branch: true },
       orderBy: { createdAt: 'desc' },
@@ -115,7 +116,7 @@ export class CommissionsService {
 
   sales(user: AuthUser) {
     return this.prisma.salesCommission.findMany({
-      where: user.role === Role.OWNER ? {} : { employee: { branchId: user.branchId } },
+      where: canAccessAllBranches(user.role) ? {} : { employee: { branchId: user.branchId } },
       include: { employee: true, sale: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -124,7 +125,7 @@ export class CommissionsService {
   repairs(user: AuthUser) {
     return this.prisma.repairCommission.findMany({
       where:
-        user.role === Role.OWNER
+        canAccessAllBranches(user.role)
           ? {}
           : user.role === Role.MASTER
             ? { employeeId: user.id }
@@ -138,7 +139,7 @@ export class CommissionsService {
     return this.prisma.repairCommission.findFirst({
       where: {
         id,
-        ...(user.role === Role.OWNER
+        ...(canAccessAllBranches(user.role)
           ? {}
           : user.role === Role.MASTER
             ? { employeeId: user.id }
@@ -153,7 +154,7 @@ export class CommissionsService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
       },
       include: { employee: true, branch: true },
     });

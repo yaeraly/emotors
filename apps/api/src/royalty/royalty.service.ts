@@ -1,7 +1,8 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { Role, RoyaltyInvoiceStatus, RoyaltyRuleType, SaleStatus } from '@prisma/client';
+import { RoyaltyInvoiceStatus, RoyaltyRuleType, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 
 @Injectable()
 export class RoyaltyService {
@@ -23,7 +24,7 @@ export class RoyaltyService {
 
   rules(user: AuthUser) {
     return this.prisma.royaltyRule.findMany({
-      where: user.role === Role.OWNER ? {} : { branchId: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { branchId: user.branchId },
       include: { branch: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -32,7 +33,7 @@ export class RoyaltyService {
   async generateMonthly(user: AuthUser, dto: any) {
     const month = dto.month ? new Date(dto.month) : this.monthStart();
     const branches = await this.prisma.branch.findMany({
-      where: user.role === Role.OWNER ? {} : { id: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
       include: { royaltyRules: { where: { isActive: true } } },
     });
     const invoices = [];
@@ -71,7 +72,7 @@ export class RoyaltyService {
 
   invoices(user: AuthUser) {
     return this.prisma.royaltyInvoice.findMany({
-      where: user.role === Role.OWNER ? {} : { branchId: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { branchId: user.branchId },
       include: { branch: true, payments: true },
       orderBy: { month: 'desc' },
     });
@@ -79,7 +80,7 @@ export class RoyaltyService {
 
   async pay(user: AuthUser, id: string, dto: any) {
     const invoice = await this.prisma.royaltyInvoice.findFirst({
-      where: { id, ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }) },
+      where: { id, ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }) },
     });
     if (!invoice) throw new ForbiddenException('Invoice not found');
     await this.prisma.royaltyPayment.create({
@@ -99,7 +100,7 @@ export class RoyaltyService {
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (user.role === Role.OWNER) return branchId ?? user.branchId;
+    if (canAccessAllBranches(user.role)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }

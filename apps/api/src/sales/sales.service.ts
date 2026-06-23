@@ -18,6 +18,7 @@ import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches, isFullAccessRole } from '../rbac/rbac';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
@@ -405,8 +406,8 @@ export class SalesService {
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
 
-      if (sale.status === SaleStatus.FINALIZED && user.role !== Role.OWNER) {
-        throw new ForbiddenException('Only OWNER can cancel finalized sale');
+      if (sale.status === SaleStatus.FINALIZED && !isFullAccessRole(user.role)) {
+        throw new ForbiddenException('Only HQ can cancel finalized sale');
       }
 
       if (sale.status === SaleStatus.CANCELLED) {
@@ -618,7 +619,7 @@ export class SalesService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
       },
       include: this.saleInclude(),
     });
@@ -639,7 +640,7 @@ export class SalesService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
       },
       include: {
         installments: { orderBy: { dueDate: 'asc' } },
@@ -654,7 +655,7 @@ export class SalesService {
   }
 
   private buildBranchWhere(user: AuthUser, requestedBranchId?: string) {
-    if (user.role === Role.OWNER) {
+    if (canAccessAllBranches(user.role)) {
       return requestedBranchId ? { branchId: requestedBranchId } : {};
     }
 
@@ -679,7 +680,7 @@ export class SalesService {
   }
 
   private ensureBranchAccess(user: AuthUser, branchId: string) {
-    if (user.role !== Role.OWNER && user.branchId !== branchId) {
+    if (!canAccessAllBranches(user.role) && user.branchId !== branchId) {
       throw new ForbiddenException('You can only access your own branch');
     }
   }

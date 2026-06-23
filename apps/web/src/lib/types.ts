@@ -121,6 +121,7 @@ export type User = {
   branch?: Branch;
   status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   mustChangePassword?: boolean;
+  permissions?: string[];
 };
 
 export type Customer = {

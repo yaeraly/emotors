@@ -24,7 +24,7 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 
 @Controller('customers')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 

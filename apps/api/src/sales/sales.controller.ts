@@ -21,18 +21,27 @@ import { SalesService } from './sales.service';
 
 @Controller('sales')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+@Roles(
+  Role.OWNER,
+  Role.CEO,
+  Role.SYSTEM_ADMINISTRATOR,
+  Role.FRANCHISE_OWNER,
+  Role.MANAGER,
+  Role.CASHIER,
+  Role.ACCOUNTANT,
+  Role.FINANCE_MANAGER,
+)
 export class SalesController {
   constructor(private readonly salesService: SalesService) {}
 
   @Post()
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateSaleDto) {
     return this.salesService.create(user, dto);
   }
 
   @Post('draft')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   createDraft(@CurrentUser() user: AuthUser, @Body() dto: CreateSaleDto) {
     return this.salesService.createDraft(user, dto);
   }
@@ -53,7 +62,7 @@ export class SalesController {
   }
 
   @Put(':id')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   updateDraft(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -63,13 +72,13 @@ export class SalesController {
   }
 
   @Post(':id/send-whatsapp')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   sendWhatsApp(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.salesService.sendWhatsApp(user, id);
   }
 
   @Post(':id/approve')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.salesService.approve(user, id);
   }
@@ -84,13 +93,13 @@ export class SalesController {
   }
 
   @Post(':id/finalize')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   finalize(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.salesService.finalize(user, id);
   }
 
   @Post(':id/cancel')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.salesService.cancel(user, id);
   }

@@ -54,7 +54,7 @@ export async function apiFetch<T>(
 }
 
 export async function login(email: string, password: string) {
-  return apiFetch<{ accessToken: string; user: { mustChangePassword?: boolean } }>('/auth/login', {
+  return apiFetch<{ accessToken: string; user: { role: import('./types').Role; mustChangePassword?: boolean } }>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });

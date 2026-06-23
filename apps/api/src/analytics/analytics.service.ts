@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Role, SaleStatus } from '@prisma/client';
+import { SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 
 @Injectable()
 export class AnalyticsService {
@@ -13,7 +14,7 @@ export class AnalyticsService {
 
   async branchComparison(user: AuthUser) {
     const branches = await this.prisma.branch.findMany({
-      where: user.role === Role.OWNER ? {} : { id: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
       orderBy: { name: 'asc' },
     });
     return Promise.all(branches.map((branch) => this.branchMetrics(branch)));
@@ -29,7 +30,7 @@ export class AnalyticsService {
 
   async customers(user: AuthUser) {
     const branches = await this.prisma.branch.findMany({
-      where: user.role === Role.OWNER ? {} : { id: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
     });
     return Promise.all(branches.map(async (branch) => ({
       branch,
@@ -39,7 +40,7 @@ export class AnalyticsService {
 
   async inventory(user: AuthUser) {
     const branches = await this.prisma.branch.findMany({
-      where: user.role === Role.OWNER ? {} : { id: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
     });
     return Promise.all(branches.map(async (branch) => {
       const balances = await this.prisma.inventoryBalance.findMany({ where: { branchId: branch.id } });
@@ -53,7 +54,7 @@ export class AnalyticsService {
 
   private async metric(user: AuthUser, field: 'totalAmount' | 'profitAmount') {
     const branches = await this.prisma.branch.findMany({
-      where: user.role === Role.OWNER ? {} : { id: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
     });
     return Promise.all(branches.map(async (branch) => {
       const sales = await this.prisma.sale.findMany({

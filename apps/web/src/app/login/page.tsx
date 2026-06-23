@@ -2,7 +2,9 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getToken, login, setToken } from '@/lib/api';
+import { apiFetch, getToken, login, setToken } from '@/lib/api';
+import { getDefaultRoute } from '@/lib/rbac';
+import type { User } from '@/lib/types';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -16,7 +18,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (getToken()) {
-      router.replace('/customers');
+      apiFetch<User>('/auth/me')
+        .then((user) => router.replace(user.mustChangePassword ? '/change-password' : getDefaultRoute(user.role)))
+        .catch(() => router.replace('/login'));
     }
   }, [router]);
 
@@ -28,7 +32,7 @@ export default function LoginPage() {
     try {
       const response = await login(email, password);
       setToken(response.accessToken);
-      router.replace(response.user.mustChangePassword ? '/change-password' : '/customers');
+      router.replace(response.user.mustChangePassword ? '/change-password' : getDefaultRoute(response.user.role));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.invalidCredentials'));
     } finally {
@@ -63,8 +67,8 @@ export default function LoginPage() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-            type="email"
-            autoComplete="email"
+            type="text"
+            autoComplete="username"
             required
           />
         </label>

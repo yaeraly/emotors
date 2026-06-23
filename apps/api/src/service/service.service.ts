@@ -17,6 +17,7 @@ import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { isFullAccessRole } from '../rbac/rbac';
 import { AddDiagnosisDto } from './dto/add-diagnosis.dto';
 import { AddPartsDto } from './dto/add-parts.dto';
 import { AddRepairDto } from './dto/add-repair.dto';
@@ -79,7 +80,7 @@ export class ServiceService {
     return this.prisma.user.findMany({
       where: {
         role: Role.MASTER,
-        ...(user.role === Role.OWNER
+        ...(isFullAccessRole(user.role)
           ? branchId
             ? { branchId }
             : {}
@@ -340,14 +341,14 @@ export class ServiceService {
   }
 
   private orderAccessWhere(user: AuthUser, branchId?: string) {
-    if (user.role === Role.OWNER) return branchId ? { branchId } : {};
+    if (isFullAccessRole(user.role)) return branchId ? { branchId } : {};
     if (user.role === Role.MASTER) return { masterId: user.id };
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return { branchId: user.branchId };
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (user.role === Role.OWNER) return branchId ?? user.branchId;
+    if (isFullAccessRole(user.role)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }

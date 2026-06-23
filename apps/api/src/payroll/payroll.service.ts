@@ -1,7 +1,8 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { BonusType, PayrollStatus, Prisma, Role } from '@prisma/client';
+import { BonusType, PayrollStatus, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 
 @Injectable()
 export class PayrollService {
@@ -14,7 +15,7 @@ export class PayrollService {
     const from = new Date(year, month - 1, 1);
     const to = new Date(year, month, 1);
     const rules = await this.prisma.employeeCompensationRule.findMany({
-      where: user.role === Role.OWNER ? (dto.branchId ? { branchId } : {}) : { branchId },
+      where: canAccessAllBranches(user.role) ? (dto.branchId ? { branchId } : {}) : { branchId },
       include: { employee: true },
     });
     const records = [];
@@ -96,7 +97,7 @@ export class PayrollService {
     return this.prisma.payrollRecord.findMany({
       where: {
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { employee: { branchId: user.branchId } }),
+        ...(canAccessAllBranches(user.role) ? {} : { employee: { branchId: user.branchId } }),
       },
       include: { employee: true },
       orderBy: [{ payrollYear: 'desc' }, { payrollMonth: 'desc' }],
@@ -105,7 +106,7 @@ export class PayrollService {
 
   detail(user: AuthUser, id: string) {
     return this.prisma.payrollRecord.findFirst({
-      where: { id, ...(user.role === Role.OWNER ? {} : { employee: { branchId: user.branchId } }) },
+      where: { id, ...(canAccessAllBranches(user.role) ? {} : { employee: { branchId: user.branchId } }) },
       include: { employee: true },
     });
   }
@@ -127,7 +128,7 @@ export class PayrollService {
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (user.role === Role.OWNER) return branchId ?? user.branchId;
+    if (canAccessAllBranches(user.role)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }

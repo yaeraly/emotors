@@ -32,12 +32,21 @@ import { InventoryService } from './inventory.service';
 
 @Controller('inventory')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.MANAGER, Role.MASTER, Role.ACCOUNTANT)
+@Roles(
+  Role.OWNER,
+  Role.CEO,
+  Role.SYSTEM_ADMINISTRATOR,
+  Role.FRANCHISE_OWNER,
+  Role.MANAGER,
+  Role.WAREHOUSE_MANAGER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.SUPPLY_CHAIN_MANAGER,
+)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get('categories')
-  @Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
   categories(@Query('search') search?: string) {
     return this.inventoryService.categories(search);
   }
@@ -49,7 +58,7 @@ export class InventoryController {
   }
 
   @Get('categories/:id')
-  @Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
   category(@Param('id') id: string) {
     return this.inventoryService.category(id);
   }
@@ -165,7 +174,7 @@ export class InventoryController {
   }
 
   @Post('stock-movements')
-  @Roles(Role.OWNER, Role.MANAGER, Role.MASTER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
   createStockMovement(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateStockMovementDto,

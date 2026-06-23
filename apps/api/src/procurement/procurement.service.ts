@@ -3,6 +3,7 @@ import { ProcurementOrderStatus, Role, StockMovementType } from '@prisma/client'
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { isFullAccessRole } from '../rbac/rbac';
 
 @Injectable()
 export class ProcurementService {
@@ -326,7 +327,7 @@ export class ProcurementService {
 
   purchaseOrders(user: AuthUser) {
     return this.prisma.purchaseOrder.findMany({
-      where: user.role === Role.OWNER ? {} : { branchId: user.branchId },
+      where: this.canAccessAllProcurement(user) ? {} : { branchId: user.branchId },
       include: { supplier: true, branch: true, items: true, shipments: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -334,7 +335,7 @@ export class ProcurementService {
 
   purchaseOrder(user: AuthUser, id: string) {
     return this.prisma.purchaseOrder.findFirst({
-      where: { id, ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }) },
+      where: { id, ...(this.canAccessAllProcurement(user) ? {} : { branchId: user.branchId }) },
       include: { supplier: true, branch: true, items: true, shipments: { include: { events: true } } },
     });
   }
@@ -381,9 +382,17 @@ export class ProcurementService {
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (user.role === Role.OWNER) return branchId ?? user.branchId;
+    if (this.canAccessAllProcurement(user)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
+  }
+
+  private canAccessAllProcurement(user: AuthUser) {
+    return (
+      isFullAccessRole(user.role) ||
+      user.role === Role.PROCUREMENT_MANAGER ||
+      user.role === Role.SUPPLY_CHAIN_MANAGER
+    );
   }
 
   private roundMoney(value: number) {

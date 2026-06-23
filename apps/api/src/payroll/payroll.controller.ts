@@ -9,7 +9,7 @@ import { PayrollService } from './payroll.service';
 
 @Controller('payroll')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT, Role.MASTER, Role.SALESPERSON)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
 export class PayrollController {
   constructor(private readonly payrollService: PayrollService) {}
 
@@ -19,7 +19,7 @@ export class PayrollController {
   }
 
   @Post('generate')
-  @Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
   generate(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.payrollService.generate(user, dto);
   }
@@ -30,13 +30,13 @@ export class PayrollController {
   }
 
   @Post(':id/approve')
-  @Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.payrollService.approve(user, id);
   }
 
   @Post(':id/mark-paid')
-  @Roles(Role.OWNER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
   markPaid(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.payrollService.markPaid(user, id);
   }

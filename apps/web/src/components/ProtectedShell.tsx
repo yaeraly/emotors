@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
+import { canAccessPath, getDefaultRoute, hasPermission } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -31,6 +32,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           router.replace('/change-password');
           return;
         }
+        if (!canAccessPath(currentUser, pathname)) {
+          router.replace(getDefaultRoute(currentUser.role));
+          return;
+        }
         setUser(currentUser);
       })
       .catch(() => router.replace('/login'))
@@ -51,46 +56,23 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     );
   }
 
-  const canSeeCrm = user?.role === 'OWNER' || user?.role === 'MANAGER';
-  const canSeeSales =
-    user?.role === 'OWNER' ||
-    user?.role === 'MANAGER' ||
-    user?.role === 'ACCOUNTANT';
-  const canSeeInventory = Boolean(user);
-  const canSeeService =
-    user?.role === 'OWNER' ||
-    user?.role === 'MANAGER' ||
-    user?.role === 'MASTER' ||
-    user?.role === 'ACCOUNTANT' ||
-    user?.role === 'SALESPERSON';
-  const canSeeHq =
-    user?.role === 'OWNER' || user?.role === 'ACCOUNTANT';
-  const canManageUsers =
-    user?.role === 'OWNER' ||
-    user?.role === 'CEO' ||
-    user?.role === 'SYSTEM_ADMINISTRATOR' ||
-    user?.role === 'FRANCHISE_OWNER';
-  const canSeeAcademy =
-    user?.role === 'OWNER' || user?.role === 'ACADEMY_MANAGER';
-  const canSeeMarketing =
-    user?.role === 'OWNER' || user?.role === 'MARKETING_MANAGER';
-  const canSeeProcurement =
-    user?.role === 'OWNER' || user?.role === 'PROCUREMENT_MANAGER';
-  const canSeeSupplyChain =
-    user?.role === 'OWNER' || user?.role === 'SUPPLY_CHAIN_MANAGER' || user?.role === 'MANAGER';
+  const canSeeCrm = hasPermission(user, 'crm.manage');
+  const canSeeSales = hasPermission(user, 'sales.manage');
+  const canSeeInventory = hasPermission(user, 'inventory.manage');
+  const canSeeService = hasPermission(user, 'service.manage');
+  const canSeeHq = hasPermission(user, 'branches.manage') || hasPermission(user, 'analytics.view');
+  const canManageUsers = hasPermission(user, 'users.manage');
+  const canSeeAcademy = hasPermission(user, 'academy.manage');
+  const canSeeMarketing = hasPermission(user, 'marketing.manage');
+  const canSeeProcurement = hasPermission(user, 'procurement.manage');
+  const canSeeSupplyChain = hasPermission(user, 'distribution.manage');
   const canSeeDistribution = canSeeSupplyChain;
-  const canSeeInvestment =
-    user?.role === 'OWNER' || user?.role === 'INVESTMENT_MANAGER';
-  const canSeeExpansion =
-    user?.role === 'OWNER' || user?.role === 'EXPANSION_MANAGER';
-  const canSeeTax = user?.role === 'OWNER' || user?.role === 'ACCOUNTANT';
-  const canSeeAi = Boolean(user);
-  const canSeePayroll =
-    user?.role === 'OWNER' ||
-    user?.role === 'MANAGER' ||
-    user?.role === 'ACCOUNTANT' ||
-    user?.role === 'MASTER' ||
-    user?.role === 'SALESPERSON';
+  const canSeeInvestment = hasPermission(user, 'analytics.view');
+  const canSeeExpansion = hasPermission(user, 'analytics.view');
+  const canSeeTax = hasPermission(user, 'finance.view');
+  const canSeeAi = hasPermission(user, 'analytics.view');
+  const canSeePayroll = hasPermission(user, 'payroll.manage');
+  const canSeePayments = user?.role === 'CASHIER' || user?.role === 'SALESPERSON';
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -109,7 +91,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             <div className="text-right text-sm">
               <p className="font-semibold text-slate-900">{user?.fullName}</p>
               <p className="text-slate-500">
-                {user?.role} · {user?.branch?.name ?? 'Branch'}
+                {user?.role} · {user?.branch?.name ?? 'HQ'}
               </p>
             </div>
             <button
@@ -223,6 +205,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}
               {canSeeExpansion ? <Link href="/expansion" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('expansion.title')}</Link> : null}
               {canSeeTax ? <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('tax.title')}</Link> : null}
+              {canSeePayments ? <Link href="/payments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
               {canSeeAi ? <Link href="/ai" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('ai.title')}</Link> : null}
               {canSeePayroll ? <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('compensation.rules')}</Link> : null}
               {canSeePayroll ? <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('commissions.title')}</Link> : null}

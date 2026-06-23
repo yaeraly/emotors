@@ -4,15 +4,16 @@ import { JwtSignOptions, JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { permissionsForRole, requiresBranch } from '../rbac/rbac';
 import { AuthUser } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 
 type JwtPayload = {
   sub: string;
-  email: string;
+  email: string | null;
   role: Role;
-  branchId: string;
+  branchId: string | null;
 };
 
 @Injectable()
@@ -46,6 +47,11 @@ export class AuthService {
       throw new UnauthorizedException('User is not active');
     }
 
+    if (requiresBranch(user.role) && !user.branchId) {
+      await this.recordLogin(user.id, false, meta);
+      throw new UnauthorizedException('User branch is not assigned');
+    }
+
     const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
 
     if (!passwordMatches) {
@@ -68,6 +74,7 @@ export class AuthService {
     };
 
     const accessToken = await this.jwtService.signAsync(payload, signOptions);
+    const permissions = await this.permissionsForUser(user.id, user.role);
     await this.prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
@@ -84,6 +91,8 @@ export class AuthService {
         role: user.role,
         branchId: user.branchId,
         branch: user.branch,
+        status: user.status,
+        permissions,
         mustChangePassword: user.mustChangePassword,
       },
     };
@@ -113,7 +122,12 @@ export class AuthService {
       throw new UnauthorizedException('User no longer exists');
     }
 
-    return currentUser;
+    const permissions = await this.permissionsForUser(user.id, currentUser.role);
+
+    return {
+      ...currentUser,
+      permissions,
+    };
   }
 
   async changePassword(user: AuthUser, dto: ChangePasswordDto) {
@@ -168,5 +182,24 @@ export class AuthService {
     return this.prisma.auditLog.create({
       data: { userId, role, action, entity, entityId },
     });
+  }
+
+  private async permissionsForUser(userId: string, role: Role) {
+    const rows = await this.prisma.userRole.findMany({
+      where: { userId },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: { permission: true },
+            },
+          },
+        },
+      },
+    });
+    const permissions = rows.flatMap((row) =>
+      row.role.permissions.map((rolePermission) => rolePermission.permission.code),
+    );
+    return permissions.length ? Array.from(new Set(permissions)) : permissionsForRole(role);
   }
 }

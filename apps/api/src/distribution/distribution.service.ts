@@ -16,6 +16,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { isFullAccessRole } from '../rbac/rbac';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
@@ -787,11 +788,19 @@ export class DistributionService {
   }
 
   private canManage(user: AuthUser) {
-    return user.role === Role.OWNER || user.role === Role.SUPPLY_CHAIN_MANAGER;
+    return (
+      isFullAccessRole(user.role) ||
+      user.role === Role.SUPPLY_CHAIN_MANAGER ||
+      user.role === Role.WAREHOUSE_MANAGER
+    );
   }
 
   private canManageFinance(user: AuthUser) {
-    return this.canManage(user) || user.role === Role.ACCOUNTANT;
+    return (
+      this.canManage(user) ||
+      user.role === Role.ACCOUNTANT ||
+      user.role === Role.FINANCE_MANAGER
+    );
   }
 
   private assertQueryBranchAccess(user: AuthUser, branchId?: string) {

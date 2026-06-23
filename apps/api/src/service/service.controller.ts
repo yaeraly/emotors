@@ -13,13 +13,13 @@ import { CreateServiceOrderDto } from './dto/create-service-order.dto';
 import { ServiceService } from './service.service';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.MANAGER, Role.MASTER, Role.ACCOUNTANT, Role.SALESPERSON)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER)
 @Controller()
 export class ServiceController {
   constructor(private readonly serviceService: ServiceService) {}
 
   @Post('service-orders')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateServiceOrderDto) {
     return this.serviceService.create(user, dto);
   }
@@ -45,37 +45,37 @@ export class ServiceController {
   }
 
   @Put('service-orders/:id')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: Partial<CreateServiceOrderDto>) {
     return this.serviceService.update(user, id, dto);
   }
 
   @Post('service-orders/:id/diagnosis')
-  @Roles(Role.OWNER, Role.MANAGER, Role.MASTER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER)
   addDiagnosis(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: AddDiagnosisDto) {
     return this.serviceService.addDiagnosis(user, id, dto);
   }
 
   @Post('service-orders/:id/repairs')
-  @Roles(Role.OWNER, Role.MANAGER, Role.MASTER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER)
   addRepair(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: AddRepairDto) {
     return this.serviceService.addRepair(user, id, dto);
   }
 
   @Post('service-orders/:id/parts')
-  @Roles(Role.OWNER, Role.MANAGER, Role.MASTER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER)
   addParts(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: AddPartsDto) {
     return this.serviceService.addParts(user, id, dto);
   }
 
   @Post('service-orders/:id/complete')
-  @Roles(Role.OWNER, Role.MANAGER, Role.MASTER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER)
   complete(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CompleteServiceOrderDto) {
     return this.serviceService.complete(user, id, dto);
   }
 
   @Post('service-orders/:id/cancel')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.serviceService.cancel(user, id);
   }

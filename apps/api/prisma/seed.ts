@@ -21,22 +21,26 @@ const permissionCodes = [
 
 const rolePermissions: Record<string, string[]> = {
   CEO: permissionCodes,
-  SYSTEM_ADMINISTRATOR: ['users.manage', 'branches.manage', 'analytics.view'],
+  SYSTEM_ADMINISTRATOR: permissionCodes,
   OWNER: permissionCodes,
-  FRANCHISE_OWNER: ['crm.manage', 'sales.manage', 'inventory.manage', 'service.manage', 'finance.view'],
+  FRANCHISE_OWNER: ['users.manage', 'crm.manage', 'sales.manage', 'inventory.manage', 'service.manage', 'finance.view'],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.manage'],
   MASTER: ['service.manage'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
+  WAREHOUSE_MANAGER: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['sales.manage'],
   ACCOUNTANT: ['finance.view', 'payroll.manage'],
   SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
   PROCUREMENT_MANAGER: ['procurement.manage'],
+  SALESPERSON: ['sales.manage'],
   MARKETING_MANAGER: ['marketing.manage'],
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'analytics.view'],
   FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view'],
+  INVESTMENT_MANAGER: ['analytics.view'],
+  EXPANSION_MANAGER: ['analytics.view'],
 };
 
 const productCategories = [

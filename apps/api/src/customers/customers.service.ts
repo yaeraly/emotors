@@ -8,11 +8,11 @@ import {
   CustomerEventType,
   FollowUpStatus,
   Prisma,
-  Role,
   SaleStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 import { AddCustomerEventDto } from './dto/add-customer-event.dto';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreateFollowUpDto } from './dto/create-follow-up.dto';
@@ -351,7 +351,7 @@ export class CustomersService {
   }
 
   private buildBranchWhere(user: AuthUser, requestedBranchId?: string) {
-    if (user.role === Role.OWNER) {
+    if (canAccessAllBranches(user.role)) {
       return requestedBranchId ? { branchId: requestedBranchId } : {};
     }
 
@@ -363,7 +363,7 @@ export class CustomersService {
   }
 
   private resolveBranchId(user: AuthUser, requestedBranchId?: string) {
-    if (user.role === Role.OWNER) {
+    if (canAccessAllBranches(user.role)) {
       return requestedBranchId ?? user.branchId;
     }
 
@@ -390,7 +390,7 @@ export class CustomersService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
       },
       include: {
         branch: true,

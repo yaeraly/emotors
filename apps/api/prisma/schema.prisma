@@ -355,7 +355,7 @@ model Branch {
 
 model User {
   id             String          @id @default(cuid())
-  email          String          @unique
+  email          String?         @unique
   employeeId     String?         @unique
   phone          String?         @unique
   username       String?         @unique
@@ -365,8 +365,8 @@ model User {
   status         UserStatus      @default(ACTIVE)
   mustChangePassword Boolean     @default(false)
   lastLoginAt    DateTime?
-  branchId       String
-  branch         Branch          @relation(fields: [branchId], references: [id])
+  branchId       String?
+  branch         Branch?         @relation(fields: [branchId], references: [id])
   customerEvents CustomerEvent[]
   followUps      FollowUp[]
   sales          Sale[]          @relation("SaleSeller")

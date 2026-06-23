@@ -8,13 +8,9 @@ import { Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { FULL_ACCESS_ROLES, requiresBranch } from '../rbac/rbac';
 
 const TEMP_PASSWORD = 'Emotors@2026';
-const FULL_ACCESS_ROLES: Role[] = [
-  Role.OWNER,
-  Role.CEO,
-  Role.SYSTEM_ADMINISTRATOR,
-];
 
 @Injectable()
 export class UsersService {
@@ -31,8 +27,10 @@ export class UsersService {
   async create(user: AuthUser, dto: any) {
     this.assertCanManage(user, dto.branchId, dto.role);
     this.validatePassword(dto.password ?? TEMP_PASSWORD);
-    const username = String(dto.username).trim().toLowerCase();
+    const username = String(dto.username ?? '').trim().toLowerCase();
+    if (!username) throw new BadRequestException('Username is required');
     const email = dto.email?.trim().toLowerCase() || `${username}@emotors.local`;
+    const branchId = this.resolveBranchId(user, dto.branchId, dto.role);
     const passwordHash = await bcrypt.hash(dto.password ?? TEMP_PASSWORD, 12);
     const created = await this.prisma.user.create({
       data: {
@@ -43,7 +41,7 @@ export class UsersService {
         username,
         passwordHash,
         role: dto.role,
-        branchId: this.resolveBranchId(user, dto.branchId),
+        branchId,
         status: dto.status ?? UserStatus.ACTIVE,
         mustChangePassword: true,
       },
@@ -70,7 +68,9 @@ export class UsersService {
   async update(user: AuthUser, id: string, dto: any) {
     const existing = await this.prisma.user.findFirst({ where: { id, ...this.userScope(user) } });
     if (!existing) throw new NotFoundException('User not found');
-    this.assertCanManage(user, dto.branchId ?? existing.branchId, dto.role ?? existing.role);
+    const role = dto.role ?? existing.role;
+    const branchId = this.resolveBranchId(user, dto.branchId ?? existing.branchId ?? undefined, role);
+    this.assertCanManage(user, branchId ?? undefined, role);
     const updated = await this.prisma.user.update({
       where: { id },
       data: {
@@ -80,7 +80,7 @@ export class UsersService {
         email: dto.email,
         username: dto.username?.toLowerCase(),
         role: dto.role,
-        branchId: dto.branchId,
+        branchId,
         status: dto.status,
       },
       include: { branch: true },
@@ -140,8 +140,11 @@ export class UsersService {
     throw new ForbiddenException('No user management access');
   }
 
-  private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (FULL_ACCESS_ROLES.includes(user.role)) return branchId ?? user.branchId;
+  private resolveBranchId(user: AuthUser, branchId?: string, role?: Role) {
+    if (role && requiresBranch(role) && !branchId) {
+      throw new BadRequestException('Branch is required for this role');
+    }
+    if (FULL_ACCESS_ROLES.includes(user.role)) return branchId ?? null;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }
@@ -157,6 +160,12 @@ export class UsersService {
       where: { code: roleCode },
       update: { name: roleCode.replaceAll('_', ' ') },
       create: { code: roleCode, name: roleCode.replaceAll('_', ' ') },
+    });
+    await this.prisma.userRole.deleteMany({
+      where: {
+        userId,
+        roleId: { not: role.id },
+      },
     });
     await this.prisma.userRole.upsert({
       where: { userId_roleId: { userId, roleId: role.id } },

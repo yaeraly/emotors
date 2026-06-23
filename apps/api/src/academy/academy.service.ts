@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { canAccessAllBranches } from '../rbac/rbac';
 
 @Injectable()
 export class AcademyService {
@@ -40,7 +40,7 @@ export class AcademyService {
 
   students(user: AuthUser) {
     return this.prisma.student.findMany({
-      where: user.role === Role.OWNER ? {} : { branchId: user.branchId },
+      where: canAccessAllBranches(user.role) ? {} : { branchId: user.branchId },
       include: { branch: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -81,7 +81,7 @@ export class AcademyService {
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (user.role === Role.OWNER) return branchId ?? user.branchId;
+    if (canAccessAllBranches(user.role)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }
