@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Role, UserStatus } from '@prisma/client';
+import { Prisma, Role, UserStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -221,7 +221,7 @@ export class UsersService {
     });
   }
 
-  private audit(user: AuthUser, action: string, entity: string, entityId?: string, metadata?: Record<string, unknown>) {
+  private audit(user: AuthUser, action: string, entity: string, entityId?: string, metadata?: Prisma.InputJsonValue) {
     return this.prisma.auditLog.create({
       data: { userId: user.id, role: user.role, action, entity, entityId, metadata },
     });
