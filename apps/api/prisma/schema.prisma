@@ -409,6 +409,7 @@ model User {
   payrollRecords PayrollRecord[] @relation("PayrollRecordEmployee")
   employeeKpis EmployeeKPI[] @relation("EmployeeKPIEmployee")
   userRoles      UserRole[]
+  assignedUserRoles UserRole[]    @relation("UserRoleAssigner")
   loginHistory   LoginHistory[]
   auditLogs      AuditLog[]
   createdAt      DateTime        @default(now())
@@ -457,16 +458,19 @@ model RolePermission {
 }
 
 model UserRole {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  roleId    String
-  role      RbacRole @relation(fields: [roleId], references: [id])
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  roleId       String
+  role         RbacRole @relation(fields: [roleId], references: [id])
+  assignedById String?
+  assignedBy   User?    @relation("UserRoleAssigner", fields: [assignedById], references: [id])
+  createdAt    DateTime @default(now())
 
   @@unique([userId, roleId])
   @@index([userId])
   @@index([roleId])
+  @@index([assignedById])
 }
 
 model LoginHistory {

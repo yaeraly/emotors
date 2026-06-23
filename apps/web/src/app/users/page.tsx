@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { RoleBadges } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -29,7 +30,7 @@ export default function UsersPage() {
         <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">{t('crm.fullName')}</th><th className="px-4 py-3">{t('users.username')}</th><th className="px-4 py-3">{t('users.phone')}</th><th className="px-4 py-3">{t('users.role')}</th><th className="px-4 py-3">{t('crm.branch')}</th><th className="px-4 py-3">{t('users.status')}</th><th className="px-4 py-3">{t('common.actions')}</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">{users.map((user) => <tr key={user.id}><td className="px-4 py-3 font-bold">{user.fullName}</td><td className="px-4 py-3">{user.username}</td><td className="px-4 py-3">{user.phone}</td><td className="px-4 py-3">{user.role}</td><td className="px-4 py-3">{user.branch?.name}</td><td className="px-4 py-3">{user.status}</td><td className="px-4 py-3"><Link href={`/users/${user.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td></tr>)}</tbody>
+            <tbody className="divide-y divide-slate-100">{users.map((user) => <tr key={user.id}><td className="px-4 py-3 font-bold">{user.fullName}</td><td className="px-4 py-3">{user.username}</td><td className="px-4 py-3">{user.phone}</td><td className="px-4 py-3"><RoleBadges roles={user.roles?.length ? user.roles : [user.role]} /></td><td className="px-4 py-3">{user.branch?.name}</td><td className="px-4 py-3">{user.status}</td><td className="px-4 py-3"><Link href={`/users/${user.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td></tr>)}</tbody>
           </table>
         </div>
       </section>

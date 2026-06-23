@@ -5,6 +5,7 @@ export type AuthUser = {
   email: string;
   fullName: string;
   role: Role;
+  roles: Role[];
   branchId: string;
   status?: string;
   permissions?: string[];

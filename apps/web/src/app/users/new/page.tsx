@@ -3,11 +3,10 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { RoleSelector } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
 import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
-
-const roles: Role[] = ['FRANCHISE_OWNER', 'MANAGER', 'MASTER', 'WAREHOUSE_OPERATOR', 'CASHIER', 'ACCOUNTANT', 'SUPPLY_CHAIN_MANAGER'];
 
 export default function NewUserPage() {
   const router = useRouter();
@@ -21,7 +20,7 @@ export default function NewUserPage() {
     phone: '',
     email: '',
     username: '',
-    role: 'MANAGER' as Role,
+    roles: ['MANAGER'] as Role[],
     branchId: '',
   });
 
@@ -54,6 +53,10 @@ export default function NewUserPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function setRoles(roles: Role[]) {
+    setForm((current) => ({ ...current, roles }));
+  }
+
   return (
     <ProtectedShell>
       <form onSubmit={submit} className="space-y-6">
@@ -66,7 +69,7 @@ export default function NewUserPage() {
           <Input label={t('users.phone')} value={form.phone} onChange={(value) => setField('phone', value)} required />
           <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
           <Input label={t('users.username')} value={form.username} onChange={(value) => setField('username', value)} required />
-          <label className="block"><span className="text-sm font-semibold text-slate-700">{t('users.role')}</span><select value={form.role} onChange={(event) => setField('role', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+          <RoleSelector label={t('users.role')} selectedRoles={form.roles} onChange={setRoles} />
           <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.create')}</button>
         </section>

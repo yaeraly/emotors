@@ -3,11 +3,10 @@
 import { useParams } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { RoleBadges, RoleSelector } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
 import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
-
-const roles: Role[] = ['FRANCHISE_OWNER', 'MANAGER', 'MASTER', 'WAREHOUSE_OPERATOR', 'CASHIER', 'ACCOUNTANT', 'SUPPLY_CHAIN_MANAGER'];
 
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -23,7 +22,7 @@ export default function UserDetailPage() {
     phone: '',
     email: '',
     username: '',
-    role: 'MANAGER' as Role,
+    roles: ['MANAGER'] as Role[],
     branchId: '',
     status: 'ACTIVE',
   });
@@ -44,7 +43,7 @@ export default function UserDetailPage() {
         phone: userResult.phone ?? '',
         email: userResult.email ?? '',
         username: userResult.username ?? '',
-        role: userResult.role,
+        roles: userResult.roles?.length ? userResult.roles : [userResult.role],
         branchId: userResult.branchId,
         status: userResult.status ?? 'ACTIVE',
       });
@@ -85,10 +84,18 @@ export default function UserDetailPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function setRoles(roles: Role[]) {
+    setForm((current) => ({ ...current, roles }));
+  }
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('users.title')}</p><h2 className="text-3xl font-bold">{user?.fullName ?? '-'}</h2></div>
+        <div className="space-y-3">
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('users.title')}</p>
+          <h2 className="text-3xl font-bold">{user?.fullName ?? '-'}</h2>
+          {user ? <RoleBadges roles={user.roles?.length ? user.roles : [user.role]} /> : null}
+        </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {temporaryPassword ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{t('users.temporaryPassword')}: {temporaryPassword}</p> : null}
         <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
@@ -97,7 +104,7 @@ export default function UserDetailPage() {
           <Input label={t('users.phone')} value={form.phone} onChange={(value) => setField('phone', value)} />
           <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
           <Input label={t('users.username')} value={form.username} onChange={(value) => setField('username', value)} />
-          <label className="block"><span className="text-sm font-semibold text-slate-700">{t('users.role')}</span><select value={form.role} onChange={(event) => setField('role', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{roles.map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+          <RoleSelector label={t('users.role')} selectedRoles={form.roles} onChange={setRoles} />
           <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
           <label className="block"><span className="text-sm font-semibold text-slate-700">{t('users.status')}</span><select value={form.status} onChange={(event) => setField('status', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option><option value="SUSPENDED">SUSPENDED</option></select></label>
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.save')}</button>

@@ -90,7 +90,54 @@ export function permissionsForRole(role: Role) {
   return ROLE_PERMISSIONS[role] ?? [];
 }
 
+export function uniqueRoles(roles: Role[]) {
+  return Array.from(new Set(roles));
+}
+
+export function permissionsForRoles(roles: Role[]) {
+  return Array.from(
+    new Set(uniqueRoles(roles).flatMap((role) => permissionsForRole(role))),
+  );
+}
+
+export function hasAnyFullAccessRole(roles: Role[]) {
+  return uniqueRoles(roles).some((role) => isFullAccessRole(role));
+}
+
+export function hasAnyHqRole(roles: Role[]) {
+  return uniqueRoles(roles).some((role) => isHqRole(role));
+}
+
+export function anyRoleRequiresBranch(roles: Role[]) {
+  return uniqueRoles(roles).some((role) => requiresBranch(role));
+}
+
 export function roleCanAccessRequiredRoles(role: Role, requiredRoles: Role[]) {
+  return rolesCanAccessRequiredRoles([role], requiredRoles);
+}
+
+export function rolesCanAccessRequiredRoles(roles: Role[], requiredRoles: Role[]) {
+  const userRoles = uniqueRoles(roles);
+  if (!userRoles.length) {
+    return false;
+  }
+
+  if (hasAnyFullAccessRole(userRoles) || requiredRoles.some((requiredRole) => userRoles.includes(requiredRole))) {
+    return true;
+  }
+
+  const capabilityRoles = requiredRoles.filter((requiredRole) => !isFullAccessRole(requiredRole));
+  if (!capabilityRoles.length) {
+    return false;
+  }
+
+  const permissions = new Set(permissionsForRoles(userRoles));
+  return capabilityRoles.some((requiredRole) =>
+    permissionsForRole(requiredRole).some((permission) => permissions.has(permission)),
+  );
+}
+
+export function legacyRoleCanAccessRequiredRoles(role: Role, requiredRoles: Role[]) {
   if (isFullAccessRole(role) || requiredRoles.includes(role)) {
     return true;
   }

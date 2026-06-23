@@ -40,13 +40,24 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   SALESPERSON: ['sales.manage'],
 };
 
-export function permissionsForUser(user: Pick<User, 'role' | 'permissions'> | null | undefined) {
+export function roleCodesForUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   if (!user) return [];
-  return user.permissions?.length ? user.permissions : ROLE_PERMISSIONS[user.role] ?? [];
+  return user.roles?.length ? user.roles : [user.role];
 }
 
-export function hasPermission(user: Pick<User, 'role' | 'permissions'> | null | undefined, permission: string) {
+export function permissionsForUser(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return [];
+  return user.permissions?.length
+    ? user.permissions
+    : Array.from(new Set(roleCodesForUser(user).flatMap((role) => ROLE_PERMISSIONS[role] ?? [])));
+}
+
+export function hasPermission(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined, permission: string) {
   return permissionsForUser(user).includes(permission);
+}
+
+export function hasRole(user: Pick<User, 'role' | 'roles'> | null | undefined, role: Role) {
+  return roleCodesForUser(user).includes(role);
 }
 
 export function getDefaultRoute(role: Role) {
@@ -63,6 +74,21 @@ export function getDefaultRoute(role: Role) {
   if (role === 'ACADEMY_DIRECTOR' || role === 'ACADEMY_MANAGER') return '/academy';
   if (role === 'MARKETING_MANAGER' || role === 'CONTENT_CREATOR') return '/marketing';
   return '/dashboard';
+}
+
+export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions'>) {
+  if (hasRole(user, 'OWNER') || hasRole(user, 'CEO') || hasRole(user, 'SYSTEM_ADMINISTRATOR')) return '/dashboard';
+  if (hasRole(user, 'FRANCHISE_OWNER')) return '/branch-dashboard';
+  if (hasPermission(user, 'procurement.manage')) return '/procurement';
+  if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
+  if (hasRole(user, 'WAREHOUSE_OPERATOR')) return '/distribution/receivings';
+  if (hasRole(user, 'CASHIER')) return '/payments';
+  if (hasPermission(user, 'finance.view')) return '/finance';
+  if (hasPermission(user, 'crm.manage')) return '/customers';
+  if (hasPermission(user, 'sales.manage')) return '/sales';
+  if (hasPermission(user, 'inventory.manage')) return '/inventory';
+  if (hasPermission(user, 'service.manage')) return '/service';
+  return getDefaultRoute(user.role);
 }
 
 export function canAccessPath(user: User, pathname: string) {

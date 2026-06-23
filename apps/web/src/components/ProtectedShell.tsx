@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, getDefaultRoute, hasPermission } from '@/lib/rbac';
+import { canAccessPath, getDefaultRouteForUser, hasPermission, hasRole, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -33,7 +33,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           return;
         }
         if (!canAccessPath(currentUser, pathname)) {
-          router.replace(getDefaultRoute(currentUser.role));
+          router.replace(getDefaultRouteForUser(currentUser));
           return;
         }
         setUser(currentUser);
@@ -72,7 +72,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeTax = hasPermission(user, 'finance.view');
   const canSeeAi = hasPermission(user, 'analytics.view');
   const canSeePayroll = hasPermission(user, 'payroll.manage');
-  const canSeePayments = user?.role === 'CASHIER' || user?.role === 'SALESPERSON';
+  const canSeePayments = hasRole(user, 'CASHIER') || hasRole(user, 'SALESPERSON');
+  const roleLabel = roleCodesForUser(user).join(', ');
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -91,7 +92,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             <div className="text-right text-sm">
               <p className="font-semibold text-slate-900">{user?.fullName}</p>
               <p className="text-slate-500">
-                {user?.role} · {user?.branch?.name ?? 'HQ'}
+                {roleLabel} · {user?.branch?.name ?? 'HQ'}
               </p>
             </div>
             <button

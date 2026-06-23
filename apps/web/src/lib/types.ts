@@ -117,6 +117,7 @@ export type User = {
   username?: string | null;
   fullName: string;
   role: Role;
+  roles?: Role[];
   branchId: string;
   branch?: Branch;
   status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';

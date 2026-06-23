@@ -4,7 +4,7 @@ import { JwtSignOptions, JwtService } from '@nestjs/jwt';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
-import { permissionsForRole, requiresBranch } from '../rbac/rbac';
+import { anyRoleRequiresBranch, permissionsForRoles, uniqueRoles } from '../rbac/rbac';
 import { AuthUser } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -13,6 +13,7 @@ type JwtPayload = {
   sub: string;
   email: string;
   role: Role;
+  roles: Role[];
   branchId: string;
 };
 
@@ -34,7 +35,7 @@ export class AuthService {
           { phone: dto.email.trim() },
         ],
       },
-      include: { branch: true },
+      include: { branch: true, userRoles: { include: { role: true } } },
     });
 
     if (!user) {
@@ -47,7 +48,9 @@ export class AuthService {
       throw new UnauthorizedException('User is not active');
     }
 
-    if (requiresBranch(user.role) && !user.branchId) {
+    const roles = this.roleCodes(user);
+
+    if (anyRoleRequiresBranch(roles) && !user.branchId) {
       await this.recordLogin(user.id, false, meta);
       throw new UnauthorizedException('User branch is not assigned');
     }
@@ -63,6 +66,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role,
+      roles,
       branchId: user.branchId,
     };
 
@@ -89,6 +93,7 @@ export class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        roles,
         branchId: user.branchId,
         branch: user.branch,
         status: user.status,
@@ -113,6 +118,7 @@ export class AuthService {
         username: true,
         status: true,
         mustChangePassword: true,
+        userRoles: { include: { role: true } },
         createdAt: true,
         updatedAt: true,
       },
@@ -122,10 +128,12 @@ export class AuthService {
       throw new UnauthorizedException('User no longer exists');
     }
 
+    const roles = this.roleCodes(currentUser);
     const permissions = await this.permissionsForUser(user.id, currentUser.role);
 
     return {
       ...currentUser,
+      roles,
       permissions,
     };
   }
@@ -197,9 +205,16 @@ export class AuthService {
         },
       },
     });
+    const roles = rows.map((row) => row.role.code as Role);
+    const assignedRoles = roles.length ? roles : [role];
     const permissions = rows.flatMap((row) =>
       row.role.permissions.map((rolePermission) => rolePermission.permission.code),
     );
-    return permissions.length ? Array.from(new Set(permissions)) : permissionsForRole(role);
+    return Array.from(new Set([...permissionsForRoles(assignedRoles), ...permissions]));
+  }
+
+  private roleCodes(user: { role: Role; userRoles?: { role: { code: string } }[] }) {
+    const assigned = user.userRoles?.map((userRole) => userRole.role.code as Role) ?? [];
+    return uniqueRoles(assigned.length ? assigned : [user.role]);
   }
 }
