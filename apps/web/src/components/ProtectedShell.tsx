@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
@@ -14,6 +14,7 @@ type ProtectedShellProps = {
 
 export function ProtectedShell({ children }: ProtectedShellProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,12 +26,19 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     }
 
     apiFetch<User>('/auth/me')
-      .then(setUser)
+      .then((currentUser) => {
+        if (currentUser.mustChangePassword && pathname !== '/change-password') {
+          router.replace('/change-password');
+          return;
+        }
+        setUser(currentUser);
+      })
       .catch(() => router.replace('/login'))
       .finally(() => setLoading(false));
-  }, [router]);
+  }, [pathname, router]);
 
-  function logout() {
+  async function logout() {
+    await apiFetch('/auth/logout', { method: 'POST' }).catch(() => null);
     clearToken();
     router.replace('/login');
   }
@@ -57,6 +65,11 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     user?.role === 'SALESPERSON';
   const canSeeHq =
     user?.role === 'OWNER' || user?.role === 'ACCOUNTANT';
+  const canManageUsers =
+    user?.role === 'OWNER' ||
+    user?.role === 'CEO' ||
+    user?.role === 'SYSTEM_ADMINISTRATOR' ||
+    user?.role === 'FRANCHISE_OWNER';
   const canSeeAcademy =
     user?.role === 'OWNER' || user?.role === 'ACADEMY_MANAGER';
   const canSeeMarketing =
@@ -214,6 +227,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeePayroll ? <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('compensation.rules')}</Link> : null}
               {canSeePayroll ? <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('commissions.title')}</Link> : null}
               {canSeePayroll ? <Link href="/payroll" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('payroll.title')}</Link> : null}
+              {canManageUsers ? <Link href="/users" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.users')}</Link> : null}
               {[
                 'nav.dashboard',
                 'nav.finance',

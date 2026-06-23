@@ -1,9 +1,19 @@
 export type Role =
   | 'OWNER'
+  | 'CEO'
+  | 'FRANCHISE_DIRECTOR'
+  | 'FINANCE_MANAGER'
+  | 'WAREHOUSE_MANAGER'
+  | 'CONTENT_CREATOR'
+  | 'ACADEMY_DIRECTOR'
+  | 'SYSTEM_ADMINISTRATOR'
   | 'MANAGER'
   | 'MASTER'
   | 'ACCOUNTANT'
   | 'SALESPERSON'
+  | 'FRANCHISE_OWNER'
+  | 'WAREHOUSE_OPERATOR'
+  | 'CASHIER'
   | 'ACADEMY_MANAGER'
   | 'MARKETING_MANAGER'
   | 'PROCUREMENT_MANAGER'
@@ -102,10 +112,15 @@ export type Branch = {
 export type User = {
   id: string;
   email: string;
+  employeeId?: string | null;
+  phone?: string | null;
+  username?: string | null;
   fullName: string;
   role: Role;
   branchId: string;
   branch?: Branch;
+  status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  mustChangePassword?: boolean;
 };
 
 export type Customer = {

@@ -21,6 +21,7 @@ import { SalesModule } from './sales/sales.module';
 import { ServiceModule } from './service/service.module';
 import { SupplyChainModule } from './supply-chain/supply-chain.module';
 import { TaxModule } from './tax/tax.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { TaxModule } from './tax/tax.module';
     InvestmentModule,
     ExpansionModule,
     TaxModule,
+    UsersModule,
     AiModule,
   ],
 })

@@ -34,10 +34,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         fullName: true,
         role: true,
         branchId: true,
+        status: true,
       },
     });
 
-    if (!user) {
+    if (!user || user.status !== 'ACTIVE') {
       throw new UnauthorizedException('User no longer exists');
     }
 

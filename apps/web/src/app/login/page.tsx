@@ -28,7 +28,7 @@ export default function LoginPage() {
     try {
       const response = await login(email, password);
       setToken(response.accessToken);
-      router.replace('/customers');
+      router.replace(response.user.mustChangePassword ? '/change-password' : '/customers');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.invalidCredentials'));
     } finally {
@@ -57,7 +57,7 @@ export default function LoginPage() {
 
         <label className="mt-8 block">
           <span className="text-sm font-semibold text-slate-700">
-            {t('auth.email')}
+            {t('auth.email')} / Username / Phone
           </span>
           <input
             value={email}

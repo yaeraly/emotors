@@ -9,10 +9,20 @@ datasource db {
 
 enum Role {
   OWNER
+  CEO
+  FRANCHISE_DIRECTOR
+  FINANCE_MANAGER
+  WAREHOUSE_MANAGER
+  CONTENT_CREATOR
+  ACADEMY_DIRECTOR
+  SYSTEM_ADMINISTRATOR
   MANAGER
   MASTER
   ACCOUNTANT
   SALESPERSON
+  FRANCHISE_OWNER
+  WAREHOUSE_OPERATOR
+  CASHIER
   ACADEMY_MANAGER
   MARKETING_MANAGER
   PROCUREMENT_MANAGER
@@ -25,6 +35,12 @@ enum BranchStatus {
   ACTIVE
   INACTIVE
   PENDING
+  SUSPENDED
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
   SUSPENDED
 }
 
@@ -340,9 +356,15 @@ model Branch {
 model User {
   id             String          @id @default(cuid())
   email          String          @unique
+  employeeId     String?         @unique
+  phone          String?         @unique
+  username       String?         @unique
   passwordHash   String
   fullName       String
   role           Role            @default(MANAGER)
+  status         UserStatus      @default(ACTIVE)
+  mustChangePassword Boolean     @default(false)
+  lastLoginAt    DateTime?
   branchId       String
   branch         Branch          @relation(fields: [branchId], references: [id])
   customerEvents CustomerEvent[]
@@ -386,10 +408,98 @@ model User {
   repairCommissions RepairCommission[] @relation("RepairCommissionEmployee")
   payrollRecords PayrollRecord[] @relation("PayrollRecordEmployee")
   employeeKpis EmployeeKPI[] @relation("EmployeeKPIEmployee")
+  userRoles      UserRole[]
+  loginHistory   LoginHistory[]
+  auditLogs      AuditLog[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+  deletedAt      DateTime?
 
   @@index([branchId])
+  @@index([role])
+  @@index([status])
+}
+
+model RbacRole {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  name        String
+  description String?
+  isActive    Boolean          @default(true)
+  permissions RolePermission[]
+  users       UserRole[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  module      String
+  action      String
+  description String?
+  roles       RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model RolePermission {
+  id           String     @id @default(cuid())
+  roleId       String
+  role         RbacRole   @relation(fields: [roleId], references: [id])
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  createdAt    DateTime   @default(now())
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  roleId    String
+  role      RbacRole @relation(fields: [roleId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  loginAt   DateTime @default(now())
+  logoutAt  DateTime?
+  ipAddress String?
+  device    String?
+  browser   String?
+  success   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([loginAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  role      String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  timestamp DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([timestamp])
 }
 
 model Customer {

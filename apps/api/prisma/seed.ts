@@ -3,6 +3,42 @@ import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+const permissionCodes = [
+  'users.manage',
+  'branches.manage',
+  'crm.manage',
+  'sales.manage',
+  'inventory.manage',
+  'service.manage',
+  'finance.view',
+  'payroll.manage',
+  'procurement.manage',
+  'distribution.manage',
+  'academy.manage',
+  'marketing.manage',
+  'analytics.view',
+];
+
+const rolePermissions: Record<string, string[]> = {
+  CEO: permissionCodes,
+  SYSTEM_ADMINISTRATOR: ['users.manage', 'branches.manage', 'analytics.view'],
+  OWNER: permissionCodes,
+  FRANCHISE_OWNER: ['crm.manage', 'sales.manage', 'inventory.manage', 'service.manage', 'finance.view'],
+  MANAGER: ['crm.manage', 'sales.manage', 'inventory.manage'],
+  MASTER: ['service.manage'],
+  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
+  CASHIER: ['sales.manage'],
+  ACCOUNTANT: ['finance.view', 'payroll.manage'],
+  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
+  PROCUREMENT_MANAGER: ['procurement.manage'],
+  MARKETING_MANAGER: ['marketing.manage'],
+  CONTENT_CREATOR: ['marketing.manage'],
+  ACADEMY_DIRECTOR: ['academy.manage'],
+  ACADEMY_MANAGER: ['academy.manage'],
+  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'analytics.view'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view'],
+};
+
 const productCategories = [
   ['CONTROLLERS', 'Контроллерлер', 'Контроллеры', 'Controllers'],
   ['MOTORS', 'Моторлор', 'Моторы', 'Motors'],
@@ -52,6 +88,11 @@ async function main() {
       fullName: 'EMOTORS Owner',
       role: Role.OWNER,
       branchId: branch.id,
+      employeeId: 'HQ-OWNER-001',
+      phone: '+996700000001',
+      username: 'owner001',
+      status: 'ACTIVE',
+      mustChangePassword: false,
     },
     create: {
       email: 'owner@emotors.kg',
@@ -59,8 +100,57 @@ async function main() {
       fullName: 'EMOTORS Owner',
       role: Role.OWNER,
       branchId: branch.id,
+      employeeId: 'HQ-OWNER-001',
+      phone: '+996700000001',
+      username: 'owner001',
+      status: 'ACTIVE',
+      mustChangePassword: false,
     },
   });
+
+  for (const code of permissionCodes) {
+    const [module, action] = code.split('.');
+    await prisma.permission.upsert({
+      where: { code },
+      update: { module, action },
+      create: { code, module, action },
+    });
+  }
+
+  for (const [roleCode, permissions] of Object.entries(rolePermissions)) {
+    const role = await prisma.rbacRole.upsert({
+      where: { code: roleCode },
+      update: { name: roleCode.replaceAll('_', ' '), isActive: true },
+      create: { code: roleCode, name: roleCode.replaceAll('_', ' ') },
+    });
+
+    for (const permissionCode of permissions) {
+      const permission = await prisma.permission.findUnique({
+        where: { code: permissionCode },
+      });
+      if (!permission) continue;
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: role.id,
+            permissionId: permission.id,
+          },
+        },
+        update: {},
+        create: { roleId: role.id, permissionId: permission.id },
+      });
+    }
+  }
+
+  const owner = await prisma.user.findUnique({ where: { email: 'owner@emotors.kg' } });
+  const ownerRole = await prisma.rbacRole.findUnique({ where: { code: 'OWNER' } });
+  if (owner && ownerRole) {
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: owner.id, roleId: ownerRole.id } },
+      update: {},
+      create: { userId: owner.id, roleId: ownerRole.id },
+    });
+  }
 
   for (const [code, nameKy, nameRu, nameEn] of productCategories) {
     await prisma.productCategory.upsert({
