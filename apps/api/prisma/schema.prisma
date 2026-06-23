@@ -145,6 +145,17 @@ enum PurchaseOrderStatus {
   CANCELLED
 }
 
+enum ProcurementOrderStatus {
+  DRAFT
+  APPROVED
+  PAID
+  IN_PRODUCTION
+  SHIPPED_TO_YIWU
+  IN_TRANSIT
+  ARRIVED
+  CANCELLED
+}
+
 enum StockTransferStatus {
   DRAFT
   APPROVED
@@ -360,6 +371,8 @@ model User {
   shortageReports ShortageReport[] @relation("ShortageReportCreator")
   branchInvoices BranchInvoice[] @relation("BranchInvoiceCreator")
   branchPayments BranchPayment[] @relation("BranchPaymentCreator")
+  createdProcurementOrders ProcurementOrder[] @relation("ProcurementOrderCreator")
+  approvedProcurementOrders ProcurementOrder[] @relation("ProcurementOrderApprover")
   assignedServiceOrders ServiceOrder[] @relation("ServiceOrderMaster")
   createdServiceOrders ServiceOrder[] @relation("ServiceOrderCreator")
   diagnoses Diagnosis[] @relation("DiagnosisMaster")
@@ -584,6 +597,7 @@ model Warehouse {
   goodsReceivings GoodsReceiving[]
   shortageReports ShortageReport[]
   partsConsumptions PartsConsumption[]
+  procurementOrders ProcurementOrder[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
@@ -625,6 +639,7 @@ model Product {
   shortageReportItems ShortageReportItem[]
   partsConsumptions PartsConsumption[]
   warranties Warranty[]
+  procurementOrderItems ProcurementOrderItem[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
@@ -1013,17 +1028,22 @@ model Supplier {
   companyName      String?
   country          String            @default("China")
   city             String?
+  address          String?
   wechat           String?
   phone            String?
   email            String?
+  website          String?
   productTypes     String[]
   reliabilityScore Decimal           @default(0) @db.Decimal(5, 2)
   notes            String?
   isActive         Boolean           @default(true)
   contacts         SupplierContact[]
   purchaseOrders   PurchaseOrder[]
+  factories        Factory[]
+  procurementOrders ProcurementOrder[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
+  deletedAt        DateTime?
 
   @@index([isActive])
   @@index([city])
@@ -1035,12 +1055,97 @@ model SupplierContact {
   supplier   Supplier @relation(fields: [supplierId], references: [id])
   fullName   String
   role       String?
+  position   String?
   wechat     String?
   phone      String?
   email      String?
+  notes      String?
+  isPrimary  Boolean  @default(false)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([supplierId])
+}
+
+model Factory {
+  id                 String   @id @default(cuid())
+  supplierId         String
+  supplier           Supplier @relation(fields: [supplierId], references: [id])
+  name               String
+  city               String?
+  address            String?
+  productTypes       String[]
+  productionCapacity String?
+  notes              String?
+  isActive           Boolean  @default(true)
+  procurementOrders  ProcurementOrder[]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
+
+  @@index([supplierId])
+  @@index([isActive])
+}
+
+model ProcurementOrder {
+  id                     String                 @id @default(cuid())
+  orderNumber            String                 @unique
+  supplierId             String
+  supplier               Supplier               @relation(fields: [supplierId], references: [id])
+  factoryId              String?
+  factory                Factory?               @relation(fields: [factoryId], references: [id])
+  hqWarehouseId          String
+  hqWarehouse            Warehouse              @relation(fields: [hqWarehouseId], references: [id])
+  status                 ProcurementOrderStatus @default(DRAFT)
+  totalYuan              Decimal                @default(0) @db.Decimal(14, 2)
+  totalTransportCostKgs  Decimal                @default(0) @db.Decimal(14, 2)
+  totalCostKgs           Decimal                @default(0) @db.Decimal(14, 2)
+  estimatedArrivalDate   DateTime?
+  actualArrivalDate      DateTime?
+  createdById            String
+  createdBy              User                   @relation("ProcurementOrderCreator", fields: [createdById], references: [id])
+  approvedById           String?
+  approvedBy             User?                  @relation("ProcurementOrderApprover", fields: [approvedById], references: [id])
+  approvedAt             DateTime?
+  paidAt                 DateTime?
+  shippedAt              DateTime?
+  arrivedAt              DateTime?
+  note                   String?
+  items                  ProcurementOrderItem[]
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  deletedAt              DateTime?
+
+  @@index([supplierId])
+  @@index([factoryId])
+  @@index([hqWarehouseId])
+  @@index([status])
+  @@index([createdById])
+  @@index([approvedById])
+}
+
+model ProcurementOrderItem {
+  id                String           @id @default(cuid())
+  orderId           String
+  order             ProcurementOrder @relation(fields: [orderId], references: [id])
+  productId         String
+  product           Product          @relation(fields: [productId], references: [id])
+  sku               String
+  productName       String
+  quantity          Int
+  purchasePriceYuan Decimal          @db.Decimal(14, 2)
+  yuanRate          Decimal          @db.Decimal(14, 4)
+  costKgs           Decimal          @db.Decimal(14, 2)
+  weightKg          Decimal          @db.Decimal(14, 3)
+  transportCostKgs  Decimal          @db.Decimal(14, 2)
+  finalCostKgs      Decimal          @db.Decimal(14, 2)
+  totalYuan         Decimal          @db.Decimal(14, 2)
+  totalCostKgs      Decimal          @db.Decimal(14, 2)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 model PurchaseOrder {

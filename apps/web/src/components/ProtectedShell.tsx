@@ -196,7 +196,16 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   </div>
                 </div>
               ) : null}
-              {canSeeProcurement ? <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.title')}</Link> : null}
+              {canSeeProcurement ? (
+                <div className="rounded-xl px-3 py-2">
+                  <Link href="/procurement" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('procurement.title')}</Link>
+                  <div className="mt-2 space-y-1 pl-2">
+                    <Link href="/procurement/suppliers" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.suppliers')}</Link>
+                    <Link href="/procurement/factories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.factories')}</Link>
+                    <Link href="/procurement/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.orders')}</Link>
+                  </div>
+                </div>
+              ) : null}
               {canSeeSupplyChain ? <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyChain.title')}</Link> : null}
               {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}
               {canSeeExpansion ? <Link href="/expansion" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('expansion.title')}</Link> : null}
