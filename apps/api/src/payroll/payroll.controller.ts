@@ -28,4 +28,16 @@ export class PayrollController {
   detail(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.payrollService.detail(user, id);
   }
+
+  @Post(':id/approve')
+  @Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.payrollService.approve(user, id);
+  }
+
+  @Post(':id/mark-paid')
+  @Roles(Role.OWNER, Role.ACCOUNTANT)
+  markPaid(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.payrollService.markPaid(user, id);
+  }
 }

@@ -274,6 +274,7 @@ enum PayrollStatus {
   DRAFT
   APPROVED
   PAID
+  CANCELLED
 }
 
 model Branch {
@@ -318,6 +319,8 @@ model Branch {
   warranties Warranty[]
   employeeCompensationRules EmployeeCompensationRule[]
   bonusRules BonusRule[]
+  payrollRecords PayrollRecord[]
+  repairCommissions RepairCommission[]
   stockRequests BranchStockRequest[]
   stockForecasts StockForecast[]
   taxProfiles TaxProfile[]
@@ -1611,8 +1614,10 @@ model EmployeeCompensationRule {
   repairCommissionPercent  Decimal  @default(0) @db.Decimal(8, 2)
   partsCommissionPercent   Decimal  @default(0) @db.Decimal(8, 2)
   bonusPercent             Decimal  @default(0) @db.Decimal(8, 2)
+  isActive                 Boolean  @default(true)
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
+  deletedAt                DateTime?
 
   @@index([branchId])
   @@index([employeeId])
@@ -1637,6 +1642,8 @@ model SalesCommission {
 
 model RepairCommission {
   id                String       @id @default(cuid())
+  branchId          String?
+  branch            Branch?      @relation(fields: [branchId], references: [id])
   employeeId        String
   employee          User         @relation("RepairCommissionEmployee", fields: [employeeId], references: [id])
   serviceOrderId    String
@@ -1644,9 +1651,18 @@ model RepairCommission {
   revenue           Decimal      @db.Decimal(14, 2)
   commissionPercent Decimal      @db.Decimal(8, 2)
   commissionAmount  Decimal      @db.Decimal(14, 2)
+  repairRevenue     Decimal      @default(0) @db.Decimal(14, 2)
+  partsRevenue      Decimal      @default(0) @db.Decimal(14, 2)
+  repairCommissionPercent Decimal @default(0) @db.Decimal(8, 2)
+  partsCommissionPercent Decimal @default(0) @db.Decimal(8, 2)
+  repairCommissionAmount Decimal @default(0) @db.Decimal(14, 2)
+  partsCommissionAmount Decimal @default(0) @db.Decimal(14, 2)
+  totalCommissionAmount Decimal @default(0) @db.Decimal(14, 2)
   createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   @@unique([employeeId, serviceOrderId])
+  @@index([branchId])
   @@index([employeeId])
   @@index([serviceOrderId])
 }
@@ -1669,21 +1685,34 @@ model BonusRule {
 
 model PayrollRecord {
   id               String        @id @default(cuid())
+  branchId         String?
+  branch           Branch?       @relation(fields: [branchId], references: [id])
   employeeId       String
   employee         User          @relation("PayrollRecordEmployee", fields: [employeeId], references: [id])
+  month            Int           @default(1)
+  year             Int           @default(2026)
   payrollMonth     Int
   payrollYear      Int
   fixedSalary      Decimal       @default(0) @db.Decimal(14, 2)
   salesCommission  Decimal       @default(0) @db.Decimal(14, 2)
   repairCommission Decimal       @default(0) @db.Decimal(14, 2)
+  repairCommissionTotal Decimal  @default(0) @db.Decimal(14, 2)
+  partsCommissionTotal Decimal   @default(0) @db.Decimal(14, 2)
+  salesCommissionTotal Decimal   @default(0) @db.Decimal(14, 2)
+  bonusAmount      Decimal       @default(0) @db.Decimal(14, 2)
   bonus            Decimal       @default(0) @db.Decimal(14, 2)
   deductions       Decimal       @default(0) @db.Decimal(14, 2)
   totalPayable     Decimal       @default(0) @db.Decimal(14, 2)
   status           PayrollStatus @default(DRAFT)
   createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  paidAt           DateTime?
+  deletedAt        DateTime?
 
   @@unique([employeeId, payrollMonth, payrollYear])
+  @@index([branchId])
   @@index([employeeId])
+  @@index([year, month])
   @@index([payrollYear, payrollMonth])
   @@index([status])
 }

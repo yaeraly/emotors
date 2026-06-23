@@ -33,7 +33,9 @@ export class PayrollService {
         }),
       ]);
       const salesCommission = this.sum(salesCommissions.map((item) => item.commissionAmount));
-      const repairCommission = this.sum(repairCommissions.map((item) => item.commissionAmount));
+      const repairCommissionTotal = this.sum(repairCommissions.map((item) => item.repairCommissionAmount));
+      const partsCommissionTotal = this.sum(repairCommissions.map((item) => item.partsCommissionAmount));
+      const repairCommission = this.roundMoney(repairCommissionTotal + partsCommissionTotal);
       const revenue = this.sum(salesCommissions.map((item) => item.revenue));
       const repairRevenue = this.sum(repairCommissions.map((item) => item.revenue));
       const bonus = this.calculateBonus(bonusRule, revenue + repairRevenue);
@@ -43,8 +45,40 @@ export class PayrollService {
 
       const record = await this.prisma.payrollRecord.upsert({
         where: { employeeId_payrollMonth_payrollYear: { employeeId: rule.employeeId, payrollMonth: month, payrollYear: year } },
-        create: { employeeId: rule.employeeId, payrollMonth: month, payrollYear: year, fixedSalary, salesCommission, repairCommission, bonus, deductions, totalPayable, status: PayrollStatus.DRAFT },
-        update: { fixedSalary, salesCommission, repairCommission, bonus, deductions, totalPayable },
+        create: {
+          branchId: rule.branchId,
+          employeeId: rule.employeeId,
+          month,
+          year,
+          payrollMonth: month,
+          payrollYear: year,
+          fixedSalary,
+          salesCommission,
+          repairCommission,
+          repairCommissionTotal,
+          partsCommissionTotal,
+          salesCommissionTotal: salesCommission,
+          bonus,
+          bonusAmount: bonus,
+          deductions,
+          totalPayable,
+          status: PayrollStatus.DRAFT,
+        },
+        update: {
+          branchId: rule.branchId,
+          month,
+          year,
+          fixedSalary,
+          salesCommission,
+          repairCommission,
+          repairCommissionTotal,
+          partsCommissionTotal,
+          salesCommissionTotal: salesCommission,
+          bonus,
+          bonusAmount: bonus,
+          deductions,
+          totalPayable,
+        },
         include: { employee: true },
       });
       await this.prisma.employeeKPI.upsert({
@@ -60,7 +94,10 @@ export class PayrollService {
 
   list(user: AuthUser) {
     return this.prisma.payrollRecord.findMany({
-      where: user.role === Role.OWNER ? {} : { employee: { branchId: user.branchId } },
+      where: {
+        deletedAt: null,
+        ...(user.role === Role.OWNER ? {} : { employee: { branchId: user.branchId } }),
+      },
       include: { employee: true },
       orderBy: [{ payrollYear: 'desc' }, { payrollMonth: 'desc' }],
     });
@@ -69,6 +106,22 @@ export class PayrollService {
   detail(user: AuthUser, id: string) {
     return this.prisma.payrollRecord.findFirst({
       where: { id, ...(user.role === Role.OWNER ? {} : { employee: { branchId: user.branchId } }) },
+      include: { employee: true },
+    });
+  }
+
+  approve(user: AuthUser, id: string) {
+    return this.prisma.payrollRecord.update({
+      where: { id },
+      data: { status: PayrollStatus.APPROVED },
+      include: { employee: true },
+    });
+  }
+
+  markPaid(user: AuthUser, id: string) {
+    return this.prisma.payrollRecord.update({
+      where: { id },
+      data: { status: PayrollStatus.PAID, paidAt: new Date() },
       include: { employee: true },
     });
   }

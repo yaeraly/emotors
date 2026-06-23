@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -32,5 +32,45 @@ export class CommissionsController {
   @Get('repairs')
   repairs(@CurrentUser() user: AuthUser) {
     return this.commissionsService.repairs(user);
+  }
+
+  @Get('repairs/:id')
+  repair(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.commissionsService.repair(user, id);
+  }
+}
+
+@Controller('compensation')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.OWNER, Role.MANAGER, Role.MASTER)
+export class CompensationController {
+  constructor(private readonly commissionsService: CommissionsService) {}
+
+  @Post('rules')
+  @Roles(Role.OWNER, Role.MANAGER)
+  createRule(@CurrentUser() user: AuthUser, @Body() dto: any) {
+    return this.commissionsService.createRule(user, dto);
+  }
+
+  @Get('rules')
+  rules(@CurrentUser() user: AuthUser) {
+    return this.commissionsService.rules(user);
+  }
+
+  @Get('rules/:id')
+  rule(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.commissionsService.rule(user, id);
+  }
+
+  @Put('rules/:id')
+  @Roles(Role.OWNER, Role.MANAGER)
+  updateRule(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.commissionsService.updateRule(user, id, dto);
+  }
+
+  @Delete('rules/:id')
+  @Roles(Role.OWNER, Role.MANAGER)
+  deleteRule(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.commissionsService.deleteRule(user, id);
   }
 }
