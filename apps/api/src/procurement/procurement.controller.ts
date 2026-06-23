@@ -17,6 +17,10 @@ export class ProcurementController {
   @Get('suppliers/:id') supplier(@Param('id') id: string) { return this.service.supplier(id); }
   @Put('suppliers/:id') @Roles(Role.OWNER, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) updateSupplier(@Param('id') id: string, @Body() dto: any) { return this.service.updateSupplier(id, dto); }
   @Delete('suppliers/:id') @Roles(Role.OWNER, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) deleteSupplier(@Param('id') id: string) { return this.service.deleteSupplier(id); }
+  @Post('suppliers/:id/contacts') @Roles(Role.OWNER, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) createSupplierContact(@Param('id') id: string, @Body() dto: any) { return this.service.createSupplierContact(id, dto); }
+  @Get('suppliers/:id/contacts') supplierContacts(@Param('id') id: string) { return this.service.supplierContacts(id); }
+  @Put('contacts/:id') @Roles(Role.OWNER, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) updateSupplierContact(@Param('id') id: string, @Body() dto: any) { return this.service.updateSupplierContact(id, dto); }
+  @Delete('contacts/:id') @Roles(Role.OWNER, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) deleteSupplierContact(@Param('id') id: string) { return this.service.deleteSupplierContact(id); }
   @Post('factories') @Roles(Role.OWNER, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) createFactory(@Body() dto: any) { return this.service.createFactory(dto); }
   @Get('factories') factories() { return this.service.factories(); }
   @Get('factories/:id') factory(@Param('id') id: string) { return this.service.factory(id); }

@@ -47,6 +47,49 @@ export class ProcurementService {
     return this.prisma.supplier.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
   }
 
+  createSupplierContact(supplierId: string, dto: any) {
+    return this.prisma.supplierContact.create({
+      data: {
+        supplierId,
+        fullName: dto.fullName,
+        position: dto.position,
+        role: dto.position,
+        wechat: dto.wechat,
+        phone: dto.phone,
+        email: dto.email,
+        notes: dto.notes,
+        isPrimary: dto.isPrimary ?? false,
+      },
+    });
+  }
+
+  supplierContacts(supplierId: string) {
+    return this.prisma.supplierContact.findMany({
+      where: { supplierId },
+      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  updateSupplierContact(id: string, dto: any) {
+    return this.prisma.supplierContact.update({
+      where: { id },
+      data: {
+        fullName: dto.fullName,
+        position: dto.position,
+        role: dto.position,
+        wechat: dto.wechat,
+        phone: dto.phone,
+        email: dto.email,
+        notes: dto.notes,
+        isPrimary: dto.isPrimary,
+      },
+    });
+  }
+
+  deleteSupplierContact(id: string) {
+    return this.prisma.supplierContact.delete({ where: { id } });
+  }
+
   createFactory(dto: any) {
     return this.prisma.factory.create({
       data: {
