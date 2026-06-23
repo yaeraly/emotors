@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma, Role, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { canAccessAllBranches } from '../rbac/rbac';
+import { canAccessAllBranches as roleCanAccessAllBranches, hasAnyHqRole } from '../rbac/rbac';
 
 @Injectable()
 export class KpiService {
@@ -80,8 +80,8 @@ export class KpiService {
 
   async employeeKpis(user: AuthUser) {
     const employeeWhere =
-      canAccessAllBranches(user.role) || user.role === Role.MANAGER || user.role === Role.ACCOUNTANT
-        ? canAccessAllBranches(user.role)
+      this.canAccessAllBranches(user) || this.hasRole(user, Role.FRANCHISE_OWNER) || this.hasRole(user, Role.ACCOUNTANT)
+        ? this.canAccessAllBranches(user)
           ? {}
           : { branchId: user.branchId }
         : { id: user.id };
@@ -145,19 +145,27 @@ export class KpiService {
 
   private accessibleBranches(user: AuthUser) {
     return this.prisma.branch.findMany({
-      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
+      where: this.canAccessAllBranches(user) ? {} : { id: user.branchId },
       orderBy: { name: 'asc' },
     });
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (canAccessAllBranches(user.role)) return branchId ?? user.branchId;
+    if (this.canAccessAllBranches(user)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
   }
 
   private ensureBranchAccess(user: AuthUser, branchId: string) {
-    if (!canAccessAllBranches(user.role) && user.branchId !== branchId) throw new ForbiddenException('Forbidden branch');
+    if (!this.canAccessAllBranches(user) && user.branchId !== branchId) throw new ForbiddenException('Forbidden branch');
+  }
+
+  private canAccessAllBranches(user: AuthUser) {
+    return hasAnyHqRole(user.roles?.length ? user.roles : [user.role]) || roleCanAccessAllBranches(user.role);
+  }
+
+  private hasRole(user: AuthUser, role: Role) {
+    return (user.roles?.length ? user.roles : [user.role]).includes(role);
   }
 
   private monthStart() {

@@ -6,18 +6,26 @@ export const assignableRoles: Role[] = [
   'MASTER',
   'WAREHOUSE_OPERATOR',
   'CASHIER',
-  'ACCOUNTANT',
-  'SALESPERSON',
-  'SUPPLY_CHAIN_MANAGER',
-  'WAREHOUSE_MANAGER',
-  'PROCUREMENT_MANAGER',
-  'FINANCE_MANAGER',
-  'ACADEMY_MANAGER',
-  'MARKETING_MANAGER',
 ];
 
+const roleLabels: Partial<Record<Role, string>> = {
+  FRANCHISE_OWNER: 'Franchise Owner',
+  MANAGER: 'Manager',
+  MASTER: 'Master',
+  WAREHOUSE_OPERATOR: 'Warehouse Operator',
+  CASHIER: 'Cashier',
+};
+
+const roleDescriptions: Partial<Record<Role, string>> = {
+  FRANCHISE_OWNER: 'Own branch CRM, sales, service, inventory, finance, KPI, employees, reports',
+  MANAGER: 'CRM, customers, sales, installments, receipts, product catalog, inventory read-only',
+  MASTER: 'Service orders, diagnosis, repairs, warranty, parts consumption',
+  WAREHOUSE_OPERATOR: 'Inventory, goods receiving, transfers, stock count, stock movement history',
+  CASHIER: 'Payments, receipts, cash register, daily cash closing',
+};
+
 export function roleLabel(role: Role) {
-  return role.replaceAll('_', ' ');
+  return roleLabels[role] ?? role.replaceAll('_', ' ');
 }
 
 export function RoleBadges({ roles }: { roles: Role[] }) {
@@ -62,7 +70,10 @@ export function RoleSelector({
               type="checkbox"
               className="h-4 w-4 rounded border-slate-300 text-blue-600"
             />
-            {roleLabel(role)}
+            <span>
+              <span className="block">{roleLabel(role)}</span>
+              <span className="block text-xs font-normal text-slate-500">{roleDescriptions[role]}</span>
+            </span>
           </label>
         ))}
       </div>

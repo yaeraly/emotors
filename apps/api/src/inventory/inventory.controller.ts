@@ -52,7 +52,7 @@ export class InventoryController {
   }
 
   @Post('categories')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.inventoryService.createCategory(dto);
   }
@@ -64,25 +64,25 @@ export class InventoryController {
   }
 
   @Put('categories/:id')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.inventoryService.updateCategory(id, dto);
   }
 
   @Delete('categories/:id')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   deleteCategory(@Param('id') id: string) {
     return this.inventoryService.deleteCategory(id);
   }
 
   @Post('products')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   createProduct(@CurrentUser() user: AuthUser, @Body() dto: CreateProductDto) {
     return this.inventoryService.createProduct(user, dto);
   }
 
   @Post('products/upload-image')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   uploadProductImage(@Req() request: FastifyRequest) {
     return this.inventoryService.uploadProductImage(request);
   }
@@ -98,7 +98,7 @@ export class InventoryController {
   }
 
   @Put('products/:id')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   updateProduct(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -108,13 +108,13 @@ export class InventoryController {
   }
 
   @Delete('products/:id')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   deleteProduct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.deleteProduct(user, id);
   }
 
   @Post('products/:id/price-history')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   addPriceHistory(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -129,7 +129,7 @@ export class InventoryController {
   }
 
   @Post('yuan-rates')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   createYuanRate(@CurrentUser() user: AuthUser, @Body() dto: CreateYuanRateDto) {
     return this.inventoryService.createYuanRate(user, dto);
   }
@@ -145,7 +145,7 @@ export class InventoryController {
   }
 
   @Post('warehouses')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   createWarehouse(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateWarehouseDto,
@@ -164,7 +164,7 @@ export class InventoryController {
   }
 
   @Put('warehouses/:id')
-  @Roles(Role.OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR)
   updateWarehouse(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -174,7 +174,7 @@ export class InventoryController {
   }
 
   @Post('stock-movements')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
   createStockMovement(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateStockMovementDto,

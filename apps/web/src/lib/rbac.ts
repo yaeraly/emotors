@@ -6,9 +6,13 @@ const ALL_PERMISSIONS = [
   'crm.manage',
   'sales.manage',
   'inventory.manage',
+  'inventory.view',
   'service.manage',
   'finance.view',
+  'payments.manage',
   'payroll.manage',
+  'kpi.view',
+  'reports.view',
   'procurement.manage',
   'distribution.manage',
   'academy.manage',
@@ -31,11 +35,22 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
-  FRANCHISE_OWNER: ['users.manage', 'crm.manage', 'sales.manage', 'inventory.manage', 'service.manage', 'finance.view'],
-  MANAGER: ['crm.manage', 'sales.manage', 'inventory.manage'],
+  FRANCHISE_OWNER: [
+    'users.manage',
+    'crm.manage',
+    'sales.manage',
+    'inventory.manage',
+    'inventory.view',
+    'service.manage',
+    'finance.view',
+    'payments.manage',
+    'kpi.view',
+    'reports.view',
+  ],
+  MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
   MASTER: ['service.manage'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
-  CASHIER: ['sales.manage'],
+  CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
@@ -82,11 +97,11 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
   if (hasRole(user, 'WAREHOUSE_OPERATOR')) return '/distribution/receivings';
-  if (hasRole(user, 'CASHIER')) return '/payments';
+  if (hasPermission(user, 'payments.manage')) return '/payments';
   if (hasPermission(user, 'finance.view')) return '/finance';
   if (hasPermission(user, 'crm.manage')) return '/customers';
   if (hasPermission(user, 'sales.manage')) return '/sales';
-  if (hasPermission(user, 'inventory.manage')) return '/inventory';
+  if (hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view')) return '/inventory';
   if (hasPermission(user, 'service.manage')) return '/service';
   return getDefaultRoute(user.role);
 }
@@ -98,7 +113,7 @@ export function canAccessPath(user: User, pathname: string) {
     return hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
   }
   if (pathname === '/finance') return hasPermission(user, 'finance.view');
-  if (pathname === '/payments') return hasPermission(user, 'sales.manage');
+  if (pathname === '/payments') return hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/customers')) return hasPermission(user, 'crm.manage');
   if (pathname.startsWith('/sales')) return hasPermission(user, 'sales.manage');
   if (
@@ -107,14 +122,14 @@ export function canAccessPath(user: User, pathname: string) {
     pathname.startsWith('/stock-movements') ||
     pathname.startsWith('/warehouses')
   ) {
-    return hasPermission(user, 'inventory.manage');
+    return hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
   }
   if (pathname.startsWith('/service')) return hasPermission(user, 'service.manage');
   if (pathname.startsWith('/users')) return hasPermission(user, 'users.manage');
   if (pathname.startsWith('/branches')) return hasPermission(user, 'branches.manage');
   if (pathname.startsWith('/procurement')) return hasPermission(user, 'procurement.manage');
   if (pathname.startsWith('/distribution/invoices')) {
-    return hasPermission(user, 'distribution.manage') || hasPermission(user, 'finance.view') || hasPermission(user, 'sales.manage');
+    return hasPermission(user, 'distribution.manage') || hasPermission(user, 'finance.view') || hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   }
   if (pathname.startsWith('/distribution')) {
     return hasPermission(user, 'distribution.manage') || hasPermission(user, 'finance.view');
@@ -124,8 +139,11 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/payroll') || pathname.startsWith('/commissions') || pathname.startsWith('/compensation')) {
     return hasPermission(user, 'payroll.manage');
   }
-  if (pathname.startsWith('/kpi') || pathname.startsWith('/analytics') || pathname.startsWith('/ai')) {
-    return hasPermission(user, 'analytics.view');
+  if (pathname.startsWith('/kpi')) {
+    return hasPermission(user, 'kpi.view') || hasPermission(user, 'analytics.view');
+  }
+  if (pathname.startsWith('/analytics') || pathname.startsWith('/ai')) {
+    return hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
   }
   if (pathname.startsWith('/academy')) return hasPermission(user, 'academy.manage');
   if (pathname.startsWith('/marketing')) return hasPermission(user, 'marketing.manage');

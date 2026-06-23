@@ -9,7 +9,7 @@ import { SupplyChainService } from './supply-chain.service';
 
 @Controller('supply-chain')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR)
 export class SupplyChainController {
   constructor(private readonly service: SupplyChainService) {}
   @Post('transfers') createTransfer(@CurrentUser() user: AuthUser, @Body() dto: any) { return this.service.createTransfer(user, dto); }

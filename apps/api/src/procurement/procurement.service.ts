@@ -388,10 +388,11 @@ export class ProcurementService {
   }
 
   private canAccessAllProcurement(user: AuthUser) {
-    return (
-      isFullAccessRole(user.role) ||
-      user.role === Role.PROCUREMENT_MANAGER ||
-      user.role === Role.SUPPLY_CHAIN_MANAGER
+    const roles = user.roles?.length ? user.roles : [user.role];
+    return roles.some((role) =>
+      isFullAccessRole(role) ||
+      role === Role.PROCUREMENT_MANAGER ||
+      role === Role.SUPPLY_CHAIN_MANAGER
     );
   }
 

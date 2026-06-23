@@ -17,7 +17,7 @@ import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isFullAccessRole } from '../rbac/rbac';
+import { hasAnyFullAccessRole } from '../rbac/rbac';
 import { AddDiagnosisDto } from './dto/add-diagnosis.dto';
 import { AddPartsDto } from './dto/add-parts.dto';
 import { AddRepairDto } from './dto/add-repair.dto';
@@ -45,7 +45,14 @@ export class ServiceService {
         throw new BadRequestException('Customer does not belong to branch');
       }
       const master = await tx.user.findFirst({
-        where: { id: dto.masterId, role: Role.MASTER, branchId },
+        where: {
+          id: dto.masterId,
+          branchId,
+          OR: [
+            { role: Role.MASTER },
+            { userRoles: { some: { role: { code: Role.MASTER } } } },
+          ],
+        },
       });
       if (!master) throw new NotFoundException('Master not found');
       const order = await tx.serviceOrder.create({
@@ -79,8 +86,11 @@ export class ServiceService {
   masters(user: AuthUser, branchId?: string) {
     return this.prisma.user.findMany({
       where: {
-        role: Role.MASTER,
-        ...(isFullAccessRole(user.role)
+        OR: [
+          { role: Role.MASTER },
+          { userRoles: { some: { role: { code: Role.MASTER } } } },
+        ],
+        ...(this.hasFullAccess(user)
           ? branchId
             ? { branchId }
             : {}
@@ -103,7 +113,14 @@ export class ServiceService {
     };
     if (dto.masterId) {
       const master = await this.prisma.user.findFirst({
-        where: { id: dto.masterId, role: Role.MASTER, branchId: order.branchId },
+        where: {
+          id: dto.masterId,
+          branchId: order.branchId,
+          OR: [
+            { role: Role.MASTER },
+            { userRoles: { some: { role: { code: Role.MASTER } } } },
+          ],
+        },
       });
       if (!master) throw new NotFoundException('Master not found');
       data.master = { connect: { id: master.id } };
@@ -341,16 +358,28 @@ export class ServiceService {
   }
 
   private orderAccessWhere(user: AuthUser, branchId?: string) {
-    if (isFullAccessRole(user.role)) return branchId ? { branchId } : {};
-    if (user.role === Role.MASTER) return { masterId: user.id };
+    if (this.hasFullAccess(user)) return branchId ? { branchId } : {};
+    if (this.hasRole(user, Role.FRANCHISE_OWNER)) {
+      if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
+      return { branchId: user.branchId };
+    }
+    if (this.hasRole(user, Role.MASTER)) return { masterId: user.id };
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return { branchId: user.branchId };
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
-    if (isFullAccessRole(user.role)) return branchId ?? user.branchId;
+    if (this.hasFullAccess(user)) return branchId ?? user.branchId;
     if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
     return user.branchId;
+  }
+
+  private hasFullAccess(user: AuthUser) {
+    return hasAnyFullAccessRole(user.roles?.length ? user.roles : [user.role]);
+  }
+
+  private hasRole(user: AuthUser, role: Role) {
+    return (user.roles?.length ? user.roles : [user.role]).includes(role);
   }
 
   private async generateOrderNumber(tx: PrismaTx) {

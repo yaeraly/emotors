@@ -915,10 +915,11 @@ export class InventoryService {
   }
 
   private canAccessAllInventory(user: AuthUser) {
-    return (
-      isFullAccessRole(user.role) ||
-      user.role === Role.SUPPLY_CHAIN_MANAGER ||
-      user.role === Role.WAREHOUSE_MANAGER
+    const roles = user.roles?.length ? user.roles : [user.role];
+    return roles.some((role) =>
+      isFullAccessRole(role) ||
+      role === Role.SUPPLY_CHAIN_MANAGER ||
+      role === Role.WAREHOUSE_MANAGER
     );
   }
 

@@ -58,9 +58,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
 
   const canSeeCrm = hasPermission(user, 'crm.manage');
   const canSeeSales = hasPermission(user, 'sales.manage');
-  const canSeeInventory = hasPermission(user, 'inventory.manage');
+  const canSeeInventory = hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
   const canSeeService = hasPermission(user, 'service.manage');
-  const canSeeHq = hasPermission(user, 'branches.manage') || hasPermission(user, 'analytics.view');
+  const canSeeHq = hasPermission(user, 'branches.manage') || hasPermission(user, 'analytics.view') || hasPermission(user, 'kpi.view') || hasPermission(user, 'reports.view');
+  const canManageBranches = hasPermission(user, 'branches.manage');
+  const canSeeKpi = hasPermission(user, 'kpi.view') || hasPermission(user, 'analytics.view');
+  const canSeeReports = hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
   const canManageUsers = hasPermission(user, 'users.manage');
   const canSeeAcademy = hasPermission(user, 'academy.manage');
   const canSeeMarketing = hasPermission(user, 'marketing.manage');
@@ -70,9 +73,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeInvestment = hasPermission(user, 'analytics.view');
   const canSeeExpansion = hasPermission(user, 'analytics.view');
   const canSeeTax = hasPermission(user, 'finance.view');
-  const canSeeAi = hasPermission(user, 'analytics.view');
+  const canSeeAi = hasPermission(user, 'analytics.view') || hasPermission(user, 'reports.view');
   const canSeePayroll = hasPermission(user, 'payroll.manage');
-  const canSeePayments = hasRole(user, 'CASHIER') || hasRole(user, 'SALESPERSON');
+  const canSeePayments = hasPermission(user, 'payments.manage') || hasRole(user, 'SALESPERSON');
   const roleLabel = roleCodesForUser(user).join(', ');
 
   return (
@@ -172,10 +175,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </p>
               {canSeeHq ? (
                 <>
-                  <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link>
-                  <Link href="/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.kpi')}</Link>
-                  <Link href="/royalty" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.royalty')}</Link>
-                  <Link href="/analytics" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.analytics')}</Link>
+                  {canManageBranches ? <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link> : null}
+                  {canSeeKpi ? <Link href="/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.kpi')}</Link> : null}
+                  {canSeeReports ? <Link href="/analytics" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.analytics')}</Link> : null}
+                  {canManageBranches ? <Link href="/royalty" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.royalty')}</Link> : null}
                 </>
               ) : null}
               {canSeeAcademy ? <Link href="/academy" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.academy')}</Link> : null}

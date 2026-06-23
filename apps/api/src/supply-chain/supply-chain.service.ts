@@ -80,6 +80,7 @@ export class SupplyChainService {
   }
 
   private canAccessAllSupplyChain(user: AuthUser) {
-    return isFullAccessRole(user.role) || user.role === Role.SUPPLY_CHAIN_MANAGER;
+    const roles = user.roles?.length ? user.roles : [user.role];
+    return roles.some((role) => isFullAccessRole(role) || role === Role.SUPPLY_CHAIN_MANAGER);
   }
 }

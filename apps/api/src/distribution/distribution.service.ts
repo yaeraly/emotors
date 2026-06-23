@@ -788,19 +788,17 @@ export class DistributionService {
   }
 
   private canManage(user: AuthUser) {
-    return (
-      isFullAccessRole(user.role) ||
-      user.role === Role.SUPPLY_CHAIN_MANAGER ||
-      user.role === Role.WAREHOUSE_MANAGER
+    const roles = user.roles?.length ? user.roles : [user.role];
+    return roles.some((role) =>
+      isFullAccessRole(role) ||
+      role === Role.SUPPLY_CHAIN_MANAGER ||
+      role === Role.WAREHOUSE_MANAGER
     );
   }
 
   private canManageFinance(user: AuthUser) {
-    return (
-      this.canManage(user) ||
-      user.role === Role.ACCOUNTANT ||
-      user.role === Role.FINANCE_MANAGER
-    );
+    const roles = user.roles?.length ? user.roles : [user.role];
+    return this.canManage(user) || roles.some((role) => role === Role.ACCOUNTANT || role === Role.FINANCE_MANAGER);
   }
 
   private assertQueryBranchAccess(user: AuthUser, branchId?: string) {

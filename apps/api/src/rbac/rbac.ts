@@ -27,7 +27,6 @@ export const BRANCH_REQUIRED_ROLES: Role[] = [
   Role.MASTER,
   Role.WAREHOUSE_OPERATOR,
   Role.CASHIER,
-  Role.SALESPERSON,
 ];
 
 export const ALL_PERMISSION_CODES = [
@@ -36,9 +35,13 @@ export const ALL_PERMISSION_CODES = [
   'crm.manage',
   'sales.manage',
   'inventory.manage',
+  'inventory.view',
   'service.manage',
   'finance.view',
+  'payments.manage',
   'payroll.manage',
+  'kpi.view',
+  'reports.view',
   'procurement.manage',
   'distribution.manage',
   'academy.manage',
@@ -61,11 +64,22 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
-  FRANCHISE_OWNER: ['users.manage', 'crm.manage', 'sales.manage', 'inventory.manage', 'service.manage', 'finance.view'],
-  MANAGER: ['crm.manage', 'sales.manage', 'inventory.manage'],
+  FRANCHISE_OWNER: [
+    'users.manage',
+    'crm.manage',
+    'sales.manage',
+    'inventory.manage',
+    'inventory.view',
+    'service.manage',
+    'finance.view',
+    'payments.manage',
+    'kpi.view',
+    'reports.view',
+  ],
+  MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
   MASTER: ['service.manage'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
-  CASHIER: ['sales.manage'],
+  CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
@@ -122,19 +136,7 @@ export function rolesCanAccessRequiredRoles(roles: Role[], requiredRoles: Role[]
     return false;
   }
 
-  if (hasAnyFullAccessRole(userRoles) || requiredRoles.some((requiredRole) => userRoles.includes(requiredRole))) {
-    return true;
-  }
-
-  const capabilityRoles = requiredRoles.filter((requiredRole) => !isFullAccessRole(requiredRole));
-  if (!capabilityRoles.length) {
-    return false;
-  }
-
-  const permissions = new Set(permissionsForRoles(userRoles));
-  return capabilityRoles.some((requiredRole) =>
-    permissionsForRole(requiredRole).some((permission) => permissions.has(permission)),
-  );
+  return hasAnyFullAccessRole(userRoles) || requiredRoles.some((requiredRole) => userRoles.includes(requiredRole));
 }
 
 export function legacyRoleCanAccessRequiredRoles(role: Role, requiredRoles: Role[]) {
