@@ -129,9 +129,65 @@ export class DistributionService {
   }
 
   send(user: AuthUser, id: string) {
-    return this.transition(user, id, BranchDistributionOrderStatus.APPROVED, {
-      status: BranchDistributionOrderStatus.SENT,
-      sentAt: new Date(),
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        },
+        include: {
+          items: true,
+          sourceWarehouse: true,
+        },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      if (order.status !== BranchDistributionOrderStatus.APPROVED) {
+        throw new BadRequestException(
+          'Only approved orders can be sent. Stock was not deducted.',
+        );
+      }
+
+      for (const item of order.items) {
+        const balance = await tx.inventoryBalance.findUnique({
+          where: {
+            branchId_warehouseId_productId: {
+              branchId: order.sourceWarehouse.branchId,
+              warehouseId: order.sourceWarehouseId,
+              productId: item.productId,
+            },
+          },
+        });
+        const availableQuantity = balance?.quantity ?? 0;
+        if (availableQuantity < item.quantity) {
+          throw new BadRequestException(
+            `Insufficient stock for SKU ${item.sku}. Requested: ${item.quantity} Available: ${availableQuantity}`,
+          );
+        }
+      }
+
+      for (const item of order.items) {
+        await this.inventoryService.createStockMovementInTx(tx, user, {
+          productId: item.productId,
+          warehouseId: order.sourceWarehouseId,
+          type: StockMovementType.OUT,
+          quantity: item.quantity,
+          unitCostKgs: Number(item.unitCost),
+          referenceType: 'DISTRIBUTION_ORDER',
+          referenceId: order.id,
+          note: `Distribution order ${order.orderNumber}`,
+        });
+      }
+
+      const updated = await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: {
+          status: BranchDistributionOrderStatus.SENT,
+          sentAt: new Date(),
+        },
+        include: this.include(),
+      });
+      return this.toResponse(updated);
     });
   }
 

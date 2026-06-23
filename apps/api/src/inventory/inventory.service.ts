@@ -744,7 +744,7 @@ export class InventoryService {
   }
 
   private resolveBranchId(user: AuthUser, requestedBranchId?: string) {
-    if (user.role === Role.OWNER) {
+    if (this.canAccessAllInventory(user)) {
       return requestedBranchId ?? user.branchId;
     }
 
@@ -756,7 +756,7 @@ export class InventoryService {
   }
 
   private buildBranchWhere(user: AuthUser, requestedBranchId?: string) {
-    if (user.role === Role.OWNER) {
+    if (this.canAccessAllInventory(user)) {
       return requestedBranchId ? { branchId: requestedBranchId } : {};
     }
 
@@ -819,7 +819,7 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
       },
     });
 
@@ -839,7 +839,7 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
       },
       include: {
         ...this.productInclude(),
@@ -872,7 +872,7 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
       },
     });
 
@@ -887,7 +887,7 @@ export class InventoryService {
     const warehouse = await tx.warehouse.findFirst({
       where: {
         id,
-        ...(user.role === Role.OWNER ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
       },
     });
 
@@ -911,6 +911,10 @@ export class InventoryService {
     }
 
     return quantity;
+  }
+
+  private canAccessAllInventory(user: AuthUser) {
+    return user.role === Role.OWNER || user.role === Role.SUPPLY_CHAIN_MANAGER;
   }
 
   private toProductResponse(product: any) {

@@ -48,6 +48,9 @@ export default function DistributionOrderDetailPage() {
   }, [id]);
 
   async function action(path: 'approve' | 'send' | 'cancel', message: string) {
+    if (path === 'send' && !window.confirm(t('distribution.confirmSendDeductStock'))) {
+      return;
+    }
     setError('');
     setSuccess('');
     try {
