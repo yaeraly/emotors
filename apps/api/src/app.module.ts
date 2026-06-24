@@ -13,6 +13,7 @@ import { InventoryModule } from './inventory/inventory.module';
 import { InvestmentModule } from './investment/investment.module';
 import { KpiModule } from './kpi/kpi.module';
 import { MarketingModule } from './marketing/marketing.module';
+import { OperationsModule } from './operations/operations.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { ProcurementModule } from './procurement/procurement.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -41,6 +42,7 @@ import { UsersModule } from './users/users.module';
     PayrollModule,
     AcademyModule,
     MarketingModule,
+    OperationsModule,
     RoyaltyModule,
     AnalyticsModule,
     ProcurementModule,

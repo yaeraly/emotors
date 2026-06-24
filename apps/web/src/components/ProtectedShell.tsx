@@ -78,6 +78,11 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeAi = hasPermission(user, 'analytics.view') || hasPermission(user, 'reports.view');
   const canSeePayroll = hasPermission(user, 'payroll.manage');
   const canSeePayments = hasPermission(user, 'payments.manage') || hasRole(user, 'SALESPERSON');
+  const canSeeReservations = hasPermission(user, 'sales.manage');
+  const canSeeReturns = hasPermission(user, 'sales.manage') || hasPermission(user, 'payments.manage');
+  const canSeeWarehouseRelease = hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
+  const canSeeWarrantyClaims = hasPermission(user, 'service.manage') || hasPermission(user, 'distribution.manage');
+  const canSeeSupplierClaims = hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
   const roleLabel = roleCodesForUser(user).join(', ');
 
   return (
@@ -137,6 +142,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {t('nav.sales')}
               </Link>
             ) : null}
+            {canSeeReservations ? <Link href="/reservations" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.reservations')}</Link> : null}
+            {canSeeReturns ? <Link href="/returns" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.returns')}</Link> : null}
             {canSeeInventory ? (
               <div className="rounded-xl px-3 py-2">
                 <Link
@@ -152,6 +159,11 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   {canManageInventory ? (
                     <Link href="/stock-movements" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
                       {t('inventory.stockMovements')}
+                    </Link>
+                  ) : null}
+                  {canSeeWarehouseRelease ? (
+                    <Link href="/warehouse-release" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                      {t('operations.warehouseRelease')}
                     </Link>
                   ) : null}
                   <Link href="/warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
@@ -172,6 +184,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/service/new" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.newOrder')}</Link>
                   <Link href="/service/warranties" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.warranties')}</Link>
                   <Link href="/service/reports" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('nav.reports')}</Link>
+                  {canSeeWarrantyClaims ? <Link href="/warranty/claims" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.warrantyClaims')}</Link> : null}
+                  {canSeeService ? <Link href="/service/parts-requests" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.partsRequests')}</Link> : null}
                 </div>
               </div>
             ) : null}
@@ -208,9 +222,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                     <Link href="/procurement/suppliers" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.suppliers')}</Link>
                     <Link href="/procurement/factories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.factories')}</Link>
                     <Link href="/procurement/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.orders')}</Link>
+                    <Link href="/branch-purchase-requests" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.branchPurchaseRequests')}</Link>
+                    {canSeeSupplierClaims ? <Link href="/supplier-claims" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.supplierClaims')}</Link> : null}
                   </div>
                 </div>
               ) : null}
+              {!canSeeProcurement && (canSeeCrm || canSeeSales) ? <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.branchPurchaseRequests')}</Link> : null}
               {canSeeSupplyChain ? <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyChain.title')}</Link> : null}
               {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}
               {canSeeExpansion ? <Link href="/expansion" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('expansion.title')}</Link> : null}
@@ -221,6 +238,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeePayroll ? <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('commissions.title')}</Link> : null}
               {canSeePayroll ? <Link href="/payroll" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('payroll.title')}</Link> : null}
               {canManageUsers ? <Link href="/users" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.users')}</Link> : null}
+              <Link href="/alerts" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.alerts')}</Link>
               {[
                 'nav.dashboard',
                 'nav.finance',

@@ -183,7 +183,7 @@ export class DistributionService {
       const updated = await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
-          status: BranchDistributionOrderStatus.SENT,
+          status: BranchDistributionOrderStatus.SHIPPED,
           sentAt: new Date(),
         },
         include: this.include(),
@@ -224,8 +224,8 @@ export class DistributionService {
         include: { items: true },
       });
       if (!order) throw new NotFoundException('Distribution order not found');
-      if (order.status !== BranchDistributionOrderStatus.SENT) {
-        throw new BadRequestException('Order must be SENT before receiving');
+      if (order.status !== BranchDistributionOrderStatus.SENT && order.status !== BranchDistributionOrderStatus.SHIPPED) {
+        throw new BadRequestException('Order must be SHIPPED before receiving');
       }
 
       const warehouse = await tx.warehouse.findFirst({

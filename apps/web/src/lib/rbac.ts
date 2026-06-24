@@ -145,6 +145,15 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/users')) return hasPermission(user, 'users.manage');
   if (pathname.startsWith('/branches')) return hasPermission(user, 'branches.manage');
   if (pathname.startsWith('/procurement')) return hasPermission(user, 'procurement.manage');
+  if (pathname.startsWith('/branch-purchase-requests')) {
+    return hasPermission(user, 'procurement.manage') || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
+  }
+  if (pathname.startsWith('/reservations')) return hasPermission(user, 'sales.manage');
+  if (pathname.startsWith('/warehouse-release')) return hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
+  if (pathname.startsWith('/returns')) return hasPermission(user, 'sales.manage') || hasPermission(user, 'payments.manage');
+  if (pathname.startsWith('/warranty/claims')) return hasPermission(user, 'service.manage') || hasPermission(user, 'distribution.manage');
+  if (pathname.startsWith('/supplier-claims')) return hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
+  if (pathname.startsWith('/alerts')) return true;
   if (pathname.startsWith('/distribution/invoices')) {
     return hasPermission(user, 'distribution.manage') || hasPermission(user, 'finance.view') || hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   }

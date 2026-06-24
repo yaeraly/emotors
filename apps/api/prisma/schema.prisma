@@ -118,6 +118,134 @@ enum StockMovementType {
   ADJUSTMENT
   SALE
   SERVICE_USE
+  DEFECTIVE_IN
+}
+
+enum BranchPurchaseRequestStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CONVERTED_TO_DISTRIBUTION_ORDER
+  CANCELLED
+}
+
+enum ReplacementShipmentStatus {
+  OPEN
+  APPROVED
+  SENT
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum ReservationStatus {
+  ACTIVE
+  EXPIRED
+  CONVERTED_TO_SALE
+  CANCELLED
+}
+
+enum WarehouseReleaseOrderStatus {
+  PENDING
+  READY
+  RELEASED
+  CANCELLED
+}
+
+enum PartsRequestStatus {
+  PENDING
+  APPROVED
+  RELEASED
+  CANCELLED
+}
+
+enum ReturnOrderStatus {
+  PENDING
+  UNDER_INSPECTION
+  APPROVED
+  REJECTED
+  REFUNDED
+  EXCHANGED
+  CLOSED
+  CANCELLED
+}
+
+enum ReturnReason {
+  DEFECTIVE
+  WRONG_PRODUCT
+  WRONG_MODEL
+  CUSTOMER_CHANGED_MIND
+  WARRANTY_RETURN
+  SHIPPING_DAMAGE
+  OTHER
+}
+
+enum ReturnResolution {
+  REFUND
+  EXCHANGE
+  REJECTION
+  DEFECTIVE_STOCK
+  RESTOCK
+}
+
+enum ExchangeOrderStatus {
+  DRAFT
+  COMPLETED
+  CANCELLED
+}
+
+enum WarrantyClaimStatus {
+  PENDING
+  UNDER_INSPECTION
+  APPROVED
+  REJECTED
+  REPAIRED
+  REPLACED
+  SENT_TO_HQ
+  CLOSED
+}
+
+enum HqWarrantyDecision {
+  REPAIR
+  REPLACE
+  REJECT
+  SUPPLIER_CLAIM
+}
+
+enum SupplierClaimStatus {
+  DRAFT
+  SENT_TO_SUPPLIER
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  COMPENSATED
+  CLOSED
+}
+
+enum SupplierClaimOutcome {
+  REFUND
+  REPLACEMENT
+  CREDIT
+  REJECTED
+}
+
+enum AlertType {
+  LOW_STOCK
+  OUT_OF_STOCK
+  PROCUREMENT_ORDER_DELAYED
+  CONTAINER_DELAYED
+  BRANCH_DEBT_HIGH
+  INSTALLMENT_OVERDUE
+  WARRANTY_EXPIRING
+  RESERVATION_EXPIRING
+  RETURN_PENDING_APPROVAL
+}
+
+enum AlertStatus {
+  UNREAD
+  READ
+  RESOLVED
 }
 
 enum StudentStatus {
@@ -175,6 +303,13 @@ enum PurchaseOrderStatus {
 enum ProcurementOrderStatus {
   DRAFT
   APPROVED
+  ORDERED
+  PRODUCTION
+  READY_TO_SHIP
+  CUSTOMS_CLEARANCE
+  ARRIVED_IN_KYRGYZSTAN
+  RECEIVED_TO_HQ_WAREHOUSE
+  CLOSED
   PAID
   IN_PRODUCTION
   SHIPPED_TO_YIWU
@@ -193,10 +328,16 @@ enum StockTransferStatus {
 
 enum BranchDistributionOrderStatus {
   DRAFT
+  SUBMITTED
   APPROVED
+  PICKING
+  PACKED
+  SHIPPED
+  DELIVERED
   SENT
   RECEIVED
   RECEIVED_WITH_DIFFERENCE
+  CLOSED
   CANCELLED
 }
 
@@ -1243,6 +1384,8 @@ model ProcurementOrder {
   paidAt                 DateTime?
   shippedAt              DateTime?
   arrivedAt              DateTime?
+  receivedToHqAt         DateTime?
+  hqStockMovementCreatedAt DateTime?
   note                   String?
   items                  ProcurementOrderItem[]
   createdAt              DateTime               @default(now())
@@ -2158,4 +2301,425 @@ model KpiRecommendation {
 
   @@index([branchId])
   @@index([priority])
+}
+
+model ProcurementGoodsReceiving {
+  id                 String   @id @default(cuid())
+  receivingNumber   String   @unique
+  procurementOrderId String
+  hqWarehouseId     String
+  receivedById      String
+  receivedAt        DateTime @default(now())
+  note              String?
+  items             ProcurementGoodsReceivingItem[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  @@index([procurementOrderId])
+  @@index([hqWarehouseId])
+  @@index([receivedById])
+}
+
+model ProcurementGoodsReceivingItem {
+  id                 String   @id @default(cuid())
+  receivingId        String
+  receiving          ProcurementGoodsReceiving @relation(fields: [receivingId], references: [id])
+  procurementItemId  String?
+  productId          String
+  sku                String
+  productName        String
+  expectedQuantity   Int
+  receivedQuantity   Int
+  differenceQuantity Int
+  note               String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([receivingId])
+  @@index([productId])
+}
+
+model ProcurementDifferenceReport {
+  id                 String   @id @default(cuid())
+  reportNumber       String   @unique
+  receivingId        String
+  procurementOrderId String
+  type               ShortageReportItemType
+  status             ShortageReportStatus @default(OPEN)
+  productId          String
+  sku                String
+  productName        String
+  expectedQuantity   Int
+  receivedQuantity   Int
+  differenceQuantity Int
+  note               String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  resolvedAt         DateTime?
+  deletedAt          DateTime?
+
+  @@index([receivingId])
+  @@index([procurementOrderId])
+  @@index([type])
+  @@index([status])
+}
+
+model BranchPurchaseRequest {
+  id               String   @id @default(cuid())
+  requestNumber    String   @unique
+  branchId         String
+  status           BranchPurchaseRequestStatus @default(DRAFT)
+  createdById      String
+  reviewedById     String?
+  reviewedAt       DateTime?
+  convertedOrderId String?
+  note             String?
+  items            BranchPurchaseRequestItem[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  @@index([branchId])
+  @@index([status])
+  @@index([createdById])
+  @@index([convertedOrderId])
+}
+
+model BranchPurchaseRequestItem {
+  id          String   @id @default(cuid())
+  requestId   String
+  request     BranchPurchaseRequest @relation(fields: [requestId], references: [id])
+  productId   String
+  sku         String
+  productName String
+  quantity    Int
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([requestId])
+  @@index([productId])
+}
+
+model ReplacementShipment {
+  id                  String   @id @default(cuid())
+  shipmentNumber      String   @unique
+  shortageReportId    String?
+  distributionOrderId String?
+  branchId            String
+  status              ReplacementShipmentStatus @default(OPEN)
+  createdById         String
+  sentAt              DateTime?
+  receivedAt          DateTime?
+  note                String?
+  items               ReplacementShipmentItem[]
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  deletedAt           DateTime?
+
+  @@index([shortageReportId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model ReplacementShipmentItem {
+  id          String @id @default(cuid())
+  shipmentId  String
+  shipment    ReplacementShipment @relation(fields: [shipmentId], references: [id])
+  productId   String
+  sku         String
+  productName String
+  quantity    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([shipmentId])
+  @@index([productId])
+}
+
+model Reservation {
+  id                String   @id @default(cuid())
+  reservationNumber String   @unique
+  branchId          String
+  customerId        String
+  status            ReservationStatus @default(ACTIVE)
+  depositAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  expiresAt         DateTime
+  createdById       String
+  convertedSaleId   String?
+  cancelledAt       DateTime?
+  items             ReservationItem[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  @@index([branchId])
+  @@index([customerId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model ReservationItem {
+  id            String @id @default(cuid())
+  reservationId String
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
+  productId     String
+  sku           String
+  productName   String
+  quantity      Int
+  unitPrice     Decimal @db.Decimal(14, 2)
+  totalPrice    Decimal @db.Decimal(14, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([reservationId])
+  @@index([productId])
+}
+
+model WarehouseReleaseOrder {
+  id             String @id @default(cuid())
+  releaseNumber  String @unique
+  saleId         String?
+  serviceOrderId String?
+  branchId       String
+  warehouseId    String?
+  status         WarehouseReleaseOrderStatus @default(PENDING)
+  releasedById   String?
+  releasedAt     DateTime?
+  note           String?
+  items          WarehouseReleaseOrderItem[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([saleId])
+  @@index([serviceOrderId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model WarehouseReleaseOrderItem {
+  id          String @id @default(cuid())
+  releaseId   String
+  release     WarehouseReleaseOrder @relation(fields: [releaseId], references: [id])
+  productId   String
+  sku         String
+  productName String
+  quantity    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([releaseId])
+  @@index([productId])
+}
+
+model PartsRequest {
+  id             String @id @default(cuid())
+  requestNumber  String @unique
+  serviceOrderId String
+  branchId       String
+  status         PartsRequestStatus @default(PENDING)
+  createdById    String
+  approvedById   String?
+  releasedById   String?
+  releasedAt     DateTime?
+  note           String?
+  items          PartsRequestItem[]
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([serviceOrderId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model PartsRequestItem {
+  id          String @id @default(cuid())
+  requestId   String
+  request     PartsRequest @relation(fields: [requestId], references: [id])
+  productId   String
+  warehouseId String?
+  sku         String
+  productName String
+  quantity    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([requestId])
+  @@index([productId])
+}
+
+model ReturnOrder {
+  id           String @id @default(cuid())
+  returnNumber String @unique
+  branchId     String
+  customerId   String
+  saleId       String?
+  status       ReturnOrderStatus @default(PENDING)
+  reason       ReturnReason
+  resolution   ReturnResolution?
+  totalAmount  Decimal @default(0) @db.Decimal(14, 2)
+  createdById  String
+  approvedById String?
+  approvedAt   DateTime?
+  closedAt     DateTime?
+  note         String?
+  items        ReturnOrderItem[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  @@index([branchId])
+  @@index([customerId])
+  @@index([saleId])
+  @@index([status])
+}
+
+model ReturnOrderItem {
+  id            String @id @default(cuid())
+  returnOrderId String
+  returnOrder   ReturnOrder @relation(fields: [returnOrderId], references: [id])
+  productId     String
+  sku           String
+  productName   String
+  quantity      Int
+  unitPrice     Decimal @default(0) @db.Decimal(14, 2)
+  condition     String?
+  defective     Boolean @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([returnOrderId])
+  @@index([productId])
+}
+
+model ExchangeOrder {
+  id              String @id @default(cuid())
+  exchangeNumber  String @unique
+  returnOrderId   String
+  branchId        String
+  status          ExchangeOrderStatus @default(DRAFT)
+  priceDifference Decimal @default(0) @db.Decimal(14, 2)
+  createdById     String
+  completedAt     DateTime?
+  items           ExchangeOrderItem[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  @@index([returnOrderId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model ExchangeOrderItem {
+  id           String @id @default(cuid())
+  exchangeId   String
+  exchange     ExchangeOrder @relation(fields: [exchangeId], references: [id])
+  oldProductId String?
+  newProductId String
+  sku          String
+  productName  String
+  quantity     Int
+  unitPrice    Decimal @default(0) @db.Decimal(14, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([exchangeId])
+  @@index([newProductId])
+}
+
+model WarrantyClaim {
+  id             String @id @default(cuid())
+  claimNumber    String @unique
+  branchId       String
+  customerId     String
+  productId      String
+  sku            String
+  serialNumber   String?
+  saleId         String?
+  soldAt         DateTime?
+  soldById       String?
+  installedById  String?
+  warrantyUntil  DateTime?
+  status         WarrantyClaimStatus @default(PENDING)
+  reason         String
+  decision       String?
+  note           String?
+  hqReceivedAt   DateTime?
+  inspectedById  String?
+  hqDecision     HqWarrantyDecision?
+  hqResult       String?
+  items          WarrantyClaimItem[]
+  createdById    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  deletedAt      DateTime?
+
+  @@index([branchId])
+  @@index([customerId])
+  @@index([productId])
+  @@index([saleId])
+  @@index([status])
+}
+
+model WarrantyClaimItem {
+  id          String @id @default(cuid())
+  claimId     String
+  claim       WarrantyClaim @relation(fields: [claimId], references: [id])
+  productId   String
+  sku         String
+  productName String
+  quantity    Int @default(1)
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([claimId])
+  @@index([productId])
+}
+
+model SupplierClaim {
+  id                 String @id @default(cuid())
+  claimNumber        String @unique
+  supplierId         String?
+  factoryId          String?
+  procurementOrderId String?
+  productId          String
+  sku                String
+  quantity           Int
+  reason             String
+  evidencePhotos     String[]
+  claimAmount        Decimal @default(0) @db.Decimal(14, 2)
+  status             SupplierClaimStatus @default(DRAFT)
+  outcome            SupplierClaimOutcome?
+  createdById        String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
+
+  @@index([supplierId])
+  @@index([factoryId])
+  @@index([procurementOrderId])
+  @@index([productId])
+  @@index([status])
+}
+
+model Alert {
+  id         String @id @default(cuid())
+  branchId   String?
+  type       AlertType
+  title      String
+  message    String
+  status     AlertStatus @default(UNREAD)
+  createdAt  DateTime @default(now())
+  readAt     DateTime?
+  resolvedAt DateTime?
+
+  @@index([branchId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
 }

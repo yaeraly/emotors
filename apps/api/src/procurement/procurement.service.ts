@@ -218,7 +218,7 @@ export class ProcurementService {
   }
 
   updateProcurementStatus(user: AuthUser, id: string, status: ProcurementOrderStatus) {
-    if (status === ProcurementOrderStatus.ARRIVED) {
+    if (status === ProcurementOrderStatus.ARRIVED || status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
       return this.markProcurementArrived(user, id);
     }
     const data: any = { status };
@@ -238,7 +238,7 @@ export class ProcurementService {
         include: { items: true, hqWarehouse: true },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
-      if (order.status === ProcurementOrderStatus.ARRIVED) {
+      if (order.hqStockMovementCreatedAt || order.status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
         return this.prisma.procurementOrder.findUnique({ where: { id }, include: this.procurementOrderInclude() });
       }
 
@@ -289,9 +289,11 @@ export class ProcurementService {
       return tx.procurementOrder.update({
         where: { id },
         data: {
-          status: ProcurementOrderStatus.ARRIVED,
+          status: ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE,
           arrivedAt: new Date(),
           actualArrivalDate: new Date(),
+          receivedToHqAt: new Date(),
+          hqStockMovementCreatedAt: new Date(),
         },
         include: this.procurementOrderInclude(),
       });
