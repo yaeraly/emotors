@@ -8,12 +8,33 @@ export const assignableRoles: Role[] = [
   'CASHIER',
 ];
 
+export const hqAssignableRoles: Role[] = [
+  'FRANCHISE_DIRECTOR',
+  'SUPPLY_CHAIN_MANAGER',
+  'WAREHOUSE_MANAGER',
+  'FINANCE_MANAGER',
+  'ACCOUNTANT',
+  'MARKETING_MANAGER',
+  'CONTENT_CREATOR',
+  'ACADEMY_DIRECTOR',
+  'SYSTEM_ADMINISTRATOR',
+];
+
 const roleLabels: Partial<Record<Role, string>> = {
   FRANCHISE_OWNER: 'Franchise Owner',
   MANAGER: 'Manager',
   MASTER: 'Master',
   WAREHOUSE_OPERATOR: 'Warehouse Operator',
   CASHIER: 'Cashier',
+  FRANCHISE_DIRECTOR: 'Franchise Director',
+  SUPPLY_CHAIN_MANAGER: 'Supply Chain Manager',
+  WAREHOUSE_MANAGER: 'Warehouse Manager',
+  FINANCE_MANAGER: 'Finance Manager',
+  ACCOUNTANT: 'Accountant',
+  MARKETING_MANAGER: 'Marketing Manager',
+  CONTENT_CREATOR: 'Content Creator',
+  ACADEMY_DIRECTOR: 'Academy Director',
+  SYSTEM_ADMINISTRATOR: 'System Administrator',
 };
 
 const roleDescriptions: Partial<Record<Role, string>> = {
@@ -44,10 +65,12 @@ export function RoleSelector({
   label,
   selectedRoles,
   onChange,
+  roles = assignableRoles,
 }: {
   label: string;
   selectedRoles: Role[];
   onChange: (roles: Role[]) => void;
+  roles?: Role[];
 }) {
   function toggle(role: Role) {
     if (selectedRoles.includes(role)) {
@@ -62,7 +85,7 @@ export function RoleSelector({
     <fieldset className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
       <legend className="px-1 text-sm font-semibold text-slate-700">{label}</legend>
       <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {assignableRoles.map((role) => (
+        {roles.map((role) => (
           <label key={role} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
             <input
               checked={selectedRoles.includes(role)}

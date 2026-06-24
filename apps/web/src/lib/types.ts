@@ -121,8 +121,8 @@ export type User = {
   fullName: string;
   role: Role;
   roles?: Role[];
-  branchId: string;
-  branch?: Branch;
+  branchId: string | null;
+  branch?: Branch | null;
   status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   mustChangePassword?: boolean;
   permissions?: string[];

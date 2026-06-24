@@ -203,6 +203,95 @@ async function main() {
   console.log('Username: ceo');
   console.log('Password: Emotors@2026\n');
 
+  const hqTestUsers: Array<{
+    email: string;
+    username: string;
+    fullName: string;
+    role: Role;
+    employeeId: string;
+    phone: string;
+  }> = [
+    {
+      email: 'supply@emotors.kg',
+      username: 'supply',
+      fullName: 'Supply Chain Manager',
+      role: Role.SUPPLY_CHAIN_MANAGER,
+      employeeId: 'HQ-SUPPLY-001',
+      phone: '+996700000003',
+    },
+    {
+      email: 'warehouse@emotors.kg',
+      username: 'warehouse',
+      fullName: 'HQ Warehouse Manager',
+      role: Role.WAREHOUSE_MANAGER,
+      employeeId: 'HQ-WAREHOUSE-001',
+      phone: '+996700000004',
+    },
+    {
+      email: 'finance@emotors.kg',
+      username: 'finance',
+      fullName: 'Finance Manager',
+      role: Role.FINANCE_MANAGER,
+      employeeId: 'HQ-FINANCE-001',
+      phone: '+996700000005',
+    },
+    {
+      email: 'accountant@emotors.kg',
+      username: 'accountant',
+      fullName: 'HQ Accountant',
+      role: Role.ACCOUNTANT,
+      employeeId: 'HQ-ACCOUNTANT-001',
+      phone: '+996700000006',
+    },
+    {
+      email: 'sysadmin@emotors.kg',
+      username: 'sysadmin',
+      fullName: 'System Administrator',
+      role: Role.SYSTEM_ADMINISTRATOR,
+      employeeId: 'HQ-SYSADMIN-001',
+      phone: '+996700000007',
+    },
+  ];
+
+  const hqPasswordHash = await bcrypt.hash('Emotors@2026', 12);
+  for (const hqUser of hqTestUsers) {
+    await prisma.user.upsert({
+      where: { email: hqUser.email },
+      update: {
+        passwordHash: hqPasswordHash,
+        fullName: hqUser.fullName,
+        role: hqUser.role,
+        branchId: null,
+        employeeId: hqUser.employeeId,
+        phone: hqUser.phone,
+        username: hqUser.username,
+        status: 'ACTIVE',
+        mustChangePassword: false,
+      },
+      create: {
+        email: hqUser.email,
+        passwordHash: hqPasswordHash,
+        fullName: hqUser.fullName,
+        role: hqUser.role,
+        branchId: null,
+        employeeId: hqUser.employeeId,
+        phone: hqUser.phone,
+        username: hqUser.username,
+        status: 'ACTIVE',
+        mustChangePassword: false,
+      },
+    });
+    const createdUser = await prisma.user.findUnique({ where: { email: hqUser.email } });
+    const role = await prisma.rbacRole.findUnique({ where: { code: hqUser.role } });
+    if (createdUser && role) {
+      await prisma.userRole.upsert({
+        where: { userId_roleId: { userId: createdUser.id, roleId: role.id } },
+        update: {},
+        create: { userId: createdUser.id, roleId: role.id },
+      });
+    }
+  }
+
   for (const [code, nameKy, nameRu, nameEn] of productCategories) {
     await prisma.productCategory.upsert({
       where: { code },

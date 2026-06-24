@@ -24,6 +24,25 @@ const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
 ];
 const OWN_BRANCH_PASSWORD_RESET_ERROR =
   'You can reset passwords only for employees in your own branch.';
+const HQ_ROLES: Role[] = [
+  Role.CEO,
+  Role.FRANCHISE_DIRECTOR,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.WAREHOUSE_MANAGER,
+  Role.FINANCE_MANAGER,
+  Role.ACCOUNTANT,
+  Role.MARKETING_MANAGER,
+  Role.CONTENT_CREATOR,
+  Role.ACADEMY_DIRECTOR,
+  Role.SYSTEM_ADMINISTRATOR,
+];
+const BRANCH_ROLES: Role[] = [
+  Role.FRANCHISE_OWNER,
+  Role.MANAGER,
+  Role.MASTER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.CASHIER,
+];
 
 @Injectable()
 export class UsersService {
@@ -38,14 +57,19 @@ export class UsersService {
   }
 
   async create(user: AuthUser, dto: any) {
-    const roles = this.normalizeRoles(dto.roles, dto.role ? [dto.role] : [Role.MANAGER]);
+    const userType = dto.userType === 'HQ' ? 'HQ' : 'BRANCH';
+    const roles = this.normalizeRoles(
+      dto.roles,
+      dto.role ? [dto.role] : [userType === 'HQ' ? Role.SUPPLY_CHAIN_MANAGER : Role.MANAGER],
+    );
+    this.validateUserTypeForCreate(user, userType, roles, dto.branchId);
     const primaryRole = this.primaryRole(roles, dto.role);
     this.assertCanManage(user, dto.branchId, roles);
     this.validatePassword(dto.password ?? TEMP_PASSWORD);
     const username = String(dto.username ?? '').trim().toLowerCase();
     if (!username) throw new BadRequestException('Username is required');
     const email = dto.email?.trim().toLowerCase() || `${username}@emotors.local`;
-    const branchId = this.resolveBranchId(user, dto.branchId, roles);
+    const branchId = userType === 'HQ' ? null : this.resolveBranchId(user, dto.branchId, roles);
     const passwordHash = await bcrypt.hash(dto.password ?? TEMP_PASSWORD, 12);
     const created = await this.prisma.user.create({
       data: {
@@ -168,6 +192,33 @@ export class UsersService {
       return;
     }
     throw new ForbiddenException('No user management access');
+  }
+
+  private validateUserTypeForCreate(
+    user: AuthUser,
+    userType: 'HQ' | 'BRANCH',
+    roles: Role[],
+    branchId?: string | null,
+  ) {
+    if (userType === 'HQ') {
+      if (!this.hasRole(user, Role.CEO) && !this.hasRole(user, Role.SYSTEM_ADMINISTRATOR)) {
+        throw new ForbiddenException('Only CEO or system administrator can create HQ employees');
+      }
+      if (branchId) {
+        throw new BadRequestException('HQ employees cannot belong to a branch.');
+      }
+      if (!roles.length || roles.some((role) => !HQ_ROLES.includes(role))) {
+        throw new BadRequestException('HQ employees can only have HQ roles.');
+      }
+      return;
+    }
+
+    if (!roles.length || roles.some((role) => !BRANCH_ROLES.includes(role))) {
+      throw new BadRequestException('Branch employees can only have branch roles.');
+    }
+    if (!branchId && !this.hasRole(user, Role.FRANCHISE_OWNER)) {
+      throw new BadRequestException('Branch is required for branch employees');
+    }
   }
 
   private resolveBranchId(user: AuthUser, branchId: string | undefined, roles: Role[]) {
