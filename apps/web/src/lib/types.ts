@@ -126,6 +126,9 @@ export type User = {
   status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   mustChangePassword?: boolean;
   permissions?: string[];
+  lastLoginAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type Customer = {
