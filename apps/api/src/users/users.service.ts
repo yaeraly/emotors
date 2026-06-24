@@ -48,7 +48,8 @@ const BRANCH_ROLES: Role[] = [
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  list(user: AuthUser) {
+  list(user: AuthUser, roleFilter?: string) {
+    this.assertRoleFilterAllowed(user, roleFilter);
     return this.prisma.user.findMany({
       where: this.userScope(user),
       include: { branch: true, userRoles: { include: { role: true } } },
@@ -185,6 +186,13 @@ export class UsersService {
     if (this.hasFullAccess(user)) return {};
     if (this.hasRole(user, Role.FRANCHISE_OWNER)) return { branchId: user.branchId };
     throw new ForbiddenException('No user management access');
+  }
+
+  private assertRoleFilterAllowed(user: AuthUser, roleFilter?: string) {
+    if (!roleFilter || this.hasFullAccess(user)) return;
+    if (this.hasRole(user, Role.FRANCHISE_OWNER) && !BRANCH_ROLES.includes(roleFilter as Role)) {
+      throw new BadRequestException('Branch users can filter only branch roles.');
+    }
   }
 
   private assertCanManage(user: AuthUser, branchId: string | undefined, roles: Role[]) {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role, UserStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -14,8 +14,8 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  list(@CurrentUser() user: AuthUser) {
-    return this.usersService.list(user);
+  list(@CurrentUser() user: AuthUser, @Query('role') role?: string) {
+    return this.usersService.list(user, role);
   }
 
   @Post()

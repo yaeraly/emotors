@@ -72,6 +72,8 @@ export default function UsersPage() {
     };
   }, [users]);
 
+  const roleFilterOptions = isHqUser(currentUser) ? allFilterRoles : branchRoles;
+
   const filteredUsers = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return users.filter((user) => {
@@ -172,7 +174,7 @@ export default function UsersPage() {
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
-            <Select label={t('users.roleFilter')} value={roleFilter} onChange={setRoleFilter} options={[{ value: '', label: t('common.all') }, ...allFilterRoles.map((role) => ({ value: role, label: roleLabel(role) }))]} />
+            <Select label={t('users.roleFilter')} value={roleFilter} onChange={setRoleFilter} options={[{ value: '', label: t('common.all') }, ...roleFilterOptions.map((role) => ({ value: role, label: roleLabel(role, t) }))]} />
             <Select
               label={t('users.branchFilter')}
               value={branchFilter}
@@ -214,7 +216,7 @@ export default function UsersPage() {
           <div className="mt-5">
             <p className="text-sm font-semibold text-slate-700">{t('users.multiRoleFilter')}</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              {allFilterRoles.map((role) => (
+              {roleFilterOptions.map((role) => (
                 <label key={role} className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">
                   <input
                     checked={multiRoleFilter.includes(role)}
@@ -222,7 +224,7 @@ export default function UsersPage() {
                     type="checkbox"
                     className="h-3.5 w-3.5 rounded border-slate-300"
                   />
-                  {roleLabel(role)}
+                  {roleLabel(role, t)}
                 </label>
               ))}
             </div>
@@ -293,8 +295,10 @@ function isHqUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return rolesForUser(user).some((role) => hqRoles.includes(role));
 }
 
-function roleLabel(role: Role) {
-  return role.replaceAll('_', ' ');
+function roleLabel(role: Role, t: (key: string) => string) {
+  const key = `roles.${role}`;
+  const translated = t(key);
+  return translated === key ? role.replaceAll('_', ' ') : translated;
 }
 
 function formatDate(value?: string | null) {
