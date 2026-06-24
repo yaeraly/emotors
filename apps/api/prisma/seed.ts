@@ -160,6 +160,49 @@ async function main() {
     });
   }
 
+  const ceoPasswordHash = await bcrypt.hash('Emotors@2026', 12);
+  await prisma.user.upsert({
+    where: { email: 'ceo@emotors.kg' },
+    update: {
+      passwordHash: ceoPasswordHash,
+      fullName: 'EMOTORS CEO',
+      role: Role.CEO,
+      branchId: null,
+      employeeId: 'HQ-CEO-001',
+      phone: '+996700000002',
+      username: 'ceo',
+      status: 'ACTIVE',
+      mustChangePassword: false,
+    },
+    create: {
+      email: 'ceo@emotors.kg',
+      passwordHash: ceoPasswordHash,
+      fullName: 'EMOTORS CEO',
+      role: Role.CEO,
+      branchId: null,
+      employeeId: 'HQ-CEO-001',
+      phone: '+996700000002',
+      username: 'ceo',
+      status: 'ACTIVE',
+      mustChangePassword: false,
+    },
+  });
+
+  const ceo = await prisma.user.findUnique({ where: { email: 'ceo@emotors.kg' } });
+  const ceoRole = await prisma.rbacRole.findUnique({ where: { code: 'CEO' } });
+  if (ceo && ceoRole) {
+    await prisma.userRole.upsert({
+      where: { userId_roleId: { userId: ceo.id, roleId: ceoRole.id } },
+      update: {},
+      create: { userId: ceo.id, roleId: ceoRole.id },
+    });
+  }
+
+  console.log('\nCEO LOGIN');
+  console.log('Email: ceo@emotors.kg');
+  console.log('Username: ceo');
+  console.log('Password: Emotors@2026\n');
+
   for (const [code, nameKy, nameRu, nameEn] of productCategories) {
     await prisma.productCategory.upsert({
       where: { code },

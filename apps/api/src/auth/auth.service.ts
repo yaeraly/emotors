@@ -67,7 +67,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       roles,
-      branchId: user.branchId,
+      branchId: user.branchId ?? '',
     };
 
     const expiresIn =

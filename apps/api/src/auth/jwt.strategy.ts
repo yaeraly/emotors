@@ -69,6 +69,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     return {
       ...user,
+      branchId: user.branchId ?? '',
       roles: assignedRoles,
       permissions: Array.from(new Set([...permissionsForRoles(assignedRoles), ...permissions])),
     };
