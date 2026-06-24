@@ -34,7 +34,7 @@ export class UsersController {
   }
 
   @Post(':id/reset-password')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
   resetPassword(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.usersService.resetPassword(user, id);
   }

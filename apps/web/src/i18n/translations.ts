@@ -64,6 +64,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'users.newPassword': 'Жаңы сыр сөз',
     'users.temporaryPassword': 'Убактылуу сыр сөз',
     'users.loginHistory': 'Кирүү тарыхы',
+    'users.resetOwnBranchOnly': 'Сиз өз филиалыңыздагы кызматкерлердин гана сырсөзүн жаңылай аласыз.',
 
     'nav.customers': 'Кардарлар',
     'nav.sales': 'Сатуу',
@@ -551,6 +552,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'users.newPassword': 'Новый пароль',
     'users.temporaryPassword': 'Временный пароль',
     'users.loginHistory': 'История входов',
+    'users.resetOwnBranchOnly': 'Вы можете сбрасывать пароль только сотрудникам своего филиала.',
 
     'nav.customers': 'Клиенты',
     'nav.sales': 'Продажи',
@@ -1038,6 +1040,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'users.newPassword': 'New Password',
     'users.temporaryPassword': 'Temporary Password',
     'users.loginHistory': 'Login History',
+    'users.resetOwnBranchOnly': 'You can reset passwords only for employees in your own branch.',
 
     'nav.customers': 'Customers',
     'nav.sales': 'Sales',

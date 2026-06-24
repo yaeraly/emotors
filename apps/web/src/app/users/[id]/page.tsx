@@ -5,12 +5,14 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { RoleBadges, RoleSelector } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
+import { canResetUserPassword } from '@/lib/rbac';
 import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [history, setHistory] = useState<any[]>([]);
@@ -29,11 +31,13 @@ export default function UserDetailPage() {
 
   async function load() {
     try {
-      const [userResult, branchResult, historyResult] = await Promise.all([
+      const [currentUserResult, userResult, branchResult, historyResult] = await Promise.all([
+        apiFetch<User>('/auth/me'),
         apiFetch<User>(`/users/${id}`),
         apiFetch<Branch[]>('/branches'),
         apiFetch<any[]>(`/users/${id}/login-history`),
       ]);
+      setCurrentUser(currentUserResult);
       setUser(userResult);
       setBranches(branchResult);
       setHistory(historyResult);
@@ -48,7 +52,8 @@ export default function UserDetailPage() {
         status: userResult.status ?? 'ACTIVE',
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(path === 'reset-password' && message.includes('own branch') ? t('users.resetOwnBranchOnly') : message);
     }
   }
 
@@ -88,6 +93,8 @@ export default function UserDetailPage() {
     setForm((current) => ({ ...current, roles }));
   }
 
+  const canResetPassword = canResetUserPassword(currentUser, user);
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -110,7 +117,9 @@ export default function UserDetailPage() {
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.save')}</button>
         </form>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => void action('reset-password')} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold" type="button">{t('users.resetPassword')}</button>
+          {canResetPassword ? (
+            <button onClick={() => void action('reset-password')} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold" type="button">{t('users.resetPassword')}</button>
+          ) : null}
           <button onClick={() => void action('activate')} className="rounded-xl border border-green-200 px-4 py-2 font-semibold text-green-700" type="button">{t('users.activate')}</button>
           <button onClick={() => void action('suspend')} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">{t('users.suspend')}</button>
         </div>

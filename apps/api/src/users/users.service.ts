@@ -16,6 +16,14 @@ import {
 } from '../rbac/rbac';
 
 const TEMP_PASSWORD = 'Emotors@2026';
+const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
+  Role.MANAGER,
+  Role.MASTER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.CASHIER,
+];
+const OWN_BRANCH_PASSWORD_RESET_ERROR =
+  'You can reset passwords only for employees in your own branch.';
 
 @Injectable()
 export class UsersService {
@@ -103,16 +111,27 @@ export class UsersService {
   }
 
   async resetPassword(user: AuthUser, id: string) {
-    if (!this.hasFullAccess(user)) {
-      throw new ForbiddenException('Only CEO or system administrator can reset passwords');
-    }
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
+    if (!target) throw new NotFoundException('User not found');
+
+    const targetRoles = this.extractRoles(target);
+    this.assertCanResetPassword(user, target, targetRoles);
+
     const passwordHash = await bcrypt.hash(TEMP_PASSWORD, 12);
     const updated = await this.prisma.user.update({
       where: { id },
       data: { passwordHash, mustChangePassword: true },
-      include: { branch: true },
+      include: { branch: true, userRoles: { include: { role: true } } },
     });
-    await this.audit(user, 'password_reset', 'User', id);
+    await this.audit(user, 'PASSWORD_RESET', 'User', id, {
+      actorUserId: user.id,
+      targetUserId: id,
+      branchId: updated.branchId,
+      action: 'PASSWORD_RESET',
+    });
     return { ...this.safeUser(updated), temporaryPassword: TEMP_PASSWORD };
   }
 
@@ -277,5 +296,30 @@ export class UsersService {
 
   private hasRole(user: AuthUser, role: Role) {
     return (user.roles?.length ? user.roles : [user.role]).includes(role);
+  }
+
+  private assertCanResetPassword(
+    user: AuthUser,
+    target: { branchId: string; role: Role },
+    targetRoles: Role[],
+  ) {
+    if (this.hasFullAccess(user)) return;
+
+    if (!this.hasRole(user, Role.FRANCHISE_OWNER)) {
+      throw new ForbiddenException(OWN_BRANCH_PASSWORD_RESET_ERROR);
+    }
+
+    if (target.branchId !== user.branchId) {
+      throw new ForbiddenException(OWN_BRANCH_PASSWORD_RESET_ERROR);
+    }
+
+    if (!targetRoles.length || targetRoles.some((role) => !FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES.includes(role))) {
+      throw new ForbiddenException(OWN_BRANCH_PASSWORD_RESET_ERROR);
+    }
+  }
+
+  private extractRoles(user: { role: Role; userRoles?: { role: { code: string } }[] }) {
+    const roles = user.userRoles?.map((userRole) => userRole.role.code as Role) ?? [];
+    return uniqueRoles(roles.length ? roles : [user.role]);
   }
 }

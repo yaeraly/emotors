@@ -75,6 +75,13 @@ export function hasRole(user: Pick<User, 'role' | 'roles'> | null | undefined, r
   return roleCodesForUser(user).includes(role);
 }
 
+const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
+  'MANAGER',
+  'MASTER',
+  'WAREHOUSE_OPERATOR',
+  'CASHIER',
+];
+
 export function getDefaultRoute(role: Role) {
   if (role === 'OWNER' || role === 'CEO' || role === 'SYSTEM_ADMINISTRATOR') return '/dashboard';
   if (role === 'SUPPLY_CHAIN_MANAGER') return '/procurement';
@@ -149,4 +156,22 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/marketing')) return hasPermission(user, 'marketing.manage');
   if (pathname.startsWith('/investment') || pathname.startsWith('/expansion')) return hasPermission(user, 'analytics.view');
   return true;
+}
+
+export function canResetUserPassword(
+  actor: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+  target: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  if (!actor || !target) return false;
+  if (hasRole(actor, 'OWNER') || hasRole(actor, 'CEO') || hasRole(actor, 'SYSTEM_ADMINISTRATOR')) {
+    return true;
+  }
+  if (!hasRole(actor, 'FRANCHISE_OWNER') || actor.branchId !== target.branchId) {
+    return false;
+  }
+  const targetRoles = roleCodesForUser(target);
+  return (
+    targetRoles.length > 0 &&
+    targetRoles.every((role) => FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES.includes(role))
+  );
 }
