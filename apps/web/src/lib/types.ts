@@ -444,8 +444,6 @@ export type BranchDistributionOrder = {
   totalCost: number;
   totalProfit: number;
   note?: string | null;
-  status?: PaymentRecordStatus;
-  voidedAt?: string | null;
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   approvedById?: string | null;
