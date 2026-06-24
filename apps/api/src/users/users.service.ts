@@ -300,7 +300,7 @@ export class UsersService {
 
   private assertCanResetPassword(
     user: AuthUser,
-    target: { branchId: string; role: Role },
+    target: { branchId: string | null; role: Role },
     targetRoles: Role[],
   ) {
     if (this.hasFullAccess(user)) return;
