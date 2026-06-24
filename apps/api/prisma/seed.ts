@@ -29,7 +29,7 @@ const rolePermissions: Record<string, string[]> = {
   OWNER: permissionCodes,
   FRANCHISE_OWNER: ['users.manage', 'crm.manage', 'sales.manage', 'inventory.manage', 'inventory.view', 'service.manage', 'finance.view', 'payments.manage', 'kpi.view', 'reports.view'],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
-  MASTER: ['service.manage'],
+  MASTER: ['service.manage', 'kpi.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   WAREHOUSE_MANAGER: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],

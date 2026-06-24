@@ -48,7 +48,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'reports.view',
   ],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
-  MASTER: ['service.manage'],
+  MASTER: ['service.manage', 'kpi.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payroll.manage'],
@@ -91,11 +91,12 @@ export function getDefaultRoute(role: Role) {
   if (role === 'SUPPLY_CHAIN_MANAGER') return '/procurement';
   if (role === 'WAREHOUSE_MANAGER') return '/inventory';
   if (role === 'FINANCE_MANAGER' || role === 'ACCOUNTANT') return '/finance';
-  if (role === 'FRANCHISE_OWNER') return '/branch-dashboard';
-  if (role === 'MANAGER') return '/customers';
+  if (role === 'FRANCHISE_OWNER') return '/dashboard';
+  if (role === 'MANAGER') return '/sales';
   if (role === 'MASTER') return '/service';
-  if (role === 'WAREHOUSE_OPERATOR') return '/distribution/receivings';
-  if (role === 'CASHIER' || role === 'SALESPERSON') return '/sales';
+  if (role === 'WAREHOUSE_OPERATOR') return '/inventory';
+  if (role === 'CASHIER') return '/payments';
+  if (role === 'SALESPERSON') return '/sales';
   if (role === 'PROCUREMENT_MANAGER') return '/procurement';
   if (role === 'ACADEMY_DIRECTOR' || role === 'ACADEMY_MANAGER') return '/academy';
   if (role === 'MARKETING_MANAGER' || role === 'CONTENT_CREATOR') return '/marketing';
@@ -104,10 +105,10 @@ export function getDefaultRoute(role: Role) {
 
 export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions'>) {
   if (hasRole(user, 'OWNER') || hasRole(user, 'CEO') || hasRole(user, 'SYSTEM_ADMINISTRATOR')) return '/dashboard';
-  if (hasRole(user, 'FRANCHISE_OWNER')) return '/branch-dashboard';
+  if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
-  if (hasRole(user, 'WAREHOUSE_OPERATOR')) return '/distribution/receivings';
+  if (hasRole(user, 'WAREHOUSE_OPERATOR')) return '/inventory';
   if (hasPermission(user, 'payments.manage')) return '/payments';
   if (hasPermission(user, 'finance.view')) return '/finance';
   if (hasPermission(user, 'crm.manage')) return '/customers';

@@ -529,7 +529,13 @@ export class DistributionService {
   }
 
   branchBalances(user: AuthUser) {
-    if (!this.canManageFinance(user)) throw new ForbiddenException('Forbidden');
+    if (!this.canManageFinance(user)) {
+      return this.prisma.branchAccountBalance.findMany({
+        where: { branchId: user.branchId },
+        include: { branch: true },
+        orderBy: { totalDebt: 'desc' },
+      }).then((items) => items.map((item) => this.toBalanceResponse(item)));
+    }
     return this.prisma.branchAccountBalance.findMany({
       include: { branch: true },
       orderBy: { totalDebt: 'desc' },

@@ -9,7 +9,7 @@ import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.ACCOUNTANT)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 

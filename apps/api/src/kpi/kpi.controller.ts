@@ -9,7 +9,7 @@ import { KpiService } from './kpi.service';
 
 @Controller('kpi')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MASTER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
 export class KpiController {
   constructor(private readonly kpiService: KpiService) {}
 

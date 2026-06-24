@@ -77,7 +77,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'reports.view',
   ],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
-  MASTER: ['service.manage'],
+  MASTER: ['service.manage', 'kpi.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payroll.manage'],

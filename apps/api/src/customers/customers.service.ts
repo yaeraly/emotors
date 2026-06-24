@@ -13,7 +13,7 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { canAccessAllBranches } from '../rbac/rbac';
+import { hasAnyHqRole } from '../rbac/rbac';
 import { AddCustomerEventDto } from './dto/add-customer-event.dto';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreateFollowUpDto } from './dto/create-follow-up.dto';
@@ -354,7 +354,7 @@ export class CustomersService {
   }
 
   private buildBranchWhere(user: AuthUser, requestedBranchId?: string) {
-    if (canAccessAllBranches(user.role)) {
+    if (this.canAccessAllBranches(user)) {
       return requestedBranchId ? { branchId: requestedBranchId } : {};
     }
 
@@ -366,7 +366,7 @@ export class CustomersService {
   }
 
   private resolveBranchId(user: AuthUser, requestedBranchId?: string) {
-    if (canAccessAllBranches(user.role)) {
+    if (this.canAccessAllBranches(user)) {
       return requestedBranchId ?? user.branchId;
     }
 
@@ -404,12 +404,16 @@ export class CustomersService {
     });
   }
 
+  private canAccessAllBranches(user: AuthUser) {
+    return hasAnyHqRole(user.roles?.length ? user.roles : [user.role]);
+  }
+
   private async getAccessibleCustomer(user: AuthUser, id: string) {
     const customer = await this.prisma.customer.findFirst({
       where: {
         id,
         deletedAt: null,
-        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
       },
       include: {
         branch: true,

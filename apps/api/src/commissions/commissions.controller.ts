@@ -9,12 +9,12 @@ import { CommissionsService } from './commissions.service';
 
 @Controller('commissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
 export class CommissionsController {
   constructor(private readonly commissionsService: CommissionsService) {}
 
   @Post('rules')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
   createRule(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.commissionsService.createRule(user, dto);
   }
@@ -42,12 +42,12 @@ export class CommissionsController {
 
 @Controller('compensation')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
 export class CompensationController {
   constructor(private readonly commissionsService: CommissionsService) {}
 
   @Post('rules')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
   createRule(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.commissionsService.createRule(user, dto);
   }
@@ -63,13 +63,13 @@ export class CompensationController {
   }
 
   @Put('rules/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
   updateRule(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
     return this.commissionsService.updateRule(user, id, dto);
   }
 
   @Delete('rules/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
   deleteRule(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.commissionsService.deleteRule(user, id);
   }

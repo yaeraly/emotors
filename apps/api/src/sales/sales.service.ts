@@ -19,7 +19,7 @@ import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { canAccessAllBranches, isFullAccessRole } from '../rbac/rbac';
+import { hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
@@ -434,7 +434,7 @@ export class SalesService {
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
 
-      if (sale.status === SaleStatus.FINALIZED && !isFullAccessRole(user.role)) {
+      if (sale.status === SaleStatus.FINALIZED && !this.hasFullAccess(user)) {
         throw new ForbiddenException('Only HQ can cancel finalized sale');
       }
 
@@ -648,7 +648,7 @@ export class SalesService {
       where: {
         id,
         deletedAt: null,
-        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
       },
       include: this.saleInclude(),
     });
@@ -669,7 +669,7 @@ export class SalesService {
       where: {
         id,
         deletedAt: null,
-        ...(canAccessAllBranches(user.role) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
       },
       include: {
         installments: { orderBy: { dueDate: 'asc' } },
@@ -684,7 +684,7 @@ export class SalesService {
   }
 
   private buildBranchWhere(user: AuthUser, requestedBranchId?: string) {
-    if (canAccessAllBranches(user.role)) {
+    if (this.canAccessAllBranches(user)) {
       return requestedBranchId ? { branchId: requestedBranchId } : {};
     }
 
@@ -709,7 +709,7 @@ export class SalesService {
   }
 
   private ensureBranchAccess(user: AuthUser, branchId: string) {
-    if (!canAccessAllBranches(user.role) && user.branchId !== branchId) {
+    if (!this.canAccessAllBranches(user) && user.branchId !== branchId) {
       throw new ForbiddenException('You can only access your own branch');
     }
   }
@@ -778,6 +778,14 @@ export class SalesService {
         },
       },
     });
+  }
+
+  private canAccessAllBranches(user: AuthUser) {
+    return hasAnyHqRole(user.roles?.length ? user.roles : [user.role]);
+  }
+
+  private hasFullAccess(user: AuthUser) {
+    return hasAnyFullAccessRole(user.roles?.length ? user.roles : [user.role]);
   }
 
   private getPaymentStatus(totalAmount: number, paidAmount: number) {

@@ -102,19 +102,19 @@ export class DistributionController {
   }
 
   @Get('invoices')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
   invoices(@CurrentUser() user: AuthUser, @Query() query: BranchInvoiceQueryDto) {
     return this.distributionService.invoices(user, query);
   }
 
   @Get('invoices/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
   invoice(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.invoice(user, id);
   }
 
   @Post('invoices/:id/payments')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
   addInvoicePayment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -124,13 +124,13 @@ export class DistributionController {
   }
 
   @Get('branches/:branchId/account-balance')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
   branchAccountBalance(@CurrentUser() user: AuthUser, @Param('branchId') branchId: string) {
     return this.distributionService.branchAccountBalance(user, branchId);
   }
 
   @Get('branch-balances')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
   branchBalances(@CurrentUser() user: AuthUser) {
     return this.distributionService.branchBalances(user);
   }

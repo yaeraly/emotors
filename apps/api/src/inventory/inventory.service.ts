@@ -13,7 +13,7 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { isFullAccessRole } from '../rbac/rbac';
+import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -651,7 +651,7 @@ export class InventoryService {
     const currentQuantity = current?.quantity ?? 0;
     const nextQuantity = currentQuantity + quantityDelta;
 
-    if (nextQuantity < 0 && !(isFullAccessRole(user.role) && dto.type === StockMovementType.ADJUSTMENT)) {
+    if (nextQuantity < 0 && !(hasAnyFullAccessRole(user.roles?.length ? user.roles : [user.role]) && dto.type === StockMovementType.ADJUSTMENT)) {
       throw new BadRequestException('Negative stock is not allowed');
     }
 

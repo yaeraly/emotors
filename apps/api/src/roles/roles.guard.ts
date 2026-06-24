@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger }
 import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
-import { anyRoleRequiresBranch, rolesCanAccessRequiredRoles } from '../rbac/rbac';
+import { anyRoleRequiresBranch, permissionsForRoles, rolesCanAccessRequiredRoles } from '../rbac/rbac';
 import { ROLES_KEY } from './roles.decorator';
 
 @Injectable()
@@ -31,12 +31,12 @@ export class RolesGuard implements CanActivate {
     const userRoles = user?.roles?.length ? user.roles : user ? [user.role] : [];
 
     if (!user || !rolesCanAccessRequiredRoles(userRoles, requiredRoles)) {
-      this.logForbidden(request, user, requiredRoles);
+      this.logForbidden(context, request, user, requiredRoles);
       throw new ForbiddenException('Forbidden resource');
     }
 
     if (anyRoleRequiresBranch(userRoles) && !user.branchId) {
-      this.logForbidden(request, user, requiredRoles);
+      this.logForbidden(context, request, user, requiredRoles);
       throw new ForbiddenException('Forbidden resource');
     }
 
@@ -44,6 +44,7 @@ export class RolesGuard implements CanActivate {
   }
 
   private logForbidden(
+    context: ExecutionContext,
     request: { method?: string; url?: string },
     user: AuthUser | undefined,
     requiredRoles: Role[],
@@ -51,11 +52,15 @@ export class RolesGuard implements CanActivate {
     this.logger.warn({
       message: 'Forbidden resource',
       userId: user?.id,
+      username: user?.username,
       role: user?.role,
       roles: user?.roles,
       branchId: user?.branchId,
       route: `${request.method ?? 'UNKNOWN'} ${request.url ?? 'unknown'}`,
+      controller: context.getClass().name,
+      action: context.getHandler().name,
       requiredRoles,
+      requiredPermissions: permissionsForRoles(requiredRoles),
       permissions: user?.permissions,
     });
   }

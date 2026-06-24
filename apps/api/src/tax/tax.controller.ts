@@ -9,7 +9,7 @@ import { TaxService } from './tax.service';
 
 @Controller('tax')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.ACCOUNTANT)
+@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
 export class TaxController {
   constructor(private readonly service: TaxService) {}
   @Post('profiles') createProfile(@CurrentUser() user: AuthUser, @Body() dto: any) { return this.service.createProfile(user, dto); }
