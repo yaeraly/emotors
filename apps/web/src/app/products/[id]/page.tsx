@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
+import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
@@ -26,6 +27,7 @@ export default function ProductDetailPage() {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -90,7 +92,11 @@ export default function ProductDetailPage() {
           <>
             <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-6 md:flex-row">
-                {product.photoUrl ? <img src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${product.photoUrl}`} alt="" className="h-40 w-40 rounded-3xl object-cover" /> : <div className="h-40 w-40 rounded-3xl bg-slate-100" />}
+                {product.photoUrl ? (
+                  <button onClick={() => setPreviewOpen(true)} className="group block focus:outline-none" type="button">
+                    <img src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${product.photoUrl}`} alt={product.name} className="h-40 w-40 rounded-3xl object-cover ring-blue-500 transition group-hover:ring-4" />
+                  </button>
+                ) : <div className="h-40 w-40 rounded-3xl bg-slate-100" />}
                 <div className="flex-1">
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{product.sku}</p>
                   <h2 className="mt-2 text-3xl font-bold text-slate-950">{product.name}</h2>
@@ -159,6 +165,14 @@ export default function ProductDetailPage() {
                 </div>
               </Panel>
             </div>
+            {product.photoUrl && previewOpen ? (
+              <ImagePreviewModal
+                images={[{ src: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${product.photoUrl}`, alt: product.name }]}
+                title={product.name}
+                subtitle={product.sku}
+                onClose={() => setPreviewOpen(false)}
+              />
+            ) : null}
           </>
         ) : null}
       </section>

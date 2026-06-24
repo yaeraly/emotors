@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
@@ -21,6 +22,7 @@ export default function ProductsPage() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({ pageSize: '50' });
@@ -168,7 +170,9 @@ export default function ProductsPage() {
                   <tr key={product.id} className="hover:bg-blue-50/40">
                     <td className="px-4 py-3">
                       {product.photoUrl ? (
-                        <img src={`${API_URL}${product.photoUrl}`} alt="" className="h-12 w-12 rounded-xl object-cover" />
+                        <button onClick={() => setPreviewProduct(product)} className="block rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500" type="button">
+                          <img src={`${API_URL}${product.photoUrl}`} alt={product.name} className="h-12 w-12 rounded-xl object-cover" />
+                        </button>
                       ) : (
                         <div className="h-12 w-12 rounded-xl bg-slate-100" />
                       )}
@@ -211,6 +215,14 @@ export default function ProductsPage() {
             </table>
           </div>
         </div>
+        {previewProduct?.photoUrl ? (
+          <ImagePreviewModal
+            images={[{ src: `${API_URL}${previewProduct.photoUrl}`, alt: previewProduct.name }]}
+            title={previewProduct.name}
+            subtitle={previewProduct.sku}
+            onClose={() => setPreviewProduct(null)}
+          />
+        ) : null}
       </section>
     </ProtectedShell>
   );
