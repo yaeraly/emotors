@@ -48,7 +48,7 @@ export default function UserDetailPage() {
         email: userResult.email ?? '',
         username: userResult.username ?? '',
         roles: userResult.roles?.length ? userResult.roles : [userResult.role],
-        branchId: userResult.branchId,
+        branchId: userResult.branchId ?? '',
         status: userResult.status ?? 'ACTIVE',
       });
     } catch (err) {
