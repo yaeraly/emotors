@@ -59,7 +59,7 @@ export class OperationsService {
 
   async reviewBranchPurchaseRequest(user: AuthUser, id: string, status: BranchPurchaseRequestStatus) {
     if (!this.canManageSupplyChain(user)) throw new ForbiddenException('Forbidden resource');
-    if (![BranchPurchaseRequestStatus.APPROVED, BranchPurchaseRequestStatus.REJECTED].includes(status)) {
+    if (status !== BranchPurchaseRequestStatus.APPROVED && status !== BranchPurchaseRequestStatus.REJECTED) {
       throw new BadRequestException('Request can only be approved or rejected');
     }
     const updated = await this.prisma.branchPurchaseRequest.update({
@@ -137,7 +137,7 @@ export class OperationsService {
       if (order.hqStockMovementCreatedAt) {
         throw new BadRequestException('Procurement stock has already been received');
       }
-      const receivedMap = new Map((dto.items ?? []).map((item: any) => [item.procurementItemId ?? item.productId, item]));
+      const receivedMap = new Map<string, any>((dto.items ?? []).map((item: any) => [item.procurementItemId ?? item.productId, item]));
       const receiving = await tx.procurementGoodsReceiving.create({
         data: {
           receivingNumber: dto.receivingNumber ?? `PGR-${Date.now()}`,
@@ -148,7 +148,7 @@ export class OperationsService {
         },
       });
       for (const item of order.items) {
-        const received = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
+        const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
         const receivedQuantity = Number(received.receivedQuantity ?? item.quantity);
         const difference = receivedQuantity - item.quantity;
         await tx.procurementGoodsReceivingItem.create({
