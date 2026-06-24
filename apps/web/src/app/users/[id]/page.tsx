@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { RoleBadges, RoleSelector } from '@/components/RoleSelector';
+import { hqAssignableRoles, RoleBadges, RoleSelector } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
 import { canResetUserPassword } from '@/lib/rbac';
 import type { Branch, Role, User } from '@/lib/types';
@@ -94,6 +94,7 @@ export default function UserDetailPage() {
   }
 
   const canResetPassword = canResetUserPassword(currentUser, user);
+  const isHqEmployee = user?.branchId === null;
 
   return (
     <ProtectedShell>
@@ -111,8 +112,15 @@ export default function UserDetailPage() {
           <Input label={t('users.phone')} value={form.phone} onChange={(value) => setField('phone', value)} />
           <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
           <Input label={t('users.username')} value={form.username} onChange={(value) => setField('username', value)} />
-          <RoleSelector label={t('users.role')} selectedRoles={form.roles} onChange={setRoles} />
-          <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+          <RoleSelector label={isHqEmployee ? t('users.hqRoles') : t('users.role')} selectedRoles={form.roles} onChange={setRoles} roles={isHqEmployee ? hqAssignableRoles : undefined} />
+          {isHqEmployee ? (
+            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
+              <p className="font-semibold text-slate-800">{t('users.hqEmployee')}</p>
+              <p>{t('users.hqEmployeeNoBranch')}</p>
+            </div>
+          ) : (
+            <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+          )}
           <label className="block"><span className="text-sm font-semibold text-slate-700">{t('users.status')}</span><select value={form.status} onChange={(event) => setField('status', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option><option value="SUSPENDED">SUSPENDED</option></select></label>
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.save')}</button>
         </form>

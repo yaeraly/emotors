@@ -110,7 +110,12 @@ export class UsersService {
     const existingRoles = await this.currentRoles(id, existing.role);
     const roles = this.normalizeRoles(dto.roles, dto.role ? [dto.role] : existingRoles);
     const primaryRole = this.primaryRole(roles, dto.role);
-    const branchId = this.resolveBranchId(user, dto.branchId ?? existing.branchId ?? undefined, roles);
+    const targetUserType = existing.branchId === null ? 'HQ' : 'BRANCH';
+    this.validateUserTypeForUpdate(user, targetUserType, roles, dto.branchId);
+    const branchId =
+      targetUserType === 'HQ'
+        ? null
+        : this.resolveBranchId(user, dto.branchId ?? existing.branchId ?? undefined, roles);
     this.assertCanManage(user, branchId ?? undefined, roles);
     const updated = await this.prisma.user.update({
       where: { id },
@@ -217,6 +222,33 @@ export class UsersService {
       throw new BadRequestException('Branch employees can only have branch roles.');
     }
     if (!branchId && !this.hasRole(user, Role.FRANCHISE_OWNER)) {
+      throw new BadRequestException('Branch is required for branch employees');
+    }
+  }
+
+  private validateUserTypeForUpdate(
+    user: AuthUser,
+    userType: 'HQ' | 'BRANCH',
+    roles: Role[],
+    branchId?: string | null,
+  ) {
+    if (userType === 'HQ') {
+      if (!this.hasRole(user, Role.CEO) && !this.hasRole(user, Role.SYSTEM_ADMINISTRATOR)) {
+        throw new ForbiddenException('Only CEO or system administrator can manage HQ employees');
+      }
+      if (branchId) {
+        throw new BadRequestException('HQ employees cannot belong to a branch.');
+      }
+      if (!roles.length || roles.some((role) => !HQ_ROLES.includes(role))) {
+        throw new BadRequestException('HQ employees can only have HQ roles.');
+      }
+      return;
+    }
+
+    if (!roles.length || roles.some((role) => !BRANCH_ROLES.includes(role))) {
+      throw new BadRequestException('Branch employees can only have branch roles.');
+    }
+    if (!branchId) {
       throw new BadRequestException('Branch is required for branch employees');
     }
   }
