@@ -600,6 +600,8 @@ export type Payment = {
   method: PaymentMethod;
   paidAt: string;
   note?: string | null;
+  status?: PaymentRecordStatus;
+  voidedAt?: string | null;
   createdById: string;
   createdAt: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
