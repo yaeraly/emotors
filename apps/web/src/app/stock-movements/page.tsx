@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { Product, ProductListResponse, StockMovement, StockMovementType, Warehouse } from '@/lib/types';
+import { canCreateStockMovement } from '@/lib/rbac';
+import type { Product, ProductListResponse, StockMovement, StockMovementType, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const movementTypes: StockMovementType[] = ['IN', 'OUT', 'TRANSFER', 'ADJUSTMENT', 'SALE', 'SERVICE_USE'];
@@ -11,6 +12,7 @@ const movementTypes: StockMovementType[] = ['IN', 'OUT', 'TRANSFER', 'ADJUSTMENT
 export default function StockMovementsPage() {
   const { t } = useTranslation();
   const [products, setProducts] = useState<Product[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [error, setError] = useState('');
@@ -29,14 +31,16 @@ export default function StockMovementsPage() {
 
   async function load() {
     try {
-      const [productResult, warehouseResult, movementResult] = await Promise.all([
+      const [productResult, warehouseResult, movementResult, currentUserResult] = await Promise.all([
         apiFetch<ProductListResponse>('/inventory/products?pageSize=200'),
         apiFetch<Warehouse[]>('/inventory/warehouses'),
         apiFetch<StockMovement[]>('/inventory/stock-movements'),
+        apiFetch<User>('/auth/me'),
       ]);
       setProducts(productResult.items);
       setWarehouses(warehouseResult);
       setMovements(movementResult);
+      setCurrentUser(currentUserResult);
       setForm((current) => ({
         ...current,
         productId: current.productId || productResult.items[0]?.id || '',
@@ -76,15 +80,17 @@ export default function StockMovementsPage() {
           <h2 className="text-3xl font-bold text-slate-950">{t('stockMovement.title')}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        <form onSubmit={submit} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
-          <Select label={t('stockMovement.product')} value={form.productId} onChange={(value) => setForm({ ...form, productId: value })} options={products.map((p) => ({ value: p.id, label: `${p.sku} · ${p.name}` }))} />
-          <Select label={t('stockMovement.warehouse')} value={form.warehouseId} onChange={(value) => setForm({ ...form, warehouseId: value })} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
-          <Select label={t('stockMovement.type')} value={form.type} onChange={(value) => setForm({ ...form, type: value as StockMovementType })} options={movementTypes.map((type) => ({ value: type, label: movementTypeLabel(type, t) }))} />
-          <Input label={t('stockMovement.quantity')} type="number" value={form.quantity} onChange={(value) => setForm({ ...form, quantity: value })} />
-          <Input label={t('stockMovement.unitCost')} type="number" value={form.unitCostKgs} onChange={(value) => setForm({ ...form, unitCostKgs: value })} />
-          <Input label={t('stockMovement.note')} value={form.note} onChange={(value) => setForm({ ...form, note: value })} />
-          <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-3" type="submit">{t('inventory.createStockMovement')}</button>
-        </form>
+        {canCreateStockMovement(currentUser) ? (
+          <form onSubmit={submit} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
+            <Select label={t('stockMovement.product')} value={form.productId} onChange={(value) => setForm({ ...form, productId: value })} options={products.map((p) => ({ value: p.id, label: `${p.sku} · ${p.name}` }))} />
+            <Select label={t('stockMovement.warehouse')} value={form.warehouseId} onChange={(value) => setForm({ ...form, warehouseId: value })} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+            <Select label={t('stockMovement.type')} value={form.type} onChange={(value) => setForm({ ...form, type: value as StockMovementType })} options={movementTypes.map((type) => ({ value: type, label: movementTypeLabel(type, t) }))} />
+            <Input label={t('stockMovement.quantity')} type="number" value={form.quantity} onChange={(value) => setForm({ ...form, quantity: value })} />
+            <Input label={t('stockMovement.unitCost')} type="number" value={form.unitCostKgs} onChange={(value) => setForm({ ...form, unitCostKgs: value })} />
+            <Input label={t('stockMovement.note')} value={form.note} onChange={(value) => setForm({ ...form, note: value })} />
+            <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-3" type="submit">{t('inventory.createStockMovement')}</button>
+          </form>
+        ) : null}
 
         <div className="h-[calc(100vh-360px)] min-h-[360px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">

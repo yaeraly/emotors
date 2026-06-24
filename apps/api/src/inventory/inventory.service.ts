@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, StockMovementType } from '@prisma/client';
+import { Prisma, Role, StockMovementStatus, StockMovementType } from '@prisma/client';
 import { MultipartFile } from '@fastify/multipart';
 import { FastifyRequest } from 'fastify';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -554,6 +554,7 @@ export class InventoryService {
 
   stockMovements(user: AuthUser, query: StockMovementQueryDto) {
     const where: Prisma.StockMovementWhereInput = {
+      status: StockMovementStatus.ACTIVE,
       ...this.buildBranchWhere(user, query.branchId),
       ...(query.productId ? { productId: query.productId } : {}),
       ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
@@ -705,6 +706,10 @@ export class InventoryService {
         totalValueKgs: nextTotalValue,
       },
     });
+
+    if (dto.type === StockMovementType.ADJUSTMENT) {
+      await this.auditInTx(tx, user, product.branchId, 'INVENTORY_ADJUSTMENT', 'StockMovement', movement.id);
+    }
 
     return movement;
   }
@@ -921,6 +926,29 @@ export class InventoryService {
       role === Role.SUPPLY_CHAIN_MANAGER ||
       role === Role.WAREHOUSE_MANAGER
     );
+  }
+
+  private auditInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    branchId: string,
+    action: string,
+    entity: string,
+    entityId: string,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          branchId,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
   }
 
   private toProductResponse(product: any) {

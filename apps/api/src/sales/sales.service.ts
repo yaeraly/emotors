@@ -8,6 +8,7 @@ import {
   CustomerEventType,
   InstallmentStatus,
   PaymentMethod,
+  PaymentRecordStatus,
   PaymentStatus,
   Prisma,
   Role,
@@ -111,7 +112,7 @@ export class SalesService {
       const saleDate = dto.saleDate ?? sale.saleDate;
       const totals = this.calculateSale(dto);
       const paymentAggregate = await tx.payment.aggregate({
-        where: { saleId: sale.id },
+        where: { saleId: sale.id, status: PaymentRecordStatus.ACTIVE },
         _sum: { amount: true },
       });
       const paidAmount = this.roundMoney(
@@ -323,6 +324,33 @@ export class SalesService {
     return this.findOne(user, id);
   }
 
+  async voidPayment(user: AuthUser, id: string, paymentId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const sale = await this.getAccessibleSaleInTx(tx, user, id);
+      const payment = await tx.payment.findFirst({
+        where: {
+          id: paymentId,
+          saleId: sale.id,
+          branchId: sale.branchId,
+          status: PaymentRecordStatus.ACTIVE,
+        },
+      });
+      if (!payment) throw new NotFoundException('Payment not found');
+
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: PaymentRecordStatus.VOID,
+          voidedAt: new Date(),
+        },
+      });
+      await this.refreshSalePaymentState(tx, sale.id);
+      await this.auditInTx(tx, user, sale.branchId, 'PAYMENT_VOID', 'Payment', payment.id);
+    });
+
+    return this.findOne(user, id);
+  }
+
   async finalize(user: AuthUser, id: string) {
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
@@ -425,6 +453,7 @@ export class SalesService {
       if (sale.status === SaleStatus.FINALIZED) {
         await this.refreshCustomerFinancials(tx, sale.customerId);
       }
+      await this.auditInTx(tx, user, sale.branchId, 'SALE_CANCELLATION', 'Sale', sale.id);
     });
 
     return this.findOne(user, id);
@@ -708,7 +737,7 @@ export class SalesService {
       select: { totalAmount: true },
     });
     const paymentAggregate = await tx.payment.aggregate({
-      where: { saleId },
+      where: { saleId, status: PaymentRecordStatus.ACTIVE },
       _sum: { amount: true },
     });
     const paidAmount = this.roundMoney(
@@ -726,6 +755,29 @@ export class SalesService {
       },
     });
     await this.refreshInstallments(tx, saleId, paidAmount);
+  }
+
+  private auditInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    branchId: string,
+    action: string,
+    entity: string,
+    entityId: string,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          branchId,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
   }
 
   private getPaymentStatus(totalAmount: number, paidAmount: number) {

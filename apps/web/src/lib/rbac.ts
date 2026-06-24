@@ -75,6 +75,10 @@ export function hasRole(user: Pick<User, 'role' | 'roles'> | null | undefined, r
   return roleCodesForUser(user).includes(role);
 }
 
+function hasAnyRole(user: Pick<User, 'role' | 'roles'> | null | undefined, roles: Role[]) {
+  return roles.some((role) => hasRole(user, role));
+}
+
 const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
   'MANAGER',
   'MASTER',
@@ -123,10 +127,15 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/payments') return hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/customers')) return hasPermission(user, 'crm.manage');
   if (pathname.startsWith('/sales')) return hasPermission(user, 'sales.manage');
+  if (pathname.startsWith('/products/new') || pathname.startsWith('/inventory/categories')) {
+    return canManageProductCatalog(user);
+  }
+  if (pathname.startsWith('/stock-movements')) {
+    return hasPermission(user, 'inventory.manage');
+  }
   if (
     pathname.startsWith('/inventory') ||
     pathname.startsWith('/products') ||
-    pathname.startsWith('/stock-movements') ||
     pathname.startsWith('/warehouses')
   ) {
     return hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
@@ -174,4 +183,24 @@ export function canResetUserPassword(
     targetRoles.length > 0 &&
     targetRoles.every((role) => FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES.includes(role))
   );
+}
+
+export function canManageProductCatalog(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'WAREHOUSE_MANAGER', 'SUPPLY_CHAIN_MANAGER']);
+}
+
+export function canArchiveCustomer(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'FRANCHISE_OWNER']);
+}
+
+export function canCancelSale(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'FRANCHISE_OWNER']);
+}
+
+export function canVoidPayment(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'FRANCHISE_OWNER', 'CASHIER']);
+}
+
+export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasPermission(user, 'inventory.manage');
 }

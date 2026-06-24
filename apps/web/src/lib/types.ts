@@ -27,7 +27,8 @@ export type CustomerStatus =
   | 'VIP'
   | 'SLEEPING'
   | 'RISK'
-  | 'INACTIVE';
+  | 'INACTIVE'
+  | 'ARCHIVED';
 
 export type CustomerEventType =
   | 'NOTE'
@@ -49,6 +50,8 @@ export type ServiceOrderStatus =
 export type RepairStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
 export type WarrantyStatus = 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
 export type PaymentStatus = 'PAID' | 'PARTIAL' | 'DEBT';
+export type PaymentRecordStatus = 'ACTIVE' | 'VOID';
+export type StockMovementStatus = 'ACTIVE' | 'VOID';
 export type PaymentMethod =
   | 'CASH'
   | 'QR'
@@ -381,6 +384,7 @@ export type StockMovement = {
   unitCostKgs: number | string;
   totalCostKgs: number | string;
   note?: string | null;
+  status?: StockMovementStatus;
   referenceType?: string | null;
   referenceId?: string | null;
   createdAt: string;
@@ -440,6 +444,8 @@ export type BranchDistributionOrder = {
   totalCost: number;
   totalProfit: number;
   note?: string | null;
+  status?: PaymentRecordStatus;
+  voidedAt?: string | null;
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   approvedById?: string | null;

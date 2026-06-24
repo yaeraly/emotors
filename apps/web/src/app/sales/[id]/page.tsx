@@ -5,7 +5,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { PaymentMethod, Sale } from '@/lib/types';
+import { canCancelSale, canVoidPayment } from '@/lib/rbac';
+import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const paymentMethods: PaymentMethod[] = [
@@ -23,6 +24,7 @@ export default function SaleDetailPage() {
   const params = useParams<{ id: string }>();
   const saleId = params.id;
   const [sale, setSale] = useState<Sale | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('CASH');
   const [note, setNote] = useState('');
@@ -41,8 +43,12 @@ export default function SaleDetailPage() {
     setError('');
 
     try {
-      const result = await apiFetch<Sale>(`/sales/${saleId}`);
+      const [result, currentUserResult] = await Promise.all([
+        apiFetch<Sale>(`/sales/${saleId}`),
+        apiFetch<User>('/auth/me'),
+      ]);
       setSale(result);
+      setCurrentUser(currentUserResult);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -94,6 +100,20 @@ export default function SaleDetailPage() {
       }
 
       setSuccess('Sale updated successfully');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function voidPayment(paymentId: string) {
+    setError('');
+    setSuccess('');
+    try {
+      const result = await apiFetch<Sale>(`/sales/${saleId}/payments/${paymentId}/void`, {
+        method: 'POST',
+      });
+      setSale(result);
+      setSuccess('Payment voided successfully');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -183,75 +203,79 @@ export default function SaleDetailPage() {
                   >
                     Finalize
                   </button>
-                  <button
-                    onClick={() => void runSaleAction('cancel')}
-                    disabled={sale.status === 'CANCELLED'}
-                    className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                    type="button"
-                  >
-                    Cancel
-                  </button>
+                  {canCancelSale(currentUser) ? (
+                    <button
+                      onClick={() => void runSaleAction('cancel')}
+                      disabled={sale.status === 'CANCELLED'}
+                      className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
                 </div>
               </article>
 
-              <form
-                onSubmit={addPayment}
-                className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
-              >
-                <h3 className="text-lg font-bold text-slate-950">{t('sales.addPayment')}</h3>
-                <div className="mt-4 space-y-3">
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">
-                      {t('sales.paidAmount')}
-                    </span>
-                    <input
-                      value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      max={sale.debtAmount}
-                      required
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">
-                      {t('sales.paymentMethod')}
-                    </span>
-                    <select
-                      value={method}
-                      onChange={(event) =>
-                        setMethod(event.target.value as PaymentMethod)
-                      }
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    >
-                      {paymentMethods.map((paymentMethod) => (
-                        <option key={paymentMethod} value={paymentMethod}>
-                          {paymentMethod}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">
-                      {t('crm.notes')}
-                    </span>
-                    <textarea
-                      value={note}
-                      onChange={(event) => setNote(event.target.value)}
-                      className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    />
-                  </label>
-                </div>
-                <button
-                  disabled={savingPayment || sale.debtAmount <= 0}
-                  className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                  type="submit"
+              {canVoidPayment(currentUser) ? (
+                <form
+                  onSubmit={addPayment}
+                  className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
                 >
-                  {savingPayment ? t('common.loading') : t('sales.addPayment')}
-                </button>
-              </form>
+                  <h3 className="text-lg font-bold text-slate-950">{t('sales.addPayment')}</h3>
+                  <div className="mt-4 space-y-3">
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">
+                        {t('sales.paidAmount')}
+                      </span>
+                      <input
+                        value={amount}
+                        onChange={(event) => setAmount(event.target.value)}
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        max={sale.debtAmount}
+                        required
+                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">
+                        {t('sales.paymentMethod')}
+                      </span>
+                      <select
+                        value={method}
+                        onChange={(event) =>
+                          setMethod(event.target.value as PaymentMethod)
+                        }
+                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                      >
+                        {paymentMethods.map((paymentMethod) => (
+                          <option key={paymentMethod} value={paymentMethod}>
+                            {paymentMethod}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">
+                        {t('crm.notes')}
+                      </span>
+                      <textarea
+                        value={note}
+                        onChange={(event) => setNote(event.target.value)}
+                        className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                      />
+                    </label>
+                  </div>
+                  <button
+                    disabled={savingPayment || sale.debtAmount <= 0}
+                    className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                    type="submit"
+                  >
+                    {savingPayment ? t('common.loading') : t('sales.addPayment')}
+                  </button>
+                </form>
+              ) : null}
             </div>
 
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -301,9 +325,20 @@ export default function SaleDetailPage() {
                           <p className="font-bold text-slate-950">
                             {formatKgs(payment.amount)}
                           </p>
-                          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                            {payment.method}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                              {payment.status === 'VOID' ? 'VOID' : payment.method}
+                            </span>
+                            {payment.status !== 'VOID' && canVoidPayment(currentUser) ? (
+                              <button
+                                onClick={() => void voidPayment(payment.id)}
+                                className="rounded-full border border-red-200 px-3 py-1 text-xs font-bold text-red-600 hover:bg-red-50"
+                                type="button"
+                              >
+                                Void
+                              </button>
+                            ) : null}
+                          </div>
                         </div>
                         <p className="mt-1 text-sm text-slate-500">
                           {new Date(payment.paidAt).toLocaleString()}

@@ -4,12 +4,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import type { Branch, Customer, CustomerStatus } from '@/lib/types';
+import { canArchiveCustomer } from '@/lib/rbac';
+import type { Branch, Customer, CustomerStatus, User } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const TOKEN_KEY = 'emotors_access_token';
-const businessStatuses: CustomerStatus[] = ['ACTIVE', 'VIP', 'RISK', 'INACTIVE'];
+const businessStatuses: CustomerStatus[] = ['ACTIVE', 'VIP', 'RISK', 'INACTIVE', 'ARCHIVED'];
 const allStatuses: CustomerStatus[] = [
   'ACTIVE',
   'VIP',
@@ -17,6 +18,7 @@ const allStatuses: CustomerStatus[] = [
   'INACTIVE',
   'NEW',
   'SLEEPING',
+  'ARCHIVED',
 ];
 
 type CustomerFormFields = {
@@ -71,6 +73,7 @@ export default function CustomersPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
@@ -137,6 +140,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     void loadCustomers();
+    void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
     void apiFetch<Branch[]>('/branches').then(setBranches).catch(() => null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
@@ -294,7 +298,7 @@ export default function CustomersPage() {
     }
   }
 
-  async function deleteCustomer(customer: Customer) {
+  async function archiveCustomer(customer: Customer) {
     if (!window.confirm(t('crm.confirmDelete'))) {
       return;
     }
@@ -318,7 +322,7 @@ export default function CustomersPage() {
       }
 
       const url = `${process.env.NEXT_PUBLIC_API_URL}/customers/${customer.id}`;
-      console.log('Deleting customer URL:', url);
+      console.log('Archiving customer URL:', url);
 
       let response: Response;
 
@@ -330,7 +334,7 @@ export default function CustomersPage() {
           },
         });
       } catch (fetchError) {
-        console.error('Customer delete network error', fetchError);
+        console.error('Customer archive network error', fetchError);
         throw new Error(
           'API server is not reachable. Check backend on port 3001.',
         );
@@ -338,7 +342,7 @@ export default function CustomersPage() {
 
       if (!response.ok) {
         const responseBody = await response.text();
-        console.error('Customer delete failed', {
+        console.error('Customer archive failed', {
           status: response.status,
           url,
           responseBody,
@@ -358,7 +362,7 @@ export default function CustomersPage() {
       await loadCustomers();
       showSuccess(t('crm.customerDeleted'));
     } catch (err) {
-      console.error('Customer delete failed', err);
+      console.error('Customer archive failed', err);
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setDeletingCustomerId(null);
@@ -698,16 +702,18 @@ export default function CustomersPage() {
                                 <PencilIcon />
                                 {t('common.edit')}
                               </button>
-                              <button
-                                onClick={() => void deleteCustomer(customer)}
-                                disabled={deletingCustomerId === customer.id}
-                                className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
-                                type="button"
-                              >
-                                {deletingCustomerId === customer.id
-                                  ? t('common.loading')
-                                  : t('common.delete')}
-                              </button>
+                              {canArchiveCustomer(currentUser) ? (
+                                <button
+                                  onClick={() => void archiveCustomer(customer)}
+                                  disabled={deletingCustomerId === customer.id}
+                                  className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
+                                  type="button"
+                                >
+                                  {deletingCustomerId === customer.id
+                                    ? t('common.loading')
+                                    : t('common.delete')}
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </tr>

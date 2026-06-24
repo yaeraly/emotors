@@ -59,6 +59,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeCrm = hasPermission(user, 'crm.manage');
   const canSeeSales = hasPermission(user, 'sales.manage');
   const canSeeInventory = hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
+  const canManageInventory = hasPermission(user, 'inventory.manage');
+  const canManageProductCatalog = hasRole(user, 'OWNER') || hasRole(user, 'CEO') || hasRole(user, 'SYSTEM_ADMINISTRATOR') || hasRole(user, 'WAREHOUSE_MANAGER') || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
   const canSeeService = hasPermission(user, 'service.manage');
   const canSeeHq = hasPermission(user, 'branches.manage') || hasPermission(user, 'analytics.view') || hasPermission(user, 'kpi.view') || hasPermission(user, 'reports.view');
   const canManageBranches = hasPermission(user, 'branches.manage');
@@ -147,15 +149,19 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/products" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
                     {t('inventory.products')}
                   </Link>
-                  <Link href="/stock-movements" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
-                    {t('inventory.stockMovements')}
-                  </Link>
+                  {canManageInventory ? (
+                    <Link href="/stock-movements" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                      {t('inventory.stockMovements')}
+                    </Link>
+                  ) : null}
                   <Link href="/warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
                     {t('inventory.warehouses')}
                   </Link>
-                  <Link href="/inventory/categories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
-                    {t('inventory.categories')}
-                  </Link>
+                  {canManageProductCatalog ? (
+                    <Link href="/inventory/categories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                      {t('inventory.categories')}
+                    </Link>
+                  ) : null}
                 </div>
               </div>
             ) : null}

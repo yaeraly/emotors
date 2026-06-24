@@ -6,13 +6,15 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import type { Product, ProductCategory } from '@/lib/types';
+import { canManageProductCatalog } from '@/lib/rbac';
+import type { Product, ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductDetailPage() {
   const { t, language } = useTranslation();
   const params = useParams<{ id: string }>();
   const [product, setProduct] = useState<Product | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [editForm, setEditForm] = useState({
     name: '',
@@ -29,10 +31,12 @@ export default function ProductDetailPage() {
     Promise.all([
       apiFetch<Product>(`/inventory/products/${params.id}`),
       apiFetch<ProductCategory[]>('/inventory/categories'),
+      apiFetch<User>('/auth/me'),
     ])
-      .then(([productResult, categoryResult]) => {
+      .then(([productResult, categoryResult, currentUserResult]) => {
         setProduct(productResult);
         setCategories(categoryResult);
+        setCurrentUser(currentUserResult);
         setEditForm({
           name: productResult.name,
           sku: productResult.sku,
@@ -101,26 +105,28 @@ export default function ProductDetailPage() {
               </div>
             </article>
 
-            <form onSubmit={saveProduct} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-5">
-              <div className="md:col-span-5">
-                <ProductImageUploader
-                  photoUrl={editForm.photoUrl}
-                  onChange={(value) => setEditForm({ ...editForm, photoUrl: value })}
-                />
-              </div>
-              <Input label={t('inventory.name')} value={editForm.name} onChange={(value) => setEditForm({ ...editForm, name: value })} />
-              <Input label={t('inventory.sku')} value={editForm.sku} onChange={(value) => setEditForm({ ...editForm, sku: value })} />
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
-                <select value={editForm.categoryId} onChange={(event) => setEditForm({ ...editForm, categoryId: event.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" required>
-                  <option value="">{t('inventory.selectCategory')}</option>
-                  {categories.map((category) => <option key={category.id} value={category.id}>{categoryName(category, language)}</option>)}
-                </select>
-              </label>
-              <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
-              <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
-              <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
-            </form>
+            {canManageProductCatalog(currentUser) ? (
+              <form onSubmit={saveProduct} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-5">
+                <div className="md:col-span-5">
+                  <ProductImageUploader
+                    photoUrl={editForm.photoUrl}
+                    onChange={(value) => setEditForm({ ...editForm, photoUrl: value })}
+                  />
+                </div>
+                <Input label={t('inventory.name')} value={editForm.name} onChange={(value) => setEditForm({ ...editForm, name: value })} />
+                <Input label={t('inventory.sku')} value={editForm.sku} onChange={(value) => setEditForm({ ...editForm, sku: value })} />
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
+                  <select value={editForm.categoryId} onChange={(event) => setEditForm({ ...editForm, categoryId: event.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" required>
+                    <option value="">{t('inventory.selectCategory')}</option>
+                    {categories.map((category) => <option key={category.id} value={category.id}>{categoryName(category, language)}</option>)}
+                  </select>
+                </label>
+                <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
+                <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
+                <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
+              </form>
+            ) : null}
 
             <div className="grid gap-6 xl:grid-cols-3">
               <Panel title={t('inventory.productDetail')}>

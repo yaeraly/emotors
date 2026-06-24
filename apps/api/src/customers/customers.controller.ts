@@ -53,6 +53,7 @@ export class CustomersController {
   }
 
   @Delete(':id')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
   softDelete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.customersService.softDelete(user, id);
   }

@@ -51,6 +51,7 @@ enum CustomerStatus {
   SLEEPING
   RISK
   INACTIVE
+  ARCHIVED
 }
 
 enum CustomerEventType {
@@ -73,6 +74,16 @@ enum PaymentStatus {
   PAID
   PARTIAL
   DEBT
+}
+
+enum PaymentRecordStatus {
+  ACTIVE
+  VOID
+}
+
+enum StockMovementStatus {
+  ACTIVE
+  VOID
 }
 
 enum PaymentMethod {
@@ -649,6 +660,8 @@ model Payment {
   method      PaymentMethod
   paidAt      DateTime      @default(now())
   note        String?
+  status      PaymentRecordStatus @default(ACTIVE)
+  voidedAt    DateTime?
   createdById String
   createdBy   User          @relation("PaymentCreator", fields: [createdById], references: [id])
   createdAt   DateTime      @default(now())
@@ -659,6 +672,7 @@ model Payment {
   @@index([createdById])
   @@index([paidAt])
   @@index([method])
+  @@index([status])
 }
 
 model InstallmentSchedule {
@@ -833,6 +847,7 @@ model StockMovement {
   unitCostKgs   Decimal           @default(0) @db.Decimal(14, 2)
   totalCostKgs  Decimal           @default(0) @db.Decimal(14, 2)
   note          String?
+  status        StockMovementStatus @default(ACTIVE)
   referenceType String?
   referenceId   String?
   createdById   String
@@ -845,6 +860,7 @@ model StockMovement {
   @@index([type])
   @@index([createdById])
   @@index([createdAt])
+  @@index([status])
 }
 
 model InventoryBalance {

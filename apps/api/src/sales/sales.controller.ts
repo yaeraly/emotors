@@ -84,12 +84,23 @@ export class SalesController {
   }
 
   @Post(':id/payments')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.CASHIER)
   addPayment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: AddPaymentDto,
   ) {
     return this.salesService.addPayment(user, id, dto);
+  }
+
+  @Post(':id/payments/:paymentId/void')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.CASHIER)
+  voidPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.salesService.voidPayment(user, id, paymentId);
   }
 
   @Post(':id/finalize')

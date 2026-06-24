@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CustomerStatus,
   CustomerEvent,
   CustomerEventType,
   FollowUpStatus,
@@ -155,13 +156,15 @@ export class CustomersService {
   }
 
   async softDelete(user: AuthUser, id: string) {
-    await this.getAccessibleCustomer(user, id);
+    const existing = await this.getAccessibleCustomer(user, id);
 
-    return this.prisma.customer.update({
+    const archived = await this.prisma.customer.update({
       where: { id },
-      data: { deletedAt: new Date() },
-      select: { id: true, deletedAt: true },
+      data: { status: CustomerStatus.ARCHIVED },
+      select: { id: true, status: true },
     });
+    await this.audit(user, existing.branchId, 'CUSTOMER_ARCHIVE', 'Customer', id);
+    return archived;
   }
 
   async addEvent(user: AuthUser, customerId: string, dto: AddCustomerEventDto) {
@@ -383,6 +386,22 @@ export class CustomersService {
     if (!branch) {
       throw new NotFoundException('Branch not found');
     }
+  }
+
+  private audit(user: AuthUser, branchId: string, action: string, entity: string, entityId: string) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          branchId,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
   }
 
   private async getAccessibleCustomer(user: AuthUser, id: string) {

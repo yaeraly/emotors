@@ -284,11 +284,15 @@ export class ServiceService {
 
   async cancel(user: AuthUser, id: string) {
     const order = await this.getOrder(user, id);
-    return this.prisma.serviceOrder.update({
-      where: { id: order.id },
-      data: { status: ServiceOrderStatus.CANCELLED, cancelledAt: new Date() },
-      include: this.include(),
-    }).then((updated) => this.toResponse(updated));
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serviceOrder.update({
+        where: { id: order.id },
+        data: { status: ServiceOrderStatus.CANCELLED, cancelledAt: new Date() },
+        include: this.include(),
+      });
+      await this.auditInTx(tx, user, order.branchId, 'REPAIR_CANCELLATION', 'ServiceOrder', order.id);
+      return this.toResponse(updated);
+    });
   }
 
   dailyReport(user: AuthUser, branchId?: string) {
@@ -380,6 +384,29 @@ export class ServiceService {
 
   private hasRole(user: AuthUser, role: Role) {
     return (user.roles?.length ? user.roles : [user.role]).includes(role);
+  }
+
+  private auditInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    branchId: string,
+    action: string,
+    entity: string,
+    entityId: string,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          branchId,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
   }
 
   private async generateOrderNumber(tx: PrismaTx) {
