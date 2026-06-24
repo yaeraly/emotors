@@ -52,8 +52,7 @@ export default function UserDetailPage() {
         status: userResult.status ?? 'ACTIVE',
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('common.error');
-      setError(path === 'reset-password' && message.includes('own branch') ? t('users.resetOwnBranchOnly') : message);
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -69,7 +68,8 @@ export default function UserDetailPage() {
       setUser(await apiFetch<User>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(form) }));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(path === 'reset-password' && message.includes('own branch') ? t('users.resetOwnBranchOnly') : message);
     }
   }
 
