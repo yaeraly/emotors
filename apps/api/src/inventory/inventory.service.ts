@@ -201,7 +201,6 @@ export class InventoryService {
         }
 
         const category = await this.getActiveCategory(tx, dto.categoryId);
-        await this.ensureSkuAvailable(tx, branchId, dto.sku);
         const costs = this.calculateCosts({
           weightKg: dto.weightKg,
           purchasePriceYuan: dto.purchasePriceYuan,
@@ -211,6 +210,63 @@ export class InventoryService {
             dto.weightKg * Number(dto.transportCostPerKg ?? 0),
           sellingPriceKgs: dto.sellingPriceKgs,
         });
+        const existingProduct = await tx.product.findFirst({
+          where: { branchId, sku: dto.sku },
+          include: this.productInclude(),
+        });
+
+        if (existingProduct && !existingProduct.deletedAt) {
+          throw new ConflictException('Active product with this SKU already exists');
+        }
+
+        if (existingProduct?.deletedAt) {
+          await tx.product.update({
+            where: { id: existingProduct.id },
+            data: {
+              deletedAt: null,
+              isActive: dto.isActive ?? true,
+              warehouseId: warehouse.id,
+              name: dto.name,
+              categoryId: category.id,
+              category: category.nameEn,
+              photoUrl: dto.photoUrl,
+              description: dto.description,
+              characteristics: dto.characteristics as Prisma.InputJsonValue,
+              weightKg: dto.weightKg,
+              purchasePriceYuan: dto.purchasePriceYuan,
+              latestYuanRate: dto.latestYuanRate,
+              ...costs,
+              minStockLevel: dto.minStockLevel ?? 0,
+              priceHistory: {
+                create: {
+                  purchasePriceYuan: dto.purchasePriceYuan,
+                  yuanRate: dto.latestYuanRate,
+                  ...costs,
+                  effectiveFrom: new Date(),
+                  createdById: user.id,
+                },
+              },
+            },
+          });
+
+          if (dto.initialQuantity && dto.initialQuantity > 0) {
+            await this.createStockMovementInTx(tx, user, {
+              productId: existingProduct.id,
+              warehouseId: warehouse.id,
+              type: StockMovementType.IN,
+              quantity: dto.initialQuantity,
+              unitCostKgs: costs.finalCostKgs,
+              note: 'Restored product initial stock',
+              referenceType: 'PRODUCT_RESTORE',
+              referenceId: existingProduct.id,
+            });
+          }
+
+          return {
+            ...(await this.getProductResponseInTx(tx, user, existingProduct.id)),
+            restored: true,
+          };
+        }
 
         const product = await tx.product.create({
           data: {
@@ -255,10 +311,16 @@ export class InventoryService {
           });
         }
 
-        return this.getProductResponseInTx(tx, user, product.id);
+        return {
+          ...(await this.getProductResponseInTx(tx, user, product.id)),
+          restored: false,
+        };
       });
     } catch (error) {
       this.logProductCreateFailure(user, dto, error);
+      if (this.isUniqueConstraintError(error)) {
+        throw new ConflictException('Active product with this SKU already exists');
+      }
       throw error;
     }
   }
@@ -950,9 +1012,16 @@ export class InventoryService {
       userId: user.id,
       roles: user.roles ?? [user.role],
       branchId: user.branchId,
+      sku: dto?.sku,
+      productName: dto?.name,
       payloadKeys: Object.keys(dto ?? {}),
+      errorCode: typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined,
       error: message,
     });
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';
   }
 
   private getQuantityDelta(type: StockMovementType, quantity: number) {

@@ -47,6 +47,11 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
+    const success = window.localStorage.getItem('emotors_product_success');
+    if (success) {
+      setSuccessMessage(success);
+      window.localStorage.removeItem('emotors_product_success');
+    }
     void loadProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);

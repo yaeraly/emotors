@@ -14,6 +14,7 @@ export default function NewProductPage() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [error, setError] = useState('');
+  const [skuError, setSkuError] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     name: '',
@@ -70,6 +71,7 @@ export default function NewProductPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
+    setSkuError('');
     setSaving(true);
 
     try {
@@ -79,7 +81,7 @@ export default function NewProductPage() {
         return;
       }
 
-      const product = await apiFetch<Product>('/inventory/products', {
+      const product = await apiFetch<Product & { restored?: boolean }>('/inventory/products', {
         method: 'POST',
         body: JSON.stringify({
           ...form,
@@ -96,9 +98,18 @@ export default function NewProductPage() {
           initialQuantity: Number(form.initialQuantity),
         }),
       });
-      router.push(`/products/${product.id}`);
+      window.localStorage.setItem(
+        'emotors_product_success',
+        product.restored ? t('inventory.productRestored') : t('inventory.productCreated'),
+      );
+      router.push('/products');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      if (message.toLowerCase().includes('sku')) {
+        setSkuError(t('inventory.activeSkuExists'));
+      } else {
+        setError(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -125,7 +136,7 @@ export default function NewProductPage() {
               />
             </div>
             <Input label={t('inventory.name')} value={form.name} onChange={(value) => setField('name', value)} required />
-            <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => setField('sku', value)} required />
+            <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => { setField('sku', value); setSkuError(''); }} error={skuError} required />
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
               <select value={form.categoryId} onChange={(event) => setField('categoryId', event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
@@ -172,11 +183,12 @@ export default function NewProductPage() {
   );
 }
 
-function Input({ label, value, onChange, type = 'text', required }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {
+function Input({ label, value, onChange, type = 'text', required, error }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean; error?: string }) {
   return (
     <label className="block">
       <span className="text-sm font-semibold text-slate-700">{label}</span>
       <input value={value} onChange={(event) => onChange(event.target.value)} required={required} type={type} min={type === 'number' ? 0 : undefined} step={type === 'number' ? '0.01' : undefined} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+      {error ? <span className="mt-1 block text-xs font-semibold text-red-600">{error}</span> : null}
     </label>
   );
 }
