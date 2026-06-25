@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, Role, StockMovementStatus, StockMovementType } from '@prisma/client';
@@ -30,6 +31,8 @@ type PrismaTx = Prisma.TransactionClient;
 
 @Injectable()
 export class InventoryService {
+  private readonly logger = new Logger(InventoryService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async uploadProductImage(request: FastifyRequest) {
@@ -183,71 +186,81 @@ export class InventoryService {
   }
 
   async createProduct(user: AuthUser, dto: CreateProductDto) {
-    return this.prisma.$transaction(async (tx) => {
-      const warehouse = await this.getWarehouseForWrite(tx, user, dto.warehouseId);
-      const branchId = this.resolveBranchId(user, dto.branchId ?? warehouse.branchId);
+    try {
+      this.assertCanManageProductCatalog(user);
+      return await this.prisma.$transaction(async (tx) => {
+        if (!dto.name?.trim()) throw new BadRequestException('Product name is required');
+        if (!dto.sku?.trim()) throw new BadRequestException('SKU is required');
+        if (!dto.categoryId) throw new BadRequestException('Category is required');
+        if (!dto.warehouseId) throw new BadRequestException('Warehouse is required');
+        const warehouse = await this.getWarehouseForCatalogWrite(tx, user, dto.warehouseId);
+        const branchId = dto.branchId ?? warehouse.branchId;
 
-      if (warehouse.branchId !== branchId) {
-        throw new BadRequestException('Warehouse does not belong to branch');
-      }
+        if (warehouse.branchId !== branchId) {
+          throw new BadRequestException('Warehouse does not belong to branch');
+        }
 
-      const category = await this.getActiveCategory(tx, dto.categoryId);
-      await this.ensureSkuAvailable(tx, branchId, dto.sku);
-      const costs = this.calculateCosts({
-        weightKg: dto.weightKg,
-        purchasePriceYuan: dto.purchasePriceYuan,
-        yuanRate: dto.latestYuanRate,
-        transportCostKgs:
-          dto.transportCostKgs ??
-          dto.weightKg * Number(dto.transportCostPerKg ?? 0),
-        sellingPriceKgs: dto.sellingPriceKgs,
-      });
-
-      const product = await tx.product.create({
-        data: {
-          branchId,
-          warehouseId: warehouse.id,
-          name: dto.name,
-          sku: dto.sku,
-          categoryId: category.id,
-          category: category.nameEn,
-          photoUrl: dto.photoUrl,
-          description: dto.description,
-          characteristics: dto.characteristics as Prisma.InputJsonValue,
+        const category = await this.getActiveCategory(tx, dto.categoryId);
+        await this.ensureSkuAvailable(tx, branchId, dto.sku);
+        const costs = this.calculateCosts({
           weightKg: dto.weightKg,
           purchasePriceYuan: dto.purchasePriceYuan,
-          latestYuanRate: dto.latestYuanRate,
-          ...costs,
-          minStockLevel: dto.minStockLevel ?? 0,
-          isActive: dto.isActive ?? true,
-          priceHistory: {
-            create: {
-              purchasePriceYuan: dto.purchasePriceYuan,
-              yuanRate: dto.latestYuanRate,
-              ...costs,
-              effectiveFrom: new Date(),
-              createdById: user.id,
+          yuanRate: dto.latestYuanRate,
+          transportCostKgs:
+            dto.transportCostKgs ??
+            dto.weightKg * Number(dto.transportCostPerKg ?? 0),
+          sellingPriceKgs: dto.sellingPriceKgs,
+        });
+
+        const product = await tx.product.create({
+          data: {
+            branchId,
+            warehouseId: warehouse.id,
+            name: dto.name,
+            sku: dto.sku,
+            categoryId: category.id,
+            category: category.nameEn,
+            photoUrl: dto.photoUrl,
+            description: dto.description,
+            characteristics: dto.characteristics as Prisma.InputJsonValue,
+            weightKg: dto.weightKg,
+            purchasePriceYuan: dto.purchasePriceYuan,
+            latestYuanRate: dto.latestYuanRate,
+            ...costs,
+            minStockLevel: dto.minStockLevel ?? 0,
+            isActive: dto.isActive ?? true,
+            priceHistory: {
+              create: {
+                purchasePriceYuan: dto.purchasePriceYuan,
+                yuanRate: dto.latestYuanRate,
+                ...costs,
+                effectiveFrom: new Date(),
+                createdById: user.id,
+              },
             },
           },
-        },
-        include: this.productInclude(),
-      });
-
-      if (dto.initialQuantity && dto.initialQuantity > 0) {
-        await this.createStockMovementInTx(tx, user, {
-          productId: product.id,
-          warehouseId: product.warehouseId,
-          type: StockMovementType.IN,
-          quantity: dto.initialQuantity,
-          unitCostKgs: Number(product.finalCostKgs),
-          note: 'Initial stock',
-          referenceType: 'PRODUCT_CREATE',
-          referenceId: product.id,
+          include: this.productInclude(),
         });
-      }
 
-      return this.getProductResponseInTx(tx, user, product.id);
-    });
+        if (dto.initialQuantity && dto.initialQuantity > 0) {
+          await this.createStockMovementInTx(tx, user, {
+            productId: product.id,
+            warehouseId: product.warehouseId,
+            type: StockMovementType.IN,
+            quantity: dto.initialQuantity,
+            unitCostKgs: Number(product.finalCostKgs),
+            note: 'Initial stock',
+            referenceType: 'PRODUCT_CREATE',
+            referenceId: product.id,
+          });
+        }
+
+        return this.getProductResponseInTx(tx, user, product.id);
+      });
+    } catch (error) {
+      this.logProductCreateFailure(user, dto, error);
+      throw error;
+    }
   }
 
   async products(user: AuthUser, query: ProductQueryDto) {
@@ -326,6 +339,7 @@ export class InventoryService {
   }
 
   async updateProduct(user: AuthUser, id: string, dto: UpdateProductDto) {
+    this.assertCanManageProductCatalog(user);
     return this.prisma.$transaction(async (tx) => {
       const current = await this.getProductForWrite(tx, user, id);
 
@@ -334,7 +348,7 @@ export class InventoryService {
       }
 
       if (dto.warehouseId) {
-        const warehouse = await this.getWarehouseForWrite(tx, user, dto.warehouseId);
+        const warehouse = await this.getWarehouseForCatalogWrite(tx, user, dto.warehouseId);
         if (warehouse.branchId !== current.branchId) {
           throw new BadRequestException('Warehouse does not belong to branch');
         }
@@ -408,6 +422,7 @@ export class InventoryService {
   }
 
   async deleteProduct(user: AuthUser, id: string) {
+    this.assertCanManageProductCatalog(user);
     await this.getProductForWrite(this.prisma, user, id);
     const [stockMovements, saleItems, balances, priceHistory] =
       await Promise.all([
@@ -438,6 +453,7 @@ export class InventoryService {
     productId: string,
     dto: CreatePriceHistoryDto,
   ) {
+    this.assertCanManageProductCatalog(user);
     return this.prisma.$transaction(async (tx) => {
       const product = await this.getProductForWrite(tx, user, productId);
       const transportCostKgs =
@@ -902,6 +918,41 @@ export class InventoryService {
     }
 
     return warehouse;
+  }
+
+  private async getWarehouseForCatalogWrite(tx: PrismaTx | PrismaService, user: AuthUser, id: string) {
+    this.assertCanManageProductCatalog(user);
+    const warehouse = await tx.warehouse.findFirst({ where: { id } });
+    if (!warehouse) {
+      throw new BadRequestException('Warehouse is required');
+    }
+    return warehouse;
+  }
+
+  private assertCanManageProductCatalog(user: AuthUser) {
+    const roles = user.roles?.length ? user.roles : [user.role];
+    const allowed = roles.some((role) =>
+      role === Role.CEO ||
+      role === Role.SUPPLY_CHAIN_MANAGER ||
+      role === Role.WAREHOUSE_MANAGER ||
+      role === Role.SYSTEM_ADMINISTRATOR ||
+      role === Role.OWNER,
+    );
+    if (!allowed) {
+      throw new ForbiddenException('You do not have permission to manage product catalog');
+    }
+  }
+
+  private logProductCreateFailure(user: AuthUser, dto: CreateProductDto, error: unknown) {
+    const message = error instanceof Error ? error.message : 'Unknown product create error';
+    this.logger.warn({
+      message: 'Product create failed',
+      userId: user.id,
+      roles: user.roles ?? [user.role],
+      branchId: user.branchId,
+      payloadKeys: Object.keys(dto ?? {}),
+      error: message,
+    });
   }
 
   private getQuantityDelta(type: StockMovementType, quantity: number) {
