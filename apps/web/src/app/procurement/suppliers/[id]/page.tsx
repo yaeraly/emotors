@@ -1,9 +1,11 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type SupplierContact = {
@@ -31,6 +33,7 @@ type Supplier = {
 export default function SupplierDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [supplier, setSupplier] = useState<Supplier | null>(null);
   const [contacts, setContacts] = useState<SupplierContact[]>([]);
   const [error, setError] = useState('');
@@ -52,6 +55,7 @@ export default function SupplierDetailPage() {
       ]);
       setSupplier(supplierResult);
       setContacts(contactResult);
+      void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -94,9 +98,16 @@ export default function SupplierDetailPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('procurement.suppliers.title')}</p>
-          <h2 className="text-3xl font-bold text-slate-950">{supplier?.name ?? '-'}</h2>
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('procurement.suppliers.title')}</p>
+            <h2 className="text-3xl font-bold text-slate-950">{supplier?.name ?? '-'}</h2>
+          </div>
+          {canEditSupplier(currentUser) ? (
+            <Link href={`/procurement/suppliers/${id}/edit`} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
+              {t('procurement.suppliers.edit')}
+            </Link>
+          ) : null}
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {supplier ? (
@@ -145,4 +156,9 @@ function Info({ label, value }: { label: string; value: string }) {
 
 function Input({ label, value, onChange, required }: { label: string; value: string; onChange: (value: string) => void; required?: boolean }) {
   return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} required={required} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
+}
+
+function canEditSupplier(user: User | null) {
+  const roles = user?.roles?.length ? user.roles : user ? [user.role] : [];
+  return roles.includes('CEO') || roles.includes('SUPPLY_CHAIN_MANAGER');
 }

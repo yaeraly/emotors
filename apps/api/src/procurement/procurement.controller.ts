@@ -15,7 +15,7 @@ export class ProcurementController {
   @Post('suppliers') @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) createSupplier(@Body() dto: any) { return this.service.createSupplier(dto); }
   @Get('suppliers') suppliers() { return this.service.suppliers(); }
   @Get('suppliers/:id') supplier(@Param('id') id: string) { return this.service.supplier(id); }
-  @Put('suppliers/:id') @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) updateSupplier(@Param('id') id: string, @Body() dto: any) { return this.service.updateSupplier(id, dto); }
+  @Put('suppliers/:id') @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER) updateSupplier(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) { return this.service.updateSupplier(user, id, dto); }
   @Delete('suppliers/:id') @Roles(Role.CEO) deleteSupplier(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) { return this.service.deleteSupplier(user, id, dto?.reason); }
   @Post('suppliers/:id/contacts') @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.PROCUREMENT_MANAGER, Role.SUPPLY_CHAIN_MANAGER) createSupplierContact(@Param('id') id: string, @Body() dto: any) { return this.service.createSupplierContact(id, dto); }
   @Get('suppliers/:id/contacts') supplierContacts(@Param('id') id: string) { return this.service.supplierContacts(id); }

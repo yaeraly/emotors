@@ -40,8 +40,43 @@ export class ProcurementService {
     return this.prisma.supplier.findFirst({ where: { id, deletedAt: null }, include: { contacts: true, purchaseOrders: true, factories: true, procurementOrders: true } });
   }
 
-  updateSupplier(id: string, dto: any) {
-    return this.prisma.supplier.update({ where: { id }, data: dto });
+  async updateSupplier(user: AuthUser, id: string, dto: any) {
+    this.assertCanEditSupplier(user);
+    this.validateSupplierPayload(dto);
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.supplier.findFirst({ where: { id, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Supplier not found');
+      if (dto.name && dto.name !== existing.name) {
+        const duplicate = await tx.supplier.findFirst({
+          where: { name: dto.name, deletedAt: null, NOT: { id } },
+          select: { id: true },
+        });
+        if (duplicate) throw new BadRequestException('Supplier name already exists');
+      }
+      const oldValue = this.pickSupplierAuditFields(existing);
+      const nextNotes = this.mergeSupplierNotes(existing.notes, dto);
+      const updated = await tx.supplier.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          companyName: dto.companyName,
+          country: dto.country,
+          city: dto.city,
+          address: dto.address,
+          wechat: dto.wechat,
+          phone: dto.phone ?? dto.mobile ?? dto.whatsapp,
+          email: dto.email,
+          website: dto.website,
+          productTypes: Array.isArray(dto.productTypes) ? dto.productTypes : this.splitList(dto.productTypes),
+          reliabilityScore: dto.reliabilityScore !== undefined ? Number(dto.reliabilityScore) : undefined,
+          isActive: dto.status ? dto.status === 'ACTIVE' : dto.isActive,
+          deletedAt: dto.status === 'ARCHIVED' ? new Date() : dto.status === 'ACTIVE' ? null : undefined,
+          notes: nextNotes,
+        },
+      });
+      await this.auditSupplierUpdate(tx, user, existing.id, this.changedFields(oldValue, this.pickSupplierAuditFields(updated)), oldValue, this.pickSupplierAuditFields(updated));
+      return updated;
+    });
   }
 
   async deleteSupplier(user: AuthUser, id: string, reason?: string) {
@@ -450,6 +485,110 @@ export class ProcurementService {
 
   private hasRole(user: AuthUser, role: Role) {
     return (user.roles?.length ? user.roles : [user.role]).includes(role);
+  }
+
+  private assertCanEditSupplier(user: AuthUser) {
+    if (!this.hasRole(user, Role.CEO) && !this.hasRole(user, Role.SUPPLY_CHAIN_MANAGER)) {
+      throw new ForbiddenException('You do not have permission to edit suppliers');
+    }
+  }
+
+  private validateSupplierPayload(dto: any) {
+    if (!dto.name?.trim()) throw new BadRequestException('Supplier name is required');
+    if (dto.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dto.email)) {
+      throw new BadRequestException('Invalid email format');
+    }
+    const phone = dto.phone ?? dto.mobile ?? dto.whatsapp;
+    if (phone && !/^[+\d\s().-]{5,}$/.test(String(phone))) {
+      throw new BadRequestException('Invalid phone format');
+    }
+    if (dto.website && !/^https?:\/\/.+\..+/.test(dto.website)) {
+      throw new BadRequestException('Invalid website format');
+    }
+  }
+
+  private mergeSupplierNotes(existingNotes: string | null, dto: any) {
+    const extras = {
+      contactPerson: dto.contactPerson,
+      mobile: dto.mobile,
+      whatsapp: dto.whatsapp,
+      telegram: dto.telegram,
+      supplierType: dto.supplierType,
+      moq: dto.moq,
+      leadTimeDays: dto.leadTimeDays,
+      currency: dto.currency,
+      paymentTerms: dto.paymentTerms,
+      incoterms: dto.incoterms,
+      bankInformation: dto.bankInformation,
+      taxNumber: dto.taxNumber,
+      qualityScore: dto.qualityScore,
+      deliveryScore: dto.deliveryScore,
+      overallRating: dto.overallRating,
+      publicNotes: dto.publicNotes,
+      files: dto.files,
+    };
+    const cleanExtras = Object.fromEntries(
+      Object.entries(extras).filter(([, value]) => value !== undefined && value !== ''),
+    );
+    const internalNotes = dto.notes ?? existingNotes ?? '';
+    return JSON.stringify({ internalNotes, ...cleanExtras });
+  }
+
+  private splitList(value: unknown) {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return undefined;
+    return value.split(',').map((item) => item.trim()).filter(Boolean);
+  }
+
+  private pickSupplierAuditFields(supplier: any) {
+    return {
+      name: supplier.name,
+      companyName: supplier.companyName,
+      country: supplier.country,
+      city: supplier.city,
+      address: supplier.address,
+      wechat: supplier.wechat,
+      phone: supplier.phone,
+      email: supplier.email,
+      website: supplier.website,
+      productTypes: supplier.productTypes,
+      reliabilityScore: supplier.reliabilityScore?.toString?.() ?? supplier.reliabilityScore,
+      notes: supplier.notes,
+      isActive: supplier.isActive,
+      deletedAt: supplier.deletedAt,
+    };
+  }
+
+  private changedFields(oldValue: Record<string, unknown>, newValue: Record<string, unknown>) {
+    return Object.keys(newValue).filter((key) => JSON.stringify(oldValue[key]) !== JSON.stringify(newValue[key]));
+  }
+
+  private auditSupplierUpdate(
+    tx: any,
+    user: AuthUser,
+    supplierId: string,
+    changedFields: string[],
+    oldValue: unknown,
+    newValue: unknown,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'UPDATE_SUPPLIER',
+        entity: 'Supplier',
+        entityId: supplierId,
+        metadata: {
+          userId: user.id,
+          userRole: user.role,
+          roles: user.roles ?? [user.role],
+          supplierId,
+          changedFields,
+          oldValue,
+          newValue,
+        },
+      },
+    });
   }
 
   private auditSupplierDelete(
