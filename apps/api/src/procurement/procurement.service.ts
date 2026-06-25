@@ -44,8 +44,58 @@ export class ProcurementService {
     return this.prisma.supplier.update({ where: { id }, data: dto });
   }
 
-  deleteSupplier(id: string) {
-    return this.prisma.supplier.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
+  async deleteSupplier(user: AuthUser, id: string, reason?: string) {
+    if (!this.hasRole(user, Role.CEO)) {
+      throw new ForbiddenException('Only CEO can delete suppliers');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const supplier = await tx.supplier.findFirst({ where: { id, deletedAt: null } });
+      if (!supplier) throw new NotFoundException('Supplier not found');
+
+      const [procurementOrders, purchaseOrders, factories, contacts] = await Promise.all([
+        tx.procurementOrder.count({ where: { supplierId: id } }),
+        tx.purchaseOrder.count({ where: { supplierId: id } }),
+        tx.factory.count({ where: { supplierId: id, deletedAt: null } }),
+        tx.supplierContact.count({ where: { supplierId: id } }),
+      ]);
+      const hasPurchaseHistory = procurementOrders > 0 || purchaseOrders > 0 || factories > 0;
+      const oldValue = {
+        id: supplier.id,
+        name: supplier.name,
+        deletedAt: supplier.deletedAt,
+        isActive: supplier.isActive,
+      };
+
+      if (hasPurchaseHistory) {
+        const archived = await tx.supplier.update({
+          where: { id },
+          data: { isActive: false, deletedAt: new Date() },
+        });
+        await this.auditSupplierDelete(tx, user, supplier, oldValue, {
+          deletedAt: archived.deletedAt,
+          isActive: archived.isActive,
+          archived: true,
+        }, reason, { procurementOrders, purchaseOrders, factories, contacts });
+        return {
+          success: true,
+          archived: true,
+          message: 'Supplier has related purchase history. It was archived instead.',
+        };
+      }
+
+      await tx.supplierContact.deleteMany({ where: { supplierId: id } });
+      await tx.supplier.delete({ where: { id } });
+      await this.auditSupplierDelete(tx, user, supplier, oldValue, {
+        deleted: true,
+        archived: false,
+      }, reason, { procurementOrders, purchaseOrders, factories, contacts });
+      return {
+        success: true,
+        archived: false,
+        message: 'Supplier deleted successfully',
+      };
+    });
   }
 
   createSupplierContact(supplierId: string, dto: any) {
@@ -396,6 +446,40 @@ export class ProcurementService {
       role === Role.PROCUREMENT_MANAGER ||
       role === Role.SUPPLY_CHAIN_MANAGER
     );
+  }
+
+  private hasRole(user: AuthUser, role: Role) {
+    return (user.roles?.length ? user.roles : [user.role]).includes(role);
+  }
+
+  private auditSupplierDelete(
+    tx: any,
+    user: AuthUser,
+    supplier: { id: string; name: string },
+    oldValue: unknown,
+    newValue: unknown,
+    reason: string | undefined,
+    relationCounts: Record<string, number>,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'DELETE_SUPPLIER',
+        entity: 'Supplier',
+        entityId: supplier.id,
+        metadata: {
+          actorUserId: user.id,
+          actorRole: Role.CEO,
+          supplierId: supplier.id,
+          supplierName: supplier.name,
+          oldValue,
+          newValue,
+          reason: reason?.trim() || null,
+          relationCounts,
+        },
+      },
+    });
   }
 
   private roundMoney(value: number) {
