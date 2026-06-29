@@ -14,6 +14,7 @@ const ALL_PERMISSIONS = [
   'kpi.view',
   'reports.view',
   'procurement.manage',
+  'procurement.landed_cost.view',
   'distribution.manage',
   'academy.manage',
   'marketing.manage',
@@ -25,7 +26,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   CEO: [...ALL_PERMISSIONS],
   SYSTEM_ADMINISTRATOR: [...ALL_PERMISSIONS],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'analytics.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view', 'procurement.landed_cost.view'],
   WAREHOUSE_MANAGER: ['inventory.manage', 'distribution.manage'],
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
@@ -144,7 +145,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/service')) return hasPermission(user, 'service.manage');
   if (pathname.startsWith('/users')) return hasPermission(user, 'users.manage');
   if (pathname.startsWith('/branches')) return hasPermission(user, 'branches.manage');
-  if (pathname.startsWith('/procurement')) return hasPermission(user, 'procurement.manage');
+  if (pathname.startsWith('/procurement')) {
+    return hasPermission(user, 'procurement.manage') || hasPermission(user, 'procurement.landed_cost.view');
+  }
   if (pathname.startsWith('/branch-purchase-requests')) {
     return hasPermission(user, 'procurement.manage') || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
   }

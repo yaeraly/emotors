@@ -4,7 +4,10 @@ import {
   BranchPurchaseRequestStatus,
   HqWarrantyDecision,
   Prisma,
+  ProcurementAuditAction,
   ProcurementOrderStatus,
+  ProcurementQuantityType,
+  ReceivingDifferenceReason,
   ReturnOrderStatus,
   ReturnResolution,
   Role,
@@ -16,6 +19,8 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
+import { persistLandedCostRecalculation } from '../procurement/procurement-landed-cost.helpers';
+import { LandedCostEngineService } from '../procurement/landed-cost/landed-cost-engine.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
 
@@ -26,6 +31,7 @@ export class OperationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly landedCostEngine: LandedCostEngineService,
   ) {}
 
   branchPurchaseRequests(user: AuthUser) {
@@ -147,10 +153,32 @@ export class OperationsService {
           note: dto.note,
         },
       });
+
       for (const item of order.items) {
         const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
-        const receivedQuantity = Number(received.receivedQuantity ?? item.quantity);
-        const difference = receivedQuantity - item.quantity;
+        const expectedQuantity = item.shippedQuantity ?? item.confirmedQuantity ?? item.quantity;
+        const receivedQuantity = Number(received.receivedQuantity ?? expectedQuantity);
+        const difference = receivedQuantity - expectedQuantity;
+        const differenceReason = received.differenceReason as ReceivingDifferenceReason | undefined;
+
+        await tx.procurementOrderItem.update({
+          where: { id: item.id },
+          data: { receivedQuantity },
+        });
+
+        if (receivedQuantity !== Number(item.receivedQuantity ?? 0)) {
+          await tx.procurementQuantityHistory.create({
+            data: {
+              procurementItemId: item.id,
+              quantityType: ProcurementQuantityType.RECEIVED,
+              oldQuantity: Number(item.receivedQuantity ?? 0),
+              newQuantity: receivedQuantity,
+              reason: received.note ?? differenceReason,
+              changedById: user.id,
+            },
+          });
+        }
+
         await tx.procurementGoodsReceivingItem.create({
           data: {
             receivingId: receiving.id,
@@ -158,24 +186,14 @@ export class OperationsService {
             productId: item.productId,
             sku: item.sku,
             productName: item.productName,
-            expectedQuantity: item.quantity,
+            expectedQuantity,
             receivedQuantity,
             differenceQuantity: Math.abs(difference),
+            differenceReason,
             note: received.note,
           },
         });
-        if (receivedQuantity > 0) {
-          await this.inventoryService.createStockMovementInTx(tx, user, {
-            productId: item.productId,
-            warehouseId: dto.hqWarehouseId ?? order.hqWarehouseId,
-            type: StockMovementType.IN,
-            quantity: receivedQuantity,
-            unitCostKgs: Number(item.finalCostKgs),
-            referenceType: 'PROCUREMENT_GOODS_RECEIVING',
-            referenceId: receiving.id,
-            note: `Procurement receiving ${receiving.receivingNumber}`,
-          });
-        }
+
         if (difference !== 0) {
           await tx.procurementDifferenceReport.create({
             data: {
@@ -186,14 +204,99 @@ export class OperationsService {
               productId: item.productId,
               sku: item.sku,
               productName: item.productName,
-              expectedQuantity: item.quantity,
+              expectedQuantity,
               receivedQuantity,
               differenceQuantity: Math.abs(difference),
+              differenceReason,
               note: received.note,
+            },
+          });
+          await tx.procurementAuditEntry.create({
+            data: {
+              procurementOrderId: order.id,
+              action: ProcurementAuditAction.RECEIVING_DIFFERENCE,
+              entityType: 'ProcurementOrderItem',
+              entityId: item.id,
+              oldValue: { expectedQuantity },
+              newValue: { receivedQuantity, differenceReason },
+              reason: received.note,
+              userId: user.id,
+              userRole: user.role,
             },
           });
         }
       }
+
+      const orderWithReceived = await tx.procurementOrder.findUnique({
+        where: { id: order.id },
+        include: { items: true },
+      });
+      const landedCostResult = await persistLandedCostRecalculation(
+        tx,
+        user,
+        orderWithReceived!,
+        'HQ_RECEIVING',
+        {
+          landedCostEngine: this.landedCostEngine,
+          roundMoney: (value: number) => Math.round((value + Number.EPSILON) * 100) / 100,
+          procurementOrderInclude: () => ({}),
+        },
+      );
+      const breakdownByItem = new Map(landedCostResult.items.map((entry) => [entry.procurementItemId, entry]));
+
+      for (const item of orderWithReceived!.items) {
+        const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
+        const expectedQuantity = item.shippedQuantity ?? item.confirmedQuantity ?? item.quantity;
+        const receivedQuantity = Number(received.receivedQuantity ?? expectedQuantity);
+        const breakdown = breakdownByItem.get(item.id);
+        const unitCost = breakdown?.landedCostPerUnitKgs ?? Number(item.finalCostKgs);
+
+        if (receivedQuantity > 0) {
+          await this.inventoryService.createStockMovementInTx(tx, user, {
+            productId: item.productId,
+            warehouseId: dto.hqWarehouseId ?? order.hqWarehouseId,
+            type: StockMovementType.IN,
+            quantity: receivedQuantity,
+            unitCostKgs: unitCost,
+            referenceType: 'PROCUREMENT_GOODS_RECEIVING',
+            referenceId: receiving.id,
+            note: `Procurement receiving ${receiving.receivingNumber}`,
+          });
+
+          const product = await tx.product.findUnique({ where: { id: item.productId } });
+          if (product) {
+            const sellingPriceKgs = Number(product.sellingPriceKgs);
+            const marginAmount = Math.round((sellingPriceKgs - unitCost + Number.EPSILON) * 100) / 100;
+            const marginPercent = sellingPriceKgs === 0 ? 0 : Math.round(((marginAmount / sellingPriceKgs) * 100 + Number.EPSILON) * 100) / 100;
+            await tx.product.update({
+              where: { id: item.productId },
+              data: {
+                purchasePriceYuan: item.purchasePriceYuan,
+                latestYuanRate: item.yuanRate,
+                purchaseCostKgs: breakdown?.factoryCostKgs ?? item.costKgs,
+                transportCostKgs: breakdown?.transportCostKgs ?? item.transportCostKgs,
+                finalCostKgs: unitCost,
+                marginAmount,
+                marginPercent,
+                priceHistory: {
+                  create: {
+                    purchasePriceYuan: item.purchasePriceYuan,
+                    yuanRate: item.yuanRate,
+                    purchaseCostKgs: breakdown?.factoryCostKgs ?? item.costKgs,
+                    transportCostKgs: breakdown?.transportCostKgs ?? item.transportCostKgs,
+                    finalCostKgs: unitCost,
+                    sellingPriceKgs,
+                    marginAmount,
+                    marginPercent,
+                    createdById: user.id,
+                  },
+                },
+              },
+            });
+          }
+        }
+      }
+
       await tx.procurementOrder.update({
         where: { id: order.id },
         data: {

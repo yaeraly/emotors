@@ -69,7 +69,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canManageUsers = hasPermission(user, 'users.manage');
   const canSeeAcademy = hasPermission(user, 'academy.manage');
   const canSeeMarketing = hasPermission(user, 'marketing.manage');
-  const canSeeProcurement = hasPermission(user, 'procurement.manage');
+  const canSeeProcurement = hasPermission(user, 'procurement.manage') || hasPermission(user, 'procurement.landed_cost.view');
   const canSeeSupplyChain = hasPermission(user, 'distribution.manage');
   const canSeeDistribution = canSeeSupplyChain;
   const canSeeInvestment = hasPermission(user, 'analytics.view');

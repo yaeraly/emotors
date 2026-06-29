@@ -302,20 +302,61 @@ enum PurchaseOrderStatus {
 
 enum ProcurementOrderStatus {
   DRAFT
+  WAITING_SUPPLIER_CONFIRMATION
+  SUPPLIER_CONFIRMED
+  FACTORY_CONFIRMED
   APPROVED
   ORDERED
   PRODUCTION
+  IN_PRODUCTION
   READY_TO_SHIP
+  SHIPPED_TO_YIWU
+  IN_CHINA_WAREHOUSE
+  IN_TRANSIT
   CUSTOMS_CLEARANCE
+  ARRIVED
   ARRIVED_IN_KYRGYZSTAN
+  ARRIVED_AT_HQ_WAREHOUSE
   RECEIVED_TO_HQ_WAREHOUSE
+  COMPLETED
   CLOSED
   PAID
-  IN_PRODUCTION
-  SHIPPED_TO_YIWU
-  IN_TRANSIT
-  ARRIVED
   CANCELLED
+}
+
+enum LandedCostAllocationMethod {
+  BY_WEIGHT
+  BY_PURCHASE_COST
+  BY_CBM
+  MANUAL
+}
+
+enum ProcurementQuantityType {
+  ORDERED
+  CONFIRMED
+  SHIPPED
+  RECEIVED
+}
+
+enum ReceivingDifferenceReason {
+  FACTORY_SHORTAGE
+  SUPPLIER_SHORTAGE
+  DAMAGED_GOODS
+  LOST_DURING_TRANSPORT
+  CUSTOMS_ISSUE
+  OTHER
+}
+
+enum ProcurementAuditAction {
+  SUPPLIER_CHANGE
+  FACTORY_CHANGE
+  PRICE_CHANGE
+  QUANTITY_CHANGE
+  STATUS_CHANGE
+  TRANSPORTATION_CHANGE
+  RECEIVING_DIFFERENCE
+  COST_RECALCULATION
+  ALLOCATION_METHOD_CHANGE
 }
 
 enum StockTransferStatus {
@@ -550,6 +591,11 @@ model User {
   branchPayments BranchPayment[] @relation("BranchPaymentCreator")
   createdProcurementOrders ProcurementOrder[] @relation("ProcurementOrderCreator")
   approvedProcurementOrders ProcurementOrder[] @relation("ProcurementOrderApprover")
+  procurementPriceHistory ProcurementPriceHistory[] @relation("ProcurementPriceHistoryChanger")
+  procurementQuantityHistory ProcurementQuantityHistory[] @relation("ProcurementQuantityHistoryChanger")
+  procurementStatusHistory ProcurementStatusHistory[] @relation("ProcurementStatusHistoryChanger")
+  procurementAuditEntries ProcurementAuditEntry[] @relation("ProcurementAuditUser")
+  procurementCostRecalculations ProcurementCostRecalculation[] @relation("ProcurementCostRecalculator")
   assignedServiceOrders ServiceOrder[] @relation("ServiceOrderMaster")
   createdServiceOrders ServiceOrder[] @relation("ServiceOrderCreator")
   diagnoses Diagnosis[] @relation("DiagnosisMaster")
@@ -1362,35 +1408,48 @@ model Factory {
 }
 
 model ProcurementOrder {
-  id                     String                 @id @default(cuid())
-  orderNumber            String                 @unique
-  supplierId             String
-  supplier               Supplier               @relation(fields: [supplierId], references: [id])
-  factoryId              String?
-  factory                Factory?               @relation(fields: [factoryId], references: [id])
-  hqWarehouseId          String
-  hqWarehouse            Warehouse              @relation(fields: [hqWarehouseId], references: [id])
-  status                 ProcurementOrderStatus @default(DRAFT)
-  totalYuan              Decimal                @default(0) @db.Decimal(14, 2)
-  totalTransportCostKgs  Decimal                @default(0) @db.Decimal(14, 2)
-  totalCostKgs           Decimal                @default(0) @db.Decimal(14, 2)
-  estimatedArrivalDate   DateTime?
-  actualArrivalDate      DateTime?
-  createdById            String
-  createdBy              User                   @relation("ProcurementOrderCreator", fields: [createdById], references: [id])
-  approvedById           String?
-  approvedBy             User?                  @relation("ProcurementOrderApprover", fields: [approvedById], references: [id])
-  approvedAt             DateTime?
-  paidAt                 DateTime?
-  shippedAt              DateTime?
-  arrivedAt              DateTime?
-  receivedToHqAt         DateTime?
+  id                       String                     @id @default(cuid())
+  orderNumber              String                     @unique
+  supplierId               String
+  supplier                 Supplier                   @relation(fields: [supplierId], references: [id])
+  factoryId                String?
+  factory                  Factory?                   @relation(fields: [factoryId], references: [id])
+  hqWarehouseId            String
+  hqWarehouse              Warehouse                  @relation(fields: [hqWarehouseId], references: [id])
+  status                   ProcurementOrderStatus     @default(DRAFT)
+  allocationMethod         LandedCostAllocationMethod @default(BY_WEIGHT)
+  totalYuan                Decimal                    @default(0) @db.Decimal(14, 2)
+  totalTransportCostKgs    Decimal                    @default(0) @db.Decimal(14, 2)
+  totalCostKgs             Decimal                    @default(0) @db.Decimal(14, 2)
+  chinaLocalShippingKgs    Decimal                    @default(0) @db.Decimal(14, 2)
+  packagingCostKgs         Decimal                    @default(0) @db.Decimal(14, 2)
+  internationalShippingKgs Decimal                    @default(0) @db.Decimal(14, 2)
+  insuranceKgs             Decimal                    @default(0) @db.Decimal(14, 2)
+  customsKgs               Decimal                    @default(0) @db.Decimal(14, 2)
+  bankFeesKgs              Decimal                    @default(0) @db.Decimal(14, 2)
+  otherExpensesKgs         Decimal                    @default(0) @db.Decimal(14, 2)
+  totalWeightKg            Decimal                    @default(0) @db.Decimal(14, 3)
+  estimatedArrivalDate     DateTime?
+  actualArrivalDate        DateTime?
+  lastRecalculatedAt       DateTime?
+  createdById              String
+  createdBy                User                       @relation("ProcurementOrderCreator", fields: [createdById], references: [id])
+  approvedById             String?
+  approvedBy               User?                      @relation("ProcurementOrderApprover", fields: [approvedById], references: [id])
+  approvedAt               DateTime?
+  paidAt                   DateTime?
+  shippedAt                DateTime?
+  arrivedAt                DateTime?
+  receivedToHqAt           DateTime?
   hqStockMovementCreatedAt DateTime?
-  note                   String?
-  items                  ProcurementOrderItem[]
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
-  deletedAt              DateTime?
+  note                     String?
+  items                    ProcurementOrderItem[]
+  statusHistory            ProcurementStatusHistory[]
+  auditEntries             ProcurementAuditEntry[]
+  costRecalculations       ProcurementCostRecalculation[]
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  deletedAt                DateTime?
 
   @@index([supplierId])
   @@index([factoryId])
@@ -1401,27 +1460,53 @@ model ProcurementOrder {
 }
 
 model ProcurementOrderItem {
-  id                String           @id @default(cuid())
-  orderId           String
-  order             ProcurementOrder @relation(fields: [orderId], references: [id])
-  productId         String
-  product           Product          @relation(fields: [productId], references: [id])
-  sku               String
-  productName       String
-  quantity          Int
-  purchasePriceYuan Decimal          @db.Decimal(14, 2)
-  yuanRate          Decimal          @db.Decimal(14, 4)
-  costKgs           Decimal          @db.Decimal(14, 2)
-  weightKg          Decimal          @db.Decimal(14, 3)
-  transportCostKgs  Decimal          @db.Decimal(14, 2)
-  finalCostKgs      Decimal          @db.Decimal(14, 2)
-  totalYuan         Decimal          @db.Decimal(14, 2)
-  totalCostKgs      Decimal          @db.Decimal(14, 2)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  id                               String           @id @default(cuid())
+  orderId                          String
+  order                            ProcurementOrder @relation(fields: [orderId], references: [id])
+  productId                        String
+  product                          Product          @relation(fields: [productId], references: [id])
+  supplierId                       String?
+  factoryId                        String?
+  sku                              String
+  productName                      String
+  quantity                         Int
+  confirmedQuantity                Int?
+  shippedQuantity                  Int?
+  receivedQuantity                 Int?
+  purchasePriceYuan                Decimal          @db.Decimal(14, 2)
+  currency                         String           @default("CNY")
+  moq                              Int?
+  yuanRate                         Decimal          @db.Decimal(14, 4)
+  costKgs                          Decimal          @db.Decimal(14, 2)
+  weightKg                         Decimal          @db.Decimal(14, 3)
+  totalWeightKg                    Decimal          @default(0) @db.Decimal(14, 3)
+  transportCostKgs                 Decimal          @db.Decimal(14, 2)
+  finalCostKgs                     Decimal          @db.Decimal(14, 2)
+  totalYuan                        Decimal          @db.Decimal(14, 2)
+  totalCostKgs                     Decimal          @db.Decimal(14, 2)
+  factoryCostKgs                   Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedChinaShippingKgs        Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedPackagingKgs            Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedInternationalShippingKgs Decimal         @default(0) @db.Decimal(14, 2)
+  allocatedInsuranceKgs            Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedCustomsKgs              Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedBankFeesKgs             Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedOtherExpensesKgs        Decimal          @default(0) @db.Decimal(14, 2)
+  landedCostPerUnitKgs             Decimal          @default(0) @db.Decimal(14, 2)
+  totalLandedCostKgs               Decimal          @default(0) @db.Decimal(14, 2)
+  costPerUnitKgs                   Decimal          @default(0) @db.Decimal(14, 2)
+  manualAllocationKgs              Decimal?
+  estimatedArrivalDate             DateTime?
+  notes                            String?
+  priceHistory                     ProcurementPriceHistory[]
+  quantityHistory                  ProcurementQuantityHistory[]
+  createdAt                        DateTime         @default(now())
+  updatedAt                        DateTime         @updatedAt
 
   @@index([orderId])
   @@index([productId])
+  @@index([supplierId])
+  @@index([factoryId])
 }
 
 model PurchaseOrder {
@@ -2303,6 +2388,93 @@ model KpiRecommendation {
   @@index([priority])
 }
 
+model ProcurementPriceHistory {
+  id                String               @id @default(cuid())
+  procurementItemId String
+  procurementItem   ProcurementOrderItem @relation(fields: [procurementItemId], references: [id])
+  oldPriceYuan      Decimal              @db.Decimal(14, 2)
+  newPriceYuan      Decimal              @db.Decimal(14, 2)
+  reason            String?
+  changedById       String
+  changedBy         User                 @relation("ProcurementPriceHistoryChanger", fields: [changedById], references: [id])
+  changedAt         DateTime             @default(now())
+
+  @@index([procurementItemId])
+  @@index([changedById])
+  @@index([changedAt])
+}
+
+model ProcurementQuantityHistory {
+  id                String                  @id @default(cuid())
+  procurementItemId String
+  procurementItem   ProcurementOrderItem    @relation(fields: [procurementItemId], references: [id])
+  quantityType      ProcurementQuantityType
+  oldQuantity       Int
+  newQuantity       Int
+  reason            String?
+  changedById       String
+  changedBy         User                    @relation("ProcurementQuantityHistoryChanger", fields: [changedById], references: [id])
+  changedAt         DateTime                @default(now())
+
+  @@index([procurementItemId])
+  @@index([changedById])
+  @@index([changedAt])
+}
+
+model ProcurementStatusHistory {
+  id                  String                 @id @default(cuid())
+  procurementOrderId  String
+  procurementOrder    ProcurementOrder       @relation(fields: [procurementOrderId], references: [id])
+  oldStatus           ProcurementOrderStatus?
+  newStatus           ProcurementOrderStatus
+  reason              String?
+  changedById         String
+  changedBy           User                   @relation("ProcurementStatusHistoryChanger", fields: [changedById], references: [id])
+  changedAt           DateTime               @default(now())
+
+  @@index([procurementOrderId])
+  @@index([changedById])
+  @@index([changedAt])
+}
+
+model ProcurementAuditEntry {
+  id                 String                 @id @default(cuid())
+  procurementOrderId String
+  procurementOrder   ProcurementOrder       @relation(fields: [procurementOrderId], references: [id])
+  action             ProcurementAuditAction
+  entityType         String?
+  entityId           String?
+  oldValue           Json?
+  newValue           Json?
+  reason             String?
+  userId             String
+  user               User                   @relation("ProcurementAuditUser", fields: [userId], references: [id])
+  userRole           String
+  createdAt          DateTime               @default(now())
+
+  @@index([procurementOrderId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model ProcurementCostRecalculation {
+  id                 String           @id @default(cuid())
+  procurementOrderId String
+  procurementOrder   ProcurementOrder @relation(fields: [procurementOrderId], references: [id])
+  allocationMethod   LandedCostAllocationMethod
+  trigger            String
+  totalWeightKg      Decimal          @db.Decimal(14, 3)
+  totalLandedCostKgs Decimal          @db.Decimal(14, 2)
+  snapshot           Json
+  recalculatedById   String?
+  recalculatedBy     User?            @relation("ProcurementCostRecalculator", fields: [recalculatedById], references: [id])
+  recalculatedAt     DateTime         @default(now())
+
+  @@index([procurementOrderId])
+  @@index([recalculatedAt])
+}
+
 model ProcurementGoodsReceiving {
   id                 String   @id @default(cuid())
   receivingNumber   String   @unique
@@ -2322,7 +2494,7 @@ model ProcurementGoodsReceiving {
 }
 
 model ProcurementGoodsReceivingItem {
-  id                 String   @id @default(cuid())
+  id                 String                    @id @default(cuid())
   receivingId        String
   receiving          ProcurementGoodsReceiving @relation(fields: [receivingId], references: [id])
   procurementItemId  String?
@@ -2332,30 +2504,33 @@ model ProcurementGoodsReceivingItem {
   expectedQuantity   Int
   receivedQuantity   Int
   differenceQuantity Int
+  differenceReason   ReceivingDifferenceReason?
   note               String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@index([receivingId])
   @@index([productId])
+  @@index([procurementItemId])
 }
 
 model ProcurementDifferenceReport {
-  id                 String   @id @default(cuid())
-  reportNumber       String   @unique
+  id                 String                     @id @default(cuid())
+  reportNumber       String                     @unique
   receivingId        String
   procurementOrderId String
   type               ShortageReportItemType
-  status             ShortageReportStatus @default(OPEN)
+  status             ShortageReportStatus       @default(OPEN)
   productId          String
   sku                String
   productName        String
   expectedQuantity   Int
   receivedQuantity   Int
   differenceQuantity Int
+  differenceReason   ReceivingDifferenceReason?
   note               String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
   resolvedAt         DateTime?
   deletedAt          DateTime?
 

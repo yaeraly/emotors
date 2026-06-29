@@ -1,15 +1,30 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProcurementOrderStatus, Role, StockMovementType } from '@prisma/client';
+import {
+  LandedCostAllocationMethod,
+  ProcurementAuditAction,
+  ProcurementOrderStatus,
+  ProcurementQuantityType,
+  Role,
+  StockMovementType,
+} from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole } from '../rbac/rbac';
+import { LandedCostEngineService } from './landed-cost/landed-cost-engine.service';
+import {
+  buildProcurementItemInput,
+  persistLandedCostRecalculation,
+  PROCUREMENT_STATUS_CHANGE_ROLES,
+  userHasAnyRole,
+} from './procurement-landed-cost.helpers';
 
 @Injectable()
 export class ProcurementService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly landedCostEngine: LandedCostEngineService,
   ) {}
 
   createSupplier(dto: any) {
@@ -231,46 +246,45 @@ export class ProcurementService {
       for (const item of itemInputs) {
         const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
         if (!product) throw new NotFoundException('Product not found');
-        const quantity = Number(item.quantity ?? 0);
-        const purchasePriceYuan = Number(item.purchasePriceYuan ?? 0);
-        const yuanRate = Number(item.yuanRate ?? 0);
-        const costKgs = this.roundMoney(purchasePriceYuan * yuanRate);
-        const transportCostKgs = Number(item.transportCostKgs ?? 0);
-        const finalCostKgs = this.roundMoney(costKgs + transportCostKgs);
-        items.push({
-          productId: product.id,
-          sku: product.sku,
-          productName: product.name,
-          quantity,
-          purchasePriceYuan,
-          yuanRate,
-          costKgs,
-          weightKg: Number(item.weightKg ?? 0),
-          transportCostKgs,
-          finalCostKgs,
-          totalYuan: this.roundMoney(quantity * purchasePriceYuan),
-          totalCostKgs: this.roundMoney(quantity * finalCostKgs),
-        });
+        items.push(buildProcurementItemInput(item, product, supplier.id, factory?.id, this.roundMoney.bind(this)));
       }
-      const totalYuan = this.roundMoney(items.reduce((sum, item) => sum + item.totalYuan, 0));
-      const totalTransportCostKgs = this.roundMoney(items.reduce((sum, item) => sum + item.transportCostKgs * item.quantity, 0));
-      const totalCostKgs = this.roundMoney(items.reduce((sum, item) => sum + item.totalCostKgs, 0));
 
-      return tx.procurementOrder.create({
+      const order = await tx.procurementOrder.create({
         data: {
           orderNumber: dto.orderNumber ?? `PROC-${Date.now()}`,
           supplierId: supplier.id,
           factoryId: factory?.id,
           hqWarehouseId: warehouse.id,
           status: ProcurementOrderStatus.DRAFT,
-          totalYuan,
-          totalTransportCostKgs,
-          totalCostKgs,
+          allocationMethod: dto.allocationMethod ?? LandedCostAllocationMethod.BY_WEIGHT,
+          chinaLocalShippingKgs: Number(dto.chinaLocalShippingKgs ?? 0),
+          packagingCostKgs: Number(dto.packagingCostKgs ?? 0),
+          internationalShippingKgs: Number(dto.internationalShippingKgs ?? 0),
+          insuranceKgs: Number(dto.insuranceKgs ?? 0),
+          customsKgs: Number(dto.customsKgs ?? 0),
+          bankFeesKgs: Number(dto.bankFeesKgs ?? 0),
+          otherExpensesKgs: Number(dto.otherExpensesKgs ?? 0),
           estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
           note: dto.note,
           createdById: user.id,
           items: { create: items },
         },
+        include: { items: true },
+      });
+
+      await persistLandedCostRecalculation(tx, user, order, 'ORDER_CREATED', this.landedCostDeps());
+      await tx.procurementStatusHistory.create({
+        data: {
+          procurementOrderId: order.id,
+          oldStatus: null,
+          newStatus: ProcurementOrderStatus.DRAFT,
+          changedById: user.id,
+          reason: 'Order created',
+        },
+      });
+
+      return tx.procurementOrder.findUnique({
+        where: { id: order.id },
         include: this.procurementOrderInclude(),
       });
     });
@@ -291,29 +305,257 @@ export class ProcurementService {
     });
   }
 
-  updateProcurementOrder(id: string, dto: any) {
-    return this.prisma.procurementOrder.update({
-      where: { id },
-      data: {
-        estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
-        note: dto.note,
-      },
-      include: this.procurementOrderInclude(),
+  updateProcurementOrder(user: AuthUser, id: string, dto: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({ where: { id, deletedAt: null }, include: { items: true } });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const oldSupplierId = order.supplierId;
+      const oldFactoryId = order.factoryId;
+
+      await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          supplierId: dto.supplierId,
+          factoryId: dto.factoryId,
+          estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
+          note: dto.note,
+        },
+      });
+
+      if (dto.supplierId && dto.supplierId !== oldSupplierId) {
+        await this.auditProcurement(tx, user, id, ProcurementAuditAction.SUPPLIER_CHANGE, { supplierId: oldSupplierId }, { supplierId: dto.supplierId }, dto.reason);
+      }
+      if (dto.factoryId && dto.factoryId !== oldFactoryId) {
+        await this.auditProcurement(tx, user, id, ProcurementAuditAction.FACTORY_CHANGE, { factoryId: oldFactoryId }, { factoryId: dto.factoryId }, dto.reason);
+      }
+
+      const updated = await tx.procurementOrder.findUnique({ where: { id }, include: { items: true } });
+      await persistLandedCostRecalculation(tx, user, updated!, 'ORDER_UPDATED', this.landedCostDeps());
+      return tx.procurementOrder.findUnique({ where: { id }, include: this.procurementOrderInclude() });
     });
   }
 
-  updateProcurementStatus(user: AuthUser, id: string, status: ProcurementOrderStatus) {
+  updateProcurementTransportCosts(user: AuthUser, id: string, dto: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({ where: { id, deletedAt: null }, include: { items: true } });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const oldValue = {
+        chinaLocalShippingKgs: order.chinaLocalShippingKgs,
+        packagingCostKgs: order.packagingCostKgs,
+        internationalShippingKgs: order.internationalShippingKgs,
+        insuranceKgs: order.insuranceKgs,
+        customsKgs: order.customsKgs,
+        bankFeesKgs: order.bankFeesKgs,
+        otherExpensesKgs: order.otherExpensesKgs,
+      };
+
+      const updated = await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          chinaLocalShippingKgs: dto.chinaLocalShippingKgs ?? order.chinaLocalShippingKgs,
+          packagingCostKgs: dto.packagingCostKgs ?? order.packagingCostKgs,
+          internationalShippingKgs: dto.internationalShippingKgs ?? order.internationalShippingKgs,
+          insuranceKgs: dto.insuranceKgs ?? order.insuranceKgs,
+          customsKgs: dto.customsKgs ?? order.customsKgs,
+          bankFeesKgs: dto.bankFeesKgs ?? order.bankFeesKgs,
+          otherExpensesKgs: dto.otherExpensesKgs ?? order.otherExpensesKgs,
+        },
+        include: { items: true },
+      });
+
+      await this.auditProcurement(tx, user, id, ProcurementAuditAction.TRANSPORTATION_CHANGE, oldValue, {
+        chinaLocalShippingKgs: updated.chinaLocalShippingKgs,
+        packagingCostKgs: updated.packagingCostKgs,
+        internationalShippingKgs: updated.internationalShippingKgs,
+        insuranceKgs: updated.insuranceKgs,
+        customsKgs: updated.customsKgs,
+        bankFeesKgs: updated.bankFeesKgs,
+        otherExpensesKgs: updated.otherExpensesKgs,
+      }, dto.reason);
+
+      await persistLandedCostRecalculation(tx, user, updated, 'TRANSPORT_COSTS_UPDATED', this.landedCostDeps());
+      return tx.procurementOrder.findUnique({ where: { id }, include: this.procurementOrderInclude() });
+    });
+  }
+
+  updateAllocationMethod(user: AuthUser, id: string, allocationMethod: LandedCostAllocationMethod, reason?: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({ where: { id, deletedAt: null }, include: { items: true } });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const updated = await tx.procurementOrder.update({
+        where: { id },
+        data: { allocationMethod },
+        include: { items: true },
+      });
+
+      await this.auditProcurement(tx, user, id, ProcurementAuditAction.ALLOCATION_METHOD_CHANGE, { allocationMethod: order.allocationMethod }, { allocationMethod }, reason);
+      await persistLandedCostRecalculation(tx, user, updated, 'ALLOCATION_METHOD_CHANGED', this.landedCostDeps());
+      return tx.procurementOrder.findUnique({ where: { id }, include: this.procurementOrderInclude() });
+    });
+  }
+
+  recalculateLandedCost(user: AuthUser, id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({ where: { id, deletedAt: null }, include: { items: true } });
+      if (!order) throw new NotFoundException('Procurement order not found');
+      await persistLandedCostRecalculation(tx, user, order, 'MANUAL_RECALCULATION', this.landedCostDeps());
+      return tx.procurementOrder.findUnique({ where: { id }, include: this.procurementOrderInclude() });
+    });
+  }
+
+  updateProcurementItem(user: AuthUser, orderId: string, itemId: string, dto: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const item = await tx.procurementOrderItem.findFirst({ where: { id: itemId, orderId } });
+      if (!item) throw new NotFoundException('Procurement item not found');
+
+      const updates: any = {};
+      if (dto.purchasePriceYuan != null && Number(dto.purchasePriceYuan) !== Number(item.purchasePriceYuan)) {
+        const oldPrice = Number(item.purchasePriceYuan);
+        const newPrice = Number(dto.purchasePriceYuan);
+        updates.purchasePriceYuan = newPrice;
+        await tx.procurementPriceHistory.create({
+          data: {
+            procurementItemId: item.id,
+            oldPriceYuan: oldPrice,
+            newPriceYuan: newPrice,
+            reason: dto.reason,
+            changedById: user.id,
+          },
+        });
+        await this.auditProcurement(tx, user, orderId, ProcurementAuditAction.PRICE_CHANGE, { itemId, oldPrice }, { itemId, newPrice }, dto.reason, itemId);
+      }
+
+      const quantityFields: Array<[ProcurementQuantityType, string, keyof typeof item]> = [
+        [ProcurementQuantityType.ORDERED, 'quantity', 'quantity'],
+        [ProcurementQuantityType.CONFIRMED, 'confirmedQuantity', 'confirmedQuantity'],
+        [ProcurementQuantityType.SHIPPED, 'shippedQuantity', 'shippedQuantity'],
+        [ProcurementQuantityType.RECEIVED, 'receivedQuantity', 'receivedQuantity'],
+      ];
+
+      for (const [type, dtoKey, field] of quantityFields) {
+        if (dto[dtoKey] != null && Number(dto[dtoKey]) !== Number(item[field] ?? 0)) {
+          const oldQty = Number(item[field] ?? item.quantity);
+          const newQty = Number(dto[dtoKey]);
+          updates[dtoKey] = newQty;
+          await tx.procurementQuantityHistory.create({
+            data: {
+              procurementItemId: item.id,
+              quantityType: type,
+              oldQuantity: oldQty,
+              newQuantity: newQty,
+              reason: dto.reason,
+              changedById: user.id,
+            },
+          });
+          await this.auditProcurement(tx, user, orderId, ProcurementAuditAction.QUANTITY_CHANGE, { itemId, type, oldQty }, { itemId, type, newQty }, dto.reason, itemId);
+        }
+      }
+
+      if (dto.factoryId != null) updates.factoryId = dto.factoryId;
+      if (dto.supplierId != null) updates.supplierId = dto.supplierId;
+      if (dto.currency != null) updates.currency = dto.currency;
+      if (dto.moq != null) updates.moq = Number(dto.moq);
+      if (dto.weightKg != null) updates.weightKg = Number(dto.weightKg);
+      if (dto.yuanRate != null) updates.yuanRate = Number(dto.yuanRate);
+      if (dto.estimatedArrivalDate != null) updates.estimatedArrivalDate = new Date(dto.estimatedArrivalDate);
+      if (dto.notes != null) updates.notes = dto.notes;
+      if (dto.manualAllocationKgs != null) updates.manualAllocationKgs = Number(dto.manualAllocationKgs);
+
+      if (Object.keys(updates).length) {
+        await tx.procurementOrderItem.update({ where: { id: itemId }, data: updates });
+      }
+
+      const order = await tx.procurementOrder.findUnique({ where: { id: orderId }, include: { items: true } });
+      await persistLandedCostRecalculation(tx, user, order!, 'ITEM_UPDATED', this.landedCostDeps());
+      return tx.procurementOrder.findUnique({ where: { id: orderId }, include: this.procurementOrderInclude() });
+    });
+  }
+
+  procurementOrderHistory(orderId: string) {
+    return this.prisma.$transaction([
+      this.prisma.procurementStatusHistory.findMany({
+        where: { procurementOrderId: orderId },
+        include: { changedBy: { select: { id: true, fullName: true, role: true } } },
+        orderBy: { changedAt: 'asc' },
+      }),
+      this.prisma.procurementAuditEntry.findMany({
+        where: { procurementOrderId: orderId },
+        include: { user: { select: { id: true, fullName: true, role: true } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.procurementCostRecalculation.findMany({
+        where: { procurementOrderId: orderId },
+        orderBy: { recalculatedAt: 'desc' },
+        take: 20,
+      }),
+      this.prisma.procurementPriceHistory.findMany({
+        where: { procurementItem: { orderId } },
+        include: { changedBy: { select: { id: true, fullName: true, role: true } }, procurementItem: { select: { sku: true, productName: true } } },
+        orderBy: { changedAt: 'desc' },
+      }),
+      this.prisma.procurementQuantityHistory.findMany({
+        where: { procurementItem: { orderId } },
+        include: { changedBy: { select: { id: true, fullName: true, role: true } }, procurementItem: { select: { sku: true, productName: true } } },
+        orderBy: { changedAt: 'desc' },
+      }),
+      this.prisma.procurementDifferenceReport.findMany({
+        where: { procurementOrderId: orderId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.procurementGoodsReceiving.findMany({
+        where: { procurementOrderId: orderId, deletedAt: null },
+        include: { items: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]).then(([statusHistory, auditHistory, costRecalculations, priceHistory, quantityHistory, shortageReports, receivings]) => ({
+      statusHistory,
+      auditHistory,
+      costRecalculations,
+      priceHistory,
+      quantityHistory,
+      shortageReports,
+      receivings,
+    }));
+  }
+
+  updateProcurementStatus(user: AuthUser, id: string, status: ProcurementOrderStatus, reason?: string) {
+    if (!userHasAnyRole(user, PROCUREMENT_STATUS_CHANGE_ROLES) && !isFullAccessRole(user.role)) {
+      throw new ForbiddenException('Only CEO or Supply Chain Manager can change procurement status');
+    }
+
     if (status === ProcurementOrderStatus.ARRIVED || status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
       return this.markProcurementArrived(user, id);
     }
-    const data: any = { status };
-    if (status === ProcurementOrderStatus.APPROVED) {
-      data.approvedById = user.id;
-      data.approvedAt = new Date();
-    }
-    if (status === ProcurementOrderStatus.PAID) data.paidAt = new Date();
-    if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU) data.shippedAt = new Date();
-    return this.prisma.procurementOrder.update({ where: { id }, data, include: this.procurementOrderInclude() });
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({ where: { id, deletedAt: null } });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const data: any = { status };
+      if (status === ProcurementOrderStatus.APPROVED || status === ProcurementOrderStatus.SUPPLIER_CONFIRMED) {
+        data.approvedById = user.id;
+        data.approvedAt = new Date();
+      }
+      if (status === ProcurementOrderStatus.PAID) data.paidAt = new Date();
+      if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU || status === ProcurementOrderStatus.READY_TO_SHIP) data.shippedAt = new Date();
+      if (status === ProcurementOrderStatus.ARRIVED_AT_HQ_WAREHOUSE) data.arrivedAt = new Date();
+
+      await tx.procurementStatusHistory.create({
+        data: {
+          procurementOrderId: id,
+          oldStatus: order.status,
+          newStatus: status,
+          reason,
+          changedById: user.id,
+        },
+      });
+      await this.auditProcurement(tx, user, id, ProcurementAuditAction.STATUS_CHANGE, { status: order.status }, { status }, reason);
+
+      return tx.procurementOrder.update({ where: { id }, data, include: this.procurementOrderInclude() });
+    });
   }
 
   private markProcurementArrived(user: AuthUser, id: string) {
@@ -464,8 +706,52 @@ export class ProcurementService {
       hqWarehouse: true,
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
-      items: { include: { product: true } },
+      items: {
+        include: {
+          product: true,
+          priceHistory: { orderBy: { changedAt: 'desc' as const }, take: 5 },
+          quantityHistory: { orderBy: { changedAt: 'desc' as const }, take: 5 },
+        },
+      },
+      statusHistory: {
+        include: { changedBy: { select: { id: true, fullName: true, role: true } } },
+        orderBy: { changedAt: 'asc' as const },
+      },
+      costRecalculations: { orderBy: { recalculatedAt: 'desc' as const }, take: 5 },
     };
+  }
+
+  private landedCostDeps() {
+    return {
+      landedCostEngine: this.landedCostEngine,
+      roundMoney: this.roundMoney.bind(this),
+      procurementOrderInclude: this.procurementOrderInclude.bind(this),
+    };
+  }
+
+  private async auditProcurement(
+    tx: any,
+    user: AuthUser,
+    orderId: string,
+    action: ProcurementAuditAction,
+    oldValue: unknown,
+    newValue: unknown,
+    reason?: string,
+    entityId?: string,
+  ) {
+    return tx.procurementAuditEntry.create({
+      data: {
+        procurementOrderId: orderId,
+        action,
+        entityType: entityId ? 'ProcurementOrderItem' : 'ProcurementOrder',
+        entityId,
+        oldValue: oldValue as any,
+        newValue: newValue as any,
+        reason,
+        userId: user.id,
+        userRole: user.role,
+      },
+    });
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
