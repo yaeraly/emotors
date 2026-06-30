@@ -67,11 +67,19 @@ npx prisma generate --schema apps/api/prisma/schema.prisma
 
 ### 5. Run migration
 
+Fresh or empty database (recommended):
+
 ```bash
-npx prisma migrate dev --schema apps/api/prisma/schema.prisma --name init
+npm run prisma:migrate:deploy
 ```
 
-Do not use `--force-reset` with `migrate dev`.
+Development (applies pending migrations and can create new ones):
+
+```bash
+npm run prisma:migrate
+```
+
+The repository includes a full initial migration (`20260101000000_init`) that creates all tables, including procurement fields. Do not use `--force-reset` with `migrate dev` unless you intend to wipe local data.
 
 ### 6. Run seed
 
@@ -159,7 +167,7 @@ Start PostgreSQL, then retry migration:
 
 ```bash
 sudo service postgresql start
-npx prisma migrate dev --schema apps/api/prisma/schema.prisma --name init
+npm run prisma:migrate:deploy
 ```
 
 ### DATABASE_URL missing
@@ -195,7 +203,7 @@ npm run prisma:seed -w @emotors/api
 Run migration and seed:
 
 ```bash
-npx prisma migrate dev --schema apps/api/prisma/schema.prisma --name init
+npm run prisma:migrate:deploy
 npm run prisma:seed -w @emotors/api
 ```
 
@@ -204,7 +212,23 @@ npm run prisma:seed -w @emotors/api
 Run migration and seed:
 
 ```bash
-npx prisma migrate dev --schema apps/api/prisma/schema.prisma --name init
+npm run prisma:migrate:deploy
+npm run prisma:seed -w @emotors/api
+```
+
+### P3006 / P1014 migration shadow database errors
+
+This happens when the only migration in the repo was incremental (`ALTER TABLE`) and your database is empty. Pull the latest code (includes `20260101000000_init`), then:
+
+```bash
+npm run prisma:migrate:deploy
+npm run prisma:seed -w @emotors/api
+```
+
+If you previously tried the old incremental migration and `_prisma_migrations` is in a bad state, reset the local database first:
+
+```bash
+npx prisma migrate reset --schema apps/api/prisma/schema.prisma
 npm run prisma:seed -w @emotors/api
 ```
 
