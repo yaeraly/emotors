@@ -13,7 +13,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole } from '../rbac/rbac';
 import { LandedCostEngineService } from './landed-cost/landed-cost-engine.service';
 import {
-  assertProductWeightConfigured,
   buildProcurementItemInput,
   persistLandedCostRecalculation,
   PROCUREMENT_STATUS_CHANGE_ROLES,
