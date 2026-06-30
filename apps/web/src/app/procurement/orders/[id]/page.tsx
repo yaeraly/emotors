@@ -12,6 +12,7 @@ type ProcurementItem = {
   id: string;
   sku: string;
   productName: string;
+  unit?: string | null;
   quantity: number;
   confirmedQuantity?: number | null;
   shippedQuantity?: number | null;
@@ -40,6 +41,9 @@ type ProcurementOrder = {
   id: string;
   orderNumber: string;
   status: string;
+  currency?: string;
+  exchangeRate?: string | number;
+  purchaseDate?: string;
   allocationMethod?: string;
   totalYuan: string | number;
   totalCostKgs: string | number;
@@ -105,9 +109,10 @@ export default function ProcurementOrderDetailPage() {
     bankFeesKgs: '',
     otherExpensesKgs: '',
   });
+  const [exchangeRate, setExchangeRate] = useState('');
   const [allocationMethod, setAllocationMethod] = useState('BY_WEIGHT');
   const [editingItem, setEditingItem] = useState<ProcurementItem | null>(null);
-  const [itemForm, setItemForm] = useState({ purchasePriceYuan: '', quantity: '', confirmedQuantity: '', shippedQuantity: '', weightKg: '', reason: '' });
+  const [itemForm, setItemForm] = useState({ purchasePriceYuan: '', quantity: '', confirmedQuantity: '', shippedQuantity: '', reason: '' });
   const [receiveForm, setReceiveForm] = useState<Record<string, { receivedQuantity: string; differenceReason: string }>>({});
 
   const canManage = hasPermission(user, 'procurement.manage');
@@ -136,6 +141,7 @@ export default function ProcurementOrderDetailPage() {
         otherExpensesKgs: String(orderData.otherExpensesKgs ?? 0),
       });
       setAllocationMethod(orderData.allocationMethod ?? 'BY_WEIGHT');
+      setExchangeRate(String(orderData.exchangeRate ?? 0));
       const receiveDefaults: Record<string, { receivedQuantity: string; differenceReason: string }> = {};
       orderData.items?.forEach((item) => {
         receiveDefaults[item.id] = {
@@ -207,6 +213,21 @@ export default function ProcurementOrderDetailPage() {
     }
   }
 
+  async function saveExchangeRate() {
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/exchange-rate`, {
+        method: 'PUT',
+        body: JSON.stringify({ exchangeRate: Number(exchangeRate) }),
+      });
+      await load();
+      setSuccess('Exchange rate updated and landed cost recalculated');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   async function saveItem() {
     if (!editingItem) return;
     setError('');
@@ -219,7 +240,6 @@ export default function ProcurementOrderDetailPage() {
           quantity: itemForm.quantity ? Number(itemForm.quantity) : undefined,
           confirmedQuantity: itemForm.confirmedQuantity ? Number(itemForm.confirmedQuantity) : undefined,
           shippedQuantity: itemForm.shippedQuantity ? Number(itemForm.shippedQuantity) : undefined,
-          weightKg: itemForm.weightKg ? Number(itemForm.weightKg) : undefined,
           reason: itemForm.reason,
         }),
       });
@@ -252,9 +272,12 @@ export default function ProcurementOrderDetailPage() {
     }
   }
 
+  const totalQuantity = order?.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
+  const totalProducts = order?.items?.length ?? 0;
   const totalTransport = Object.values(transportForm).reduce((sum, value) => sum + Number(value || 0), 0);
-  const totalWeight = order?.items?.reduce((sum, item) => sum + Number(item.totalWeightKg ?? Number(item.weightKg) * item.quantity), 0) ?? 0;
+  const totalWeight = order?.items?.reduce((sum, item) => sum + Number(item.totalWeightKg ?? Number(item.weightKg) * item.quantity), 0) ?? Number(order?.totalWeightKg ?? 0);
   const costPerKg = totalWeight > 0 ? totalTransport / totalWeight : 0;
+  const estimatedLandedCost = Number(order?.totalCostKgs ?? 0);
 
   return (
     <ProtectedShell>
@@ -268,19 +291,37 @@ export default function ProcurementOrderDetailPage() {
 
         {order ? (
           <>
-            <Section title="General Information">
+            <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+              <SummaryCard label="Total Products" value={String(totalProducts)} />
+              <SummaryCard label="Total Quantity" value={String(totalQuantity)} />
+              <SummaryCard label="Shipment Weight" value={`${totalWeight.toFixed(2)} kg`} />
+              <SummaryCard label="Total Yuan" value={`¥${Number(order.totalYuan).toFixed(2)}`} />
+              <SummaryCard label="Total KGS" value={formatKgs(order.totalCostKgs)} />
+              <SummaryCard label="Est. Landed Cost" value={formatKgs(estimatedLandedCost)} />
+            </div>
+
+            <Section title="Section 1 — Shipment Information">
               <div className="grid gap-4 md:grid-cols-4">
                 <Info label={t('procurement.orders.supplier')} value={order.supplier?.name ?? ''} />
                 <Info label={t('procurement.orders.factory')} value={order.factory?.name ?? '-'} />
                 <Info label={t('procurement.orders.warehouse')} value={order.hqWarehouse?.name ?? ''} />
                 <Info label={t('procurement.orders.status')} value={order.status} />
-                <Info label={t('procurement.orders.totalYuan')} value={`¥${Number(order.totalYuan).toFixed(2)}`} />
-                <Info label={t('procurement.orders.totalCostKgs')} value={formatKgs(order.totalCostKgs)} />
-                <Info label="Total Weight" value={`${totalWeight.toFixed(2)} kg`} />
-                <Info label="Allocation Method" value={order.allocationMethod ?? 'BY_WEIGHT'} />
+                <Info label="Currency" value={order.currency ?? 'CNY'} />
+                <Info label="Purchase Date" value={order.purchaseDate ? new Date(order.purchaseDate).toLocaleDateString() : '-'} />
                 <Info label={t('procurement.orders.estimatedArrivalDate')} value={order.estimatedArrivalDate ? new Date(order.estimatedArrivalDate).toLocaleDateString() : '-'} />
-                <Info label="Last Recalculated" value={order.lastRecalculatedAt ? new Date(order.lastRecalculatedAt).toLocaleString() : '-'} />
+                <Info label="Cost per Kg" value={formatKgs(costPerKg)} />
               </div>
+              {canManage ? (
+                <div className="mt-4 flex flex-wrap items-end gap-3">
+                  <label className="block text-sm">
+                    <span className="mb-1 block font-semibold text-slate-600">Exchange Rate (1 Yuan = KGS)</span>
+                    <input className="rounded-xl border border-slate-300 px-3 py-2" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+                  </label>
+                  <button type="button" onClick={() => void saveExchangeRate()} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Update Exchange Rate</button>
+                </div>
+              ) : (
+                <div className="mt-4"><Info label="Exchange Rate" value={String(order.exchangeRate ?? 0)} /></div>
+              )}
             </Section>
 
             {canChangeStatus ? (
@@ -302,19 +343,19 @@ export default function ProcurementOrderDetailPage() {
               </Section>
             ) : null}
 
-            <Section title="Products">
+            <Section title="Section 2 — Products">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">SKU</th>
                       <th className="px-4 py-3">Product</th>
-                      <th className="px-4 py-3">Ordered</th>
-                      <th className="px-4 py-3">Confirmed</th>
-                      <th className="px-4 py-3">Shipped</th>
-                      <th className="px-4 py-3">Received</th>
+                      <th className="px-4 py-3">SKU</th>
+                      <th className="px-4 py-3">Qty</th>
+                      <th className="px-4 py-3">Unit</th>
+                      <th className="px-4 py-3">Weight/Unit</th>
+                      <th className="px-4 py-3">Total Weight</th>
                       <th className="px-4 py-3">Price ¥</th>
-                      <th className="px-4 py-3">Weight</th>
+                      <th className="px-4 py-3">Total ¥</th>
                       <th className="px-4 py-3">Landed Cost</th>
                       {canManage ? <th className="px-4 py-3" /> : null}
                     </tr>
@@ -322,14 +363,14 @@ export default function ProcurementOrderDetailPage() {
                   <tbody className="divide-y divide-slate-100">
                     {order.items?.map((item) => (
                       <tr key={item.id}>
-                        <td className="px-4 py-3">{item.sku}</td>
                         <td className="px-4 py-3">{item.productName}</td>
+                        <td className="px-4 py-3">{item.sku}</td>
                         <td className="px-4 py-3">{item.quantity}</td>
-                        <td className="px-4 py-3">{item.confirmedQuantity ?? '—'}</td>
-                        <td className="px-4 py-3">{item.shippedQuantity ?? '—'}</td>
-                        <td className="px-4 py-3">{item.receivedQuantity ?? '—'}</td>
-                        <td className="px-4 py-3">¥{Number(item.purchasePriceYuan).toFixed(2)}</td>
+                        <td className="px-4 py-3">{item.unit ?? 'pcs'}</td>
                         <td className="px-4 py-3">{Number(item.weightKg).toFixed(2)} kg</td>
+                        <td className="px-4 py-3">{Number(item.totalWeightKg ?? Number(item.weightKg) * item.quantity).toFixed(2)} kg</td>
+                        <td className="px-4 py-3">¥{Number(item.purchasePriceYuan).toFixed(2)}</td>
+                        <td className="px-4 py-3">¥{Number(item.quantity * Number(item.purchasePriceYuan)).toFixed(2)}</td>
                         <td className="px-4 py-3">{formatKgs(item.landedCostPerUnitKgs ?? item.finalCostKgs)}</td>
                         {canManage ? (
                           <td className="px-4 py-3">
@@ -340,7 +381,6 @@ export default function ProcurementOrderDetailPage() {
                                 quantity: String(item.quantity),
                                 confirmedQuantity: String(item.confirmedQuantity ?? ''),
                                 shippedQuantity: String(item.shippedQuantity ?? ''),
-                                weightKg: String(item.weightKg ?? ''),
                                 reason: '',
                               });
                             }}>Edit</button>
@@ -491,7 +531,6 @@ export default function ProcurementOrderDetailPage() {
                 <input className="rounded-xl border px-3 py-2" placeholder="Ordered quantity" value={itemForm.quantity} onChange={(e) => setItemForm((prev) => ({ ...prev, quantity: e.target.value }))} />
                 <input className="rounded-xl border px-3 py-2" placeholder="Confirmed quantity" value={itemForm.confirmedQuantity} onChange={(e) => setItemForm((prev) => ({ ...prev, confirmedQuantity: e.target.value }))} />
                 <input className="rounded-xl border px-3 py-2" placeholder="Shipped quantity" value={itemForm.shippedQuantity} onChange={(e) => setItemForm((prev) => ({ ...prev, shippedQuantity: e.target.value }))} />
-                <input className="rounded-xl border px-3 py-2" placeholder="Weight kg/unit" value={itemForm.weightKg} onChange={(e) => setItemForm((prev) => ({ ...prev, weightKg: e.target.value }))} />
                 <input className="rounded-xl border px-3 py-2" placeholder="Reason" value={itemForm.reason} onChange={(e) => setItemForm((prev) => ({ ...prev, reason: e.target.value }))} />
               </div>
               <div className="mt-4 flex justify-end gap-2">
@@ -507,7 +546,11 @@ export default function ProcurementOrderDetailPage() {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><h3 className="mb-4 text-lg font-bold">{title}</h3>{children}</section>;
+  return <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h3 className="mb-4 text-lg font-bold">{title}</h3>{children}</section>;
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p><p className="mt-2 text-xl font-bold text-slate-950">{value}</p></div>;
 }
 
 function Info({ label, value }: { label: string; value: string }) {

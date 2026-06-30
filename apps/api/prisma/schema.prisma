@@ -353,6 +353,7 @@ enum ProcurementAuditAction {
   PRICE_CHANGE
   QUANTITY_CHANGE
   WEIGHT_CHANGE
+  EXCHANGE_RATE_CHANGE
   STATUS_CHANGE
   TRANSPORTATION_CHANGE
   RECEIVING_DIFFERENCE
@@ -939,6 +940,11 @@ model Product {
   description       String?
   characteristics   Json?
   weightKg          Decimal   @default(0) @db.Decimal(14, 3)
+  unit              String?   @default("pcs")
+  defaultSupplierId String?
+  defaultSupplier   Supplier? @relation("ProductDefaultSupplier", fields: [defaultSupplierId], references: [id])
+  defaultFactoryId  String?
+  defaultFactory    Factory?  @relation("ProductDefaultFactory", fields: [defaultFactoryId], references: [id])
   purchasePriceYuan Decimal   @default(0) @db.Decimal(14, 2)
   latestYuanRate    Decimal   @default(0) @db.Decimal(14, 4)
   purchaseCostKgs   Decimal   @default(0) @db.Decimal(14, 2)
@@ -969,6 +975,8 @@ model Product {
   @@index([categoryId])
   @@index([category])
   @@index([isActive])
+  @@index([defaultSupplierId])
+  @@index([defaultFactoryId])
 }
 
 model ProductCategory {
@@ -1362,6 +1370,7 @@ model Supplier {
   purchaseOrders   PurchaseOrder[]
   factories        Factory[]
   procurementOrders ProcurementOrder[]
+  defaultProducts     Product[]         @relation("ProductDefaultSupplier")
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   deletedAt        DateTime?
@@ -1400,6 +1409,7 @@ model Factory {
   notes              String?
   isActive           Boolean  @default(true)
   procurementOrders  ProcurementOrder[]
+  defaultProducts    Product[] @relation("ProductDefaultFactory")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   deletedAt          DateTime?
@@ -1419,6 +1429,9 @@ model ProcurementOrder {
   hqWarehouse              Warehouse                  @relation(fields: [hqWarehouseId], references: [id])
   status                   ProcurementOrderStatus     @default(DRAFT)
   allocationMethod         LandedCostAllocationMethod @default(BY_WEIGHT)
+  currency                 String                     @default("CNY")
+  exchangeRate             Decimal                    @default(0) @db.Decimal(14, 4)
+  purchaseDate             DateTime?
   totalYuan                Decimal                    @default(0) @db.Decimal(14, 2)
   totalTransportCostKgs    Decimal                    @default(0) @db.Decimal(14, 2)
   totalCostKgs             Decimal                    @default(0) @db.Decimal(14, 2)
@@ -1471,6 +1484,7 @@ model ProcurementOrderItem {
   factoryId                        String?
   sku                              String
   productName                      String
+  unit                             String?          @default("pcs")
   quantity                         Int
   confirmedQuantity                Int?
   shippedQuantity                  Int?

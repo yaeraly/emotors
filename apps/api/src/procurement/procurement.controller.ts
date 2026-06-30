@@ -32,7 +32,8 @@ export class ProcurementController {
   @Put('factories/:id') @Roles(...PROCUREMENT_ROLES) updateFactory(@Param('id') id: string, @Body() dto: any) { return this.service.updateFactory(id, dto); }
   @Delete('factories/:id') @Roles(...PROCUREMENT_ROLES) deleteFactory(@Param('id') id: string) { return this.service.deleteFactory(id); }
 
-  @Post('orders') @Roles(...PROCUREMENT_ROLES) createOrder(@CurrentUser() user: AuthUser, @Body() dto: any) { return this.service.createProcurementOrder(user, dto); }
+  @Get('products/:productId/master-data') @Roles(...LANDED_COST_VIEW_ROLES) productMasterData(@Param('productId') productId: string) { return this.service.productMasterData(productId); }
+  @Put('orders/:id/exchange-rate') @Roles(...PROCUREMENT_ROLES) updateExchangeRate(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: { exchangeRate: number; reason?: string }) { return this.service.updateProcurementOrder(user, id, dto); }
   @Get('orders') @Roles(...LANDED_COST_VIEW_ROLES) procurementOrders() { return this.service.procurementOrders(); }
   @Get('orders/:id') @Roles(...LANDED_COST_VIEW_ROLES) procurementOrder(@Param('id') id: string) { return this.service.procurementOrder(id); }
   @Get('orders/:id/history') @Roles(...LANDED_COST_VIEW_ROLES) procurementOrderHistory(@Param('id') id: string) { return this.service.procurementOrderHistory(id); }

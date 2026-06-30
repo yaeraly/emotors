@@ -13,9 +13,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole } from '../rbac/rbac';
 import { LandedCostEngineService } from './landed-cost/landed-cost-engine.service';
 import {
+  assertProductWeightConfigured,
   buildProcurementItemInput,
   persistLandedCostRecalculation,
   PROCUREMENT_STATUS_CHANGE_ROLES,
+  resolveOrderExchangeRate,
+  toProductMasterData,
   userHasAnyRole,
 } from './procurement-landed-cost.helpers';
 
@@ -241,12 +244,17 @@ export class ProcurementService {
       if (dto.factoryId && !factory) throw new NotFoundException('Factory not found');
       if (!warehouse) throw new NotFoundException('HQ warehouse not found');
 
+      const exchangeRate = Number(dto.exchangeRate ?? dto.yuanRate ?? 0);
+      if (exchangeRate <= 0) throw new BadRequestException('Exchange rate is required');
+
       const itemInputs = dto.items ?? [];
+      if (!itemInputs.length) throw new BadRequestException('At least one product is required');
+
       const items = [];
       for (const item of itemInputs) {
         const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
         if (!product) throw new NotFoundException('Product not found');
-        items.push(buildProcurementItemInput(item, product, supplier.id, factory?.id, this.roundMoney.bind(this)));
+        items.push(buildProcurementItemInput(item, product, supplier.id, factory?.id, exchangeRate, this.roundMoney.bind(this)));
       }
 
       const order = await tx.procurementOrder.create({
@@ -257,6 +265,9 @@ export class ProcurementService {
           hqWarehouseId: warehouse.id,
           status: ProcurementOrderStatus.DRAFT,
           allocationMethod: dto.allocationMethod ?? LandedCostAllocationMethod.BY_WEIGHT,
+          currency: dto.currency ?? 'CNY',
+          exchangeRate,
+          purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : new Date(),
           chinaLocalShippingKgs: Number(dto.chinaLocalShippingKgs ?? dto.chinaDomesticTransportKgs ?? 0),
           packagingCostKgs: Number(dto.packagingCostKgs ?? 0),
           internationalShippingKgs: Number(dto.internationalShippingKgs ?? dto.chinaExportTransportKgs ?? 0),
@@ -291,6 +302,15 @@ export class ProcurementService {
     });
   }
 
+  async productMasterData(productId: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      include: { defaultSupplier: true, defaultFactory: true, productCategory: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    return toProductMasterData(product);
+  }
+
   procurementOrders() {
     return this.prisma.procurementOrder.findMany({
       where: { deletedAt: null },
@@ -313,12 +333,23 @@ export class ProcurementService {
 
       const oldSupplierId = order.supplierId;
       const oldFactoryId = order.factoryId;
+      const oldExchangeRate = Number(order.exchangeRate ?? 0);
+      const nextExchangeRate = dto.exchangeRate != null || dto.yuanRate != null
+        ? resolveOrderExchangeRate(order, dto)
+        : oldExchangeRate;
+
+      if (nextExchangeRate <= 0 && dto.exchangeRate != null) {
+        throw new BadRequestException('Exchange rate must be greater than zero');
+      }
 
       await tx.procurementOrder.update({
         where: { id },
         data: {
           supplierId: dto.supplierId,
           factoryId: dto.factoryId,
+          currency: dto.currency,
+          exchangeRate: dto.exchangeRate != null || dto.yuanRate != null ? nextExchangeRate : undefined,
+          purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : undefined,
           estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
           note: dto.note,
         },
@@ -329,6 +360,9 @@ export class ProcurementService {
       }
       if (dto.factoryId && dto.factoryId !== oldFactoryId) {
         await this.auditProcurement(tx, user, id, ProcurementAuditAction.FACTORY_CHANGE, { factoryId: oldFactoryId }, { factoryId: dto.factoryId }, dto.reason);
+      }
+      if (nextExchangeRate !== oldExchangeRate && (dto.exchangeRate != null || dto.yuanRate != null)) {
+        await this.auditProcurement(tx, user, id, ProcurementAuditAction.EXCHANGE_RATE_CHANGE, { exchangeRate: oldExchangeRate }, { exchangeRate: nextExchangeRate }, dto.reason);
       }
 
       const updated = await tx.procurementOrder.findUnique({ where: { id }, include: { items: true } });
@@ -444,6 +478,9 @@ export class ProcurementService {
           const oldQty = Number(item[field] ?? item.quantity);
           const newQty = Number(dto[dtoKey]);
           updates[dtoKey] = newQty;
+          if (dtoKey === 'quantity') {
+            updates.totalWeightKg = this.roundMoney(Number(item.weightKg) * newQty);
+          }
           await tx.procurementQuantityHistory.create({
             data: {
               procurementItemId: item.id,
@@ -460,15 +497,13 @@ export class ProcurementService {
 
       if (dto.factoryId != null) updates.factoryId = dto.factoryId;
       if (dto.supplierId != null) updates.supplierId = dto.supplierId;
-      if (dto.currency != null) updates.currency = dto.currency;
       if (dto.moq != null) updates.moq = Number(dto.moq);
-      if (dto.weightKg != null && Number(dto.weightKg) !== Number(item.weightKg)) {
-        const oldWeight = Number(item.weightKg);
-        const newWeight = Number(dto.weightKg);
-        updates.weightKg = newWeight;
-        await this.auditProcurement(tx, user, orderId, ProcurementAuditAction.WEIGHT_CHANGE, { itemId, oldWeight }, { itemId, newWeight }, dto.reason, itemId);
+      if (dto.weightKg != null) {
+        throw new ForbiddenException('Product weight can only be edited in Product Management');
       }
-      if (dto.yuanRate != null) updates.yuanRate = Number(dto.yuanRate);
+      if (dto.yuanRate != null || dto.exchangeRate != null) {
+        throw new BadRequestException('Exchange rate is managed at Procurement Order level');
+      }
       if (dto.estimatedArrivalDate != null) updates.estimatedArrivalDate = new Date(dto.estimatedArrivalDate);
       if (dto.notes != null) updates.notes = dto.notes;
       if (dto.manualAllocationKgs != null) updates.manualAllocationKgs = Number(dto.manualAllocationKgs);
@@ -491,6 +526,7 @@ export class ProcurementService {
       });
       if (!order) throw new NotFoundException('Procurement order not found');
 
+      const exchangeRate = Number(order.exchangeRate ?? 0);
       const itemInputs = dto.items ?? [];
       for (const item of itemInputs) {
         const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
@@ -498,7 +534,7 @@ export class ProcurementService {
         await tx.procurementOrderItem.create({
           data: {
             orderId,
-            ...buildProcurementItemInput(item, product, item.supplierId ?? order.supplierId, item.factoryId ?? order.factoryId ?? undefined, this.roundMoney.bind(this)),
+            ...buildProcurementItemInput(item, product, item.supplierId ?? order.supplierId, item.factoryId ?? order.factoryId ?? undefined, exchangeRate, this.roundMoney.bind(this)),
           },
         });
       }

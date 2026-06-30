@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import {
   LandedCostAllocationMethod,
   ProcurementAuditAction,
@@ -19,9 +20,23 @@ export const PROCUREMENT_FULL_MANAGE_ROLES: Role[] = [
   Role.SUPPLY_CHAIN_MANAGER,
 ];
 
+export const PRODUCT_WEIGHT_ERROR = 'Product weight is not configured.';
+
 export function userHasAnyRole(user: AuthUser, roles: Role[]) {
   const userRoles = user.roles?.length ? user.roles : [user.role];
   return roles.some((role) => userRoles.includes(role));
+}
+
+export function assertProductWeightConfigured(product: { sku: string; name: string; weightKg: unknown }) {
+  if (!product.weightKg || Number(product.weightKg) <= 0) {
+    throw new BadRequestException(`${PRODUCT_WEIGHT_ERROR} (${product.sku} · ${product.name})`);
+  }
+}
+
+export function resolveOrderExchangeRate(order: { exchangeRate?: unknown }, dto?: { exchangeRate?: unknown; yuanRate?: unknown }) {
+  if (dto?.exchangeRate != null) return Number(dto.exchangeRate);
+  if (dto?.yuanRate != null) return Number(dto.yuanRate);
+  return Number(order.exchangeRate ?? 0);
 }
 
 export function extractTransportCosts(order: OrderTransportCosts & { localTransportKgs?: number }) {
@@ -43,11 +58,48 @@ export type ProcurementLandedCostDeps = {
   procurementOrderInclude: () => object;
 };
 
+export type ProductMasterData = {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  unit: string;
+  weightKg: number;
+  purchasePriceYuan: number;
+  defaultSupplierId: string | null;
+  defaultFactoryId: string | null;
+  weightConfigured: boolean;
+};
+
+export function toProductMasterData(product: any): ProductMasterData {
+  const weightKg = Number(product.weightKg ?? 0);
+  return {
+    id: product.id,
+    sku: product.sku,
+    name: product.name,
+    category: product.category,
+    unit: product.unit ?? 'pcs',
+    weightKg,
+    purchasePriceYuan: Number(product.purchasePriceYuan ?? 0),
+    defaultSupplierId: product.defaultSupplierId ?? null,
+    defaultFactoryId: product.defaultFactoryId ?? null,
+    weightConfigured: weightKg > 0,
+  };
+}
+
+export async function syncOrderItemExchangeRates(tx: any, orderId: string, exchangeRate: number) {
+  await tx.procurementOrderItem.updateMany({
+    where: { orderId },
+    data: { yuanRate: exchangeRate },
+  });
+}
+
 export async function persistLandedCostRecalculation(
   tx: any,
   user: AuthUser | null,
   order: {
     id: string;
+    exchangeRate?: unknown;
     allocationMethod: LandedCostAllocationMethod;
     chinaLocalShippingKgs: any;
     packagingCostKgs: any;
@@ -62,10 +114,17 @@ export async function persistLandedCostRecalculation(
   trigger: string,
   deps: ProcurementLandedCostDeps,
 ) {
+  const exchangeRate = Number(order.exchangeRate ?? 0);
+  if (exchangeRate > 0) {
+    await syncOrderItemExchangeRates(tx, order.id, exchangeRate);
+  }
+
+  const items = await tx.procurementOrderItem.findMany({ where: { orderId: order.id } });
   const costs = extractTransportCosts(order);
-  const result = deps.landedCostEngine.calculate(order.items, costs, order.allocationMethod, trigger);
+  const result = deps.landedCostEngine.calculate(items, costs, order.allocationMethod, trigger);
 
   for (const breakdown of result.items) {
+    const item = items.find((entry: any) => entry.id === breakdown.procurementItemId);
     await tx.procurementOrderItem.update({
       where: { id: breakdown.procurementItemId },
       data: {
@@ -79,6 +138,7 @@ export async function persistLandedCostRecalculation(
         costPerUnitKgs: breakdown.costPerUnitKgs,
         totalCostKgs: breakdown.totalCostKgs,
         totalYuan: breakdown.totalYuan,
+        yuanRate: exchangeRate > 0 ? exchangeRate : item?.yuanRate,
         allocatedChinaShippingKgs: breakdown.allocatedChinaShippingKgs,
         allocatedPackagingKgs: breakdown.allocatedPackagingKgs,
         allocatedInternationalShippingKgs: breakdown.allocatedInternationalShippingKgs,
@@ -120,7 +180,7 @@ export async function persistLandedCostRecalculation(
         procurementOrderId: order.id,
         action: ProcurementAuditAction.COST_RECALCULATION,
         oldValue: null,
-        newValue: { trigger, totalLandedCostKgs: result.totalLandedCostKgs },
+        newValue: { trigger, totalLandedCostKgs: result.totalLandedCostKgs, shipmentWeightKg: result.totalWeightKg },
         userId: user.id,
         userRole: user.role,
       },
@@ -132,44 +192,60 @@ export async function persistLandedCostRecalculation(
 
 export function buildProcurementItemInput(
   item: any,
-  product: { id: string; sku: string; name: string },
+  product: {
+    id: string;
+    sku: string;
+    name: string;
+    weightKg: unknown;
+    unit?: string | null;
+    defaultSupplierId?: string | null;
+    defaultFactoryId?: string | null;
+    purchasePriceYuan?: unknown;
+  },
   supplierId: string,
   factoryId: string | undefined,
+  exchangeRate: number,
   roundMoney: (value: number) => number,
 ) {
+  assertProductWeightConfigured(product);
+
   const quantity = Number(item.quantity ?? 0);
-  const purchasePriceYuan = Number(item.purchasePriceYuan ?? 0);
-  const yuanRate = Number(item.yuanRate ?? 0);
-  const weightKg = Number(item.weightKg ?? 0);
+  const purchasePriceYuan = Number(item.purchasePriceYuan ?? product.purchasePriceYuan ?? 0);
+  const weightKg = Number(product.weightKg);
+  const yuanRate = exchangeRate;
   const costKgs = roundMoney(purchasePriceYuan * yuanRate);
+  const totalWeightKg = roundMoney(weightKg * quantity);
 
   return {
     productId: product.id,
-    supplierId: item.supplierId ?? supplierId,
-    factoryId: item.factoryId ?? factoryId,
+    supplierId: item.supplierId ?? product.defaultSupplierId ?? supplierId,
+    factoryId: item.factoryId ?? product.defaultFactoryId ?? factoryId,
     sku: product.sku,
     productName: product.name,
+    unit: product.unit ?? 'pcs',
     quantity,
     confirmedQuantity: item.confirmedQuantity != null ? Number(item.confirmedQuantity) : null,
     shippedQuantity: item.shippedQuantity != null ? Number(item.shippedQuantity) : null,
     receivedQuantity: item.receivedQuantity != null ? Number(item.receivedQuantity) : null,
     purchasePriceYuan,
-    currency: item.currency ?? 'CNY',
+    currency: 'CNY',
     moq: item.moq != null ? Number(item.moq) : null,
     yuanRate,
     costKgs,
     weightKg,
-    totalWeightKg: roundMoney(weightKg * quantity),
-    transportCostKgs: Number(item.transportCostKgs ?? 0),
-    finalCostKgs: roundMoney(costKgs + Number(item.transportCostKgs ?? 0)),
+    totalWeightKg,
+    transportCostKgs: 0,
+    finalCostKgs: costKgs,
     totalYuan: roundMoney(quantity * purchasePriceYuan),
-    totalCostKgs: roundMoney(quantity * roundMoney(costKgs + Number(item.transportCostKgs ?? 0))),
+    totalCostKgs: roundMoney(quantity * costKgs),
     factoryCostKgs: costKgs,
-    landedCostPerUnitKgs: roundMoney(costKgs + Number(item.transportCostKgs ?? 0)),
-    totalLandedCostKgs: roundMoney(quantity * roundMoney(costKgs + Number(item.transportCostKgs ?? 0))),
-    costPerUnitKgs: roundMoney(costKgs + Number(item.transportCostKgs ?? 0)),
+    landedCostPerUnitKgs: costKgs,
+    totalLandedCostKgs: roundMoney(quantity * costKgs),
+    costPerUnitKgs: costKgs,
     estimatedArrivalDate: item.estimatedArrivalDate ? new Date(item.estimatedArrivalDate) : undefined,
     notes: item.notes,
     manualAllocationKgs: item.manualAllocationKgs != null ? Number(item.manualAllocationKgs) : null,
   };
 }
+
+export { ProcurementAuditAction, ProcurementOrderStatus, ProcurementQuantityType };
