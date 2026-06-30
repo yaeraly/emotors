@@ -35,9 +35,9 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'audit.view', 'analytics.view'],
   SUPPLY_CHAIN_MANAGER: ['procurement.manage', 'distribution.manage', 'inventory.manage', 'inventory.view', 'products.view', 'products.manage', 'products.archive'],
   WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'products.view', 'products.manage'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'reports.view', 'analytics.view', 'procurement.landed_cost.view', 'products.view'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'reports.view', 'analytics.view', 'kpi.view', 'products.view'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
-  MARKETING_MANAGER: ['marketing.manage'],
+  MARKETING_MANAGER: ['marketing.manage', 'marketing.content'],
   CONTENT_CREATOR: ['marketing.content'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
@@ -253,7 +253,7 @@ export function canResetUserPassword(
   );
 }
 
-export const PRODUCT_CATALOG_MANAGE_ROLES = ['CEO', 'SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER'] as const;
+export const PRODUCT_CATALOG_MANAGE_ROLES = ['OWNER', 'CEO', 'SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER'] as const;
 
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return hasPermission(user, 'products.view');
@@ -268,7 +268,7 @@ export function canEditProduct(user: Pick<User, 'role' | 'roles' | 'permissions'
 }
 
 export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER']);
+  return hasAnyRole(user, ['OWNER', 'CEO', 'SUPPLY_CHAIN_MANAGER']);
 }
 
 /** @deprecated Use canCreateProduct / canEditProduct */

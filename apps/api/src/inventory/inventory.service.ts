@@ -1121,7 +1121,9 @@ export class InventoryService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
-          productId: entityId,
+          entityType: entity,
+          entityId,
+          productId: entity === 'Product' ? entityId : undefined,
           ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
             ? (metadata as Record<string, unknown>)
             : {}),

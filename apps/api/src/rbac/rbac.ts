@@ -98,11 +98,11 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'payroll.manage',
     'reports.view',
     'analytics.view',
-    'procurement.landed_cost.view',
+    'kpi.view',
     'products.view',
   ],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
-  MARKETING_MANAGER: ['marketing.manage'],
+  MARKETING_MANAGER: ['marketing.manage', 'marketing.content'],
   CONTENT_CREATOR: ['marketing.content'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
@@ -130,12 +130,14 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
 };
 
 export const PRODUCT_CATALOG_MANAGE_ROLES: Role[] = [
+  Role.OWNER,
   Role.CEO,
   Role.SUPPLY_CHAIN_MANAGER,
   Role.WAREHOUSE_MANAGER,
 ];
 
 export const PRODUCT_CATALOG_ARCHIVE_ROLES: Role[] = [
+  Role.OWNER,
   Role.CEO,
   Role.SUPPLY_CHAIN_MANAGER,
 ];
