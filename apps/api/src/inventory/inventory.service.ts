@@ -14,7 +14,7 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { hasAnyFullAccessRole, isFullAccessRole, userHasPermission } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -187,7 +187,7 @@ export class InventoryService {
 
   async createProduct(user: AuthUser, dto: CreateProductDto) {
     try {
-      this.assertCanManageProductCatalog(user);
+      this.assertCanManageProduct(user);
       return await this.prisma.$transaction(async (tx) => {
         if (!dto.name?.trim()) throw new BadRequestException('Product name is required');
         if (!dto.sku?.trim()) throw new BadRequestException('SKU is required');
@@ -262,6 +262,12 @@ export class InventoryService {
             });
           }
 
+          await this.auditInTx(tx, user, branchId, 'product_created', 'Product', existingProduct.id, {
+            sku: dto.sku,
+            name: dto.name,
+            restored: true,
+          });
+
           return {
             ...(await this.getProductResponseInTx(tx, user, existingProduct.id)),
             restored: true,
@@ -311,6 +317,11 @@ export class InventoryService {
           });
         }
 
+        await this.auditInTx(tx, user, branchId, 'product_created', 'Product', product.id, {
+          sku: product.sku,
+          name: product.name,
+        });
+
         return {
           ...(await this.getProductResponseInTx(tx, user, product.id)),
           restored: false,
@@ -326,6 +337,7 @@ export class InventoryService {
   }
 
   async products(user: AuthUser, query: ProductQueryDto) {
+    this.assertCanViewProducts(user);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 25;
     const where: Prisma.ProductWhereInput = {
@@ -368,6 +380,7 @@ export class InventoryService {
   }
 
   async product(user: AuthUser, id: string) {
+    this.assertCanViewProducts(user);
     const product = await this.prisma.product.findFirst({
       where: {
         id,
@@ -401,7 +414,8 @@ export class InventoryService {
   }
 
   async updateProduct(user: AuthUser, id: string, dto: UpdateProductDto) {
-    this.assertCanManageProductCatalog(user);
+    this.assertCanManageProduct(user);
+    this.assertCanChangeSellingPolicy(user, dto);
     return this.prisma.$transaction(async (tx) => {
       const current = await this.getProductForWrite(tx, user, id);
 
@@ -479,13 +493,19 @@ export class InventoryService {
         },
       });
 
+      await this.auditInTx(tx, user, current.branchId, 'product_updated', 'Product', id, {
+        sku: dto.sku ?? current.sku,
+        name: dto.name ?? current.name,
+        changedFields: Object.keys(dto).filter((key) => dto[key as keyof UpdateProductDto] !== undefined),
+      });
+
       return this.getProductResponseInTx(tx, user, id);
     });
   }
 
   async deleteProduct(user: AuthUser, id: string) {
-    this.assertCanManageProductCatalog(user);
-    await this.getProductForWrite(this.prisma, user, id);
+    this.assertCanArchiveProduct(user);
+    const product = await this.getProductForWrite(this.prisma, user, id);
     const [stockMovements, saleItems, balances, priceHistory] =
       await Promise.all([
         this.prisma.stockMovement.count({ where: { productId: id } }),
@@ -499,6 +519,12 @@ export class InventoryService {
     await this.prisma.product.update({
       where: { id },
       data: { deletedAt: new Date(), isActive: false },
+    });
+
+    await this.auditInTx(this.prisma, user, product.branchId, 'product_archived', 'Product', id, {
+      sku: product.sku,
+      name: product.name,
+      deactivated: hasHistory,
     });
 
     return {
@@ -515,7 +541,10 @@ export class InventoryService {
     productId: string,
     dto: CreatePriceHistoryDto,
   ) {
-    this.assertCanManageProductCatalog(user);
+    this.assertCanManageProduct(user);
+    if (!userHasPermission(user, 'procurement.manage')) {
+      throw new ForbiddenException('You do not have permission to change product pricing');
+    }
     return this.prisma.$transaction(async (tx) => {
       const product = await this.getProductForWrite(tx, user, productId);
       const transportCostKgs =
@@ -983,7 +1012,7 @@ export class InventoryService {
   }
 
   private async getWarehouseForCatalogWrite(tx: PrismaTx | PrismaService, user: AuthUser, id: string) {
-    this.assertCanManageProductCatalog(user);
+    this.assertCanManageProduct(user);
     const warehouse = await tx.warehouse.findFirst({ where: { id } });
     if (!warehouse) {
       throw new BadRequestException('Warehouse is required');
@@ -991,17 +1020,35 @@ export class InventoryService {
     return warehouse;
   }
 
-  private assertCanManageProductCatalog(user: AuthUser) {
+  private assertCanViewProducts(user: AuthUser) {
+    if (!userHasPermission(user, 'products.view')) {
+      throw new ForbiddenException('You do not have permission to view products');
+    }
+  }
+
+  private assertCanManageProduct(user: AuthUser) {
+    if (!userHasPermission(user, 'products.manage')) {
+      throw new ForbiddenException('You do not have permission to manage products');
+    }
+  }
+
+  private assertCanArchiveProduct(user: AuthUser) {
+    if (!userHasPermission(user, 'products.archive')) {
+      throw new ForbiddenException('You do not have permission to archive products');
+    }
+  }
+
+  private assertCanChangeSellingPolicy(user: AuthUser, dto: UpdateProductDto) {
+    if (dto.sellingPriceKgs === undefined) return;
     const roles = user.roles?.length ? user.roles : [user.role];
-    const allowed = roles.some((role) =>
-      role === Role.CEO ||
-      role === Role.SUPPLY_CHAIN_MANAGER ||
-      role === Role.WAREHOUSE_MANAGER ||
-      role === Role.SYSTEM_ADMINISTRATOR ||
-      role === Role.OWNER,
-    );
-    if (!allowed) {
-      throw new ForbiddenException('You do not have permission to manage product catalog');
+    const warehouseOnly =
+      roles.includes(Role.WAREHOUSE_MANAGER) &&
+      !roles.some(
+        (role) =>
+          role === Role.OWNER || role === Role.CEO || role === Role.SUPPLY_CHAIN_MANAGER,
+      );
+    if (warehouseOnly) {
+      throw new ForbiddenException('Warehouse manager cannot change selling policy');
     }
   }
 
@@ -1049,12 +1096,13 @@ export class InventoryService {
   }
 
   private auditInTx(
-    tx: PrismaTx,
+    tx: PrismaTx | PrismaService,
     user: AuthUser,
     branchId: string,
     action: string,
     entity: string,
     entityId: string,
+    metadata?: Prisma.InputJsonValue,
   ) {
     return tx.auditLog.create({
       data: {
@@ -1066,6 +1114,9 @@ export class InventoryService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
+          ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+            ? (metadata as Record<string, unknown>)
+            : {}),
         },
       },
     });

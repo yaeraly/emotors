@@ -7,7 +7,7 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog } from '@/lib/rbac';
+import { canArchiveProduct, canCreateProduct, canEditProduct, canViewProductCatalog } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -122,7 +122,7 @@ export default function ProductsPage() {
             </p>
             <h2 className="text-3xl font-bold text-slate-950">{t('inventory.productList')}</h2>
           </div>
-          {canManageProductCatalog(currentUser) ? (
+          {canCreateProduct(currentUser) ? (
             <Link href="/products/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
               {t('inventory.createProduct')}
             </Link>
@@ -202,7 +202,7 @@ export default function ProductsPage() {
                         <Link href={`/products/${product.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
                           {t('common.open')}
                         </Link>
-                        {canManageProductCatalog(currentUser) ? (
+                        {canArchiveProduct(currentUser) ? (
                           <button
                             onClick={() => void deleteProduct(product)}
                             disabled={deletingProductId === product.id}

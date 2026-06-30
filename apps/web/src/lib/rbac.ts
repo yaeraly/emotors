@@ -23,6 +23,9 @@ const ALL_PERMISSIONS = [
   'analytics.view',
   'audit.view',
   'settings.manage',
+  'products.view',
+  'products.manage',
+  'products.archive',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<Role, string[]> = {
@@ -30,9 +33,9 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   CEO: [...ALL_PERMISSIONS],
   SYSTEM_ADMINISTRATOR: ['users.manage', 'roles.manage', 'audit.view', 'settings.manage'],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'audit.view', 'analytics.view'],
-  SUPPLY_CHAIN_MANAGER: ['procurement.manage', 'distribution.manage', 'inventory.manage', 'inventory.view'],
-  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'reports.view', 'analytics.view', 'procurement.landed_cost.view'],
+  SUPPLY_CHAIN_MANAGER: ['procurement.manage', 'distribution.manage', 'inventory.manage', 'inventory.view', 'products.view', 'products.manage', 'products.archive'],
+  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'products.view', 'products.manage'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'reports.view', 'analytics.view', 'procurement.landed_cost.view', 'products.view'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   MARKETING_MANAGER: ['marketing.manage'],
   CONTENT_CREATOR: ['marketing.content'],
@@ -47,17 +50,18 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'sales.manage',
     'inventory.manage',
     'inventory.view',
+    'products.view',
     'service.manage',
     'finance.view',
     'payments.manage',
     'kpi.view',
     'reports.view',
   ],
-  MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
-  MASTER: ['service.manage', 'kpi.view'],
-  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
-  CASHIER: ['payments.manage', 'sales.manage'],
-  SALESPERSON: ['sales.manage'],
+  MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
+  MASTER: ['service.manage', 'kpi.view', 'products.view'],
+  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage', 'products.view'],
+  CASHIER: ['payments.manage', 'sales.manage', 'products.view'],
+  SALESPERSON: ['sales.manage', 'products.view'],
 };
 
 export function roleCodesForUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
@@ -141,15 +145,22 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/payments')) return hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/customers')) return hasPermission(user, 'crm.manage');
   if (pathname.startsWith('/sales')) return hasPermission(user, 'sales.manage');
-  if (pathname.startsWith('/products/new') || pathname.startsWith('/inventory/categories')) {
-    return canManageProductCatalog(user);
+  if (pathname.startsWith('/products/new')) {
+    return canCreateProduct(user);
+  }
+  if (pathname.startsWith('/products/') && pathname !== '/products') {
+    if (pathname.endsWith('/edit')) return canEditProduct(user);
+    return canViewProductCatalog(user);
+  }
+  if (pathname.startsWith('/products')) return canViewProductCatalog(user);
+  if (pathname.startsWith('/inventory/categories')) {
+    return hasPermission(user, 'inventory.manage');
   }
   if (pathname.startsWith('/stock-movements')) {
     return hasPermission(user, 'inventory.manage');
   }
   if (
     pathname.startsWith('/inventory') ||
-    pathname.startsWith('/products') ||
     pathname.startsWith('/warehouses')
   ) {
     return hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
@@ -239,12 +250,25 @@ export function canResetUserPassword(
   );
 }
 
+export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasPermission(user, 'products.view');
+}
+
+export function canCreateProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasPermission(user, 'products.manage');
+}
+
+export function canEditProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasPermission(user, 'products.manage');
+}
+
+export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasPermission(user, 'products.archive');
+}
+
+/** @deprecated Use canCreateProduct / canEditProduct */
 export function canManageProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return (
-    hasRole(user, 'CEO') ||
-    hasRole(user, 'OWNER') ||
-    hasPermission(user, 'procurement.manage')
-  );
+  return canCreateProduct(user);
 }
 
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles'> | null | undefined) {

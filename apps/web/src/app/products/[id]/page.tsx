@@ -7,7 +7,7 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog } from '@/lib/rbac';
+import { canEditProduct, hasRole } from '@/lib/rbac';
 import type { Product, ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -83,6 +83,11 @@ export default function ProductDetailPage() {
     }
   }
 
+  const canChangeSellingPolicy =
+    hasRole(currentUser, 'CEO') ||
+    hasRole(currentUser, 'OWNER') ||
+    hasRole(currentUser, 'SUPPLY_CHAIN_MANAGER');
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -111,7 +116,7 @@ export default function ProductDetailPage() {
               </div>
             </article>
 
-            {canManageProductCatalog(currentUser) ? (
+            {canEditProduct(currentUser) ? (
               <form onSubmit={saveProduct} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-5">
                 <div className="md:col-span-5">
                   <ProductImageUploader
@@ -128,7 +133,9 @@ export default function ProductDetailPage() {
                     {categories.map((category) => <option key={category.id} value={category.id}>{categoryName(category, language)}</option>)}
                   </select>
                 </label>
-                <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
+                {canChangeSellingPolicy ? (
+                  <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
+                ) : null}
                 <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
                 <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
               </form>

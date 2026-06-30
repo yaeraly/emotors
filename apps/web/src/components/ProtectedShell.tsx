@@ -7,7 +7,8 @@ import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
 import {
   canAccessPath,
-  canManageProductCatalog,
+  canCreateProduct,
+  canViewProductCatalog,
   getDefaultRouteForUser,
   hasAnyPermission,
   hasPermission,
@@ -67,8 +68,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeCrm = hasPermission(user, 'crm.manage');
   const canSeeSales = hasPermission(user, 'sales.manage');
   const canSeeInventory = hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
+  const canSeeProductCatalog = canViewProductCatalog(user);
+  const canCreateProducts = canCreateProduct(user);
   const canManageInventory = hasPermission(user, 'inventory.manage');
-  const canManageProductCatalogNav = canManageProductCatalog(user);
+  const canManageProductCatalogNav = canCreateProducts;
   const canSeeService = hasPermission(user, 'service.manage');
   const canManageBranches = hasPermission(user, 'branches.manage');
   const canSeeKpi = hasPermission(user, 'kpi.view');
@@ -176,15 +179,21 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {t('operations.returns')}
               </Link>
             ) : null}
-            {canSeeInventory ? (
+            {(canSeeInventory || canSeeProductCatalog) ? (
               <div className="rounded-xl px-3 py-2">
-                <Link href="/inventory" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">
-                  {t('nav.inventory')}
-                </Link>
-                <div className="mt-2 space-y-1 pl-2">
-                  <Link href="/products" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
-                    {t('inventory.products')}
+                {canSeeInventory ? (
+                  <Link href="/inventory" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">
+                    {t('nav.inventory')}
                   </Link>
+                ) : (
+                  <p className="text-sm font-semibold text-slate-700">Product Catalog</p>
+                )}
+                <div className="mt-2 space-y-1 pl-2">
+                  {canSeeProductCatalog ? (
+                    <Link href="/products" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                      {t('inventory.products')}
+                    </Link>
+                  ) : null}
                   {canManageInventory ? (
                     <Link href="/stock-movements" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
                       {t('inventory.stockMovements')}
@@ -195,9 +204,11 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                       {t('operations.warehouseRelease')}
                     </Link>
                   ) : null}
-                  <Link href="/warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
-                    {t('inventory.warehouses')}
-                  </Link>
+                  {canSeeInventory ? (
+                    <Link href="/warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
+                      {t('inventory.warehouses')}
+                    </Link>
+                  ) : null}
                   {canManageProductCatalogNav ? (
                     <Link href="/inventory/categories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
                       {t('inventory.categories')}
