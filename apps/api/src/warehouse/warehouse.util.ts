@@ -58,3 +58,8 @@ export const branchWarehouseWhere = {
   branchId: { not: null },
   deletedAt: null,
 } as const;
+
+export const activeBranchWarehouseWhere = {
+  ...branchWarehouseWhere,
+  isActive: true,
+} as const;

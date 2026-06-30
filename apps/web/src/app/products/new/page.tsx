@@ -35,7 +35,7 @@ export default function NewProductPage() {
 
   useEffect(() => {
     Promise.all([
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<YuanRateHistory | null>('/inventory/yuan-rates/latest'),
       apiFetch<ProductCategory[]>('/inventory/categories'),
     ])
@@ -81,6 +81,12 @@ export default function NewProductPage() {
         return;
       }
 
+      if (!form.warehouseId) {
+        setError(t('inventory.activeWarehouseRequired'));
+        setSaving(false);
+        return;
+      }
+
       const weightKg = Number(form.weightKg);
       if (!Number.isFinite(weightKg) || weightKg <= 0) {
         setError(t('inventory.weightMustBePositive'));
@@ -114,6 +120,8 @@ export default function NewProductPage() {
       const message = err instanceof Error ? err.message : t('common.error');
       if (message.toLowerCase().includes('sku')) {
         setSkuError(t('inventory.activeSkuExists'));
+      } else if (message.toLowerCase().includes('inactive warehouse')) {
+        setError(t('inventory.cannotAssignInactiveWarehouse'));
       } else {
         setError(message);
       }

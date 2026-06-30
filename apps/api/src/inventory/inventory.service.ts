@@ -16,6 +16,8 @@ import { AuthUser } from '../auth/auth.types';
 import { normalizeBranchId, resolveWritableBranchId } from '../rbac/branch-scope';
 import {
   assertProductWarehouseBranchMatch,
+  activeBranchWarehouseWhere,
+  activeHqWarehouseWhere,
   branchWarehouseWhere,
   HQ_CATALOG_BRANCH_CODE,
   hqWarehouseWhere,
@@ -440,6 +442,10 @@ export class InventoryService {
         const warehouse = await this.getWarehouseForCatalogWrite(tx, user, dto.warehouseId);
         assertProductWarehouseBranchMatch(warehouse, current.branchId);
       }
+
+      const oldWarehouseId = current.warehouseId;
+      const warehouseChanged =
+        dto.warehouseId !== undefined && dto.warehouseId !== oldWarehouseId;
       const category = dto.categoryId
         ? await this.getActiveCategory(tx, dto.categoryId)
         : null;
@@ -536,6 +542,17 @@ export class InventoryService {
           reason: dto.weightChangeReason,
         });
         await this.syncProductWeightToOpenProcurementOrders(tx, id, dto.weightKg);
+      }
+
+      if (warehouseChanged && dto.warehouseId) {
+        await this.auditInTx(tx, user, current.branchId, 'PRODUCT_WAREHOUSE_CHANGED', 'Product', id, {
+          entityType: 'Product',
+          productId: id,
+          oldWarehouseId,
+          newWarehouseId: dto.warehouseId,
+          oldValue: { warehouseId: oldWarehouseId },
+          newValue: { warehouseId: dto.warehouseId },
+        });
       }
 
       return this.getProductResponseInTx(tx, user, id);
@@ -674,15 +691,26 @@ export class InventoryService {
     });
   }
 
-  warehouses(user: AuthUser, branchId?: string, warehouseType?: string) {
+  warehouses(user: AuthUser, branchId?: string, warehouseType?: string, status?: string) {
+    const activeOnly = status?.toUpperCase() === 'ACTIVE';
     const where: Prisma.WarehouseWhereInput = {
       ...this.buildBranchWhere(user, branchId),
       ...(warehouseType === 'HQ'
-        ? hqWarehouseWhere
+        ? activeOnly
+          ? activeHqWarehouseWhere
+          : hqWarehouseWhere
         : warehouseType === 'BRANCH'
-          ? branchWarehouseWhere
+          ? activeOnly
+            ? activeBranchWarehouseWhere
+            : branchWarehouseWhere
           : { deletedAt: null }),
     };
+
+    if (activeOnly && !warehouseType) {
+      where.isActive = true;
+      where.deletedAt = null;
+    }
+
     return this.prisma.warehouse.findMany({
       where,
       orderBy: { name: 'asc' },
@@ -1118,11 +1146,20 @@ export class InventoryService {
 
   private async getWarehouseForCatalogWrite(tx: PrismaTx | PrismaService, user: AuthUser, id: string) {
     this.assertCanManageProductCatalog(user);
-    const warehouse = await tx.warehouse.findFirst({ where: { id } });
+    const warehouse = await tx.warehouse.findFirst({
+      where: { id, deletedAt: null },
+    });
     if (!warehouse) {
       throw new BadRequestException('Warehouse is required');
     }
+    this.assertActiveWarehouseForProduct(warehouse);
     return warehouse;
+  }
+
+  private assertActiveWarehouseForProduct(warehouse: { isActive: boolean; deletedAt: Date | null }) {
+    if (warehouse.deletedAt || !warehouse.isActive) {
+      throw new BadRequestException('Cannot add product to inactive warehouse');
+    }
   }
 
   private assertPositiveProductWeight(weightKg: number) {

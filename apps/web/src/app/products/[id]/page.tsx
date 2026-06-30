@@ -8,7 +8,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
 import { canEditProductCatalog } from '@/lib/rbac';
-import type { Product, ProductCategory, User } from '@/lib/types';
+import type { Product, ProductCategory, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductDetailPage() {
@@ -17,11 +17,13 @@ export default function ProductDetailPage() {
   const [product, setProduct] = useState<Product | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [editForm, setEditForm] = useState({
     name: '',
     sku: '',
     categoryId: '',
     photoUrl: '',
+    warehouseId: '',
     weightKg: '0',
     sellingPriceKgs: '0',
     minStockLevel: '0',
@@ -35,17 +37,21 @@ export default function ProductDetailPage() {
     Promise.all([
       apiFetch<Product>(`/inventory/products/${params.id}`),
       apiFetch<ProductCategory[]>('/inventory/categories'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<User>('/auth/me'),
     ])
-      .then(([productResult, categoryResult, currentUserResult]) => {
+      .then(([productResult, categoryResult, warehouseResult, currentUserResult]) => {
         setProduct(productResult);
         setCategories(categoryResult);
+        setWarehouses(warehouseResult);
         setCurrentUser(currentUserResult);
+        const currentWarehouseActive = productResult.warehouse?.isActive !== false;
         setEditForm({
           name: productResult.name,
           sku: productResult.sku,
           categoryId: productResult.categoryId,
           photoUrl: productResult.photoUrl ?? '',
+          warehouseId: currentWarehouseActive ? productResult.warehouseId : '',
           weightKg: String(productResult.weightKg),
           sellingPriceKgs: String(productResult.sellingPriceKgs),
           minStockLevel: String(productResult.minStockLevel),
@@ -56,6 +62,9 @@ export default function ProductDetailPage() {
       );
   }, [params.id, t]);
 
+  const currentWarehouseInactive = Boolean(product?.warehouse && product.warehouse.isActive === false);
+  const canSaveWarehouse = !currentWarehouseInactive || Boolean(editForm.warehouseId);
+
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -65,6 +74,11 @@ export default function ProductDetailPage() {
     try {
       if (!editForm.categoryId) {
         setError(t('inventory.categoryRequired'));
+        return;
+      }
+
+      if (canEditProductCatalog(currentUser) && !editForm.warehouseId) {
+        setError(t('inventory.activeWarehouseRequired'));
         return;
       }
 
@@ -83,7 +97,7 @@ export default function ProductDetailPage() {
           categoryId: editForm.categoryId,
           photoUrl: editForm.photoUrl || null,
           ...(canEditProductCatalog(currentUser)
-            ? { weightKg: nextWeight }
+            ? { weightKg: nextWeight, warehouseId: editForm.warehouseId }
             : {}),
           sellingPriceKgs: Number(editForm.sellingPriceKgs),
           minStockLevel: Number(editForm.minStockLevel),
@@ -96,7 +110,12 @@ export default function ProductDetailPage() {
           : t('common.success'),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      if (message.toLowerCase().includes('inactive warehouse')) {
+        setError(t('inventory.cannotAssignInactiveWarehouse'));
+      } else {
+        setError(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -134,6 +153,12 @@ export default function ProductDetailPage() {
 
             {canEditProductCatalog(currentUser) ? (
               <form onSubmit={saveProduct} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-5">
+                {currentWarehouseInactive ? (
+                  <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 md:col-span-5">
+                    {t('inventory.inactiveWarehouseWarning')}
+                    {product.warehouse?.name ? ` (${product.warehouse.name})` : ''}
+                  </p>
+                ) : null}
                 <div className="md:col-span-5">
                   <ProductImageUploader
                     photoUrl={editForm.photoUrl}
@@ -149,10 +174,24 @@ export default function ProductDetailPage() {
                     {categories.map((category) => <option key={category.id} value={category.id}>{categoryName(category, language)}</option>)}
                   </select>
                 </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">{t('inventory.warehouse')}</span>
+                  <select
+                    value={editForm.warehouseId}
+                    onChange={(event) => setEditForm({ ...editForm, warehouseId: event.target.value })}
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                    required
+                  >
+                    <option value="">{t('inventory.selectWarehouse')}</option>
+                    {warehouses.map((warehouse) => (
+                      <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
+                    ))}
+                  </select>
+                </label>
                 <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
                 <Input label={t('inventory.weightPerUnitKg')} type="number" value={editForm.weightKg} onChange={(value) => setEditForm({ ...editForm, weightKg: value })} min="0.001" step="0.001" />
                 <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
-                <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
+                <button disabled={saving || !canSaveWarehouse} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
               </form>
             ) : null}
 

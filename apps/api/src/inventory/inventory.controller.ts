@@ -171,10 +171,12 @@ export class InventoryController {
     @CurrentUser() user: AuthUser,
     @Query('branchId') branchId?: string,
     @Query('warehouseType') warehouseType?: string,
+    @Query('type') type?: string,
+    @Query('status') status?: string,
     @Query('isHq') isHq?: string,
   ) {
-    const resolvedType = warehouseType ?? (isHq === 'true' ? 'HQ' : isHq === 'false' ? 'BRANCH' : undefined);
-    return this.inventoryService.warehouses(user, branchId, resolvedType);
+    const resolvedType = warehouseType ?? type ?? (isHq === 'true' ? 'HQ' : isHq === 'false' ? 'BRANCH' : undefined);
+    return this.inventoryService.warehouses(user, branchId, resolvedType, status);
   }
 
   @Get('warehouses/:id')
