@@ -87,38 +87,43 @@ async function main() {
     },
   });
 
-  await prisma.warehouse.upsert({
-    where: {
-      branchId_code: {
-        branchId: branch.id,
-        code: 'HQ-MAIN',
-      },
-    },
-    update: {
-      name: 'HQ Warehouse Bishkek',
-      address: 'Bishkek HQ',
-      city: 'Bishkek',
-      country: 'Kyrgyzstan',
-      contactPerson: 'HQ Warehouse Manager',
-      phone: '+996700000004',
-      notes: 'Primary headquarters warehouse for China imports',
-      isHq: true,
-      isActive: true,
-    },
-    create: {
-      branchId: branch.id,
-      name: 'HQ Warehouse Bishkek',
-      code: 'HQ-MAIN',
-      address: 'Bishkek HQ',
-      city: 'Bishkek',
-      country: 'Kyrgyzstan',
-      contactPerson: 'HQ Warehouse Manager',
-      phone: '+996700000004',
-      notes: 'Primary headquarters warehouse for China imports',
-      isHq: true,
-      isActive: true,
-    },
+  const existingHqWarehouse = await prisma.warehouse.findFirst({
+    where: { code: 'HQ-MAIN', warehouseType: 'HQ' },
   });
+
+  if (existingHqWarehouse) {
+    await prisma.warehouse.update({
+      where: { id: existingHqWarehouse.id },
+      data: {
+        branchId: null,
+        warehouseType: 'HQ',
+        name: 'HQ Warehouse Bishkek',
+        address: 'Bishkek HQ',
+        city: 'Bishkek',
+        country: 'Kyrgyzstan',
+        contactPerson: 'HQ Warehouse Manager',
+        phone: '+996700000004',
+        notes: 'Primary headquarters warehouse for China imports',
+        isActive: true,
+      },
+    });
+  } else {
+    await prisma.warehouse.create({
+      data: {
+        branchId: null,
+        warehouseType: 'HQ',
+        name: 'HQ Warehouse Bishkek',
+        code: 'HQ-MAIN',
+        address: 'Bishkek HQ',
+        city: 'Bishkek',
+        country: 'Kyrgyzstan',
+        contactPerson: 'HQ Warehouse Manager',
+        phone: '+996700000004',
+        notes: 'Primary headquarters warehouse for China imports',
+        isActive: true,
+      },
+    });
+  }
 
   const passwordHash = await bcrypt.hash('password123', 12);
 

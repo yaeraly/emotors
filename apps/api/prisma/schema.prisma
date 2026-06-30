@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum WarehouseType {
+  HQ
+  BRANCH
+}
+
 enum Role {
   OWNER
   CEO
@@ -863,9 +868,10 @@ model Receipt {
 }
 
 model Warehouse {
-  id        String    @id @default(cuid())
-  branchId  String
-  branch    Branch    @relation(fields: [branchId], references: [id])
+  id        String        @id @default(cuid())
+  branchId  String?
+  branch    Branch?       @relation(fields: [branchId], references: [id])
+  warehouseType WarehouseType @default(BRANCH)
   name      String
   code      String
   address   String?
@@ -874,7 +880,6 @@ model Warehouse {
   contactPerson String?
   phone     String?
   notes     String?
-  isHq      Boolean   @default(false)
   isActive  Boolean   @default(true)
   products  Product[]
   stockMovements StockMovement[]
@@ -892,7 +897,7 @@ model Warehouse {
 
   @@unique([branchId, code])
   @@index([branchId])
-  @@index([isHq])
+  @@index([warehouseType])
   @@index([deletedAt])
 }
 

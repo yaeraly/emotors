@@ -4,9 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role } from '@prisma/client';
+import { Prisma, Role, WarehouseType } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  activeHqWarehouseWhere,
+  hqWarehouseWhere,
+  isHqWarehouse,
+} from '../warehouse/warehouse.util';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 
@@ -17,17 +22,15 @@ export class HqWarehouseService {
   dashboard(user: AuthUser) {
     this.assertCanView(user);
     return this.prisma.$transaction(async (tx) => {
-      const warehouses = await tx.warehouse.count({
-        where: { isHq: true, deletedAt: null },
-      });
+      const warehouses = await tx.warehouse.count({ where: hqWarehouseWhere });
       const balances = await tx.inventoryBalance.findMany({
-        where: { warehouse: { isHq: true, deletedAt: null, isActive: true } },
+        where: { warehouse: activeHqWarehouseWhere },
         include: { product: true },
       });
       const pendingTransfers = await tx.branchDistributionOrder.count({
         where: {
           deletedAt: null,
-          sourceWarehouse: { isHq: true },
+          sourceWarehouse: hqWarehouseWhere,
           status: {
             in: ['DRAFT', 'APPROVED', 'PICKING', 'PACKED', 'SHIPPED', 'SENT'],
           },
@@ -53,8 +56,7 @@ export class HqWarehouseService {
   list(user: AuthUser) {
     this.assertCanView(user);
     return this.prisma.warehouse.findMany({
-      where: { isHq: true, deletedAt: null },
-      include: { branch: { select: { id: true, name: true, code: true, city: true } } },
+      where: hqWarehouseWhere,
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
   }
@@ -78,15 +80,15 @@ export class HqWarehouseService {
 
   async create(user: AuthUser, dto: CreateHqWarehouseDto) {
     this.assertCanManage(user);
+    if (dto.branchId?.trim()) {
+      throw new BadRequestException('HQ warehouse cannot be linked to a branch.');
+    }
     await this.assertUniqueHqFields(dto.name, dto.code);
-    const branch = await this.prisma.branch.findFirst({
-      where: { id: dto.branchId, deletedAt: null },
-    });
-    if (!branch) throw new BadRequestException('Branch not found');
 
     const warehouse = await this.prisma.warehouse.create({
       data: {
-        branchId: dto.branchId,
+        branchId: null,
+        warehouseType: WarehouseType.HQ,
         name: dto.name.trim(),
         code: dto.code.trim().toUpperCase(),
         country: dto.country?.trim() || 'Kyrgyzstan',
@@ -95,10 +97,8 @@ export class HqWarehouseService {
         contactPerson: dto.contactPerson?.trim(),
         phone: dto.phone?.trim(),
         notes: dto.notes?.trim(),
-        isHq: true,
         isActive: dto.isActive ?? true,
       },
-      include: { branch: { select: { id: true, name: true, code: true, city: true } } },
     });
     await this.audit(user, 'HQ_WAREHOUSE_CREATED', warehouse.id, { warehouse });
     return warehouse;
@@ -122,8 +122,9 @@ export class HqWarehouseService {
         ...(dto.phone !== undefined ? { phone: dto.phone?.trim() } : {}),
         ...(dto.notes !== undefined ? { notes: dto.notes?.trim() } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        branchId: null,
+        warehouseType: WarehouseType.HQ,
       },
-      include: { branch: { select: { id: true, name: true, code: true, city: true } } },
     });
     await this.audit(user, 'HQ_WAREHOUSE_UPDATED', warehouse.id, { before: existing, after: warehouse });
     return warehouse;
@@ -141,7 +142,6 @@ export class HqWarehouseService {
     const warehouse = await this.prisma.warehouse.update({
       where: { id },
       data: { isActive: false },
-      include: { branch: { select: { id: true, name: true, code: true, city: true } } },
     });
     await this.audit(user, 'HQ_WAREHOUSE_DEACTIVATED', warehouse.id, { warehouse: existing });
     return warehouse;
@@ -216,9 +216,9 @@ export class HqWarehouseService {
 
   async assertActiveHqWarehouse(warehouseId: string) {
     const warehouse = await this.prisma.warehouse.findFirst({
-      where: { id: warehouseId, isHq: true, deletedAt: null, isActive: true },
+      where: { id: warehouseId, ...activeHqWarehouseWhere },
     });
-    if (!warehouse) {
+    if (!warehouse || !isHqWarehouse(warehouse)) {
       throw new BadRequestException('Active HQ warehouse is required');
     }
     return warehouse;
@@ -227,18 +227,18 @@ export class HqWarehouseService {
   private async getHqWarehouse(user: AuthUser, id: string) {
     this.assertCanView(user);
     const warehouse = await this.prisma.warehouse.findFirst({
-      where: { id, isHq: true, deletedAt: null },
-      include: { branch: { select: { id: true, name: true, code: true, city: true } } },
+      where: { id, ...hqWarehouseWhere },
     });
-    if (!warehouse) throw new NotFoundException('HQ warehouse not found');
+    if (!warehouse || !isHqWarehouse(warehouse)) {
+      throw new NotFoundException('HQ warehouse not found');
+    }
     return warehouse;
   }
 
   private async assertUniqueHqFields(name: string, code: string, excludeId?: string) {
     const existing = await this.prisma.warehouse.findFirst({
       where: {
-        isHq: true,
-        deletedAt: null,
+        ...hqWarehouseWhere,
         id: excludeId ? { not: excludeId } : undefined,
         OR: [
           { name: { equals: name.trim(), mode: 'insensitive' } },
@@ -297,13 +297,13 @@ export class HqWarehouseService {
 
   private hasViewRole(user: AuthUser) {
     const roles = user.roles?.length ? user.roles : [user.role];
-    const allowed: Role[] = [Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.OWNER, Role.SYSTEM_ADMINISTRATOR];
+    const allowed: Role[] = [Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER];
     return roles.some((role) => allowed.includes(role));
   }
 
   private hasManageRole(user: AuthUser) {
     const roles = user.roles?.length ? user.roles : [user.role];
-    const allowed: Role[] = [Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.OWNER, Role.SYSTEM_ADMINISTRATOR];
+    const allowed: Role[] = [Role.CEO, Role.SUPPLY_CHAIN_MANAGER];
     return roles.some((role) => allowed.includes(role));
   }
 

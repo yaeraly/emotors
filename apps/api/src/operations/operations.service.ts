@@ -19,6 +19,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
 import { calculateLandedCosts, extractLogisticsCosts } from '../procurement/landed-cost.util';
+import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -140,9 +141,9 @@ export class OperationsService {
       }
       const hqWarehouseId = dto.hqWarehouseId ?? order.hqWarehouseId;
       const hqWarehouse = await tx.warehouse.findFirst({
-        where: { id: hqWarehouseId, isHq: true, deletedAt: null, isActive: true },
+        where: { id: hqWarehouseId, ...activeHqWarehouseWhere },
       });
-      if (!hqWarehouse) {
+      if (!hqWarehouse || !isHqWarehouse(hqWarehouse)) {
         throw new BadRequestException('Receiving requires an active HQ warehouse');
       }
       const receivedMap = new Map<string, any>((dto.items ?? []).map((item: any) => [item.procurementItemId ?? item.productId, item]));
@@ -286,7 +287,7 @@ export class OperationsService {
           costPerKg: recalculated.costPerKg,
         },
       });
-      await this.auditInTx(tx, user, hqWarehouse.branchId, 'INVENTORY_RECEIVED', 'Warehouse', hqWarehouseId, {
+      await this.auditInTx(tx, user, 'HQ', 'INVENTORY_RECEIVED', 'Warehouse', hqWarehouseId, {
         receivingId: receiving.id,
         procurementOrderId: order.id,
         recalculatedLandedCost: true,

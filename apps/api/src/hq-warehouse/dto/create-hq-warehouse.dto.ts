@@ -9,9 +9,6 @@ export class CreateHqWarehouseDto {
   @MinLength(1)
   code!: string;
 
-  @IsString()
-  branchId!: string;
-
   @IsOptional()
   @IsString()
   country?: string;
@@ -39,4 +36,8 @@ export class CreateHqWarehouseDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  branchId?: string;
 }

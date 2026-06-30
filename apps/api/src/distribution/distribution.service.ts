@@ -17,6 +17,13 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole } from '../rbac/rbac';
+import {
+  activeHqWarehouseWhere,
+  hqWarehouseWhere,
+  inventoryBranchIdForWarehouse,
+  isBranchWarehouse,
+  isHqWarehouse,
+} from '../warehouse/warehouse.util';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
@@ -138,10 +145,15 @@ export class DistributionService {
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
       for (const item of order.items) {
+        const inventoryBranchId = await this.inventoryBranchIdForItem(
+          tx,
+          order.sourceWarehouse,
+          item.productId,
+        );
         const balance = await tx.inventoryBalance.findUnique({
           where: {
             branchId_warehouseId_productId: {
-              branchId: order.sourceWarehouse.branchId,
+              branchId: inventoryBranchId,
               warehouseId: order.sourceWarehouseId,
               productId: item.productId,
             },
@@ -156,7 +168,7 @@ export class DistributionService {
         await tx.inventoryBalance.update({
           where: {
             branchId_warehouseId_productId: {
-              branchId: order.sourceWarehouse.branchId,
+              branchId: inventoryBranchId,
               warehouseId: order.sourceWarehouseId,
               productId: item.productId,
             },
@@ -232,10 +244,15 @@ export class DistributionService {
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
       for (const item of order.items) {
+        const inventoryBranchId = await this.inventoryBranchIdForItem(
+          tx,
+          order.sourceWarehouse,
+          item.productId,
+        );
         const balance = await tx.inventoryBalance.findUnique({
           where: {
             branchId_warehouseId_productId: {
-              branchId: order.sourceWarehouse.branchId,
+              branchId: inventoryBranchId,
               warehouseId: order.sourceWarehouseId,
               productId: item.productId,
             },
@@ -250,6 +267,11 @@ export class DistributionService {
       }
 
       for (const item of order.items) {
+        const inventoryBranchId = await this.inventoryBranchIdForItem(
+          tx,
+          order.sourceWarehouse,
+          item.productId,
+        );
         await this.inventoryService.createStockMovementInTx(tx, user, {
           productId: item.productId,
           warehouseId: order.sourceWarehouseId,
@@ -263,7 +285,7 @@ export class DistributionService {
         await tx.inventoryBalance.update({
           where: {
             branchId_warehouseId_productId: {
-              branchId: order.sourceWarehouse.branchId,
+              branchId: inventoryBranchId,
               warehouseId: order.sourceWarehouseId,
               productId: item.productId,
             },
@@ -307,9 +329,14 @@ export class DistributionService {
         });
         if (fullOrder) {
           for (const item of fullOrder.items) {
+            const inventoryBranchId = await this.inventoryBranchIdForItem(
+              tx,
+              fullOrder.sourceWarehouse,
+              item.productId,
+            );
             await tx.inventoryBalance.updateMany({
               where: {
-                branchId: fullOrder.sourceWarehouse.branchId,
+                branchId: inventoryBranchId,
                 warehouseId: fullOrder.sourceWarehouseId,
                 productId: item.productId,
                 reservedQuantity: { gte: item.quantity },
@@ -692,10 +719,10 @@ export class DistributionService {
     if (!branch) throw new NotFoundException('Branch not found');
     if (!sourceWarehouse) throw new NotFoundException('Source warehouse not found');
     if (!destinationWarehouse) throw new NotFoundException('Destination warehouse not found');
-    if (!sourceWarehouse.isHq || !sourceWarehouse.isActive || sourceWarehouse.deletedAt) {
+    if (!isHqWarehouse(sourceWarehouse) || !sourceWarehouse.isActive) {
       throw new BadRequestException('Transfers must originate from an active HQ warehouse');
     }
-    if (destinationWarehouse.isHq) {
+    if (!isBranchWarehouse(destinationWarehouse)) {
       throw new BadRequestException('Destination warehouse must be a branch warehouse');
     }
     if (destinationWarehouse.branchId !== branch.id) {
@@ -703,10 +730,28 @@ export class DistributionService {
     }
   }
 
-  private assertHqSourceWarehouse(sourceWarehouse: { isHq: boolean; isActive: boolean; deletedAt: Date | null }) {
-    if (!sourceWarehouse.isHq || !sourceWarehouse.isActive || sourceWarehouse.deletedAt) {
+  private assertHqSourceWarehouse(sourceWarehouse: {
+    warehouseType: import('@prisma/client').WarehouseType;
+    branchId: string | null;
+    isActive: boolean;
+    deletedAt: Date | null;
+  }) {
+    if (!isHqWarehouse(sourceWarehouse) || !sourceWarehouse.isActive || sourceWarehouse.deletedAt) {
       throw new BadRequestException('Transfer source must be an active HQ warehouse');
     }
+  }
+
+  private async inventoryBranchIdForItem(
+    tx: PrismaTx,
+    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+    productId: string,
+  ) {
+    const product = await tx.product.findUnique({
+      where: { id: productId },
+      select: { branchId: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    return inventoryBranchIdForWarehouse(warehouse, product.branchId);
   }
 
   private auditTransfer(

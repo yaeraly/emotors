@@ -303,7 +303,8 @@ export type SaleItem = {
 
 export type Warehouse = {
   id: string;
-  branchId: string;
+  branchId: string | null;
+  warehouseType?: 'HQ' | 'BRANCH';
   name: string;
   code: string;
   address?: string | null;
@@ -312,7 +313,6 @@ export type Warehouse = {
   contactPerson?: string | null;
   phone?: string | null;
   notes?: string | null;
-  isHq?: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

@@ -212,11 +212,11 @@ export function canVoidPayment(user: Pick<User, 'role' | 'roles'> | null | undef
 }
 
 export function canViewHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER', 'OWNER', 'SYSTEM_ADMINISTRATOR']);
+  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER']);
 }
 
 export function canManageHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER', 'OWNER', 'SYSTEM_ADMINISTRATOR']);
+  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER']);
 }
 
 export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

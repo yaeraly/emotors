@@ -87,7 +87,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     const loaders: Promise<unknown>[] = [
       apiFetch<Supplier[]>('/procurement/suppliers'),
       apiFetch<Factory[]>('/procurement/factories'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?isHq=true'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ'),
       apiFetch<ProductListResponse>('/inventory/products?pageSize=500'),
     ];
     if (mode === 'edit' && orderId) loaders.push(apiFetch<any>(`/procurement/orders/${orderId}`));

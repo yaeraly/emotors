@@ -24,7 +24,7 @@ export default function WarehousesPage() {
   async function load() {
     try {
       const [warehouseResult, currentUserResult, branchResult] = await Promise.all([
-        apiFetch<Warehouse[]>('/inventory/warehouses?isHq=false'),
+        apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH'),
         apiFetch<User>('/auth/me'),
         apiFetch<Branch[]>('/branches'),
       ]);
@@ -89,7 +89,7 @@ export default function WarehousesPage() {
       name: warehouse.name,
       code: warehouse.code,
       address: warehouse.address ?? '',
-      branchId: warehouse.branchId,
+      branchId: warehouse.branchId ?? '',
     });
   }
 

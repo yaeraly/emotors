@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, StockMovementStatus, StockMovementType } from '@prisma/client';
+import { Prisma, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { MultipartFile } from '@fastify/multipart';
 import { FastifyRequest } from 'fastify';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -14,6 +14,12 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
 import { normalizeBranchId, resolveWritableBranchId } from '../rbac/branch-scope';
+import {
+  assertProductWarehouseBranchMatch,
+  branchWarehouseWhere,
+  hqWarehouseWhere,
+  isHqWarehouse,
+} from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -195,11 +201,19 @@ export class InventoryService {
         if (!dto.categoryId) throw new BadRequestException('Category is required');
         if (!dto.warehouseId) throw new BadRequestException('Warehouse is required');
         const warehouse = await this.getWarehouseForCatalogWrite(tx, user, dto.warehouseId);
-        const branchId = dto.branchId ?? warehouse.branchId;
-
-        if (warehouse.branchId !== branchId) {
-          throw new BadRequestException('Warehouse does not belong to branch');
+        let branchId: string;
+        if (isHqWarehouse(warehouse)) {
+          if (!dto.branchId?.trim()) {
+            throw new BadRequestException('Branch is required when assigning products to HQ warehouse');
+          }
+          branchId = dto.branchId.trim();
+        } else {
+          branchId = dto.branchId ?? warehouse.branchId ?? '';
+          if (!branchId) {
+            throw new BadRequestException('Branch is required');
+          }
         }
+        assertProductWarehouseBranchMatch(warehouse, branchId);
 
         const category = await this.getActiveCategory(tx, dto.categoryId);
         const costs = this.calculateCosts({
@@ -418,9 +432,7 @@ export class InventoryService {
 
       if (dto.warehouseId) {
         const warehouse = await this.getWarehouseForCatalogWrite(tx, user, dto.warehouseId);
-        if (warehouse.branchId !== current.branchId) {
-          throw new BadRequestException('Warehouse does not belong to branch');
-        }
+        assertProductWarehouseBranchMatch(warehouse, current.branchId);
       }
       const category = dto.categoryId
         ? await this.getActiveCategory(tx, dto.categoryId)
@@ -608,6 +620,7 @@ export class InventoryService {
     return this.prisma.warehouse.create({
       data: {
         branchId,
+        warehouseType: WarehouseType.BRANCH,
         name: dto.name,
         code: dto.code,
         address: dto.address,
@@ -616,11 +629,14 @@ export class InventoryService {
     });
   }
 
-  warehouses(user: AuthUser, branchId?: string, isHq?: string) {
+  warehouses(user: AuthUser, branchId?: string, warehouseType?: string) {
     const where: Prisma.WarehouseWhereInput = {
-      deletedAt: null,
       ...this.buildBranchWhere(user, branchId),
-      ...(isHq === 'true' ? { isHq: true } : isHq === 'false' ? { isHq: false } : {}),
+      ...(warehouseType === 'HQ'
+        ? hqWarehouseWhere
+        : warehouseType === 'BRANCH'
+          ? branchWarehouseWhere
+          : { deletedAt: null }),
     };
     return this.prisma.warehouse.findMany({
       where,
@@ -736,9 +752,7 @@ export class InventoryService {
     const product = await this.getProductForWrite(tx, user, dto.productId);
     const warehouse = await this.getWarehouseForWrite(tx, user, dto.warehouseId);
 
-    if (product.branchId !== warehouse.branchId) {
-      throw new BadRequestException('Product and warehouse branch mismatch');
-    }
+    assertProductWarehouseBranchMatch(warehouse, product.branchId);
 
     const quantityDelta = this.getQuantityDelta(dto.type, dto.quantity);
     const current = await tx.inventoryBalance.findUnique({

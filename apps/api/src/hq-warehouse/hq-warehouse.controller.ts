@@ -11,7 +11,7 @@ import { HqWarehouseService } from './hq-warehouse.service';
 
 @Controller('hq-warehouses')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.OWNER, Role.SYSTEM_ADMINISTRATOR)
+@Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
 export class HqWarehouseController {
   constructor(private readonly service: HqWarehouseService) {}
 
@@ -26,7 +26,7 @@ export class HqWarehouseController {
   }
 
   @Post()
-  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.OWNER, Role.SYSTEM_ADMINISTRATOR)
+  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateHqWarehouseDto) {
     return this.service.create(user, dto);
   }
@@ -37,13 +37,13 @@ export class HqWarehouseController {
   }
 
   @Put(':id')
-  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.OWNER, Role.SYSTEM_ADMINISTRATOR)
+  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateHqWarehouseDto) {
     return this.service.update(user, id, dto);
   }
 
   @Post(':id/deactivate')
-  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.OWNER, Role.SYSTEM_ADMINISTRATOR)
+  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   deactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.deactivate(user, id);
   }

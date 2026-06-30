@@ -4,6 +4,7 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole } from '../rbac/rbac';
+import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { calculateLandedCosts, extractLogisticsCosts } from './landed-cost.util';
 
 type PreparedProcurementItem = {
@@ -237,7 +238,7 @@ export class ProcurementService {
         tx.supplier.findFirst({ where: { id: dto.supplierId, deletedAt: null } }),
         dto.factoryId ? tx.factory.findFirst({ where: { id: dto.factoryId, deletedAt: null } }) : Promise.resolve(null),
         tx.warehouse.findFirst({
-          where: { id: dto.hqWarehouseId, deletedAt: null, isHq: true, isActive: true },
+          where: { id: dto.hqWarehouseId, ...activeHqWarehouseWhere },
         }),
       ]);
       if (!supplier) throw new NotFoundException('Supplier not found');
@@ -595,7 +596,7 @@ export class ProcurementService {
       if (order.hqStockMovementCreatedAt || order.status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
         return this.prisma.procurementOrder.findUnique({ where: { id }, include: this.procurementOrderInclude() });
       }
-      if (!order.hqWarehouse?.isHq || !order.hqWarehouse.isActive) {
+      if (!order.hqWarehouse || !isHqWarehouse(order.hqWarehouse) || !order.hqWarehouse.isActive) {
         throw new BadRequestException('Procurement order must target an active HQ warehouse');
       }
 
