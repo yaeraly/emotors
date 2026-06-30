@@ -1315,6 +1315,7 @@ model Supplier {
   purchaseOrders   PurchaseOrder[]
   factories        Factory[]
   procurementOrders ProcurementOrder[]
+  procurementOrderItems ProcurementOrderItem[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   deletedAt        DateTime?
@@ -1353,6 +1354,7 @@ model Factory {
   notes              String?
   isActive           Boolean  @default(true)
   procurementOrders  ProcurementOrder[]
+  procurementOrderItems ProcurementOrderItem[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   deletedAt          DateTime?
@@ -1362,35 +1364,48 @@ model Factory {
 }
 
 model ProcurementOrder {
-  id                     String                 @id @default(cuid())
-  orderNumber            String                 @unique
-  supplierId             String
-  supplier               Supplier               @relation(fields: [supplierId], references: [id])
-  factoryId              String?
-  factory                Factory?               @relation(fields: [factoryId], references: [id])
-  hqWarehouseId          String
-  hqWarehouse            Warehouse              @relation(fields: [hqWarehouseId], references: [id])
-  status                 ProcurementOrderStatus @default(DRAFT)
-  totalYuan              Decimal                @default(0) @db.Decimal(14, 2)
-  totalTransportCostKgs  Decimal                @default(0) @db.Decimal(14, 2)
-  totalCostKgs           Decimal                @default(0) @db.Decimal(14, 2)
-  estimatedArrivalDate   DateTime?
-  actualArrivalDate      DateTime?
-  createdById            String
-  createdBy              User                   @relation("ProcurementOrderCreator", fields: [createdById], references: [id])
-  approvedById           String?
-  approvedBy             User?                  @relation("ProcurementOrderApprover", fields: [approvedById], references: [id])
-  approvedAt             DateTime?
-  paidAt                 DateTime?
-  shippedAt              DateTime?
-  arrivedAt              DateTime?
-  receivedToHqAt         DateTime?
+  id                       String                 @id @default(cuid())
+  orderNumber              String                 @unique
+  supplierId               String
+  supplier                 Supplier               @relation(fields: [supplierId], references: [id])
+  factoryId                String?
+  factory                  Factory?               @relation(fields: [factoryId], references: [id])
+  hqWarehouseId            String
+  hqWarehouse              Warehouse              @relation(fields: [hqWarehouseId], references: [id])
+  status                   ProcurementOrderStatus @default(DRAFT)
+  defaultYuanRate          Decimal                @default(0) @db.Decimal(14, 4)
+  totalYuan                Decimal                @default(0) @db.Decimal(14, 2)
+  totalTransportCostKgs    Decimal                @default(0) @db.Decimal(14, 2)
+  totalCostKgs             Decimal                @default(0) @db.Decimal(14, 2)
+  totalWeightKg            Decimal                @default(0) @db.Decimal(14, 3)
+  costPerKg                Decimal                @default(0) @db.Decimal(14, 4)
+  chinaDomesticTransportKgs Decimal               @default(0) @db.Decimal(14, 2)
+  chinaExportTransportKgs  Decimal                @default(0) @db.Decimal(14, 2)
+  localTransportKgs        Decimal                @default(0) @db.Decimal(14, 2)
+  packagingCostKgs         Decimal                @default(0) @db.Decimal(14, 2)
+  customsCostKgs           Decimal                @default(0) @db.Decimal(14, 2)
+  insuranceCostKgs         Decimal                @default(0) @db.Decimal(14, 2)
+  bankFeeCostKgs           Decimal                @default(0) @db.Decimal(14, 2)
+  otherExpenseKgs          Decimal                @default(0) @db.Decimal(14, 2)
+  estimatedArrivalDate     DateTime?
+  actualArrivalDate        DateTime?
+  createdById              String
+  createdBy                User                   @relation("ProcurementOrderCreator", fields: [createdById], references: [id])
+  approvedById             String?
+  approvedBy               User?                  @relation("ProcurementOrderApprover", fields: [approvedById], references: [id])
+  approvedAt               DateTime?
+  paidAt                   DateTime?
+  shippedAt                DateTime?
+  arrivedAt                DateTime?
+  receivedToHqAt           DateTime?
   hqStockMovementCreatedAt DateTime?
-  note                   String?
-  items                  ProcurementOrderItem[]
-  createdAt              DateTime               @default(now())
-  updatedAt              DateTime               @updatedAt
-  deletedAt              DateTime?
+  note                     String?
+  items                    ProcurementOrderItem[]
+  receivings               ProcurementGoodsReceiving[]
+  differenceReports        ProcurementDifferenceReport[]
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+  deletedAt                DateTime?
 
   @@index([supplierId])
   @@index([factoryId])
@@ -1401,27 +1416,44 @@ model ProcurementOrder {
 }
 
 model ProcurementOrderItem {
-  id                String           @id @default(cuid())
-  orderId           String
-  order             ProcurementOrder @relation(fields: [orderId], references: [id])
-  productId         String
-  product           Product          @relation(fields: [productId], references: [id])
-  sku               String
-  productName       String
-  quantity          Int
-  purchasePriceYuan Decimal          @db.Decimal(14, 2)
-  yuanRate          Decimal          @db.Decimal(14, 4)
-  costKgs           Decimal          @db.Decimal(14, 2)
-  weightKg          Decimal          @db.Decimal(14, 3)
-  transportCostKgs  Decimal          @db.Decimal(14, 2)
-  finalCostKgs      Decimal          @db.Decimal(14, 2)
-  totalYuan         Decimal          @db.Decimal(14, 2)
-  totalCostKgs      Decimal          @db.Decimal(14, 2)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  id                     String           @id @default(cuid())
+  orderId                String
+  order                  ProcurementOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId              String
+  product                Product          @relation(fields: [productId], references: [id])
+  supplierId             String?
+  supplier               Supplier?        @relation(fields: [supplierId], references: [id])
+  factoryId              String?
+  factory                Factory?         @relation(fields: [factoryId], references: [id])
+  sku                    String
+  productName            String
+  quantity               Int
+  receivedQuantity       Int?
+  purchasePriceYuan      Decimal          @db.Decimal(14, 2)
+  yuanRate               Decimal          @db.Decimal(14, 4)
+  costKgs                Decimal          @db.Decimal(14, 2)
+  weightKg               Decimal          @db.Decimal(14, 3)
+  totalWeightKg          Decimal          @default(0) @db.Decimal(14, 3)
+  chinaDomesticAllocKgs  Decimal          @default(0) @db.Decimal(14, 2)
+  chinaExportAllocKgs    Decimal          @default(0) @db.Decimal(14, 2)
+  localTransportAllocKgs Decimal          @default(0) @db.Decimal(14, 2)
+  packagingAllocKgs      Decimal          @default(0) @db.Decimal(14, 2)
+  customsAllocKgs        Decimal          @default(0) @db.Decimal(14, 2)
+  insuranceAllocKgs      Decimal          @default(0) @db.Decimal(14, 2)
+  bankFeeAllocKgs        Decimal          @default(0) @db.Decimal(14, 2)
+  otherAllocKgs          Decimal          @default(0) @db.Decimal(14, 2)
+  transportCostKgs       Decimal          @db.Decimal(14, 2)
+  finalCostKgs           Decimal          @db.Decimal(14, 2)
+  totalYuan              Decimal          @db.Decimal(14, 2)
+  totalCostKgs           Decimal          @db.Decimal(14, 2)
+  note                   String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
   @@index([orderId])
   @@index([productId])
+  @@index([supplierId])
+  @@index([factoryId])
 }
 
 model PurchaseOrder {
@@ -2304,17 +2336,18 @@ model KpiRecommendation {
 }
 
 model ProcurementGoodsReceiving {
-  id                 String   @id @default(cuid())
-  receivingNumber   String   @unique
+  id                 String            @id @default(cuid())
+  receivingNumber    String            @unique
   procurementOrderId String
-  hqWarehouseId     String
-  receivedById      String
-  receivedAt        DateTime @default(now())
-  note              String?
-  items             ProcurementGoodsReceivingItem[]
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  deletedAt         DateTime?
+  procurementOrder   ProcurementOrder  @relation(fields: [procurementOrderId], references: [id])
+  hqWarehouseId      String
+  receivedById       String
+  receivedAt         DateTime          @default(now())
+  note               String?
+  items              ProcurementGoodsReceivingItem[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  deletedAt          DateTime?
 
   @@index([procurementOrderId])
   @@index([hqWarehouseId])
@@ -2341,12 +2374,13 @@ model ProcurementGoodsReceivingItem {
 }
 
 model ProcurementDifferenceReport {
-  id                 String   @id @default(cuid())
-  reportNumber       String   @unique
+  id                 String                 @id @default(cuid())
+  reportNumber       String                 @unique
   receivingId        String
   procurementOrderId String
+  procurementOrder   ProcurementOrder       @relation(fields: [procurementOrderId], references: [id])
   type               ShortageReportItemType
-  status             ShortageReportStatus @default(OPEN)
+  status             ShortageReportStatus   @default(OPEN)
   productId          String
   sku                String
   productName        String
@@ -2354,8 +2388,8 @@ model ProcurementDifferenceReport {
   receivedQuantity   Int
   differenceQuantity Int
   note               String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
   resolvedAt         DateTime?
   deletedAt          DateTime?
 

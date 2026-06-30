@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, getDefaultRouteForUser, hasPermission, hasRole, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, getDefaultRouteForUser, hasPermission, hasRole, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -69,7 +69,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canManageUsers = hasPermission(user, 'users.manage');
   const canSeeAcademy = hasPermission(user, 'academy.manage');
   const canSeeMarketing = hasPermission(user, 'marketing.manage');
-  const canSeeProcurement = hasPermission(user, 'procurement.manage');
+  const canSeeProcurement = canViewProcurement(user);
+  const canManageProcurementOrders = hasPermission(user, 'procurement.manage');
   const canSeeSupplyChain = hasPermission(user, 'distribution.manage');
   const canSeeDistribution = canSeeSupplyChain;
   const canSeeInvestment = hasPermission(user, 'analytics.view');
@@ -219,10 +220,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <div className="rounded-xl px-3 py-2">
                   <Link href="/procurement" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('procurement.title')}</Link>
                   <div className="mt-2 space-y-1 pl-2">
-                    <Link href="/procurement/suppliers" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.suppliers')}</Link>
-                    <Link href="/procurement/factories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.factories')}</Link>
+                    {canManageProcurementOrders ? <Link href="/procurement/suppliers" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.suppliers')}</Link> : null}
+                    {canManageProcurementOrders ? <Link href="/procurement/factories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.factories')}</Link> : null}
                     <Link href="/procurement/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.orders')}</Link>
-                    <Link href="/branch-purchase-requests" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.branchPurchaseRequests')}</Link>
+                    {canManageProcurementOrders ? <Link href="/branch-purchase-requests" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.branchPurchaseRequests')}</Link> : null}
                     {canSeeSupplierClaims ? <Link href="/supplier-claims" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.supplierClaims')}</Link> : null}
                   </div>
                 </div>

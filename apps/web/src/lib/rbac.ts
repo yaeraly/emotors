@@ -144,7 +144,7 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/service')) return hasPermission(user, 'service.manage');
   if (pathname.startsWith('/users')) return hasPermission(user, 'users.manage');
   if (pathname.startsWith('/branches')) return hasPermission(user, 'branches.manage');
-  if (pathname.startsWith('/procurement')) return hasPermission(user, 'procurement.manage');
+  if (pathname.startsWith('/procurement')) return canViewProcurement(user);
   if (pathname.startsWith('/branch-purchase-requests')) {
     return hasPermission(user, 'procurement.manage') || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
   }
@@ -213,4 +213,13 @@ export function canVoidPayment(user: Pick<User, 'role' | 'roles'> | null | undef
 
 export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return hasPermission(user, 'inventory.manage');
+}
+
+export function canManageProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasPermission(user, 'procurement.manage');
+}
+
+export function canViewProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canManageProcurement(user) ||
+    hasAnyRole(user, ['FINANCE_MANAGER', 'ACCOUNTANT', 'WAREHOUSE_MANAGER']);
 }

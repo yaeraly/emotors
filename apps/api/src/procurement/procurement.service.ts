@@ -4,6 +4,20 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole } from '../rbac/rbac';
+import { calculateLandedCosts, extractLogisticsCosts } from './landed-cost.util';
+
+type PreparedProcurementItem = {
+  productId: string;
+  supplierId: string;
+  factoryId: string | null;
+  sku: string;
+  productName: string;
+  quantity: number;
+  purchasePriceYuan: number;
+  yuanRate: number;
+  weightKg: number;
+  note?: string;
+};
 
 @Injectable()
 export class ProcurementService {
@@ -216,6 +230,7 @@ export class ProcurementService {
   }
 
   createProcurementOrder(user: AuthUser, dto: any) {
+    this.assertCanManageProcurement(user);
     return this.prisma.$transaction(async (tx) => {
       const [supplier, factory, warehouse] = await Promise.all([
         tx.supplier.findFirst({ where: { id: dto.supplierId, deletedAt: null } }),
@@ -227,52 +242,90 @@ export class ProcurementService {
       if (!warehouse) throw new NotFoundException('HQ warehouse not found');
 
       const itemInputs = dto.items ?? [];
-      const items = [];
+      if (!itemInputs.length) throw new BadRequestException('At least one product is required');
+
+      const defaultYuanRate = Number(dto.defaultYuanRate ?? dto.yuanRate ?? 0);
+      const logistics = extractLogisticsCosts(dto);
+      const preparedItems: PreparedProcurementItem[] = [];
       for (const item of itemInputs) {
         const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
         if (!product) throw new NotFoundException('Product not found');
-        const quantity = Number(item.quantity ?? 0);
-        const purchasePriceYuan = Number(item.purchasePriceYuan ?? 0);
-        const yuanRate = Number(item.yuanRate ?? 0);
-        const costKgs = this.roundMoney(purchasePriceYuan * yuanRate);
-        const transportCostKgs = Number(item.transportCostKgs ?? 0);
-        const finalCostKgs = this.roundMoney(costKgs + transportCostKgs);
-        items.push({
+        const itemSupplierId = item.supplierId ?? dto.supplierId;
+        const itemFactoryId = item.factoryId ?? dto.factoryId;
+        if (itemSupplierId) {
+          const itemSupplier = await tx.supplier.findFirst({ where: { id: itemSupplierId, deletedAt: null } });
+          if (!itemSupplier) throw new NotFoundException('Item supplier not found');
+        }
+        if (itemFactoryId) {
+          const itemFactory = await tx.factory.findFirst({ where: { id: itemFactoryId, deletedAt: null } });
+          if (!itemFactory) throw new NotFoundException('Item factory not found');
+        }
+        preparedItems.push({
           productId: product.id,
+          supplierId: itemSupplierId,
+          factoryId: itemFactoryId || null,
           sku: product.sku,
           productName: product.name,
-          quantity,
-          purchasePriceYuan,
-          yuanRate,
-          costKgs,
-          weightKg: Number(item.weightKg ?? 0),
-          transportCostKgs,
-          finalCostKgs,
-          totalYuan: this.roundMoney(quantity * purchasePriceYuan),
-          totalCostKgs: this.roundMoney(quantity * finalCostKgs),
+          quantity: Number(item.quantity ?? 0),
+          purchasePriceYuan: Number(item.purchasePriceYuan ?? product.purchasePriceYuan ?? 0),
+          yuanRate: Number(item.yuanRate ?? defaultYuanRate ?? product.latestYuanRate ?? 0),
+          weightKg: Number(item.weightKg ?? product.weightKg ?? 0),
+          note: item.note,
         });
       }
-      const totalYuan = this.roundMoney(items.reduce((sum, item) => sum + item.totalYuan, 0));
-      const totalTransportCostKgs = this.roundMoney(items.reduce((sum, item) => sum + item.transportCostKgs * item.quantity, 0));
-      const totalCostKgs = this.roundMoney(items.reduce((sum, item) => sum + item.totalCostKgs, 0));
 
-      return tx.procurementOrder.create({
+      const calculated = calculateLandedCosts(preparedItems, logistics);
+      const order = await tx.procurementOrder.create({
         data: {
           orderNumber: dto.orderNumber ?? `PROC-${Date.now()}`,
           supplierId: supplier.id,
           factoryId: factory?.id,
           hqWarehouseId: warehouse.id,
           status: ProcurementOrderStatus.DRAFT,
-          totalYuan,
-          totalTransportCostKgs,
-          totalCostKgs,
+          defaultYuanRate,
+          totalYuan: calculated.totalYuan,
+          totalTransportCostKgs: calculated.totalTransportCostKgs,
+          totalCostKgs: calculated.totalCostKgs,
+          totalWeightKg: calculated.totalWeightKg,
+          costPerKg: calculated.costPerKg,
+          ...logistics,
           estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
           note: dto.note,
           createdById: user.id,
-          items: { create: items },
+          items: {
+            create: calculated.items.map((item, index) => ({
+              productId: preparedItems[index].productId,
+              supplierId: preparedItems[index].supplierId,
+              factoryId: preparedItems[index].factoryId,
+              sku: preparedItems[index].sku,
+              productName: preparedItems[index].productName,
+              quantity: preparedItems[index].quantity,
+              purchasePriceYuan: item.purchasePriceYuan,
+              yuanRate: item.yuanRate,
+              costKgs: item.costKgs,
+              weightKg: item.weightKg,
+              totalWeightKg: item.totalWeightKg,
+              chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
+              chinaExportAllocKgs: item.chinaExportAllocKgs,
+              localTransportAllocKgs: item.localTransportAllocKgs,
+              packagingAllocKgs: item.packagingAllocKgs,
+              customsAllocKgs: item.customsAllocKgs,
+              insuranceAllocKgs: item.insuranceAllocKgs,
+              bankFeeAllocKgs: item.bankFeeAllocKgs,
+              otherAllocKgs: item.otherAllocKgs,
+              transportCostKgs: item.transportCostKgs,
+              finalCostKgs: item.finalCostKgs,
+              totalYuan: item.totalYuan,
+              totalCostKgs: item.totalCostKgs,
+              note: preparedItems[index].note,
+            })),
+          },
         },
         include: this.procurementOrderInclude(),
       });
+
+      await this.auditProcurement(tx, user, 'CREATE_PROCUREMENT_ORDER', order.id, null, this.pickProcurementAuditFields(order));
+      return order;
     });
   }
 
@@ -291,29 +344,254 @@ export class ProcurementService {
     });
   }
 
-  updateProcurementOrder(id: string, dto: any) {
-    return this.prisma.procurementOrder.update({
-      where: { id },
-      data: {
-        estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
-        note: dto.note,
-      },
-      include: this.procurementOrderInclude(),
+  updateProcurementOrder(user: AuthUser, id: string, dto: any) {
+    this.assertCanManageProcurement(user);
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.procurementOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: { items: true },
+      });
+      if (!existing) throw new NotFoundException('Procurement order not found');
+      if (existing.hqStockMovementCreatedAt) {
+        throw new BadRequestException('Received procurement orders cannot be edited');
+      }
+
+      const oldValue = this.pickProcurementAuditFields(existing);
+      const defaultYuanRate = dto.defaultYuanRate !== undefined ? Number(dto.defaultYuanRate) : Number(existing.defaultYuanRate);
+      const logistics = extractLogisticsCosts({
+        chinaDomesticTransportKgs: dto.chinaDomesticTransportKgs ?? existing.chinaDomesticTransportKgs,
+        chinaExportTransportKgs: dto.chinaExportTransportKgs ?? existing.chinaExportTransportKgs,
+        localTransportKgs: dto.localTransportKgs ?? existing.localTransportKgs,
+        packagingCostKgs: dto.packagingCostKgs ?? existing.packagingCostKgs,
+        customsCostKgs: dto.customsCostKgs ?? existing.customsCostKgs,
+        insuranceCostKgs: dto.insuranceCostKgs ?? existing.insuranceCostKgs,
+        bankFeeCostKgs: dto.bankFeeCostKgs ?? existing.bankFeeCostKgs,
+        otherExpenseKgs: dto.otherExpenseKgs ?? existing.otherExpenseKgs,
+      });
+
+      if (Array.isArray(dto.items)) {
+        await tx.procurementOrderItem.deleteMany({ where: { orderId: id } });
+        const preparedItems: PreparedProcurementItem[] = [];
+        for (const item of dto.items) {
+          const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
+          if (!product) throw new NotFoundException('Product not found');
+          preparedItems.push({
+            productId: product.id,
+            supplierId: item.supplierId ?? dto.supplierId ?? existing.supplierId,
+            factoryId: item.factoryId ?? dto.factoryId ?? existing.factoryId,
+            sku: product.sku,
+            productName: product.name,
+            quantity: Number(item.quantity ?? 0),
+            purchasePriceYuan: Number(item.purchasePriceYuan ?? 0),
+            yuanRate: Number(item.yuanRate ?? defaultYuanRate),
+            weightKg: Number(item.weightKg ?? 0),
+            note: item.note,
+          });
+        }
+        const calculated = calculateLandedCosts(preparedItems, logistics);
+        await tx.procurementOrderItem.createMany({
+          data: calculated.items.map((item, index) => ({
+            orderId: id,
+            productId: preparedItems[index].productId,
+            supplierId: preparedItems[index].supplierId,
+            factoryId: preparedItems[index].factoryId,
+            sku: preparedItems[index].sku,
+            productName: preparedItems[index].productName,
+            quantity: preparedItems[index].quantity,
+            purchasePriceYuan: item.purchasePriceYuan,
+            yuanRate: item.yuanRate,
+            costKgs: item.costKgs,
+            weightKg: item.weightKg,
+            totalWeightKg: item.totalWeightKg,
+            chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
+            chinaExportAllocKgs: item.chinaExportAllocKgs,
+            localTransportAllocKgs: item.localTransportAllocKgs,
+            packagingAllocKgs: item.packagingAllocKgs,
+            customsAllocKgs: item.customsAllocKgs,
+            insuranceAllocKgs: item.insuranceAllocKgs,
+            bankFeeAllocKgs: item.bankFeeAllocKgs,
+            otherAllocKgs: item.otherAllocKgs,
+            transportCostKgs: item.transportCostKgs,
+            finalCostKgs: item.finalCostKgs,
+            totalYuan: item.totalYuan,
+            totalCostKgs: item.totalCostKgs,
+            note: preparedItems[index].note,
+          })),
+        });
+        await tx.procurementOrder.update({
+          where: { id },
+          data: {
+            supplierId: dto.supplierId ?? existing.supplierId,
+            factoryId: dto.factoryId ?? existing.factoryId,
+            hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
+            defaultYuanRate,
+            totalYuan: calculated.totalYuan,
+            totalTransportCostKgs: calculated.totalTransportCostKgs,
+            totalCostKgs: calculated.totalCostKgs,
+            totalWeightKg: calculated.totalWeightKg,
+            costPerKg: calculated.costPerKg,
+            ...logistics,
+            estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
+            note: dto.note ?? existing.note,
+          },
+        });
+      } else {
+        const recalculated = calculateLandedCosts(
+          existing.items.map((item) => ({
+            quantity: item.quantity,
+            receivedQuantity: item.receivedQuantity,
+            purchasePriceYuan: Number(item.purchasePriceYuan),
+            yuanRate: Number(item.yuanRate),
+            weightKg: Number(item.weightKg),
+          })),
+          logistics,
+        );
+        for (const [index, item] of existing.items.entries()) {
+          const next = recalculated.items[index];
+          await tx.procurementOrderItem.update({
+            where: { id: item.id },
+            data: {
+              totalWeightKg: next.totalWeightKg,
+              costKgs: next.costKgs,
+              chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
+              chinaExportAllocKgs: next.chinaExportAllocKgs,
+              localTransportAllocKgs: next.localTransportAllocKgs,
+              packagingAllocKgs: next.packagingAllocKgs,
+              customsAllocKgs: next.customsAllocKgs,
+              insuranceAllocKgs: next.insuranceAllocKgs,
+              bankFeeAllocKgs: next.bankFeeAllocKgs,
+              otherAllocKgs: next.otherAllocKgs,
+              transportCostKgs: next.transportCostKgs,
+              finalCostKgs: next.finalCostKgs,
+              totalYuan: next.totalYuan,
+              totalCostKgs: next.totalCostKgs,
+            },
+          });
+        }
+        await tx.procurementOrder.update({
+          where: { id },
+          data: {
+            supplierId: dto.supplierId ?? existing.supplierId,
+            factoryId: dto.factoryId ?? existing.factoryId,
+            hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
+            defaultYuanRate,
+            totalYuan: recalculated.totalYuan,
+            totalTransportCostKgs: recalculated.totalTransportCostKgs,
+            totalCostKgs: recalculated.totalCostKgs,
+            totalWeightKg: recalculated.totalWeightKg,
+            costPerKg: recalculated.costPerKg,
+            ...logistics,
+            estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
+            note: dto.note ?? existing.note,
+          },
+        });
+      }
+
+      const updated = await tx.procurementOrder.findUnique({
+        where: { id },
+        include: this.procurementOrderInclude(),
+      });
+      await this.auditProcurement(
+        tx,
+        user,
+        'UPDATE_PROCUREMENT_ORDER',
+        id,
+        oldValue,
+        this.pickProcurementAuditFields(updated),
+        dto.reason,
+      );
+      return updated;
     });
   }
 
-  updateProcurementStatus(user: AuthUser, id: string, status: ProcurementOrderStatus) {
+  recalculateProcurementOrder(user: AuthUser, id: string, reason?: string) {
+    this.assertCanManageProcurement(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: { items: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+      const oldValue = this.pickProcurementAuditFields(order);
+      const logistics = extractLogisticsCosts(order);
+      const calculated = calculateLandedCosts(
+        order.items.map((item) => ({
+          quantity: item.quantity,
+          receivedQuantity: item.receivedQuantity,
+          purchasePriceYuan: Number(item.purchasePriceYuan),
+          yuanRate: Number(item.yuanRate),
+          weightKg: Number(item.weightKg),
+        })),
+        logistics,
+      );
+      for (const [index, item] of order.items.entries()) {
+        const next = calculated.items[index];
+        await tx.procurementOrderItem.update({
+          where: { id: item.id },
+          data: {
+            totalWeightKg: next.totalWeightKg,
+            costKgs: next.costKgs,
+            chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
+            chinaExportAllocKgs: next.chinaExportAllocKgs,
+            localTransportAllocKgs: next.localTransportAllocKgs,
+            packagingAllocKgs: next.packagingAllocKgs,
+            customsAllocKgs: next.customsAllocKgs,
+            insuranceAllocKgs: next.insuranceAllocKgs,
+            bankFeeAllocKgs: next.bankFeeAllocKgs,
+            otherAllocKgs: next.otherAllocKgs,
+            transportCostKgs: next.transportCostKgs,
+            finalCostKgs: next.finalCostKgs,
+            totalYuan: next.totalYuan,
+            totalCostKgs: next.totalCostKgs,
+          },
+        });
+      }
+      const updated = await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          totalYuan: calculated.totalYuan,
+          totalTransportCostKgs: calculated.totalTransportCostKgs,
+          totalCostKgs: calculated.totalCostKgs,
+          totalWeightKg: calculated.totalWeightKg,
+          costPerKg: calculated.costPerKg,
+        },
+        include: this.procurementOrderInclude(),
+      });
+      await this.auditProcurement(tx, user, 'RECALCULATE_PROCUREMENT_LANDED_COST', id, oldValue, this.pickProcurementAuditFields(updated), reason);
+      return updated;
+    });
+  }
+
+  procurementOrderAuditLogs(id: string) {
+    return this.prisma.auditLog.findMany({
+      where: {
+        entity: 'ProcurementOrder',
+        entityId: id,
+      },
+      include: { user: { select: { id: true, fullName: true, email: true } } },
+      orderBy: { timestamp: 'desc' },
+    });
+  }
+
+  updateProcurementStatus(user: AuthUser, id: string, status: ProcurementOrderStatus, reason?: string) {
     if (status === ProcurementOrderStatus.ARRIVED || status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
       return this.markProcurementArrived(user, id);
     }
-    const data: any = { status };
-    if (status === ProcurementOrderStatus.APPROVED) {
-      data.approvedById = user.id;
-      data.approvedAt = new Date();
-    }
-    if (status === ProcurementOrderStatus.PAID) data.paidAt = new Date();
-    if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU) data.shippedAt = new Date();
-    return this.prisma.procurementOrder.update({ where: { id }, data, include: this.procurementOrderInclude() });
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.procurementOrder.findFirst({ where: { id, deletedAt: null }, include: { items: true } });
+      if (!existing) throw new NotFoundException('Procurement order not found');
+      const oldValue = this.pickProcurementAuditFields(existing);
+      const data: any = { status };
+      if (status === ProcurementOrderStatus.APPROVED) {
+        data.approvedById = user.id;
+        data.approvedAt = new Date();
+      }
+      if (status === ProcurementOrderStatus.PAID) data.paidAt = new Date();
+      if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU) data.shippedAt = new Date();
+      const updated = await tx.procurementOrder.update({ where: { id }, data, include: this.procurementOrderInclude() });
+      await this.auditProcurement(tx, user, 'PROCUREMENT_STATUS_CHANGE', id, oldValue, this.pickProcurementAuditFields(updated), reason, { status });
+      return updated;
+    });
   }
 
   private markProcurementArrived(user: AuthUser, id: string) {
@@ -464,8 +742,101 @@ export class ProcurementService {
       hqWarehouse: true,
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
-      items: { include: { product: true } },
+      items: { include: { product: true, supplier: true, factory: true }, orderBy: { createdAt: 'asc' as const } },
+      receivings: { include: { items: true }, orderBy: { createdAt: 'desc' as const } },
+      differenceReports: { orderBy: { createdAt: 'desc' as const } },
     };
+  }
+
+  private assertCanManageProcurement(user: AuthUser) {
+    if (this.canManageProcurement(user)) return;
+    throw new ForbiddenException('You do not have permission to manage procurement orders');
+  }
+
+  private canManageProcurement(user: AuthUser) {
+    const roles = user.roles?.length ? user.roles : [user.role];
+    return roles.some((role) =>
+      isFullAccessRole(role) ||
+      role === Role.PROCUREMENT_MANAGER ||
+      role === Role.SUPPLY_CHAIN_MANAGER
+    );
+  }
+
+  private canViewProcurementCosts(user: AuthUser) {
+    const roles = user.roles?.length ? user.roles : [user.role];
+    return this.canManageProcurement(user) ||
+      roles.some((role) => role === Role.FINANCE_MANAGER || role === Role.ACCOUNTANT || role === Role.WAREHOUSE_MANAGER);
+  }
+
+  assertCanViewProcurement(user: AuthUser) {
+    if (this.canViewProcurementCosts(user)) return;
+    throw new ForbiddenException('You do not have permission to view procurement orders');
+  }
+
+  private pickProcurementAuditFields(order: any) {
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      supplierId: order.supplierId,
+      factoryId: order.factoryId,
+      hqWarehouseId: order.hqWarehouseId,
+      defaultYuanRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
+      totalYuan: order.totalYuan?.toString?.() ?? order.totalYuan,
+      totalTransportCostKgs: order.totalTransportCostKgs?.toString?.() ?? order.totalTransportCostKgs,
+      totalCostKgs: order.totalCostKgs?.toString?.() ?? order.totalCostKgs,
+      totalWeightKg: order.totalWeightKg?.toString?.() ?? order.totalWeightKg,
+      costPerKg: order.costPerKg?.toString?.() ?? order.costPerKg,
+      chinaDomesticTransportKgs: order.chinaDomesticTransportKgs?.toString?.() ?? order.chinaDomesticTransportKgs,
+      chinaExportTransportKgs: order.chinaExportTransportKgs?.toString?.() ?? order.chinaExportTransportKgs,
+      localTransportKgs: order.localTransportKgs?.toString?.() ?? order.localTransportKgs,
+      packagingCostKgs: order.packagingCostKgs?.toString?.() ?? order.packagingCostKgs,
+      customsCostKgs: order.customsCostKgs?.toString?.() ?? order.customsCostKgs,
+      insuranceCostKgs: order.insuranceCostKgs?.toString?.() ?? order.insuranceCostKgs,
+      bankFeeCostKgs: order.bankFeeCostKgs?.toString?.() ?? order.bankFeeCostKgs,
+      otherExpenseKgs: order.otherExpenseKgs?.toString?.() ?? order.otherExpenseKgs,
+      items: order.items?.map((item: any) => ({
+        id: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        quantity: item.quantity,
+        receivedQuantity: item.receivedQuantity,
+        purchasePriceYuan: item.purchasePriceYuan?.toString?.() ?? item.purchasePriceYuan,
+        yuanRate: item.yuanRate?.toString?.() ?? item.yuanRate,
+        weightKg: item.weightKg?.toString?.() ?? item.weightKg,
+        finalCostKgs: item.finalCostKgs?.toString?.() ?? item.finalCostKgs,
+      })),
+    };
+  }
+
+  private auditProcurement(
+    tx: any,
+    user: AuthUser,
+    action: string,
+    entityId: string,
+    oldValue: unknown,
+    newValue: unknown,
+    reason?: string,
+    extra?: Record<string, unknown>,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'ProcurementOrder',
+        entityId,
+        metadata: {
+          userId: user.id,
+          userRole: user.role,
+          roles: user.roles ?? [user.role],
+          oldValue,
+          newValue,
+          reason: reason?.trim() || null,
+          ...extra,
+        },
+      },
+    });
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
