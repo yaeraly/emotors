@@ -250,20 +250,22 @@ export function canResetUserPassword(
   );
 }
 
+export const PRODUCT_CATALOG_MANAGE_ROLES = ['CEO', 'SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER'] as const;
+
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return hasPermission(user, 'products.view');
 }
 
 export function canCreateProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasPermission(user, 'products.manage');
+  return hasAnyRole(user, [...PRODUCT_CATALOG_MANAGE_ROLES]);
 }
 
 export function canEditProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasPermission(user, 'products.manage');
+  return canCreateProduct(user);
 }
 
 export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasPermission(user, 'products.archive');
+  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER']);
 }
 
 /** @deprecated Use canCreateProduct / canEditProduct */

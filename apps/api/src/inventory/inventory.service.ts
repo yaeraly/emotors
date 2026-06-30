@@ -14,7 +14,7 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, isFullAccessRole, userHasPermission } from '../rbac/rbac';
+import { hasAnyFullAccessRole, isFullAccessRole, userCanArchiveProductCatalog, userCanManageProductCatalog, userHasPermission } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -262,7 +262,7 @@ export class InventoryService {
             });
           }
 
-          await this.auditInTx(tx, user, branchId, 'product_created', 'Product', existingProduct.id, {
+          await this.auditInTx(tx, user, branchId, 'PRODUCT_CREATED', 'Product', existingProduct.id, {
             sku: dto.sku,
             name: dto.name,
             restored: true,
@@ -317,7 +317,7 @@ export class InventoryService {
           });
         }
 
-        await this.auditInTx(tx, user, branchId, 'product_created', 'Product', product.id, {
+        await this.auditInTx(tx, user, branchId, 'PRODUCT_CREATED', 'Product', product.id, {
           sku: product.sku,
           name: product.name,
         });
@@ -328,6 +328,9 @@ export class InventoryService {
         };
       });
     } catch (error) {
+      if (error instanceof ForbiddenException || error instanceof BadRequestException || error instanceof ConflictException || error instanceof NotFoundException) {
+        throw error;
+      }
       this.logProductCreateFailure(user, dto, error);
       if (this.isUniqueConstraintError(error)) {
         throw new ConflictException('Active product with this SKU already exists');
@@ -493,7 +496,7 @@ export class InventoryService {
         },
       });
 
-      await this.auditInTx(tx, user, current.branchId, 'product_updated', 'Product', id, {
+      await this.auditInTx(tx, user, current.branchId, 'PRODUCT_UPDATED', 'Product', id, {
         sku: dto.sku ?? current.sku,
         name: dto.name ?? current.name,
         changedFields: Object.keys(dto).filter((key) => dto[key as keyof UpdateProductDto] !== undefined),
@@ -521,7 +524,7 @@ export class InventoryService {
       data: { deletedAt: new Date(), isActive: false },
     });
 
-    await this.auditInTx(this.prisma, user, product.branchId, 'product_archived', 'Product', id, {
+    await this.auditInTx(this.prisma, user, product.branchId, 'PRODUCT_ARCHIVED', 'Product', id, {
       sku: product.sku,
       name: product.name,
       deactivated: hasHistory,
@@ -1027,14 +1030,18 @@ export class InventoryService {
   }
 
   private assertCanManageProduct(user: AuthUser) {
-    if (!userHasPermission(user, 'products.manage')) {
-      throw new ForbiddenException('You do not have permission to manage products');
+    if (!userCanManageProductCatalog(user)) {
+      throw new ForbiddenException(
+        'Only CEO, Supply Chain Manager, or HQ Warehouse Manager can create or edit products',
+      );
     }
   }
 
   private assertCanArchiveProduct(user: AuthUser) {
-    if (!userHasPermission(user, 'products.archive')) {
-      throw new ForbiddenException('You do not have permission to archive products');
+    if (!userCanArchiveProductCatalog(user)) {
+      throw new ForbiddenException(
+        'Only CEO or Supply Chain Manager can archive products',
+      );
     }
   }
 
@@ -1114,6 +1121,7 @@ export class InventoryService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
+          productId: entityId,
           ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata)
             ? (metadata as Record<string, unknown>)
             : {}),

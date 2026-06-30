@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -15,6 +16,7 @@ import { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { PRODUCT_CATALOG_ARCHIVE_ROLES, PRODUCT_CATALOG_MANAGE_ROLES } from '../rbac/rbac';
 import { Permissions } from '../roles/permissions.decorator';
 import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
@@ -74,14 +76,14 @@ export class InventoryController {
 
   @Post('products')
   @Permissions('products.manage')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...PRODUCT_CATALOG_MANAGE_ROLES)
   createProduct(@CurrentUser() user: AuthUser, @Body() dto: CreateProductDto) {
     return this.inventoryService.createProduct(user, dto);
   }
 
   @Post('products/upload-image')
   @Permissions('products.manage')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...PRODUCT_CATALOG_MANAGE_ROLES)
   uploadProductImage(@Req() request: FastifyRequest) {
     return this.inventoryService.uploadProductImage(request);
   }
@@ -126,8 +128,19 @@ export class InventoryController {
 
   @Put('products/:id')
   @Permissions('products.manage')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...PRODUCT_CATALOG_MANAGE_ROLES)
   updateProduct(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductDto,
+  ) {
+    return this.inventoryService.updateProduct(user, id, dto);
+  }
+
+  @Patch('products/:id')
+  @Permissions('products.manage')
+  @Roles(...PRODUCT_CATALOG_MANAGE_ROLES)
+  patchProduct(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: UpdateProductDto,
@@ -137,7 +150,7 @@ export class InventoryController {
 
   @Delete('products/:id')
   @Permissions('products.archive')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(...PRODUCT_CATALOG_ARCHIVE_ROLES)
   deleteProduct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.deleteProduct(user, id);
   }

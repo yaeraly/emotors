@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { InventoryBalance, ProductListResponse, StockValueReport } from '@/lib/types';
+import { canCreateProduct } from '@/lib/rbac';
+import type { InventoryBalance, ProductListResponse, StockValueReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function InventoryPage() {
@@ -12,6 +13,7 @@ export default function InventoryPage() {
   const [stockValue, setStockValue] = useState<StockValueReport | null>(null);
   const [lowStock, setLowStock] = useState<InventoryBalance[]>([]);
   const [products, setProducts] = useState<ProductListResponse | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [yuanRate, setYuanRate] = useState('');
 
@@ -20,11 +22,13 @@ export default function InventoryPage() {
       apiFetch<StockValueReport>('/inventory/stock-value'),
       apiFetch<InventoryBalance[]>('/inventory/low-stock'),
       apiFetch<ProductListResponse>('/inventory/products?pageSize=1'),
+      apiFetch<User>('/auth/me'),
     ])
-      .then(([stockValueResult, lowStockResult, productsResult]) => {
+      .then(([stockValueResult, lowStockResult, productsResult, userResult]) => {
         setStockValue(stockValueResult);
         setLowStock(lowStockResult);
         setProducts(productsResult);
+        setCurrentUser(userResult);
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : t('common.error')),
@@ -62,9 +66,11 @@ export default function InventoryPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" href="/products/new">
-              {t('inventory.createProduct')}
-            </Link>
+            {canCreateProduct(currentUser) ? (
+              <Link className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" href="/products/new">
+                {t('inventory.createProduct')}
+              </Link>
+            ) : null}
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/products">
               {t('inventory.products')}
             </Link>

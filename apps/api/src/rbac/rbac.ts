@@ -129,6 +129,27 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   SALESPERSON: ['sales.manage', 'products.view'],
 };
 
+export const PRODUCT_CATALOG_MANAGE_ROLES: Role[] = [
+  Role.CEO,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.WAREHOUSE_MANAGER,
+];
+
+export const PRODUCT_CATALOG_ARCHIVE_ROLES: Role[] = [
+  Role.CEO,
+  Role.SUPPLY_CHAIN_MANAGER,
+];
+
+export function userCanManageProductCatalog(user: { role: Role; roles?: Role[] }) {
+  const roles = uniqueRoles(user.roles?.length ? user.roles : [user.role]);
+  return roles.some((role) => PRODUCT_CATALOG_MANAGE_ROLES.includes(role));
+}
+
+export function userCanArchiveProductCatalog(user: { role: Role; roles?: Role[] }) {
+  const roles = uniqueRoles(user.roles?.length ? user.roles : [user.role]);
+  return roles.some((role) => PRODUCT_CATALOG_ARCHIVE_ROLES.includes(role));
+}
+
 export function isFullAccessRole(role: Role) {
   return FULL_ACCESS_ROLES.includes(role);
 }
