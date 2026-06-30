@@ -13,6 +13,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
+import { normalizeBranchId, resolveWritableBranchId } from '../rbac/branch-scope';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -595,6 +596,15 @@ export class InventoryService {
 
   async createWarehouse(user: AuthUser, dto: CreateWarehouseDto) {
     const branchId = this.resolveBranchId(user, dto.branchId);
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (!branch) {
+      throw new BadRequestException('Branch not found');
+    }
+
     return this.prisma.warehouse.create({
       data: {
         branchId,
@@ -837,27 +847,26 @@ export class InventoryService {
   }
 
   private resolveBranchId(user: AuthUser, requestedBranchId?: string) {
-    if (this.canAccessAllInventory(user)) {
-      return requestedBranchId ?? user.branchId;
-    }
-
-    if (requestedBranchId && requestedBranchId !== user.branchId) {
-      throw new ForbiddenException('You can only access your own branch');
-    }
-
-    return user.branchId;
+    return resolveWritableBranchId(
+      user,
+      requestedBranchId,
+      this.canAccessAllInventory(user),
+    );
   }
 
   private buildBranchWhere(user: AuthUser, requestedBranchId?: string) {
+    const requested = normalizeBranchId(requestedBranchId);
+    const userBranch = normalizeBranchId(user.branchId);
+
     if (this.canAccessAllInventory(user)) {
-      return requestedBranchId ? { branchId: requestedBranchId } : {};
+      return requested ? { branchId: requested } : {};
     }
 
-    if (requestedBranchId && requestedBranchId !== user.branchId) {
+    if (requested && requested !== userBranch) {
       throw new ForbiddenException('You can only access your own branch');
     }
 
-    return { branchId: user.branchId };
+    return { branchId: userBranch };
   }
 
   private async ensureSkuAvailable(

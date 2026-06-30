@@ -87,6 +87,27 @@ async function main() {
     },
   });
 
+  await prisma.warehouse.upsert({
+    where: {
+      branchId_code: {
+        branchId: branch.id,
+        code: 'HQ-MAIN',
+      },
+    },
+    update: {
+      name: 'HQ Main Warehouse',
+      address: 'Bishkek HQ',
+      isActive: true,
+    },
+    create: {
+      branchId: branch.id,
+      name: 'HQ Main Warehouse',
+      code: 'HQ-MAIN',
+      address: 'Bishkek HQ',
+      isActive: true,
+    },
+  });
+
   const passwordHash = await bcrypt.hash('password123', 12);
 
   await prisma.user.upsert({

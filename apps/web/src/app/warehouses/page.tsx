@@ -3,15 +3,19 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { Warehouse } from '@/lib/types';
+import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function WarehousesPage() {
   const { t } = useTranslation();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [editing, setEditing] = useState<Warehouse | null>(null);
   const [error, setError] = useState('');
-  const [form, setForm] = useState({ name: '', code: '', address: '' });
+  const [form, setForm] = useState({ name: '', code: '', address: '', branchId: '' });
+
+  const requiresBranchSelection = !currentUser?.branchId;
 
   useEffect(() => {
     void load();
@@ -19,7 +23,18 @@ export default function WarehousesPage() {
 
   async function load() {
     try {
-      setWarehouses(await apiFetch<Warehouse[]>('/inventory/warehouses'));
+      const [warehouseResult, currentUserResult, branchResult] = await Promise.all([
+        apiFetch<Warehouse[]>('/inventory/warehouses'),
+        apiFetch<User>('/auth/me'),
+        apiFetch<Branch[]>('/branches'),
+      ]);
+      setWarehouses(warehouseResult);
+      setCurrentUser(currentUserResult);
+      setBranches(branchResult);
+      setForm((current) => ({
+        ...current,
+        branchId: current.branchId || currentUserResult.branchId || branchResult[0]?.id || '',
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -29,20 +44,39 @@ export default function WarehousesPage() {
     event.preventDefault();
     setError('');
 
+    if (requiresBranchSelection && !form.branchId) {
+      setError(t('warehouse.branchRequired'));
+      return;
+    }
+
     try {
       if (editing) {
         await apiFetch(`/inventory/warehouses/${editing.id}`, {
           method: 'PUT',
-          body: JSON.stringify(form),
+          body: JSON.stringify({
+            name: form.name,
+            code: form.code,
+            address: form.address,
+          }),
         });
       } else {
         await apiFetch('/inventory/warehouses', {
           method: 'POST',
-          body: JSON.stringify(form),
+          body: JSON.stringify({
+            name: form.name,
+            code: form.code,
+            address: form.address,
+            ...(requiresBranchSelection ? { branchId: form.branchId } : {}),
+          }),
         });
       }
       setEditing(null);
-      setForm({ name: '', code: '', address: '' });
+      setForm({
+        name: '',
+        code: '',
+        address: '',
+        branchId: currentUser?.branchId || branches[0]?.id || '',
+      });
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -55,6 +89,7 @@ export default function WarehousesPage() {
       name: warehouse.name,
       code: warehouse.code,
       address: warehouse.address ?? '',
+      branchId: warehouse.branchId,
     });
   }
 
@@ -67,6 +102,24 @@ export default function WarehousesPage() {
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <form onSubmit={submit} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
+          {requiresBranchSelection ? (
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('common.branch')}</span>
+              <select
+                value={form.branchId}
+                onChange={(event) => setForm({ ...form, branchId: event.target.value })}
+                required
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              >
+                <option value="">{t('warehouse.selectBranch')}</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <Input label={t('warehouse.name')} value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
           <Input label={t('warehouse.code')} value={form.code} onChange={(value) => setForm({ ...form, code: value })} />
           <Input label={t('warehouse.address')} value={form.address} onChange={(value) => setForm({ ...form, address: value })} />
