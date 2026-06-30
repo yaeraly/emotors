@@ -81,6 +81,13 @@ export default function NewProductPage() {
         return;
       }
 
+      const weightKg = Number(form.weightKg);
+      if (!Number.isFinite(weightKg) || weightKg <= 0) {
+        setError(t('inventory.weightMustBePositive'));
+        setSaving(false);
+        return;
+      }
+
       const product = await apiFetch<Product & { restored?: boolean }>('/inventory/products', {
         method: 'POST',
         body: JSON.stringify({
@@ -89,7 +96,7 @@ export default function NewProductPage() {
             ? JSON.parse(form.characteristics)
             : undefined,
           categoryId: form.categoryId,
-          weightKg: Number(form.weightKg),
+          weightKg,
           purchasePriceYuan: Number(form.purchasePriceYuan),
           latestYuanRate: Number(form.latestYuanRate),
           transportCostPerKg: Number(form.transportCostPerKg),
@@ -150,7 +157,7 @@ export default function NewProductPage() {
                 {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
               </select>
             </label>
-            <Input label={t('inventory.weightKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} />
+            <Input label={t('inventory.weightPerUnitKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} min="0.001" step="0.001" />
             <Input label={t('inventory.purchasePriceYuan')} type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
             <Input label={t('inventory.latestYuanRate')} type="number" value={form.latestYuanRate} onChange={(value) => setField('latestYuanRate', value)} />
             <Input label={t('inventory.transportCost')} type="number" value={form.transportCostPerKg} onChange={(value) => setField('transportCostPerKg', value)} />
@@ -183,11 +190,11 @@ export default function NewProductPage() {
   );
 }
 
-function Input({ label, value, onChange, type = 'text', required, error }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean; error?: string }) {
+function Input({ label, value, onChange, type = 'text', required, error, min, step }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean; error?: string; min?: string; step?: string }) {
   return (
     <label className="block">
       <span className="text-sm font-semibold text-slate-700">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} required={required} type={type} min={type === 'number' ? 0 : undefined} step={type === 'number' ? '0.01' : undefined} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+      <input value={value} onChange={(event) => onChange(event.target.value)} required={required} type={type} min={min ?? (type === 'number' ? 0 : undefined)} step={step ?? (type === 'number' ? '0.01' : undefined)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
       {error ? <span className="mt-1 block text-xs font-semibold text-red-600">{error}</span> : null}
     </label>
   );

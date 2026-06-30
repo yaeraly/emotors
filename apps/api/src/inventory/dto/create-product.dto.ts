@@ -55,7 +55,6 @@ export class CreateProductDto {
 
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
   weightKg!: number;
 
   @Type(() => Number)

@@ -22,11 +22,13 @@ export default function ProductDetailPage() {
     sku: '',
     categoryId: '',
     photoUrl: '',
+    weightKg: '0',
     sellingPriceKgs: '0',
     minStockLevel: '0',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
@@ -44,6 +46,7 @@ export default function ProductDetailPage() {
           sku: productResult.sku,
           categoryId: productResult.categoryId,
           photoUrl: productResult.photoUrl ?? '',
+          weightKg: String(productResult.weightKg),
           sellingPriceKgs: String(productResult.sellingPriceKgs),
           minStockLevel: String(productResult.minStockLevel),
         });
@@ -57,10 +60,18 @@ export default function ProductDetailPage() {
     event.preventDefault();
     setSaving(true);
     setError('');
+    setSuccessMessage('');
 
     try {
       if (!editForm.categoryId) {
         setError(t('inventory.categoryRequired'));
+        return;
+      }
+
+      const nextWeight = Number(editForm.weightKg);
+      const weightChanged = product ? nextWeight !== Number(product.weightKg) : false;
+      if (canEditProductCatalog(currentUser) && (!Number.isFinite(nextWeight) || nextWeight <= 0)) {
+        setError(t('inventory.weightMustBePositive'));
         return;
       }
 
@@ -71,11 +82,19 @@ export default function ProductDetailPage() {
           sku: editForm.sku,
           categoryId: editForm.categoryId,
           photoUrl: editForm.photoUrl || null,
+          ...(canEditProductCatalog(currentUser)
+            ? { weightKg: nextWeight }
+            : {}),
           sellingPriceKgs: Number(editForm.sellingPriceKgs),
           minStockLevel: Number(editForm.minStockLevel),
         }),
       });
       setProduct(updated);
+      setSuccessMessage(
+        weightChanged && canEditProductCatalog(currentUser)
+          ? t('inventory.productWeightUpdatedSuccess')
+          : t('common.success'),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -88,6 +107,7 @@ export default function ProductDetailPage() {
       <section className="space-y-6">
         <Link href="/products" className="text-sm font-semibold text-blue-700">{t('inventory.products')}</Link>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {successMessage ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p> : null}
         {product ? (
           <>
             <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -104,6 +124,7 @@ export default function ProductDetailPage() {
                   <div className="mt-6 grid gap-4 md:grid-cols-4">
                     <Info label={t('inventory.category')} value={product.productCategory ? categoryName(product.productCategory, language) : product.category} />
                     <Info label={t('inventory.warehouse')} value={product.warehouse?.name ?? ''} />
+                    <Info label={t('inventory.weightPerUnitKg')} value={`${Number(product.weightKg).toFixed(3)} kg`} />
                     <Info label={t('inventory.quantity')} value={String(product.quantity)} />
                     <Info label={t('inventory.lowStock')} value={product.lowStock ? t('inventory.lowStockAlert') : t('inventory.inStock')} />
                   </div>
@@ -129,6 +150,7 @@ export default function ProductDetailPage() {
                   </select>
                 </label>
                 <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
+                <Input label={t('inventory.weightPerUnitKg')} type="number" value={editForm.weightKg} onChange={(value) => setEditForm({ ...editForm, weightKg: value })} min="0.001" step="0.001" />
                 <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
                 <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
               </form>
@@ -188,8 +210,8 @@ function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase text-slate-400">{label}</p><p className="font-bold text-slate-950">{value}</p></div>;
 }
 
-function Input({ label, value, onChange, type = 'text' }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
-  return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} type={type} min={type === 'number' ? 0 : undefined} step={type === 'number' ? '0.01' : undefined} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
+function Input({ label, value, onChange, type = 'text', min, step }: { label: string; value: string; onChange: (value: string) => void; type?: string; min?: string; step?: string }) {
+  return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} type={type} min={min ?? (type === 'number' ? 0 : undefined)} step={step ?? (type === 'number' ? '0.01' : undefined)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
 }
 
 function formatKgs(value: number | string | null | undefined) {

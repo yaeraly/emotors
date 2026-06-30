@@ -54,8 +54,11 @@ export class UpdateProductDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
   weightKg?: number;
+
+  @IsOptional()
+  @IsString()
+  weightChangeReason?: string;
 
   @IsOptional()
   @Type(() => Number)

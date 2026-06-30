@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
+import { Prisma, ProcurementOrderStatus, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { MultipartFile } from '@fastify/multipart';
 import { FastifyRequest } from 'fastify';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -34,6 +34,7 @@ import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
+import { calculateLandedCosts, extractLogisticsCosts } from '../procurement/landed-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -214,6 +215,7 @@ export class InventoryService {
         assertProductWarehouseBranchMatch(warehouse, branchId);
 
         const category = await this.getActiveCategory(tx, dto.categoryId);
+        this.assertPositiveProductWeight(dto.weightKg);
         const costs = this.calculateCosts({
           weightKg: dto.weightKg,
           purchasePriceYuan: dto.purchasePriceYuan,
@@ -442,6 +444,13 @@ export class InventoryService {
         ? await this.getActiveCategory(tx, dto.categoryId)
         : null;
 
+      const oldWeightKg = Number(current.weightKg);
+      if (dto.weightKg !== undefined) {
+        this.assertPositiveProductWeight(dto.weightKg);
+      }
+      const weightChanged =
+        dto.weightKg !== undefined && Number(dto.weightKg) !== oldWeightKg;
+
       const next = {
         weightKg: dto.weightKg ?? Number(current.weightKg),
         purchasePriceYuan:
@@ -515,6 +524,19 @@ export class InventoryService {
           sellingPriceKgs: next.sellingPriceKgs,
         },
       });
+
+      if (weightChanged && dto.weightKg !== undefined) {
+        await this.auditInTx(tx, user, current.branchId, 'PRODUCT_WEIGHT_CHANGED', 'Product', id, {
+          entityType: 'Product',
+          productId: id,
+          oldWeight: oldWeightKg,
+          newWeight: dto.weightKg,
+          oldValue: { weightKg: oldWeightKg },
+          newValue: { weightKg: dto.weightKg },
+          reason: dto.weightChangeReason,
+        });
+        await this.syncProductWeightToOpenProcurementOrders(tx, id, dto.weightKg);
+      }
 
       return this.getProductResponseInTx(tx, user, id);
     });
@@ -1101,6 +1123,84 @@ export class InventoryService {
       throw new BadRequestException('Warehouse is required');
     }
     return warehouse;
+  }
+
+  private assertPositiveProductWeight(weightKg: number) {
+    if (!Number.isFinite(weightKg) || weightKg <= 0) {
+      throw new BadRequestException('Product weight must be greater than zero');
+    }
+  }
+
+  private async syncProductWeightToOpenProcurementOrders(
+    tx: PrismaTx,
+    productId: string,
+    newWeightKg: number,
+  ) {
+    const completedStatuses: ProcurementOrderStatus[] = [
+      ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE,
+      ProcurementOrderStatus.CLOSED,
+      ProcurementOrderStatus.CANCELLED,
+    ];
+
+    const orders = await tx.procurementOrder.findMany({
+      where: {
+        deletedAt: null,
+        hqStockMovementCreatedAt: null,
+        status: { notIn: completedStatuses },
+        items: { some: { productId } },
+      },
+      include: { items: true },
+    });
+
+    for (const order of orders) {
+      const exchangeRate = Number(order.defaultYuanRate);
+      const logistics = extractLogisticsCosts(order);
+      const calculated = calculateLandedCosts(
+        order.items.map((item) => ({
+          quantity: item.quantity,
+          receivedQuantity: item.receivedQuantity,
+          purchasePriceYuan: Number(item.purchasePriceYuan),
+          yuanRate: exchangeRate,
+          weightKg: item.productId === productId ? newWeightKg : Number(item.weightKg),
+        })),
+        logistics,
+      );
+
+      for (const [index, item] of order.items.entries()) {
+        const next = calculated.items[index];
+        await tx.procurementOrderItem.update({
+          where: { id: item.id },
+          data: {
+            ...(item.productId === productId ? { weightKg: newWeightKg } : {}),
+            totalWeightKg: next.totalWeightKg,
+            costKgs: next.costKgs,
+            chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
+            chinaExportAllocKgs: next.chinaExportAllocKgs,
+            localTransportAllocKgs: next.localTransportAllocKgs,
+            packagingAllocKgs: next.packagingAllocKgs,
+            customsAllocKgs: next.customsAllocKgs,
+            insuranceAllocKgs: next.insuranceAllocKgs,
+            bankFeeAllocKgs: next.bankFeeAllocKgs,
+            otherAllocKgs: next.otherAllocKgs,
+            transportCostKgs: next.transportCostKgs,
+            finalCostKgs: next.finalCostKgs,
+            totalYuan: next.totalYuan,
+            totalCostKgs: next.totalCostKgs,
+          },
+        });
+      }
+
+      await tx.procurementOrder.update({
+        where: { id: order.id },
+        data: {
+          totalYuan: calculated.totalYuan,
+          totalTransportCostKgs: calculated.totalTransportCostKgs,
+          totalCostKgs: calculated.totalCostKgs,
+          totalWeightKg: calculated.totalWeightKg,
+          costPerKg: calculated.costPerKg,
+        },
+      });
+    }
   }
 
   private assertCanManageProductCatalog(user: AuthUser) {
