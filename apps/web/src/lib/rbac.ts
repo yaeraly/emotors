@@ -120,7 +120,10 @@ export function getDefaultRoute(role: Role) {
   return '/dashboard';
 }
 
-export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions'>) {
+export function getDefaultRouteForUser(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+) {
+  if (!user) return '/dashboard';
   if (hasRole(user, 'OWNER') || hasRole(user, 'CEO') || hasRole(user, 'SYSTEM_ADMINISTRATOR')) return '/dashboard';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.manage')) return '/procurement';

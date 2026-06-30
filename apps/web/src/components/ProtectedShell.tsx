@@ -46,9 +46,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           return;
         }
         setUser(currentUser);
+        setLoading(false);
       })
-      .catch(() => router.replace('/login'))
-      .finally(() => setLoading(false));
+      .catch(() => router.replace('/login'));
   }, [pathname, router]);
 
   async function logout() {
@@ -57,7 +57,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     router.replace('/login');
   }
 
-  if (loading) {
+  if (loading || !user) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">
         {t('common.loading')}
@@ -150,7 +150,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           </p>
           <nav className="space-y-2">
             <Link
-              href={getDefaultRouteForUser(user!)}
+              href={getDefaultRouteForUser(user)}
               className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
               {t('nav.dashboard')}
