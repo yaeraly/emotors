@@ -3,12 +3,15 @@ import { Role, UserStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Permissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { UsersService } from './users.service';
 
 @Controller('users')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Permissions('users.manage')
 @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
@@ -34,7 +37,6 @@ export class UsersController {
   }
 
   @Post(':id/reset-password')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
   resetPassword(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.usersService.resetPassword(user, id);
   }

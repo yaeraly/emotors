@@ -3,13 +3,16 @@ import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Permissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { PayrollService } from './payroll.service';
 
 @Controller('payroll')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Permissions('payroll.manage')
+@Roles(Role.OWNER, Role.CEO, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
 export class PayrollController {
   constructor(private readonly payrollService: PayrollService) {}
 
@@ -19,7 +22,6 @@ export class PayrollController {
   }
 
   @Post('generate')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
   generate(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.payrollService.generate(user, dto);
   }
@@ -30,13 +32,12 @@ export class PayrollController {
   }
 
   @Post(':id/approve')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.FINANCE_MANAGER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.payrollService.approve(user, id);
   }
 
   @Post(':id/mark-paid')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
   markPaid(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.payrollService.markPaid(user, id);
   }

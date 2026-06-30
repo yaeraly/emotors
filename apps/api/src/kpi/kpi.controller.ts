@@ -3,13 +3,16 @@ import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Permissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { KpiService } from './kpi.service';
 
 @Controller('kpi')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MASTER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Permissions('kpi.view', 'analytics.view')
+@Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MASTER, Role.FINANCE_MANAGER, Role.FRANCHISE_DIRECTOR)
 export class KpiController {
   constructor(private readonly kpiService: KpiService) {}
 
@@ -34,6 +37,8 @@ export class KpiController {
   }
 
   @Post('targets')
+  @Permissions('kpi.view')
+  @Roles(Role.OWNER, Role.CEO, Role.FINANCE_MANAGER, Role.FRANCHISE_DIRECTOR)
   targets(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.kpiService.createTarget(user, dto);
   }
@@ -44,6 +49,8 @@ export class KpiController {
   }
 
   @Post('nps')
+  @Permissions('kpi.view')
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MASTER, Role.FINANCE_MANAGER)
   nps(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.kpiService.createNps(user, dto);
   }

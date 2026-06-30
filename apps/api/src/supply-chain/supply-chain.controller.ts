@@ -3,13 +3,16 @@ import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Permissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { SupplyChainService } from './supply-chain.service';
 
 @Controller('supply-chain')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Permissions('distribution.manage')
+@Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR, Role.WAREHOUSE_MANAGER)
 export class SupplyChainController {
   constructor(private readonly service: SupplyChainService) {}
   @Post('transfers') createTransfer(@CurrentUser() user: AuthUser, @Body() dto: any) { return this.service.createTransfer(user, dto); }

@@ -1,22 +1,24 @@
 import { Role } from '@prisma/client';
 
-export const FULL_ACCESS_ROLES: Role[] = [
-  Role.OWNER,
-  Role.CEO,
-  Role.SYSTEM_ADMINISTRATOR,
-];
+/** CEO (and legacy OWNER) bypass role/permission checks in guards. */
+export const FULL_ACCESS_ROLES: Role[] = [Role.OWNER, Role.CEO];
+
+/** Only CEO is the HQ super administrator. */
+export const SUPER_ADMIN_ROLES: Role[] = [Role.CEO];
 
 export const HQ_ROLES: Role[] = [
-  ...FULL_ACCESS_ROLES,
+  Role.CEO,
+  Role.SYSTEM_ADMINISTRATOR,
   Role.FRANCHISE_DIRECTOR,
-  Role.FINANCE_MANAGER,
+  Role.SUPPLY_CHAIN_MANAGER,
   Role.WAREHOUSE_MANAGER,
+  Role.FINANCE_MANAGER,
+  Role.ACCOUNTANT,
+  Role.MARKETING_MANAGER,
   Role.CONTENT_CREATOR,
   Role.ACADEMY_DIRECTOR,
   Role.ACADEMY_MANAGER,
-  Role.MARKETING_MANAGER,
   Role.PROCUREMENT_MANAGER,
-  Role.SUPPLY_CHAIN_MANAGER,
   Role.INVESTMENT_MANAGER,
   Role.EXPANSION_MANAGER,
 ];
@@ -31,6 +33,7 @@ export const BRANCH_REQUIRED_ROLES: Role[] = [
 
 export const ALL_PERMISSION_CODES = [
   'users.manage',
+  'roles.manage',
   'branches.manage',
   'crm.manage',
   'sales.manage',
@@ -47,24 +50,52 @@ export const ALL_PERMISSION_CODES = [
   'distribution.manage',
   'academy.manage',
   'marketing.manage',
+  'marketing.content',
   'analytics.view',
+  'audit.view',
+  'settings.manage',
 ] as const;
+
+export type PermissionCode = (typeof ALL_PERMISSION_CODES)[number];
 
 export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSION_CODES],
   CEO: [...ALL_PERMISSION_CODES],
-  SYSTEM_ADMINISTRATOR: [...ALL_PERMISSION_CODES],
-  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'analytics.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view', 'procurement.landed_cost.view'],
-  WAREHOUSE_MANAGER: ['inventory.manage', 'distribution.manage'],
-  CONTENT_CREATOR: ['marketing.manage'],
+  SYSTEM_ADMINISTRATOR: [
+    'users.manage',
+    'roles.manage',
+    'audit.view',
+    'settings.manage',
+  ],
+  FRANCHISE_DIRECTOR: [
+    'branches.manage',
+    'academy.manage',
+    'kpi.view',
+    'audit.view',
+    'analytics.view',
+  ],
+  SUPPLY_CHAIN_MANAGER: [
+    'procurement.manage',
+    'distribution.manage',
+    'inventory.manage',
+    'inventory.view',
+  ],
+  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage'],
+  FINANCE_MANAGER: [
+    'finance.view',
+    'payroll.manage',
+    'reports.view',
+    'analytics.view',
+    'procurement.landed_cost.view',
+  ],
+  ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
+  MARKETING_MANAGER: ['marketing.manage'],
+  CONTENT_CREATOR: ['marketing.content'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
-  MARKETING_MANAGER: ['marketing.manage'],
   PROCUREMENT_MANAGER: ['procurement.manage'],
-  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
-  INVESTMENT_MANAGER: ['analytics.view'],
-  EXPANSION_MANAGER: ['analytics.view'],
+  INVESTMENT_MANAGER: ['analytics.view', 'branches.manage'],
+  EXPANSION_MANAGER: ['analytics.view', 'branches.manage'],
   FRANCHISE_OWNER: [
     'users.manage',
     'crm.manage',
@@ -81,7 +112,6 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MASTER: ['service.manage', 'kpi.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
-  ACCOUNTANT: ['finance.view', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
 
@@ -89,12 +119,21 @@ export function isFullAccessRole(role: Role) {
   return FULL_ACCESS_ROLES.includes(role);
 }
 
+export function isSuperAdminRole(role: Role) {
+  return SUPER_ADMIN_ROLES.includes(role);
+}
+
 export function isHqRole(role: Role) {
   return HQ_ROLES.includes(role);
 }
 
 export function canAccessAllBranches(role: Role) {
-  return isHqRole(role);
+  return isFullAccessRole(role) || isHqRole(role);
+}
+
+export function userCanAccessAllBranches(user: { role: Role; roles?: Role[] }) {
+  const roles = user.roles?.length ? user.roles : [user.role];
+  return roles.some((role) => canAccessAllBranches(role));
 }
 
 export function requiresBranch(role: Role) {
@@ -119,12 +158,42 @@ export function hasAnyFullAccessRole(roles: Role[]) {
   return uniqueRoles(roles).some((role) => isFullAccessRole(role));
 }
 
+export function hasAnySuperAdminRole(roles: Role[]) {
+  return uniqueRoles(roles).some((role) => isSuperAdminRole(role));
+}
+
 export function hasAnyHqRole(roles: Role[]) {
   return uniqueRoles(roles).some((role) => isHqRole(role));
 }
 
 export function anyRoleRequiresBranch(roles: Role[]) {
   return uniqueRoles(roles).some((role) => requiresBranch(role));
+}
+
+export function userHasPermission(
+  user: { role: Role; roles?: Role[]; permissions?: string[] },
+  ...required: string[]
+) {
+  if (!required.length) return true;
+  const roles = user.roles?.length ? user.roles : [user.role];
+  if (hasAnyFullAccessRole(roles)) return true;
+  const permissions = user.permissions?.length
+    ? user.permissions
+    : permissionsForRoles(roles);
+  return required.some((code) => permissions.includes(code));
+}
+
+export function userHasAllPermissions(
+  user: { role: Role; roles?: Role[]; permissions?: string[] },
+  ...required: string[]
+) {
+  if (!required.length) return true;
+  const roles = user.roles?.length ? user.roles : [user.role];
+  if (hasAnyFullAccessRole(roles)) return true;
+  const permissions = user.permissions?.length
+    ? user.permissions
+    : permissionsForRoles(roles);
+  return required.every((code) => permissions.includes(code));
 }
 
 export function roleCanAccessRequiredRoles(role: Role, requiredRoles: Role[]) {

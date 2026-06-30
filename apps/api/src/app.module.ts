@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AuditModule } from './audit/audit.module';
 import { AcademyModule } from './academy/academy.module';
 import { AiModule } from './ai/ai.module';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -17,6 +18,8 @@ import { OperationsModule } from './operations/operations.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { ProcurementModule } from './procurement/procurement.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { RbacModule } from './rbac/rbac.module';
+import { RolesModule } from './roles/roles.module';
 import { RoyaltyModule } from './royalty/royalty.module';
 import { SalesModule } from './sales/sales.module';
 import { ServiceModule } from './service/service.module';
@@ -30,7 +33,10 @@ import { UsersModule } from './users/users.module';
       isGlobal: true,
     }),
     PrismaModule,
+    RolesModule,
     AuthModule,
+    AuditModule,
+    RbacModule,
     BranchesModule,
     CommissionsModule,
     CustomersModule,

@@ -1,13 +1,16 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Permissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { InvestmentService } from './investment.service';
 
 @Controller('investment')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.INVESTMENT_MANAGER)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Permissions('analytics.view')
+@Roles(Role.OWNER, Role.CEO, Role.INVESTMENT_MANAGER)
 export class InvestmentController {
   constructor(private readonly service: InvestmentService) {}
   @Post('investors') createInvestor(@Body() dto: any) { return this.service.createInvestor(dto); }

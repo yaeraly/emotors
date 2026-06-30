@@ -15,6 +15,8 @@ import { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Permissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -31,11 +33,11 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { InventoryService } from './inventory.service';
 
 @Controller('inventory')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Permissions('inventory.manage', 'inventory.view')
 @Roles(
   Role.OWNER,
   Role.CEO,
-  Role.SYSTEM_ADMINISTRATOR,
   Role.FRANCHISE_OWNER,
   Role.MANAGER,
   Role.WAREHOUSE_MANAGER,
@@ -46,43 +48,46 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get('categories')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
   categories(@Query('search') search?: string) {
     return this.inventoryService.categories(search);
   }
 
   @Post('categories')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Permissions('inventory.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.inventoryService.createCategory(dto);
   }
 
   @Get('categories/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
   category(@Param('id') id: string) {
     return this.inventoryService.category(id);
   }
 
   @Put('categories/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.inventoryService.updateCategory(id, dto);
   }
 
   @Delete('categories/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   deleteCategory(@Param('id') id: string) {
     return this.inventoryService.deleteCategory(id);
   }
 
   @Post('products')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Permissions('procurement.manage', 'inventory.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   createProduct(@CurrentUser() user: AuthUser, @Body() dto: CreateProductDto) {
     return this.inventoryService.createProduct(user, dto);
   }
 
   @Post('products/upload-image')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Permissions('procurement.manage', 'inventory.manage', 'marketing.content', 'marketing.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.MARKETING_MANAGER, Role.CONTENT_CREATOR)
   uploadProductImage(@Req() request: FastifyRequest) {
     return this.inventoryService.uploadProductImage(request);
   }
@@ -98,7 +103,8 @@ export class InventoryController {
   }
 
   @Put('products/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Permissions('procurement.manage', 'inventory.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   updateProduct(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -108,13 +114,15 @@ export class InventoryController {
   }
 
   @Delete('products/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Permissions('procurement.manage', 'inventory.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   deleteProduct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.deleteProduct(user, id);
   }
 
   @Post('products/:id/price-history')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Permissions('procurement.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   addPriceHistory(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -129,7 +137,8 @@ export class InventoryController {
   }
 
   @Post('yuan-rates')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
+  @Permissions('procurement.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   createYuanRate(@CurrentUser() user: AuthUser, @Body() dto: CreateYuanRateDto) {
     return this.inventoryService.createYuanRate(user, dto);
   }
@@ -174,7 +183,8 @@ export class InventoryController {
   }
 
   @Post('stock-movements')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Permissions('inventory.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
   createStockMovement(
     @CurrentUser() user: AuthUser,
     @Body() dto: CreateStockMovementDto,

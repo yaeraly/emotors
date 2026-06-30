@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 
 const permissionCodes = [
   'users.manage',
+  'roles.manage',
   'branches.manage',
   'crm.manage',
   'sales.manage',
@@ -17,34 +18,38 @@ const permissionCodes = [
   'kpi.view',
   'reports.view',
   'procurement.manage',
+  'procurement.landed_cost.view',
   'distribution.manage',
   'academy.manage',
   'marketing.manage',
+  'marketing.content',
   'analytics.view',
+  'audit.view',
+  'settings.manage',
 ];
 
 const rolePermissions: Record<string, string[]> = {
   CEO: permissionCodes,
-  SYSTEM_ADMINISTRATOR: permissionCodes,
   OWNER: permissionCodes,
+  SYSTEM_ADMINISTRATOR: ['users.manage', 'roles.manage', 'audit.view', 'settings.manage'],
+  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'audit.view', 'analytics.view'],
+  SUPPLY_CHAIN_MANAGER: ['procurement.manage', 'distribution.manage', 'inventory.manage', 'inventory.view'],
+  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'reports.view', 'analytics.view', 'procurement.landed_cost.view'],
+  ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
+  MARKETING_MANAGER: ['marketing.manage'],
+  CONTENT_CREATOR: ['marketing.content'],
+  ACADEMY_DIRECTOR: ['academy.manage'],
   FRANCHISE_OWNER: ['users.manage', 'crm.manage', 'sales.manage', 'inventory.manage', 'inventory.view', 'service.manage', 'finance.view', 'payments.manage', 'kpi.view', 'reports.view'],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
   MASTER: ['service.manage', 'kpi.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
-  WAREHOUSE_MANAGER: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
-  ACCOUNTANT: ['finance.view', 'payroll.manage'],
-  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
   PROCUREMENT_MANAGER: ['procurement.manage'],
   SALESPERSON: ['sales.manage'],
-  MARKETING_MANAGER: ['marketing.manage'],
-  CONTENT_CREATOR: ['marketing.manage'],
-  ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
-  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'analytics.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view'],
-  INVESTMENT_MANAGER: ['analytics.view'],
-  EXPANSION_MANAGER: ['analytics.view'],
+  INVESTMENT_MANAGER: ['analytics.view', 'branches.manage'],
+  EXPANSION_MANAGER: ['analytics.view', 'branches.manage'],
 };
 
 const productCategories = [
@@ -210,6 +215,7 @@ async function main() {
     role: Role;
     employeeId: string;
     phone: string;
+    extraRoles?: Role[];
   }> = [
     {
       email: 'supply@emotors.kg',
@@ -251,6 +257,47 @@ async function main() {
       employeeId: 'HQ-SYSADMIN-001',
       phone: '+996700000007',
     },
+    {
+      email: 'franchise.director@emotors.kg',
+      username: 'franchise',
+      fullName: 'Franchise Director',
+      role: Role.FRANCHISE_DIRECTOR,
+      employeeId: 'HQ-FRANCHISE-001',
+      phone: '+996700000008',
+    },
+    {
+      email: 'marketing@emotors.kg',
+      username: 'marketing',
+      fullName: 'Marketing Manager',
+      role: Role.MARKETING_MANAGER,
+      employeeId: 'HQ-MARKETING-001',
+      phone: '+996700000009',
+    },
+    {
+      email: 'content@emotors.kg',
+      username: 'content',
+      fullName: 'Content Creator',
+      role: Role.CONTENT_CREATOR,
+      employeeId: 'HQ-CONTENT-001',
+      phone: '+996700000010',
+    },
+    {
+      email: 'academy@emotors.kg',
+      username: 'academy',
+      fullName: 'Academy Director',
+      role: Role.ACADEMY_DIRECTOR,
+      employeeId: 'HQ-ACADEMY-001',
+      phone: '+996700000011',
+    },
+    {
+      email: 'multirole@emotors.kg',
+      username: 'multirole',
+      fullName: 'Multi Role HQ Employee',
+      role: Role.SUPPLY_CHAIN_MANAGER,
+      employeeId: 'HQ-MULTI-001',
+      phone: '+996700000012',
+      extraRoles: [Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER],
+    },
   ];
 
   const hqPasswordHash = await bcrypt.hash('Emotors@2026', 12);
@@ -282,15 +329,21 @@ async function main() {
       },
     });
     const createdUser = await prisma.user.findUnique({ where: { email: hqUser.email } });
-    const role = await prisma.rbacRole.findUnique({ where: { code: hqUser.role } });
-    if (createdUser && role) {
-      await prisma.userRole.upsert({
-        where: { userId_roleId: { userId: createdUser.id, roleId: role.id } },
-        update: {},
-        create: { userId: createdUser.id, roleId: role.id },
-      });
+    const roleCodes = [hqUser.role, ...(hqUser.extraRoles ?? [])];
+    for (const roleCode of roleCodes) {
+      const role = await prisma.rbacRole.findUnique({ where: { code: roleCode } });
+      if (createdUser && role) {
+        await prisma.userRole.upsert({
+          where: { userId_roleId: { userId: createdUser.id, roleId: role.id } },
+          update: {},
+          create: { userId: createdUser.id, roleId: role.id },
+        });
+      }
     }
   }
+
+  console.log('\nHQ TEST LOGINS (password: Emotors@2026)');
+  console.log('ceo, supply, warehouse, finance, accountant, sysadmin, franchise, marketing, content, academy, multirole');
 
   for (const [code, nameKy, nameRu, nameEn] of productCategories) {
     await prisma.productCategory.upsert({

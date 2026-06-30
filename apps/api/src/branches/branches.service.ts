@@ -7,7 +7,7 @@ import {
 import { BranchStatus, Prisma, Role, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { canAccessAllBranches } from '../rbac/rbac';
+import { canAccessAllBranches, userCanAccessAllBranches } from '../rbac/rbac';
 import { BranchQueryDto } from './dto/branch-query.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
@@ -34,7 +34,7 @@ export class BranchesService {
   findAll(user: AuthUser, query: BranchQueryDto = {}) {
     const where: Prisma.BranchWhereInput = {
       deletedAt: null,
-      ...(canAccessAllBranches(user.role) ? {} : { id: user.branchId }),
+      ...(userCanAccessAllBranches(user) ? {} : { id: user.branchId }),
     };
 
     if (query.search?.trim()) {
@@ -163,7 +163,7 @@ export class BranchesService {
   }
 
   private ensureBranchAccess(user: AuthUser, branchId: string) {
-    if (!canAccessAllBranches(user.role) && user.branchId !== branchId) {
+    if (!userCanAccessAllBranches(user) && user.branchId !== branchId) {
       throw new ForbiddenException('You can only access your own branch');
     }
   }

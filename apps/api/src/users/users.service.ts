@@ -183,7 +183,7 @@ export class UsersService {
   }
 
   private userScope(user: AuthUser) {
-    if (this.hasFullAccess(user)) return {};
+    if (this.hasFullAccess(user) || this.hasRole(user, Role.SYSTEM_ADMINISTRATOR)) return {};
     if (this.hasRole(user, Role.FRANCHISE_OWNER)) return { branchId: user.branchId };
     throw new ForbiddenException('No user management access');
   }
@@ -197,6 +197,13 @@ export class UsersService {
 
   private assertCanManage(user: AuthUser, branchId: string | undefined, roles: Role[]) {
     if (this.hasFullAccess(user)) return;
+    if (this.hasRole(user, Role.SYSTEM_ADMINISTRATOR)) {
+      if (roles.some((role) => !HQ_ROLES.includes(role))) {
+        throw new ForbiddenException('System administrator can manage HQ users only');
+      }
+      if (branchId) throw new ForbiddenException('Cannot assign branch to HQ users');
+      return;
+    }
     if (this.hasRole(user, Role.FRANCHISE_OWNER)) {
       if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
       if (roles.some((role) => isHqRole(role))) {
@@ -394,7 +401,7 @@ export class UsersService {
     target: { branchId: string | null; role: Role },
     targetRoles: Role[],
   ) {
-    if (this.hasFullAccess(user)) return;
+    if (this.hasFullAccess(user) || this.hasRole(user, Role.SYSTEM_ADMINISTRATOR)) return;
 
     if (!this.hasRole(user, Role.FRANCHISE_OWNER)) {
       throw new ForbiddenException(OWN_BRANCH_PASSWORD_RESET_ERROR);
