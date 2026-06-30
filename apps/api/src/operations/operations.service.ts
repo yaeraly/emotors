@@ -18,7 +18,7 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
-import { calculateLandedCosts, extractLogisticsCosts } from '../procurement/landed-cost.util';
+import { buildLogisticsWithCargo, calculateLandedCosts, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -170,15 +170,16 @@ export class OperationsService {
       });
 
       const logistics = extractLogisticsCosts(order);
+      const cargo = extractCargoConfig(order);
       const recalculated = calculateLandedCosts(
-        receivedItems.map((item) => ({
-          quantity: item.quantity,
-          receivedQuantity: item.receivedQuantity,
-          purchasePriceYuan: Number(item.purchasePriceYuan),
-          yuanRate: Number(item.yuanRate),
-          weightKg: Number(item.weightKg),
-        })),
+        receivedItems.map((item) => mapStoredProcurementItemToLandedCostInput(item)),
         logistics,
+        { cargo },
+      );
+      const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
+        logistics,
+        recalculated.totalShipmentWeightKg,
+        cargo,
       );
 
       for (const [index, item] of receivedItems.entries()) {
@@ -285,8 +286,14 @@ export class OperationsService {
           actualArrivalDate: new Date(),
           hqStockMovementCreatedAt: new Date(),
           totalCostKgs: recalculated.totalCostKgs,
-          totalWeightKg: recalculated.totalWeightKg,
+          totalWeightKg: recalculated.totalShipmentWeightKg,
+          totalNetWeightKg: recalculated.totalNetWeightKg,
+          totalPackagingWeightKg: recalculated.totalPackagingWeightKg,
+          totalCargoCostUsd: recalculated.totalCargoCostUsd,
+          totalCargoCostKgs: recalculated.totalCargoCostKgs,
+          totalTransportCostKgs: recalculated.totalTransportCostKgs,
           costPerKg: recalculated.costPerKg,
+          chinaExportTransportKgs: resolvedLogistics.chinaExportTransportKgs,
         },
       });
       await this.auditInTx(tx, user, 'HQ', 'INVENTORY_RECEIVED', 'Warehouse', hqWarehouseId, {

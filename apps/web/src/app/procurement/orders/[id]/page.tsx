@@ -22,6 +22,10 @@ type ProcurementOrderItem = {
   purchasePriceYuan: string | number;
   yuanRate: string | number;
   weightKg: string | number;
+  netWeightKg?: string | number;
+  packagingWeightKg?: string | number;
+  packagingType?: string | null;
+  directPackagingCostKgs?: string | number;
   totalWeightKg: string | number;
   costKgs: string | number;
   transportCostKgs: string | number;
@@ -51,6 +55,12 @@ type ProcurementOrder = {
   costPerKg: string | number;
   currency?: string;
   defaultYuanRate?: string | number;
+  defaultUsdRate?: string | number;
+  cargoRateUsdPerKg?: string | number;
+  totalCargoCostUsd?: string | number;
+  totalCargoCostKgs?: string | number;
+  totalNetWeightKg?: string | number;
+  totalPackagingWeightKg?: string | number;
   purchaseDate?: string;
   chinaDomesticTransportKgs: string | number;
   chinaExportTransportKgs: string | number;
@@ -189,12 +199,18 @@ export default function ProcurementOrderDetailPage() {
             <Info label={t('procurement.orders.supplier')} value={order.supplier?.name ?? ''} />
             <Info label={t('procurement.orders.currency')} value={order.currency ?? 'CNY'} />
             <Info label={t('procurement.orders.exchangeRate')} value={String(order.defaultYuanRate ?? '-')} />
+            <Info label={t('procurement.orders.usdExchangeRate')} value={String(order.defaultUsdRate ?? '-')} />
+            <Info label={t('procurement.orders.cargoRateUsdPerKg')} value={String(order.cargoRateUsdPerKg ?? '-')} />
             <Info label={t('procurement.orders.purchaseDate')} value={order.purchaseDate ? new Date(order.purchaseDate).toLocaleDateString() : '-'} />
             <Info label={t('procurement.orders.warehouse')} value={order.hqWarehouse?.name ?? ''} />
             <Info label={t('procurement.orders.status')} value={order.status} />
             <Info label={t('procurement.orders.totalYuan')} value={`¥${Number(order.totalYuan).toFixed(2)}`} />
             <Info label={t('procurement.orders.totalCostKgs')} value={formatKgs(order.totalCostKgs)} />
             <Info label={t('procurement.orders.totalWeightKg')} value={`${Number(order.totalWeightKg).toFixed(3)} kg`} />
+            <Info label={t('procurement.orders.totalNetWeightKg')} value={`${Number(order.totalNetWeightKg ?? 0).toFixed(3)} kg`} />
+            <Info label={t('procurement.orders.totalPackagingWeightKg')} value={`${Number(order.totalPackagingWeightKg ?? 0).toFixed(3)} kg`} />
+            <Info label={t('procurement.orders.totalCargoCostUsd')} value={`$${Number(order.totalCargoCostUsd ?? 0).toFixed(2)}`} />
+            <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(order.totalCargoCostKgs)} />
             <Info label={t('procurement.orders.costPerKg')} value={formatKgs(order.costPerKg)} />
           </section>
 
@@ -229,11 +245,13 @@ export default function ProcurementOrderDetailPage() {
                   <th className="px-4 py-3">{t('procurement.orders.product')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.quantity')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.unit')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.weightPerUnit')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.totalWeightKg')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.factoryCost')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.transportAllocation')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.netWeightKg')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.packagingWeightKg')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.shipmentWeightKg')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.allocatedTransport')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.packagingCost')}</th>
                   <th className="px-4 py-3">{t('inventory.finalCostKgs')}</th>
                 </tr>
               </thead>
@@ -244,11 +262,16 @@ export default function ProcurementOrderDetailPage() {
                     <td className="px-4 py-3">{item.productName}</td>
                     <td className="px-4 py-3">{item.quantity}</td>
                     <td className="px-4 py-3">{item.receivedQuantity ?? '-'}</td>
-                    <td className="px-4 py-3">{item.unit ?? 'pcs'}</td>
-                    <td className="px-4 py-3">{Number(item.weightKg).toFixed(3)}</td>
+                    <td className="px-4 py-3">{Number(item.netWeightKg ?? item.weightKg).toFixed(3)}</td>
+                    <td className="px-4 py-3">{Number(item.packagingWeightKg ?? 0).toFixed(3)}</td>
                     <td className="px-4 py-3">{Number(item.totalWeightKg).toFixed(3)}</td>
-                    <td className="px-4 py-3">{formatKgs(item.costKgs)}</td>
+                    <td className="px-4 py-3">¥{Number(item.purchasePriceYuan).toFixed(2)}</td>
+                    <td className="px-4 py-3">¥{(Number(item.purchasePriceYuan) * item.quantity).toFixed(2)}</td>
                     <td className="px-4 py-3">{formatKgs(item.transportCostKgs)}</td>
+                    <td className="px-4 py-3">
+                      {item.packagingType ? `${item.packagingType} · ` : ''}
+                      {formatKgs(item.directPackagingCostKgs ?? 0)}
+                    </td>
                     <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>
                   </tr>
                 ))}

@@ -5,7 +5,15 @@ import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
-import { calculateLandedCosts, extractLogisticsCosts } from './landed-cost.util';
+import {
+  buildLogisticsWithCargo,
+  calculateLandedCosts,
+  extractCargoConfig,
+  extractLogisticsCosts,
+  LandedCostItemResult,
+  LandedCostOrderResult,
+  mapStoredProcurementItemToLandedCostInput,
+} from './landed-cost.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -18,6 +26,9 @@ type PreparedProcurementItem = {
   purchasePriceYuan: number;
   yuanRate: number;
   weightKg: number;
+  packagingWeightKg: number;
+  packagingType?: string | null;
+  directPackagingCostKgs: number;
   note?: string;
 };
 
@@ -250,13 +261,14 @@ export class ProcurementService {
 
       const exchangeRate = Number(dto.defaultYuanRate ?? dto.exchangeRate ?? dto.yuanRate ?? 0);
       this.validateExchangeRate(exchangeRate);
-      const logistics = extractLogisticsCosts(dto);
+      const { logistics, cargo } = this.resolveProcurementLogistics(dto);
       const preparedItems: PreparedProcurementItem[] = [];
       for (const item of itemInputs) {
         preparedItems.push(await this.resolveProcurementItemFromProduct(tx, item, supplier.id, factory?.id, exchangeRate));
       }
 
-      const calculated = calculateLandedCosts(preparedItems, logistics);
+      const calculated = this.calculateProcurementLandedCosts(preparedItems, logistics, cargo);
+      const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
       const order = await tx.procurementOrder.create({
         data: {
           orderNumber: dto.orderNumber ?? `PROC-${Date.now()}`,
@@ -267,43 +279,14 @@ export class ProcurementService {
           currency: dto.currency ?? 'CNY',
           defaultYuanRate: exchangeRate,
           purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : new Date(),
-          totalYuan: calculated.totalYuan,
-          totalTransportCostKgs: calculated.totalTransportCostKgs,
-          totalCostKgs: calculated.totalCostKgs,
-          totalWeightKg: calculated.totalWeightKg,
-          costPerKg: calculated.costPerKg,
-          ...logistics,
+          ...orderTotals,
           estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
           note: dto.note,
           createdById: user.id,
           items: {
-            create: calculated.items.map((item, index) => ({
-              productId: preparedItems[index].productId,
-              supplierId: preparedItems[index].supplierId,
-              factoryId: preparedItems[index].factoryId,
-              sku: preparedItems[index].sku,
-              productName: preparedItems[index].productName,
-              unit: preparedItems[index].unit,
-              quantity: preparedItems[index].quantity,
-              purchasePriceYuan: item.purchasePriceYuan,
-              yuanRate: exchangeRate,
-              costKgs: item.costKgs,
-              weightKg: item.weightKg,
-              totalWeightKg: item.totalWeightKg,
-              chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
-              chinaExportAllocKgs: item.chinaExportAllocKgs,
-              localTransportAllocKgs: item.localTransportAllocKgs,
-              packagingAllocKgs: item.packagingAllocKgs,
-              customsAllocKgs: item.customsAllocKgs,
-              insuranceAllocKgs: item.insuranceAllocKgs,
-              bankFeeAllocKgs: item.bankFeeAllocKgs,
-              otherAllocKgs: item.otherAllocKgs,
-              transportCostKgs: item.transportCostKgs,
-              finalCostKgs: item.finalCostKgs,
-              totalYuan: item.totalYuan,
-              totalCostKgs: item.totalCostKgs,
-              note: preparedItems[index].note,
-            })),
+            create: calculated.items.map((item, index) =>
+              this.mapCalculatedItemToPersisted(preparedItems[index], item, exchangeRate),
+            ),
           },
         },
         include: this.procurementOrderInclude(),
@@ -346,16 +329,7 @@ export class ProcurementService {
         ? Number(dto.defaultYuanRate)
         : Number(existing.defaultYuanRate);
       this.validateExchangeRate(exchangeRate);
-      const logistics = extractLogisticsCosts({
-        chinaDomesticTransportKgs: dto.chinaDomesticTransportKgs ?? existing.chinaDomesticTransportKgs,
-        chinaExportTransportKgs: dto.chinaExportTransportKgs ?? existing.chinaExportTransportKgs,
-        localTransportKgs: dto.localTransportKgs ?? existing.localTransportKgs,
-        packagingCostKgs: dto.packagingCostKgs ?? existing.packagingCostKgs,
-        customsCostKgs: dto.customsCostKgs ?? existing.customsCostKgs,
-        insuranceCostKgs: dto.insuranceCostKgs ?? existing.insuranceCostKgs,
-        bankFeeCostKgs: dto.bankFeeCostKgs ?? existing.bankFeeCostKgs,
-        otherExpenseKgs: dto.otherExpenseKgs ?? existing.otherExpenseKgs,
-      });
+      const { logistics, cargo } = this.resolveProcurementLogistics(dto, existing);
 
       if (Array.isArray(dto.items)) {
         await tx.procurementOrderItem.deleteMany({ where: { orderId: id } });
@@ -369,35 +343,12 @@ export class ProcurementService {
             exchangeRate,
           ));
         }
-        const calculated = calculateLandedCosts(preparedItems, logistics);
+        const calculated = this.calculateProcurementLandedCosts(preparedItems, logistics, cargo);
+        const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
         await tx.procurementOrderItem.createMany({
           data: calculated.items.map((item, index) => ({
             orderId: id,
-            productId: preparedItems[index].productId,
-            supplierId: preparedItems[index].supplierId,
-            factoryId: preparedItems[index].factoryId,
-            sku: preparedItems[index].sku,
-            productName: preparedItems[index].productName,
-            unit: preparedItems[index].unit,
-            quantity: preparedItems[index].quantity,
-            purchasePriceYuan: item.purchasePriceYuan,
-            yuanRate: exchangeRate,
-            costKgs: item.costKgs,
-            weightKg: item.weightKg,
-            totalWeightKg: item.totalWeightKg,
-            chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
-            chinaExportAllocKgs: item.chinaExportAllocKgs,
-            localTransportAllocKgs: item.localTransportAllocKgs,
-            packagingAllocKgs: item.packagingAllocKgs,
-            customsAllocKgs: item.customsAllocKgs,
-            insuranceAllocKgs: item.insuranceAllocKgs,
-            bankFeeAllocKgs: item.bankFeeAllocKgs,
-            otherAllocKgs: item.otherAllocKgs,
-            transportCostKgs: item.transportCostKgs,
-            finalCostKgs: item.finalCostKgs,
-            totalYuan: item.totalYuan,
-            totalCostKgs: item.totalCostKgs,
-            note: preparedItems[index].note,
+            ...this.mapCalculatedItemToPersisted(preparedItems[index], item, exchangeRate),
           })),
         });
         await tx.procurementOrder.update({
@@ -409,48 +360,26 @@ export class ProcurementService {
             currency: dto.currency ?? existing.currency,
             defaultYuanRate: exchangeRate,
             purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
-            totalYuan: calculated.totalYuan,
-            totalTransportCostKgs: calculated.totalTransportCostKgs,
-            totalCostKgs: calculated.totalCostKgs,
-            totalWeightKg: calculated.totalWeightKg,
-            costPerKg: calculated.costPerKg,
-            ...logistics,
+            ...orderTotals,
             estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
             note: dto.note ?? existing.note,
           },
         });
       } else {
-        const recalculated = calculateLandedCosts(
-          existing.items.map((item) => ({
-            quantity: item.quantity,
-            receivedQuantity: item.receivedQuantity,
-            purchasePriceYuan: Number(item.purchasePriceYuan),
+        const recalculated = this.calculateProcurementLandedCosts(
+          existing.items.map((item) => mapStoredProcurementItemToLandedCostInput({
+            ...item,
             yuanRate: exchangeRate,
-            weightKg: Number(item.weightKg),
           })),
           logistics,
+          cargo,
         );
+        const orderTotals = this.buildProcurementOrderTotals(recalculated, logistics, cargo);
         for (const [index, item] of existing.items.entries()) {
           const next = recalculated.items[index];
           await tx.procurementOrderItem.update({
             where: { id: item.id },
-            data: {
-              yuanRate: exchangeRate,
-              costKgs: next.costKgs,
-              totalWeightKg: next.totalWeightKg,
-              chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
-              chinaExportAllocKgs: next.chinaExportAllocKgs,
-              localTransportAllocKgs: next.localTransportAllocKgs,
-              packagingAllocKgs: next.packagingAllocKgs,
-              customsAllocKgs: next.customsAllocKgs,
-              insuranceAllocKgs: next.insuranceAllocKgs,
-              bankFeeAllocKgs: next.bankFeeAllocKgs,
-              otherAllocKgs: next.otherAllocKgs,
-              transportCostKgs: next.transportCostKgs,
-              finalCostKgs: next.finalCostKgs,
-              totalYuan: next.totalYuan,
-              totalCostKgs: next.totalCostKgs,
-            },
+            data: this.mapRecalculatedItemFields(next, exchangeRate),
           });
         }
         await tx.procurementOrder.update({
@@ -462,12 +391,7 @@ export class ProcurementService {
             currency: dto.currency ?? existing.currency,
             defaultYuanRate: exchangeRate,
             purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
-            totalYuan: recalculated.totalYuan,
-            totalTransportCostKgs: recalculated.totalTransportCostKgs,
-            totalCostKgs: recalculated.totalCostKgs,
-            totalWeightKg: recalculated.totalWeightKg,
-            costPerKg: recalculated.costPerKg,
-            ...logistics,
+            ...orderTotals,
             estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
             note: dto.note ?? existing.note,
           },
@@ -487,6 +411,7 @@ export class ProcurementService {
         this.pickProcurementAuditFields(updated),
         dto.reason,
       );
+      await this.auditProcurementLogisticsChanges(tx, user, id, oldValue, this.pickProcurementAuditFields(updated));
       return updated;
     });
   }
@@ -500,50 +425,27 @@ export class ProcurementService {
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       const oldValue = this.pickProcurementAuditFields(order);
-      const logistics = extractLogisticsCosts(order);
+      const { logistics, cargo } = this.resolveProcurementLogistics(order);
       const exchangeRate = Number(order.defaultYuanRate);
-      const calculated = calculateLandedCosts(
-        order.items.map((item) => ({
-          quantity: item.quantity,
-          receivedQuantity: item.receivedQuantity,
-          purchasePriceYuan: Number(item.purchasePriceYuan),
+      const calculated = this.calculateProcurementLandedCosts(
+        order.items.map((item) => mapStoredProcurementItemToLandedCostInput({
+          ...item,
           yuanRate: exchangeRate,
-          weightKg: Number(item.weightKg),
         })),
         logistics,
+        cargo,
       );
+      const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
       for (const [index, item] of order.items.entries()) {
         const next = calculated.items[index];
         await tx.procurementOrderItem.update({
           where: { id: item.id },
-          data: {
-            yuanRate: exchangeRate,
-            totalWeightKg: next.totalWeightKg,
-            costKgs: next.costKgs,
-            chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
-            chinaExportAllocKgs: next.chinaExportAllocKgs,
-            localTransportAllocKgs: next.localTransportAllocKgs,
-            packagingAllocKgs: next.packagingAllocKgs,
-            customsAllocKgs: next.customsAllocKgs,
-            insuranceAllocKgs: next.insuranceAllocKgs,
-            bankFeeAllocKgs: next.bankFeeAllocKgs,
-            otherAllocKgs: next.otherAllocKgs,
-            transportCostKgs: next.transportCostKgs,
-            finalCostKgs: next.finalCostKgs,
-            totalYuan: next.totalYuan,
-            totalCostKgs: next.totalCostKgs,
-          },
+          data: this.mapRecalculatedItemFields(next, exchangeRate),
         });
       }
       const updated = await tx.procurementOrder.update({
         where: { id },
-        data: {
-          totalYuan: calculated.totalYuan,
-          totalTransportCostKgs: calculated.totalTransportCostKgs,
-          totalCostKgs: calculated.totalCostKgs,
-          totalWeightKg: calculated.totalWeightKg,
-          costPerKg: calculated.costPerKg,
-        },
+        data: orderTotals,
         include: this.procurementOrderInclude(),
       });
       await this.auditProcurement(tx, user, 'RECALCULATE_PROCUREMENT_LANDED_COST', id, oldValue, this.pickProcurementAuditFields(updated), reason);
@@ -734,6 +636,12 @@ export class ProcurementService {
       purchaseDate: order.purchaseDate,
       exchangeRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
       defaultYuanRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
+      defaultUsdRate: order.defaultUsdRate?.toString?.() ?? order.defaultUsdRate,
+      cargoRateUsdPerKg: order.cargoRateUsdPerKg?.toString?.() ?? order.cargoRateUsdPerKg,
+      totalCargoCostUsd: order.totalCargoCostUsd?.toString?.() ?? order.totalCargoCostUsd,
+      totalCargoCostKgs: order.totalCargoCostKgs?.toString?.() ?? order.totalCargoCostKgs,
+      totalNetWeightKg: order.totalNetWeightKg?.toString?.() ?? order.totalNetWeightKg,
+      totalPackagingWeightKg: order.totalPackagingWeightKg?.toString?.() ?? order.totalPackagingWeightKg,
       totalYuan: order.totalYuan?.toString?.() ?? order.totalYuan,
       totalTransportCostKgs: order.totalTransportCostKgs?.toString?.() ?? order.totalTransportCostKgs,
       totalCostKgs: order.totalCostKgs?.toString?.() ?? order.totalCostKgs,
@@ -756,6 +664,10 @@ export class ProcurementService {
         purchasePriceYuan: item.purchasePriceYuan?.toString?.() ?? item.purchasePriceYuan,
         yuanRate: item.yuanRate?.toString?.() ?? item.yuanRate,
         weightKg: item.weightKg?.toString?.() ?? item.weightKg,
+        netWeightKg: item.netWeightKg?.toString?.() ?? item.netWeightKg,
+        packagingWeightKg: item.packagingWeightKg?.toString?.() ?? item.packagingWeightKg,
+        packagingType: item.packagingType,
+        directPackagingCostKgs: item.directPackagingCostKgs?.toString?.() ?? item.directPackagingCostKgs,
         finalCostKgs: item.finalCostKgs?.toString?.() ?? item.finalCostKgs,
       })),
     };
@@ -824,7 +736,15 @@ export class ProcurementService {
 
   private async resolveProcurementItemFromProduct(
     tx: any,
-    item: { productId: string; quantity?: number; purchasePriceYuan?: number; note?: string },
+    item: {
+      productId: string;
+      quantity?: number;
+      purchasePriceYuan?: number;
+      note?: string;
+      packagingWeightKg?: number;
+      packagingType?: string;
+      directPackagingCostKgs?: number;
+    },
     orderSupplierId: string,
     orderFactoryId: string | null | undefined,
     exchangeRate: number,
@@ -852,8 +772,190 @@ export class ProcurementService {
       purchasePriceYuan: Number(item.purchasePriceYuan ?? product.purchasePriceYuan ?? 0),
       yuanRate: exchangeRate,
       weightKg,
+      packagingWeightKg: Number(item.packagingWeightKg ?? 0),
+      packagingType: item.packagingType?.trim() || null,
+      directPackagingCostKgs: Number(item.directPackagingCostKgs ?? 0),
       note: item.note,
     };
+  }
+
+  private resolveProcurementLogistics(dto: any, existing?: any) {
+    const logistics = extractLogisticsCosts({
+      chinaDomesticTransportKgs: dto.chinaDomesticTransportKgs ?? existing?.chinaDomesticTransportKgs,
+      chinaExportTransportKgs: dto.chinaExportTransportKgs ?? existing?.chinaExportTransportKgs,
+      localTransportKgs: dto.localTransportKgs ?? existing?.localTransportKgs,
+      packagingCostKgs: dto.packagingCostKgs ?? existing?.packagingCostKgs,
+      customsCostKgs: dto.customsCostKgs ?? existing?.customsCostKgs,
+      insuranceCostKgs: dto.insuranceCostKgs ?? existing?.insuranceCostKgs,
+      bankFeeCostKgs: dto.bankFeeCostKgs ?? existing?.bankFeeCostKgs,
+      otherExpenseKgs: dto.otherExpenseKgs ?? existing?.otherExpenseKgs,
+    });
+    const cargo = extractCargoConfig({
+      defaultUsdRate: dto.defaultUsdRate ?? existing?.defaultUsdRate,
+      cargoRateUsdPerKg: dto.cargoRateUsdPerKg ?? existing?.cargoRateUsdPerKg,
+    });
+    this.validateCargoConfig(cargo);
+    return { logistics, cargo };
+  }
+
+  private calculateProcurementLandedCosts(
+    items: Array<{
+      quantity: number;
+      receivedQuantity?: number | null;
+      purchasePriceYuan: number;
+      yuanRate: number;
+      weightKg: number;
+      packagingWeightKg?: number;
+      directPackagingCostKgs?: number;
+    }>,
+    logistics: ReturnType<typeof extractLogisticsCosts>,
+    cargo: ReturnType<typeof extractCargoConfig>,
+  ) {
+    return calculateLandedCosts(items, logistics, { cargo });
+  }
+
+  private buildProcurementOrderTotals(
+    calculated: LandedCostOrderResult,
+    logistics: ReturnType<typeof extractLogisticsCosts>,
+    cargo: ReturnType<typeof extractCargoConfig>,
+  ) {
+    const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
+      logistics,
+      calculated.totalShipmentWeightKg,
+      cargo,
+    );
+    return {
+      ...resolvedLogistics,
+      defaultUsdRate: cargo.usdRate,
+      cargoRateUsdPerKg: cargo.cargoRateUsdPerKg,
+      totalCargoCostUsd: calculated.totalCargoCostUsd,
+      totalCargoCostKgs: calculated.totalCargoCostKgs,
+      totalNetWeightKg: calculated.totalNetWeightKg,
+      totalPackagingWeightKg: calculated.totalPackagingWeightKg,
+      totalYuan: calculated.totalYuan,
+      totalTransportCostKgs: calculated.totalTransportCostKgs,
+      totalCostKgs: calculated.totalCostKgs,
+      totalWeightKg: calculated.totalShipmentWeightKg,
+      costPerKg: calculated.costPerKg,
+    };
+  }
+
+  private mapCalculatedItemToPersisted(
+    prepared: PreparedProcurementItem,
+    item: LandedCostItemResult,
+    exchangeRate: number,
+  ) {
+    return {
+      productId: prepared.productId,
+      supplierId: prepared.supplierId,
+      factoryId: prepared.factoryId,
+      sku: prepared.sku,
+      productName: prepared.productName,
+      unit: prepared.unit,
+      quantity: prepared.quantity,
+      purchasePriceYuan: item.purchasePriceYuan,
+      yuanRate: exchangeRate,
+      costKgs: item.costKgs,
+      weightKg: item.netWeightKg,
+      netWeightKg: item.netWeightKg,
+      packagingWeightKg: item.packagingWeightKg ?? 0,
+      packagingType: prepared.packagingType ?? null,
+      directPackagingCostKgs: prepared.directPackagingCostKgs,
+      totalWeightKg: item.totalWeightKg,
+      chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
+      chinaExportAllocKgs: item.chinaExportAllocKgs,
+      localTransportAllocKgs: item.localTransportAllocKgs,
+      packagingAllocKgs: item.packagingAllocKgs,
+      customsAllocKgs: item.customsAllocKgs,
+      insuranceAllocKgs: item.insuranceAllocKgs,
+      bankFeeAllocKgs: item.bankFeeAllocKgs,
+      otherAllocKgs: item.otherAllocKgs,
+      transportCostKgs: item.transportCostKgs,
+      finalCostKgs: item.finalCostKgs,
+      totalYuan: item.totalYuan,
+      totalCostKgs: item.totalCostKgs,
+      note: prepared.note,
+    };
+  }
+
+  private mapRecalculatedItemFields(item: LandedCostItemResult, exchangeRate: number) {
+    return {
+      yuanRate: exchangeRate,
+      costKgs: item.costKgs,
+      weightKg: item.netWeightKg,
+      netWeightKg: item.netWeightKg,
+      packagingWeightKg: item.packagingWeightKg ?? 0,
+      totalWeightKg: item.totalWeightKg,
+      chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
+      chinaExportAllocKgs: item.chinaExportAllocKgs,
+      localTransportAllocKgs: item.localTransportAllocKgs,
+      packagingAllocKgs: item.packagingAllocKgs,
+      customsAllocKgs: item.customsAllocKgs,
+      insuranceAllocKgs: item.insuranceAllocKgs,
+      bankFeeAllocKgs: item.bankFeeAllocKgs,
+      otherAllocKgs: item.otherAllocKgs,
+      transportCostKgs: item.transportCostKgs,
+      finalCostKgs: item.finalCostKgs,
+      totalYuan: item.totalYuan,
+      totalCostKgs: item.totalCostKgs,
+    };
+  }
+
+  private validateCargoConfig(cargo: ReturnType<typeof extractCargoConfig>) {
+    if (cargo.cargoRateUsdPerKg > 0 && (!cargo.usdRate || cargo.usdRate <= 0)) {
+      throw new BadRequestException('USD exchange rate is required when cargo rate is set');
+    }
+  }
+
+  private auditProcurementLogisticsChanges(
+    tx: any,
+    user: AuthUser,
+    entityId: string,
+    oldValue: any,
+    newValue: any,
+  ) {
+    const audits: Array<{ action: string; extra?: Record<string, unknown> }> = [];
+    if (String(oldValue?.defaultUsdRate ?? '') !== String(newValue?.defaultUsdRate ?? '')) {
+      audits.push({
+        action: 'USD_RATE_CHANGED',
+        extra: { oldUsdRate: oldValue?.defaultUsdRate, newUsdRate: newValue?.defaultUsdRate },
+      });
+    }
+    if (String(oldValue?.cargoRateUsdPerKg ?? '') !== String(newValue?.cargoRateUsdPerKg ?? '')) {
+      audits.push({
+        action: 'CARGO_RATE_CHANGED',
+        extra: {
+          oldCargoRateUsdPerKg: oldValue?.cargoRateUsdPerKg,
+          newCargoRateUsdPerKg: newValue?.cargoRateUsdPerKg,
+        },
+      });
+    }
+    const oldItems = JSON.stringify(oldValue?.items ?? []);
+    const newItems = JSON.stringify(newValue?.items ?? []);
+    if (oldItems !== newItems) {
+      const packagingChanged = (oldValue?.items ?? []).some((item: any, index: number) => {
+        const next = (newValue?.items ?? [])[index];
+        return next && (
+          String(item.packagingWeightKg ?? '') !== String(next.packagingWeightKg ?? '') ||
+          String(item.packagingType ?? '') !== String(next.packagingType ?? '') ||
+          String(item.directPackagingCostKgs ?? '') !== String(next.directPackagingCostKgs ?? '')
+        );
+      });
+      if (packagingChanged) {
+        audits.push({ action: 'PACKAGING_CHANGED' });
+      }
+      const transportChanged = String(oldValue?.chinaDomesticTransportKgs ?? '') !== String(newValue?.chinaDomesticTransportKgs ?? '') ||
+        String(oldValue?.chinaExportTransportKgs ?? '') !== String(newValue?.chinaExportTransportKgs ?? '') ||
+        String(oldValue?.localTransportKgs ?? '') !== String(newValue?.localTransportKgs ?? '') ||
+        String(oldValue?.totalCargoCostKgs ?? '') !== String(newValue?.totalCargoCostKgs ?? '');
+      if (transportChanged) {
+        audits.push({ action: 'TRANSPORTATION_CHANGED' });
+      }
+      audits.push({ action: 'LANDED_COST_RECALCULATED' });
+    }
+    return Promise.all(audits.map((entry) =>
+      this.auditProcurement(tx, user, entry.action, entityId, oldValue, newValue, undefined, entry.extra),
+    ));
   }
 
   private validateSupplierPayload(dto: any) {

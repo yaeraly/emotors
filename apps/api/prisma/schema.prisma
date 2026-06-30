@@ -1411,6 +1411,12 @@ model ProcurementOrder {
   status                   ProcurementOrderStatus @default(DRAFT)
   currency                 String                 @default("CNY")
   defaultYuanRate          Decimal                @default(0) @db.Decimal(14, 4)
+  defaultUsdRate             Decimal                @default(0) @db.Decimal(14, 4)
+  cargoRateUsdPerKg        Decimal                @default(0) @db.Decimal(14, 4)
+  totalCargoCostUsd        Decimal                @default(0) @db.Decimal(14, 2)
+  totalCargoCostKgs        Decimal                @default(0) @db.Decimal(14, 2)
+  totalNetWeightKg         Decimal                @default(0) @db.Decimal(14, 3)
+  totalPackagingWeightKg   Decimal                @default(0) @db.Decimal(14, 3)
   purchaseDate             DateTime?
   totalYuan                Decimal                @default(0) @db.Decimal(14, 2)
   totalTransportCostKgs    Decimal                @default(0) @db.Decimal(14, 2)
@@ -1472,6 +1478,10 @@ model ProcurementOrderItem {
   yuanRate               Decimal          @db.Decimal(14, 4)
   costKgs                Decimal          @db.Decimal(14, 2)
   weightKg               Decimal          @db.Decimal(14, 3)
+  netWeightKg            Decimal          @default(0) @db.Decimal(14, 3)
+  packagingWeightKg      Decimal          @default(0) @db.Decimal(14, 3)
+  packagingType          String?
+  directPackagingCostKgs Decimal          @default(0) @db.Decimal(14, 2)
   totalWeightKg          Decimal          @default(0) @db.Decimal(14, 3)
   chinaDomesticAllocKgs  Decimal          @default(0) @db.Decimal(14, 2)
   chinaExportAllocKgs    Decimal          @default(0) @db.Decimal(14, 2)

@@ -36,7 +36,7 @@ import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
-import { calculateLandedCosts, extractLogisticsCosts } from '../procurement/landed-cost.util';
+import { buildLogisticsWithCargo, calculateLandedCosts, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -1192,15 +1192,20 @@ export class InventoryService {
     for (const order of orders) {
       const exchangeRate = Number(order.defaultYuanRate);
       const logistics = extractLogisticsCosts(order);
+      const cargo = extractCargoConfig(order);
       const calculated = calculateLandedCosts(
-        order.items.map((item) => ({
-          quantity: item.quantity,
-          receivedQuantity: item.receivedQuantity,
-          purchasePriceYuan: Number(item.purchasePriceYuan),
+        order.items.map((item) => mapStoredProcurementItemToLandedCostInput({
+          ...item,
+          weightKg: item.productId === productId ? newWeightKg : Number(item.netWeightKg ?? item.weightKg),
           yuanRate: exchangeRate,
-          weightKg: item.productId === productId ? newWeightKg : Number(item.weightKg),
         })),
         logistics,
+        { cargo },
+      );
+      const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
+        logistics,
+        calculated.totalShipmentWeightKg,
+        cargo,
       );
 
       for (const [index, item] of order.items.entries()) {
@@ -1208,7 +1213,7 @@ export class InventoryService {
         await tx.procurementOrderItem.update({
           where: { id: item.id },
           data: {
-            ...(item.productId === productId ? { weightKg: newWeightKg } : {}),
+            ...(item.productId === productId ? { weightKg: newWeightKg, netWeightKg: newWeightKg } : {}),
             totalWeightKg: next.totalWeightKg,
             costKgs: next.costKgs,
             chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
@@ -1233,8 +1238,13 @@ export class InventoryService {
           totalYuan: calculated.totalYuan,
           totalTransportCostKgs: calculated.totalTransportCostKgs,
           totalCostKgs: calculated.totalCostKgs,
-          totalWeightKg: calculated.totalWeightKg,
+          totalWeightKg: calculated.totalShipmentWeightKg,
+          totalNetWeightKg: calculated.totalNetWeightKg,
+          totalPackagingWeightKg: calculated.totalPackagingWeightKg,
+          totalCargoCostUsd: calculated.totalCargoCostUsd,
+          totalCargoCostKgs: calculated.totalCargoCostKgs,
           costPerKg: calculated.costPerKg,
+          chinaExportTransportKgs: resolvedLogistics.chinaExportTransportKgs,
         },
       });
     }
