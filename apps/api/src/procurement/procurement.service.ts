@@ -6,6 +6,7 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   FileAttachmentEntityType,
+  ProcurementOrderItemStatus,
   ProcurementOrderStatus,
   ProcurementSupplierPaymentStatus,
   Role,
@@ -40,6 +41,17 @@ import {
   calculateAmountKgs,
   summarizeSupplierPayments,
 } from './supplier-payment.util';
+import {
+  canUnlockProcurementOrder,
+  canUserEditProcurementItems,
+  computeSentToSupplierTimestamps,
+  computeUnlockExpiry,
+  isProcurementOrderCompleted,
+  PROCUREMENT_EDIT_WINDOW_EXPIRED_MESSAGE,
+  resolveProcurementEditState,
+  triggersSentToSupplierWindow,
+} from './procurement-edit-window.util';
+import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -670,9 +682,8 @@ export class ProcurementService {
         include: { items: true },
       });
       if (!existing) throw new NotFoundException('Procurement order not found');
-      if (existing.hqStockMovementCreatedAt) {
-        throw new BadRequestException('Received procurement orders cannot be edited');
-      }
+
+      const editState = this.assertProcurementOrderEditable(user, existing, dto);
 
       const activePaymentCount = await tx.procurementSupplierPayment.count({
         where: { procurementOrderId: id, status: ProcurementSupplierPaymentStatus.ACTIVE },
@@ -708,50 +719,115 @@ export class ProcurementService {
         factoryId?: string | null;
       }> | null = null;
 
+      const nextSupplierId = dto.supplierId ?? existing.supplierId;
+      const nextFactoryId = dto.factoryId !== undefined ? dto.factoryId ?? null : existing.factoryId;
+      const nextNote = dto.note !== undefined ? dto.note ?? null : existing.note;
+
+      if (dto.supplierId && dto.supplierId !== existing.supplierId) {
+        await this.auditProcurementItemChange(
+          tx,
+          user,
+          id,
+          null,
+          'PROCUREMENT_SUPPLIER_CHANGED',
+          { supplierId: existing.supplierId },
+          { supplierId: dto.supplierId },
+          dto.reason,
+        );
+      }
+      if (dto.factoryId !== undefined && dto.factoryId !== existing.factoryId) {
+        await this.auditProcurementItemChange(
+          tx,
+          user,
+          id,
+          null,
+          'PROCUREMENT_FACTORY_CHANGED',
+          { factoryId: existing.factoryId },
+          { factoryId: dto.factoryId ?? null },
+          dto.reason,
+        );
+      }
+
       if (Array.isArray(dto.items)) {
-        await tx.procurementOrderItem.deleteMany({ where: { orderId: id } });
-        const preparedItems: PreparedProcurementItem[] = [];
-        for (const item of dto.items) {
-          preparedItems.push(await this.resolveProcurementItemFromProduct(
+        if (existing.sentToSupplierAt) {
+          const syncResult = await this.syncProcurementOrderItemsInTx(
             tx,
-            item,
-            dto.supplierId ?? existing.supplierId,
-            dto.factoryId ?? existing.factoryId,
+            user,
+            id,
+            existing.items,
+            dto.items,
+            nextSupplierId,
+            nextFactoryId,
             exchangeRate,
-          ));
+            logistics,
+            cargo,
+            dto.reason,
+          );
+          priceSyncItems = syncResult.priceSyncItems;
+          const orderTotals = this.buildProcurementOrderTotals(syncResult.calculated, logistics, cargo);
+          await tx.procurementOrder.update({
+            where: { id },
+            data: {
+              supplierId: nextSupplierId,
+              factoryId: nextFactoryId,
+              hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
+              currency: dto.currency ?? existing.currency,
+              defaultYuanRate: exchangeRate,
+              purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
+              ...orderTotals,
+              remainingYuan: orderTotals.totalYuan,
+              ...cargoReceipt,
+              estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
+              note: nextNote,
+            },
+          });
+        } else {
+          await tx.procurementOrderItem.deleteMany({ where: { orderId: id } });
+          const preparedItems: PreparedProcurementItem[] = [];
+          for (const item of dto.items) {
+            preparedItems.push(await this.resolveProcurementItemFromProduct(
+              tx,
+              item,
+              nextSupplierId,
+              nextFactoryId,
+              exchangeRate,
+            ));
+          }
+          priceSyncItems = preparedItems.map((item) => ({
+            productId: item.productId,
+            purchasePriceYuan: item.purchasePriceYuan,
+            supplierId: item.supplierId,
+            factoryId: item.factoryId,
+          }));
+          const calculated = this.calculateProcurementLandedCosts(preparedItems, logistics, cargo);
+          const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
+          await tx.procurementOrderItem.createMany({
+            data: calculated.items.map((item, index) => ({
+              orderId: id,
+              ...this.mapCalculatedItemToPersisted(preparedItems[index], item, exchangeRate),
+            })),
+          });
+          await tx.procurementOrder.update({
+            where: { id },
+            data: {
+              supplierId: nextSupplierId,
+              factoryId: nextFactoryId,
+              hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
+              currency: dto.currency ?? existing.currency,
+              defaultYuanRate: exchangeRate,
+              purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
+              ...orderTotals,
+              remainingYuan: orderTotals.totalYuan,
+              ...cargoReceipt,
+              estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
+              note: nextNote,
+            },
+          });
         }
-        priceSyncItems = preparedItems.map((item) => ({
-          productId: item.productId,
-          purchasePriceYuan: item.purchasePriceYuan,
-          supplierId: item.supplierId,
-          factoryId: item.factoryId,
-        }));
-        const calculated = this.calculateProcurementLandedCosts(preparedItems, logistics, cargo);
-        const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
-        await tx.procurementOrderItem.createMany({
-          data: calculated.items.map((item, index) => ({
-            orderId: id,
-            ...this.mapCalculatedItemToPersisted(preparedItems[index], item, exchangeRate),
-          })),
-        });
-        await tx.procurementOrder.update({
-          where: { id },
-          data: {
-            supplierId: dto.supplierId ?? existing.supplierId,
-            factoryId: dto.factoryId ?? existing.factoryId,
-            hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
-            currency: dto.currency ?? existing.currency,
-            defaultYuanRate: exchangeRate,
-            purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
-            ...orderTotals,
-            ...cargoReceipt,
-            estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
-            note: dto.note ?? existing.note,
-          },
-        });
       } else {
+        const activeItems = this.activeProcurementItems(existing.items);
         const recalculated = this.calculateProcurementLandedCosts(
-          existing.items.map((item) => mapStoredProcurementItemToLandedCostInput({
+          activeItems.map((item) => mapStoredProcurementItemToLandedCostInput({
             ...item,
             yuanRate: exchangeRate,
           })),
@@ -759,7 +835,7 @@ export class ProcurementService {
           cargo,
         );
         const orderTotals = this.buildProcurementOrderTotals(recalculated, logistics, cargo);
-        for (const [index, item] of existing.items.entries()) {
+        for (const [index, item] of activeItems.entries()) {
           const next = recalculated.items[index];
           await tx.procurementOrderItem.update({
             where: { id: item.id },
@@ -769,16 +845,17 @@ export class ProcurementService {
         await tx.procurementOrder.update({
           where: { id },
           data: {
-            supplierId: dto.supplierId ?? existing.supplierId,
-            factoryId: dto.factoryId ?? existing.factoryId,
+            supplierId: nextSupplierId,
+            factoryId: nextFactoryId,
             hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
             currency: dto.currency ?? existing.currency,
             defaultYuanRate: exchangeRate,
             purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
             ...orderTotals,
+            remainingYuan: orderTotals.totalYuan,
             ...cargoReceipt,
             estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
-            note: dto.note ?? existing.note,
+            note: nextNote,
           },
         });
       }
@@ -824,8 +901,9 @@ export class ProcurementService {
       const oldValue = this.pickProcurementAuditFields(order);
       const { logistics, cargo } = this.resolveProcurementLogistics(order);
       const exchangeRate = await this.resolveEffectiveYuanRate(tx, order);
+      const activeItems = this.activeProcurementItems(order.items);
       const calculated = this.calculateProcurementLandedCosts(
-        order.items.map((item) => mapStoredProcurementItemToLandedCostInput({
+        activeItems.map((item) => mapStoredProcurementItemToLandedCostInput({
           ...item,
           yuanRate: exchangeRate,
         })),
@@ -833,7 +911,7 @@ export class ProcurementService {
         cargo,
       );
       const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
-      for (const [index, item] of order.items.entries()) {
+      for (const [index, item] of activeItems.entries()) {
         const next = calculated.items[index];
         await tx.procurementOrderItem.update({
           where: { id: item.id },
@@ -885,10 +963,82 @@ export class ProcurementService {
       }
       if (status === ProcurementOrderStatus.PAID) data.paidAt = new Date();
       if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU) data.shippedAt = new Date();
+      if (triggersSentToSupplierWindow(status) && !existing.sentToSupplierAt) {
+        const timestamps = computeSentToSupplierTimestamps();
+        data.sentToSupplierAt = timestamps.sentToSupplierAt;
+        data.editableUntil = timestamps.editableUntil;
+      }
       const updated = await tx.procurementOrder.update({ where: { id }, data, include: this.procurementOrderInclude() });
       await this.auditProcurement(tx, user, 'PROCUREMENT_STATUS_CHANGE', id, oldValue, this.pickProcurementAuditFields(updated), reason, { status });
-      return updated;
+      return this.toProcurementOrderResponse(updated);
     });
+  }
+
+  unlockProcurementOrder(user: AuthUser, id: string, dto: UnlockProcurementOrderDto) {
+    if (!canUnlockProcurementOrder(user)) {
+      throw new ForbiddenException('Only CEO can unlock procurement orders');
+    }
+    const reason = dto.reason?.trim();
+    if (!reason) {
+      throw new BadRequestException('Unlock reason is required');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.procurementOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: { items: true },
+      });
+      if (!existing) throw new NotFoundException('Procurement order not found');
+      if (!existing.sentToSupplierAt || !existing.editableUntil) {
+        throw new BadRequestException('Edit window has not started for this procurement order');
+      }
+      if (existing.hqStockMovementCreatedAt || isProcurementOrderCompleted(existing)) {
+        throw new BadRequestException('Completed or received procurement orders cannot be unlocked');
+      }
+
+      const editState = resolveProcurementEditState(existing);
+      if (editState.editWindowStatus === 'EDITABLE') {
+        throw new BadRequestException('Procurement order is still within the 24-hour edit window');
+      }
+
+      const now = new Date();
+      const unlockExpiresAt = computeUnlockExpiry(now);
+      const updated = await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          unlockedById: user.id,
+          unlockedAt: now,
+          unlockExpiresAt,
+          unlockReason: reason,
+        },
+        include: this.procurementOrderInclude(),
+      });
+
+      await this.auditProcurement(
+        tx,
+        user,
+        'PROCUREMENT_ORDER_UNLOCKED',
+        id,
+        {
+          unlockedById: existing.unlockedById,
+          unlockedAt: existing.unlockedAt,
+          unlockExpiresAt: existing.unlockExpiresAt,
+        },
+        {
+          unlockedById: user.id,
+          unlockedAt: now,
+          unlockExpiresAt,
+          unlockReason: reason,
+        },
+        reason,
+      );
+
+      return this.toProcurementOrderResponse(updated);
+    });
+  }
+
+  markSentToSupplier(user: AuthUser, id: string, reason?: string) {
+    return this.updateProcurementStatus(user, id, ProcurementOrderStatus.SENT_TO_SUPPLIER, reason);
   }
 
   private markProcurementArrived(user: AuthUser, id: string) {
@@ -996,6 +1146,7 @@ export class ProcurementService {
       hqWarehouse: true,
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
+      unlockedBy: { select: { id: true, fullName: true, role: true } },
       items: { include: { product: true, supplier: true, factory: true }, orderBy: { createdAt: 'asc' as const } },
       receivings: { include: { items: true }, orderBy: { createdAt: 'desc' as const } },
       differenceReports: { orderBy: { createdAt: 'desc' as const } },
@@ -1036,6 +1187,270 @@ export class ProcurementService {
     throw new ForbiddenException('You do not have permission to view procurement orders');
   }
 
+  private assertProcurementOrderEditable(user: AuthUser, order: any, dto: any) {
+    if (order.hqStockMovementCreatedAt) {
+      throw new BadRequestException('Received procurement orders cannot be edited');
+    }
+    if (isProcurementOrderCompleted(order)) {
+      throw new BadRequestException('Completed procurement orders cannot be edited');
+    }
+
+    const editState = resolveProcurementEditState(order);
+    const headerChanged =
+      (dto.supplierId !== undefined && dto.supplierId !== order.supplierId) ||
+      (dto.factoryId !== undefined && dto.factoryId !== order.factoryId) ||
+      (dto.note !== undefined && dto.note !== order.note);
+    const itemsChanged = Array.isArray(dto.items);
+
+    if (!order.sentToSupplierAt) {
+      return editState;
+    }
+
+    if (itemsChanged || headerChanged) {
+      if (!canUserEditProcurementItems(user, editState)) {
+        if (editState.editWindowStatus === 'LOCKED') {
+          throw new BadRequestException(PROCUREMENT_EDIT_WINDOW_EXPIRED_MESSAGE);
+        }
+        throw new ForbiddenException('You do not have permission to edit this procurement order');
+      }
+    }
+
+    return editState;
+  }
+
+  private activeProcurementItems(items: any[]) {
+    return items.filter((item) => item.status !== ProcurementOrderItemStatus.CANCELLED);
+  }
+
+  private async canHardDeleteProcurementItem(tx: any, item: any) {
+    if ((item.receivedQuantity ?? 0) > 0) {
+      return false;
+    }
+    const receivingCount = await tx.procurementGoodsReceivingItem.count({
+      where: { procurementItemId: item.id },
+    });
+    return receivingCount === 0;
+  }
+
+  private auditProcurementItemChange(
+    tx: any,
+    user: AuthUser,
+    procurementOrderId: string,
+    itemId: string | null,
+    action: string,
+    oldValue: unknown,
+    newValue: unknown,
+    reason?: string,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'ProcurementOrder',
+        entityId: procurementOrderId,
+        metadata: {
+          userId: user.id,
+          userRole: user.role,
+          roles: user.roles ?? [user.role],
+          procurementOrderId,
+          itemId,
+          oldValue,
+          newValue,
+          reason: reason?.trim() || null,
+        },
+      },
+    });
+  }
+
+  private async syncProcurementOrderItemsInTx(
+    tx: any,
+    user: AuthUser,
+    orderId: string,
+    existingItems: any[],
+    dtoItems: any[],
+    orderSupplierId: string,
+    orderFactoryId: string | null,
+    exchangeRate: number,
+    logistics: ReturnType<typeof extractLogisticsCosts>,
+    cargo: ReturnType<typeof extractCargoConfig>,
+    reason?: string,
+  ) {
+    const activeExisting = this.activeProcurementItems(existingItems);
+    const existingById = new Map(activeExisting.map((item) => [item.id, item]));
+    const incomingIds = new Set(
+      dtoItems.map((item) => item.id).filter((id: string | undefined) => !!id),
+    );
+    const priceSyncItems: Array<{
+      productId: string;
+      purchasePriceYuan: number;
+      supplierId?: string | null;
+      factoryId?: string | null;
+    }> = [];
+
+    for (const dtoItem of dtoItems) {
+      const prepared = await this.resolveProcurementItemFromProduct(
+        tx,
+        dtoItem,
+        orderSupplierId,
+        orderFactoryId,
+        exchangeRate,
+      );
+      priceSyncItems.push({
+        productId: prepared.productId,
+        purchasePriceYuan: prepared.purchasePriceYuan,
+        supplierId: prepared.supplierId,
+        factoryId: prepared.factoryId,
+      });
+
+      if (dtoItem.id && existingById.has(dtoItem.id)) {
+        const existing = existingById.get(dtoItem.id)!;
+        if (existing.quantity !== prepared.quantity) {
+          await this.auditProcurementItemChange(
+            tx,
+            user,
+            orderId,
+            existing.id,
+            'PROCUREMENT_ITEM_QUANTITY_CHANGED',
+            { quantity: existing.quantity },
+            { quantity: prepared.quantity },
+            reason,
+          );
+        }
+        if (Number(existing.purchasePriceYuan) !== prepared.purchasePriceYuan) {
+          await this.auditProcurementItemChange(
+            tx,
+            user,
+            orderId,
+            existing.id,
+            'PROCUREMENT_ITEM_PRICE_CHANGED',
+            { purchasePriceYuan: existing.purchasePriceYuan },
+            { purchasePriceYuan: prepared.purchasePriceYuan },
+            reason,
+          );
+        }
+        await tx.procurementOrderItem.update({
+          where: { id: existing.id },
+          data: {
+            productId: prepared.productId,
+            supplierId: prepared.supplierId,
+            factoryId: prepared.factoryId,
+            sku: prepared.sku,
+            productName: prepared.productName,
+            unit: prepared.unit,
+            quantity: prepared.quantity,
+            purchasePriceYuan: prepared.purchasePriceYuan,
+            yuanRate: exchangeRate,
+            weightKg: prepared.weightKg,
+            note: prepared.note,
+            status: ProcurementOrderItemStatus.ACTIVE,
+          },
+        });
+      } else {
+        const created = await tx.procurementOrderItem.create({
+          data: {
+            orderId,
+            productId: prepared.productId,
+            supplierId: prepared.supplierId,
+            factoryId: prepared.factoryId,
+            sku: prepared.sku,
+            productName: prepared.productName,
+            unit: prepared.unit,
+            quantity: prepared.quantity,
+            purchasePriceYuan: prepared.purchasePriceYuan,
+            yuanRate: exchangeRate,
+            costKgs: 0,
+            weightKg: prepared.weightKg,
+            netWeightKg: prepared.weightKg,
+            transportCostKgs: 0,
+            finalCostKgs: 0,
+            totalYuan: prepared.quantity * prepared.purchasePriceYuan,
+            totalCostKgs: 0,
+            note: prepared.note,
+            status: ProcurementOrderItemStatus.ACTIVE,
+          },
+        });
+        await this.auditProcurementItemChange(
+          tx,
+          user,
+          orderId,
+          created.id,
+          'PROCUREMENT_ITEM_ADDED',
+          null,
+          {
+            productId: prepared.productId,
+            sku: prepared.sku,
+            quantity: prepared.quantity,
+            purchasePriceYuan: prepared.purchasePriceYuan,
+          },
+          reason,
+        );
+      }
+    }
+
+    for (const existing of activeExisting) {
+      if (incomingIds.has(existing.id)) {
+        continue;
+      }
+      const canDelete = await this.canHardDeleteProcurementItem(tx, existing);
+      if (canDelete) {
+        await tx.procurementOrderItem.delete({ where: { id: existing.id } });
+        await this.auditProcurementItemChange(
+          tx,
+          user,
+          orderId,
+          existing.id,
+          'PROCUREMENT_ITEM_REMOVED',
+          {
+            productId: existing.productId,
+            sku: existing.sku,
+            quantity: existing.quantity,
+          },
+          null,
+          reason,
+        );
+      } else {
+        await tx.procurementOrderItem.update({
+          where: { id: existing.id },
+          data: { status: ProcurementOrderItemStatus.CANCELLED },
+        });
+        await this.auditProcurementItemChange(
+          tx,
+          user,
+          orderId,
+          existing.id,
+          'PROCUREMENT_ITEM_CANCELLED',
+          { status: ProcurementOrderItemStatus.ACTIVE },
+          { status: ProcurementOrderItemStatus.CANCELLED },
+          reason,
+        );
+      }
+    }
+
+    const activeItems = await tx.procurementOrderItem.findMany({
+      where: { orderId, status: ProcurementOrderItemStatus.ACTIVE },
+      orderBy: { createdAt: 'asc' },
+    });
+    const calculated = this.calculateProcurementLandedCosts(
+      activeItems.map((item: any) => mapStoredProcurementItemToLandedCostInput({
+        ...item,
+        yuanRate: exchangeRate,
+      })),
+      logistics,
+      cargo,
+    );
+
+    for (const [index, item] of activeItems.entries()) {
+      const next = calculated.items[index];
+      await tx.procurementOrderItem.update({
+        where: { id: item.id },
+        data: this.mapRecalculatedItemFields(next, exchangeRate),
+      });
+    }
+
+    return { calculated, priceSyncItems };
+  }
+
   private pickProcurementAuditFields(order: any) {
     return {
       id: order.id,
@@ -1044,6 +1459,12 @@ export class ProcurementService {
       supplierId: order.supplierId,
       factoryId: order.factoryId,
       hqWarehouseId: order.hqWarehouseId,
+      sentToSupplierAt: order.sentToSupplierAt,
+      editableUntil: order.editableUntil,
+      unlockedById: order.unlockedById,
+      unlockedAt: order.unlockedAt,
+      unlockExpiresAt: order.unlockExpiresAt,
+      unlockReason: order.unlockReason,
       currency: order.currency,
       purchaseDate: order.purchaseDate,
       exchangeRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
@@ -1081,6 +1502,7 @@ export class ProcurementService {
         id: item.id,
         productId: item.productId,
         sku: item.sku,
+        status: item.status,
         quantity: item.quantity,
         receivedQuantity: item.receivedQuantity,
         purchasePriceYuan: item.purchasePriceYuan?.toString?.() ?? item.purchasePriceYuan,
@@ -1785,6 +2207,19 @@ export class ProcurementService {
         order.weightedAverageYuanRate && Number(order.totalPaidYuan) > 0
           ? Number(order.weightedAverageYuanRate)
           : Number(order.defaultYuanRate),
+      ...(() => {
+        const editState = resolveProcurementEditState(order);
+        return {
+          sentToSupplierAt: order.sentToSupplierAt,
+          editableUntil: order.editableUntil,
+          unlockedAt: order.unlockedAt,
+          unlockExpiresAt: order.unlockExpiresAt,
+          unlockReason: order.unlockReason,
+          isEditable: editState.isEditable,
+          editWindowStatus: editState.editWindowStatus,
+          secondsRemaining: editState.secondsRemaining,
+        };
+      })(),
       supplierPayments: order.supplierPayments?.map((payment: any) =>
         this.toSupplierPaymentResponse(payment),
       ),

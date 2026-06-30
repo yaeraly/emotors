@@ -5,12 +5,15 @@ import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
+import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
 import {
   canCreateProcurementOrder,
   canCreateSupplierPayment,
+  canEditProcurementOrderItemsInWindow,
   canReceiveProcurementToHq,
+  canUnlockProcurementOrder,
   canViewSupplierPayments,
   hasRole,
 } from '@/lib/rbac';
@@ -21,6 +24,7 @@ type ProcurementOrderItem = {
   id: string;
   sku: string;
   productName: string;
+  status?: string;
   quantity: number;
   receivedQuantity?: number | null;
   purchasePriceYuan: string | number;
@@ -83,6 +87,15 @@ type ProcurementOrder = {
     attachments?: Array<{ id: string; fileName: string; fileUrl: string }>;
   }>;
   cargoAttachments?: Array<{ id: string; fileName: string; fileUrl: string; mimeType: string }>;
+  sentToSupplierAt?: string | null;
+  editableUntil?: string | null;
+  unlockedAt?: string | null;
+  unlockExpiresAt?: string | null;
+  unlockReason?: string | null;
+  isEditable?: boolean;
+  editWindowStatus?: 'DRAFT_EDITABLE' | 'EDITABLE' | 'LOCKED' | 'CEO_UNLOCKED';
+  secondsRemaining?: number | null;
+  unlockedBy?: { fullName?: string } | null;
   items?: ProcurementOrderItem[];
   differenceReports?: Array<{ id: string; reportNumber: string; type: string; sku: string; expectedQuantity: number; receivedQuantity: number; differenceQuantity: number; status: string; shortageReason?: string }>;
   receivings?: Array<{ id: string; receivingNumber: string; receivedAt: string }>;
@@ -93,6 +106,8 @@ type AuditLog = { id: string; action: string; timestamp: string; user?: { fullNa
 const SHORTAGE_REASONS = ['FACTORY_SHORTAGE', 'SUPPLIER_SHORTAGE', 'DAMAGED_GOODS', 'LOST_IN_TRANSPORT', 'CUSTOMS_ISSUE', 'OTHER'] as const;
 const statusActions = [
   ['approve', 'distribution.approve'],
+  ['mark-ordered', 'procurement.orders.markOrdered'],
+  ['mark-sent-to-supplier', 'procurement.orders.markSentToSupplier'],
   ['mark-paid', 'paymentStatus.PAID'],
   ['mark-production', 'procurement.inProduction'],
   ['mark-shipped-to-yiwu', 'procurement.shippedToYiwu'],
@@ -132,8 +147,15 @@ export default function ProcurementOrderDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [savingLogistics, setSavingLogistics] = useState(false);
+  const [unlocking, setUnlocking] = useState(false);
 
   const canEditOrder = canCreateProcurementOrder(user);
+  const canEditItems = canEditProcurementOrderItemsInWindow(user, {
+    isEditable: order?.isEditable,
+    editWindowStatus: order?.editWindowStatus,
+    sentToSupplierAt: order?.sentToSupplierAt,
+  });
+  const canUnlock = canUnlockProcurementOrder(user) && order?.editWindowStatus === 'LOCKED';
   const canSeePayments = canViewSupplierPayments(user);
   const canUploadCargo = canCreateSupplierPayment(user);
   const readOnlyFinance = hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'ACCOUNTANT');
@@ -142,7 +164,9 @@ export default function ProcurementOrderDetailPage() {
   const canEditSvh = order ? SVH_STATUSES.includes(order.status) : false;
   const finalized = !!order?.hqStockMovementCreatedAt;
 
-  const previewItems = useMemo(() => (order?.items ?? []).map((item) => ({
+  const previewItems = useMemo(() => (order?.items ?? [])
+    .filter((item) => item.status !== 'CANCELLED')
+    .map((item) => ({
     quantity: item.quantity,
     receivedQuantity: canReceive && !finalized ? Number(receiveQty[item.id] ?? item.quantity) : item.receivedQuantity,
     purchasePriceYuan: Number(item.purchasePriceYuan),
@@ -221,6 +245,24 @@ export default function ProcurementOrderDetailPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function unlockOrder(reason: string) {
+    setUnlocking(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/unlock`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      setSuccess(t('procurement.orders.editWindow.unlockSuccess'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setUnlocking(false);
+    }
+  }
 
   async function action(path: string) {
     setError('');
@@ -347,7 +389,7 @@ export default function ProcurementOrderDetailPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('procurement.orders.title')}</p>
             <h2 className="text-3xl font-bold">{order?.orderNumber ?? '-'}</h2>
           </div>
-          {canEditOrder && order && !finalized ? (
+          {canEditItems && order && !finalized ? (
             <Link href={`/procurement/orders/${id}/edit`} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t('procurement.orders.edit')}</Link>
           ) : null}
         </div>
@@ -362,6 +404,23 @@ export default function ProcurementOrderDetailPage() {
         ) : null}
 
         {order ? <>
+          {order.sentToSupplierAt ? (
+            <ProcurementEditWindowPanel
+              sentToSupplierAt={order.sentToSupplierAt}
+              editableUntil={order.editableUntil}
+              unlockedAt={order.unlockedAt}
+              unlockExpiresAt={order.unlockExpiresAt}
+              unlockReason={order.unlockReason}
+              unlockedBy={order.unlockedBy}
+              isEditable={order.isEditable}
+              editWindowStatus={order.editWindowStatus}
+              secondsRemaining={order.secondsRemaining}
+              showUnlockForm={canUnlock}
+              unlocking={unlocking}
+              onUnlock={unlockOrder}
+            />
+          ) : null}
+
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.generalInfo')}</h3>
             <div className="grid gap-4 md:grid-cols-4">
@@ -415,7 +474,7 @@ export default function ProcurementOrderDetailPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {(previewTotals?.items ?? []).map((item, index) => {
-                  const row = order.items?.[index];
+                  const row = (order.items ?? []).filter((entry) => entry.status !== 'CANCELLED')[index];
                   if (!row) return null;
                   return (
                     <tr key={row.id}>

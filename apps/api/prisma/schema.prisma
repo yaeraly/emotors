@@ -253,6 +253,11 @@ enum ProcurementSupplierPaymentLedgerStatus {
   OVERPAID
 }
 
+enum ProcurementOrderItemStatus {
+  ACTIVE
+  CANCELLED
+}
+
 enum FileAttachmentEntityType {
   PROCUREMENT_ORDER
   SUPPLIER_PAYMENT
@@ -349,6 +354,7 @@ enum ProcurementOrderStatus {
   DRAFT
   APPROVED
   ORDERED
+  SENT_TO_SUPPLIER
   PRODUCTION
   READY_TO_SHIP
   CUSTOMS_CLEARANCE
@@ -614,6 +620,7 @@ model User {
   voidedProcurementSupplierPayments ProcurementSupplierPayment[] @relation("ProcurementSupplierPaymentVoider")
   fileAttachments FileAttachment[] @relation("FileAttachmentUploader")
   procurementCostAdjustments ProcurementCostAdjustment[] @relation("ProcurementCostAdjustmentCreator")
+  unlockedProcurementOrders ProcurementOrder[] @relation("ProcurementOrderUnlocker")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1522,6 +1529,13 @@ model ProcurementOrder {
   arrivedAt                DateTime?
   receivedToHqAt           DateTime?
   hqStockMovementCreatedAt DateTime?
+  sentToSupplierAt         DateTime?
+  editableUntil            DateTime?
+  unlockedById             String?
+  unlockedBy               User?                  @relation("ProcurementOrderUnlocker", fields: [unlockedById], references: [id])
+  unlockedAt               DateTime?
+  unlockExpiresAt          DateTime?
+  unlockReason             String?
   note                     String?
   items                    ProcurementOrderItem[]
   receivings               ProcurementGoodsReceiving[]
@@ -1539,6 +1553,7 @@ model ProcurementOrder {
   @@index([status])
   @@index([createdById])
   @@index([approvedById])
+  @@index([unlockedById])
 }
 
 model ProcurementSupplierPayment {
@@ -1622,6 +1637,7 @@ model ProcurementOrderItem {
   sku                    String
   productName            String
   unit                   String           @default("pcs")
+  status                 ProcurementOrderItemStatus @default(ACTIVE)
   quantity               Int
   receivedQuantity       Int?
   purchasePriceYuan      Decimal          @db.Decimal(14, 2)
@@ -1653,6 +1669,7 @@ model ProcurementOrderItem {
   @@index([productId])
   @@index([supplierId])
   @@index([factoryId])
+  @@index([status])
 }
 
 model PurchaseOrder {

@@ -10,6 +10,7 @@ import { RolesGuard } from '../roles/roles.guard';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
+import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
 import { ProcurementService } from './procurement.service';
 
 const PROCUREMENT_VIEW_PERMISSIONS = ['procurement.manage', 'procurement.view'] as const;
@@ -204,6 +205,26 @@ export class ProcurementController {
   @Post('orders/:id/mark-shipped-to-yiwu')
   @RequirePermissions('procurement.manage')
   markShipped(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.service.updateProcurementStatus(user, id, 'SHIPPED_TO_YIWU' as any); }
+
+  @Post('orders/:id/mark-ordered')
+  @RequirePermissions('procurement.manage')
+  markOrdered(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.service.updateProcurementStatus(user, id, 'ORDERED' as any); }
+
+  @Post('orders/:id/mark-sent-to-supplier')
+  @RequirePermissions('procurement.manage')
+  markSentToSupplier(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.markSentToSupplier(user, id, dto?.reason);
+  }
+
+  @Post('orders/:id/unlock')
+  @RequirePermissions('procurement.manage')
+  unlockProcurementOrder(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UnlockProcurementOrderDto,
+  ) {
+    return this.service.unlockProcurementOrder(user, id, dto);
+  }
 
   @Post('orders/:id/mark-in-transit')
   @RequirePermissions('procurement.manage')

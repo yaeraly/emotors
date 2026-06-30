@@ -337,6 +337,40 @@ export function canReceiveProcurementToHq(user: Pick<User, 'role' | 'roles' | 'p
   return hasPermission(user, 'procurement.receive') || hasPermission(user, 'procurement.manage');
 }
 
+export function canEditProcurementOrderItems(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasRole(user, 'WAREHOUSE_MANAGER') || hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'ACCOUNTANT')) {
+    return false;
+  }
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER') || hasRole(user, 'PROCUREMENT_MANAGER');
+}
+
+export function canUnlockProcurementOrder(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'CEO') || hasRole(user, 'OWNER');
+}
+
+export function canEditProcurementOrderItemsInWindow(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+  editWindow: {
+    isEditable?: boolean;
+    editWindowStatus?: string;
+    sentToSupplierAt?: string | null;
+  },
+) {
+  if (!user) return false;
+  if (!editWindow.sentToSupplierAt) {
+    return canEditProcurementOrderItems(user);
+  }
+  if (!editWindow.isEditable) {
+    return false;
+  }
+  if (editWindow.editWindowStatus === 'CEO_UNLOCKED') {
+    return canUnlockProcurementOrder(user);
+  }
+  return canEditProcurementOrderItems(user);
+}
+
 export function canCreateDistributionOrder(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }

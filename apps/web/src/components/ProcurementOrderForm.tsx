@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { calculateLandedCosts } from '@/lib/landed-cost';
-import type { Product, ProductListResponse, Warehouse } from '@/lib/types';
+import { canEditProcurementOrderItemsInWindow } from '@/lib/rbac';
+import type { Product, ProductListResponse, User, Warehouse } from '@/lib/types';
+import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type Supplier = { id: string; name: string };
@@ -78,6 +80,17 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     otherExpenseKgs: '0',
   });
   const [lines, setLines] = useState<ProcurementLine[]>([emptyLine()]);
+  const [user, setUser] = useState<User | null>(null);
+  const [editWindow, setEditWindow] = useState<{
+    isEditable?: boolean;
+    editWindowStatus?: string;
+    sentToSupplierAt?: string | null;
+    editableUntil?: string | null;
+    secondsRemaining?: number | null;
+    unlockExpiresAt?: string | null;
+    unlockReason?: string | null;
+    unlockedBy?: { fullName?: string } | null;
+  }>({});
 
   useEffect(() => {
     const loaders: Promise<unknown>[] = [
@@ -85,24 +98,37 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       apiFetch<Factory[]>('/procurement/factories'),
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<ProductListResponse>('/inventory/products?pageSize=500'),
+      apiFetch<User>('/auth/me'),
     ];
     if (mode === 'edit' && orderId) loaders.push(apiFetch<any>(`/procurement/orders/${orderId}`));
 
     Promise.all(loaders)
       .then((results) => {
-        const [supplierResult, factoryResult, warehouseResult, productResult, order] = results as [
+        const [supplierResult, factoryResult, warehouseResult, productResult, me, order] = results as [
           Supplier[],
           Factory[],
           Warehouse[],
           ProductListResponse,
+          User,
           any?,
         ];
+        setUser(me);
         setSuppliers(supplierResult);
         setFactories(factoryResult);
         setWarehouses(warehouseResult);
         setProducts(productResult.items);
 
         if (mode === 'edit' && order) {
+          setEditWindow({
+            isEditable: order.isEditable,
+            editWindowStatus: order.editWindowStatus,
+            sentToSupplierAt: order.sentToSupplierAt,
+            editableUntil: order.editableUntil,
+            secondsRemaining: order.secondsRemaining,
+            unlockExpiresAt: order.unlockExpiresAt,
+            unlockReason: order.unlockReason,
+            unlockedBy: order.unlockedBy,
+          });
           setForm({
             supplierId: order.supplierId,
             factoryId: order.factoryId ?? '',
@@ -118,7 +144,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             bankFeeCostKgs: String(order.bankFeeCostKgs ?? 0),
             otherExpenseKgs: String(order.otherExpenseKgs ?? 0),
           });
-          setLines((order.items ?? []).map((item: any) => {
+          setLines((order.items ?? [])
+            .filter((item: any) => item.status !== 'CANCELLED')
+            .map((item: any) => {
             const product = productResult.items.find((p) => p.id === item.productId);
             const masterPrice = String(product?.purchasePriceYuan ?? item.purchasePriceYuan ?? 0);
             return {
@@ -202,6 +230,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
   ), [form, lineDetails]);
 
   const weightErrors = lineDetails.filter((line) => line.productId && line.missingWeight);
+  const sentToSupplier = !!editWindow.sentToSupplierAt;
+  const canEditItems = canEditProcurementOrderItemsInWindow(user, editWindow);
+  const itemsLocked = mode === 'edit' && sentToSupplier && !canEditItems;
 
   function setField<K extends keyof HeaderForm>(key: K, value: HeaderForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -265,6 +296,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       bankFeeCostKgs: Number(form.bankFeeCostKgs || 0),
       otherExpenseKgs: Number(form.otherExpenseKgs || 0),
       items: lines.map((line) => ({
+        id: mode === 'edit' ? line.key : undefined,
         productId: line.productId,
         factoryId: line.factoryId || form.factoryId || undefined,
         quantity: Number(line.quantity || 0),
@@ -299,6 +331,19 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         <h2 className="mt-2 text-3xl font-bold text-slate-950">{title}</h2>
       </div>
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {mode === 'edit' && editWindow.sentToSupplierAt ? (
+        <ProcurementEditWindowPanel
+          sentToSupplierAt={editWindow.sentToSupplierAt}
+          editableUntil={editWindow.editableUntil}
+          unlockExpiresAt={editWindow.unlockExpiresAt}
+          unlockReason={editWindow.unlockReason}
+          unlockedBy={editWindow.unlockedBy}
+          isEditable={editWindow.isEditable}
+          editWindowStatus={editWindow.editWindowStatus as any}
+          secondsRemaining={editWindow.secondsRemaining}
+        />
+      ) : null}
+      {itemsLocked ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t('procurement.orders.editWindow.expired')}</p> : null}
       {weightErrors.length ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.orders.weightNotConfigured')}</p>
       ) : null}
@@ -307,8 +352,8 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h3 className="mb-4 text-lg font-bold text-slate-950">{t('procurement.orders.generalInfo')}</h3>
         <div className="grid gap-4 md:grid-cols-3">
-          <Field label={t('procurement.orders.supplier')}><select value={form.supplierId} onChange={(e) => setField('supplierId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
-          <Field label={t('procurement.orders.factory')}><select value={form.factoryId} onChange={(e) => setField('factoryId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2"><option value="">-</option>{factories.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Field>
+          <Field label={t('procurement.orders.supplier')}><select disabled={itemsLocked} value={form.supplierId} onChange={(e) => setField('supplierId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+          <Field label={t('procurement.orders.factory')}><select disabled={itemsLocked} value={form.factoryId} onChange={(e) => setField('factoryId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2"><option value="">-</option>{factories.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Field>
           <Field label={t('procurement.orders.exchangeRate')}><input type="number" step="0.0001" value={form.exchangeRate} onChange={(e) => setField('exchangeRate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.warehouse')}><select value={form.hqWarehouseId} onChange={(e) => setField('hqWarehouseId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
           <Field label={t('procurement.orders.purchaseDate')}><input type="date" value={form.purchaseDate} onChange={(e) => setField('purchaseDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
@@ -325,7 +370,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-bold text-slate-950">{t('procurement.orders.productsTable')}</h3>
-          <button type="button" onClick={addLine} className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">{t('procurement.orders.addProduct')}</button>
+          <button type="button" disabled={itemsLocked} onClick={addLine} className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 disabled:opacity-50">{t('procurement.orders.addProduct')}</button>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -347,17 +392,18 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
               {lineDetails.map((line) => (
                 <tr key={line.key} className={line.missingWeight ? 'bg-amber-50' : line.priceChanged ? 'bg-blue-50' : ''}>
                   <td className="px-3 py-3 min-w-48">
-                    <select value={line.productId} onChange={(e) => updateLine(line.key, { productId: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5">
+                    <select disabled={itemsLocked} value={line.productId} onChange={(e) => updateLine(line.key, { productId: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5">
                       {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                   </td>
                   <td className="px-3 py-3 font-mono text-xs">{line.sku}</td>
-                  <td className="px-3 py-3"><input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
+                  <td className="px-3 py-3"><input disabled={itemsLocked} type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
                   <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : `${line.netWeightKg.toFixed(3)} kg`}</td>
                   <td className="px-3 py-3">{line.totalNetWeightKg.toFixed(3)}</td>
                   <td className="px-3 py-3 font-mono">¥{line.masterPriceYuan.toFixed(2)}</td>
                   <td className="px-3 py-3">
                     <input
+                      disabled={itemsLocked}
                       type="number"
                       min={0}
                       step="0.01"
@@ -374,7 +420,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                         : '-'}
                   </td>
                   <td className="px-3 py-3">¥{line.totalYuan.toFixed(2)}</td>
-                  <td className="px-3 py-3">{lines.length > 1 ? <button type="button" onClick={() => removeLine(line.key)} className="text-red-600">{t('common.delete')}</button> : null}</td>
+                  <td className="px-3 py-3">{lines.length > 1 ? <button disabled={itemsLocked} type="button" onClick={() => removeLine(line.key)} className="text-red-600 disabled:opacity-50">{t('common.delete')}</button> : null}</td>
                 </tr>
               ))}
             </tbody>
@@ -389,7 +435,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       </section>
 
       <div className="flex justify-end">
-        <button disabled={saving || weightErrors.length > 0} type="submit" className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:bg-blue-300">
+        <button disabled={saving || weightErrors.length > 0 || itemsLocked} type="submit" className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:bg-blue-300">
           {saving ? t('common.loading') : t('procurement.orders.save')}
         </button>
       </div>

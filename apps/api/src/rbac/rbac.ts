@@ -279,6 +279,23 @@ export function canReceiveProcurementToHq(user: Pick<AuthUser, 'role' | 'roles' 
   return userHasAnyPermission(user, ['procurement.receive', 'procurement.manage']);
 }
 
+export function canEditProcurementOrderItems(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (roles.includes(Role.WAREHOUSE_MANAGER) || roles.includes(Role.FINANCE_MANAGER) || roles.includes(Role.ACCOUNTANT)) {
+    return false;
+  }
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.PROCUREMENT_MANAGER)
+  );
+}
+
+export function canUnlockProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO) || roles.includes(Role.OWNER);
+}
+
 export function canCreateDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
   return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
