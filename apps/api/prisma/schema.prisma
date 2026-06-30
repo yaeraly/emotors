@@ -235,6 +235,30 @@ enum PurchasePriceChangeReason {
   MANUAL_CORRECTION
 }
 
+enum ProcurementSupplierPaymentStatus {
+  ACTIVE
+  VOID
+}
+
+enum ProcurementSupplierPaymentMethod {
+  BANK
+  CASH
+  TRANSFER
+}
+
+enum ProcurementSupplierPaymentLedgerStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  OVERPAID
+}
+
+enum FileAttachmentEntityType {
+  PROCUREMENT_ORDER
+  SUPPLIER_PAYMENT
+  CARGO_RECEIPT
+}
+
 enum SupplierClaimOutcome {
   REFUND
   REPLACEMENT
@@ -586,6 +610,10 @@ model User {
   assignedUserRoles UserRole[]    @relation("UserRoleAssigner")
   loginHistory   LoginHistory[]
   auditLogs      AuditLog[]
+  procurementSupplierPayments ProcurementSupplierPayment[] @relation("ProcurementSupplierPaymentCreator")
+  voidedProcurementSupplierPayments ProcurementSupplierPayment[] @relation("ProcurementSupplierPaymentVoider")
+  fileAttachments FileAttachment[] @relation("FileAttachmentUploader")
+  procurementCostAdjustments ProcurementCostAdjustment[] @relation("ProcurementCostAdjustmentCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1390,6 +1418,7 @@ model Supplier {
   procurementOrderItems ProcurementOrderItem[]
   defaultProducts       Product[]         @relation("ProductDefaultSupplier")
   purchasePriceHistory  ProductPurchasePriceHistory[]
+  supplierPayments      ProcurementSupplierPayment[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   deletedAt        DateTime?
@@ -1464,6 +1493,11 @@ model ProcurementOrder {
   totalPackagingWeightKg   Decimal                @default(0) @db.Decimal(14, 3)
   purchaseDate             DateTime?
   totalYuan                Decimal                @default(0) @db.Decimal(14, 2)
+  totalPaidYuan            Decimal                @default(0) @db.Decimal(14, 2)
+  totalPaidKgs             Decimal                @default(0) @db.Decimal(14, 2)
+  remainingYuan            Decimal                @default(0) @db.Decimal(14, 2)
+  weightedAverageYuanRate  Decimal?               @db.Decimal(14, 4)
+  supplierPaymentStatus    ProcurementSupplierPaymentLedgerStatus @default(UNPAID)
   totalTransportCostKgs    Decimal                @default(0) @db.Decimal(14, 2)
   totalCostKgs             Decimal                @default(0) @db.Decimal(14, 2)
   totalWeightKg            Decimal                @default(0) @db.Decimal(14, 3)
@@ -1493,6 +1527,8 @@ model ProcurementOrder {
   receivings               ProcurementGoodsReceiving[]
   differenceReports        ProcurementDifferenceReport[]
   purchasePriceHistory     ProductPurchasePriceHistory[]
+  supplierPayments         ProcurementSupplierPayment[]
+  costAdjustments          ProcurementCostAdjustment[]
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
@@ -1503,6 +1539,74 @@ model ProcurementOrder {
   @@index([status])
   @@index([createdById])
   @@index([approvedById])
+}
+
+model ProcurementSupplierPayment {
+  id                 String                            @id @default(cuid())
+  procurementOrderId String
+  procurementOrder   ProcurementOrder                  @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  supplierId         String
+  supplier           Supplier                          @relation(fields: [supplierId], references: [id])
+  paymentDate        DateTime
+  amountYuan         Decimal                           @db.Decimal(14, 2)
+  exchangeRate       Decimal                           @db.Decimal(14, 4)
+  amountKgs          Decimal                           @db.Decimal(14, 2)
+  paymentMethod      ProcurementSupplierPaymentMethod
+  receiptNumber      String?
+  notes              String?
+  status             ProcurementSupplierPaymentStatus  @default(ACTIVE)
+  voidedAt           DateTime?
+  voidedById         String?
+  voidedBy           User?                             @relation("ProcurementSupplierPaymentVoider", fields: [voidedById], references: [id])
+  voidReason         String?
+  createdById        String
+  createdBy          User                              @relation("ProcurementSupplierPaymentCreator", fields: [createdById], references: [id])
+  attachments        FileAttachment[]
+  createdAt          DateTime                          @default(now())
+  updatedAt          DateTime                          @updatedAt
+
+  @@index([procurementOrderId])
+  @@index([supplierId])
+  @@index([status])
+  @@index([createdById])
+  @@index([paymentDate])
+}
+
+model ProcurementCostAdjustment {
+  id                 String           @id @default(cuid())
+  procurementOrderId String
+  procurementOrder   ProcurementOrder @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  oldTotalCostKgs    Decimal          @db.Decimal(14, 2)
+  newTotalCostKgs    Decimal          @db.Decimal(14, 2)
+  oldWeightedRate    Decimal?         @db.Decimal(14, 4)
+  newWeightedRate    Decimal?         @db.Decimal(14, 4)
+  reason             String?
+  createdById        String
+  createdBy          User             @relation("ProcurementCostAdjustmentCreator", fields: [createdById], references: [id])
+  createdAt          DateTime         @default(now())
+
+  @@index([procurementOrderId])
+  @@index([createdById])
+}
+
+model FileAttachment {
+  id           String                   @id @default(cuid())
+  entityType   FileAttachmentEntityType
+  entityId     String
+  fileName     String
+  fileUrl      String
+  mimeType     String
+  size         Int
+  uploadedById String
+  uploadedBy   User                     @relation("FileAttachmentUploader", fields: [uploadedById], references: [id])
+  supplierPaymentId String?
+  supplierPayment   ProcurementSupplierPayment? @relation(fields: [supplierPaymentId], references: [id], onDelete: SetNull)
+  createdAt    DateTime                 @default(now())
+  deletedAt    DateTime?
+
+  @@index([entityType, entityId])
+  @@index([uploadedById])
+  @@index([supplierPaymentId])
 }
 
 model ProcurementOrderItem {

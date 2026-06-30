@@ -183,6 +183,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/procurement/purchase-price-history')) {
     return canViewProcurement(user) || hasPermission(user, 'reports.view');
   }
+  if (pathname.startsWith('/procurement/orders/')) {
+    return canViewProcurement(user) || canViewSupplierPayments(user);
+  }
   if (pathname.startsWith('/procurement')) return canViewProcurement(user);
   if (pathname.startsWith('/branch-purchase-requests')) {
     return hasPermission(user, 'procurement.manage') || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
@@ -259,6 +262,35 @@ export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permi
 
 export function canEditPurchasePriceYuan(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+}
+
+export function canViewSupplierPayments(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return (
+    hasFullAccess(user) ||
+    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT']) ||
+    hasPermission(user, 'procurement.view') ||
+    hasPermission(user, 'procurement.manage') ||
+    hasPermission(user, 'finance.view')
+  );
+}
+
+export function canCreateSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return (
+    hasFullAccess(user) ||
+    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT'])
+  );
+}
+
+export function canEditSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user) || hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'FINANCE_MANAGER']);
+}
+
+export function canVoidSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER');
+}
+
+export function canAllowSupplierOverpayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER');
 }
 
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles'> | null | undefined) {

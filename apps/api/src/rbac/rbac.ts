@@ -224,6 +224,49 @@ export function canEditPurchasePriceYuan(user: Pick<AuthUser, 'role' | 'roles' |
   return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
 }
 
+export function canViewSupplierPayments(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.PROCUREMENT_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.ACCOUNTANT) ||
+    userHasPermission(user, 'procurement.view') ||
+    userHasPermission(user, 'procurement.manage') ||
+    userHasPermission(user, 'finance.view')
+  );
+}
+
+export function canCreateSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.ACCOUNTANT)
+  );
+}
+
+export function canEditSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER)
+  );
+}
+
+export function canVoidSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
+export function canAllowSupplierOverpayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
 export function canCreateProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return userHasPermission(user, 'procurement.manage');
 }

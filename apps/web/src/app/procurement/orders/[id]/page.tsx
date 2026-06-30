@@ -4,11 +4,14 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { apiFetch } from '@/lib/api';
+import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
+import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
 import {
   canCreateProcurementOrder,
+  canCreateSupplierPayment,
   canReceiveProcurementToHq,
+  canViewSupplierPayments,
   hasRole,
 } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
@@ -61,6 +64,25 @@ type ProcurementOrder = {
   supplier?: { name: string };
   factory?: { name: string };
   hqWarehouse?: { name: string };
+  totalPaidYuan?: number;
+  totalPaidKgs?: number;
+  remainingYuan?: number;
+  weightedAverageYuanRate?: number | null;
+  effectiveYuanRate?: number;
+  supplierPaymentStatus?: string;
+  yuanRateLocked?: boolean;
+  supplierPayments?: Array<{
+    id: string;
+    paymentDate: string;
+    amountYuan: number;
+    exchangeRate: number;
+    amountKgs: number;
+    paymentMethod: 'BANK' | 'CASH' | 'TRANSFER';
+    receiptNumber?: string | null;
+    status: 'ACTIVE' | 'VOID';
+    attachments?: Array<{ id: string; fileName: string; fileUrl: string }>;
+  }>;
+  cargoAttachments?: Array<{ id: string; fileName: string; fileUrl: string; mimeType: string }>;
   items?: ProcurementOrderItem[];
   differenceReports?: Array<{ id: string; reportNumber: string; type: string; sku: string; expectedQuantity: number; receivedQuantity: number; differenceQuantity: number; status: string; shortageReason?: string }>;
   receivings?: Array<{ id: string; receivingNumber: string; receivedAt: string }>;
@@ -112,6 +134,8 @@ export default function ProcurementOrderDetailPage() {
   const [savingLogistics, setSavingLogistics] = useState(false);
 
   const canEditOrder = canCreateProcurementOrder(user);
+  const canSeePayments = canViewSupplierPayments(user);
+  const canUploadCargo = canCreateSupplierPayment(user);
   const readOnlyFinance = hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'ACCOUNTANT');
   const canReceive = canReceiveProcurementToHq(user);
   const readyForHqReceiving = order?.status === 'ARRIVED' || order?.status === 'ARRIVED_IN_KYRGYZSTAN' || order?.status === 'IN_TRANSIT';
@@ -122,7 +146,13 @@ export default function ProcurementOrderDetailPage() {
     quantity: item.quantity,
     receivedQuantity: canReceive && !finalized ? Number(receiveQty[item.id] ?? item.quantity) : item.receivedQuantity,
     purchasePriceYuan: Number(item.purchasePriceYuan),
-    yuanRate: Number(item.yuanRate ?? order?.defaultYuanRate ?? 0),
+    yuanRate: Number(
+      order?.effectiveYuanRate ??
+      item.yuanRate ??
+      order?.weightedAverageYuanRate ??
+      order?.defaultYuanRate ??
+      0,
+    ),
     weightKg: Number(item.netWeightKg ?? item.weightKg),
   })), [order, receiveQty, canReceive, finalized]);
 
@@ -239,6 +269,33 @@ export default function ProcurementOrderDetailPage() {
     }
   }
 
+  async function uploadCargoReceipt(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const token = getToken();
+    if (!token) return;
+    setError('');
+    setSuccess('');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const response = await fetch(`${API_URL}/procurement/orders/${id}/attachments/cargo-receipt`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || t('common.error'));
+      }
+      setSuccess(t('common.success'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   async function receiveGoods() {
     if (!order || cargoValidationError) return;
     setError('');
@@ -310,10 +367,27 @@ export default function ProcurementOrderDetailPage() {
             <div className="grid gap-4 md:grid-cols-4">
               <Info label={t('procurement.orders.supplier')} value={order.supplier?.name ?? ''} />
               <Info label={t('procurement.orders.factory')} value={order.factory?.name ?? '-'} />
-              <Info label={t('procurement.orders.exchangeRate')} value={String(order.defaultYuanRate ?? '-')} />
+              <Info label={t('procurement.orders.exchangeRate')} value={String(order.effectiveYuanRate ?? order.defaultYuanRate ?? '-')} />
               <Info label={t('procurement.orders.status')} value={order.status} />
             </div>
+            {order.yuanRateLocked ? (
+              <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.payments.rateLocked')}</p>
+            ) : null}
           </section>
+
+          {canSeePayments ? (
+            <ProcurementSupplierPayments
+              order={{
+                ...order,
+                totalYuan: Number(order.totalYuan),
+                totalPaidYuan: Number(order.totalPaidYuan ?? 0),
+                totalPaidKgs: Number(order.totalPaidKgs ?? 0),
+                remainingYuan: Number(order.remainingYuan ?? order.totalYuan),
+              }}
+              user={user}
+              onChanged={load}
+            />
+          ) : null}
 
           {canEditOrder && !finalized ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -373,6 +447,35 @@ export default function ProcurementOrderDetailPage() {
               <Info label={t('procurement.orders.totalCargoCostUsd')} value={`$${(previewTotals?.totalCargoCostUsd ?? 0).toFixed(2)}`} />
               <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
               <EditableField label={t('procurement.orders.cargoReceiptNote')} value={logisticsForm.cargoReceiptNote} onChange={(v) => setLogistics('cargoReceiptNote', v)} disabled={finalized || readOnlyFinance} />
+            </div>
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <h4 className="font-semibold text-slate-900">{t('procurement.payments.cargoAttachments')}</h4>
+                {canUploadCargo && !finalized ? (
+                  <label className="cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">
+                    {t('procurement.payments.attachCargoReceipt')}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      onChange={(e) => void uploadCargoReceipt(e)}
+                    />
+                  </label>
+                ) : null}
+              </div>
+              {order.cargoAttachments?.length ? (
+                <ul className="space-y-2">
+                  {order.cargoAttachments.map((attachment) => (
+                    <li key={attachment.id}>
+                      <a href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-700">
+                        {attachment.fileName}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500">{t('procurement.payments.noCargoAttachments')}</p>
+              )}
             </div>
           </section>
 

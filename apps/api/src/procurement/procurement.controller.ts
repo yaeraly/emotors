@@ -1,10 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { FileAttachmentEntityType } from '@prisma/client';
+import { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RequirePermissions } from '../roles/permissions.decorator';
 import { PermissionsGuard } from '../roles/permissions.guard';
 import { RolesGuard } from '../roles/roles.guard';
+import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
+import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
+import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
 import { ProcurementService } from './procurement.service';
 
 const PROCUREMENT_VIEW_PERMISSIONS = ['procurement.manage', 'procurement.view'] as const;
@@ -79,12 +84,102 @@ export class ProcurementController {
   procurementOrders() { return this.service.procurementOrders(); }
 
   @Get('orders/:id')
-  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS)
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
   procurementOrder(@Param('id') id: string) { return this.service.procurementOrder(id); }
 
   @Get('orders/:id/audit-logs')
-  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS)
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
   procurementOrderAuditLogs(@Param('id') id: string) { return this.service.procurementOrderAuditLogs(id); }
+
+  @Get('orders/:id/supplier-payments')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  supplierPayments(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.supplierPayments(user, id);
+  }
+
+  @Post('orders/:id/supplier-payments')
+  @RequirePermissions('procurement.manage', 'finance.view')
+  createSupplierPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CreateSupplierPaymentDto,
+  ) {
+    return this.service.createSupplierPayment(user, id, dto);
+  }
+
+  @Put('orders/:id/supplier-payments/:paymentId')
+  @RequirePermissions('procurement.manage', 'finance.view')
+  updateSupplierPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: UpdateSupplierPaymentDto,
+  ) {
+    return this.service.updateSupplierPayment(user, id, paymentId, dto);
+  }
+
+  @Post('orders/:id/supplier-payments/:paymentId/void')
+  @RequirePermissions('procurement.manage', 'finance.view')
+  voidSupplierPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: VoidSupplierPaymentDto,
+  ) {
+    return this.service.voidSupplierPayment(user, id, paymentId, dto);
+  }
+
+  @Get('orders/:id/attachments')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  procurementAttachments(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query('entityType') entityType?: FileAttachmentEntityType,
+  ) {
+    return this.service.procurementAttachments(user, id, entityType);
+  }
+
+  @Post('orders/:id/attachments/cargo-receipt')
+  @RequirePermissions('procurement.manage', 'finance.view')
+  uploadCargoReceipt(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.service.uploadProcurementAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.CARGO_RECEIPT,
+    );
+  }
+
+  @Post('orders/:id/supplier-payments/:paymentId/attachments')
+  @RequirePermissions('procurement.manage', 'finance.view')
+  uploadSupplierPaymentReceipt(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.service.uploadProcurementAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.SUPPLIER_PAYMENT,
+      paymentId,
+    );
+  }
+
+  @Delete('orders/:id/attachments/:attachmentId')
+  @RequirePermissions('procurement.manage', 'finance.view')
+  deleteProcurementAttachment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.service.deleteProcurementAttachment(user, id, attachmentId);
+  }
 
   @Put('orders/:id')
   @RequirePermissions('procurement.manage')

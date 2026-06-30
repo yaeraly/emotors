@@ -1,10 +1,31 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProcurementOrderStatus, Role, StockMovementType } from '@prisma/client';
+import { MultipartFile } from '@fastify/multipart';
+import { FastifyRequest } from 'fastify';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { extname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import {
+  FileAttachmentEntityType,
+  ProcurementOrderStatus,
+  ProcurementSupplierPaymentStatus,
+  Role,
+  StockMovementType,
+} from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isFullAccessRole } from '../rbac/rbac';
+import {
+  canAllowSupplierOverpayment,
+  canCreateSupplierPayment,
+  canEditSupplierPayment,
+  canVoidSupplierPayment,
+  canViewSupplierPayments,
+  isFullAccessRole,
+} from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
+import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
+import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
+import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
 import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
@@ -15,6 +36,10 @@ import {
   LandedCostOrderResult,
   mapStoredProcurementItemToLandedCostInput,
 } from './landed-cost.util';
+import {
+  calculateAmountKgs,
+  summarizeSupplierPayments,
+} from './supplier-payment.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -279,6 +304,7 @@ export class ProcurementService {
           defaultYuanRate: exchangeRate,
           purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : new Date(),
           ...orderTotals,
+          remainingYuan: orderTotals.totalYuan,
           ...cargoReceipt,
           estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
           note: dto.note,
@@ -302,7 +328,7 @@ export class ProcurementService {
           factoryId: item.factoryId,
         })),
       });
-      return order;
+      return this.toProcurementOrderResponse(order);
     });
   }
 
@@ -318,7 +344,322 @@ export class ProcurementService {
     return this.prisma.procurementOrder.findFirst({
       where: { id, deletedAt: null },
       include: this.procurementOrderInclude(),
+    }).then((order) => (order ? this.toProcurementOrderResponse(order) : null));
+  }
+
+  async supplierPayments(user: AuthUser, orderId: string) {
+    this.assertCanViewSupplierPayments(user);
+    await this.getProcurementOrderForRead(orderId);
+    const payments = await this.prisma.procurementSupplierPayment.findMany({
+      where: { procurementOrderId: orderId },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, fullName: true, role: true } },
+        voidedBy: { select: { id: true, fullName: true, role: true } },
+        attachments: {
+          where: { deletedAt: null },
+          include: { uploadedBy: { select: { id: true, fullName: true } } },
+        },
+      },
+      orderBy: { paymentDate: 'desc' },
     });
+    return payments.map((payment) => this.toSupplierPaymentResponse(payment));
+  }
+
+  createSupplierPayment(user: AuthUser, orderId: string, dto: CreateSupplierPaymentDto) {
+    this.assertCanCreateSupplierPayment(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.getProcurementOrderForWrite(tx, orderId);
+      this.validateSupplierPaymentPayload(dto.amountYuan, dto.exchangeRate);
+      await this.assertSupplierPaymentAllowed(
+        tx,
+        user,
+        order,
+        dto.amountYuan,
+        dto.allowOverpayment === true,
+      );
+      const amountKgs = calculateAmountKgs(dto.amountYuan, dto.exchangeRate);
+      const payment = await tx.procurementSupplierPayment.create({
+        data: {
+          procurementOrderId: order.id,
+          supplierId: order.supplierId,
+          paymentDate: new Date(dto.paymentDate),
+          amountYuan: dto.amountYuan,
+          exchangeRate: dto.exchangeRate,
+          amountKgs,
+          paymentMethod: dto.paymentMethod,
+          receiptNumber: dto.receiptNumber?.trim() || null,
+          notes: dto.notes?.trim() || null,
+          createdById: user.id,
+        },
+        include: {
+          supplier: { select: { id: true, name: true } },
+          createdBy: { select: { id: true, fullName: true, role: true } },
+          attachments: true,
+        },
+      });
+      const updated = await this.syncSupplierPaymentSummaryAndRecalculate(
+        tx,
+        user,
+        order.id,
+        'Supplier payment recorded',
+      );
+      await this.auditProcurement(
+        tx,
+        user,
+        'SUPPLIER_PAYMENT_CREATED',
+        order.id,
+        null,
+        {
+          paymentId: payment.id,
+          amountYuan: dto.amountYuan,
+          exchangeRate: dto.exchangeRate,
+          amountKgs,
+          paymentMethod: dto.paymentMethod,
+        },
+      );
+      return {
+        payment: this.toSupplierPaymentResponse(payment),
+        order: updated,
+      };
+    });
+  }
+
+  updateSupplierPayment(
+    user: AuthUser,
+    orderId: string,
+    paymentId: string,
+    dto: UpdateSupplierPaymentDto,
+  ) {
+    this.assertCanEditSupplierPayment(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.getProcurementOrderForWrite(tx, orderId);
+      const payment = await tx.procurementSupplierPayment.findFirst({
+        where: { id: paymentId, procurementOrderId: order.id },
+      });
+      if (!payment) throw new NotFoundException('Supplier payment not found');
+      if (payment.status === ProcurementSupplierPaymentStatus.VOID) {
+        throw new BadRequestException('Voided payments cannot be edited');
+      }
+      const oldValue = this.toSupplierPaymentResponse(payment);
+      const amountYuan = dto.amountYuan ?? Number(payment.amountYuan);
+      const exchangeRate = dto.exchangeRate ?? Number(payment.exchangeRate);
+      this.validateSupplierPaymentPayload(amountYuan, exchangeRate);
+      const otherPayments = await tx.procurementSupplierPayment.findMany({
+        where: {
+          procurementOrderId: order.id,
+          status: ProcurementSupplierPaymentStatus.ACTIVE,
+          NOT: { id: payment.id },
+        },
+      });
+      const projectedTotal = otherPayments.reduce((sum, row) => sum + Number(row.amountYuan), 0) + amountYuan;
+      if (projectedTotal > Number(order.totalYuan) && !dto.allowOverpayment) {
+        this.assertCanAllowSupplierOverpayment(user);
+      }
+      const updatedPayment = await tx.procurementSupplierPayment.update({
+        where: { id: payment.id },
+        data: {
+          paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : payment.paymentDate,
+          amountYuan,
+          exchangeRate,
+          amountKgs: calculateAmountKgs(amountYuan, exchangeRate),
+          paymentMethod: dto.paymentMethod ?? payment.paymentMethod,
+          receiptNumber: dto.receiptNumber !== undefined ? dto.receiptNumber?.trim() || null : payment.receiptNumber,
+          notes: dto.notes !== undefined ? dto.notes?.trim() || null : payment.notes,
+        },
+        include: {
+          supplier: { select: { id: true, name: true } },
+          createdBy: { select: { id: true, fullName: true, role: true } },
+          attachments: { where: { deletedAt: null } },
+        },
+      });
+      const updatedOrder = await this.syncSupplierPaymentSummaryAndRecalculate(
+        tx,
+        user,
+        order.id,
+        'Supplier payment updated',
+      );
+      await this.auditProcurement(
+        tx,
+        user,
+        'SUPPLIER_PAYMENT_EDITED',
+        order.id,
+        oldValue,
+        this.toSupplierPaymentResponse(updatedPayment),
+      );
+      return {
+        payment: this.toSupplierPaymentResponse(updatedPayment),
+        order: updatedOrder,
+      };
+    });
+  }
+
+  voidSupplierPayment(
+    user: AuthUser,
+    orderId: string,
+    paymentId: string,
+    dto: VoidSupplierPaymentDto,
+  ) {
+    this.assertCanVoidSupplierPayment(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.getProcurementOrderForWrite(tx, orderId);
+      const payment = await tx.procurementSupplierPayment.findFirst({
+        where: { id: paymentId, procurementOrderId: order.id },
+      });
+      if (!payment) throw new NotFoundException('Supplier payment not found');
+      if (payment.status === ProcurementSupplierPaymentStatus.VOID) {
+        throw new BadRequestException('Payment is already voided');
+      }
+      const oldValue = this.toSupplierPaymentResponse(payment);
+      const voided = await tx.procurementSupplierPayment.update({
+        where: { id: payment.id },
+        data: {
+          status: ProcurementSupplierPaymentStatus.VOID,
+          voidedAt: new Date(),
+          voidedById: user.id,
+          voidReason: dto.reason?.trim() || null,
+        },
+        include: {
+          supplier: { select: { id: true, name: true } },
+          createdBy: { select: { id: true, fullName: true, role: true } },
+          voidedBy: { select: { id: true, fullName: true, role: true } },
+          attachments: { where: { deletedAt: null } },
+        },
+      });
+      const updatedOrder = await this.syncSupplierPaymentSummaryAndRecalculate(
+        tx,
+        user,
+        order.id,
+        dto.reason?.trim() || 'Supplier payment voided',
+      );
+      await this.auditProcurement(
+        tx,
+        user,
+        'SUPPLIER_PAYMENT_VOIDED',
+        order.id,
+        oldValue,
+        this.toSupplierPaymentResponse(voided),
+        dto.reason,
+      );
+      return {
+        payment: this.toSupplierPaymentResponse(voided),
+        order: updatedOrder,
+      };
+    });
+  }
+
+  async procurementAttachments(user: AuthUser, orderId: string, entityType?: FileAttachmentEntityType) {
+    this.assertCanViewSupplierPayments(user);
+    await this.getProcurementOrderForRead(orderId);
+    const attachments = await this.prisma.fileAttachment.findMany({
+      where: {
+        entityId: orderId,
+        deletedAt: null,
+        ...(entityType ? { entityType } : {}),
+      },
+      include: { uploadedBy: { select: { id: true, fullName: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return attachments;
+  }
+
+  async uploadProcurementAttachment(
+    user: AuthUser,
+    orderId: string,
+    request: FastifyRequest,
+    entityType: FileAttachmentEntityType,
+    supplierPaymentId?: string,
+  ) {
+    this.assertCanCreateSupplierPayment(user);
+    const order = await this.getProcurementOrderForRead(orderId);
+    if (supplierPaymentId) {
+      const payment = await this.prisma.procurementSupplierPayment.findFirst({
+        where: { id: supplierPaymentId, procurementOrderId: order.id },
+      });
+      if (!payment) throw new NotFoundException('Supplier payment not found');
+    }
+
+    let file: MultipartFile | undefined;
+    try {
+      file = await request.file();
+    } catch {
+      throw new BadRequestException('File is too large');
+    }
+    if (!file) throw new BadRequestException('File is required');
+
+    const allowedMimeTypes = new Map<string, string>([
+      ['application/pdf', '.pdf'],
+      ['image/jpeg', '.jpg'],
+      ['image/png', '.png'],
+      ['image/webp', '.webp'],
+    ]);
+    const extensionFromMime = allowedMimeTypes.get(file.mimetype);
+    const originalExtension = extname(file.filename).toLowerCase();
+    const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
+    if (!extensionFromMime || !allowedExtensions.includes(originalExtension)) {
+      throw new BadRequestException('Invalid file format');
+    }
+
+    const buffer = await file.toBuffer();
+    if (buffer.length > 5 * 1024 * 1024) {
+      throw new BadRequestException('File is too large');
+    }
+
+    const uploadDirectory = join(process.cwd(), 'uploads', 'procurement');
+    await mkdir(uploadDirectory, { recursive: true });
+    const extension = originalExtension === '.jpeg' ? '.jpg' : extensionFromMime;
+    const storedName = `${randomUUID()}${extension}`;
+    await writeFile(join(uploadDirectory, storedName), buffer);
+    const fileUrl = `/uploads/procurement/${storedName}`;
+
+    const attachment = await this.prisma.fileAttachment.create({
+      data: {
+        entityType,
+        entityId: order.id,
+        fileName: file.filename,
+        fileUrl,
+        mimeType: file.mimetype,
+        size: buffer.length,
+        uploadedById: user.id,
+        supplierPaymentId: supplierPaymentId ?? null,
+      },
+      include: { uploadedBy: { select: { id: true, fullName: true } } },
+    });
+
+    const action =
+      entityType === FileAttachmentEntityType.CARGO_RECEIPT
+        ? 'CARGO_RECEIPT_UPLOADED'
+        : entityType === FileAttachmentEntityType.SUPPLIER_PAYMENT
+          ? 'SUPPLIER_PAYMENT_RECEIPT_UPLOADED'
+          : 'PROCUREMENT_ATTACHMENT_UPLOADED';
+
+    await this.auditProcurement(this.prisma, user, action, order.id, null, {
+      attachmentId: attachment.id,
+      entityType,
+      fileName: attachment.fileName,
+      fileUrl: attachment.fileUrl,
+      supplierPaymentId,
+    });
+
+    return attachment;
+  }
+
+  async deleteProcurementAttachment(user: AuthUser, orderId: string, attachmentId: string) {
+    this.assertCanEditSupplierPayment(user);
+    await this.getProcurementOrderForRead(orderId);
+    const attachment = await this.prisma.fileAttachment.findFirst({
+      where: { id: attachmentId, entityId: orderId, deletedAt: null },
+    });
+    if (!attachment) throw new NotFoundException('Attachment not found');
+    const deleted = await this.prisma.fileAttachment.update({
+      where: { id: attachment.id },
+      data: { deletedAt: new Date() },
+    });
+    await this.auditProcurement(this.prisma, user, 'PROCUREMENT_ATTACHMENT_DELETED', orderId, attachment, {
+      attachmentId: attachment.id,
+      fileName: attachment.fileName,
+    });
+    return deleted;
   }
 
   updateProcurementOrder(user: AuthUser, id: string, dto: any) {
@@ -333,10 +674,23 @@ export class ProcurementService {
         throw new BadRequestException('Received procurement orders cannot be edited');
       }
 
+      const activePaymentCount = await tx.procurementSupplierPayment.count({
+        where: { procurementOrderId: id, status: ProcurementSupplierPaymentStatus.ACTIVE },
+      });
+      if (
+        activePaymentCount > 0 &&
+        dto.defaultYuanRate !== undefined &&
+        Number(dto.defaultYuanRate) !== Number(existing.defaultYuanRate)
+      ) {
+        throw new BadRequestException(
+          'Exchange rate is locked after supplier payments are recorded. Edit or void payments to correct the weighted average rate.',
+        );
+      }
+
       const oldValue = this.pickProcurementAuditFields(existing);
       const exchangeRate = dto.defaultYuanRate !== undefined
         ? Number(dto.defaultYuanRate)
-        : Number(existing.defaultYuanRate);
+        : await this.resolveEffectiveYuanRate(tx, existing);
       this.validateExchangeRate(exchangeRate);
       this.assertProcurementLogisticsEditable(existing, dto);
       if (dto.hqWarehouseId && dto.hqWarehouseId !== existing.hqWarehouseId) {
@@ -449,7 +803,13 @@ export class ProcurementService {
           items: priceSyncItems,
         });
       }
-      return updated;
+      const paymentCount = await tx.procurementSupplierPayment.count({
+        where: { procurementOrderId: id, status: ProcurementSupplierPaymentStatus.ACTIVE },
+      });
+      if (paymentCount > 0) {
+        return this.syncSupplierPaymentSummaryAndRecalculate(tx, user, id, dto.reason ?? 'Procurement order updated');
+      }
+      return this.toProcurementOrderResponse(updated);
     });
   }
 
@@ -463,7 +823,7 @@ export class ProcurementService {
       if (!order) throw new NotFoundException('Procurement order not found');
       const oldValue = this.pickProcurementAuditFields(order);
       const { logistics, cargo } = this.resolveProcurementLogistics(order);
-      const exchangeRate = Number(order.defaultYuanRate);
+      const exchangeRate = await this.resolveEffectiveYuanRate(tx, order);
       const calculated = this.calculateProcurementLandedCosts(
         order.items.map((item) => mapStoredProcurementItemToLandedCostInput({
           ...item,
@@ -486,7 +846,13 @@ export class ProcurementService {
         include: this.procurementOrderInclude(),
       });
       await this.auditProcurement(tx, user, 'RECALCULATE_PROCUREMENT_LANDED_COST', id, oldValue, this.pickProcurementAuditFields(updated), reason);
-      return updated;
+      const paymentCount = await tx.procurementSupplierPayment.count({
+        where: { procurementOrderId: id, status: ProcurementSupplierPaymentStatus.ACTIVE },
+      });
+      if (paymentCount > 0) {
+        return this.syncSupplierPaymentSummaryAndRecalculate(tx, user, id, reason ?? 'Procurement landed cost recalculated');
+      }
+      return this.toProcurementOrderResponse(updated);
     });
   }
 
@@ -633,6 +999,15 @@ export class ProcurementService {
       items: { include: { product: true, supplier: true, factory: true }, orderBy: { createdAt: 'asc' as const } },
       receivings: { include: { items: true }, orderBy: { createdAt: 'desc' as const } },
       differenceReports: { orderBy: { createdAt: 'desc' as const } },
+      supplierPayments: {
+        include: {
+          createdBy: { select: { id: true, fullName: true, role: true } },
+          voidedBy: { select: { id: true, fullName: true, role: true } },
+          attachments: { where: { deletedAt: null } },
+        },
+        orderBy: { paymentDate: 'desc' as const },
+      },
+      costAdjustments: { orderBy: { createdAt: 'desc' as const }, take: 10 },
     };
   }
 
@@ -685,6 +1060,11 @@ export class ProcurementService {
       totalNetWeightKg: order.totalNetWeightKg?.toString?.() ?? order.totalNetWeightKg,
       totalPackagingWeightKg: order.totalPackagingWeightKg?.toString?.() ?? order.totalPackagingWeightKg,
       totalYuan: order.totalYuan?.toString?.() ?? order.totalYuan,
+      totalPaidYuan: order.totalPaidYuan?.toString?.() ?? order.totalPaidYuan,
+      totalPaidKgs: order.totalPaidKgs?.toString?.() ?? order.totalPaidKgs,
+      remainingYuan: order.remainingYuan?.toString?.() ?? order.remainingYuan,
+      weightedAverageYuanRate: order.weightedAverageYuanRate?.toString?.() ?? order.weightedAverageYuanRate,
+      supplierPaymentStatus: order.supplierPaymentStatus,
       totalTransportCostKgs: order.totalTransportCostKgs?.toString?.() ?? order.totalTransportCostKgs,
       totalCostKgs: order.totalCostKgs?.toString?.() ?? order.totalCostKgs,
       totalWeightKg: order.totalWeightKg?.toString?.() ?? order.totalWeightKg,
@@ -1163,5 +1543,255 @@ export class ProcurementService {
 
   private roundMoney(value: number) {
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private async getProcurementOrderForRead(orderId: string) {
+    const order = await this.prisma.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+    });
+    if (!order) throw new NotFoundException('Procurement order not found');
+    return order;
+  }
+
+  private async getProcurementOrderForWrite(tx: any, orderId: string) {
+    const order = await tx.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+      include: { items: true },
+    });
+    if (!order) throw new NotFoundException('Procurement order not found');
+    return order;
+  }
+
+  private assertCanViewSupplierPayments(user: AuthUser) {
+    if (!canViewSupplierPayments(user)) {
+      throw new ForbiddenException('You do not have permission to view supplier payments');
+    }
+  }
+
+  private assertCanCreateSupplierPayment(user: AuthUser) {
+    if (!canCreateSupplierPayment(user)) {
+      throw new ForbiddenException('You do not have permission to create supplier payments');
+    }
+  }
+
+  private assertCanEditSupplierPayment(user: AuthUser) {
+    if (!canEditSupplierPayment(user)) {
+      throw new ForbiddenException('You do not have permission to edit supplier payments');
+    }
+  }
+
+  private assertCanVoidSupplierPayment(user: AuthUser) {
+    if (!canVoidSupplierPayment(user)) {
+      throw new ForbiddenException('You do not have permission to void supplier payments');
+    }
+  }
+
+  private assertCanAllowSupplierOverpayment(user: AuthUser) {
+    if (!canAllowSupplierOverpayment(user)) {
+      throw new BadRequestException('Overpayment requires Finance Manager or CEO approval');
+    }
+  }
+
+  private validateSupplierPaymentPayload(amountYuan: number, exchangeRate: number) {
+    if (!amountYuan || amountYuan <= 0) {
+      throw new BadRequestException('Payment amount must be greater than zero');
+    }
+    this.validateExchangeRate(exchangeRate);
+  }
+
+  private async assertSupplierPaymentAllowed(
+    tx: any,
+    user: AuthUser,
+    order: { id: string; totalYuan: any },
+    amountYuan: number,
+    allowOverpayment: boolean,
+  ) {
+    const payments = await tx.procurementSupplierPayment.findMany({
+      where: {
+        procurementOrderId: order.id,
+        status: ProcurementSupplierPaymentStatus.ACTIVE,
+      },
+    });
+    const summary = summarizeSupplierPayments(payments, Number(order.totalYuan));
+    const projectedTotal = summary.totalPaidYuan + amountYuan;
+    if (projectedTotal > Number(order.totalYuan) && !allowOverpayment) {
+      this.assertCanAllowSupplierOverpayment(user);
+    }
+  }
+
+  private async resolveEffectiveYuanRate(tx: any, order: { id: string; defaultYuanRate: any }) {
+    const payments = await tx.procurementSupplierPayment.findMany({
+      where: {
+        procurementOrderId: order.id,
+        status: ProcurementSupplierPaymentStatus.ACTIVE,
+      },
+    });
+    const summary = summarizeSupplierPayments(payments, 0);
+    if (summary.weightedAverageYuanRate && summary.totalPaidYuan > 0) {
+      return summary.weightedAverageYuanRate;
+    }
+    return Number(order.defaultYuanRate);
+  }
+
+  private async syncSupplierPaymentSummaryAndRecalculate(
+    tx: any,
+    user: AuthUser,
+    orderId: string,
+    reason: string,
+  ) {
+    const order = await tx.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+      include: { items: true, supplierPayments: true },
+    });
+    if (!order) throw new NotFoundException('Procurement order not found');
+
+    const oldValue = this.pickProcurementAuditFields(order);
+    const summary = summarizeSupplierPayments(order.supplierPayments, Number(order.totalYuan));
+    const effectiveRate =
+      summary.weightedAverageYuanRate && summary.totalPaidYuan > 0
+        ? summary.weightedAverageYuanRate
+        : Number(order.defaultYuanRate);
+    const { logistics, cargo } = this.resolveProcurementLogistics(order);
+    const calculated = this.calculateProcurementLandedCosts(
+      order.items.map((item: any) => mapStoredProcurementItemToLandedCostInput({
+        ...item,
+        yuanRate: effectiveRate,
+      })),
+      logistics,
+      cargo,
+    );
+    const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
+
+    for (const [index, item] of order.items.entries()) {
+      const next = calculated.items[index];
+      await tx.procurementOrderItem.update({
+        where: { id: item.id },
+        data: this.mapRecalculatedItemFields(next, effectiveRate),
+      });
+    }
+
+    const updated = await tx.procurementOrder.update({
+      where: { id: order.id },
+      data: {
+        ...orderTotals,
+        totalPaidYuan: summary.totalPaidYuan,
+        totalPaidKgs: summary.totalPaidKgs,
+        remainingYuan: summary.remainingYuan,
+        weightedAverageYuanRate: summary.weightedAverageYuanRate,
+        supplierPaymentStatus: summary.supplierPaymentStatus,
+        paidAt:
+          summary.supplierPaymentStatus === 'PAID' || summary.supplierPaymentStatus === 'OVERPAID'
+            ? order.paidAt ?? new Date()
+            : order.paidAt,
+      },
+      include: this.procurementOrderInclude(),
+    });
+
+    if (
+      order.hqStockMovementCreatedAt &&
+      Number(oldValue.totalCostKgs) !== Number(updated.totalCostKgs)
+    ) {
+      await tx.procurementCostAdjustment.create({
+        data: {
+          procurementOrderId: order.id,
+          oldTotalCostKgs: Number(oldValue.totalCostKgs),
+          newTotalCostKgs: Number(updated.totalCostKgs),
+          oldWeightedRate: oldValue.weightedAverageYuanRate
+            ? Number(oldValue.weightedAverageYuanRate)
+            : null,
+          newWeightedRate: summary.weightedAverageYuanRate,
+          reason,
+          createdById: user.id,
+        },
+      });
+      await this.auditProcurement(tx, user, 'PROCUREMENT_COST_ADJUSTMENT', order.id, {
+        oldTotalCostKgs: oldValue.totalCostKgs,
+        oldWeightedRate: oldValue.weightedAverageYuanRate,
+      }, {
+        newTotalCostKgs: updated.totalCostKgs,
+        newWeightedRate: summary.weightedAverageYuanRate,
+        reason,
+      });
+    }
+
+    await this.auditProcurement(
+      tx,
+      user,
+      'WEIGHTED_AVERAGE_RATE_RECALCULATED',
+      order.id,
+      {
+        weightedAverageYuanRate: oldValue.weightedAverageYuanRate,
+        totalPaidYuan: oldValue.totalPaidYuan,
+        supplierPaymentStatus: oldValue.supplierPaymentStatus,
+      },
+      {
+        weightedAverageYuanRate: summary.weightedAverageYuanRate,
+        totalPaidYuan: summary.totalPaidYuan,
+        totalPaidKgs: summary.totalPaidKgs,
+        remainingYuan: summary.remainingYuan,
+        supplierPaymentStatus: summary.supplierPaymentStatus,
+        effectiveYuanRate: effectiveRate,
+      },
+      reason,
+    );
+    await this.auditProcurement(
+      tx,
+      user,
+      'LANDED_COST_RECALCULATED',
+      order.id,
+      oldValue,
+      this.pickProcurementAuditFields(updated),
+      reason,
+    );
+
+    return this.toProcurementOrderResponse(updated);
+  }
+
+  private toSupplierPaymentResponse(payment: any) {
+    return {
+      ...payment,
+      amountYuan: Number(payment.amountYuan),
+      exchangeRate: Number(payment.exchangeRate),
+      amountKgs: Number(payment.amountKgs),
+    };
+  }
+
+  private async toProcurementOrderResponse(order: any) {
+    const attachments = await this.prisma.fileAttachment.findMany({
+      where: { entityId: order.id, deletedAt: null },
+      include: { uploadedBy: { select: { id: true, fullName: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const activePaymentCount = order.supplierPayments
+      ? order.supplierPayments.filter(
+          (payment: any) => payment.status === ProcurementSupplierPaymentStatus.ACTIVE,
+        ).length
+      : await this.prisma.procurementSupplierPayment.count({
+          where: { procurementOrderId: order.id, status: ProcurementSupplierPaymentStatus.ACTIVE },
+        });
+
+    return {
+      ...order,
+      totalYuan: Number(order.totalYuan),
+      totalPaidYuan: Number(order.totalPaidYuan ?? 0),
+      totalPaidKgs: Number(order.totalPaidKgs ?? 0),
+      remainingYuan: Number(order.remainingYuan ?? 0),
+      weightedAverageYuanRate: order.weightedAverageYuanRate
+        ? Number(order.weightedAverageYuanRate)
+        : null,
+      defaultYuanRate: Number(order.defaultYuanRate),
+      yuanRateLocked: activePaymentCount > 0,
+      effectiveYuanRate:
+        order.weightedAverageYuanRate && Number(order.totalPaidYuan) > 0
+          ? Number(order.weightedAverageYuanRate)
+          : Number(order.defaultYuanRate),
+      supplierPayments: order.supplierPayments?.map((payment: any) =>
+        this.toSupplierPaymentResponse(payment),
+      ),
+      attachments,
+      cargoAttachments: attachments.filter(
+        (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
+      ),
+    };
   }
 }
