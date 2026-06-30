@@ -236,11 +236,13 @@ export class ProcurementService {
       const [supplier, factory, warehouse] = await Promise.all([
         tx.supplier.findFirst({ where: { id: dto.supplierId, deletedAt: null } }),
         dto.factoryId ? tx.factory.findFirst({ where: { id: dto.factoryId, deletedAt: null } }) : Promise.resolve(null),
-        tx.warehouse.findUnique({ where: { id: dto.hqWarehouseId } }),
+        tx.warehouse.findFirst({
+          where: { id: dto.hqWarehouseId, deletedAt: null, isHq: true, isActive: true },
+        }),
       ]);
       if (!supplier) throw new NotFoundException('Supplier not found');
       if (dto.factoryId && !factory) throw new NotFoundException('Factory not found');
-      if (!warehouse) throw new NotFoundException('HQ warehouse not found');
+      if (!warehouse) throw new BadRequestException('Active HQ warehouse is required for procurement');
 
       const itemInputs = dto.items ?? [];
       if (!itemInputs.length) throw new BadRequestException('At least one product is required');
@@ -560,7 +562,10 @@ export class ProcurementService {
   }
 
   updateProcurementStatus(user: AuthUser, id: string, status: ProcurementOrderStatus, reason?: string) {
-    if (status === ProcurementOrderStatus.ARRIVED || status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
+    if (status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
+      throw new BadRequestException('Use receive-to-hq workflow to post inventory into HQ warehouse');
+    }
+    if (status === ProcurementOrderStatus.ARRIVED) {
       return this.markProcurementArrived(user, id);
     }
     return this.prisma.$transaction(async (tx) => {
@@ -584,65 +589,22 @@ export class ProcurementService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
         where: { id, deletedAt: null },
-        include: { items: true, hqWarehouse: true },
+        include: { hqWarehouse: true },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       if (order.hqStockMovementCreatedAt || order.status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
         return this.prisma.procurementOrder.findUnique({ where: { id }, include: this.procurementOrderInclude() });
       }
-
-      for (const item of order.items) {
-        await this.inventoryService.createStockMovementInTx(tx, user, {
-          productId: item.productId,
-          warehouseId: order.hqWarehouseId,
-          type: StockMovementType.IN,
-          quantity: item.quantity,
-          unitCostKgs: Number(item.finalCostKgs),
-          referenceType: 'PROCUREMENT_ORDER',
-          referenceId: order.id,
-          note: `Procurement ${order.orderNumber}`,
-        });
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        if (product) {
-          const sellingPriceKgs = Number(product.sellingPriceKgs);
-          const marginAmount = this.roundMoney(sellingPriceKgs - Number(item.finalCostKgs));
-          const marginPercent = sellingPriceKgs === 0 ? 0 : this.roundMoney((marginAmount / sellingPriceKgs) * 100);
-          await tx.product.update({
-            where: { id: item.productId },
-            data: {
-              purchasePriceYuan: item.purchasePriceYuan,
-              latestYuanRate: item.yuanRate,
-              purchaseCostKgs: item.costKgs,
-              transportCostKgs: item.transportCostKgs,
-              finalCostKgs: item.finalCostKgs,
-              marginAmount,
-              marginPercent,
-              priceHistory: {
-                create: {
-                  purchasePriceYuan: item.purchasePriceYuan,
-                  yuanRate: item.yuanRate,
-                  purchaseCostKgs: item.costKgs,
-                  transportCostKgs: item.transportCostKgs,
-                  finalCostKgs: item.finalCostKgs,
-                  sellingPriceKgs,
-                  marginAmount,
-                  marginPercent,
-                  createdById: user.id,
-                },
-              },
-            },
-          });
-        }
+      if (!order.hqWarehouse?.isHq || !order.hqWarehouse.isActive) {
+        throw new BadRequestException('Procurement order must target an active HQ warehouse');
       }
 
       return tx.procurementOrder.update({
         where: { id },
         data: {
-          status: ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE,
+          status: ProcurementOrderStatus.ARRIVED,
           arrivedAt: new Date(),
           actualArrivalDate: new Date(),
-          receivedToHqAt: new Date(),
-          hqStockMovementCreatedAt: new Date(),
         },
         include: this.procurementOrderInclude(),
       });

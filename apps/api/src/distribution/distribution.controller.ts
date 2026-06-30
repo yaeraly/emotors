@@ -49,6 +49,18 @@ export class DistributionController {
     return this.distributionService.approve(user, id);
   }
 
+  @Post('orders/:id/pick')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  pick(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.pick(user, id);
+  }
+
+  @Post('orders/:id/pack')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  pack(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.pack(user, id);
+  }
+
   @Post('orders/:id/send')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   send(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -69,6 +81,12 @@ export class DistributionController {
     @Body() dto: ReceiveDistributionOrderDto,
   ) {
     return this.distributionService.receive(user, id, dto);
+  }
+
+  @Post('orders/:id/complete')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  complete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.complete(user, id);
   }
 
   @Get('receivings')

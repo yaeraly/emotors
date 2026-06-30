@@ -13,7 +13,8 @@ export default function NewDistributionOrderPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
+  const [branchWarehouses, setBranchWarehouses] = useState<Warehouse[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [branchId, setBranchId] = useState('');
   const [sourceWarehouseId, setSourceWarehouseId] = useState('');
@@ -26,16 +27,18 @@ export default function NewDistributionOrderPage() {
   useEffect(() => {
     Promise.all([
       apiFetch<Branch[]>('/branches'),
-      apiFetch<Warehouse[]>('/inventory/warehouses'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?isHq=true'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?isHq=false'),
       apiFetch<ProductListResponse>('/inventory/products?pageSize=200'),
     ])
-      .then(([branchResult, warehouseResult, productResult]) => {
+      .then(([branchResult, hqWarehouseResult, branchWarehouseResult, productResult]) => {
         setBranches(branchResult);
-        setWarehouses(warehouseResult);
+        setHqWarehouses(hqWarehouseResult);
+        setBranchWarehouses(branchWarehouseResult);
         setProducts(productResult.items);
         setBranchId(branchResult[0]?.id ?? '');
-        setSourceWarehouseId(warehouseResult[0]?.id ?? '');
-        setDestinationWarehouseId(warehouseResult[0]?.id ?? '');
+        setSourceWarehouseId(hqWarehouseResult[0]?.id ?? '');
+        setDestinationWarehouseId(branchWarehouseResult.find((w) => w.branchId === branchResult[0]?.id)?.id ?? branchWarehouseResult[0]?.id ?? '');
         setItems([{ productId: productResult.items[0]?.id ?? '', quantity: '1', unitPrice: '0' }]);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -90,8 +93,8 @@ export default function NewDistributionOrderPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
           <Select label={t('distribution.branch')} value={branchId} onChange={setBranchId} options={branches.map((branch) => ({ value: branch.id, label: branch.name }))} />
-          <Select label={t('distribution.sourceWarehouse')} value={sourceWarehouseId} onChange={setSourceWarehouseId} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
-          <Select label={t('distribution.destinationWarehouse')} value={destinationWarehouseId} onChange={setDestinationWarehouseId} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
+          <Select label={t('distribution.sourceWarehouse')} value={sourceWarehouseId} onChange={setSourceWarehouseId} options={hqWarehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
+          <Select label={t('distribution.destinationWarehouse')} value={destinationWarehouseId} onChange={setDestinationWarehouseId} options={branchWarehouses.filter((warehouse) => warehouse.branchId === branchId).map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
           <label className="block md:col-span-3"><span className="text-sm font-semibold text-slate-700">Note</span><textarea value={note} onChange={(event) => setNote(event.target.value)} className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>
         </section>
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

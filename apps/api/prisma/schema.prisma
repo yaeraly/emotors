@@ -869,6 +869,12 @@ model Warehouse {
   name      String
   code      String
   address   String?
+  country   String    @default("Kyrgyzstan")
+  city      String?
+  contactPerson String?
+  phone     String?
+  notes     String?
+  isHq      Boolean   @default(false)
   isActive  Boolean   @default(true)
   products  Product[]
   stockMovements StockMovement[]
@@ -879,11 +885,15 @@ model Warehouse {
   shortageReports ShortageReport[]
   partsConsumptions PartsConsumption[]
   procurementOrders ProcurementOrder[]
+  procurementReceivings ProcurementGoodsReceiving[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([branchId, code])
   @@index([branchId])
+  @@index([isHq])
+  @@index([deletedAt])
 }
 
 model Product {
@@ -1029,8 +1039,11 @@ model InventoryBalance {
   productId     String
   product       Product   @relation(fields: [productId], references: [id])
   quantity      Int       @default(0)
+  reservedQuantity Int    @default(0)
   averageCostKgs Decimal  @default(0) @db.Decimal(14, 2)
+  landedCostKgs Decimal   @default(0) @db.Decimal(14, 2)
   totalValueKgs Decimal   @default(0) @db.Decimal(14, 2)
+  lastReceivingAt DateTime?
   updatedAt     DateTime  @updatedAt
 
   @@unique([branchId, warehouseId, productId])
@@ -2362,6 +2375,7 @@ model ProcurementGoodsReceiving {
   procurementOrderId String
   procurementOrder   ProcurementOrder  @relation(fields: [procurementOrderId], references: [id])
   hqWarehouseId      String
+  hqWarehouse        Warehouse         @relation(fields: [hqWarehouseId], references: [id])
   receivedById       String
   receivedAt         DateTime          @default(now())
   note               String?

@@ -134,8 +134,8 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/stock-movements')) {
     return hasPermission(user, 'inventory.manage');
   }
-  if (
-    pathname.startsWith('/inventory') ||
+  if (pathname.startsWith('/hq-warehouses')) return canViewHqWarehouse(user);
+  if (pathname.startsWith('/inventory') ||
     pathname.startsWith('/products') ||
     pathname.startsWith('/warehouses')
   ) {
@@ -209,6 +209,14 @@ export function canCancelSale(user: Pick<User, 'role' | 'roles'> | null | undefi
 
 export function canVoidPayment(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'FRANCHISE_OWNER', 'CASHIER']);
+}
+
+export function canViewHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER', 'OWNER', 'SYSTEM_ADMINISTRATOR']);
+}
+
+export function canManageHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER', 'OWNER', 'SYSTEM_ADMINISTRATOR']);
 }
 
 export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

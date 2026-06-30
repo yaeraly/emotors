@@ -307,6 +307,12 @@ export type Warehouse = {
   name: string;
   code: string;
   address?: string | null;
+  country?: string;
+  city?: string | null;
+  contactPerson?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+  isHq?: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

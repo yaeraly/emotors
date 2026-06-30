@@ -138,12 +138,19 @@ export class OperationsService {
       if (order.hqStockMovementCreatedAt) {
         throw new BadRequestException('Procurement stock has already been received');
       }
+      const hqWarehouseId = dto.hqWarehouseId ?? order.hqWarehouseId;
+      const hqWarehouse = await tx.warehouse.findFirst({
+        where: { id: hqWarehouseId, isHq: true, deletedAt: null, isActive: true },
+      });
+      if (!hqWarehouse) {
+        throw new BadRequestException('Receiving requires an active HQ warehouse');
+      }
       const receivedMap = new Map<string, any>((dto.items ?? []).map((item: any) => [item.procurementItemId ?? item.productId, item]));
       const receiving = await tx.procurementGoodsReceiving.create({
         data: {
           receivingNumber: dto.receivingNumber ?? `PGR-${Date.now()}`,
           procurementOrderId: order.id,
-          hqWarehouseId: dto.hqWarehouseId ?? order.hqWarehouseId,
+          hqWarehouseId,
           receivedById: user.id,
           note: dto.note,
         },
@@ -207,7 +214,7 @@ export class OperationsService {
         if (item.receivedQuantity > 0) {
           await this.inventoryService.createStockMovementInTx(tx, user, {
             productId: item.productId,
-            warehouseId: dto.hqWarehouseId ?? order.hqWarehouseId,
+            warehouseId: hqWarehouseId,
             type: StockMovementType.IN,
             quantity: item.receivedQuantity,
             unitCostKgs: next.finalCostKgs,
@@ -279,8 +286,9 @@ export class OperationsService {
           costPerKg: recalculated.costPerKg,
         },
       });
-      await this.auditInTx(tx, user, 'HQ', 'PROCUREMENT_RECEIVED_TO_HQ_WAREHOUSE', 'ProcurementOrder', order.id, {
+      await this.auditInTx(tx, user, hqWarehouse.branchId, 'INVENTORY_RECEIVED', 'Warehouse', hqWarehouseId, {
         receivingId: receiving.id,
+        procurementOrderId: order.id,
         recalculatedLandedCost: true,
         reason: dto.reason,
       });

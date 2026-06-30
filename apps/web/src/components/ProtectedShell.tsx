@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, getDefaultRouteForUser, hasPermission, hasRole, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, getDefaultRouteForUser, hasPermission, hasRole, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -62,7 +62,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canManageInventory = hasPermission(user, 'inventory.manage');
   const canManageProductCatalog = hasRole(user, 'OWNER') || hasRole(user, 'CEO') || hasRole(user, 'SYSTEM_ADMINISTRATOR') || hasRole(user, 'WAREHOUSE_MANAGER') || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
   const canSeeService = hasPermission(user, 'service.manage');
-  const canSeeHq = hasPermission(user, 'branches.manage') || hasPermission(user, 'analytics.view') || hasPermission(user, 'kpi.view') || hasPermission(user, 'reports.view');
+  const canSeeHqWarehouse = canViewHqWarehouse(user);
+  const canManageHqWarehouses = canManageHqWarehouse(user);
+  const canSeeHq = hasPermission(user, 'branches.manage') || hasPermission(user, 'analytics.view') || hasPermission(user, 'kpi.view') || hasPermission(user, 'reports.view') || canSeeHqWarehouse;
   const canManageBranches = hasPermission(user, 'branches.manage');
   const canSeeKpi = hasPermission(user, 'kpi.view') || hasPermission(user, 'analytics.view');
   const canSeeReports = hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
@@ -194,6 +196,15 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               <p className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-400">
                 {t('phase2.title')}
               </p>
+              {canSeeHqWarehouse ? (
+                <div className="rounded-xl px-3 py-2">
+                  <Link href="/hq-warehouses" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('hqWarehouse.title')}</Link>
+                  <div className="mt-2 space-y-1 pl-2">
+                    <Link href="/hq-warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('hqWarehouse.list')}</Link>
+                    {canManageHqWarehouses ? <Link href="/hq-warehouses/new" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('hqWarehouse.create')}</Link> : null}
+                  </div>
+                </div>
+              ) : null}
               {canSeeHq ? (
                 <>
                   {canManageBranches ? <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link> : null}

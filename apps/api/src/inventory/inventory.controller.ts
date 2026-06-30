@@ -154,8 +154,12 @@ export class InventoryController {
   }
 
   @Get('warehouses')
-  warehouses(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
-    return this.inventoryService.warehouses(user, branchId);
+  warehouses(
+    @CurrentUser() user: AuthUser,
+    @Query('branchId') branchId?: string,
+    @Query('isHq') isHq?: string,
+  ) {
+    return this.inventoryService.warehouses(user, branchId, isHq);
   }
 
   @Get('warehouses/:id')

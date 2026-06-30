@@ -122,10 +122,91 @@ export class DistributionService {
   }
 
   approve(user: AuthUser, id: string) {
-    return this.transition(user, id, BranchDistributionOrderStatus.DRAFT, {
-      status: BranchDistributionOrderStatus.APPROVED,
-      approvedBy: { connect: { id: user.id } },
-      approvedAt: new Date(),
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        },
+        include: { items: true, sourceWarehouse: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      if (order.status !== BranchDistributionOrderStatus.DRAFT) {
+        throw new BadRequestException('Only draft orders can be approved');
+      }
+      this.assertHqSourceWarehouse(order.sourceWarehouse);
+
+      for (const item of order.items) {
+        const balance = await tx.inventoryBalance.findUnique({
+          where: {
+            branchId_warehouseId_productId: {
+              branchId: order.sourceWarehouse.branchId,
+              warehouseId: order.sourceWarehouseId,
+              productId: item.productId,
+            },
+          },
+        });
+        const availableQuantity = (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0);
+        if (availableQuantity < item.quantity) {
+          throw new BadRequestException(
+            `Insufficient available stock for SKU ${item.sku}. Requested: ${item.quantity} Available: ${availableQuantity}`,
+          );
+        }
+        await tx.inventoryBalance.update({
+          where: {
+            branchId_warehouseId_productId: {
+              branchId: order.sourceWarehouse.branchId,
+              warehouseId: order.sourceWarehouseId,
+              productId: item.productId,
+            },
+          },
+          data: { reservedQuantity: { increment: item.quantity } },
+        });
+      }
+
+      const updated = await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: {
+          status: BranchDistributionOrderStatus.APPROVED,
+          approvedBy: { connect: { id: user.id } },
+          approvedAt: new Date(),
+        },
+        include: this.include(),
+      });
+      await this.auditTransfer(tx, user, 'TRANSFER_CREATED', updated);
+      return this.toResponse(updated);
+    });
+  }
+
+  pick(user: AuthUser, id: string) {
+    return this.transition(user, id, BranchDistributionOrderStatus.APPROVED, {
+      status: BranchDistributionOrderStatus.PICKING,
+    });
+  }
+
+  pack(user: AuthUser, id: string) {
+    return this.transition(user, id, BranchDistributionOrderStatus.PICKING, {
+      status: BranchDistributionOrderStatus.PACKED,
+    });
+  }
+
+  complete(user: AuthUser, id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.getAccessibleOrderInTx(tx, user, id);
+      if (
+        order.status !== BranchDistributionOrderStatus.RECEIVED &&
+        order.status !== BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE
+      ) {
+        throw new BadRequestException('Only received transfers can be completed');
+      }
+      const updated = await tx.branchDistributionOrder.update({
+        where: { id },
+        data: { status: BranchDistributionOrderStatus.CLOSED },
+        include: this.include(),
+      });
+      await this.auditTransfer(tx, user, 'TRANSFER_COMPLETED', updated);
+      return this.toResponse(updated);
     });
   }
 
@@ -143,11 +224,12 @@ export class DistributionService {
         },
       });
       if (!order) throw new NotFoundException('Distribution order not found');
-      if (order.status !== BranchDistributionOrderStatus.APPROVED) {
+      if (order.status !== BranchDistributionOrderStatus.PACKED) {
         throw new BadRequestException(
-          'Only approved orders can be sent. Stock was not deducted.',
+          'Only packed orders can be shipped. Stock was not deducted.',
         );
       }
+      this.assertHqSourceWarehouse(order.sourceWarehouse);
 
       for (const item of order.items) {
         const balance = await tx.inventoryBalance.findUnique({
@@ -159,8 +241,8 @@ export class DistributionService {
             },
           },
         });
-        const availableQuantity = balance?.quantity ?? 0;
-        if (availableQuantity < item.quantity) {
+        const availableQuantity = (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0);
+        if ((balance?.quantity ?? 0) < item.quantity) {
           throw new BadRequestException(
             `Insufficient stock for SKU ${item.sku}. Requested: ${item.quantity} Available: ${availableQuantity}`,
           );
@@ -178,6 +260,16 @@ export class DistributionService {
           referenceId: order.id,
           note: `Distribution order ${order.orderNumber}`,
         });
+        await tx.inventoryBalance.update({
+          where: {
+            branchId_warehouseId_productId: {
+              branchId: order.sourceWarehouse.branchId,
+              warehouseId: order.sourceWarehouseId,
+              productId: item.productId,
+            },
+          },
+          data: { reservedQuantity: { decrement: item.quantity } },
+        });
       }
 
       const updated = await tx.branchDistributionOrder.update({
@@ -188,6 +280,7 @@ export class DistributionService {
         },
         include: this.include(),
       });
+      await this.auditTransfer(tx, user, 'INVENTORY_SHIPPED', updated);
       return this.toResponse(updated);
     });
   }
@@ -197,9 +290,34 @@ export class DistributionService {
       const order = await this.getAccessibleOrderInTx(tx, user, id);
       if (
         order.status !== BranchDistributionOrderStatus.DRAFT &&
-        order.status !== BranchDistributionOrderStatus.APPROVED
+        order.status !== BranchDistributionOrderStatus.APPROVED &&
+        order.status !== BranchDistributionOrderStatus.PICKING &&
+        order.status !== BranchDistributionOrderStatus.PACKED
       ) {
-        throw new BadRequestException('Only draft or approved orders can be cancelled');
+        throw new BadRequestException('Only draft, approved, picking, or packed orders can be cancelled');
+      }
+      if (
+        order.status === BranchDistributionOrderStatus.APPROVED ||
+        order.status === BranchDistributionOrderStatus.PICKING ||
+        order.status === BranchDistributionOrderStatus.PACKED
+      ) {
+        const fullOrder = await tx.branchDistributionOrder.findUnique({
+          where: { id },
+          include: { items: true, sourceWarehouse: true },
+        });
+        if (fullOrder) {
+          for (const item of fullOrder.items) {
+            await tx.inventoryBalance.updateMany({
+              where: {
+                branchId: fullOrder.sourceWarehouse.branchId,
+                warehouseId: fullOrder.sourceWarehouseId,
+                productId: item.productId,
+                reservedQuantity: { gte: item.quantity },
+              },
+              data: { reservedQuantity: { decrement: item.quantity } },
+            });
+          }
+        }
       }
       const updated = await tx.branchDistributionOrder.update({
         where: { id },
@@ -574,9 +692,43 @@ export class DistributionService {
     if (!branch) throw new NotFoundException('Branch not found');
     if (!sourceWarehouse) throw new NotFoundException('Source warehouse not found');
     if (!destinationWarehouse) throw new NotFoundException('Destination warehouse not found');
+    if (!sourceWarehouse.isHq || !sourceWarehouse.isActive || sourceWarehouse.deletedAt) {
+      throw new BadRequestException('Transfers must originate from an active HQ warehouse');
+    }
+    if (destinationWarehouse.isHq) {
+      throw new BadRequestException('Destination warehouse must be a branch warehouse');
+    }
     if (destinationWarehouse.branchId !== branch.id) {
       throw new BadRequestException('Destination warehouse must belong to branch');
     }
+  }
+
+  private assertHqSourceWarehouse(sourceWarehouse: { isHq: boolean; isActive: boolean; deletedAt: Date | null }) {
+    if (!sourceWarehouse.isHq || !sourceWarehouse.isActive || sourceWarehouse.deletedAt) {
+      throw new BadRequestException('Transfer source must be an active HQ warehouse');
+    }
+  }
+
+  private auditTransfer(
+    tx: PrismaTx,
+    user: AuthUser,
+    action: string,
+    order: { id: string; orderNumber: string; sourceWarehouseId: string },
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'BranchDistributionOrder',
+        entityId: order.id,
+        metadata: {
+          warehouseId: order.sourceWarehouseId,
+          orderNumber: order.orderNumber,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
   }
 
   private async calculateItems(tx: PrismaTx, dto: CreateDistributionOrderDto) {

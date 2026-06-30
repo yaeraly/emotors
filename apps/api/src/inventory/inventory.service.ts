@@ -616,9 +616,14 @@ export class InventoryService {
     });
   }
 
-  warehouses(user: AuthUser, branchId?: string) {
+  warehouses(user: AuthUser, branchId?: string, isHq?: string) {
+    const where: Prisma.WarehouseWhereInput = {
+      deletedAt: null,
+      ...this.buildBranchWhere(user, branchId),
+      ...(isHq === 'true' ? { isHq: true } : isHq === 'false' ? { isHq: false } : {}),
+    };
     return this.prisma.warehouse.findMany({
-      where: this.buildBranchWhere(user, branchId),
+      where,
       orderBy: { name: 'asc' },
     });
   }
@@ -795,12 +800,16 @@ export class InventoryService {
         productId: product.id,
         quantity: nextQuantity,
         averageCostKgs: nextAverageCost,
+        landedCostKgs: quantityDelta > 0 ? unitCostKgs : nextAverageCost,
         totalValueKgs: nextTotalValue,
+        ...(quantityDelta > 0 ? { lastReceivingAt: new Date() } : {}),
       },
       update: {
         quantity: nextQuantity,
         averageCostKgs: nextAverageCost,
+        landedCostKgs: quantityDelta > 0 ? unitCostKgs : nextAverageCost,
         totalValueKgs: nextTotalValue,
+        ...(quantityDelta > 0 ? { lastReceivingAt: new Date() } : {}),
       },
     });
 
@@ -1113,6 +1122,8 @@ export class InventoryService {
   }
 
   private toBalanceResponse(balance: any) {
+    const quantity = balance.quantity;
+    const reservedQuantity = balance.reservedQuantity ?? 0;
     return {
       id: balance.id,
       branchId: balance.branchId,
@@ -1121,11 +1132,15 @@ export class InventoryService {
       product: balance.product,
       sku: balance.product.sku,
       warehouse: balance.warehouse,
-      quantity: balance.quantity,
+      quantity,
+      reservedQuantity,
+      availableQuantity: Math.max(quantity - reservedQuantity, 0),
       averageCostKgs: Number(balance.averageCostKgs),
+      landedCostKgs: Number(balance.landedCostKgs ?? balance.averageCostKgs),
       totalValueKgs: Number(balance.totalValueKgs),
+      lastReceivingAt: balance.lastReceivingAt ?? null,
       minStockLevel: balance.product.minStockLevel,
-      lowStock: balance.quantity <= balance.product.minStockLevel,
+      lowStock: quantity <= balance.product.minStockLevel,
       updatedAt: balance.updatedAt,
     };
   }

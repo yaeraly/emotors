@@ -24,7 +24,7 @@ export default function WarehousesPage() {
   async function load() {
     try {
       const [warehouseResult, currentUserResult, branchResult] = await Promise.all([
-        apiFetch<Warehouse[]>('/inventory/warehouses'),
+        apiFetch<Warehouse[]>('/inventory/warehouses?isHq=false'),
         apiFetch<User>('/auth/me'),
         apiFetch<Branch[]>('/branches'),
       ]);
