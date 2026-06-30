@@ -21,7 +21,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { canManageProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { canArchiveProduct, canManageProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -523,8 +523,8 @@ export class InventoryService {
   }
 
   async deleteProduct(user: AuthUser, id: string) {
-    this.assertCanManageProductCatalog(user);
-    await this.getProductForWrite(this.prisma, user, id);
+    this.assertCanArchiveProduct(user);
+    const product = await this.getProductForWrite(this.prisma, user, id);
     const [stockMovements, saleItems, balances, priceHistory] =
       await Promise.all([
         this.prisma.stockMovement.count({ where: { productId: id } }),
@@ -538,6 +538,14 @@ export class InventoryService {
     await this.prisma.product.update({
       where: { id },
       data: { deletedAt: new Date(), isActive: false },
+    });
+
+    await this.auditInTx(this.prisma, user, product.branchId, 'PRODUCT_ARCHIVED', 'Product', id, {
+      module: 'inventory',
+      entityType: 'Product',
+      sku: product.sku,
+      oldValue: { name: product.name, sku: product.sku, isActive: product.isActive },
+      newValue: { isActive: false, deletedAt: new Date().toISOString() },
     });
 
     return {
@@ -1052,6 +1060,12 @@ export class InventoryService {
   private assertCanManageProductCatalog(user: AuthUser) {
     if (!canManageProductCatalog(user)) {
       throw new ForbiddenException('You do not have permission to manage product catalog');
+    }
+  }
+
+  private assertCanArchiveProduct(user: AuthUser) {
+    if (!canArchiveProduct(user)) {
+      throw new ForbiddenException('You do not have permission to archive products');
     }
   }
 

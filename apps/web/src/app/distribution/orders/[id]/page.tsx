@@ -4,7 +4,12 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { BranchDistributionOrder, GoodsReceiving, ShortageReport } from '@/lib/types';
+import {
+  canCreateDistributionOrder,
+  canDispatchFromHq,
+  hasRole,
+} from '@/lib/rbac';
+import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type ReceiveItemForm = {
@@ -18,6 +23,7 @@ export default function DistributionOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const [order, setOrder] = useState<BranchDistributionOrder | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [receiveItems, setReceiveItems] = useState<ReceiveItemForm[]>([]);
   const [receiving, setReceiving] = useState<GoodsReceiving | null>(null);
   const [shortageReport, setShortageReport] = useState<ShortageReport | null>(null);
@@ -27,7 +33,11 @@ export default function DistributionOrderDetailPage() {
 
   async function load() {
     try {
-      const result = await apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}`);
+      const [result, me] = await Promise.all([
+        apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}`),
+        apiFetch<User>('/auth/me'),
+      ]);
+      setCurrentUser(me);
       setOrder(result);
       setReceiveItems(
         result.items?.map((item) => ({
@@ -105,6 +115,10 @@ export default function DistributionOrderDetailPage() {
     }
   }
 
+  const canApprove = canCreateDistributionOrder(currentUser);
+  const canDispatch = canDispatchFromHq(currentUser);
+  const canReceiveAtBranch = hasRole(currentUser, 'WAREHOUSE_OPERATOR') || hasRole(currentUser, 'FRANCHISE_OWNER') || hasRole(currentUser, 'MANAGER');
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -128,9 +142,9 @@ export default function DistributionOrderDetailPage() {
                 <Info label={t('common.createdDate')} value={new Date(order.createdAt).toLocaleString()} />
               </div>
               <div className="mt-6 flex flex-wrap gap-2">
-                {order.status === 'DRAFT' ? <button onClick={() => void action('approve', t('distribution.orderApproved'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">{t('distribution.approve')}</button> : null}
-                {order.status === 'APPROVED' ? <button onClick={() => void action('send', t('distribution.orderSent'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">{t('distribution.send')}</button> : null}
-                {(order.status === 'DRAFT' || order.status === 'APPROVED') ? <button onClick={() => void action('cancel', t('distribution.orderCancelled'))} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">{t('distribution.cancel')}</button> : null}
+                {order.status === 'DRAFT' && canApprove ? <button onClick={() => void action('approve', t('distribution.orderApproved'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">{t('distribution.approve')}</button> : null}
+                {order.status === 'APPROVED' && canDispatch ? <button onClick={() => void action('send', t('distribution.orderSent'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">{t('distribution.send')}</button> : null}
+                {(order.status === 'DRAFT' || order.status === 'APPROVED') && (canApprove || canDispatch) ? <button onClick={() => void action('cancel', t('distribution.orderCancelled'))} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">{t('distribution.cancel')}</button> : null}
               </div>
             </section>
             {order.branchInvoice ? (
@@ -156,7 +170,7 @@ export default function DistributionOrderDetailPage() {
                 </table>
               </div>
             </section>
-            {order.status === 'SENT' ? (
+            {order.status === 'SENT' && canReceiveAtBranch ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-bold">{t('distribution.receiveGoods')}</h3>
                 <div className="mt-4 overflow-x-auto">

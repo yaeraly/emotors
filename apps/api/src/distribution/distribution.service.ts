@@ -16,7 +16,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isFullAccessRole } from '../rbac/rbac';
+import { isFullAccessRole, canCreateDistributionOrder, canDispatchFromHq } from '../rbac/rbac';
 import {
   activeHqWarehouseWhere,
   hqWarehouseWhere,
@@ -41,6 +41,9 @@ export class DistributionService {
   ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
+    if (!canCreateDistributionOrder(user)) {
+      throw new ForbiddenException('Only Supply Chain Manager can create distribution orders');
+    }
     return this.prisma.$transaction(async (tx) => {
       await this.validateBranchesAndWarehouses(tx, dto);
       const calculated = await this.calculateItems(tx, dto);
@@ -129,6 +132,9 @@ export class DistributionService {
   }
 
   approve(user: AuthUser, id: string) {
+    if (!canCreateDistributionOrder(user)) {
+      throw new ForbiddenException('Only Supply Chain Manager can approve distribution orders');
+    }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: {
@@ -223,6 +229,9 @@ export class DistributionService {
   }
 
   send(user: AuthUser, id: string) {
+    if (!canDispatchFromHq(user)) {
+      throw new ForbiddenException('Only Warehouse Manager can dispatch goods from HQ warehouse');
+    }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: {

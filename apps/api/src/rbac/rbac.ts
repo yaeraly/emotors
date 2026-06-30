@@ -44,6 +44,8 @@ export const ALL_PERMISSION_CODES = [
   'inventory.manage',
   'inventory.view',
   'products.manage',
+  'products.view',
+  'products.archive',
   'service.manage',
   'finance.view',
   'payments.manage',
@@ -51,6 +53,8 @@ export const ALL_PERMISSION_CODES = [
   'kpi.view',
   'reports.view',
   'procurement.manage',
+  'procurement.view',
+  'procurement.receive',
   'distribution.manage',
   'academy.manage',
   'marketing.manage',
@@ -62,8 +66,15 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   CEO: [...ALL_PERMISSION_CODES],
   SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'kpi.view', 'reports.view'],
-  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'products.manage'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
+  WAREHOUSE_MANAGER: [
+    'inventory.manage',
+    'inventory.view',
+    'distribution.manage',
+    'products.manage',
+    'procurement.view',
+    'procurement.receive',
+  ],
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
@@ -73,8 +84,11 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'inventory.manage',
     'inventory.view',
     'procurement.manage',
+    'procurement.view',
+    'procurement.receive',
     'distribution.manage',
     'products.manage',
+    'products.archive',
   ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
@@ -84,15 +98,16 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'sales.manage',
     'inventory.manage',
     'inventory.view',
+    'products.view',
     'service.manage',
     'finance.view',
     'payments.manage',
     'kpi.view',
     'reports.view',
   ],
-  MANAGER: ['crm.manage', 'sales.manage', 'inventory.view'],
-  MASTER: ['service.manage', 'kpi.view'],
-  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
+  MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
+  MASTER: ['service.manage', 'kpi.view', 'products.view'],
+  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage', 'products.view'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
@@ -189,6 +204,41 @@ export function rolesCanAccessRequiredRoles(roles: Role[], requiredRoles: Role[]
 
 export function canManageProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return userHasPermission(user, 'products.manage');
+}
+
+export function canArchiveProduct(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return userHasPermission(user, 'products.archive');
+}
+
+export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return userHasAnyPermission(user, [
+    'products.view',
+    'products.manage',
+    'inventory.view',
+    'inventory.manage',
+  ]);
+}
+
+export function canCreateProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return userHasPermission(user, 'procurement.manage');
+}
+
+export function canViewProcurement(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return userHasAnyPermission(user, ['procurement.manage', 'procurement.view']);
+}
+
+export function canReceiveProcurementToHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return userHasAnyPermission(user, ['procurement.receive', 'procurement.manage']);
+}
+
+export function canCreateDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
+export function canDispatchFromHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.WAREHOUSE_MANAGER);
 }
 
 export function canManageUsers(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {

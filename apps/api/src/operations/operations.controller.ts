@@ -3,11 +3,13 @@ import { BranchPurchaseRequestStatus, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RequirePermissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { OperationsService } from './operations.service';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller()
 export class OperationsController {
   constructor(private readonly service: OperationsService) {}
@@ -43,13 +45,13 @@ export class OperationsController {
   }
 
   @Get('procurement/hq-receivings')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+  @RequirePermissions('procurement.manage', 'procurement.view', 'procurement.receive')
   procurementReceivings() {
     return this.service.procurementReceivings();
   }
 
   @Post('procurement/orders/:id/receive-to-hq')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive', 'procurement.manage')
   receiveProcurementToHq(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
     return this.service.receiveProcurementToHq(user, id, dto);
   }

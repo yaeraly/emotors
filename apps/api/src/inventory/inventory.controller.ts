@@ -32,79 +32,73 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { InventoryService } from './inventory.service';
 
+const PRODUCT_VIEW_PERMISSIONS = [
+  'products.view',
+  'products.manage',
+  'inventory.view',
+  'inventory.manage',
+] as const;
+
 @Controller('inventory')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
-@Roles(
-  Role.OWNER,
-  Role.CEO,
-  Role.FRANCHISE_OWNER,
-  Role.MANAGER,
-  Role.WAREHOUSE_MANAGER,
-  Role.WAREHOUSE_OPERATOR,
-  Role.SUPPLY_CHAIN_MANAGER,
-)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Get('categories')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   categories(@Query('search') search?: string) {
     return this.inventoryService.categories(search);
   }
 
   @Post('categories')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   @RequirePermissions('products.manage')
   createCategory(@Body() dto: CreateCategoryDto) {
     return this.inventoryService.createCategory(dto);
   }
 
   @Get('categories/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER)
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   category(@Param('id') id: string) {
     return this.inventoryService.category(id);
   }
 
   @Put('categories/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   @RequirePermissions('products.manage')
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     return this.inventoryService.updateCategory(id, dto);
   }
 
   @Delete('categories/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
-  @RequirePermissions('products.manage')
+  @RequirePermissions('products.archive')
   deleteCategory(@Param('id') id: string) {
     return this.inventoryService.deleteCategory(id);
   }
 
   @Post('products')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   @RequirePermissions('products.manage')
   createProduct(@CurrentUser() user: AuthUser, @Body() dto: CreateProductDto) {
     return this.inventoryService.createProduct(user, dto);
   }
 
   @Post('products/upload-image')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   @RequirePermissions('products.manage')
   uploadProductImage(@Req() request: FastifyRequest) {
     return this.inventoryService.uploadProductImage(request);
   }
 
   @Get('products')
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   products(@CurrentUser() user: AuthUser, @Query() query: ProductQueryDto) {
     return this.inventoryService.products(user, query);
   }
 
   @Get('products/:id')
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   product(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.product(user, id);
   }
 
   @Put('products/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   @RequirePermissions('products.manage')
   updateProduct(
     @CurrentUser() user: AuthUser,
@@ -115,14 +109,12 @@ export class InventoryController {
   }
 
   @Delete('products/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
-  @RequirePermissions('products.manage')
+  @RequirePermissions('products.archive')
   deleteProduct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.deleteProduct(user, id);
   }
 
   @Post('products/:id/price-history')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   @RequirePermissions('products.manage')
   addPriceHistory(
     @CurrentUser() user: AuthUser,
@@ -133,23 +125,25 @@ export class InventoryController {
   }
 
   @Get('products/:id/price-history')
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   priceHistory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.priceHistory(user, id);
   }
 
   @Post('yuan-rates')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER)
   @RequirePermissions('products.manage')
   createYuanRate(@CurrentUser() user: AuthUser, @Body() dto: CreateYuanRateDto) {
     return this.inventoryService.createYuanRate(user, dto);
   }
 
   @Get('yuan-rates')
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   yuanRates() {
     return this.inventoryService.yuanRates();
   }
 
   @Get('yuan-rates/latest')
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   latestYuanRate() {
     return this.inventoryService.latestYuanRate();
   }
@@ -164,6 +158,15 @@ export class InventoryController {
   }
 
   @Get('warehouses')
+  @Roles(
+    Role.OWNER,
+    Role.CEO,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.WAREHOUSE_MANAGER,
+    Role.WAREHOUSE_OPERATOR,
+    Role.SUPPLY_CHAIN_MANAGER,
+  )
   warehouses(
     @CurrentUser() user: AuthUser,
     @Query('branchId') branchId?: string,
@@ -175,6 +178,15 @@ export class InventoryController {
   }
 
   @Get('warehouses/:id')
+  @Roles(
+    Role.OWNER,
+    Role.CEO,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.WAREHOUSE_MANAGER,
+    Role.WAREHOUSE_OPERATOR,
+    Role.SUPPLY_CHAIN_MANAGER,
+  )
   warehouse(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.warehouse(user, id);
   }
@@ -199,6 +211,15 @@ export class InventoryController {
   }
 
   @Get('stock-movements')
+  @Roles(
+    Role.OWNER,
+    Role.CEO,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.WAREHOUSE_MANAGER,
+    Role.WAREHOUSE_OPERATOR,
+    Role.SUPPLY_CHAIN_MANAGER,
+  )
   stockMovements(
     @CurrentUser() user: AuthUser,
     @Query() query: StockMovementQueryDto,
@@ -207,16 +228,43 @@ export class InventoryController {
   }
 
   @Get('balances')
+  @Roles(
+    Role.OWNER,
+    Role.CEO,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.WAREHOUSE_MANAGER,
+    Role.WAREHOUSE_OPERATOR,
+    Role.SUPPLY_CHAIN_MANAGER,
+  )
   balances(@CurrentUser() user: AuthUser, @Query() query: ProductQueryDto) {
     return this.inventoryService.balances(user, query);
   }
 
   @Get('stock-value')
+  @Roles(
+    Role.OWNER,
+    Role.CEO,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.WAREHOUSE_MANAGER,
+    Role.WAREHOUSE_OPERATOR,
+    Role.SUPPLY_CHAIN_MANAGER,
+  )
   stockValue(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
     return this.inventoryService.stockValue(user, branchId);
   }
 
   @Get('low-stock')
+  @Roles(
+    Role.OWNER,
+    Role.CEO,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.WAREHOUSE_MANAGER,
+    Role.WAREHOUSE_OPERATOR,
+    Role.SUPPLY_CHAIN_MANAGER,
+  )
   lowStock(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
     return this.inventoryService.lowStock(user, branchId);
   }

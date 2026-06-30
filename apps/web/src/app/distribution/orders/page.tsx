@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus } from '@/lib/types';
+import { canCreateDistributionOrder } from '@/lib/rbac';
+import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const statuses: BranchDistributionOrderStatus[] = [
@@ -20,6 +21,7 @@ export default function DistributionOrdersPage() {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<BranchDistributionOrder[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [filters, setFilters] = useState({ search: '', branchId: '', status: '' });
   const [error, setError] = useState('');
 
@@ -40,6 +42,7 @@ export default function DistributionOrdersPage() {
       .then(([orderResult, branchResult]) => {
         setOrders(orderResult);
         setBranches(branchResult);
+        void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [query, t]);
@@ -52,9 +55,11 @@ export default function DistributionOrdersPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('distribution.title')}</p>
             <h2 className="text-3xl font-bold text-slate-950">{t('distribution.orders')}</h2>
           </div>
-          <Link href="/distribution/orders/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
-            {t('distribution.newOrder')}
-          </Link>
+          {canCreateDistributionOrder(currentUser) ? (
+            <Link href="/distribution/orders/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
+              {t('distribution.newOrder')}
+            </Link>
+          ) : null}
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3">

@@ -17,7 +17,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
+import { canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
 import { calculateLandedCosts, extractLogisticsCosts } from '../procurement/landed-cost.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 
@@ -129,7 +129,9 @@ export class OperationsService {
   }
 
   async receiveProcurementToHq(user: AuthUser, procurementOrderId: string, dto: any) {
-    if (!this.canManageWarehouse(user)) throw new ForbiddenException('Forbidden resource');
+    if (!canReceiveProcurementToHq(user)) {
+      throw new ForbiddenException('Only Warehouse Manager can receive goods into HQ warehouse');
+    }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
         where: { id: procurementOrderId, deletedAt: null },

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -58,7 +58,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
 
   const canSeeCrm = hasPermission(user, 'crm.manage');
   const canSeeSales = hasPermission(user, 'sales.manage');
-  const canSeeInventory = hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
+  const canSeeInventory = hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view') || canViewProductCatalog(user);
   const canManageInventory = hasPermission(user, 'inventory.manage');
   const canManageProducts = canManageProductCatalog(user);
   const canSeeService = hasPermission(user, 'service.manage');

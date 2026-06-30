@@ -5,7 +5,11 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canManageProcurement, hasRole } from '@/lib/rbac';
+import {
+  canCreateProcurementOrder,
+  canReceiveProcurementToHq,
+  hasRole,
+} from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -100,9 +104,13 @@ export default function ProcurementOrderDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const canManage = canManageProcurement(user);
-  const canReceive = hasRole(user, 'WAREHOUSE_MANAGER') || hasRole(user, 'CEO') || hasRole(user, 'SUPPLY_CHAIN_MANAGER') || hasRole(user, 'OWNER') || hasRole(user, 'SYSTEM_ADMINISTRATOR');
+  const canEditOrder = canCreateProcurementOrder(user);
   const readOnlyFinance = hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'ACCOUNTANT');
+  const canReceive = canReceiveProcurementToHq(user);
+  const readyForHqReceiving =
+    order?.status === 'ARRIVED' ||
+    order?.status === 'ARRIVED_IN_KYRGYZSTAN' ||
+    order?.status === 'IN_TRANSIT';
 
   async function load() {
     try {
@@ -168,7 +176,7 @@ export default function ProcurementOrderDetailPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('procurement.orders.title')}</p>
             <h2 className="text-3xl font-bold">{order?.orderNumber ?? '-'}</h2>
           </div>
-          {canManage && order && !order.hqStockMovementCreatedAt ? (
+          {canEditOrder && order && !order.hqStockMovementCreatedAt ? (
             <Link href={`/procurement/orders/${id}/edit`} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t('procurement.orders.edit')}</Link>
           ) : null}
         </div>
@@ -190,7 +198,7 @@ export default function ProcurementOrderDetailPage() {
             <Info label={t('procurement.orders.costPerKg')} value={formatKgs(order.costPerKg)} />
           </section>
 
-          {canManage && !order.hqStockMovementCreatedAt ? (
+          {canEditOrder && !order.hqStockMovementCreatedAt ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap gap-2">
                 {statusActions.map(([path, label]) => <button key={path} onClick={() => void action(path)} type="button" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t(label)}</button>)}
@@ -248,7 +256,7 @@ export default function ProcurementOrderDetailPage() {
             </table>
           </section>
 
-          {canReceive && !order.hqStockMovementCreatedAt ? (
+          {canReceive && readyForHqReceiving && !order.hqStockMovementCreatedAt ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.receivingSummary')}</h3>
               <div className="space-y-3">

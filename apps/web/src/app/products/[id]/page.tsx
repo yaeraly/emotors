@@ -7,7 +7,7 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog } from '@/lib/rbac';
+import { canEditProductCatalog } from '@/lib/rbac';
 import type { Product, ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -111,7 +111,7 @@ export default function ProductDetailPage() {
               </div>
             </article>
 
-            {canManageProductCatalog(currentUser) ? (
+            {canEditProductCatalog(currentUser) ? (
               <form onSubmit={saveProduct} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-5">
                 <div className="md:col-span-5">
                   <ProductImageUploader

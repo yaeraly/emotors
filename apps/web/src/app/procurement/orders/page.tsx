@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { canCreateProcurementOrder } from '@/lib/rbac';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type ProcurementOrder = {
@@ -21,6 +23,7 @@ type ProcurementOrder = {
 export default function ProcurementOrdersPage() {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<ProcurementOrder[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -31,7 +34,10 @@ export default function ProcurementOrdersPage() {
       window.localStorage.removeItem('emotors_procurement_success');
     }
     apiFetch<ProcurementOrder[]>('/procurement/orders')
-      .then(setOrders)
+      .then((result) => {
+        setOrders(result);
+        void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
@@ -43,7 +49,9 @@ export default function ProcurementOrdersPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('procurement.title')}</p>
             <h2 className="text-3xl font-bold text-slate-950">{t('procurement.orders.title')}</h2>
           </div>
-          <Link href="/procurement/orders/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">{t('procurement.orders.new')}</Link>
+          {canCreateProcurementOrder(currentUser) ? (
+            <Link href="/procurement/orders/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">{t('procurement.orders.new')}</Link>
+          ) : null}
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
