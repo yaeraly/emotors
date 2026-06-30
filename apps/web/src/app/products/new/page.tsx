@@ -35,7 +35,7 @@ export default function NewProductPage() {
 
   useEffect(() => {
     Promise.all([
-      apiFetch<Warehouse[]>('/inventory/warehouses'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ'),
       apiFetch<YuanRateHistory | null>('/inventory/yuan-rates/latest'),
       apiFetch<ProductCategory[]>('/inventory/categories'),
     ])

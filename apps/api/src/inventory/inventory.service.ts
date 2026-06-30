@@ -17,11 +17,12 @@ import { normalizeBranchId, resolveWritableBranchId } from '../rbac/branch-scope
 import {
   assertProductWarehouseBranchMatch,
   branchWarehouseWhere,
+  HQ_CATALOG_BRANCH_CODE,
   hqWarehouseWhere,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { canArchiveProduct, canManageProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { canArchiveProduct, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -203,10 +204,7 @@ export class InventoryService {
         const warehouse = await this.getWarehouseForCatalogWrite(tx, user, dto.warehouseId);
         let branchId: string;
         if (isHqWarehouse(warehouse)) {
-          if (!dto.branchId?.trim()) {
-            throw new BadRequestException('Branch is required when assigning products to HQ warehouse');
-          }
-          branchId = dto.branchId.trim();
+          branchId = dto.branchId?.trim() || (await this.resolveHqCatalogBranchId(tx));
         } else {
           branchId = dto.branchId ?? warehouse.branchId ?? '';
           if (!branchId) {
@@ -357,7 +355,7 @@ export class InventoryService {
     const pageSize = query.pageSize ?? 25;
     const where: Prisma.ProductWhereInput = {
       deletedAt: null,
-      ...this.buildBranchWhere(user, query.branchId),
+      ...this.buildProductCatalogWhere(user, query.branchId),
       ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
@@ -399,7 +397,7 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
+        ...this.buildProductCatalogWhere(user),
       },
       include: {
         ...this.productInclude(),
@@ -917,6 +915,52 @@ export class InventoryService {
     return { branchId: userBranch };
   }
 
+  private buildProductCatalogWhere(
+    user: AuthUser,
+    requestedBranchId?: string,
+  ): Prisma.ProductWhereInput {
+    const requested = normalizeBranchId(requestedBranchId);
+    const userBranch = normalizeBranchId(user.branchId);
+
+    if (this.canAccessAllInventory(user)) {
+      return requested ? { branchId: requested } : {};
+    }
+
+    if (canViewProductCatalog(user) && userBranch) {
+      if (requested && requested !== userBranch) {
+        throw new ForbiddenException('You can only access your own branch');
+      }
+      return {
+        OR: [
+          { warehouse: hqWarehouseWhere },
+          { branchId: userBranch },
+        ],
+      };
+    }
+
+    return this.buildBranchWhere(user, requestedBranchId);
+  }
+
+  private async resolveHqCatalogBranchId(tx: PrismaTx) {
+    const existing = await tx.branch.findFirst({
+      where: { code: HQ_CATALOG_BRANCH_CODE },
+      select: { id: true },
+    });
+    if (existing) {
+      return existing.id;
+    }
+
+    const created = await tx.branch.create({
+      data: {
+        code: HQ_CATALOG_BRANCH_CODE,
+        name: 'EMOTORS HQ Catalog',
+        city: 'Bishkek',
+      },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
   private async ensureSkuAvailable(
     tx: PrismaTx,
     branchId: string,
@@ -969,7 +1013,7 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
+        ...this.buildProductCatalogWhere(user),
       },
     });
 
@@ -989,7 +1033,7 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
+        ...this.buildProductCatalogWhere(user),
       },
       include: {
         ...this.productInclude(),
@@ -1022,7 +1066,9 @@ export class InventoryService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canAccessAllInventory(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllInventory(user)
+          ? {}
+          : this.buildProductCatalogWhere(user)),
       },
     });
 

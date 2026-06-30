@@ -81,6 +81,19 @@ const productCategories = [
 ] as const;
 
 async function main() {
+  const hqCatalogBranch = await prisma.branch.upsert({
+    where: { code: 'EMOTORS-HQ' },
+    update: {
+      name: 'EMOTORS HQ Catalog',
+      city: 'Bishkek',
+    },
+    create: {
+      name: 'EMOTORS HQ Catalog',
+      code: 'EMOTORS-HQ',
+      city: 'Bishkek',
+    },
+  });
+
   const branch = await prisma.branch.upsert({
     where: { code: 'BISHKEK' },
     update: {

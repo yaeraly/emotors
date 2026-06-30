@@ -1,6 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { WarehouseType } from '@prisma/client';
 
+export const HQ_CATALOG_BRANCH_CODE = 'EMOTORS-HQ';
+
 export function isHqWarehouse(warehouse: {
   warehouseType: WarehouseType;
   branchId: string | null;
