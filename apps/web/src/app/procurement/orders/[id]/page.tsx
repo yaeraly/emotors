@@ -24,6 +24,7 @@ type ProcurementItem = {
   allocatedChinaShippingKgs?: string | number;
   allocatedPackagingKgs?: string | number;
   allocatedInternationalShippingKgs?: string | number;
+  allocatedLocalTransportKgs?: string | number;
   allocatedInsuranceKgs?: string | number;
   allocatedCustomsKgs?: string | number;
   allocatedBankFeesKgs?: string | number;
@@ -47,6 +48,7 @@ type ProcurementOrder = {
   chinaLocalShippingKgs?: string | number;
   packagingCostKgs?: string | number;
   internationalShippingKgs?: string | number;
+  localTransportKgs?: string | number;
   insuranceKgs?: string | number;
   customsKgs?: string | number;
   bankFeesKgs?: string | number;
@@ -95,8 +97,9 @@ export default function ProcurementOrderDetailPage() {
   const [success, setSuccess] = useState('');
   const [transportForm, setTransportForm] = useState({
     chinaLocalShippingKgs: '',
-    packagingCostKgs: '',
     internationalShippingKgs: '',
+    localTransportKgs: '',
+    packagingCostKgs: '',
     insuranceKgs: '',
     customsKgs: '',
     bankFeesKgs: '',
@@ -104,7 +107,7 @@ export default function ProcurementOrderDetailPage() {
   });
   const [allocationMethod, setAllocationMethod] = useState('BY_WEIGHT');
   const [editingItem, setEditingItem] = useState<ProcurementItem | null>(null);
-  const [itemForm, setItemForm] = useState({ purchasePriceYuan: '', quantity: '', confirmedQuantity: '', shippedQuantity: '', reason: '' });
+  const [itemForm, setItemForm] = useState({ purchasePriceYuan: '', quantity: '', confirmedQuantity: '', shippedQuantity: '', weightKg: '', reason: '' });
   const [receiveForm, setReceiveForm] = useState<Record<string, { receivedQuantity: string; differenceReason: string }>>({});
 
   const canManage = hasPermission(user, 'procurement.manage');
@@ -124,8 +127,9 @@ export default function ProcurementOrderDetailPage() {
       setHistory(historyData);
       setTransportForm({
         chinaLocalShippingKgs: String(orderData.chinaLocalShippingKgs ?? 0),
-        packagingCostKgs: String(orderData.packagingCostKgs ?? 0),
         internationalShippingKgs: String(orderData.internationalShippingKgs ?? 0),
+        localTransportKgs: String(orderData.localTransportKgs ?? 0),
+        packagingCostKgs: String(orderData.packagingCostKgs ?? 0),
         insuranceKgs: String(orderData.insuranceKgs ?? 0),
         customsKgs: String(orderData.customsKgs ?? 0),
         bankFeesKgs: String(orderData.bankFeesKgs ?? 0),
@@ -215,6 +219,7 @@ export default function ProcurementOrderDetailPage() {
           quantity: itemForm.quantity ? Number(itemForm.quantity) : undefined,
           confirmedQuantity: itemForm.confirmedQuantity ? Number(itemForm.confirmedQuantity) : undefined,
           shippedQuantity: itemForm.shippedQuantity ? Number(itemForm.shippedQuantity) : undefined,
+          weightKg: itemForm.weightKg ? Number(itemForm.weightKg) : undefined,
           reason: itemForm.reason,
         }),
       });
@@ -335,6 +340,7 @@ export default function ProcurementOrderDetailPage() {
                                 quantity: String(item.quantity),
                                 confirmedQuantity: String(item.confirmedQuantity ?? ''),
                                 shippedQuantity: String(item.shippedQuantity ?? ''),
+                                weightKg: String(item.weightKg ?? ''),
                                 reason: '',
                               });
                             }}>Edit</button>
@@ -378,9 +384,10 @@ export default function ProcurementOrderDetailPage() {
                     <tr>
                       <th className="px-4 py-3">Product</th>
                       <th className="px-4 py-3">Factory</th>
-                      <th className="px-4 py-3">China Ship</th>
+                      <th className="px-4 py-3">China Domestic</th>
+                      <th className="px-4 py-3">China Export</th>
+                      <th className="px-4 py-3">Local</th>
                       <th className="px-4 py-3">Packaging</th>
-                      <th className="px-4 py-3">Intl Ship</th>
                       <th className="px-4 py-3">Insurance</th>
                       <th className="px-4 py-3">Customs</th>
                       <th className="px-4 py-3">Bank</th>
@@ -395,8 +402,9 @@ export default function ProcurementOrderDetailPage() {
                         <td className="px-4 py-3">{item.productName}</td>
                         <td className="px-4 py-3">{formatKgs(item.factoryCostKgs ?? 0)}</td>
                         <td className="px-4 py-3">{formatKgs(item.allocatedChinaShippingKgs ?? 0)}</td>
-                        <td className="px-4 py-3">{formatKgs(item.allocatedPackagingKgs ?? 0)}</td>
                         <td className="px-4 py-3">{formatKgs(item.allocatedInternationalShippingKgs ?? 0)}</td>
+                        <td className="px-4 py-3">{formatKgs(item.allocatedLocalTransportKgs ?? 0)}</td>
+                        <td className="px-4 py-3">{formatKgs(item.allocatedPackagingKgs ?? 0)}</td>
                         <td className="px-4 py-3">{formatKgs(item.allocatedInsuranceKgs ?? 0)}</td>
                         <td className="px-4 py-3">{formatKgs(item.allocatedCustomsKgs ?? 0)}</td>
                         <td className="px-4 py-3">{formatKgs(item.allocatedBankFeesKgs ?? 0)}</td>
@@ -483,6 +491,7 @@ export default function ProcurementOrderDetailPage() {
                 <input className="rounded-xl border px-3 py-2" placeholder="Ordered quantity" value={itemForm.quantity} onChange={(e) => setItemForm((prev) => ({ ...prev, quantity: e.target.value }))} />
                 <input className="rounded-xl border px-3 py-2" placeholder="Confirmed quantity" value={itemForm.confirmedQuantity} onChange={(e) => setItemForm((prev) => ({ ...prev, confirmedQuantity: e.target.value }))} />
                 <input className="rounded-xl border px-3 py-2" placeholder="Shipped quantity" value={itemForm.shippedQuantity} onChange={(e) => setItemForm((prev) => ({ ...prev, shippedQuantity: e.target.value }))} />
+                <input className="rounded-xl border px-3 py-2" placeholder="Weight kg/unit" value={itemForm.weightKg} onChange={(e) => setItemForm((prev) => ({ ...prev, weightKg: e.target.value }))} />
                 <input className="rounded-xl border px-3 py-2" placeholder="Reason" value={itemForm.reason} onChange={(e) => setItemForm((prev) => ({ ...prev, reason: e.target.value }))} />
               </div>
               <div className="mt-4 flex justify-end gap-2">
@@ -524,10 +533,17 @@ function formatKgs(value: number | string | null | undefined) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
 }
 
+const TRANSPORT_LABELS: Record<string, string> = {
+  chinaLocalShippingKgs: 'China Domestic (Factory → China WH)',
+  internationalShippingKgs: 'China Export (China WH → Bishkek)',
+  localTransportKgs: 'Local (Customs/SVH → HQ)',
+  packagingCostKgs: 'Packaging',
+  customsKgs: 'Customs',
+  insuranceKgs: 'Insurance',
+  bankFeesKgs: 'Bank Fees',
+  otherExpensesKgs: 'Other Expenses',
+};
+
 function formatTransportLabel(key: string) {
-  return key
-    .replace(/Kgs$/, '')
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, (char) => char.toUpperCase())
-    .trim();
+  return TRANSPORT_LABELS[key] ?? key;
 }

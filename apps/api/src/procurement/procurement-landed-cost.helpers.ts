@@ -24,11 +24,12 @@ export function userHasAnyRole(user: AuthUser, roles: Role[]) {
   return roles.some((role) => userRoles.includes(role));
 }
 
-export function extractTransportCosts(order: OrderTransportCosts) {
+export function extractTransportCosts(order: OrderTransportCosts & { localTransportKgs?: number }) {
   return {
     chinaLocalShippingKgs: Number(order.chinaLocalShippingKgs ?? 0),
-    packagingCostKgs: Number(order.packagingCostKgs ?? 0),
     internationalShippingKgs: Number(order.internationalShippingKgs ?? 0),
+    localTransportKgs: Number(order.localTransportKgs ?? 0),
+    packagingCostKgs: Number(order.packagingCostKgs ?? 0),
     insuranceKgs: Number(order.insuranceKgs ?? 0),
     customsKgs: Number(order.customsKgs ?? 0),
     bankFeesKgs: Number(order.bankFeesKgs ?? 0),
@@ -51,6 +52,7 @@ export async function persistLandedCostRecalculation(
     chinaLocalShippingKgs: any;
     packagingCostKgs: any;
     internationalShippingKgs: any;
+    localTransportKgs: any;
     insuranceKgs: any;
     customsKgs: any;
     bankFeesKgs: any;
@@ -80,6 +82,7 @@ export async function persistLandedCostRecalculation(
         allocatedChinaShippingKgs: breakdown.allocatedChinaShippingKgs,
         allocatedPackagingKgs: breakdown.allocatedPackagingKgs,
         allocatedInternationalShippingKgs: breakdown.allocatedInternationalShippingKgs,
+        allocatedLocalTransportKgs: breakdown.allocatedLocalTransportKgs,
         allocatedInsuranceKgs: breakdown.allocatedInsuranceKgs,
         allocatedCustomsKgs: breakdown.allocatedCustomsKgs,
         allocatedBankFeesKgs: breakdown.allocatedBankFeesKgs,

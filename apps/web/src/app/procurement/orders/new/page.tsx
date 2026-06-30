@@ -11,6 +11,30 @@ import { useTranslation } from '@/i18n/useTranslation';
 type Supplier = { id: string; name: string };
 type Factory = { id: string; name: string; supplierId: string };
 
+type LineItem = {
+  id: string;
+  productId: string;
+  supplierId: string;
+  factoryId: string;
+  quantity: string;
+  purchasePriceYuan: string;
+  yuanRate: string;
+  weightKg: string;
+  notes: string;
+};
+
+const emptyLine = (product?: Product, supplierId = '', factoryId = ''): LineItem => ({
+  id: crypto.randomUUID(),
+  productId: product?.id ?? '',
+  supplierId,
+  factoryId,
+  quantity: '1',
+  purchasePriceYuan: String(product?.purchasePriceYuan ?? 0),
+  yuanRate: String(product?.latestYuanRate ?? 0),
+  weightKg: String(product?.weightKg ?? 0),
+  notes: '',
+});
+
 export default function NewProcurementOrderPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -26,13 +50,16 @@ export default function NewProcurementOrderPage() {
     hqWarehouseId: '',
     estimatedArrivalDate: '',
     note: '',
-    productId: '',
-    quantity: '1',
-    purchasePriceYuan: '0',
-    yuanRate: '0',
-    transportCostKgs: '0',
-    weightKg: '0',
+    chinaDomesticTransportKgs: '0',
+    chinaExportTransportKgs: '0',
+    localTransportKgs: '0',
+    packagingCostKgs: '0',
+    customsKgs: '0',
+    insuranceKgs: '0',
+    bankFeesKgs: '0',
+    otherExpensesKgs: '0',
   });
+  const [lines, setLines] = useState<LineItem[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -46,30 +73,34 @@ export default function NewProcurementOrderPage() {
         setFactories(factoryResult);
         setWarehouses(warehouseResult);
         setProducts(productResult.items);
+        const supplierId = supplierResult[0]?.id ?? '';
+        const factoryId = factoryResult[0]?.id ?? '';
         setForm((current) => ({
           ...current,
-          supplierId: supplierResult[0]?.id ?? '',
-          factoryId: factoryResult[0]?.id ?? '',
+          supplierId,
+          factoryId,
           hqWarehouseId: warehouseResult[0]?.id ?? '',
-          productId: productResult.items[0]?.id ?? '',
-          yuanRate: current.yuanRate === '0' ? String(productResult.items[0]?.latestYuanRate ?? 0) : current.yuanRate,
-          purchasePriceYuan: current.purchasePriceYuan === '0' ? String(productResult.items[0]?.purchasePriceYuan ?? 0) : current.purchasePriceYuan,
-          weightKg: current.weightKg === '0' ? String(productResult.items[0]?.weightKg ?? 0) : current.weightKg,
         }));
+        setLines([emptyLine(productResult.items[0], supplierId, factoryId)]);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
   const totals = useMemo(() => {
-    const quantity = Number(form.quantity || 0);
-    const purchasePriceYuan = Number(form.purchasePriceYuan || 0);
-    const yuanRate = Number(form.yuanRate || 0);
-    const transportCostKgs = Number(form.transportCostKgs || 0);
-    return {
-      totalYuan: quantity * purchasePriceYuan,
-      totalCostKgs: quantity * (purchasePriceYuan * yuanRate + transportCostKgs),
-    };
-  }, [form.purchasePriceYuan, form.quantity, form.transportCostKgs, form.yuanRate]);
+    const totalYuan = lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.purchasePriceYuan || 0), 0);
+    const totalWeight = lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.weightKg || 0), 0);
+    const transportTotal =
+      Number(form.chinaDomesticTransportKgs || 0) +
+      Number(form.chinaExportTransportKgs || 0) +
+      Number(form.localTransportKgs || 0) +
+      Number(form.packagingCostKgs || 0) +
+      Number(form.customsKgs || 0) +
+      Number(form.insuranceKgs || 0) +
+      Number(form.bankFeesKgs || 0) +
+      Number(form.otherExpensesKgs || 0);
+    const costPerKg = totalWeight > 0 ? transportTotal / totalWeight : 0;
+    return { totalYuan, totalWeight, transportTotal, costPerKg };
+  }, [form, lines]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -84,14 +115,24 @@ export default function NewProcurementOrderPage() {
           hqWarehouseId: form.hqWarehouseId,
           estimatedArrivalDate: form.estimatedArrivalDate || undefined,
           note: form.note || undefined,
-          items: [{
-            productId: form.productId,
-            quantity: Number(form.quantity || 0),
-            purchasePriceYuan: Number(form.purchasePriceYuan || 0),
-            yuanRate: Number(form.yuanRate || 0),
-            transportCostKgs: Number(form.transportCostKgs || 0),
-            weightKg: Number(form.weightKg || 0),
-          }],
+          chinaLocalShippingKgs: Number(form.chinaDomesticTransportKgs || 0),
+          internationalShippingKgs: Number(form.chinaExportTransportKgs || 0),
+          localTransportKgs: Number(form.localTransportKgs || 0),
+          packagingCostKgs: Number(form.packagingCostKgs || 0),
+          customsKgs: Number(form.customsKgs || 0),
+          insuranceKgs: Number(form.insuranceKgs || 0),
+          bankFeesKgs: Number(form.bankFeesKgs || 0),
+          otherExpensesKgs: Number(form.otherExpensesKgs || 0),
+          items: lines.map((line) => ({
+            productId: line.productId,
+            supplierId: line.supplierId || form.supplierId,
+            factoryId: line.factoryId || form.factoryId || undefined,
+            quantity: Number(line.quantity || 0),
+            purchasePriceYuan: Number(line.purchasePriceYuan || 0),
+            yuanRate: Number(line.yuanRate || 0),
+            weightKg: Number(line.weightKg || 0),
+            notes: line.notes || undefined,
+          })),
         }),
       });
       window.localStorage.setItem('emotors_procurement_success', t('procurement.orders.created'));
@@ -103,8 +144,16 @@ export default function NewProcurementOrderPage() {
     }
   }
 
-  function setField(key: keyof typeof form, value: string) {
-    setForm((current) => ({ ...current, [key]: value }));
+  function updateLine(id: string, patch: Partial<LineItem>) {
+    setLines((current) => current.map((line) => (line.id === id ? { ...line, ...patch } : line)));
+  }
+
+  function addLine() {
+    setLines((current) => [...current, emptyLine(products[0], form.supplierId, form.factoryId)]);
+  }
+
+  function removeLine(id: string) {
+    setLines((current) => (current.length <= 1 ? current : current.filter((line) => line.id !== id)));
   }
 
   return (
@@ -115,36 +164,68 @@ export default function NewProcurementOrderPage() {
           <h2 className="mt-2 text-3xl font-bold text-slate-950">{t('procurement.orders.new')}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        <div className="grid gap-6 xl:grid-cols-[1fr_320px]">
-          <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-            <Select label={t('procurement.orders.supplier')} value={form.supplierId} onChange={(value) => setField('supplierId', value)} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
-            <Select label={t('procurement.orders.factory')} value={form.factoryId} onChange={(value) => setField('factoryId', value)} options={[{ value: '', label: '-' }, ...factories.map((factory) => ({ value: factory.id, label: factory.name }))]} />
-            <Select label={t('procurement.orders.warehouse')} value={form.hqWarehouseId} onChange={(value) => setField('hqWarehouseId', value)} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
-            <Input label={t('procurement.orders.estimatedArrivalDate')} type="date" value={form.estimatedArrivalDate} onChange={(value) => setField('estimatedArrivalDate', value)} />
-            <Select label={t('procurement.orders.product')} value={form.productId} onChange={(value) => {
-              const product = products.find((item) => item.id === value);
-              setForm((current) => ({
-                ...current,
-                productId: value,
-                purchasePriceYuan: product ? String(product.purchasePriceYuan ?? 0) : current.purchasePriceYuan,
-                yuanRate: product ? String(product.latestYuanRate ?? 0) : current.yuanRate,
-                weightKg: product ? String(product.weightKg ?? 0) : current.weightKg,
-              }));
-            }} options={products.map((product) => ({ value: product.id, label: `${product.sku} · ${product.name}` }))} />
-            <Input label={t('procurement.orders.quantity')} type="number" value={form.quantity} onChange={(value) => setField('quantity', value)} />
-            <Input label={t('procurement.orders.purchasePriceYuan')} type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
-            <Input label={t('procurement.orders.yuanRate')} type="number" value={form.yuanRate} onChange={(value) => setField('yuanRate', value)} />
-            <Input label={t('inventory.transportCostKgs')} type="number" value={form.transportCostKgs} onChange={(value) => setField('transportCostKgs', value)} />
-            <Input label={t('inventory.weightKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} />
-            <label className="block md:col-span-2"><span className="text-sm font-semibold text-slate-700">{t('procurement.orders.note')}</span><textarea value={form.note} onChange={(event) => setField('note', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>
-          </section>
-          <aside className="h-fit rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">{t('procurement.orders.totalCostKgs')}</h3>
-            <Preview label={t('procurement.orders.totalYuan')} value={`¥${totals.totalYuan.toFixed(2)}`} />
-            <Preview label={t('procurement.orders.totalCostKgs')} value={formatKgs(totals.totalCostKgs)} />
-            <button disabled={saving} className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300" type="submit">{saving ? t('common.loading') : t('procurement.orders.save')}</button>
-          </aside>
-        </div>
+
+        <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+          <h3 className="md:col-span-2 text-lg font-bold">General Information</h3>
+          <Select label={t('procurement.orders.supplier')} value={form.supplierId} onChange={(value) => setForm((c) => ({ ...c, supplierId: value }))} options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
+          <Select label={t('procurement.orders.factory')} value={form.factoryId} onChange={(value) => setForm((c) => ({ ...c, factoryId: value }))} options={[{ value: '', label: '-' }, ...factories.map((f) => ({ value: f.id, label: f.name }))]} />
+          <Select label={t('procurement.orders.warehouse')} value={form.hqWarehouseId} onChange={(value) => setForm((c) => ({ ...c, hqWarehouseId: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+          <Input label={t('procurement.orders.estimatedArrivalDate')} type="date" value={form.estimatedArrivalDate} onChange={(value) => setForm((c) => ({ ...c, estimatedArrivalDate: value }))} />
+          <label className="block md:col-span-2"><span className="text-sm font-semibold text-slate-700">{t('procurement.orders.note')}</span><textarea value={form.note} onChange={(e) => setForm((c) => ({ ...c, note: e.target.value }))} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-lg font-bold">Products</h3>
+            <button type="button" onClick={addLine} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">Add Product</button>
+          </div>
+          <div className="space-y-4">
+            {lines.map((line) => (
+              <div key={line.id} className="grid gap-3 rounded-2xl bg-slate-50 p-4 md:grid-cols-4">
+                <Select label="Product" value={line.productId} onChange={(value) => {
+                  const product = products.find((p) => p.id === value);
+                  updateLine(line.id, {
+                    productId: value,
+                    purchasePriceYuan: String(product?.purchasePriceYuan ?? 0),
+                    yuanRate: String(product?.latestYuanRate ?? 0),
+                    weightKg: String(product?.weightKg ?? 0),
+                  });
+                }} options={products.map((p) => ({ value: p.id, label: `${p.sku} · ${p.name}` }))} />
+                <Select label="Supplier" value={line.supplierId} onChange={(value) => updateLine(line.id, { supplierId: value })} options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
+                <Select label="Factory" value={line.factoryId} onChange={(value) => updateLine(line.id, { factoryId: value })} options={[{ value: '', label: '-' }, ...factories.filter((f) => !line.supplierId || f.supplierId === line.supplierId).map((f) => ({ value: f.id, label: f.name }))]} />
+                <Input label="Qty" type="number" value={line.quantity} onChange={(value) => updateLine(line.id, { quantity: value })} />
+                <Input label="Price ¥" type="number" value={line.purchasePriceYuan} onChange={(value) => updateLine(line.id, { purchasePriceYuan: value })} />
+                <Input label="Yuan Rate" type="number" value={line.yuanRate} onChange={(value) => updateLine(line.id, { yuanRate: value })} />
+                <Input label="Weight kg/unit" type="number" value={line.weightKg} onChange={(value) => updateLine(line.id, { weightKg: value })} />
+                <Input label="Notes" value={line.notes} onChange={(value) => updateLine(line.id, { notes: value })} />
+                <div className="flex items-end">
+                  <button type="button" onClick={() => removeLine(line.id)} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-600">Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
+          <h3 className="md:col-span-4 text-lg font-bold">Transportation Costs</h3>
+          <Input label="China Domestic (Factory → China WH)" type="number" value={form.chinaDomesticTransportKgs} onChange={(v) => setForm((c) => ({ ...c, chinaDomesticTransportKgs: v }))} />
+          <Input label="China Export (China WH → Bishkek)" type="number" value={form.chinaExportTransportKgs} onChange={(v) => setForm((c) => ({ ...c, chinaExportTransportKgs: v }))} />
+          <Input label="Local (Customs/SVH → HQ)" type="number" value={form.localTransportKgs} onChange={(v) => setForm((c) => ({ ...c, localTransportKgs: v }))} />
+          <Input label="Packaging" type="number" value={form.packagingCostKgs} onChange={(v) => setForm((c) => ({ ...c, packagingCostKgs: v }))} />
+          <Input label="Customs" type="number" value={form.customsKgs} onChange={(v) => setForm((c) => ({ ...c, customsKgs: v }))} />
+          <Input label="Insurance" type="number" value={form.insuranceKgs} onChange={(v) => setForm((c) => ({ ...c, insuranceKgs: v }))} />
+          <Input label="Bank Fees" type="number" value={form.bankFeesKgs} onChange={(v) => setForm((c) => ({ ...c, bankFeesKgs: v }))} />
+          <Input label="Other Expenses" type="number" value={form.otherExpensesKgs} onChange={(v) => setForm((c) => ({ ...c, otherExpensesKgs: v }))} />
+        </section>
+
+        <aside className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-bold">Weight & Cost Preview</h3>
+          <Preview label={t('procurement.orders.totalYuan')} value={`¥${totals.totalYuan.toFixed(2)}`} />
+          <Preview label="Total Weight" value={`${totals.totalWeight.toFixed(2)} kg`} />
+          <Preview label="Total Transportation" value={formatKgs(totals.transportTotal)} />
+          <Preview label="Cost per Kg" value={formatKgs(totals.costPerKg)} />
+          <button disabled={saving} className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300" type="submit">{saving ? t('common.loading') : t('procurement.orders.save')}</button>
+        </aside>
       </form>
     </ProtectedShell>
   );

@@ -257,9 +257,10 @@ export class ProcurementService {
           hqWarehouseId: warehouse.id,
           status: ProcurementOrderStatus.DRAFT,
           allocationMethod: dto.allocationMethod ?? LandedCostAllocationMethod.BY_WEIGHT,
-          chinaLocalShippingKgs: Number(dto.chinaLocalShippingKgs ?? 0),
+          chinaLocalShippingKgs: Number(dto.chinaLocalShippingKgs ?? dto.chinaDomesticTransportKgs ?? 0),
           packagingCostKgs: Number(dto.packagingCostKgs ?? 0),
-          internationalShippingKgs: Number(dto.internationalShippingKgs ?? 0),
+          internationalShippingKgs: Number(dto.internationalShippingKgs ?? dto.chinaExportTransportKgs ?? 0),
+          localTransportKgs: Number(dto.localTransportKgs ?? 0),
           insuranceKgs: Number(dto.insuranceKgs ?? 0),
           customsKgs: Number(dto.customsKgs ?? 0),
           bankFeesKgs: Number(dto.bankFeesKgs ?? 0),
@@ -343,8 +344,9 @@ export class ProcurementService {
 
       const oldValue = {
         chinaLocalShippingKgs: order.chinaLocalShippingKgs,
-        packagingCostKgs: order.packagingCostKgs,
         internationalShippingKgs: order.internationalShippingKgs,
+        localTransportKgs: order.localTransportKgs,
+        packagingCostKgs: order.packagingCostKgs,
         insuranceKgs: order.insuranceKgs,
         customsKgs: order.customsKgs,
         bankFeesKgs: order.bankFeesKgs,
@@ -354,9 +356,10 @@ export class ProcurementService {
       const updated = await tx.procurementOrder.update({
         where: { id },
         data: {
-          chinaLocalShippingKgs: dto.chinaLocalShippingKgs ?? order.chinaLocalShippingKgs,
+          chinaLocalShippingKgs: dto.chinaLocalShippingKgs ?? dto.chinaDomesticTransportKgs ?? order.chinaLocalShippingKgs,
           packagingCostKgs: dto.packagingCostKgs ?? order.packagingCostKgs,
-          internationalShippingKgs: dto.internationalShippingKgs ?? order.internationalShippingKgs,
+          internationalShippingKgs: dto.internationalShippingKgs ?? dto.chinaExportTransportKgs ?? order.internationalShippingKgs,
+          localTransportKgs: dto.localTransportKgs ?? order.localTransportKgs,
           insuranceKgs: dto.insuranceKgs ?? order.insuranceKgs,
           customsKgs: dto.customsKgs ?? order.customsKgs,
           bankFeesKgs: dto.bankFeesKgs ?? order.bankFeesKgs,
@@ -367,8 +370,9 @@ export class ProcurementService {
 
       await this.auditProcurement(tx, user, id, ProcurementAuditAction.TRANSPORTATION_CHANGE, oldValue, {
         chinaLocalShippingKgs: updated.chinaLocalShippingKgs,
-        packagingCostKgs: updated.packagingCostKgs,
         internationalShippingKgs: updated.internationalShippingKgs,
+        localTransportKgs: updated.localTransportKgs,
+        packagingCostKgs: updated.packagingCostKgs,
         insuranceKgs: updated.insuranceKgs,
         customsKgs: updated.customsKgs,
         bankFeesKgs: updated.bankFeesKgs,
@@ -458,7 +462,12 @@ export class ProcurementService {
       if (dto.supplierId != null) updates.supplierId = dto.supplierId;
       if (dto.currency != null) updates.currency = dto.currency;
       if (dto.moq != null) updates.moq = Number(dto.moq);
-      if (dto.weightKg != null) updates.weightKg = Number(dto.weightKg);
+      if (dto.weightKg != null && Number(dto.weightKg) !== Number(item.weightKg)) {
+        const oldWeight = Number(item.weightKg);
+        const newWeight = Number(dto.weightKg);
+        updates.weightKg = newWeight;
+        await this.auditProcurement(tx, user, orderId, ProcurementAuditAction.WEIGHT_CHANGE, { itemId, oldWeight }, { itemId, newWeight }, dto.reason, itemId);
+      }
       if (dto.yuanRate != null) updates.yuanRate = Number(dto.yuanRate);
       if (dto.estimatedArrivalDate != null) updates.estimatedArrivalDate = new Date(dto.estimatedArrivalDate);
       if (dto.notes != null) updates.notes = dto.notes;
@@ -470,6 +479,32 @@ export class ProcurementService {
 
       const order = await tx.procurementOrder.findUnique({ where: { id: orderId }, include: { items: true } });
       await persistLandedCostRecalculation(tx, user, order!, 'ITEM_UPDATED', this.landedCostDeps());
+      return tx.procurementOrder.findUnique({ where: { id: orderId }, include: this.procurementOrderInclude() });
+    });
+  }
+
+  addProcurementOrderItems(user: AuthUser, orderId: string, dto: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { supplier: true, factory: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const itemInputs = dto.items ?? [];
+      for (const item of itemInputs) {
+        const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
+        if (!product) throw new NotFoundException('Product not found');
+        await tx.procurementOrderItem.create({
+          data: {
+            orderId,
+            ...buildProcurementItemInput(item, product, item.supplierId ?? order.supplierId, item.factoryId ?? order.factoryId ?? undefined, this.roundMoney.bind(this)),
+          },
+        });
+      }
+
+      const updated = await tx.procurementOrder.findUnique({ where: { id: orderId }, include: { items: true } });
+      await persistLandedCostRecalculation(tx, user, updated!, 'ITEMS_ADDED', this.landedCostDeps());
       return tx.procurementOrder.findUnique({ where: { id: orderId }, include: this.procurementOrderInclude() });
     });
   }

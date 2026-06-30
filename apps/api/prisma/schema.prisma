@@ -352,6 +352,7 @@ enum ProcurementAuditAction {
   FACTORY_CHANGE
   PRICE_CHANGE
   QUANTITY_CHANGE
+  WEIGHT_CHANGE
   STATUS_CHANGE
   TRANSPORTATION_CHANGE
   RECEIVING_DIFFERENCE
@@ -1424,6 +1425,7 @@ model ProcurementOrder {
   chinaLocalShippingKgs    Decimal                    @default(0) @db.Decimal(14, 2)
   packagingCostKgs         Decimal                    @default(0) @db.Decimal(14, 2)
   internationalShippingKgs Decimal                    @default(0) @db.Decimal(14, 2)
+  localTransportKgs        Decimal                    @default(0) @db.Decimal(14, 2)
   insuranceKgs             Decimal                    @default(0) @db.Decimal(14, 2)
   customsKgs               Decimal                    @default(0) @db.Decimal(14, 2)
   bankFeesKgs              Decimal                    @default(0) @db.Decimal(14, 2)
@@ -1485,10 +1487,11 @@ model ProcurementOrderItem {
   totalYuan                        Decimal          @db.Decimal(14, 2)
   totalCostKgs                     Decimal          @db.Decimal(14, 2)
   factoryCostKgs                   Decimal          @default(0) @db.Decimal(14, 2)
-  allocatedChinaShippingKgs        Decimal          @default(0) @db.Decimal(14, 2)
-  allocatedPackagingKgs            Decimal          @default(0) @db.Decimal(14, 2)
-  allocatedInternationalShippingKgs Decimal         @default(0) @db.Decimal(14, 2)
-  allocatedInsuranceKgs            Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedChinaShippingKgs         Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedPackagingKgs             Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedInternationalShippingKgs Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedLocalTransportKgs        Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedInsuranceKgs             Decimal          @default(0) @db.Decimal(14, 2)
   allocatedCustomsKgs              Decimal          @default(0) @db.Decimal(14, 2)
   allocatedBankFeesKgs             Decimal          @default(0) @db.Decimal(14, 2)
   allocatedOtherExpensesKgs        Decimal          @default(0) @db.Decimal(14, 2)

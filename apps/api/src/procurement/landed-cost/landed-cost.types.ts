@@ -11,9 +11,13 @@ export type ProcurementItemForAllocation = {
 };
 
 export type OrderTransportCosts = {
+  /** China Domestic: Factory → China Warehouse */
   chinaLocalShippingKgs: number;
-  packagingCostKgs: number;
+  /** China Export: China Warehouse → Bishkek */
   internationalShippingKgs: number;
+  /** Local: Customs/SVH → EMOTORS HQ Warehouse */
+  localTransportKgs: number;
+  packagingCostKgs: number;
   insuranceKgs: number;
   customsKgs: number;
   bankFeesKgs: number;
@@ -28,6 +32,7 @@ export type ItemCostBreakdown = {
   allocatedChinaShippingKgs: number;
   allocatedPackagingKgs: number;
   allocatedInternationalShippingKgs: number;
+  allocatedLocalTransportKgs: number;
   allocatedInsuranceKgs: number;
   allocatedCustomsKgs: number;
   allocatedBankFeesKgs: number;

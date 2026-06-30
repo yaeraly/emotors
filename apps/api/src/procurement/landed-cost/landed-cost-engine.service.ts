@@ -34,9 +34,10 @@ export class LandedCostEngineService {
     );
 
     const sharedCosts = {
-      china: Number(costs.chinaLocalShippingKgs),
+      chinaDomestic: Number(costs.chinaLocalShippingKgs),
+      chinaExport: Number(costs.internationalShippingKgs),
+      local: Number(costs.localTransportKgs),
       packaging: Number(costs.packagingCostKgs),
-      international: Number(costs.internationalShippingKgs),
       insurance: Number(costs.insuranceKgs),
       customs: Number(costs.customsKgs),
       bankFees: Number(costs.bankFeesKgs),
@@ -56,9 +57,10 @@ export class LandedCostEngineService {
       const share = weights[index];
       const factoryCostKgs = this.round(item.purchasePriceYuan * item.yuanRate, 2);
 
-      const allocatedChinaShippingKgs = this.round(sharedCosts.china * share, 2);
+      const allocatedChinaShippingKgs = this.round(sharedCosts.chinaDomestic * share, 2);
       const allocatedPackagingKgs = this.round(sharedCosts.packaging * share, 2);
-      const allocatedInternationalShippingKgs = this.round(sharedCosts.international * share, 2);
+      const allocatedInternationalShippingKgs = this.round(sharedCosts.chinaExport * share, 2);
+      const allocatedLocalTransportKgs = this.round(sharedCosts.local * share, 2);
       const allocatedInsuranceKgs = this.round(sharedCosts.insurance * share, 2);
       const allocatedCustomsKgs = this.round(sharedCosts.customs * share, 2);
       const allocatedBankFeesKgs = this.round(sharedCosts.bankFees * share, 2);
@@ -70,6 +72,7 @@ export class LandedCostEngineService {
             (allocatedChinaShippingKgs +
               allocatedPackagingKgs +
               allocatedInternationalShippingKgs +
+              allocatedLocalTransportKgs +
               allocatedInsuranceKgs +
               allocatedCustomsKgs +
               allocatedBankFeesKgs +
@@ -91,6 +94,7 @@ export class LandedCostEngineService {
         allocatedChinaShippingKgs,
         allocatedPackagingKgs,
         allocatedInternationalShippingKgs,
+        allocatedLocalTransportKgs,
         allocatedInsuranceKgs,
         allocatedCustomsKgs,
         allocatedBankFeesKgs,
