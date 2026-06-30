@@ -18,7 +18,14 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
-import { buildLogisticsWithCargo, calculateLandedCosts, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
+import {
+  buildLogisticsWithCargo,
+  calculateLandedCosts,
+  CARGO_WEIGHT_LESS_THAN_NET,
+  extractCargoConfig,
+  extractLogisticsCosts,
+  mapStoredProcurementItemToLandedCostInput,
+} from '../procurement/landed-cost.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -169,16 +176,43 @@ export class OperationsService {
         };
       });
 
-      const logistics = extractLogisticsCosts(order);
-      const cargo = extractCargoConfig(order);
-      const recalculated = calculateLandedCosts(
-        receivedItems.map((item) => mapStoredProcurementItemToLandedCostInput(item)),
-        logistics,
-        { cargo },
-      );
+      const mergedOrder = {
+        ...order,
+        cargoTotalWeightKg: dto.cargoTotalWeightKg ?? order.cargoTotalWeightKg,
+        cargoRateUsdPerKg: dto.cargoRateUsdPerKg ?? order.cargoRateUsdPerKg,
+        defaultUsdRate: dto.defaultUsdRate ?? order.defaultUsdRate,
+        cargoCompany: dto.cargoCompany ?? order.cargoCompany,
+        cargoReceiptNumber: dto.cargoReceiptNumber ?? order.cargoReceiptNumber,
+        cargoReceiptDate: dto.cargoReceiptDate ? new Date(dto.cargoReceiptDate) : order.cargoReceiptDate,
+        cargoReceiptNote: dto.cargoReceiptNote ?? order.cargoReceiptNote,
+        localTransportKgs: dto.localTransportKgs ?? order.localTransportKgs,
+        chinaDomesticTransportKgs: dto.chinaDomesticTransportKgs ?? order.chinaDomesticTransportKgs,
+        customsCostKgs: dto.customsCostKgs ?? order.customsCostKgs,
+        insuranceCostKgs: dto.insuranceCostKgs ?? order.insuranceCostKgs,
+        bankFeeCostKgs: dto.bankFeeCostKgs ?? order.bankFeeCostKgs,
+        otherExpenseKgs: dto.otherExpenseKgs ?? order.otherExpenseKgs,
+        packagingCostKgs: dto.packagingCostKgs ?? order.packagingCostKgs,
+      };
+
+      const logistics = extractLogisticsCosts(mergedOrder);
+      const cargo = extractCargoConfig(mergedOrder);
+      let recalculated;
+      try {
+        recalculated = calculateLandedCosts(
+          receivedItems.map((item) => mapStoredProcurementItemToLandedCostInput(item)),
+          logistics,
+          { cargo },
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message === CARGO_WEIGHT_LESS_THAN_NET) {
+          throw new BadRequestException('Cargo total weight cannot be less than product net weight.');
+        }
+        throw error;
+      }
+      const cargoTotalWeightKg = Number(cargo.cargoTotalWeightKg ?? 0);
       const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
         logistics,
-        recalculated.totalShipmentWeightKg,
+        cargoTotalWeightKg,
         cargo,
       );
 
@@ -188,7 +222,8 @@ export class OperationsService {
           where: { id: item.id },
           data: {
             receivedQuantity: item.receivedQuantity,
-            totalWeightKg: next.totalWeightKg,
+            packagingWeightKg: next.packagingWeightKg ?? 0,
+            totalWeightKg: next.lineShipmentWeightKg ?? next.totalWeightKg,
             chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
             chinaExportAllocKgs: next.chinaExportAllocKgs,
             localTransportAllocKgs: next.localTransportAllocKgs,
@@ -275,6 +310,12 @@ export class OperationsService {
               note: receivedMap.get(item.id)?.note ?? receivedMap.get(item.productId)?.note,
             },
           });
+          await this.auditInTx(tx, user, 'HQ', 'SHORTAGE_CREATED', 'ProcurementOrder', order.id, {
+            procurementItemId: item.id,
+            sku: item.sku,
+            expectedQuantity: item.quantity,
+            receivedQuantity: item.receivedQuantity,
+          });
         }
       }
 
@@ -285,6 +326,21 @@ export class OperationsService {
           receivedToHqAt: new Date(),
           actualArrivalDate: new Date(),
           hqStockMovementCreatedAt: new Date(),
+          hqWarehouseId,
+          cargoTotalWeightKg,
+          cargoRateUsdPerKg: cargo.cargoRateUsdPerKg,
+          defaultUsdRate: cargo.usdRate,
+          cargoCompany: mergedOrder.cargoCompany,
+          cargoReceiptNumber: mergedOrder.cargoReceiptNumber,
+          cargoReceiptDate: mergedOrder.cargoReceiptDate,
+          cargoReceiptNote: mergedOrder.cargoReceiptNote,
+          localTransportKgs: mergedOrder.localTransportKgs,
+          chinaDomesticTransportKgs: mergedOrder.chinaDomesticTransportKgs,
+          customsCostKgs: mergedOrder.customsCostKgs,
+          insuranceCostKgs: mergedOrder.insuranceCostKgs,
+          bankFeeCostKgs: mergedOrder.bankFeeCostKgs,
+          otherExpenseKgs: mergedOrder.otherExpenseKgs,
+          packagingCostKgs: mergedOrder.packagingCostKgs,
           totalCostKgs: recalculated.totalCostKgs,
           totalWeightKg: recalculated.totalShipmentWeightKg,
           totalNetWeightKg: recalculated.totalNetWeightKg,
@@ -296,9 +352,10 @@ export class OperationsService {
           chinaExportTransportKgs: resolvedLogistics.chinaExportTransportKgs,
         },
       });
-      await this.auditInTx(tx, user, 'HQ', 'INVENTORY_RECEIVED', 'Warehouse', hqWarehouseId, {
+      await this.auditInTx(tx, user, 'HQ', 'HQ_RECEIVING_FINALIZED', 'ProcurementOrder', order.id, {
         receivingId: receiving.id,
         procurementOrderId: order.id,
+        hqWarehouseId,
         recalculatedLandedCost: true,
         reason: dto.reason,
       });

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
+import { calculateLandedCosts } from '@/lib/landed-cost';
 import type { Product, ProductListResponse, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -17,9 +17,6 @@ export type ProcurementLine = {
   factoryId: string;
   quantity: string;
   purchasePriceYuan: string;
-  packagingWeightKg: string;
-  packagingType: string;
-  directPackagingCostKgs: string;
 };
 
 type HeaderForm = {
@@ -28,22 +25,15 @@ type HeaderForm = {
   hqWarehouseId: string;
   currency: string;
   exchangeRate: string;
-  usdExchangeRate: string;
-  cargoRateUsdPerKg: string;
   purchaseDate: string;
   estimatedArrivalDate: string;
   note: string;
   chinaDomesticTransportKgs: string;
-  chinaExportTransportKgs: string;
-  localTransportKgs: string;
-  packagingCostKgs: string;
   customsCostKgs: string;
   insuranceCostKgs: string;
   bankFeeCostKgs: string;
   otherExpenseKgs: string;
 };
-
-const PACKAGING_TYPES = ['Wooden Box', 'Carton', 'Plastic', 'Metal Frame'] as const;
 
 const emptyLine = (): ProcurementLine => ({
   key: `${Date.now()}-${Math.random()}`,
@@ -51,9 +41,6 @@ const emptyLine = (): ProcurementLine => ({
   factoryId: '',
   quantity: '1',
   purchasePriceYuan: '0',
-  packagingWeightKg: '0',
-  packagingType: '',
-  directPackagingCostKgs: '0',
 });
 
 type Props = {
@@ -79,15 +66,10 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     hqWarehouseId: '',
     currency: 'CNY',
     exchangeRate: '0',
-    usdExchangeRate: '0',
-    cargoRateUsdPerKg: '0',
     purchaseDate: new Date().toISOString().slice(0, 10),
     estimatedArrivalDate: '',
     note: '',
     chinaDomesticTransportKgs: '0',
-    chinaExportTransportKgs: '0',
-    localTransportKgs: '0',
-    packagingCostKgs: '0',
     customsCostKgs: '0',
     insuranceCostKgs: '0',
     bankFeeCostKgs: '0',
@@ -99,7 +81,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     const loaders: Promise<unknown>[] = [
       apiFetch<Supplier[]>('/procurement/suppliers'),
       apiFetch<Factory[]>('/procurement/factories'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<ProductListResponse>('/inventory/products?pageSize=500'),
     ];
     if (mode === 'edit' && orderId) loaders.push(apiFetch<any>(`/procurement/orders/${orderId}`));
@@ -125,15 +107,10 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             hqWarehouseId: order.hqWarehouseId,
             currency: order.currency ?? 'CNY',
             exchangeRate: String(order.defaultYuanRate ?? 0),
-            usdExchangeRate: String(order.defaultUsdRate ?? 0),
-            cargoRateUsdPerKg: String(order.cargoRateUsdPerKg ?? 0),
             purchaseDate: order.purchaseDate ? order.purchaseDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
             estimatedArrivalDate: order.estimatedArrivalDate ? order.estimatedArrivalDate.slice(0, 10) : '',
             note: order.note ?? '',
             chinaDomesticTransportKgs: String(order.chinaDomesticTransportKgs ?? 0),
-            chinaExportTransportKgs: String(order.chinaExportTransportKgs ?? 0),
-            localTransportKgs: String(order.localTransportKgs ?? 0),
-            packagingCostKgs: String(order.packagingCostKgs ?? 0),
             customsCostKgs: String(order.customsCostKgs ?? 0),
             insuranceCostKgs: String(order.insuranceCostKgs ?? 0),
             bankFeeCostKgs: String(order.bankFeeCostKgs ?? 0),
@@ -145,9 +122,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             factoryId: item.factoryId ?? order.factoryId ?? '',
             quantity: String(item.quantity),
             purchasePriceYuan: String(item.purchasePriceYuan),
-            packagingWeightKg: String(item.packagingWeightKg ?? 0),
-            packagingType: item.packagingType ?? '',
-            directPackagingCostKgs: String(item.directPackagingCostKgs ?? 0),
           })));
         } else {
           const firstProduct = productResult.items[0];
@@ -178,8 +152,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
   const lineDetails = useMemo(() => lines.map((line) => {
     const product = productMap.get(line.productId);
     const netWeightKg = Number(product?.weightKg ?? 0);
-    const packagingWeightKg = Number(line.packagingWeightKg || 0);
-    const shipmentWeightKg = netWeightKg + packagingWeightKg;
     const quantity = Number(line.quantity || 0);
     const purchasePriceYuan = Number(line.purchasePriceYuan || 0);
     const exchangeRate = Number(form.exchangeRate || 0);
@@ -189,26 +161,13 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       product,
       sku: product?.sku ?? '-',
       productName: product?.name ?? '-',
-      unit: (product as Product & { unit?: string })?.unit ?? 'pcs',
       netWeightKg,
-      packagingWeightKg,
-      shipmentWeightKg,
       totalNetWeightKg: quantity * netWeightKg,
-      totalPackagingWeightKg: quantity * packagingWeightKg,
-      totalShipmentWeightKg: quantity * shipmentWeightKg,
       totalYuan: quantity * purchasePriceYuan,
-      totalCostKgs: quantity * purchasePriceYuan * exchangeRate,
       missingWeight,
       factoryName: factoryMap.get(line.factoryId || form.factoryId) ?? '-',
     };
   }), [lines, productMap, factoryMap, form.exchangeRate, form.factoryId]);
-
-  const cargo = useMemo(() => extractCargoConfig({
-    defaultUsdRate: form.usdExchangeRate,
-    cargoRateUsdPerKg: form.cargoRateUsdPerKg,
-  }), [form.usdExchangeRate, form.cargoRateUsdPerKg]);
-
-  const usesCargoRate = cargo.cargoRateUsdPerKg > 0;
 
   const totals = useMemo(() => calculateLandedCosts(
     lineDetails.map((line) => ({
@@ -216,21 +175,18 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       purchasePriceYuan: Number(line.purchasePriceYuan || 0),
       yuanRate: Number(form.exchangeRate || 0),
       weightKg: line.netWeightKg,
-      packagingWeightKg: line.packagingWeightKg,
-      directPackagingCostKgs: Number(line.directPackagingCostKgs || 0),
     })),
     {
       chinaDomesticTransportKgs: Number(form.chinaDomesticTransportKgs || 0),
-      chinaExportTransportKgs: usesCargoRate ? 0 : Number(form.chinaExportTransportKgs || 0),
-      localTransportKgs: Number(form.localTransportKgs || 0),
-      packagingCostKgs: Number(form.packagingCostKgs || 0),
+      chinaExportTransportKgs: 0,
+      localTransportKgs: 0,
+      packagingCostKgs: 0,
       customsCostKgs: Number(form.customsCostKgs || 0),
       insuranceCostKgs: Number(form.insuranceCostKgs || 0),
       bankFeeCostKgs: Number(form.bankFeeCostKgs || 0),
       otherExpenseKgs: Number(form.otherExpenseKgs || 0),
     },
-    { cargo },
-  ), [form, lineDetails, cargo, usesCargoRate]);
+  ), [form, lineDetails]);
 
   const weightErrors = lineDetails.filter((line) => line.productId && line.missingWeight);
 
@@ -273,10 +229,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       setError(t('procurement.orders.exchangeRateRequired'));
       return;
     }
-    if (usesCargoRate && !Number(form.usdExchangeRate || 0)) {
-      setError(t('procurement.orders.usdExchangeRateRequired'));
-      return;
-    }
     if (weightErrors.length) {
       setError(t('procurement.orders.weightNotConfigured'));
       return;
@@ -288,15 +240,10 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       hqWarehouseId: form.hqWarehouseId,
       currency: form.currency,
       defaultYuanRate: Number(form.exchangeRate),
-      defaultUsdRate: Number(form.usdExchangeRate || 0),
-      cargoRateUsdPerKg: Number(form.cargoRateUsdPerKg || 0),
       purchaseDate: form.purchaseDate || undefined,
       estimatedArrivalDate: form.estimatedArrivalDate || undefined,
       note: form.note || undefined,
       chinaDomesticTransportKgs: Number(form.chinaDomesticTransportKgs || 0),
-      chinaExportTransportKgs: usesCargoRate ? 0 : Number(form.chinaExportTransportKgs || 0),
-      localTransportKgs: Number(form.localTransportKgs || 0),
-      packagingCostKgs: Number(form.packagingCostKgs || 0),
       customsCostKgs: Number(form.customsCostKgs || 0),
       insuranceCostKgs: Number(form.insuranceCostKgs || 0),
       bankFeeCostKgs: Number(form.bankFeeCostKgs || 0),
@@ -306,9 +253,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         factoryId: line.factoryId || form.factoryId || undefined,
         quantity: Number(line.quantity || 0),
         purchasePriceYuan: Number(line.purchasePriceYuan || 0),
-        packagingWeightKg: Number(line.packagingWeightKg || 0),
-        packagingType: line.packagingType || undefined,
-        directPackagingCostKgs: Number(line.directPackagingCostKgs || 0),
       })),
     };
     try {
@@ -342,34 +286,23 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       {weightErrors.length ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.orders.weightNotConfigured')}</p>
       ) : null}
+      <p className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">{t('procurement.orders.landedCostEstimatedWarning')}</p>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-lg font-bold text-slate-950">{t('procurement.orders.shipmentInfo')}</h3>
+        <h3 className="mb-4 text-lg font-bold text-slate-950">{t('procurement.orders.generalInfo')}</h3>
         <div className="grid gap-4 md:grid-cols-3">
           <Field label={t('procurement.orders.supplier')}><select value={form.supplierId} onChange={(e) => setField('supplierId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
-          <Field label={t('procurement.orders.currency')}><input value={form.currency} readOnly className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-2" /></Field>
+          <Field label={t('procurement.orders.factory')}><select value={form.factoryId} onChange={(e) => setField('factoryId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2"><option value="">-</option>{factories.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Field>
           <Field label={t('procurement.orders.exchangeRate')}><input type="number" step="0.0001" value={form.exchangeRate} onChange={(e) => setField('exchangeRate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.usdExchangeRate')}><input type="number" step="0.0001" value={form.usdExchangeRate} onChange={(e) => setField('usdExchangeRate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.cargoRateUsdPerKg')}><input type="number" step="0.01" min={0} value={form.cargoRateUsdPerKg} onChange={(e) => setField('cargoRateUsdPerKg', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+          <Field label={t('procurement.orders.warehouse')}><select value={form.hqWarehouseId} onChange={(e) => setField('hqWarehouseId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
           <Field label={t('procurement.orders.purchaseDate')}><input type="date" value={form.purchaseDate} onChange={(e) => setField('purchaseDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.estimatedArrivalDate')}><input type="date" value={form.estimatedArrivalDate} onChange={(e) => setField('estimatedArrivalDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.warehouse')}><select value={form.hqWarehouseId} onChange={(e) => setField('hqWarehouseId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-4">
           <Field label={t('procurement.orders.chinaDomestic')}><input type="number" value={form.chinaDomesticTransportKgs} onChange={(e) => setField('chinaDomesticTransportKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.chinaExport')}>
-            {usesCargoRate ? (
-              <input readOnly value={totals.totalCargoCostKgs.toFixed(2)} className="w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-2" title={t('procurement.orders.cargoAutoCalculated')} />
-            ) : (
-              <input type="number" value={form.chinaExportTransportKgs} onChange={(e) => setField('chinaExportTransportKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" />
-            )}
-          </Field>
-          <Field label={t('procurement.orders.localTransport')}><input type="number" value={form.localTransportKgs} onChange={(e) => setField('localTransportKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.packaging')}><input type="number" value={form.packagingCostKgs} onChange={(e) => setField('packagingCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.customs')}><input type="number" value={form.customsCostKgs} onChange={(e) => setField('customsCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.insurance')}><input type="number" value={form.insuranceCostKgs} onChange={(e) => setField('insuranceCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.bankFees')}><input type="number" value={form.bankFeeCostKgs} onChange={(e) => setField('bankFeeCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.otherExpenses')}><input type="number" value={form.otherExpenseKgs} onChange={(e) => setField('otherExpenseKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
         </div>
       </section>
 
@@ -384,21 +317,16 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
               <tr>
                 <th className="px-3 py-3">{t('procurement.orders.product')}</th>
                 <th className="px-3 py-3">SKU</th>
-                <th className="px-3 py-3">{t('procurement.orders.factory')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.quantity')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.netWeightKg')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.packagingWeightKg')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.shipmentWeightKg')}</th>
+                <th className="px-3 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.totalYuan')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.allocatedTransport')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.packagingCost')}</th>
-                <th className="px-3 py-3">{t('inventory.finalCostKgs')}</th>
                 <th className="px-3 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {lineDetails.map((line, index) => (
+              {lineDetails.map((line) => (
                 <tr key={line.key} className={line.missingWeight ? 'bg-amber-50' : ''}>
                   <td className="px-3 py-3 min-w-48">
                     <select value={line.productId} onChange={(e) => updateLine(line.key, { productId: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5">
@@ -406,26 +334,11 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                     </select>
                   </td>
                   <td className="px-3 py-3 font-mono text-xs">{line.sku}</td>
-                  <td className="px-3 py-3">{line.factoryName}</td>
                   <td className="px-3 py-3"><input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
                   <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : `${line.netWeightKg.toFixed(3)} kg`}</td>
-                  <td className="px-3 py-3">
-                    <input type="number" min={0} step="0.001" value={line.packagingWeightKg} onChange={(e) => updateLine(line.key, { packagingWeightKg: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" />
-                  </td>
-                  <td className="px-3 py-3">{line.totalShipmentWeightKg.toFixed(3)}</td>
+                  <td className="px-3 py-3">{line.totalNetWeightKg.toFixed(3)}</td>
                   <td className="px-3 py-3"><input type="number" min={0} step="0.01" value={line.purchasePriceYuan} onChange={(e) => updateLine(line.key, { purchasePriceYuan: e.target.value })} className="w-24 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
                   <td className="px-3 py-3">¥{line.totalYuan.toFixed(2)}</td>
-                  <td className="px-3 py-3">{formatKgs(totals.items[index]?.transportCostKgs ?? 0)}</td>
-                  <td className="px-3 py-3">
-                    <div className="space-y-1">
-                      <select value={line.packagingType} onChange={(e) => updateLine(line.key, { packagingType: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs">
-                        <option value="">{t('procurement.orders.packagingType')}</option>
-                        {PACKAGING_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
-                      </select>
-                      <input type="number" min={0} step="0.01" value={line.directPackagingCostKgs} onChange={(e) => updateLine(line.key, { directPackagingCostKgs: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs" placeholder={t('procurement.orders.packagingCost')} />
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 font-semibold">{formatKgs(totals.items[index]?.finalCostKgs ?? 0)}</td>
                   <td className="px-3 py-3">{lines.length > 1 ? <button type="button" onClick={() => removeLine(line.key)} className="text-red-600">{t('common.delete')}</button> : null}</td>
                 </tr>
               ))}
@@ -434,12 +347,8 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-3">
         <SummaryCard label={t('procurement.orders.totalNetWeightKg')} value={`${totals.totalNetWeightKg} kg`} />
-        <SummaryCard label={t('procurement.orders.totalPackagingWeightKg')} value={`${totals.totalPackagingWeightKg} kg`} />
-        <SummaryCard label={t('procurement.orders.shipmentWeight')} value={`${totals.totalShipmentWeightKg} kg`} />
-        <SummaryCard label={t('procurement.orders.totalCargoCostUsd')} value={`$${totals.totalCargoCostUsd.toFixed(2)}`} />
-        <SummaryCard label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(totals.totalCargoCostKgs)} />
         <SummaryCard label={t('procurement.orders.totalYuan')} value={`¥${totals.totalYuan.toFixed(2)}`} />
         <SummaryCard label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(totals.totalCostKgs)} />
       </section>

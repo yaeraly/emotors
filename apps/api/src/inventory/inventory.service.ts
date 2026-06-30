@@ -36,7 +36,7 @@ import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
-import { buildLogisticsWithCargo, calculateLandedCosts, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
+import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -1193,18 +1193,26 @@ export class InventoryService {
       const exchangeRate = Number(order.defaultYuanRate);
       const logistics = extractLogisticsCosts(order);
       const cargo = extractCargoConfig(order);
-      const calculated = calculateLandedCosts(
-        order.items.map((item) => mapStoredProcurementItemToLandedCostInput({
-          ...item,
-          weightKg: item.productId === productId ? newWeightKg : Number(item.netWeightKg ?? item.weightKg),
-          yuanRate: exchangeRate,
-        })),
-        logistics,
-        { cargo },
-      );
+      let calculated;
+      try {
+        calculated = calculateLandedCosts(
+          order.items.map((item) => mapStoredProcurementItemToLandedCostInput({
+            ...item,
+            weightKg: item.productId === productId ? newWeightKg : Number(item.netWeightKg ?? item.weightKg),
+            yuanRate: exchangeRate,
+          })),
+          logistics,
+          { cargo },
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message === CARGO_WEIGHT_LESS_THAN_NET) {
+          throw new BadRequestException('Cargo total weight cannot be less than product net weight.');
+        }
+        throw error;
+      }
       const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
         logistics,
-        calculated.totalShipmentWeightKg,
+        Number(cargo.cargoTotalWeightKg ?? 0),
         cargo,
       );
 

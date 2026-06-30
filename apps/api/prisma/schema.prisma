@@ -1413,6 +1413,11 @@ model ProcurementOrder {
   defaultYuanRate          Decimal                @default(0) @db.Decimal(14, 4)
   defaultUsdRate             Decimal                @default(0) @db.Decimal(14, 4)
   cargoRateUsdPerKg        Decimal                @default(0) @db.Decimal(14, 4)
+  cargoTotalWeightKg       Decimal                @default(0) @db.Decimal(14, 3)
+  cargoCompany             String?
+  cargoReceiptNumber       String?
+  cargoReceiptDate         DateTime?
+  cargoReceiptNote         String?
   totalCargoCostUsd        Decimal                @default(0) @db.Decimal(14, 2)
   totalCargoCostKgs        Decimal                @default(0) @db.Decimal(14, 2)
   totalNetWeightKg         Decimal                @default(0) @db.Decimal(14, 3)

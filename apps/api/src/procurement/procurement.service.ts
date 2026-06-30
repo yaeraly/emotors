@@ -8,6 +8,7 @@ import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.ut
 import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
+  CARGO_WEIGHT_LESS_THAN_NET,
   extractCargoConfig,
   extractLogisticsCosts,
   LandedCostItemResult,
@@ -26,9 +27,6 @@ type PreparedProcurementItem = {
   purchasePriceYuan: number;
   yuanRate: number;
   weightKg: number;
-  packagingWeightKg: number;
-  packagingType?: string | null;
-  directPackagingCostKgs: number;
   note?: string;
 };
 
@@ -269,6 +267,7 @@ export class ProcurementService {
 
       const calculated = this.calculateProcurementLandedCosts(preparedItems, logistics, cargo);
       const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
+      const cargoReceipt = this.buildCargoReceiptData(dto);
       const order = await tx.procurementOrder.create({
         data: {
           orderNumber: dto.orderNumber ?? `PROC-${Date.now()}`,
@@ -280,6 +279,7 @@ export class ProcurementService {
           defaultYuanRate: exchangeRate,
           purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : new Date(),
           ...orderTotals,
+          ...cargoReceipt,
           estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
           note: dto.note,
           createdById: user.id,
@@ -329,7 +329,15 @@ export class ProcurementService {
         ? Number(dto.defaultYuanRate)
         : Number(existing.defaultYuanRate);
       this.validateExchangeRate(exchangeRate);
+      this.assertProcurementLogisticsEditable(existing, dto);
+      if (dto.hqWarehouseId && dto.hqWarehouseId !== existing.hqWarehouseId) {
+        const warehouse = await tx.warehouse.findFirst({
+          where: { id: dto.hqWarehouseId, ...activeHqWarehouseWhere },
+        });
+        if (!warehouse) throw new BadRequestException('Active HQ warehouse is required for procurement');
+      }
       const { logistics, cargo } = this.resolveProcurementLogistics(dto, existing);
+      const cargoReceipt = this.buildCargoReceiptData(dto, existing);
 
       if (Array.isArray(dto.items)) {
         await tx.procurementOrderItem.deleteMany({ where: { orderId: id } });
@@ -361,6 +369,7 @@ export class ProcurementService {
             defaultYuanRate: exchangeRate,
             purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
             ...orderTotals,
+            ...cargoReceipt,
             estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
             note: dto.note ?? existing.note,
           },
@@ -392,6 +401,7 @@ export class ProcurementService {
             defaultYuanRate: exchangeRate,
             purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
             ...orderTotals,
+            ...cargoReceipt,
             estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
             note: dto.note ?? existing.note,
           },
@@ -638,6 +648,11 @@ export class ProcurementService {
       defaultYuanRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
       defaultUsdRate: order.defaultUsdRate?.toString?.() ?? order.defaultUsdRate,
       cargoRateUsdPerKg: order.cargoRateUsdPerKg?.toString?.() ?? order.cargoRateUsdPerKg,
+      cargoTotalWeightKg: order.cargoTotalWeightKg?.toString?.() ?? order.cargoTotalWeightKg,
+      cargoCompany: order.cargoCompany,
+      cargoReceiptNumber: order.cargoReceiptNumber,
+      cargoReceiptDate: order.cargoReceiptDate,
+      cargoReceiptNote: order.cargoReceiptNote,
       totalCargoCostUsd: order.totalCargoCostUsd?.toString?.() ?? order.totalCargoCostUsd,
       totalCargoCostKgs: order.totalCargoCostKgs?.toString?.() ?? order.totalCargoCostKgs,
       totalNetWeightKg: order.totalNetWeightKg?.toString?.() ?? order.totalNetWeightKg,
@@ -741,9 +756,6 @@ export class ProcurementService {
       quantity?: number;
       purchasePriceYuan?: number;
       note?: string;
-      packagingWeightKg?: number;
-      packagingType?: string;
-      directPackagingCostKgs?: number;
     },
     orderSupplierId: string,
     orderFactoryId: string | null | undefined,
@@ -772,9 +784,6 @@ export class ProcurementService {
       purchasePriceYuan: Number(item.purchasePriceYuan ?? product.purchasePriceYuan ?? 0),
       yuanRate: exchangeRate,
       weightKg,
-      packagingWeightKg: Number(item.packagingWeightKg ?? 0),
-      packagingType: item.packagingType?.trim() || null,
-      directPackagingCostKgs: Number(item.directPackagingCostKgs ?? 0),
       note: item.note,
     };
   }
@@ -793,9 +802,35 @@ export class ProcurementService {
     const cargo = extractCargoConfig({
       defaultUsdRate: dto.defaultUsdRate ?? existing?.defaultUsdRate,
       cargoRateUsdPerKg: dto.cargoRateUsdPerKg ?? existing?.cargoRateUsdPerKg,
+      cargoTotalWeightKg: dto.cargoTotalWeightKg ?? existing?.cargoTotalWeightKg,
     });
     this.validateCargoConfig(cargo);
     return { logistics, cargo };
+  }
+
+  private buildCargoReceiptData(dto: any, existing?: any) {
+    const has = (key: string) => dto[key] !== undefined;
+    return {
+      ...(has('cargoTotalWeightKg') ? { cargoTotalWeightKg: Number(dto.cargoTotalWeightKg ?? 0) } : existing ? { cargoTotalWeightKg: existing.cargoTotalWeightKg } : {}),
+      ...(has('cargoCompany') ? { cargoCompany: dto.cargoCompany?.trim() || null } : existing ? { cargoCompany: existing.cargoCompany } : {}),
+      ...(has('cargoReceiptNumber') ? { cargoReceiptNumber: dto.cargoReceiptNumber?.trim() || null } : existing ? { cargoReceiptNumber: existing.cargoReceiptNumber } : {}),
+      ...(has('cargoReceiptDate') ? { cargoReceiptDate: dto.cargoReceiptDate ? new Date(dto.cargoReceiptDate) : null } : existing ? { cargoReceiptDate: existing.cargoReceiptDate } : {}),
+      ...(has('cargoReceiptNote') ? { cargoReceiptNote: dto.cargoReceiptNote?.trim() || null } : existing ? { cargoReceiptNote: existing.cargoReceiptNote } : {}),
+    };
+  }
+
+  private assertProcurementLogisticsEditable(order: any, dto: any) {
+    const svhEligible = ['ARRIVED_IN_KYRGYZSTAN', 'ARRIVED', 'CUSTOMS_CLEARANCE'].includes(order.status);
+    if (
+      dto.localTransportKgs !== undefined &&
+      Number(dto.localTransportKgs) !== Number(order.localTransportKgs) &&
+      !svhEligible
+    ) {
+      throw new BadRequestException('SVH to HQ transportation can only be edited after goods arrive in Kyrgyzstan');
+    }
+    if (dto.hqWarehouseId && dto.hqWarehouseId !== order.hqWarehouseId) {
+      // warehouse change validated separately on create/update via activeHqWarehouseWhere
+    }
   }
 
   private calculateProcurementLandedCosts(
@@ -805,13 +840,18 @@ export class ProcurementService {
       purchasePriceYuan: number;
       yuanRate: number;
       weightKg: number;
-      packagingWeightKg?: number;
-      directPackagingCostKgs?: number;
     }>,
     logistics: ReturnType<typeof extractLogisticsCosts>,
     cargo: ReturnType<typeof extractCargoConfig>,
   ) {
-    return calculateLandedCosts(items, logistics, { cargo });
+    try {
+      return calculateLandedCosts(items, logistics, { cargo });
+    } catch (error) {
+      if (error instanceof Error && error.message === CARGO_WEIGHT_LESS_THAN_NET) {
+        throw new BadRequestException('Cargo total weight cannot be less than product net weight.');
+      }
+      throw error;
+    }
   }
 
   private buildProcurementOrderTotals(
@@ -819,15 +859,17 @@ export class ProcurementService {
     logistics: ReturnType<typeof extractLogisticsCosts>,
     cargo: ReturnType<typeof extractCargoConfig>,
   ) {
+    const cargoTotalWeightKg = Number(cargo.cargoTotalWeightKg ?? 0);
     const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
       logistics,
-      calculated.totalShipmentWeightKg,
+      cargoTotalWeightKg,
       cargo,
     );
     return {
       ...resolvedLogistics,
       defaultUsdRate: cargo.usdRate,
       cargoRateUsdPerKg: cargo.cargoRateUsdPerKg,
+      cargoTotalWeightKg,
       totalCargoCostUsd: calculated.totalCargoCostUsd,
       totalCargoCostKgs: calculated.totalCargoCostKgs,
       totalNetWeightKg: calculated.totalNetWeightKg,
@@ -859,9 +901,9 @@ export class ProcurementService {
       weightKg: item.netWeightKg,
       netWeightKg: item.netWeightKg,
       packagingWeightKg: item.packagingWeightKg ?? 0,
-      packagingType: prepared.packagingType ?? null,
-      directPackagingCostKgs: prepared.directPackagingCostKgs,
-      totalWeightKg: item.totalWeightKg,
+      packagingType: null,
+      directPackagingCostKgs: 0,
+      totalWeightKg: item.lineShipmentWeightKg ?? item.totalWeightKg,
       chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
       chinaExportAllocKgs: item.chinaExportAllocKgs,
       localTransportAllocKgs: item.localTransportAllocKgs,
@@ -885,7 +927,7 @@ export class ProcurementService {
       weightKg: item.netWeightKg,
       netWeightKg: item.netWeightKg,
       packagingWeightKg: item.packagingWeightKg ?? 0,
-      totalWeightKg: item.totalWeightKg,
+      totalWeightKg: item.lineShipmentWeightKg ?? item.totalWeightKg,
       chinaDomesticAllocKgs: item.chinaDomesticAllocKgs,
       chinaExportAllocKgs: item.chinaExportAllocKgs,
       localTransportAllocKgs: item.localTransportAllocKgs,
@@ -903,7 +945,10 @@ export class ProcurementService {
 
   private validateCargoConfig(cargo: ReturnType<typeof extractCargoConfig>) {
     if (cargo.cargoRateUsdPerKg > 0 && (!cargo.usdRate || cargo.usdRate <= 0)) {
-      throw new BadRequestException('USD exchange rate is required when cargo rate is set');
+      throw new BadRequestException('USD exchange rate is required when cargo tariff is set');
+    }
+    if (Number(cargo.cargoTotalWeightKg ?? 0) > 0 && cargo.cargoRateUsdPerKg <= 0) {
+      throw new BadRequestException('Cargo tariff rate is required when cargo total weight is set');
     }
   }
 
@@ -917,40 +962,43 @@ export class ProcurementService {
     const audits: Array<{ action: string; extra?: Record<string, unknown> }> = [];
     if (String(oldValue?.defaultUsdRate ?? '') !== String(newValue?.defaultUsdRate ?? '')) {
       audits.push({
-        action: 'USD_RATE_CHANGED',
-        extra: { oldUsdRate: oldValue?.defaultUsdRate, newUsdRate: newValue?.defaultUsdRate },
+        action: 'USD_EXCHANGE_RATE_CHANGED',
+        extra: { field: 'defaultUsdRate', oldValue: oldValue?.defaultUsdRate, newValue: newValue?.defaultUsdRate },
       });
     }
     if (String(oldValue?.cargoRateUsdPerKg ?? '') !== String(newValue?.cargoRateUsdPerKg ?? '')) {
       audits.push({
-        action: 'CARGO_RATE_CHANGED',
-        extra: {
-          oldCargoRateUsdPerKg: oldValue?.cargoRateUsdPerKg,
-          newCargoRateUsdPerKg: newValue?.cargoRateUsdPerKg,
-        },
+        action: 'CARGO_TARIFF_RATE_CHANGED',
+        extra: { field: 'cargoRateUsdPerKg', oldValue: oldValue?.cargoRateUsdPerKg, newValue: newValue?.cargoRateUsdPerKg },
       });
     }
-    const oldItems = JSON.stringify(oldValue?.items ?? []);
-    const newItems = JSON.stringify(newValue?.items ?? []);
-    if (oldItems !== newItems) {
-      const packagingChanged = (oldValue?.items ?? []).some((item: any, index: number) => {
-        const next = (newValue?.items ?? [])[index];
-        return next && (
-          String(item.packagingWeightKg ?? '') !== String(next.packagingWeightKg ?? '') ||
-          String(item.packagingType ?? '') !== String(next.packagingType ?? '') ||
-          String(item.directPackagingCostKgs ?? '') !== String(next.directPackagingCostKgs ?? '')
-        );
+    if (String(oldValue?.cargoTotalWeightKg ?? '') !== String(newValue?.cargoTotalWeightKg ?? '')) {
+      audits.push({
+        action: 'CARGO_TOTAL_WEIGHT_CHANGED',
+        extra: { field: 'cargoTotalWeightKg', oldValue: oldValue?.cargoTotalWeightKg, newValue: newValue?.cargoTotalWeightKg },
       });
-      if (packagingChanged) {
-        audits.push({ action: 'PACKAGING_CHANGED' });
-      }
-      const transportChanged = String(oldValue?.chinaDomesticTransportKgs ?? '') !== String(newValue?.chinaDomesticTransportKgs ?? '') ||
-        String(oldValue?.chinaExportTransportKgs ?? '') !== String(newValue?.chinaExportTransportKgs ?? '') ||
-        String(oldValue?.localTransportKgs ?? '') !== String(newValue?.localTransportKgs ?? '') ||
-        String(oldValue?.totalCargoCostKgs ?? '') !== String(newValue?.totalCargoCostKgs ?? '');
-      if (transportChanged) {
-        audits.push({ action: 'TRANSPORTATION_CHANGED' });
-      }
+    }
+    if (String(oldValue?.chinaDomesticTransportKgs ?? '') !== String(newValue?.chinaDomesticTransportKgs ?? '')) {
+      audits.push({
+        action: 'CHINA_DOMESTIC_TRANSPORT_CHANGED',
+        extra: { field: 'chinaDomesticTransportKgs', oldValue: oldValue?.chinaDomesticTransportKgs, newValue: newValue?.chinaDomesticTransportKgs },
+      });
+    }
+    if (String(oldValue?.localTransportKgs ?? '') !== String(newValue?.localTransportKgs ?? '')) {
+      audits.push({
+        action: 'SVH_TO_HQ_TRANSPORT_CHANGED',
+        extra: { field: 'localTransportKgs', oldValue: oldValue?.localTransportKgs, newValue: newValue?.localTransportKgs },
+      });
+    }
+    if (String(oldValue?.hqWarehouseId ?? '') !== String(newValue?.hqWarehouseId ?? '')) {
+      audits.push({
+        action: 'WAREHOUSE_SELECTED',
+        extra: { field: 'hqWarehouseId', oldValue: oldValue?.hqWarehouseId, newValue: newValue?.hqWarehouseId },
+      });
+    }
+    const logisticsChanged = audits.length > 0 ||
+      String(oldValue?.totalCostKgs ?? '') !== String(newValue?.totalCostKgs ?? '');
+    if (logisticsChanged) {
       audits.push({ action: 'LANDED_COST_RECALCULATED' });
     }
     return Promise.all(audits.map((entry) =>

@@ -27,8 +27,8 @@ export default function NewDistributionOrderPage() {
   useEffect(() => {
     Promise.all([
       apiFetch<Branch[]>('/branches'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'),
       apiFetch<ProductListResponse>('/inventory/products?pageSize=200'),
     ])
       .then(([branchResult, hqWarehouseResult, branchWarehouseResult, productResult]) => {

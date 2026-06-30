@@ -12,6 +12,7 @@ export type LogisticsCosts = {
 export type CargoConfig = {
   usdRate: number;
   cargoRateUsdPerKg: number;
+  cargoTotalWeightKg?: number | null;
 };
 
 export type LandedCostItemInput = {
@@ -20,16 +21,16 @@ export type LandedCostItemInput = {
   purchasePriceYuan: number;
   yuanRate: number;
   weightKg: number;
-  packagingWeightKg?: number;
-  directPackagingCostKgs?: number;
 };
 
 export type LandedCostItemResult = LandedCostItemInput & {
   effectiveQuantity: number;
   netWeightKg: number;
+  packagingWeightKg: number;
   unitShipmentWeightKg: number;
   lineNetWeightKg: number;
   linePackagingWeightKg: number;
+  lineShipmentWeightKg: number;
   costKgs: number;
   totalWeightKg: number;
   chinaDomesticAllocKgs: number;
@@ -41,7 +42,6 @@ export type LandedCostItemResult = LandedCostItemInput & {
   bankFeeAllocKgs: number;
   otherAllocKgs: number;
   transportCostKgs: number;
-  directPackagingPerUnitKgs: number;
   finalCostKgs: number;
   totalYuan: number;
   totalCostKgs: number;
@@ -59,11 +59,14 @@ export type LandedCostOrderResult = {
   totalCargoCostUsd: number;
   totalCargoCostKgs: number;
   costPerKg: number;
+  isEstimated: boolean;
 };
 
 export type LandedCostCalculationOptions = {
   cargo?: CargoConfig;
 };
+
+export const CARGO_WEIGHT_LESS_THAN_NET = 'CARGO_WEIGHT_LESS_THAN_NET';
 
 function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -86,19 +89,28 @@ export function extractCargoConfig(source: Partial<CargoConfig> | Record<string,
   return {
     usdRate: Number((source as CargoConfig).usdRate ?? (source as Record<string, unknown>).defaultUsdRate ?? 0),
     cargoRateUsdPerKg: Number((source as CargoConfig).cargoRateUsdPerKg ?? 0),
+    cargoTotalWeightKg: Number((source as Record<string, unknown>).cargoTotalWeightKg ?? 0) || null,
   };
+}
+
+export function validateCargoTotalWeight(cargoTotalWeightKg: number, totalNetWeightKg: number): string | null {
+  if (cargoTotalWeightKg > 0 && totalNetWeightKg > 0 && cargoTotalWeightKg < totalNetWeightKg) {
+    return CARGO_WEIGHT_LESS_THAN_NET;
+  }
+  return null;
 }
 
 export function buildLogisticsWithCargo(
   logistics: LogisticsCosts,
-  totalShipmentWeightKg: number,
+  cargoTotalWeightKg: number,
   cargo?: CargoConfig,
 ) {
   const usdRate = Number(cargo?.usdRate ?? 0);
   const cargoRateUsdPerKg = Number(cargo?.cargoRateUsdPerKg ?? 0);
+  const billingWeight = cargoTotalWeightKg > 0 ? cargoTotalWeightKg : 0;
   const totalCargoCostUsd =
-    cargoRateUsdPerKg > 0 && totalShipmentWeightKg > 0
-      ? roundMoney(totalShipmentWeightKg * cargoRateUsdPerKg)
+    cargoRateUsdPerKg > 0 && billingWeight > 0
+      ? roundMoney(billingWeight * cargoRateUsdPerKg)
       : 0;
   const totalCargoCostKgs =
     totalCargoCostUsd > 0 && usdRate > 0 ? roundMoney(totalCargoCostUsd * usdRate) : 0;
@@ -116,6 +128,9 @@ export function calculateLandedCosts(
   logistics: LogisticsCosts,
   options?: LandedCostCalculationOptions,
 ): LandedCostOrderResult {
+  const cargo = options?.cargo;
+  const cargoTotalWeightKg = Number(cargo?.cargoTotalWeightKg ?? 0);
+
   const prepared = items.map((item) => {
     const effectiveQuantity = Math.max(
       0,
@@ -124,34 +139,61 @@ export function calculateLandedCosts(
         : item.quantity,
     );
     const netWeightKg = Number(item.weightKg || 0);
-    const packagingWeightKg = Number(item.packagingWeightKg || 0);
-    const unitShipmentWeightKg = roundWeight(netWeightKg + packagingWeightKg);
     const lineNetWeightKg = roundWeight(effectiveQuantity * netWeightKg);
-    const linePackagingWeightKg = roundWeight(effectiveQuantity * packagingWeightKg);
-    const totalWeightKg = roundWeight(effectiveQuantity * unitShipmentWeightKg);
     const costKgs = roundMoney(Number(item.purchasePriceYuan || 0) * Number(item.yuanRate || 0));
     return {
       ...item,
       effectiveQuantity,
       netWeightKg,
-      packagingWeightKg,
-      unitShipmentWeightKg,
       lineNetWeightKg,
-      linePackagingWeightKg,
-      totalWeightKg,
       costKgs,
     };
   });
 
   const totalNetWeightKg = roundWeight(prepared.reduce((sum, item) => sum + item.lineNetWeightKg, 0));
-  const totalPackagingWeightKg = roundWeight(
-    prepared.reduce((sum, item) => sum + item.linePackagingWeightKg, 0),
-  );
-  const totalShipmentWeightKg = roundWeight(prepared.reduce((sum, item) => sum + item.totalWeightKg, 0));
+  const cargoWeightError = validateCargoTotalWeight(cargoTotalWeightKg, totalNetWeightKg);
+  if (cargoWeightError) {
+    throw new Error(cargoWeightError);
+  }
+
+  let totalPackagingWeightKg = 0;
+  let totalShipmentWeightKg = totalNetWeightKg;
+  let isEstimated = true;
+
+  if (cargoTotalWeightKg > 0) {
+    totalPackagingWeightKg = roundWeight(cargoTotalWeightKg - totalNetWeightKg);
+    totalShipmentWeightKg = roundWeight(cargoTotalWeightKg);
+    isEstimated = false;
+  }
+
+  const withShipment = prepared.map((item) => {
+    const linePackagingWeightKg =
+      totalNetWeightKg > 0 && totalPackagingWeightKg > 0
+        ? roundWeight((item.lineNetWeightKg / totalNetWeightKg) * totalPackagingWeightKg)
+        : 0;
+    const lineShipmentWeightKg = roundWeight(item.lineNetWeightKg + linePackagingWeightKg);
+    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 1;
+    const packagingWeightKg = roundWeight(linePackagingWeightKg / effectiveQty);
+    const unitShipmentWeightKg = roundWeight(lineShipmentWeightKg / effectiveQty);
+    return {
+      ...item,
+      packagingWeightKg,
+      linePackagingWeightKg,
+      lineShipmentWeightKg,
+      unitShipmentWeightKg,
+      totalWeightKg: lineShipmentWeightKg,
+    };
+  });
+
+  const allocationBaseWeight =
+    totalShipmentWeightKg > 0
+      ? totalShipmentWeightKg
+      : roundWeight(withShipment.reduce((sum, item) => sum + item.lineShipmentWeightKg, 0));
+
   const { logistics: resolvedLogistics, totalCargoCostUsd, totalCargoCostKgs } = buildLogisticsWithCargo(
     logistics,
-    totalShipmentWeightKg,
-    options?.cargo,
+    cargoTotalWeightKg,
+    cargo,
   );
 
   const totalLogisticsCost = roundMoney(
@@ -164,48 +206,48 @@ export function calculateLandedCosts(
       Number(resolvedLogistics.bankFeeCostKgs || 0) +
       Number(resolvedLogistics.otherExpenseKgs || 0),
   );
-  const costPerKg = totalShipmentWeightKg > 0 ? roundRate(totalLogisticsCost / totalShipmentWeightKg) : 0;
+  const costPerKg = allocationBaseWeight > 0 ? roundRate(totalLogisticsCost / allocationBaseWeight) : 0;
 
-  const calculatedItems: LandedCostItemResult[] = prepared.map((item) => {
+  const calculatedItems: LandedCostItemResult[] = withShipment.map((item) => {
     const chinaDomesticAllocKgs = allocateByWeight(
       resolvedLogistics.chinaDomesticTransportKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const chinaExportAllocKgs = allocateByWeight(
       resolvedLogistics.chinaExportTransportKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const localTransportAllocKgs = allocateByWeight(
       resolvedLogistics.localTransportKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const packagingAllocKgs = allocateByWeight(
       resolvedLogistics.packagingCostKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const customsAllocKgs = allocateByWeight(
       resolvedLogistics.customsCostKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const insuranceAllocKgs = allocateByWeight(
       resolvedLogistics.insuranceCostKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const bankFeeAllocKgs = allocateByWeight(
       resolvedLogistics.bankFeeCostKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const otherAllocKgs = allocateByWeight(
       resolvedLogistics.otherExpenseKgs,
-      item.totalWeightKg,
-      totalShipmentWeightKg,
+      item.lineShipmentWeightKg,
+      allocationBaseWeight,
     );
     const totalLineLogistics = roundMoney(
       chinaDomesticAllocKgs +
@@ -219,10 +261,7 @@ export function calculateLandedCosts(
     );
     const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 1;
     const transportCostKgs = roundMoney(totalLineLogistics / effectiveQty);
-    const directPackagingPerUnitKgs = roundMoney(
-      Number(item.directPackagingCostKgs || 0) / effectiveQty,
-    );
-    const finalCostKgs = roundMoney(item.costKgs + transportCostKgs + directPackagingPerUnitKgs);
+    const finalCostKgs = roundMoney(item.costKgs + transportCostKgs);
     const totalYuan = roundMoney(item.quantity * Number(item.purchasePriceYuan || 0));
     const totalCostKgs = roundMoney(finalCostKgs * effectiveQty);
 
@@ -237,7 +276,6 @@ export function calculateLandedCosts(
       bankFeeAllocKgs,
       otherAllocKgs,
       transportCostKgs,
-      directPackagingPerUnitKgs,
       finalCostKgs,
       totalYuan,
       totalCostKgs,
@@ -251,11 +289,12 @@ export function calculateLandedCosts(
     totalCostKgs: roundMoney(calculatedItems.reduce((sum, item) => sum + item.totalCostKgs, 0)),
     totalNetWeightKg,
     totalPackagingWeightKg,
-    totalShipmentWeightKg,
-    totalWeightKg: totalShipmentWeightKg,
+    totalShipmentWeightKg: allocationBaseWeight,
+    totalWeightKg: allocationBaseWeight,
     totalCargoCostUsd,
     totalCargoCostKgs,
     costPerKg,
+    isEstimated,
   };
 }
 
@@ -279,8 +318,6 @@ export function mapStoredProcurementItemToLandedCostInput(item: {
   yuanRate: number | string | { toString(): string };
   weightKg: number | string | { toString(): string };
   netWeightKg?: number | string | { toString(): string } | null;
-  packagingWeightKg?: number | string | { toString(): string } | null;
-  directPackagingCostKgs?: number | string | { toString(): string } | null;
 }): LandedCostItemInput {
   return {
     quantity: item.quantity,
@@ -288,7 +325,5 @@ export function mapStoredProcurementItemToLandedCostInput(item: {
     purchasePriceYuan: Number(item.purchasePriceYuan),
     yuanRate: Number(item.yuanRate),
     weightKg: Number(item.netWeightKg ?? item.weightKg),
-    packagingWeightKg: Number(item.packagingWeightKg ?? 0),
-    directPackagingCostKgs: Number(item.directPackagingCostKgs ?? 0),
   };
 }
