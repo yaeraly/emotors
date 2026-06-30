@@ -11,6 +11,8 @@
     "build": "npm run build -w @emotors/api && npm run build -w @emotors/web",
     "prisma:generate": "npx prisma generate --schema apps/api/prisma/schema.prisma",
     "prisma:migrate": "npx prisma migrate dev --schema apps/api/prisma/schema.prisma --name init",
+    "prisma:migrate:deploy": "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma",
+    "prisma:db:push": "npx prisma db push --schema apps/api/prisma/schema.prisma",
     "prisma:seed": "npm run prisma:seed -w @emotors/api"
   },
   "devDependencies": {
