@@ -7,6 +7,7 @@ const ALL_PERMISSIONS = [
   'sales.manage',
   'inventory.manage',
   'inventory.view',
+  'products.manage',
   'service.manage',
   'finance.view',
   'payments.manage',
@@ -23,16 +24,22 @@ const ALL_PERMISSIONS = [
 const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSIONS],
   CEO: [...ALL_PERMISSIONS],
-  SYSTEM_ADMINISTRATOR: [...ALL_PERMISSIONS],
-  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'analytics.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view'],
-  WAREHOUSE_MANAGER: ['inventory.manage', 'distribution.manage'],
+  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
+  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'kpi.view', 'reports.view'],
+  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'products.manage'],
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
-  MARKETING_MANAGER: ['marketing.manage'],
+  MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],
   PROCUREMENT_MANAGER: ['procurement.manage'],
-  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
+  SUPPLY_CHAIN_MANAGER: [
+    'inventory.manage',
+    'inventory.view',
+    'procurement.manage',
+    'distribution.manage',
+    'products.manage',
+  ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
   FRANCHISE_OWNER: [
@@ -51,7 +58,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MASTER: ['service.manage', 'kpi.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
-  ACCOUNTANT: ['finance.view', 'payroll.manage'],
+  ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
 
@@ -79,6 +86,10 @@ function hasAnyRole(user: Pick<User, 'role' | 'roles'> | null | undefined, roles
   return roles.some((role) => hasRole(user, role));
 }
 
+export function hasFullAccess(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasAnyRole(user, ['OWNER', 'CEO']);
+}
+
 const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
   'MANAGER',
   'MASTER',
@@ -100,21 +111,26 @@ export function getDefaultRoute(role: Role) {
   if (role === 'PROCUREMENT_MANAGER') return '/procurement';
   if (role === 'ACADEMY_DIRECTOR' || role === 'ACADEMY_MANAGER') return '/academy';
   if (role === 'MARKETING_MANAGER' || role === 'CONTENT_CREATOR') return '/marketing';
+  if (role === 'FRANCHISE_DIRECTOR') return '/branches';
   return '/dashboard';
 }
 
-export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions'>) {
-  if (hasRole(user, 'OWNER') || hasRole(user, 'CEO') || hasRole(user, 'SYSTEM_ADMINISTRATOR')) return '/dashboard';
+export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  if (hasFullAccess(user)) return '/dashboard';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
   if (hasRole(user, 'WAREHOUSE_OPERATOR')) return '/inventory';
   if (hasPermission(user, 'payments.manage')) return '/payments';
   if (hasPermission(user, 'finance.view')) return '/finance';
+  if (hasPermission(user, 'users.manage') && !user.branchId) return '/users';
   if (hasPermission(user, 'crm.manage')) return '/customers';
   if (hasPermission(user, 'sales.manage')) return '/sales';
   if (hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view')) return '/inventory';
   if (hasPermission(user, 'service.manage')) return '/service';
+  if (hasPermission(user, 'academy.manage')) return '/academy';
+  if (hasPermission(user, 'marketing.manage')) return '/marketing';
+  if (hasPermission(user, 'branches.manage')) return '/branches';
   return getDefaultRoute(user.role);
 }
 
@@ -173,7 +189,8 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (pathname.startsWith('/academy')) return hasPermission(user, 'academy.manage');
   if (pathname.startsWith('/marketing')) return hasPermission(user, 'marketing.manage');
-  if (pathname.startsWith('/investment') || pathname.startsWith('/expansion')) return hasPermission(user, 'analytics.view');
+  if (pathname.startsWith('/investment') || pathname.startsWith('/expansion')) return hasFullAccess(user);
+  if (pathname.startsWith('/royalty')) return hasPermission(user, 'branches.manage');
   return true;
 }
 
@@ -182,7 +199,7 @@ export function canResetUserPassword(
   target: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ) {
   if (!actor || !target) return false;
-  if (hasRole(actor, 'OWNER') || hasRole(actor, 'CEO') || hasRole(actor, 'SYSTEM_ADMINISTRATOR')) {
+  if (hasFullAccess(actor) || hasRole(actor, 'SYSTEM_ADMINISTRATOR')) {
     return true;
   }
   if (!hasRole(actor, 'FRANCHISE_OWNER') || actor.branchId !== target.branchId) {
@@ -195,28 +212,32 @@ export function canResetUserPassword(
   );
 }
 
-export function canManageProductCatalog(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'WAREHOUSE_MANAGER', 'SUPPLY_CHAIN_MANAGER']);
+export function canManageProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasPermission(user, 'products.manage');
 }
 
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'FRANCHISE_OWNER']);
+  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
 }
 
 export function canCancelSale(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'FRANCHISE_OWNER']);
+  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
 }
 
 export function canVoidPayment(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['OWNER', 'CEO', 'SYSTEM_ADMINISTRATOR', 'FRANCHISE_OWNER', 'CASHIER']);
+  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER') || hasRole(user, 'CASHIER');
 }
 
 export function canViewHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER']);
+  return hasFullAccess(user) || hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'WAREHOUSE_MANAGER']);
 }
 
 export function canManageHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasAnyRole(user, ['CEO', 'SUPPLY_CHAIN_MANAGER']);
+  return hasFullAccess(user) || hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER']);
+}
+
+export function canCreateHqEmployee(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user) || hasRole(user, 'SYSTEM_ADMINISTRATOR');
 }
 
 export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
@@ -228,6 +249,11 @@ export function canManageProcurement(user: Pick<User, 'role' | 'roles' | 'permis
 }
 
 export function canViewProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return canManageProcurement(user) ||
-    hasAnyRole(user, ['FINANCE_MANAGER', 'ACCOUNTANT', 'WAREHOUSE_MANAGER']);
+  return hasPermission(user, 'procurement.manage');
+}
+
+export function canManageUsers(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  return hasPermission(user, 'users.manage');
 }

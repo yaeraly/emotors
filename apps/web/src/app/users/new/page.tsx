@@ -6,6 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { hqAssignableRoles, RoleSelector } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
 import type { Branch, Role, User } from '@/lib/types';
+import { canCreateHqEmployee } from '@/lib/rbac';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewUserPage() {
@@ -29,7 +30,7 @@ export default function NewUserPage() {
   useEffect(() => {
     Promise.all([apiFetch<User>('/auth/me'), apiFetch<Branch[]>('/branches')])
       .then(([me, result]) => {
-        const hqCreator = isHqCreator(me);
+        const hqCreator = canCreateHqEmployee(me);
         setCurrentUser(me);
         setBranches(result);
         setForm((current) => ({
@@ -50,8 +51,8 @@ export default function NewUserPage() {
         method: 'POST',
         body: JSON.stringify({
           ...form,
-          userType: isHqCreator(currentUser) ? 'HQ' : 'BRANCH',
-          branchId: isHqCreator(currentUser) ? null : form.branchId,
+          userType: canCreateHqEmployee(currentUser) ? 'HQ' : 'BRANCH',
+          branchId: canCreateHqEmployee(currentUser) ? null : form.branchId,
           password: form.password || undefined,
         }),
       });
@@ -73,7 +74,7 @@ export default function NewUserPage() {
   return (
     <ProtectedShell>
       <form onSubmit={submit} className="space-y-6">
-        <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('users.title')}</p><h2 className="text-3xl font-bold">{isHqCreator(currentUser) ? t('users.createHqEmployee') : t('users.create')}</h2></div>
+        <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('users.title')}</p><h2 className="text-3xl font-bold">{canCreateHqEmployee(currentUser) ? t('users.createHqEmployee') : t('users.create')}</h2></div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {temporaryPassword ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{t('users.temporaryPassword')}: {temporaryPassword}</p> : null}
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
@@ -83,8 +84,8 @@ export default function NewUserPage() {
           <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
           <Input label={t('users.username')} value={form.username} onChange={(value) => setField('username', value)} required />
           <Input label={t('auth.password')} value={form.password} onChange={(value) => setField('password', value)} />
-          <RoleSelector label={isHqCreator(currentUser) ? t('users.hqRoles') : t('users.role')} selectedRoles={form.roles} onChange={setRoles} roles={isHqCreator(currentUser) ? hqAssignableRoles : undefined} />
-          {isHqCreator(currentUser) ? (
+          <RoleSelector label={canCreateHqEmployee(currentUser) ? t('users.hqRoles') : t('users.role')} selectedRoles={form.roles} onChange={setRoles} roles={canCreateHqEmployee(currentUser) ? hqAssignableRoles : undefined} />
+          {canCreateHqEmployee(currentUser) ? (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-semibold text-slate-800">{t('users.hqEmployee')}</p>
               <p>{t('users.hqEmployeeNoBranch')}</p>
@@ -103,7 +104,3 @@ function Input({ label, value, onChange, required }: { label: string; value: str
   return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} required={required} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
 }
 
-function isHqCreator(user: User | null) {
-  const roles = user?.roles?.length ? user.roles : user ? [user.role] : [];
-  return roles.includes('CEO') || roles.includes('SYSTEM_ADMINISTRATOR');
-}

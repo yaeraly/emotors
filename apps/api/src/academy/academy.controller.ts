@@ -1,15 +1,15 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { Roles } from '../roles/roles.decorator';
+import { RequirePermissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { RolesGuard } from '../roles/roles.guard';
 import { AcademyService } from './academy.service';
 
 @Controller('academy')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.ACADEMY_MANAGER)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@RequirePermissions('academy.manage')
 export class AcademyController {
   constructor(private readonly academyService: AcademyService) {}
 

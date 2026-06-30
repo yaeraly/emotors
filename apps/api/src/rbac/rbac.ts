@@ -1,22 +1,29 @@
 import { Role } from '@prisma/client';
+import { AuthUser } from '../auth/auth.types';
 
 export const FULL_ACCESS_ROLES: Role[] = [
   Role.OWNER,
   Role.CEO,
+];
+
+export const HQ_EMPLOYEE_ROLES: Role[] = [
+  Role.CEO,
+  Role.FRANCHISE_DIRECTOR,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.WAREHOUSE_MANAGER,
+  Role.FINANCE_MANAGER,
+  Role.ACCOUNTANT,
+  Role.MARKETING_MANAGER,
+  Role.CONTENT_CREATOR,
+  Role.ACADEMY_DIRECTOR,
   Role.SYSTEM_ADMINISTRATOR,
 ];
 
 export const HQ_ROLES: Role[] = [
   ...FULL_ACCESS_ROLES,
-  Role.FRANCHISE_DIRECTOR,
-  Role.FINANCE_MANAGER,
-  Role.WAREHOUSE_MANAGER,
-  Role.CONTENT_CREATOR,
-  Role.ACADEMY_DIRECTOR,
+  ...HQ_EMPLOYEE_ROLES.filter((role) => !FULL_ACCESS_ROLES.includes(role)),
   Role.ACADEMY_MANAGER,
-  Role.MARKETING_MANAGER,
   Role.PROCUREMENT_MANAGER,
-  Role.SUPPLY_CHAIN_MANAGER,
   Role.INVESTMENT_MANAGER,
   Role.EXPANSION_MANAGER,
 ];
@@ -36,6 +43,7 @@ export const ALL_PERMISSION_CODES = [
   'sales.manage',
   'inventory.manage',
   'inventory.view',
+  'products.manage',
   'service.manage',
   'finance.view',
   'payments.manage',
@@ -52,16 +60,22 @@ export const ALL_PERMISSION_CODES = [
 export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSION_CODES],
   CEO: [...ALL_PERMISSION_CODES],
-  SYSTEM_ADMINISTRATOR: [...ALL_PERMISSION_CODES],
-  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'analytics.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'analytics.view'],
-  WAREHOUSE_MANAGER: ['inventory.manage', 'distribution.manage'],
+  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
+  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view'],
+  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'kpi.view', 'reports.view'],
+  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'products.manage'],
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
-  MARKETING_MANAGER: ['marketing.manage'],
+  MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],
   PROCUREMENT_MANAGER: ['procurement.manage'],
-  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'procurement.manage', 'distribution.manage'],
+  SUPPLY_CHAIN_MANAGER: [
+    'inventory.manage',
+    'inventory.view',
+    'procurement.manage',
+    'distribution.manage',
+    'products.manage',
+  ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
   FRANCHISE_OWNER: [
@@ -80,7 +94,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MASTER: ['service.manage', 'kpi.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
-  ACCOUNTANT: ['finance.view', 'payroll.manage'],
+  ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
 
@@ -90,6 +104,10 @@ export function isFullAccessRole(role: Role) {
 
 export function isHqRole(role: Role) {
   return HQ_ROLES.includes(role);
+}
+
+export function isHqEmployeeRole(role: Role) {
+  return HQ_EMPLOYEE_ROLES.includes(role);
 }
 
 export function canAccessAllBranches(role: Role) {
@@ -112,6 +130,36 @@ export function permissionsForRoles(roles: Role[]) {
   return Array.from(
     new Set(uniqueRoles(roles).flatMap((role) => permissionsForRole(role))),
   );
+}
+
+export function resolveUserRoles(user: Pick<AuthUser, 'role' | 'roles'>) {
+  return user.roles?.length ? user.roles : [user.role];
+}
+
+export function resolveUserPermissions(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  if (user.permissions?.length) {
+    return user.permissions;
+  }
+  return permissionsForRoles(resolveUserRoles(user));
+}
+
+export function userHasPermission(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+  permission: string,
+) {
+  return resolveUserPermissions(user).includes(permission);
+}
+
+export function userHasAnyPermission(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+  permissions: string[],
+) {
+  const userRoles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(userRoles)) {
+    return true;
+  }
+  const userPermissions = resolveUserPermissions(user);
+  return permissions.some((permission) => userPermissions.includes(permission));
 }
 
 export function hasAnyFullAccessRole(roles: Role[]) {
@@ -137,6 +185,20 @@ export function rolesCanAccessRequiredRoles(roles: Role[], requiredRoles: Role[]
   }
 
   return hasAnyFullAccessRole(userRoles) || requiredRoles.some((requiredRole) => userRoles.includes(requiredRole));
+}
+
+export function canManageProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return userHasPermission(user, 'products.manage');
+}
+
+export function canManageUsers(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  if (hasAnyFullAccessRole(resolveUserRoles(user))) {
+    return true;
+  }
+  if (userHasPermission(user, 'users.manage')) {
+    return true;
+  }
+  return false;
 }
 
 export function legacyRoleCanAccessRequiredRoles(role: Role, requiredRoles: Role[]) {

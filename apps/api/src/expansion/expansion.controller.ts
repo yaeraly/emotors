@@ -7,7 +7,7 @@ import { ExpansionService } from './expansion.service';
 
 @Controller('expansion')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.EXPANSION_MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.EXPANSION_MANAGER)
 export class ExpansionController {
   constructor(private readonly service: ExpansionService) {}
   @Post('cities') createCity(@Body() dto: any) { return this.service.createCity(dto); }

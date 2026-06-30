@@ -2,7 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger }
 import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
-import { anyRoleRequiresBranch, permissionsForRoles, rolesCanAccessRequiredRoles } from '../rbac/rbac';
+import { anyRoleRequiresBranch, permissionsForRoles, rolesCanAccessRequiredRoles, userHasAnyPermission } from '../rbac/rbac';
 import { ROLES_KEY } from './roles.decorator';
 
 @Injectable()
@@ -30,7 +30,15 @@ export class RolesGuard implements CanActivate {
 
     const userRoles = user?.roles?.length ? user.roles : user ? [user.role] : [];
 
-    if (!user || !rolesCanAccessRequiredRoles(userRoles, requiredRoles)) {
+    const roleAllowed = user && rolesCanAccessRequiredRoles(userRoles, requiredRoles);
+    const permissionAllowed =
+      user &&
+      userHasAnyPermission(
+        user,
+        permissionsForRoles(requiredRoles),
+      );
+
+    if (!roleAllowed && !permissionAllowed) {
       this.logForbidden(context, request, user, requiredRoles);
       throw new ForbiddenException('Forbidden resource');
     }

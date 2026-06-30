@@ -21,7 +21,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { canManageProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -332,6 +332,12 @@ export class InventoryService {
           });
         }
 
+        await this.auditInTx(tx, user, branchId, 'PRODUCT_CREATED', 'Product', product.id, {
+          module: 'inventory',
+          sku: product.sku,
+          newValue: { name: product.name, sku: product.sku, weightKg: Number(product.weightKg) },
+        });
+
         return {
           ...(await this.getProductResponseInTx(tx, user, product.id)),
           restored: false,
@@ -498,6 +504,17 @@ export class InventoryService {
                 },
               }
             : undefined,
+        },
+      });
+
+      await this.auditInTx(tx, user, current.branchId, 'PRODUCT_UPDATED', 'Product', id, {
+        module: 'inventory',
+        sku: dto.sku ?? current.sku,
+        oldValue: { name: current.name, sku: current.sku, sellingPriceKgs: Number(current.sellingPriceKgs) },
+        newValue: {
+          name: dto.name ?? current.name,
+          sku: dto.sku ?? current.sku,
+          sellingPriceKgs: next.sellingPriceKgs,
         },
       });
 
@@ -1033,15 +1050,7 @@ export class InventoryService {
   }
 
   private assertCanManageProductCatalog(user: AuthUser) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    const allowed = roles.some((role) =>
-      role === Role.CEO ||
-      role === Role.SUPPLY_CHAIN_MANAGER ||
-      role === Role.WAREHOUSE_MANAGER ||
-      role === Role.SYSTEM_ADMINISTRATOR ||
-      role === Role.OWNER,
-    );
-    if (!allowed) {
+    if (!canManageProductCatalog(user)) {
       throw new ForbiddenException('You do not have permission to manage product catalog');
     }
   }
@@ -1096,6 +1105,7 @@ export class InventoryService {
     action: string,
     entity: string,
     entityId: string,
+    metadata?: Record<string, unknown>,
   ) {
     return tx.auditLog.create({
       data: {
@@ -1107,7 +1117,8 @@ export class InventoryService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
-        },
+          ...metadata,
+        } as Prisma.InputJsonValue,
       },
     });
   }

@@ -1,15 +1,15 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { Roles } from '../roles/roles.decorator';
+import { RequirePermissions } from '../roles/permissions.decorator';
+import { PermissionsGuard } from '../roles/permissions.guard';
 import { RolesGuard } from '../roles/roles.guard';
 import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@RequirePermissions('reports.view', 'analytics.view')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 

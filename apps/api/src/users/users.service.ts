@@ -13,6 +13,7 @@ import {
   hasAnyFullAccessRole,
   isHqRole,
   uniqueRoles,
+  userHasPermission,
 } from '../rbac/rbac';
 
 const TEMP_PASSWORD = 'Emotors@2026';
@@ -184,6 +185,7 @@ export class UsersService {
 
   private userScope(user: AuthUser) {
     if (this.hasFullAccess(user)) return {};
+    if (this.isHqUserManager(user)) return { branchId: null };
     if (this.hasRole(user, Role.FRANCHISE_OWNER)) return { branchId: user.branchId };
     throw new ForbiddenException('No user management access');
   }
@@ -197,6 +199,15 @@ export class UsersService {
 
   private assertCanManage(user: AuthUser, branchId: string | undefined, roles: Role[]) {
     if (this.hasFullAccess(user)) return;
+    if (this.isHqUserManager(user)) {
+      if (branchId) {
+        throw new ForbiddenException('HQ managers can only manage HQ employees');
+      }
+      if (roles.some((role) => !HQ_ROLES.includes(role))) {
+        throw new ForbiddenException('Cannot assign non-HQ roles');
+      }
+      return;
+    }
     if (this.hasRole(user, Role.FRANCHISE_OWNER)) {
       if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
       if (roles.some((role) => isHqRole(role))) {
@@ -383,6 +394,10 @@ export class UsersService {
 
   private hasFullAccess(user: AuthUser) {
     return hasAnyFullAccessRole(user.roles?.length ? user.roles : [user.role]);
+  }
+
+  private isHqUserManager(user: AuthUser) {
+    return userHasPermission(user, 'users.manage') && user.branchId === null;
   }
 
   private hasRole(user: AuthUser, role: Role) {

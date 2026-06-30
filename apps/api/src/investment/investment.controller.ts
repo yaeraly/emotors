@@ -7,7 +7,7 @@ import { InvestmentService } from './investment.service';
 
 @Controller('investment')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.INVESTMENT_MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.INVESTMENT_MANAGER)
 export class InvestmentController {
   constructor(private readonly service: InvestmentService) {}
   @Post('investors') createInvestor(@Body() dto: any) { return this.service.createInvestor(dto); }

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, getDefaultRouteForUser, hasPermission, hasRole, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -60,27 +60,28 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeSales = hasPermission(user, 'sales.manage');
   const canSeeInventory = hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
   const canManageInventory = hasPermission(user, 'inventory.manage');
-  const canManageProductCatalog = hasRole(user, 'OWNER') || hasRole(user, 'CEO') || hasRole(user, 'SYSTEM_ADMINISTRATOR') || hasRole(user, 'WAREHOUSE_MANAGER') || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+  const canManageProducts = canManageProductCatalog(user);
   const canSeeService = hasPermission(user, 'service.manage');
   const canSeeHqWarehouse = canViewHqWarehouse(user);
   const canManageHqWarehouses = canManageHqWarehouse(user);
-  const canSeeHq = hasPermission(user, 'branches.manage') || hasPermission(user, 'analytics.view') || hasPermission(user, 'kpi.view') || hasPermission(user, 'reports.view') || canSeeHqWarehouse;
   const canManageBranches = hasPermission(user, 'branches.manage');
-  const canSeeKpi = hasPermission(user, 'kpi.view') || hasPermission(user, 'analytics.view');
+  const canSeeKpi = hasPermission(user, 'kpi.view');
   const canSeeReports = hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
   const canManageUsers = hasPermission(user, 'users.manage');
   const canSeeAcademy = hasPermission(user, 'academy.manage');
   const canSeeMarketing = hasPermission(user, 'marketing.manage');
   const canSeeProcurement = canViewProcurement(user);
   const canManageProcurementOrders = hasPermission(user, 'procurement.manage');
-  const canSeeSupplyChain = hasPermission(user, 'distribution.manage');
-  const canSeeDistribution = canSeeSupplyChain;
-  const canSeeInvestment = hasPermission(user, 'analytics.view');
-  const canSeeExpansion = hasPermission(user, 'analytics.view');
+  const canSeeDistribution = hasPermission(user, 'distribution.manage');
+  const canSeeSupplyChain = canSeeDistribution;
+  const canSeeFinance = hasPermission(user, 'finance.view');
+  const canSeeInvestment = hasFullAccess(user);
+  const canSeeExpansion = hasFullAccess(user);
+  const canSeeRoyalty = hasPermission(user, 'branches.manage');
   const canSeeTax = hasPermission(user, 'finance.view');
-  const canSeeAi = hasPermission(user, 'analytics.view') || hasPermission(user, 'reports.view');
+  const canSeeAi = hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
   const canSeePayroll = hasPermission(user, 'payroll.manage');
-  const canSeePayments = hasPermission(user, 'payments.manage') || hasRole(user, 'SALESPERSON');
+  const canSeePayments = hasPermission(user, 'payments.manage');
   const canSeeReservations = hasPermission(user, 'sales.manage');
   const canSeeReturns = hasPermission(user, 'sales.manage') || hasPermission(user, 'payments.manage');
   const canSeeWarehouseRelease = hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
@@ -172,7 +173,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
                     {t('inventory.warehouses')}
                   </Link>
-                  {canManageProductCatalog ? (
+                  {canManageProducts ? (
                     <Link href="/inventory/categories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">
                       {t('inventory.categories')}
                     </Link>
@@ -205,14 +206,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   </div>
                 </div>
               ) : null}
-              {canSeeHq ? (
-                <>
-                  {canManageBranches ? <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link> : null}
-                  {canSeeKpi ? <Link href="/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.kpi')}</Link> : null}
-                  {canSeeReports ? <Link href="/analytics" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.analytics')}</Link> : null}
-                  {canManageBranches ? <Link href="/royalty" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.royalty')}</Link> : null}
-                </>
-              ) : null}
+              {canManageBranches ? <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link> : null}
+              {canSeeKpi ? <Link href="/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.kpi')}</Link> : null}
+              {canSeeReports ? <Link href="/analytics" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.analytics')}</Link> : null}
+              {canSeeRoyalty ? <Link href="/royalty" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.royalty')}</Link> : null}
               {canSeeAcademy ? <Link href="/academy" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.academy')}</Link> : null}
               {canSeeMarketing ? <Link href="/marketing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.marketing')}</Link> : null}
               {canSeeDistribution ? (
@@ -243,8 +240,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeeSupplyChain ? <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyChain.title')}</Link> : null}
               {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}
               {canSeeExpansion ? <Link href="/expansion" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('expansion.title')}</Link> : null}
+              {canSeeFinance ? <Link href="/finance" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
               {canSeeTax ? <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('tax.title')}</Link> : null}
-              {canSeePayments ? <Link href="/payments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
+              {canSeePayments ? <Link href="/payments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.payments')}</Link> : null}
               {canSeeAi ? <Link href="/ai" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('ai.title')}</Link> : null}
               {canSeePayroll ? <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('compensation.rules')}</Link> : null}
               {canSeePayroll ? <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('commissions.title')}</Link> : null}
