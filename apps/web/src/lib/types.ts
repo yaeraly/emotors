@@ -325,6 +325,9 @@ export type Product = {
   photoUrl?: string | null;
   description?: string | null;
   characteristics?: unknown;
+  unit?: string;
+  defaultSupplierId?: string | null;
+  defaultFactoryId?: string | null;
   weightKg: number;
   purchasePriceYuan: number;
   latestYuanRate: number;

@@ -31,6 +31,7 @@ type ProcurementOrderItem = {
   insuranceAllocKgs?: string | number;
   bankFeeAllocKgs?: string | number;
   otherAllocKgs?: string | number;
+  unit?: string;
   supplier?: { name: string };
   factory?: { name: string };
 };
@@ -44,6 +45,9 @@ type ProcurementOrder = {
   totalTransportCostKgs: string | number;
   totalWeightKg: string | number;
   costPerKg: string | number;
+  currency?: string;
+  defaultYuanRate?: string | number;
+  purchaseDate?: string;
   chinaDomesticTransportKgs: string | number;
   chinaExportTransportKgs: string | number;
   localTransportKgs: string | number;
@@ -61,10 +65,19 @@ type ProcurementOrder = {
   receivedToHqAt?: string;
   items?: ProcurementOrderItem[];
   receivings?: Array<{ id: string; receivingNumber: string; receivedAt: string; items: Array<{ sku: string; productName: string; expectedQuantity: number; receivedQuantity: number; differenceQuantity: number }> }>;
-  differenceReports?: Array<{ id: string; reportNumber: string; type: string; sku: string; productName: string; expectedQuantity: number; receivedQuantity: number; differenceQuantity: number; status: string }>;
+  differenceReports?: Array<{ id: string; reportNumber: string; type: string; sku: string; productName: string; expectedQuantity: number; receivedQuantity: number; differenceQuantity: number; status: string; shortageReason?: string }>;
 };
 
 type AuditLog = { id: string; action: string; timestamp: string; metadata?: { reason?: string }; user?: { fullName: string } };
+
+const SHORTAGE_REASONS = [
+  'FACTORY_SHORTAGE',
+  'SUPPLIER_SHORTAGE',
+  'DAMAGED_GOODS',
+  'LOST_IN_TRANSPORT',
+  'CUSTOMS_ISSUE',
+  'OTHER',
+] as const;
 
 const statusActions = [
   ['approve', 'distribution.approve'],
@@ -83,6 +96,7 @@ export default function ProcurementOrderDetailPage() {
   const [order, setOrder] = useState<ProcurementOrder | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
+  const [receiveReason, setReceiveReason] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -133,6 +147,9 @@ export default function ProcurementOrderDetailPage() {
           items: (order?.items ?? []).map((item) => ({
             procurementItemId: item.id,
             receivedQuantity: Number(receiveQty[item.id] ?? item.quantity),
+            shortageReason: Number(receiveQty[item.id] ?? item.quantity) !== item.quantity
+              ? (receiveReason[item.id] || 'OTHER')
+              : undefined,
           })),
         }),
       });
@@ -162,7 +179,9 @@ export default function ProcurementOrderDetailPage() {
         {order ? <>
           <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
             <Info label={t('procurement.orders.supplier')} value={order.supplier?.name ?? ''} />
-            <Info label={t('procurement.orders.factory')} value={order.factory?.name ?? '-'} />
+            <Info label={t('procurement.orders.currency')} value={order.currency ?? 'CNY'} />
+            <Info label={t('procurement.orders.exchangeRate')} value={String(order.defaultYuanRate ?? '-')} />
+            <Info label={t('procurement.orders.purchaseDate')} value={order.purchaseDate ? new Date(order.purchaseDate).toLocaleDateString() : '-'} />
             <Info label={t('procurement.orders.warehouse')} value={order.hqWarehouse?.name ?? ''} />
             <Info label={t('procurement.orders.status')} value={order.status} />
             <Info label={t('procurement.orders.totalYuan')} value={`¥${Number(order.totalYuan).toFixed(2)}`} />
@@ -202,7 +221,8 @@ export default function ProcurementOrderDetailPage() {
                   <th className="px-4 py-3">{t('procurement.orders.product')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.quantity')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
-                  <th className="px-4 py-3">{t('inventory.weightKg')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.unit')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.weightPerUnit')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.totalWeightKg')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.factoryCost')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.transportAllocation')}</th>
@@ -216,6 +236,7 @@ export default function ProcurementOrderDetailPage() {
                     <td className="px-4 py-3">{item.productName}</td>
                     <td className="px-4 py-3">{item.quantity}</td>
                     <td className="px-4 py-3">{item.receivedQuantity ?? '-'}</td>
+                    <td className="px-4 py-3">{item.unit ?? 'pcs'}</td>
                     <td className="px-4 py-3">{Number(item.weightKg).toFixed(3)}</td>
                     <td className="px-4 py-3">{Number(item.totalWeightKg).toFixed(3)}</td>
                     <td className="px-4 py-3">{formatKgs(item.costKgs)}</td>
@@ -231,13 +252,23 @@ export default function ProcurementOrderDetailPage() {
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.receivingSummary')}</h3>
               <div className="space-y-3">
-                {order.items?.map((item) => (
-                  <label key={item.id} className="flex flex-wrap items-center gap-4 rounded-2xl bg-slate-50 p-4">
-                    <span className="min-w-48 font-semibold">{item.sku} · {item.productName}</span>
-                    <span className="text-sm text-slate-500">{t('procurement.orders.expected')}: {item.quantity}</span>
-                    <input type="number" min={0} value={receiveQty[item.id] ?? String(item.quantity)} onChange={(e) => setReceiveQty((current) => ({ ...current, [item.id]: e.target.value }))} className="rounded-xl border border-slate-300 px-3 py-2" />
+                {order.items?.map((item) => {
+                  const received = Number(receiveQty[item.id] ?? item.quantity);
+                  const hasDifference = received !== item.quantity;
+                  return (
+                  <label key={item.id} className="block rounded-2xl bg-slate-50 p-4">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <span className="min-w-48 font-semibold">{item.sku} · {item.productName}</span>
+                      <span className="text-sm text-slate-500">{t('procurement.orders.expected')}: {item.quantity}</span>
+                      <input type="number" min={0} value={receiveQty[item.id] ?? String(item.quantity)} onChange={(e) => setReceiveQty((current) => ({ ...current, [item.id]: e.target.value }))} className="rounded-xl border border-slate-300 px-3 py-2" />
+                      {hasDifference ? (
+                        <select value={receiveReason[item.id] ?? 'OTHER'} onChange={(e) => setReceiveReason((current) => ({ ...current, [item.id]: e.target.value }))} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">
+                          {SHORTAGE_REASONS.map((reason) => <option key={reason} value={reason}>{t(`procurement.orders.shortageReason.${reason}`)}</option>)}
+                        </select>
+                      ) : null}
+                    </div>
                   </label>
-                ))}
+                );})}
               </div>
               <button type="button" onClick={() => void receiveGoods()} className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white">{t('procurement.orders.receiveToHq')}</button>
             </section>
@@ -247,8 +278,8 @@ export default function ProcurementOrderDetailPage() {
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.shortageReport')}</h3>
               <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">#</th><th className="px-4 py-3">SKU</th><th className="px-4 py-3">{t('procurement.orders.expected')}</th><th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th><th className="px-4 py-3">{t('procurement.orders.difference')}</th><th className="px-4 py-3">{t('procurement.orders.status')}</th></tr></thead>
-                <tbody className="divide-y divide-slate-100">{order.differenceReports.map((report) => <tr key={report.id}><td className="px-4 py-3">{report.reportNumber}</td><td className="px-4 py-3">{report.sku}</td><td className="px-4 py-3">{report.expectedQuantity}</td><td className="px-4 py-3">{report.receivedQuantity}</td><td className="px-4 py-3">{report.differenceQuantity} ({report.type})</td><td className="px-4 py-3">{report.status}</td></tr>)}</tbody>
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">#</th><th className="px-4 py-3">SKU</th><th className="px-4 py-3">{t('procurement.orders.expected')}</th><th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th><th className="px-4 py-3">{t('procurement.orders.difference')}</th><th className="px-4 py-3">{t('procurement.orders.shortageReasonLabel')}</th><th className="px-4 py-3">{t('procurement.orders.status')}</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">{order.differenceReports.map((report) => <tr key={report.id}><td className="px-4 py-3">{report.reportNumber}</td><td className="px-4 py-3">{report.sku}</td><td className="px-4 py-3">{report.expectedQuantity}</td><td className="px-4 py-3">{report.receivedQuantity}</td><td className="px-4 py-3">{report.differenceQuantity} ({report.type})</td><td className="px-4 py-3">{report.shortageReason ? t(`procurement.orders.shortageReason.${report.shortageReason}`) : '-'}</td><td className="px-4 py-3">{report.status}</td></tr>)}</tbody>
               </table>
             </section>
           ) : null}

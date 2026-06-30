@@ -300,6 +300,15 @@ enum PurchaseOrderStatus {
   CANCELLED
 }
 
+enum ProcurementShortageReason {
+  FACTORY_SHORTAGE
+  SUPPLIER_SHORTAGE
+  DAMAGED_GOODS
+  LOST_IN_TRANSPORT
+  CUSTOMS_ISSUE
+  OTHER
+}
+
 enum ProcurementOrderStatus {
   DRAFT
   APPROVED
@@ -891,6 +900,11 @@ model Product {
   photoUrl          String?
   description       String?
   characteristics   Json?
+  unit              String    @default("pcs")
+  defaultSupplierId String?
+  defaultSupplier   Supplier? @relation("ProductDefaultSupplier", fields: [defaultSupplierId], references: [id])
+  defaultFactoryId  String?
+  defaultFactory    Factory?  @relation("ProductDefaultFactory", fields: [defaultFactoryId], references: [id])
   weightKg          Decimal   @default(0) @db.Decimal(14, 3)
   purchasePriceYuan Decimal   @default(0) @db.Decimal(14, 2)
   latestYuanRate    Decimal   @default(0) @db.Decimal(14, 4)
@@ -922,6 +936,8 @@ model Product {
   @@index([categoryId])
   @@index([category])
   @@index([isActive])
+  @@index([defaultSupplierId])
+  @@index([defaultFactoryId])
 }
 
 model ProductCategory {
@@ -1316,6 +1332,7 @@ model Supplier {
   factories        Factory[]
   procurementOrders ProcurementOrder[]
   procurementOrderItems ProcurementOrderItem[]
+  defaultProducts       Product[]         @relation("ProductDefaultSupplier")
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   deletedAt        DateTime?
@@ -1355,6 +1372,7 @@ model Factory {
   isActive           Boolean  @default(true)
   procurementOrders  ProcurementOrder[]
   procurementOrderItems ProcurementOrderItem[]
+  defaultProducts       Product[] @relation("ProductDefaultFactory")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   deletedAt          DateTime?
@@ -1373,7 +1391,9 @@ model ProcurementOrder {
   hqWarehouseId            String
   hqWarehouse              Warehouse              @relation(fields: [hqWarehouseId], references: [id])
   status                   ProcurementOrderStatus @default(DRAFT)
+  currency                 String                 @default("CNY")
   defaultYuanRate          Decimal                @default(0) @db.Decimal(14, 4)
+  purchaseDate             DateTime?
   totalYuan                Decimal                @default(0) @db.Decimal(14, 2)
   totalTransportCostKgs    Decimal                @default(0) @db.Decimal(14, 2)
   totalCostKgs             Decimal                @default(0) @db.Decimal(14, 2)
@@ -1427,6 +1447,7 @@ model ProcurementOrderItem {
   factory                Factory?         @relation(fields: [factoryId], references: [id])
   sku                    String
   productName            String
+  unit                   String           @default("pcs")
   quantity               Int
   receivedQuantity       Int?
   purchasePriceYuan      Decimal          @db.Decimal(14, 2)
@@ -2387,6 +2408,7 @@ model ProcurementDifferenceReport {
   expectedQuantity   Int
   receivedQuantity   Int
   differenceQuantity Int
+  shortageReason     ProcurementShortageReason?
   note               String?
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt

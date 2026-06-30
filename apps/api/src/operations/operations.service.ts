@@ -260,6 +260,7 @@ export class OperationsService {
               expectedQuantity: item.quantity,
               receivedQuantity: item.receivedQuantity,
               differenceQuantity: Math.abs(item.difference),
+              shortageReason: receivedMap.get(item.id)?.shortageReason ?? receivedMap.get(item.productId)?.shortageReason,
               note: receivedMap.get(item.id)?.note ?? receivedMap.get(item.productId)?.note,
             },
           });

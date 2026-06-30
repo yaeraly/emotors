@@ -12,6 +12,7 @@ type PreparedProcurementItem = {
   factoryId: string | null;
   sku: string;
   productName: string;
+  unit: string;
   quantity: number;
   purchasePriceYuan: number;
   yuanRate: number;
@@ -244,34 +245,12 @@ export class ProcurementService {
       const itemInputs = dto.items ?? [];
       if (!itemInputs.length) throw new BadRequestException('At least one product is required');
 
-      const defaultYuanRate = Number(dto.defaultYuanRate ?? dto.yuanRate ?? 0);
+      const exchangeRate = Number(dto.defaultYuanRate ?? dto.exchangeRate ?? dto.yuanRate ?? 0);
+      this.validateExchangeRate(exchangeRate);
       const logistics = extractLogisticsCosts(dto);
       const preparedItems: PreparedProcurementItem[] = [];
       for (const item of itemInputs) {
-        const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
-        if (!product) throw new NotFoundException('Product not found');
-        const itemSupplierId = item.supplierId ?? dto.supplierId;
-        const itemFactoryId = item.factoryId ?? dto.factoryId;
-        if (itemSupplierId) {
-          const itemSupplier = await tx.supplier.findFirst({ where: { id: itemSupplierId, deletedAt: null } });
-          if (!itemSupplier) throw new NotFoundException('Item supplier not found');
-        }
-        if (itemFactoryId) {
-          const itemFactory = await tx.factory.findFirst({ where: { id: itemFactoryId, deletedAt: null } });
-          if (!itemFactory) throw new NotFoundException('Item factory not found');
-        }
-        preparedItems.push({
-          productId: product.id,
-          supplierId: itemSupplierId,
-          factoryId: itemFactoryId || null,
-          sku: product.sku,
-          productName: product.name,
-          quantity: Number(item.quantity ?? 0),
-          purchasePriceYuan: Number(item.purchasePriceYuan ?? product.purchasePriceYuan ?? 0),
-          yuanRate: Number(item.yuanRate ?? defaultYuanRate ?? product.latestYuanRate ?? 0),
-          weightKg: Number(item.weightKg ?? product.weightKg ?? 0),
-          note: item.note,
-        });
+        preparedItems.push(await this.resolveProcurementItemFromProduct(tx, item, supplier.id, factory?.id, exchangeRate));
       }
 
       const calculated = calculateLandedCosts(preparedItems, logistics);
@@ -282,7 +261,9 @@ export class ProcurementService {
           factoryId: factory?.id,
           hqWarehouseId: warehouse.id,
           status: ProcurementOrderStatus.DRAFT,
-          defaultYuanRate,
+          currency: dto.currency ?? 'CNY',
+          defaultYuanRate: exchangeRate,
+          purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : new Date(),
           totalYuan: calculated.totalYuan,
           totalTransportCostKgs: calculated.totalTransportCostKgs,
           totalCostKgs: calculated.totalCostKgs,
@@ -299,9 +280,10 @@ export class ProcurementService {
               factoryId: preparedItems[index].factoryId,
               sku: preparedItems[index].sku,
               productName: preparedItems[index].productName,
+              unit: preparedItems[index].unit,
               quantity: preparedItems[index].quantity,
               purchasePriceYuan: item.purchasePriceYuan,
-              yuanRate: item.yuanRate,
+              yuanRate: exchangeRate,
               costKgs: item.costKgs,
               weightKg: item.weightKg,
               totalWeightKg: item.totalWeightKg,
@@ -357,7 +339,10 @@ export class ProcurementService {
       }
 
       const oldValue = this.pickProcurementAuditFields(existing);
-      const defaultYuanRate = dto.defaultYuanRate !== undefined ? Number(dto.defaultYuanRate) : Number(existing.defaultYuanRate);
+      const exchangeRate = dto.defaultYuanRate !== undefined
+        ? Number(dto.defaultYuanRate)
+        : Number(existing.defaultYuanRate);
+      this.validateExchangeRate(exchangeRate);
       const logistics = extractLogisticsCosts({
         chinaDomesticTransportKgs: dto.chinaDomesticTransportKgs ?? existing.chinaDomesticTransportKgs,
         chinaExportTransportKgs: dto.chinaExportTransportKgs ?? existing.chinaExportTransportKgs,
@@ -373,20 +358,13 @@ export class ProcurementService {
         await tx.procurementOrderItem.deleteMany({ where: { orderId: id } });
         const preparedItems: PreparedProcurementItem[] = [];
         for (const item of dto.items) {
-          const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
-          if (!product) throw new NotFoundException('Product not found');
-          preparedItems.push({
-            productId: product.id,
-            supplierId: item.supplierId ?? dto.supplierId ?? existing.supplierId,
-            factoryId: item.factoryId ?? dto.factoryId ?? existing.factoryId,
-            sku: product.sku,
-            productName: product.name,
-            quantity: Number(item.quantity ?? 0),
-            purchasePriceYuan: Number(item.purchasePriceYuan ?? 0),
-            yuanRate: Number(item.yuanRate ?? defaultYuanRate),
-            weightKg: Number(item.weightKg ?? 0),
-            note: item.note,
-          });
+          preparedItems.push(await this.resolveProcurementItemFromProduct(
+            tx,
+            item,
+            dto.supplierId ?? existing.supplierId,
+            dto.factoryId ?? existing.factoryId,
+            exchangeRate,
+          ));
         }
         const calculated = calculateLandedCosts(preparedItems, logistics);
         await tx.procurementOrderItem.createMany({
@@ -397,9 +375,10 @@ export class ProcurementService {
             factoryId: preparedItems[index].factoryId,
             sku: preparedItems[index].sku,
             productName: preparedItems[index].productName,
+            unit: preparedItems[index].unit,
             quantity: preparedItems[index].quantity,
             purchasePriceYuan: item.purchasePriceYuan,
-            yuanRate: item.yuanRate,
+            yuanRate: exchangeRate,
             costKgs: item.costKgs,
             weightKg: item.weightKg,
             totalWeightKg: item.totalWeightKg,
@@ -424,7 +403,9 @@ export class ProcurementService {
             supplierId: dto.supplierId ?? existing.supplierId,
             factoryId: dto.factoryId ?? existing.factoryId,
             hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
-            defaultYuanRate,
+            currency: dto.currency ?? existing.currency,
+            defaultYuanRate: exchangeRate,
+            purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
             totalYuan: calculated.totalYuan,
             totalTransportCostKgs: calculated.totalTransportCostKgs,
             totalCostKgs: calculated.totalCostKgs,
@@ -441,7 +422,7 @@ export class ProcurementService {
             quantity: item.quantity,
             receivedQuantity: item.receivedQuantity,
             purchasePriceYuan: Number(item.purchasePriceYuan),
-            yuanRate: Number(item.yuanRate),
+            yuanRate: exchangeRate,
             weightKg: Number(item.weightKg),
           })),
           logistics,
@@ -451,8 +432,9 @@ export class ProcurementService {
           await tx.procurementOrderItem.update({
             where: { id: item.id },
             data: {
-              totalWeightKg: next.totalWeightKg,
+              yuanRate: exchangeRate,
               costKgs: next.costKgs,
+              totalWeightKg: next.totalWeightKg,
               chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
               chinaExportAllocKgs: next.chinaExportAllocKgs,
               localTransportAllocKgs: next.localTransportAllocKgs,
@@ -474,7 +456,9 @@ export class ProcurementService {
             supplierId: dto.supplierId ?? existing.supplierId,
             factoryId: dto.factoryId ?? existing.factoryId,
             hqWarehouseId: dto.hqWarehouseId ?? existing.hqWarehouseId,
-            defaultYuanRate,
+            currency: dto.currency ?? existing.currency,
+            defaultYuanRate: exchangeRate,
+            purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
             totalYuan: recalculated.totalYuan,
             totalTransportCostKgs: recalculated.totalTransportCostKgs,
             totalCostKgs: recalculated.totalCostKgs,
@@ -514,12 +498,13 @@ export class ProcurementService {
       if (!order) throw new NotFoundException('Procurement order not found');
       const oldValue = this.pickProcurementAuditFields(order);
       const logistics = extractLogisticsCosts(order);
+      const exchangeRate = Number(order.defaultYuanRate);
       const calculated = calculateLandedCosts(
         order.items.map((item) => ({
           quantity: item.quantity,
           receivedQuantity: item.receivedQuantity,
           purchasePriceYuan: Number(item.purchasePriceYuan),
-          yuanRate: Number(item.yuanRate),
+          yuanRate: exchangeRate,
           weightKg: Number(item.weightKg),
         })),
         logistics,
@@ -529,6 +514,7 @@ export class ProcurementService {
         await tx.procurementOrderItem.update({
           where: { id: item.id },
           data: {
+            yuanRate: exchangeRate,
             totalWeightKg: next.totalWeightKg,
             costKgs: next.costKgs,
             chinaDomesticAllocKgs: next.chinaDomesticAllocKgs,
@@ -781,6 +767,9 @@ export class ProcurementService {
       supplierId: order.supplierId,
       factoryId: order.factoryId,
       hqWarehouseId: order.hqWarehouseId,
+      currency: order.currency,
+      purchaseDate: order.purchaseDate,
+      exchangeRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
       defaultYuanRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
       totalYuan: order.totalYuan?.toString?.() ?? order.totalYuan,
       totalTransportCostKgs: order.totalTransportCostKgs?.toString?.() ?? order.totalTransportCostKgs,
@@ -862,6 +851,46 @@ export class ProcurementService {
     if (!this.hasRole(user, Role.CEO) && !this.hasRole(user, Role.SUPPLY_CHAIN_MANAGER)) {
       throw new ForbiddenException('You do not have permission to edit suppliers');
     }
+  }
+
+  private validateExchangeRate(rate: number) {
+    if (!rate || rate <= 0) {
+      throw new BadRequestException('Exchange rate is required and must be greater than zero');
+    }
+  }
+
+  private async resolveProcurementItemFromProduct(
+    tx: any,
+    item: { productId: string; quantity?: number; purchasePriceYuan?: number; note?: string },
+    orderSupplierId: string,
+    orderFactoryId: string | null | undefined,
+    exchangeRate: number,
+  ): Promise<PreparedProcurementItem> {
+    const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
+    if (!product) throw new NotFoundException('Product not found');
+    const weightKg = Number(product.weightKg);
+    if (!weightKg || weightKg <= 0) {
+      throw new BadRequestException(
+        `Product weight is not configured for ${product.sku} (${product.name}). Please configure weight in Product Management.`,
+      );
+    }
+    const quantity = Number(item.quantity ?? 0);
+    if (quantity <= 0) {
+      throw new BadRequestException(`Quantity must be greater than zero for ${product.sku}`);
+    }
+    return {
+      productId: product.id,
+      supplierId: product.defaultSupplierId ?? orderSupplierId,
+      factoryId: product.defaultFactoryId ?? orderFactoryId ?? null,
+      sku: product.sku,
+      productName: product.name,
+      unit: product.unit ?? 'pcs',
+      quantity,
+      purchasePriceYuan: Number(item.purchasePriceYuan ?? product.purchasePriceYuan ?? 0),
+      yuanRate: exchangeRate,
+      weightKg,
+      note: item.note,
+    };
   }
 
   private validateSupplierPayload(dto: any) {

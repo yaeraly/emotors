@@ -40,6 +40,18 @@ export class UpdateProductDto {
   characteristics?: unknown;
 
   @IsOptional()
+  @IsString()
+  unit?: string;
+
+  @IsOptional()
+  @IsString()
+  defaultSupplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  defaultFactoryId?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)

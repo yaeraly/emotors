@@ -41,6 +41,18 @@ export class CreateProductDto {
   @IsOptional()
   characteristics?: unknown;
 
+  @IsOptional()
+  @IsString()
+  unit?: string;
+
+  @IsOptional()
+  @IsString()
+  defaultSupplierId?: string;
+
+  @IsOptional()
+  @IsString()
+  defaultFactoryId?: string;
+
   @Type(() => Number)
   @IsNumber()
   @Min(0)
