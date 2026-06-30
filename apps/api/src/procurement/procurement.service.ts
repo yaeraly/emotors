@@ -293,6 +293,15 @@ export class ProcurementService {
       });
 
       await this.auditProcurement(tx, user, 'CREATE_PROCUREMENT_ORDER', order.id, null, this.pickProcurementAuditFields(order));
+      await this.inventoryService.syncProcurementPurchasePricesInTx(tx, user, {
+        orderId: order.id,
+        items: preparedItems.map((item) => ({
+          productId: item.productId,
+          purchasePriceYuan: item.purchasePriceYuan,
+          supplierId: item.supplierId,
+          factoryId: item.factoryId,
+        })),
+      });
       return order;
     });
   }
@@ -338,6 +347,12 @@ export class ProcurementService {
       }
       const { logistics, cargo } = this.resolveProcurementLogistics(dto, existing);
       const cargoReceipt = this.buildCargoReceiptData(dto, existing);
+      let priceSyncItems: Array<{
+        productId: string;
+        purchasePriceYuan: number;
+        supplierId?: string | null;
+        factoryId?: string | null;
+      }> | null = null;
 
       if (Array.isArray(dto.items)) {
         await tx.procurementOrderItem.deleteMany({ where: { orderId: id } });
@@ -351,6 +366,12 @@ export class ProcurementService {
             exchangeRate,
           ));
         }
+        priceSyncItems = preparedItems.map((item) => ({
+          productId: item.productId,
+          purchasePriceYuan: item.purchasePriceYuan,
+          supplierId: item.supplierId,
+          factoryId: item.factoryId,
+        }));
         const calculated = this.calculateProcurementLandedCosts(preparedItems, logistics, cargo);
         const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
         await tx.procurementOrderItem.createMany({
@@ -422,6 +443,12 @@ export class ProcurementService {
         dto.reason,
       );
       await this.auditProcurementLogisticsChanges(tx, user, id, oldValue, this.pickProcurementAuditFields(updated));
+      if (priceSyncItems?.length) {
+        await this.inventoryService.syncProcurementPurchasePricesInTx(tx, user, {
+          orderId: id,
+          items: priceSyncItems,
+        });
+      }
       return updated;
     });
   }

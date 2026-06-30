@@ -7,8 +7,8 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import { canEditProductCatalog } from '@/lib/rbac';
-import type { Product, ProductCategory, User, Warehouse } from '@/lib/types';
+import { canEditProductCatalog, canEditPurchasePriceYuan } from '@/lib/rbac';
+import type { Product, ProductCategory, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductDetailPage() {
@@ -32,6 +32,13 @@ export default function ProductDetailPage() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [showPurchasePriceHistory, setShowPurchasePriceHistory] = useState(false);
+  const [purchasePriceForm, setPurchasePriceForm] = useState({
+    purchasePriceYuan: '0',
+    reason: 'SUPPLIER_PRICE_CHANGE' as PurchasePriceChangeReason,
+    note: '',
+  });
+  const [priceSaving, setPriceSaving] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -55,6 +62,11 @@ export default function ProductDetailPage() {
           weightKg: String(productResult.weightKg),
           sellingPriceKgs: String(productResult.sellingPriceKgs),
           minStockLevel: String(productResult.minStockLevel),
+        });
+        setPurchasePriceForm({
+          purchasePriceYuan: String(productResult.purchasePriceYuan ?? 0),
+          reason: 'SUPPLIER_PRICE_CHANGE',
+          note: '',
         });
       })
       .catch((err) =>
@@ -118,6 +130,34 @@ export default function ProductDetailPage() {
       }
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function savePurchasePrice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPriceSaving(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const updated = await apiFetch<Product>(`/inventory/products/${params.id}/purchase-price`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          purchasePriceYuan: Number(purchasePriceForm.purchasePriceYuan),
+          reason: purchasePriceForm.reason,
+          note: purchasePriceForm.note || undefined,
+        }),
+      });
+      setProduct(updated);
+      setPurchasePriceForm((current) => ({
+        ...current,
+        purchasePriceYuan: String(updated.purchasePriceYuan),
+        note: '',
+      }));
+      setSuccessMessage(t('common.success'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setPriceSaving(false);
     }
   }
 
@@ -197,12 +237,55 @@ export default function ProductDetailPage() {
 
             <div className="grid gap-6 xl:grid-cols-3">
               <Panel title={t('inventory.productDetail')}>
-                <Info label={t('inventory.purchasePriceYuan')} value={formatYuan(product.purchasePriceYuan)} />
+                <Info label={t('inventory.currentPurchasePriceYuan')} value={formatYuan(product.purchasePriceYuan)} />
+                <Info label={t('inventory.lastPriceUpdated')} value={product.purchasePriceUpdatedAt ? new Date(product.purchasePriceUpdatedAt).toLocaleString() : '-'} />
+                <Info label={t('procurement.orders.supplier')} value={product.defaultSupplier?.name ?? '-'} />
+                <Info label={t('procurement.orders.factory')} value={product.defaultFactory?.name ?? '-'} />
                 <Info label={t('inventory.latestYuanRate')} value={String(product.latestYuanRate)} />
                 <Info label={t('inventory.finalCostKgs')} value={formatKgs(product.finalCostKgs)} />
                 <Info label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} />
                 <Info label={t('inventory.marginAmount')} value={`${formatKgs(product.marginAmount)} (${Number(product.marginPercent).toFixed(2)}%)`} />
+                <button
+                  type="button"
+                  onClick={() => setShowPurchasePriceHistory((current) => !current)}
+                  className="mt-2 rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700"
+                >
+                  {t('inventory.viewPurchasePriceHistory')}
+                </button>
               </Panel>
+              {canEditPurchasePriceYuan(currentUser) ? (
+                <Panel title={t('inventory.updatePurchasePrice')}>
+                  <form onSubmit={savePurchasePrice} className="space-y-3">
+                    <Input
+                      label={t('inventory.currentPurchasePriceYuan')}
+                      type="number"
+                      value={purchasePriceForm.purchasePriceYuan}
+                      onChange={(value) => setPurchasePriceForm({ ...purchasePriceForm, purchasePriceYuan: value })}
+                      step="0.01"
+                    />
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">{t('inventory.purchasePriceChangeReason')}</span>
+                      <select
+                        value={purchasePriceForm.reason}
+                        onChange={(event) => setPurchasePriceForm({ ...purchasePriceForm, reason: event.target.value as PurchasePriceChangeReason })}
+                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                      >
+                        {PURCHASE_PRICE_REASONS.map((reason) => (
+                          <option key={reason} value={reason}>{t(`inventory.purchasePriceReason.${reason}`)}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <Input
+                      label={t('inventory.purchasePriceChangeNote')}
+                      value={purchasePriceForm.note}
+                      onChange={(value) => setPurchasePriceForm({ ...purchasePriceForm, note: value })}
+                    />
+                    <button disabled={priceSaving} type="submit" className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300">
+                      {priceSaving ? t('common.loading') : t('common.save')}
+                    </button>
+                  </form>
+                </Panel>
+              ) : null}
               <Panel title={t('inventory.priceHistory')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">
                   {product.priceHistory?.length ? product.priceHistory.map((item) => (
@@ -226,6 +309,15 @@ export default function ProductDetailPage() {
                 </div>
               </Panel>
             </div>
+            {showPurchasePriceHistory ? (
+              <Panel title={t('inventory.purchasePriceHistory')}>
+                <PurchasePriceHistoryTable
+                  items={product.purchasePriceHistory ?? []}
+                  emptyLabel={t('inventory.noPurchasePriceHistory')}
+                  t={t}
+                />
+              </Panel>
+            ) : null}
             {product.photoUrl && previewOpen ? (
               <ImagePreviewModal
                 images={[{ src: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}${product.photoUrl}`, alt: product.name }]}
@@ -251,6 +343,61 @@ function Info({ label, value }: { label: string; value: string }) {
 
 function Input({ label, value, onChange, type = 'text', min, step }: { label: string; value: string; onChange: (value: string) => void; type?: string; min?: string; step?: string }) {
   return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} type={type} min={min ?? (type === 'number' ? 0 : undefined)} step={step ?? (type === 'number' ? '0.01' : undefined)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
+}
+
+const PURCHASE_PRICE_REASONS: PurchasePriceChangeReason[] = [
+  'SUPPLIER_PRICE_CHANGE',
+  'FACTORY_PRICE_UPDATE',
+  'MANUAL_CORRECTION',
+];
+
+function PurchasePriceHistoryTable({
+  items,
+  emptyLabel,
+  t,
+}: {
+  items: ProductPurchasePriceHistory[];
+  emptyLabel: string;
+  t: (key: string) => string;
+}) {
+  if (!items.length) {
+    return <p className="text-sm text-slate-500">{emptyLabel}</p>;
+  }
+
+  return (
+    <div className="max-h-96 overflow-y-auto">
+      <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <thead className="bg-slate-50 text-left text-xs font-bold uppercase text-slate-500">
+          <tr>
+            <th className="px-3 py-2">{t('inventory.effectiveDate')}</th>
+            <th className="px-3 py-2">{t('inventory.oldPriceYuan')}</th>
+            <th className="px-3 py-2">{t('inventory.newPriceYuan')}</th>
+            <th className="px-3 py-2">{t('inventory.priceDifferenceYuan')}</th>
+            <th className="px-3 py-2">{t('inventory.purchasePriceChangeReason')}</th>
+            <th className="px-3 py-2">{t('inventory.changedBy')}</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {items.map((item) => (
+            <tr key={item.id}>
+              <td className="px-3 py-2">{new Date(item.effectiveDate).toLocaleString()}</td>
+              <td className="px-3 py-2">¥{Number(item.oldPriceYuan).toFixed(2)}</td>
+              <td className="px-3 py-2">¥{Number(item.newPriceYuan).toFixed(2)}</td>
+              <td className={`px-3 py-2 font-semibold ${item.differenceYuan > 0 ? 'text-red-600' : item.differenceYuan < 0 ? 'text-green-600' : ''}`}>
+                {item.differenceYuan > 0
+                  ? t('procurement.orders.priceIncreased').replace('{amount}', Number(item.differenceYuan).toFixed(2))
+                  : item.differenceYuan < 0
+                    ? t('procurement.orders.priceDecreased').replace('{amount}', Number(item.differenceYuan).toFixed(2))
+                    : '0'}
+              </td>
+              <td className="px-3 py-2">{t(`inventory.purchasePriceReason.${item.reason}`)}</td>
+              <td className="px-3 py-2">{item.changedBy?.fullName ?? '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function formatKgs(value: number | string | null | undefined) {

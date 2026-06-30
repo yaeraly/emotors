@@ -231,6 +231,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                     {canManageProcurementOrders ? <Link href="/procurement/suppliers" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.suppliers')}</Link> : null}
                     {canManageProcurementOrders ? <Link href="/procurement/factories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.factories')}</Link> : null}
                     <Link href="/procurement/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.orders')}</Link>
+                    <Link href="/procurement/purchase-price-history" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('inventory.purchasePriceReport')}</Link>
                     {canManageProcurementOrders ? <Link href="/branch-purchase-requests" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.branchPurchaseRequests')}</Link> : null}
                     {canSeeSupplierClaims ? <Link href="/supplier-claims" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.supplierClaims')}</Link> : null}
                   </div>

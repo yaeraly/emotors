@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ProcurementOrderStatus, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
+import { Prisma, ProcurementOrderStatus, PurchasePriceChangeReason, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { MultipartFile } from '@fastify/multipart';
 import { FastifyRequest } from 'fastify';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -24,7 +24,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { canArchiveProduct, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { canArchiveProduct, canEditPurchasePriceYuan, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -35,6 +35,8 @@ import { ProductQueryDto } from './dto/product-query.dto';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdatePurchasePriceDto } from './dto/update-purchase-price.dto';
+import { PurchasePriceHistoryQueryDto } from './dto/purchase-price-history-query.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 
@@ -411,6 +413,16 @@ export class InventoryService {
           },
           orderBy: { effectiveFrom: 'desc' },
         },
+        purchasePriceHistory: {
+          include: {
+            supplier: { select: { id: true, name: true } },
+            factory: { select: { id: true, name: true } },
+            changedBy: { select: { id: true, fullName: true, role: true } },
+            procurementOrder: { select: { id: true, orderNumber: true } },
+          },
+          orderBy: { effectiveDate: 'desc' },
+          take: 20,
+        },
         stockMovements: {
           include: {
             warehouse: true,
@@ -457,19 +469,38 @@ export class InventoryService {
       const weightChanged =
         dto.weightKg !== undefined && Number(dto.weightKg) !== oldWeightKg;
 
+      let purchasePriceYuan = Number(current.purchasePriceYuan);
+      if (dto.purchasePriceYuan !== undefined) {
+        const requestedPrice = Number(dto.purchasePriceYuan);
+        if (requestedPrice !== purchasePriceYuan) {
+          this.assertCanEditPurchasePriceYuan(user);
+          await this.recordPurchasePriceChangeInTx(tx, user, {
+            productId: id,
+            newPriceYuan: requestedPrice,
+            reason: dto.purchasePriceChangeReason ?? PurchasePriceChangeReason.MANUAL_CORRECTION,
+            supplierId: dto.defaultSupplierId ?? current.defaultSupplierId,
+            factoryId: dto.defaultFactoryId ?? current.defaultFactoryId,
+            note: dto.purchasePriceChangeNote,
+          });
+          purchasePriceYuan = requestedPrice;
+        }
+      }
+
+      const refreshed = await tx.product.findFirst({ where: { id } });
+      const currentAfterPrice = refreshed ?? current;
+
       const next = {
-        weightKg: dto.weightKg ?? Number(current.weightKg),
-        purchasePriceYuan:
-          dto.purchasePriceYuan ?? Number(current.purchasePriceYuan),
-        latestYuanRate: dto.latestYuanRate ?? Number(current.latestYuanRate),
+        weightKg: dto.weightKg ?? Number(currentAfterPrice.weightKg),
+        purchasePriceYuan,
+        latestYuanRate: dto.latestYuanRate ?? Number(currentAfterPrice.latestYuanRate),
         transportCostKgs:
           dto.transportCostKgs ??
           (dto.transportCostPerKg !== undefined || dto.weightKg !== undefined
-            ? (dto.weightKg ?? Number(current.weightKg)) *
+            ? (dto.weightKg ?? Number(currentAfterPrice.weightKg)) *
               Number(dto.transportCostPerKg ?? 0)
-            : Number(current.transportCostKgs)),
+            : Number(currentAfterPrice.transportCostKgs)),
         sellingPriceKgs:
-          dto.sellingPriceKgs ?? Number(current.sellingPriceKgs),
+          dto.sellingPriceKgs ?? Number(currentAfterPrice.sellingPriceKgs),
       };
       const costs = this.calculateCosts({
         weightKg: next.weightKg,
@@ -479,12 +510,13 @@ export class InventoryService {
         sellingPriceKgs: next.sellingPriceKgs,
       });
       const priceChanged =
-        dto.purchasePriceYuan !== undefined ||
         dto.latestYuanRate !== undefined ||
         dto.transportCostKgs !== undefined ||
         dto.transportCostPerKg !== undefined ||
         dto.weightKg !== undefined ||
-        dto.sellingPriceKgs !== undefined;
+        dto.sellingPriceKgs !== undefined ||
+        (dto.purchasePriceYuan !== undefined &&
+          Number(dto.purchasePriceYuan) !== Number(current.purchasePriceYuan));
 
       await tx.product.update({
         where: { id },
@@ -502,6 +534,11 @@ export class InventoryService {
           defaultFactoryId: dto.defaultFactoryId,
           weightKg: next.weightKg,
           purchasePriceYuan: next.purchasePriceYuan,
+          purchasePriceUpdatedAt:
+            dto.purchasePriceYuan !== undefined &&
+            Number(dto.purchasePriceYuan) !== Number(current.purchasePriceYuan)
+              ? new Date()
+              : currentAfterPrice.purchasePriceUpdatedAt,
           latestYuanRate: next.latestYuanRate,
           ...costs,
           minStockLevel: dto.minStockLevel,
@@ -602,6 +639,11 @@ export class InventoryService {
     this.assertCanManageProductCatalog(user);
     return this.prisma.$transaction(async (tx) => {
       const product = await this.getProductForWrite(tx, user, productId);
+      if (
+        Number(dto.purchasePriceYuan) !== Number(product.purchasePriceYuan)
+      ) {
+        this.assertCanEditPurchasePriceYuan(user);
+      }
       const transportCostKgs =
         dto.transportCostKgs ??
         Number(product.weightKg) * Number(dto.transportCostPerKg ?? 0);
@@ -643,6 +685,183 @@ export class InventoryService {
       include: { createdBy: { select: { id: true, fullName: true, role: true } } },
       orderBy: { effectiveFrom: 'desc' },
     });
+  }
+
+  async purchasePriceHistoryForProduct(user: AuthUser, productId: string) {
+    await this.getProductForRead(user, productId);
+    return this.queryPurchasePriceHistory({ productId });
+  }
+
+  async purchasePriceHistoryReport(
+    user: AuthUser,
+    query: PurchasePriceHistoryQueryDto,
+  ) {
+    if (!canViewProductCatalog(user) && !this.canAccessAllInventory(user)) {
+      throw new ForbiddenException('You do not have permission to view purchase price history');
+    }
+    return this.queryPurchasePriceHistory(query);
+  }
+
+  async updatePurchasePriceYuan(
+    user: AuthUser,
+    productId: string,
+    dto: UpdatePurchasePriceDto,
+  ) {
+    this.assertCanEditPurchasePriceYuan(user);
+    return this.prisma.$transaction(async (tx) => {
+      const product = await this.getProductForWrite(tx, user, productId);
+      await this.recordPurchasePriceChangeInTx(tx, user, {
+        productId,
+        newPriceYuan: dto.purchasePriceYuan,
+        reason: dto.reason,
+        supplierId: product.defaultSupplierId,
+        factoryId: product.defaultFactoryId,
+        note: dto.note,
+      });
+      return this.getProductResponseInTx(tx, user, productId);
+    });
+  }
+
+  async syncProcurementPurchasePricesInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    input: {
+      orderId: string;
+      items: Array<{
+        productId: string;
+        purchasePriceYuan: number;
+        supplierId?: string | null;
+        factoryId?: string | null;
+      }>;
+    },
+  ) {
+    for (const item of input.items) {
+      await this.recordPurchasePriceChangeInTx(tx, user, {
+        productId: item.productId,
+        newPriceYuan: item.purchasePriceYuan,
+        reason: PurchasePriceChangeReason.NEW_PROCUREMENT,
+        supplierId: item.supplierId,
+        factoryId: item.factoryId,
+        procurementOrderId: input.orderId,
+      });
+    }
+  }
+
+  async recordPurchasePriceChangeInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    input: {
+      productId: string;
+      newPriceYuan: number;
+      reason: PurchasePriceChangeReason;
+      supplierId?: string | null;
+      factoryId?: string | null;
+      procurementOrderId?: string | null;
+      note?: string | null;
+      effectiveDate?: Date;
+    },
+  ) {
+    const product = await tx.product.findFirst({
+      where: { id: input.productId, deletedAt: null },
+    });
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const oldPriceYuan = this.roundMoney(Number(product.purchasePriceYuan));
+    const newPriceYuan = this.roundMoney(input.newPriceYuan);
+    if (oldPriceYuan === newPriceYuan) {
+      return { changed: false, oldPriceYuan, newPriceYuan };
+    }
+
+    const differenceYuan = this.roundMoney(newPriceYuan - oldPriceYuan);
+    const effectiveDate = input.effectiveDate ?? new Date();
+    const costs = this.calculateCosts({
+      weightKg: Number(product.weightKg),
+      purchasePriceYuan: newPriceYuan,
+      yuanRate: Number(product.latestYuanRate),
+      transportCostKgs: Number(product.transportCostKgs),
+      sellingPriceKgs: Number(product.sellingPriceKgs),
+    });
+
+    await tx.product.update({
+      where: { id: input.productId },
+      data: {
+        purchasePriceYuan: newPriceYuan,
+        purchasePriceUpdatedAt: effectiveDate,
+        ...costs,
+      },
+    });
+
+    await tx.productPurchasePriceHistory.create({
+      data: {
+        productId: input.productId,
+        supplierId: input.supplierId ?? product.defaultSupplierId,
+        factoryId: input.factoryId ?? product.defaultFactoryId,
+        oldPriceYuan,
+        newPriceYuan,
+        differenceYuan,
+        effectiveDate,
+        reason: input.reason,
+        note: input.note,
+        procurementOrderId: input.procurementOrderId,
+        changedById: user.id,
+      },
+    });
+
+    await this.auditInTx(
+      tx,
+      user,
+      product.branchId,
+      'PURCHASE_PRICE_CHANGED',
+      'Product',
+      input.productId,
+      {
+        productId: input.productId,
+        oldPrice: oldPriceYuan,
+        newPrice: newPriceYuan,
+        reason: input.reason,
+        supplierId: input.supplierId ?? product.defaultSupplierId,
+        factoryId: input.factoryId ?? product.defaultFactoryId,
+        procurementOrderId: input.procurementOrderId,
+        note: input.note,
+      },
+    );
+
+    return { changed: true, oldPriceYuan, newPriceYuan };
+  }
+
+  private async queryPurchasePriceHistory(query: PurchasePriceHistoryQueryDto) {
+    const where: Prisma.ProductPurchasePriceHistoryWhereInput = {};
+    if (query.productId) where.productId = query.productId;
+    if (query.supplierId) where.supplierId = query.supplierId;
+    if (query.factoryId) where.factoryId = query.factoryId;
+    if (query.changedById) where.changedById = query.changedById;
+    if (query.from || query.to) {
+      where.effectiveDate = {};
+      if (query.from) where.effectiveDate.gte = new Date(query.from);
+      if (query.to) where.effectiveDate.lte = new Date(query.to);
+    }
+
+    const rows = await this.prisma.productPurchasePriceHistory.findMany({
+      where,
+      include: {
+        product: { select: { id: true, name: true, sku: true } },
+        supplier: { select: { id: true, name: true } },
+        factory: { select: { id: true, name: true } },
+        changedBy: { select: { id: true, fullName: true, role: true } },
+        procurementOrder: { select: { id: true, orderNumber: true } },
+      },
+      orderBy: { effectiveDate: 'desc' },
+      take: 500,
+    });
+
+    return rows.map((row) => ({
+      ...row,
+      oldPriceYuan: Number(row.oldPriceYuan),
+      newPriceYuan: Number(row.newPriceYuan),
+      differenceYuan: Number(row.differenceYuan),
+    }));
   }
 
   createYuanRate(user: AuthUser, dto: CreateYuanRateDto) {
@@ -938,6 +1157,8 @@ export class InventoryService {
       branch: true,
       warehouse: true,
       productCategory: true,
+      defaultSupplier: { select: { id: true, name: true } },
+      defaultFactory: { select: { id: true, name: true } },
       inventoryBalances: { include: { warehouse: true } },
     };
   }
@@ -1092,6 +1313,16 @@ export class InventoryService {
             createdBy: { select: { id: true, fullName: true, role: true } },
           },
           orderBy: { effectiveFrom: 'desc' },
+        },
+        purchasePriceHistory: {
+          include: {
+            supplier: { select: { id: true, name: true } },
+            factory: { select: { id: true, name: true } },
+            changedBy: { select: { id: true, fullName: true, role: true } },
+            procurementOrder: { select: { id: true, orderNumber: true } },
+          },
+          orderBy: { effectiveDate: 'desc' },
+          take: 20,
         },
         stockMovements: {
           include: {
@@ -1264,6 +1495,12 @@ export class InventoryService {
     }
   }
 
+  private assertCanEditPurchasePriceYuan(user: AuthUser) {
+    if (!canEditPurchasePriceYuan(user)) {
+      throw new ForbiddenException('You do not have permission to change purchase price');
+    }
+  }
+
   private assertCanArchiveProduct(user: AuthUser) {
     if (!canArchiveProduct(user)) {
       throw new ForbiddenException('You do not have permission to archive products');
@@ -1349,6 +1586,7 @@ export class InventoryService {
       ...product,
       weightKg: Number(product.weightKg),
       purchasePriceYuan: Number(product.purchasePriceYuan),
+      purchasePriceUpdatedAt: product.purchasePriceUpdatedAt ?? null,
       latestYuanRate: Number(product.latestYuanRate),
       purchaseCostKgs: Number(product.purchaseCostKgs),
       transportCostKgs: Number(product.transportCostKgs),
@@ -1358,6 +1596,12 @@ export class InventoryService {
       marginPercent: Number(product.marginPercent),
       quantity: totalQuantity,
       lowStock: totalQuantity <= product.minStockLevel,
+      purchasePriceHistory: product.purchasePriceHistory?.map((row: any) => ({
+        ...row,
+        oldPriceYuan: Number(row.oldPriceYuan),
+        newPriceYuan: Number(row.newPriceYuan),
+        differenceYuan: Number(row.differenceYuan),
+      })),
     };
   }
 

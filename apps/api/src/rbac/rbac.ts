@@ -219,6 +219,11 @@ export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'p
   ]);
 }
 
+export function canEditPurchasePriceYuan(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
 export function canCreateProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return userHasPermission(user, 'procurement.manage');
 }

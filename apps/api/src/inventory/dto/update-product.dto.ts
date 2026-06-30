@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsEnum,
   IsInt,
   IsNumber,
   IsOptional,
@@ -8,6 +9,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { PurchasePriceChangeReason } from '@prisma/client';
 
 export class UpdateProductDto {
   @IsOptional()
@@ -65,6 +67,14 @@ export class UpdateProductDto {
   @IsNumber()
   @Min(0)
   purchasePriceYuan?: number;
+
+  @IsOptional()
+  @IsEnum(PurchasePriceChangeReason)
+  purchasePriceChangeReason?: PurchasePriceChangeReason;
+
+  @IsOptional()
+  @IsString()
+  purchasePriceChangeNote?: string;
 
   @IsOptional()
   @Type(() => Number)

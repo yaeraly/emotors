@@ -228,6 +228,13 @@ enum SupplierClaimStatus {
   CLOSED
 }
 
+enum PurchasePriceChangeReason {
+  SUPPLIER_PRICE_CHANGE
+  NEW_PROCUREMENT
+  FACTORY_PRICE_UPDATE
+  MANUAL_CORRECTION
+}
+
 enum SupplierClaimOutcome {
   REFUND
   REPLACEMENT
@@ -538,6 +545,7 @@ model User {
   sales          Sale[]          @relation("SaleSeller")
   payments       Payment[]       @relation("PaymentCreator")
   productPriceHistory ProductPriceHistory[] @relation("ProductPriceHistoryCreator")
+  productPurchasePriceHistory ProductPurchasePriceHistory[] @relation("ProductPurchasePriceHistoryChanger")
   yuanRateHistory YuanRateHistory[] @relation("YuanRateHistoryCreator")
   stockMovements StockMovement[] @relation("StockMovementCreator")
   productCategories ProductCategory[] @relation("ProductCategoryCreator")
@@ -922,6 +930,7 @@ model Product {
   defaultFactory    Factory?  @relation("ProductDefaultFactory", fields: [defaultFactoryId], references: [id])
   weightKg          Decimal   @default(0) @db.Decimal(14, 3)
   purchasePriceYuan Decimal   @default(0) @db.Decimal(14, 2)
+  purchasePriceUpdatedAt DateTime?
   latestYuanRate    Decimal   @default(0) @db.Decimal(14, 4)
   purchaseCostKgs   Decimal   @default(0) @db.Decimal(14, 2)
   transportCostKgs  Decimal   @default(0) @db.Decimal(14, 2)
@@ -932,6 +941,7 @@ model Product {
   minStockLevel     Int       @default(0)
   isActive          Boolean   @default(true)
   priceHistory      ProductPriceHistory[]
+  purchasePriceHistory ProductPurchasePriceHistory[]
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
@@ -992,6 +1002,34 @@ model ProductPriceHistory {
   @@index([productId])
   @@index([createdById])
   @@index([effectiveFrom])
+}
+
+model ProductPurchasePriceHistory {
+  id                 String                    @id @default(cuid())
+  productId          String
+  product            Product                   @relation(fields: [productId], references: [id])
+  supplierId         String?
+  supplier           Supplier?                 @relation(fields: [supplierId], references: [id])
+  factoryId          String?
+  factory            Factory?                  @relation(fields: [factoryId], references: [id])
+  oldPriceYuan       Decimal                   @db.Decimal(14, 2)
+  newPriceYuan       Decimal                   @db.Decimal(14, 2)
+  differenceYuan     Decimal                   @db.Decimal(14, 2)
+  effectiveDate      DateTime                  @default(now())
+  reason             PurchasePriceChangeReason
+  note               String?
+  procurementOrderId String?
+  procurementOrder   ProcurementOrder?         @relation(fields: [procurementOrderId], references: [id])
+  changedById        String
+  changedBy          User                      @relation("ProductPurchasePriceHistoryChanger", fields: [changedById], references: [id])
+  createdAt          DateTime                  @default(now())
+
+  @@index([productId])
+  @@index([supplierId])
+  @@index([factoryId])
+  @@index([changedById])
+  @@index([effectiveDate])
+  @@index([procurementOrderId])
 }
 
 model YuanRateHistory {
@@ -1351,6 +1389,7 @@ model Supplier {
   procurementOrders ProcurementOrder[]
   procurementOrderItems ProcurementOrderItem[]
   defaultProducts       Product[]         @relation("ProductDefaultSupplier")
+  purchasePriceHistory  ProductPurchasePriceHistory[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   deletedAt        DateTime?
@@ -1391,6 +1430,7 @@ model Factory {
   procurementOrders  ProcurementOrder[]
   procurementOrderItems ProcurementOrderItem[]
   defaultProducts       Product[] @relation("ProductDefaultFactory")
+  purchasePriceHistory  ProductPurchasePriceHistory[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   deletedAt          DateTime?
@@ -1452,6 +1492,7 @@ model ProcurementOrder {
   items                    ProcurementOrderItem[]
   receivings               ProcurementGoodsReceiving[]
   differenceReports        ProcurementDifferenceReport[]
+  purchasePriceHistory     ProductPurchasePriceHistory[]
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?

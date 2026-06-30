@@ -334,8 +334,11 @@ export type Product = {
   unit?: string;
   defaultSupplierId?: string | null;
   defaultFactoryId?: string | null;
+  defaultSupplier?: { id: string; name: string } | null;
+  defaultFactory?: { id: string; name: string } | null;
   weightKg: number;
   purchasePriceYuan: number;
+  purchasePriceUpdatedAt?: string | null;
   latestYuanRate: number;
   purchaseCostKgs: number;
   transportCostKgs: number;
@@ -348,6 +351,7 @@ export type Product = {
   lowStock: boolean;
   isActive: boolean;
   priceHistory?: ProductPriceHistory[];
+  purchasePriceHistory?: ProductPurchasePriceHistory[];
   stockMovements?: StockMovement[];
   inventoryBalances?: InventoryBalance[];
   createdAt: string;
@@ -374,6 +378,32 @@ export type ProductPriceHistory = {
   marginAmount: number | string;
   marginPercent: number | string;
   effectiveFrom: string;
+  createdAt: string;
+};
+
+export type PurchasePriceChangeReason =
+  | 'SUPPLIER_PRICE_CHANGE'
+  | 'NEW_PROCUREMENT'
+  | 'FACTORY_PRICE_UPDATE'
+  | 'MANUAL_CORRECTION';
+
+export type ProductPurchasePriceHistory = {
+  id: string;
+  productId: string;
+  product?: { id: string; name: string; sku: string };
+  supplierId?: string | null;
+  supplier?: { id: string; name: string } | null;
+  factoryId?: string | null;
+  factory?: { id: string; name: string } | null;
+  oldPriceYuan: number;
+  newPriceYuan: number;
+  differenceYuan: number;
+  effectiveDate: string;
+  reason: PurchasePriceChangeReason;
+  note?: string | null;
+  procurementOrderId?: string | null;
+  procurementOrder?: { id: string; orderNumber: string } | null;
+  changedBy?: { id: string; fullName: string; role: string };
   createdAt: string;
 };
 

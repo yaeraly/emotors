@@ -29,6 +29,8 @@ import { ProductQueryDto } from './dto/product-query.dto';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { UpdatePurchasePriceDto } from './dto/update-purchase-price.dto';
+import { PurchasePriceHistoryQueryDto } from './dto/purchase-price-history-query.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { InventoryService } from './inventory.service';
 
@@ -128,6 +130,31 @@ export class InventoryController {
   @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   priceHistory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.inventoryService.priceHistory(user, id);
+  }
+
+  @Get('products/:id/purchase-price-history')
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
+  purchasePriceHistoryForProduct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.inventoryService.purchasePriceHistoryForProduct(user, id);
+  }
+
+  @Put('products/:id/purchase-price')
+  @RequirePermissions('products.manage')
+  updatePurchasePrice(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePurchasePriceDto,
+  ) {
+    return this.inventoryService.updatePurchasePriceYuan(user, id, dto);
+  }
+
+  @Get('purchase-price-history')
+  @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS, 'reports.view')
+  purchasePriceHistoryReport(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PurchasePriceHistoryQueryDto,
+  ) {
+    return this.inventoryService.purchasePriceHistoryReport(user, query);
   }
 
   @Post('yuan-rates')

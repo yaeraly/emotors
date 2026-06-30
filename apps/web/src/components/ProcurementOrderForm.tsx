@@ -17,6 +17,7 @@ export type ProcurementLine = {
   factoryId: string;
   quantity: string;
   purchasePriceYuan: string;
+  masterPriceYuan: string;
 };
 
 type HeaderForm = {
@@ -41,6 +42,7 @@ const emptyLine = (): ProcurementLine => ({
   factoryId: '',
   quantity: '1',
   purchasePriceYuan: '0',
+  masterPriceYuan: '0',
 });
 
 type Props = {
@@ -116,13 +118,18 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             bankFeeCostKgs: String(order.bankFeeCostKgs ?? 0),
             otherExpenseKgs: String(order.otherExpenseKgs ?? 0),
           });
-          setLines((order.items ?? []).map((item: any) => ({
-            key: item.id,
-            productId: item.productId,
-            factoryId: item.factoryId ?? order.factoryId ?? '',
-            quantity: String(item.quantity),
-            purchasePriceYuan: String(item.purchasePriceYuan),
-          })));
+          setLines((order.items ?? []).map((item: any) => {
+            const product = productResult.items.find((p) => p.id === item.productId);
+            const masterPrice = String(product?.purchasePriceYuan ?? item.purchasePriceYuan ?? 0);
+            return {
+              key: item.id,
+              productId: item.productId,
+              factoryId: item.factoryId ?? order.factoryId ?? '',
+              quantity: String(item.quantity),
+              purchasePriceYuan: String(item.purchasePriceYuan),
+              masterPriceYuan: masterPrice,
+            };
+          }));
         } else {
           const firstProduct = productResult.items[0];
           setForm((current) => ({
@@ -138,6 +145,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
               productId: firstProduct.id,
               factoryId: factoryResult[0]?.id ?? '',
               purchasePriceYuan: String(firstProduct.purchasePriceYuan ?? 0),
+              masterPriceYuan: String(firstProduct.purchasePriceYuan ?? 0),
             }]);
           }
         }
@@ -154,6 +162,8 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     const netWeightKg = Number(product?.weightKg ?? 0);
     const quantity = Number(line.quantity || 0);
     const purchasePriceYuan = Number(line.purchasePriceYuan || 0);
+    const masterPriceYuan = Number(line.masterPriceYuan || product?.purchasePriceYuan || 0);
+    const priceDifference = purchasePriceYuan - masterPriceYuan;
     const exchangeRate = Number(form.exchangeRate || 0);
     const missingWeight = !product || netWeightKg <= 0;
     return {
@@ -164,6 +174,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       netWeightKg,
       totalNetWeightKg: quantity * netWeightKg,
       totalYuan: quantity * purchasePriceYuan,
+      masterPriceYuan,
+      priceDifference,
+      priceChanged: priceDifference !== 0,
       missingWeight,
       factoryName: factoryMap.get(line.factoryId || form.factoryId) ?? '-',
     };
@@ -200,7 +213,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       const next = { ...line, ...patch };
       if (patch.productId) {
         const product = productMap.get(patch.productId);
-        next.purchasePriceYuan = product ? String(product.purchasePriceYuan ?? 0) : line.purchasePriceYuan;
+        const masterPrice = product ? String(product.purchasePriceYuan ?? 0) : line.masterPriceYuan;
+        next.purchasePriceYuan = masterPrice;
+        next.masterPriceYuan = masterPrice;
         const defaultFactory = (product as Product & { defaultFactoryId?: string })?.defaultFactoryId;
         if (defaultFactory) next.factoryId = defaultFactory;
       }
@@ -215,6 +230,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       productId: product?.id ?? '',
       factoryId: form.factoryId,
       purchasePriceYuan: String(product?.purchasePriceYuan ?? 0),
+      masterPriceYuan: String(product?.purchasePriceYuan ?? 0),
     }]);
   }
 
@@ -320,14 +336,16 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                 <th className="px-3 py-3">{t('procurement.orders.quantity')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.netWeightKg')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
+                <th className="px-3 py-3">{t('procurement.orders.currentPurchasePriceYuan')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
+                <th className="px-3 py-3">{t('procurement.orders.priceDifference')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.totalYuan')}</th>
                 <th className="px-3 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {lineDetails.map((line) => (
-                <tr key={line.key} className={line.missingWeight ? 'bg-amber-50' : ''}>
+                <tr key={line.key} className={line.missingWeight ? 'bg-amber-50' : line.priceChanged ? 'bg-blue-50' : ''}>
                   <td className="px-3 py-3 min-w-48">
                     <select value={line.productId} onChange={(e) => updateLine(line.key, { productId: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5">
                       {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -337,7 +355,24 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                   <td className="px-3 py-3"><input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
                   <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : `${line.netWeightKg.toFixed(3)} kg`}</td>
                   <td className="px-3 py-3">{line.totalNetWeightKg.toFixed(3)}</td>
-                  <td className="px-3 py-3"><input type="number" min={0} step="0.01" value={line.purchasePriceYuan} onChange={(e) => updateLine(line.key, { purchasePriceYuan: e.target.value })} className="w-24 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
+                  <td className="px-3 py-3 font-mono">¥{line.masterPriceYuan.toFixed(2)}</td>
+                  <td className="px-3 py-3">
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={line.purchasePriceYuan}
+                      onChange={(e) => updateLine(line.key, { purchasePriceYuan: e.target.value })}
+                      className={`w-24 rounded-lg border px-2 py-1.5 ${line.priceChanged ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
+                    />
+                  </td>
+                  <td className={`px-3 py-3 text-sm font-semibold ${line.priceDifference > 0 ? 'text-red-600' : line.priceDifference < 0 ? 'text-green-600' : 'text-slate-500'}`}>
+                    {line.priceDifference > 0
+                      ? t('procurement.orders.priceIncreased').replace('{amount}', line.priceDifference.toFixed(2))
+                      : line.priceDifference < 0
+                        ? t('procurement.orders.priceDecreased').replace('{amount}', line.priceDifference.toFixed(2))
+                        : '-'}
+                  </td>
                   <td className="px-3 py-3">¥{line.totalYuan.toFixed(2)}</td>
                   <td className="px-3 py-3">{lines.length > 1 ? <button type="button" onClick={() => removeLine(line.key)} className="text-red-600">{t('common.delete')}</button> : null}</td>
                 </tr>

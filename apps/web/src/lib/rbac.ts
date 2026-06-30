@@ -180,6 +180,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/procurement/orders/new') || pathname.startsWith('/procurement/suppliers/new') || pathname.startsWith('/procurement/factories/new')) {
     return canCreateProcurementOrder(user);
   }
+  if (pathname.startsWith('/procurement/purchase-price-history')) {
+    return canViewProcurement(user) || hasPermission(user, 'reports.view');
+  }
   if (pathname.startsWith('/procurement')) return canViewProcurement(user);
   if (pathname.startsWith('/branch-purchase-requests')) {
     return hasPermission(user, 'procurement.manage') || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
@@ -252,6 +255,10 @@ export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permi
     hasPermission(user, 'inventory.view') ||
     hasPermission(user, 'inventory.manage')
   );
+}
+
+export function canEditPurchasePriceYuan(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }
 
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles'> | null | undefined) {
