@@ -76,6 +76,36 @@ export class ProcurementController {
   @RequirePermissions('procurement.manage')
   deleteFactory(@Param('id') id: string) { return this.service.deleteFactory(id); }
 
+  @Post('transport-companies')
+  @RequirePermissions('procurement.manage')
+  createTransportCompany(@CurrentUser() user: AuthUser, @Body() dto: any) {
+    return this.service.createTransportCompany(user, dto);
+  }
+
+  @Get('transport-companies')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  transportCompanies(@CurrentUser() user: AuthUser, @Query('selectable') selectable?: string) {
+    return this.service.transportCompanies(user, selectable === 'true');
+  }
+
+  @Get('transport-companies/:id')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  transportCompany(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.transportCompany(user, id);
+  }
+
+  @Put('transport-companies/:id')
+  @RequirePermissions('procurement.manage')
+  updateTransportCompany(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.updateTransportCompany(user, id, dto);
+  }
+
+  @Post('transport-companies/:id/archive')
+  @RequirePermissions('procurement.manage')
+  archiveTransportCompany(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.archiveTransportCompany(user, id, dto?.reason);
+  }
+
   @Post('orders')
   @RequirePermissions('procurement.manage')
   createOrder(@CurrentUser() user: AuthUser, @Body() dto: any) { return this.service.createProcurementOrder(user, dto); }

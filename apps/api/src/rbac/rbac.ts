@@ -306,6 +306,22 @@ export function canDispatchFromHq(user: Pick<AuthUser, 'role' | 'roles' | 'permi
   return hasAnyFullAccessRole(roles) || roles.includes(Role.WAREHOUSE_MANAGER);
 }
 
+export function canManageTransportCompany(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
+export function canViewTransportCompany(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageTransportCompany(user) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.ACCOUNTANT) ||
+    roles.includes(Role.PROCUREMENT_MANAGER)
+  );
+}
+
 export function canManageUsers(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasAnyFullAccessRole(resolveUserRoles(user))) {
     return true;

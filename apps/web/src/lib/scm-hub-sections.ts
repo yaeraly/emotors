@@ -27,6 +27,7 @@ export const distributionHubSections: ModuleSectionLink[] = [
 export const procurementHubSections: ModuleSectionLink[] = [
   { href: '/procurement/suppliers', labelKey: 'scm.hub.procurement.suppliers' },
   { href: '/procurement/factories', labelKey: 'scm.hub.procurement.factories' },
+  { href: '/procurement/transport-companies', labelKey: 'scm.hub.procurement.transportCompanies' },
   { href: '/procurement/orders', labelKey: 'scm.hub.procurement.orders' },
   { href: '/procurement/orders', labelKey: 'scm.hub.procurement.payments' },
   { href: '/procurement/orders', labelKey: 'scm.hub.procurement.cargoReceipts' },
@@ -37,6 +38,7 @@ export const supplyChainHubSections: ModuleSectionLink[] = [
   { href: '/procurement/orders', labelKey: 'scm.hub.supplyChain.statuses' },
   { href: '/procurement/suppliers', labelKey: 'scm.hub.supplyChain.suppliers' },
   { href: '/procurement/factories', labelKey: 'scm.hub.supplyChain.factories' },
+  { href: '/procurement/transport-companies', labelKey: 'scm.hub.supplyChain.transportCompanies' },
   { href: '/supply-chain/forecast', labelKey: 'scm.hub.supplyChain.deadlines' },
 ];
 

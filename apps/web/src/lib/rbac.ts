@@ -381,6 +381,19 @@ export function canUnlockProcurementOrder(user: Pick<User, 'role' | 'roles' | 'p
   return hasFullAccess(user) || hasRole(user, 'CEO') || hasRole(user, 'OWNER');
 }
 
+export function canManageTransportCompany(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+}
+
+export function canViewTransportCompany(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return (
+    canManageTransportCompany(user) ||
+    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT', 'PROCUREMENT_MANAGER'])
+  );
+}
+
 export function canEditProcurementOrderItemsInWindow(
   user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
   editWindow: {

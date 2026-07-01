@@ -11,6 +11,7 @@ import {
   ProcurementSupplierPaymentStatus,
   Role,
   StockMovementType,
+  TransportCompanyStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
@@ -21,6 +22,8 @@ import {
   canEditSupplierPayment,
   canVoidSupplierPayment,
   canViewSupplierPayments,
+  canManageTransportCompany,
+  canViewTransportCompany,
   isFullAccessRole,
 } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
@@ -52,6 +55,10 @@ import {
   triggersSentToSupplierWindow,
 } from './procurement-edit-window.util';
 import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
+import {
+  resolveProcurementLogisticsInput,
+  WEIGHTED_YUAN_RATE_REQUIRED_MESSAGE,
+} from './transport-logistics.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -277,6 +284,147 @@ export class ProcurementService {
     return this.prisma.factory.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
   }
 
+  createTransportCompany(user: AuthUser, dto: any) {
+    this.assertCanManageTransportCompany(user);
+    this.validateTransportCompanyPayload(dto);
+    return this.prisma.$transaction(async (tx) => {
+      const duplicate = await tx.transportCompany.findFirst({
+        where: { companyCode: dto.companyCode.trim(), deletedAt: null },
+      });
+      if (duplicate) throw new BadRequestException('Transport company code already exists');
+
+      const company = await tx.transportCompany.create({
+        data: {
+          name: dto.name.trim(),
+          companyCode: dto.companyCode.trim(),
+          country: dto.country?.trim() || null,
+          city: dto.city?.trim() || null,
+          contactPerson: dto.contactPerson?.trim() || null,
+          phone: dto.phone?.trim() || null,
+          whatsapp: dto.whatsapp?.trim() || null,
+          wechat: dto.wechat?.trim() || null,
+          email: dto.email?.trim() || null,
+          address: dto.address?.trim() || null,
+          transportType: dto.transportType ?? 'UNIVERSAL',
+          defaultCurrency: dto.defaultCurrency?.trim() || 'CNY',
+          notes: dto.notes?.trim() || null,
+          status: dto.status ?? TransportCompanyStatus.ACTIVE,
+          createdById: user.id,
+        },
+        include: { createdBy: { select: { id: true, fullName: true, role: true } } },
+      });
+
+      await this.auditTransportCompany(tx, user, 'TRANSPORT_COMPANY_CREATED', company.id, null, this.pickTransportCompanyAuditFields(company));
+      return company;
+    });
+  }
+
+  transportCompanies(user: AuthUser, selectableOnly = false) {
+    this.assertCanViewTransportCompany(user);
+    return this.prisma.transportCompany.findMany({
+      where: {
+        deletedAt: null,
+        ...(selectableOnly ? { status: TransportCompanyStatus.ACTIVE } : {}),
+      },
+      include: { createdBy: { select: { id: true, fullName: true, role: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  transportCompany(user: AuthUser, id: string) {
+    this.assertCanViewTransportCompany(user);
+    return this.prisma.transportCompany.findFirst({
+      where: { id, deletedAt: null },
+      include: { createdBy: { select: { id: true, fullName: true, role: true } } },
+    });
+  }
+
+  updateTransportCompany(user: AuthUser, id: string, dto: any) {
+    this.assertCanManageTransportCompany(user);
+    this.validateTransportCompanyPayload(dto, { partial: true });
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.transportCompany.findFirst({ where: { id, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Transport company not found');
+
+      if (dto.companyCode && dto.companyCode.trim() !== existing.companyCode) {
+        const duplicate = await tx.transportCompany.findFirst({
+          where: { companyCode: dto.companyCode.trim(), deletedAt: null, NOT: { id } },
+        });
+        if (duplicate) throw new BadRequestException('Transport company code already exists');
+      }
+
+      const oldValue = this.pickTransportCompanyAuditFields(existing);
+      const updated = await tx.transportCompany.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+          ...(dto.companyCode !== undefined ? { companyCode: dto.companyCode.trim() } : {}),
+          ...(dto.country !== undefined ? { country: dto.country?.trim() || null } : {}),
+          ...(dto.city !== undefined ? { city: dto.city?.trim() || null } : {}),
+          ...(dto.contactPerson !== undefined ? { contactPerson: dto.contactPerson?.trim() || null } : {}),
+          ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
+          ...(dto.whatsapp !== undefined ? { whatsapp: dto.whatsapp?.trim() || null } : {}),
+          ...(dto.wechat !== undefined ? { wechat: dto.wechat?.trim() || null } : {}),
+          ...(dto.email !== undefined ? { email: dto.email?.trim() || null } : {}),
+          ...(dto.address !== undefined ? { address: dto.address?.trim() || null } : {}),
+          ...(dto.transportType !== undefined ? { transportType: dto.transportType } : {}),
+          ...(dto.defaultCurrency !== undefined ? { defaultCurrency: dto.defaultCurrency.trim() } : {}),
+          ...(dto.notes !== undefined ? { notes: dto.notes?.trim() || null } : {}),
+          ...(dto.status !== undefined
+            ? {
+                status: dto.status,
+                deletedAt:
+                  dto.status === TransportCompanyStatus.ARCHIVED
+                    ? new Date()
+                    : dto.status === TransportCompanyStatus.ACTIVE
+                      ? null
+                      : existing.deletedAt,
+              }
+            : {}),
+        },
+        include: { createdBy: { select: { id: true, fullName: true, role: true } } },
+      });
+
+      await this.auditTransportCompany(
+        tx,
+        user,
+        'TRANSPORT_COMPANY_UPDATED',
+        updated.id,
+        oldValue,
+        this.pickTransportCompanyAuditFields(updated),
+      );
+      return updated;
+    });
+  }
+
+  archiveTransportCompany(user: AuthUser, id: string, reason?: string) {
+    this.assertCanManageTransportCompany(user);
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.transportCompany.findFirst({ where: { id, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Transport company not found');
+
+      const oldValue = this.pickTransportCompanyAuditFields(existing);
+      const archived = await tx.transportCompany.update({
+        where: { id },
+        data: {
+          status: TransportCompanyStatus.ARCHIVED,
+          deletedAt: new Date(),
+        },
+      });
+
+      await this.auditTransportCompany(
+        tx,
+        user,
+        'TRANSPORT_COMPANY_ARCHIVED',
+        archived.id,
+        oldValue,
+        this.pickTransportCompanyAuditFields(archived),
+        reason,
+      );
+      return archived;
+    });
+  }
+
   createProcurementOrder(user: AuthUser, dto: any) {
     this.assertCanManageProcurement(user);
     return this.prisma.$transaction(async (tx) => {
@@ -296,7 +444,10 @@ export class ProcurementService {
 
       const exchangeRate = Number(dto.defaultYuanRate ?? dto.exchangeRate ?? dto.yuanRate ?? 0);
       this.validateExchangeRate(exchangeRate);
-      const { logistics, cargo } = this.resolveProcurementLogistics(dto);
+      await this.assertSelectableTransportCompanies(tx, dto);
+      const resolved = this.resolveProcurementLogistics(dto, undefined, exchangeRate);
+      const { logistics, cargo, ...transportResolved } = resolved;
+      const transportFields = this.buildProcurementTransportFields(dto, undefined, transportResolved);
       const preparedItems: PreparedProcurementItem[] = [];
       for (const item of itemInputs) {
         preparedItems.push(await this.resolveProcurementItemFromProduct(tx, item, supplier.id, factory?.id, exchangeRate));
@@ -316,6 +467,7 @@ export class ProcurementService {
           defaultYuanRate: exchangeRate,
           purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : new Date(),
           ...orderTotals,
+          ...transportFields,
           remainingYuan: orderTotals.totalYuan,
           ...cargoReceipt,
           estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : undefined,
@@ -710,7 +862,10 @@ export class ProcurementService {
         });
         if (!warehouse) throw new BadRequestException('Active HQ warehouse is required for procurement');
       }
-      const { logistics, cargo } = this.resolveProcurementLogistics(dto, existing);
+      await this.assertSelectableTransportCompanies(tx, dto, existing);
+      const resolved = this.resolveProcurementLogistics(dto, existing, exchangeRate);
+      const { logistics, cargo, ...transportResolved } = resolved;
+      const transportFields = this.buildProcurementTransportFields(dto, existing, transportResolved);
       const cargoReceipt = this.buildCargoReceiptData(dto, existing);
       let priceSyncItems: Array<{
         productId: string;
@@ -775,6 +930,7 @@ export class ProcurementService {
               defaultYuanRate: exchangeRate,
               purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
               ...orderTotals,
+              ...transportFields,
               remainingYuan: orderTotals.totalYuan,
               ...cargoReceipt,
               estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
@@ -817,6 +973,7 @@ export class ProcurementService {
               defaultYuanRate: exchangeRate,
               purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
               ...orderTotals,
+              ...transportFields,
               remainingYuan: orderTotals.totalYuan,
               ...cargoReceipt,
               estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
@@ -852,6 +1009,7 @@ export class ProcurementService {
             defaultYuanRate: exchangeRate,
             purchaseDate: dto.purchaseDate ? new Date(dto.purchaseDate) : existing.purchaseDate,
             ...orderTotals,
+            ...transportFields,
             remainingYuan: orderTotals.totalYuan,
             ...cargoReceipt,
             estimatedArrivalDate: dto.estimatedArrivalDate ? new Date(dto.estimatedArrivalDate) : existing.estimatedArrivalDate,
@@ -899,8 +1057,9 @@ export class ProcurementService {
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       const oldValue = this.pickProcurementAuditFields(order);
-      const { logistics, cargo } = this.resolveProcurementLogistics(order);
       const exchangeRate = await this.resolveEffectiveYuanRate(tx, order);
+      const resolved = this.resolveProcurementLogistics(order, undefined, exchangeRate);
+      const { logistics, cargo, ...transportResolved } = resolved;
       const activeItems = this.activeProcurementItems(order.items);
       const calculated = this.calculateProcurementLandedCosts(
         activeItems.map((item) => mapStoredProcurementItemToLandedCostInput({
@@ -920,7 +1079,10 @@ export class ProcurementService {
       }
       const updated = await tx.procurementOrder.update({
         where: { id },
-        data: orderTotals,
+        data: {
+          ...orderTotals,
+          ...this.buildProcurementTransportFields(order, order, transportResolved),
+        },
         include: this.procurementOrderInclude(),
       });
       await this.auditProcurement(tx, user, 'RECALCULATE_PROCUREMENT_LANDED_COST', id, oldValue, this.pickProcurementAuditFields(updated), reason);
@@ -1144,6 +1306,9 @@ export class ProcurementService {
       supplier: true,
       factory: true,
       hqWarehouse: true,
+      chinaDomesticTransportCompany: true,
+      chinaExportTransportCompany: true,
+      svhToHqTransportCompany: true,
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
       unlockedBy: { select: { id: true, fullName: true, role: true } },
@@ -1490,7 +1655,11 @@ export class ProcurementService {
       totalCostKgs: order.totalCostKgs?.toString?.() ?? order.totalCostKgs,
       totalWeightKg: order.totalWeightKg?.toString?.() ?? order.totalWeightKg,
       costPerKg: order.costPerKg?.toString?.() ?? order.costPerKg,
+      chinaDomesticTransportYuan: order.chinaDomesticTransportYuan?.toString?.() ?? order.chinaDomesticTransportYuan,
       chinaDomesticTransportKgs: order.chinaDomesticTransportKgs?.toString?.() ?? order.chinaDomesticTransportKgs,
+      chinaDomesticTransportCompanyId: order.chinaDomesticTransportCompanyId,
+      chinaExportTransportCompanyId: order.chinaExportTransportCompanyId,
+      svhToHqTransportCompanyId: order.svhToHqTransportCompanyId,
       chinaExportTransportKgs: order.chinaExportTransportKgs?.toString?.() ?? order.chinaExportTransportKgs,
       localTransportKgs: order.localTransportKgs?.toString?.() ?? order.localTransportKgs,
       packagingCostKgs: order.packagingCostKgs?.toString?.() ?? order.packagingCostKgs,
@@ -1617,24 +1786,158 @@ export class ProcurementService {
     };
   }
 
-  private resolveProcurementLogistics(dto: any, existing?: any) {
-    const logistics = extractLogisticsCosts({
-      chinaDomesticTransportKgs: dto.chinaDomesticTransportKgs ?? existing?.chinaDomesticTransportKgs,
-      chinaExportTransportKgs: dto.chinaExportTransportKgs ?? existing?.chinaExportTransportKgs,
-      localTransportKgs: dto.localTransportKgs ?? existing?.localTransportKgs,
-      packagingCostKgs: dto.packagingCostKgs ?? existing?.packagingCostKgs,
-      customsCostKgs: dto.customsCostKgs ?? existing?.customsCostKgs,
-      insuranceCostKgs: dto.insuranceCostKgs ?? existing?.insuranceCostKgs,
-      bankFeeCostKgs: dto.bankFeeCostKgs ?? existing?.bankFeeCostKgs,
-      otherExpenseKgs: dto.otherExpenseKgs ?? existing?.otherExpenseKgs,
+  private resolveProcurementLogistics(dto: any, existing?: any, effectiveYuanRate?: number) {
+    const rate = effectiveYuanRate ?? Number(dto.defaultYuanRate ?? existing?.defaultYuanRate ?? 0);
+    if (Number(dto.chinaDomesticTransportYuan ?? existing?.chinaDomesticTransportYuan ?? 0) < 0) {
+      throw new BadRequestException('China domestic transport cost in yuan must be greater than or equal to zero');
+    }
+    if (Number(dto.localTransportKgs ?? existing?.localTransportKgs ?? 0) < 0) {
+      throw new BadRequestException('SVH to HQ transport cost must be greater than or equal to zero');
+    }
+
+    try {
+      const resolved = resolveProcurementLogisticsInput(dto, existing, rate);
+      this.validateCargoConfig(resolved.cargo);
+      return resolved;
+    } catch (error) {
+      if (error instanceof Error && error.message === 'WEIGHTED_YUAN_RATE_REQUIRED') {
+        throw new BadRequestException(WEIGHTED_YUAN_RATE_REQUIRED_MESSAGE);
+      }
+      if (error instanceof Error && error.message === 'NEGATIVE_LOCAL_TRANSPORT') {
+        throw new BadRequestException('SVH to HQ transport cost must be greater than or equal to zero');
+      }
+      throw error;
+    }
+  }
+
+  private buildProcurementTransportFields(
+    dto: any,
+    existing: any | undefined,
+    resolved: {
+      chinaDomesticTransportYuan: number;
+      chinaDomesticTransportKgs: number;
+      localTransportKgs: number;
+    },
+  ) {
+    return {
+      chinaDomesticTransportYuan: resolved.chinaDomesticTransportYuan,
+      chinaDomesticTransportKgs: resolved.chinaDomesticTransportKgs,
+      localTransportKgs: resolved.localTransportKgs,
+      chinaDomesticTransportCompanyId: this.resolveOptionalRelationId(
+        dto.chinaDomesticTransportCompanyId,
+        existing?.chinaDomesticTransportCompanyId,
+      ),
+      chinaExportTransportCompanyId: this.resolveOptionalRelationId(
+        dto.chinaExportTransportCompanyId,
+        existing?.chinaExportTransportCompanyId,
+      ),
+      svhToHqTransportCompanyId: this.resolveOptionalRelationId(
+        dto.svhToHqTransportCompanyId,
+        existing?.svhToHqTransportCompanyId,
+      ),
+    };
+  }
+
+  private resolveOptionalRelationId(next?: string | null, existing?: string | null) {
+    if (next === undefined) return existing ?? null;
+    return next || null;
+  }
+
+  private async assertSelectableTransportCompanies(tx: any, dto: any, existing?: any) {
+    const companyIds = [
+      this.resolveOptionalRelationId(dto.chinaDomesticTransportCompanyId, existing?.chinaDomesticTransportCompanyId),
+      this.resolveOptionalRelationId(dto.chinaExportTransportCompanyId, existing?.chinaExportTransportCompanyId),
+      this.resolveOptionalRelationId(dto.svhToHqTransportCompanyId, existing?.svhToHqTransportCompanyId),
+    ].filter(Boolean) as string[];
+
+    if (!companyIds.length) return;
+
+    const companies = await tx.transportCompany.findMany({
+      where: { id: { in: companyIds }, deletedAt: null },
+      select: { id: true, status: true, name: true },
     });
-    const cargo = extractCargoConfig({
-      defaultUsdRate: dto.defaultUsdRate ?? existing?.defaultUsdRate,
-      cargoRateUsdPerKg: dto.cargoRateUsdPerKg ?? existing?.cargoRateUsdPerKg,
-      cargoTotalWeightKg: dto.cargoTotalWeightKg ?? existing?.cargoTotalWeightKg,
+
+    for (const companyId of companyIds) {
+      const company = companies.find((entry: { id: string }) => entry.id === companyId);
+      if (!company) {
+        throw new BadRequestException('Selected transport company was not found');
+      }
+      if (company.status !== TransportCompanyStatus.ACTIVE) {
+        throw new BadRequestException(`Transport company "${company.name}" is not active and cannot be selected`);
+      }
+    }
+  }
+
+  private assertCanManageTransportCompany(user: AuthUser) {
+    if (canManageTransportCompany(user)) return;
+    throw new ForbiddenException('You do not have permission to manage transport companies');
+  }
+
+  private assertCanViewTransportCompany(user: AuthUser) {
+    if (canViewTransportCompany(user)) return;
+    throw new ForbiddenException('You do not have permission to view transport companies');
+  }
+
+  private validateTransportCompanyPayload(dto: any, options?: { partial?: boolean }) {
+    const partial = options?.partial ?? false;
+    if (!partial && !dto.name?.trim()) {
+      throw new BadRequestException('Transport company name is required');
+    }
+    if (!partial && !dto.companyCode?.trim()) {
+      throw new BadRequestException('Transport company code is required');
+    }
+    if (dto.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dto.email)) {
+      throw new BadRequestException('Invalid email format');
+    }
+  }
+
+  private pickTransportCompanyAuditFields(company: any) {
+    return {
+      id: company.id,
+      name: company.name,
+      companyCode: company.companyCode,
+      country: company.country,
+      city: company.city,
+      contactPerson: company.contactPerson,
+      phone: company.phone,
+      whatsapp: company.whatsapp,
+      wechat: company.wechat,
+      email: company.email,
+      address: company.address,
+      transportType: company.transportType,
+      defaultCurrency: company.defaultCurrency,
+      notes: company.notes,
+      status: company.status,
+    };
+  }
+
+  private auditTransportCompany(
+    tx: any,
+    user: AuthUser,
+    action: string,
+    transportCompanyId: string,
+    oldValue: unknown,
+    newValue: unknown,
+    reason?: string,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'TransportCompany',
+        entityId: transportCompanyId,
+        metadata: {
+          userId: user.id,
+          userRole: user.role,
+          roles: user.roles ?? [user.role],
+          transportCompanyId,
+          oldValue,
+          newValue,
+          reason: reason?.trim() || null,
+        },
+      },
     });
-    this.validateCargoConfig(cargo);
-    return { logistics, cargo };
   }
 
   private buildCargoReceiptData(dto: any, existing?: any) {
@@ -1807,10 +2110,53 @@ export class ProcurementService {
         extra: { field: 'cargoTotalWeightKg', oldValue: oldValue?.cargoTotalWeightKg, newValue: newValue?.cargoTotalWeightKg },
       });
     }
-    if (String(oldValue?.chinaDomesticTransportKgs ?? '') !== String(newValue?.chinaDomesticTransportKgs ?? '')) {
+    if (String(oldValue?.chinaDomesticTransportYuan ?? '') !== String(newValue?.chinaDomesticTransportYuan ?? '')) {
       audits.push({
         action: 'CHINA_DOMESTIC_TRANSPORT_CHANGED',
+        extra: {
+          field: 'chinaDomesticTransportYuan',
+          oldValue: oldValue?.chinaDomesticTransportYuan,
+          newValue: newValue?.chinaDomesticTransportYuan,
+        },
+      });
+    }
+    if (String(oldValue?.chinaDomesticTransportKgs ?? '') !== String(newValue?.chinaDomesticTransportKgs ?? '')) {
+      audits.push({
+        action: 'CHINA_DOMESTIC_TRANSPORT_KGS_RECALCULATED',
         extra: { field: 'chinaDomesticTransportKgs', oldValue: oldValue?.chinaDomesticTransportKgs, newValue: newValue?.chinaDomesticTransportKgs },
+      });
+    }
+    if (String(oldValue?.chinaDomesticTransportCompanyId ?? '') !== String(newValue?.chinaDomesticTransportCompanyId ?? '')) {
+      audits.push({
+        action: 'PROCUREMENT_TRANSPORT_COMPANY_SELECTED',
+        extra: {
+          field: 'chinaDomesticTransportCompanyId',
+          transportCompanyId: newValue?.chinaDomesticTransportCompanyId,
+          oldValue: oldValue?.chinaDomesticTransportCompanyId,
+          newValue: newValue?.chinaDomesticTransportCompanyId,
+        },
+      });
+    }
+    if (String(oldValue?.chinaExportTransportCompanyId ?? '') !== String(newValue?.chinaExportTransportCompanyId ?? '')) {
+      audits.push({
+        action: 'PROCUREMENT_TRANSPORT_COMPANY_SELECTED',
+        extra: {
+          field: 'chinaExportTransportCompanyId',
+          transportCompanyId: newValue?.chinaExportTransportCompanyId,
+          oldValue: oldValue?.chinaExportTransportCompanyId,
+          newValue: newValue?.chinaExportTransportCompanyId,
+        },
+      });
+    }
+    if (String(oldValue?.svhToHqTransportCompanyId ?? '') !== String(newValue?.svhToHqTransportCompanyId ?? '')) {
+      audits.push({
+        action: 'PROCUREMENT_TRANSPORT_COMPANY_SELECTED',
+        extra: {
+          field: 'svhToHqTransportCompanyId',
+          transportCompanyId: newValue?.svhToHqTransportCompanyId,
+          oldValue: oldValue?.svhToHqTransportCompanyId,
+          newValue: newValue?.svhToHqTransportCompanyId,
+        },
       });
     }
     if (String(oldValue?.localTransportKgs ?? '') !== String(newValue?.localTransportKgs ?? '')) {
@@ -2073,7 +2419,8 @@ export class ProcurementService {
       summary.weightedAverageYuanRate && summary.totalPaidYuan > 0
         ? summary.weightedAverageYuanRate
         : Number(order.defaultYuanRate);
-    const { logistics, cargo } = this.resolveProcurementLogistics(order);
+    const resolved = this.resolveProcurementLogistics(order, undefined, effectiveRate);
+    const { logistics, cargo, ...transportResolved } = resolved;
     const calculated = this.calculateProcurementLandedCosts(
       order.items.map((item: any) => mapStoredProcurementItemToLandedCostInput({
         ...item,
@@ -2096,6 +2443,7 @@ export class ProcurementService {
       where: { id: order.id },
       data: {
         ...orderTotals,
+        ...this.buildProcurementTransportFields(order, order, transportResolved),
         totalPaidYuan: summary.totalPaidYuan,
         totalPaidKgs: summary.totalPaidKgs,
         remainingYuan: summary.remainingYuan,
@@ -2202,6 +2550,9 @@ export class ProcurementService {
         ? Number(order.weightedAverageYuanRate)
         : null,
       defaultYuanRate: Number(order.defaultYuanRate),
+      chinaDomesticTransportYuan: Number(order.chinaDomesticTransportYuan ?? 0),
+      chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs ?? 0),
+      localTransportKgs: Number(order.localTransportKgs ?? 0),
       yuanRateLocked: activePaymentCount > 0,
       effectiveYuanRate:
         order.weightedAverageYuanRate && Number(order.totalPaidYuan) > 0

@@ -369,6 +369,19 @@ enum ProcurementOrderStatus {
   CANCELLED
 }
 
+enum TransportType {
+  CHINA_DOMESTIC
+  CHINA_EXPORT
+  KYRGYZSTAN_LOCAL
+  UNIVERSAL
+}
+
+enum TransportCompanyStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
 enum StockTransferStatus {
   DRAFT
   APPROVED
@@ -621,6 +634,7 @@ model User {
   fileAttachments FileAttachment[] @relation("FileAttachmentUploader")
   procurementCostAdjustments ProcurementCostAdjustment[] @relation("ProcurementCostAdjustmentCreator")
   unlockedProcurementOrders ProcurementOrder[] @relation("ProcurementOrderUnlocker")
+  createdTransportCompanies TransportCompany[] @relation("TransportCompanyCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1403,6 +1417,36 @@ model RoyaltyPayment {
   @@index([paidAt])
 }
 
+model TransportCompany {
+  id              String                 @id @default(cuid())
+  name            String
+  companyCode     String                 @unique
+  country         String?
+  city            String?
+  contactPerson   String?
+  phone           String?
+  whatsapp        String?
+  wechat          String?
+  email           String?
+  address         String?
+  transportType   TransportType          @default(UNIVERSAL)
+  defaultCurrency String                 @default("CNY")
+  notes           String?
+  status          TransportCompanyStatus @default(ACTIVE)
+  createdById     String
+  createdBy       User                   @relation("TransportCompanyCreator", fields: [createdById], references: [id])
+  chinaDomesticProcurementOrders ProcurementOrder[] @relation("ChinaDomesticTransportCompany")
+  chinaExportProcurementOrders   ProcurementOrder[] @relation("ChinaExportTransportCompany")
+  svhToHqProcurementOrders       ProcurementOrder[] @relation("SvhToHqTransportCompany")
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  deletedAt       DateTime?
+
+  @@index([status])
+  @@index([transportType])
+  @@index([createdById])
+}
+
 model Supplier {
   id               String            @id @default(cuid())
   name             String
@@ -1509,9 +1553,16 @@ model ProcurementOrder {
   totalCostKgs             Decimal                @default(0) @db.Decimal(14, 2)
   totalWeightKg            Decimal                @default(0) @db.Decimal(14, 3)
   costPerKg                Decimal                @default(0) @db.Decimal(14, 4)
+  chinaDomesticTransportYuan Decimal              @default(0) @db.Decimal(14, 2)
   chinaDomesticTransportKgs Decimal               @default(0) @db.Decimal(14, 2)
+  chinaDomesticTransportCompanyId String?
+  chinaDomesticTransportCompany   TransportCompany? @relation("ChinaDomesticTransportCompany", fields: [chinaDomesticTransportCompanyId], references: [id])
   chinaExportTransportKgs  Decimal                @default(0) @db.Decimal(14, 2)
+  chinaExportTransportCompanyId String?
+  chinaExportTransportCompany   TransportCompany? @relation("ChinaExportTransportCompany", fields: [chinaExportTransportCompanyId], references: [id])
   localTransportKgs        Decimal                @default(0) @db.Decimal(14, 2)
+  svhToHqTransportCompanyId String?
+  svhToHqTransportCompany   TransportCompany?    @relation("SvhToHqTransportCompany", fields: [svhToHqTransportCompanyId], references: [id])
   packagingCostKgs         Decimal                @default(0) @db.Decimal(14, 2)
   customsCostKgs           Decimal                @default(0) @db.Decimal(14, 2)
   insuranceCostKgs         Decimal                @default(0) @db.Decimal(14, 2)
@@ -1554,6 +1605,9 @@ model ProcurementOrder {
   @@index([createdById])
   @@index([approvedById])
   @@index([unlockedById])
+  @@index([chinaDomesticTransportCompanyId])
+  @@index([chinaExportTransportCompanyId])
+  @@index([svhToHqTransportCompanyId])
 }
 
 model ProcurementSupplierPayment {

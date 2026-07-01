@@ -8,6 +8,7 @@ import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPay
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
+import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
 import {
   canCreateProcurementOrder,
   canCreateSupplierPayment,
@@ -37,6 +38,13 @@ type ProcurementOrderItem = {
   finalCostKgs: string | number;
 };
 
+type TransportCompany = {
+  id: string;
+  name: string;
+  companyCode: string;
+  status: string;
+};
+
 type ProcurementOrder = {
   id: string;
   orderNumber: string;
@@ -57,7 +65,14 @@ type ProcurementOrder = {
   cargoReceiptNumber?: string | null;
   cargoReceiptDate?: string | null;
   cargoReceiptNote?: string | null;
+  chinaDomesticTransportYuan?: string | number;
   chinaDomesticTransportKgs: string | number;
+  chinaDomesticTransportCompanyId?: string | null;
+  chinaExportTransportCompanyId?: string | null;
+  svhToHqTransportCompanyId?: string | null;
+  chinaDomesticTransportCompany?: TransportCompany | null;
+  chinaExportTransportCompany?: TransportCompany | null;
+  svhToHqTransportCompany?: TransportCompany | null;
   localTransportKgs: string | number;
   customsCostKgs: string | number;
   insuranceCostKgs: string | number;
@@ -128,8 +143,12 @@ export default function ProcurementOrderDetailPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
   const [receiveReason, setReceiveReason] = useState<Record<string, string>>({});
+  const [transportCompanies, setTransportCompanies] = useState<TransportCompany[]>([]);
   const [logisticsForm, setLogisticsForm] = useState({
-    chinaDomesticTransportKgs: '0',
+    chinaDomesticTransportYuan: '0',
+    chinaDomesticTransportCompanyId: '',
+    chinaExportTransportCompanyId: '',
+    svhToHqTransportCompanyId: '',
     localTransportKgs: '0',
     customsCostKgs: '0',
     insuranceCostKgs: '0',
@@ -181,12 +200,28 @@ export default function ProcurementOrderDetailPage() {
     weightKg: Number(item.netWeightKg ?? item.weightKg),
   })), [order, receiveQty, canReceive, finalized]);
 
+  const effectiveYuanRate = Number(
+    order?.effectiveYuanRate ??
+    order?.weightedAverageYuanRate ??
+    order?.defaultYuanRate ??
+    0,
+  );
+
+  const previewChinaDomesticTransportKgs = useMemo(
+    () => resolveChinaDomesticTransportKgs({
+      chinaDomesticTransportYuan: Number(logisticsForm.chinaDomesticTransportYuan || 0),
+      chinaDomesticTransportKgs: Number(order?.chinaDomesticTransportKgs || 0),
+      effectiveYuanRate,
+    }),
+    [logisticsForm.chinaDomesticTransportYuan, order?.chinaDomesticTransportKgs, effectiveYuanRate],
+  );
+
   const previewTotals = useMemo(() => {
     try {
       return calculateLandedCosts(
         previewItems,
         {
-          chinaDomesticTransportKgs: Number(logisticsForm.chinaDomesticTransportKgs || 0),
+          chinaDomesticTransportKgs: previewChinaDomesticTransportKgs,
           chinaExportTransportKgs: 0,
           localTransportKgs: Number(logisticsForm.localTransportKgs || 0),
           packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
@@ -200,7 +235,7 @@ export default function ProcurementOrderDetailPage() {
     } catch (err) {
       return null;
     }
-  }, [previewItems, logisticsForm]);
+  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs]);
 
   const cargoValidationError = useMemo(() => {
     if (!previewTotals) return t('procurement.orders.cargoWeightLessThanNet');
@@ -209,19 +244,24 @@ export default function ProcurementOrderDetailPage() {
 
   async function load() {
     try {
-      const [orderResult, auditResult, me, warehouseResult] = await Promise.all([
+      const [orderResult, auditResult, me, warehouseResult, transportCompanyResult] = await Promise.all([
         apiFetch<ProcurementOrder>(`/procurement/orders/${id}`),
         apiFetch<AuditLog[]>(`/procurement/orders/${id}/audit-logs`),
         apiFetch<User>('/auth/me'),
         apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
+        apiFetch<TransportCompany[]>('/procurement/transport-companies?selectable=true').catch(() => []),
       ]);
       setOrder(orderResult);
       setAuditLogs(auditResult);
       setUser(me);
       setWarehouses(warehouseResult);
+      setTransportCompanies(transportCompanyResult);
       setReceiveQty(Object.fromEntries((orderResult.items ?? []).map((item) => [item.id, String(item.receivedQuantity ?? item.quantity)])));
       setLogisticsForm({
-        chinaDomesticTransportKgs: String(orderResult.chinaDomesticTransportKgs ?? 0),
+        chinaDomesticTransportYuan: String(orderResult.chinaDomesticTransportYuan ?? 0),
+        chinaDomesticTransportCompanyId: orderResult.chinaDomesticTransportCompanyId ?? '',
+        chinaExportTransportCompanyId: orderResult.chinaExportTransportCompanyId ?? '',
+        svhToHqTransportCompanyId: orderResult.svhToHqTransportCompanyId ?? '',
         localTransportKgs: String(orderResult.localTransportKgs ?? 0),
         customsCostKgs: String(orderResult.customsCostKgs ?? 0),
         insuranceCostKgs: String(orderResult.insuranceCostKgs ?? 0),
@@ -286,7 +326,10 @@ export default function ProcurementOrderDetailPage() {
       await apiFetch(`/procurement/orders/${id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          chinaDomesticTransportKgs: Number(logisticsForm.chinaDomesticTransportKgs || 0),
+          chinaDomesticTransportYuan: Number(logisticsForm.chinaDomesticTransportYuan || 0),
+          chinaDomesticTransportCompanyId: logisticsForm.chinaDomesticTransportCompanyId || null,
+          chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
+          svhToHqTransportCompanyId: logisticsForm.svhToHqTransportCompanyId || null,
           localTransportKgs: Number(logisticsForm.localTransportKgs || 0),
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
@@ -356,7 +399,10 @@ export default function ProcurementOrderDetailPage() {
           cargoReceiptDate: logisticsForm.cargoReceiptDate || undefined,
           cargoReceiptNote: logisticsForm.cargoReceiptNote || undefined,
           localTransportKgs: Number(logisticsForm.localTransportKgs || 0),
-          chinaDomesticTransportKgs: Number(logisticsForm.chinaDomesticTransportKgs || 0),
+          chinaDomesticTransportYuan: Number(logisticsForm.chinaDomesticTransportYuan || 0),
+          chinaDomesticTransportCompanyId: logisticsForm.chinaDomesticTransportCompanyId || null,
+          chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
+          svhToHqTransportCompanyId: logisticsForm.svhToHqTransportCompanyId || null,
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
           bankFeeCostKgs: Number(logisticsForm.bankFeeCostKgs || 0),
@@ -451,33 +497,41 @@ export default function ProcurementOrderDetailPage() {
           ) : null}
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.localTransport')}</h3>
+            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
             <div className="grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.chinaDomestic')} value={logisticsForm.chinaDomesticTransportKgs} onChange={(v) => setLogistics('chinaDomesticTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.svhToHqTransport')} value={logisticsForm.localTransportKgs} onChange={(v) => setLogistics('localTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance || !canEditSvh} />
-              <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.bankFees')} value={logisticsForm.bankFeeCostKgs} onChange={(v) => setLogistics('bankFeeCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.otherExpenses')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <TransportCompanySelect
+                label={t('procurement.transportCompanies.select')}
+                value={logisticsForm.chinaDomesticTransportCompanyId}
+                companies={transportCompanies}
+                onChange={(value) => setLogistics('chinaDomesticTransportCompanyId', value)}
+                disabled={finalized || readOnlyFinance}
+              />
+              <EditableField label={t('procurement.orders.costInYuan')} value={logisticsForm.chinaDomesticTransportYuan} onChange={(v) => setLogistics('chinaDomesticTransportYuan', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <Info label={t('procurement.orders.costInKgs')} value={formatKgs(previewChinaDomesticTransportKgs)} />
+              <Info label={t('procurement.orders.weightedAverageYuanRate')} value={String(effectiveYuanRate || '-')} />
             </div>
-            {canEditOrder && !finalized && !readOnlyFinance ? (
-              <button type="button" disabled={savingLogistics || !!cargoValidationError} onClick={() => void saveLogistics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
-                {savingLogistics ? t('common.loading') : t('procurement.orders.saveLogistics')}
-              </button>
-            ) : null}
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.cargoReceipt')}</h3>
+            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.chinaExport')}</h3>
             <div className="grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.cargoCompany')} value={logisticsForm.cargoCompany} onChange={(v) => setLogistics('cargoCompany', v)} disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoReceiptNumber')} value={logisticsForm.cargoReceiptNumber} onChange={(v) => setLogistics('cargoReceiptNumber', v)} disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoReceiptDate')} value={logisticsForm.cargoReceiptDate} onChange={(v) => setLogistics('cargoReceiptDate', v)} type="date" disabled={finalized || readOnlyFinance} />
+              <TransportCompanySelect
+                label={t('procurement.transportCompanies.select')}
+                value={logisticsForm.chinaExportTransportCompanyId}
+                companies={transportCompanies}
+                onChange={(value) => setLogistics('chinaExportTransportCompanyId', value)}
+                disabled={finalized || readOnlyFinance}
+              />
               <EditableField label={t('procurement.orders.cargoTotalWeightKg')} value={logisticsForm.cargoTotalWeightKg} onChange={(v) => setLogistics('cargoTotalWeightKg', v)} type="number" disabled={finalized || readOnlyFinance} />
               <EditableField label={t('procurement.orders.cargoRateUsdPerKg')} value={logisticsForm.cargoRateUsdPerKg} onChange={(v) => setLogistics('cargoRateUsdPerKg', v)} type="number" disabled={finalized || readOnlyFinance} />
               <EditableField label={t('procurement.orders.usdExchangeRate')} value={logisticsForm.defaultUsdRate} onChange={(v) => setLogistics('defaultUsdRate', v)} type="number" disabled={finalized || readOnlyFinance} />
               <Info label={t('procurement.orders.totalCargoCostUsd')} value={`$${(previewTotals?.totalCargoCostUsd ?? 0).toFixed(2)}`} />
               <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <EditableField label={t('procurement.orders.cargoCompany')} value={logisticsForm.cargoCompany} onChange={(v) => setLogistics('cargoCompany', v)} disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.cargoReceiptNumber')} value={logisticsForm.cargoReceiptNumber} onChange={(v) => setLogistics('cargoReceiptNumber', v)} disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.cargoReceiptDate')} value={logisticsForm.cargoReceiptDate} onChange={(v) => setLogistics('cargoReceiptDate', v)} type="date" disabled={finalized || readOnlyFinance} />
               <EditableField label={t('procurement.orders.cargoReceiptNote')} value={logisticsForm.cargoReceiptNote} onChange={(v) => setLogistics('cargoReceiptNote', v)} disabled={finalized || readOnlyFinance} />
             </div>
             <div className="mt-4 space-y-3">
@@ -509,6 +563,35 @@ export default function ProcurementOrderDetailPage() {
                 <p className="text-sm text-slate-500">{t('procurement.payments.noCargoAttachments')}</p>
               )}
             </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.svhToHqTransport')}</h3>
+            <div className="grid gap-4 md:grid-cols-3">
+              <TransportCompanySelect
+                label={t('procurement.transportCompanies.select')}
+                value={logisticsForm.svhToHqTransportCompanyId}
+                companies={transportCompanies}
+                onChange={(value) => setLogistics('svhToHqTransportCompanyId', value)}
+                disabled={finalized || readOnlyFinance || !canEditSvh}
+              />
+              <EditableField label={t('procurement.orders.costInKgs')} value={logisticsForm.localTransportKgs} onChange={(v) => setLogistics('localTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance || !canEditSvh} />
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.transportCosts')}</h3>
+            <div className="grid gap-4 md:grid-cols-3">
+              <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.bankFees')} value={logisticsForm.bankFeeCostKgs} onChange={(v) => setLogistics('bankFeeCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.otherExpenses')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+            </div>
+            {canEditOrder && !finalized && !readOnlyFinance ? (
+              <button type="button" disabled={savingLogistics || !!cargoValidationError} onClick={() => void saveLogistics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
+                {savingLogistics ? t('common.loading') : t('procurement.orders.saveLogistics')}
+              </button>
+            ) : null}
           </section>
 
           <section className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
@@ -627,6 +710,32 @@ export default function ProcurementOrderDetailPage() {
 
 function Info({ label, value }: { label: string; value: string }) {
   return <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase text-slate-400">{label}</p><p className="font-bold text-slate-950">{value}</p></div>;
+}
+
+function TransportCompanySelect({
+  label,
+  value,
+  companies,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  companies: Array<{ id: string; name: string; companyCode: string }>;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100">
+        <option value="">-</option>
+        {companies.map((company) => (
+          <option key={company.id} value={company.id}>{company.name} ({company.companyCode})</option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 function EditableField({ label, value, onChange, type = 'text', disabled }: { label: string; value: string; onChange: (value: string) => void; type?: string; disabled?: boolean }) {
