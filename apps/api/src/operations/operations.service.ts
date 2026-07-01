@@ -26,6 +26,7 @@ import {
   extractLogisticsCosts,
   mapStoredProcurementItemToLandedCostInput,
 } from '../procurement/landed-cost.util';
+import { SVH_TRANSPORT_NOT_COMPLETED_MESSAGE } from '../procurement/svh-to-hq-transport.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -142,11 +143,14 @@ export class OperationsService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
         where: { id: procurementOrderId, deletedAt: null },
-        include: { items: true },
+        include: { items: true, svhToHqTransport: true },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       if (order.hqStockMovementCreatedAt) {
         throw new BadRequestException('Procurement stock has already been received');
+      }
+      if (!order.svhToHqTransport || order.svhToHqTransport.status !== 'COMPLETED') {
+        throw new BadRequestException(SVH_TRANSPORT_NOT_COMPLETED_MESSAGE);
       }
       const hqWarehouseId = dto.hqWarehouseId ?? order.hqWarehouseId;
       const hqWarehouse = await tx.warehouse.findFirst({

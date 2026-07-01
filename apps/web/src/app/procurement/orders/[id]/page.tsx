@@ -10,9 +10,11 @@ import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
 import {
+  canConfirmSvhToHqArrival,
   canCreateProcurementOrder,
   canCreateSupplierPayment,
   canEditProcurementOrderItemsInWindow,
+  canManageSvhToHqTransport,
   canReceiveProcurementToHq,
   canUnlockProcurementOrder,
   canViewSupplierPayments,
@@ -43,6 +45,20 @@ type TransportCompany = {
   name: string;
   companyCode: string;
   status: string;
+};
+
+type SvhToHqTransport = {
+  id: string;
+  transportCompanyId?: string | null;
+  transportCostKgs: number;
+  vehicleNumber?: string | null;
+  driverName?: string | null;
+  driverPhone?: string | null;
+  dispatchDate?: string | null;
+  arrivalDate?: string | null;
+  status: 'WAITING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  notes?: string | null;
+  transportCompany?: TransportCompany | null;
 };
 
 type ProcurementOrder = {
@@ -115,6 +131,8 @@ type ProcurementOrder = {
   items?: ProcurementOrderItem[];
   differenceReports?: Array<{ id: string; reportNumber: string; type: string; sku: string; expectedQuantity: number; receivedQuantity: number; differenceQuantity: number; status: string; shortageReason?: string }>;
   receivings?: Array<{ id: string; receivingNumber: string; receivedAt: string }>;
+  svhToHqTransport?: SvhToHqTransport | null;
+  canReceiveToHq?: boolean;
 };
 
 type AuditLog = { id: string; action: string; timestamp: string; user?: { fullName: string } };
@@ -132,7 +150,20 @@ const statusActions = [
   ['cancel', 'distribution.cancel'],
 ] as const;
 
-const SVH_STATUSES = ['ARRIVED_IN_KYRGYZSTAN', 'ARRIVED', 'CUSTOMS_CLEARANCE'];
+const SVH_STATUSES = ['ARRIVED_IN_KYRGYZSTAN', 'ARRIVED', 'CUSTOMS_CLEARANCE', 'IN_TRANSIT'];
+const SVH_TRANSPORT_STATUSES = ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const;
+
+const emptySvhForm = () => ({
+  transportCompanyId: '',
+  transportCostKgs: '0',
+  vehicleNumber: '',
+  driverName: '',
+  driverPhone: '',
+  dispatchDate: '',
+  arrivalDate: '',
+  status: 'WAITING' as SvhToHqTransport['status'],
+  notes: '',
+});
 
 export default function ProcurementOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -148,8 +179,6 @@ export default function ProcurementOrderDetailPage() {
     chinaDomesticTransportYuan: '0',
     chinaDomesticTransportCompanyId: '',
     chinaExportTransportCompanyId: '',
-    svhToHqTransportCompanyId: '',
-    localTransportKgs: '0',
     customsCostKgs: '0',
     insuranceCostKgs: '0',
     bankFeeCostKgs: '0',
@@ -167,6 +196,8 @@ export default function ProcurementOrderDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [savingLogistics, setSavingLogistics] = useState(false);
+  const [savingSvh, setSavingSvh] = useState(false);
+  const [svhForm, setSvhForm] = useState(emptySvhForm());
   const [unlocking, setUnlocking] = useState(false);
 
   const canEditOrder = canCreateProcurementOrder(user);
@@ -182,6 +213,15 @@ export default function ProcurementOrderDetailPage() {
   const canReceive = canReceiveProcurementToHq(user);
   const readyForHqReceiving = order?.status === 'ARRIVED' || order?.status === 'ARRIVED_IN_KYRGYZSTAN' || order?.status === 'IN_TRANSIT';
   const canEditSvh = order ? SVH_STATUSES.includes(order.status) : false;
+  const canManageSvh = canManageSvhToHqTransport(user);
+  const canConfirmSvh = canConfirmSvhToHqArrival(user);
+  const svhTransportCompleted = order?.svhToHqTransport?.status === 'COMPLETED' || order?.canReceiveToHq === true;
+  const canSaveSvh = canManageSvh || (canConfirmSvh && !!order?.svhToHqTransport);
+  const svhStatusOptions = canManageSvh
+    ? SVH_TRANSPORT_STATUSES
+    : canConfirmSvh
+      ? ([svhForm.status, 'COMPLETED'] as const).filter((status, index, list) => list.indexOf(status) === index)
+      : ([] as const);
   const finalized = !!order?.hqStockMovementCreatedAt;
 
   const previewItems = useMemo(() => (order?.items ?? [])
@@ -223,7 +263,7 @@ export default function ProcurementOrderDetailPage() {
         {
           chinaDomesticTransportKgs: previewChinaDomesticTransportKgs,
           chinaExportTransportKgs: 0,
-          localTransportKgs: Number(logisticsForm.localTransportKgs || 0),
+          localTransportKgs: Number(svhForm.transportCostKgs || order?.localTransportKgs || 0),
           packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
@@ -235,7 +275,7 @@ export default function ProcurementOrderDetailPage() {
     } catch (err) {
       return null;
     }
-  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs]);
+  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, svhForm.transportCostKgs, order?.localTransportKgs]);
 
   const cargoValidationError = useMemo(() => {
     if (!previewTotals) return t('procurement.orders.cargoWeightLessThanNet');
@@ -261,8 +301,6 @@ export default function ProcurementOrderDetailPage() {
         chinaDomesticTransportYuan: String(orderResult.chinaDomesticTransportYuan ?? 0),
         chinaDomesticTransportCompanyId: orderResult.chinaDomesticTransportCompanyId ?? '',
         chinaExportTransportCompanyId: orderResult.chinaExportTransportCompanyId ?? '',
-        svhToHqTransportCompanyId: orderResult.svhToHqTransportCompanyId ?? '',
-        localTransportKgs: String(orderResult.localTransportKgs ?? 0),
         customsCostKgs: String(orderResult.customsCostKgs ?? 0),
         insuranceCostKgs: String(orderResult.insuranceCostKgs ?? 0),
         bankFeeCostKgs: String(orderResult.bankFeeCostKgs ?? 0),
@@ -277,6 +315,18 @@ export default function ProcurementOrderDetailPage() {
         cargoReceiptNote: orderResult.cargoReceiptNote ?? '',
         hqWarehouseId: orderResult.hqWarehouseId ?? '',
       });
+      const svh = orderResult.svhToHqTransport;
+      setSvhForm(svh ? {
+        transportCompanyId: svh.transportCompanyId ?? '',
+        transportCostKgs: String(svh.transportCostKgs ?? 0),
+        vehicleNumber: svh.vehicleNumber ?? '',
+        driverName: svh.driverName ?? '',
+        driverPhone: svh.driverPhone ?? '',
+        dispatchDate: svh.dispatchDate ? svh.dispatchDate.slice(0, 10) : '',
+        arrivalDate: svh.arrivalDate ? svh.arrivalDate.slice(0, 10) : '',
+        status: svh.status,
+        notes: svh.notes ?? '',
+      } : emptySvhForm());
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -329,8 +379,6 @@ export default function ProcurementOrderDetailPage() {
           chinaDomesticTransportYuan: Number(logisticsForm.chinaDomesticTransportYuan || 0),
           chinaDomesticTransportCompanyId: logisticsForm.chinaDomesticTransportCompanyId || null,
           chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
-          svhToHqTransportCompanyId: logisticsForm.svhToHqTransportCompanyId || null,
-          localTransportKgs: Number(logisticsForm.localTransportKgs || 0),
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
           bankFeeCostKgs: Number(logisticsForm.bankFeeCostKgs || 0),
@@ -352,6 +400,35 @@ export default function ProcurementOrderDetailPage() {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingLogistics(false);
+    }
+  }
+
+  async function saveSvhTransport() {
+    if (!order || finalized || !canEditSvh || !canSaveSvh) return;
+    setSavingSvh(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/svh-to-hq-transport`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          transportCompanyId: svhForm.transportCompanyId || null,
+          transportCostKgs: Number(svhForm.transportCostKgs || 0),
+          vehicleNumber: svhForm.vehicleNumber || undefined,
+          driverName: svhForm.driverName || undefined,
+          driverPhone: svhForm.driverPhone || undefined,
+          dispatchDate: svhForm.dispatchDate || undefined,
+          arrivalDate: svhForm.arrivalDate || undefined,
+          status: svhForm.status,
+          notes: svhForm.notes || undefined,
+        }),
+      });
+      setSuccess(t('procurement.svhTransport.saved'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSavingSvh(false);
     }
   }
 
@@ -383,7 +460,7 @@ export default function ProcurementOrderDetailPage() {
   }
 
   async function receiveGoods() {
-    if (!order || cargoValidationError) return;
+    if (!order || cargoValidationError || !svhTransportCompleted) return;
     setError('');
     setSuccess('');
     try {
@@ -398,11 +475,6 @@ export default function ProcurementOrderDetailPage() {
           cargoReceiptNumber: logisticsForm.cargoReceiptNumber || undefined,
           cargoReceiptDate: logisticsForm.cargoReceiptDate || undefined,
           cargoReceiptNote: logisticsForm.cargoReceiptNote || undefined,
-          localTransportKgs: Number(logisticsForm.localTransportKgs || 0),
-          chinaDomesticTransportYuan: Number(logisticsForm.chinaDomesticTransportYuan || 0),
-          chinaDomesticTransportCompanyId: logisticsForm.chinaDomesticTransportCompanyId || null,
-          chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
-          svhToHqTransportCompanyId: logisticsForm.svhToHqTransportCompanyId || null,
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
           bankFeeCostKgs: Number(logisticsForm.bankFeeCostKgs || 0),
@@ -426,6 +498,10 @@ export default function ProcurementOrderDetailPage() {
 
   function setLogistics<K extends keyof typeof logisticsForm>(key: K, value: string) {
     setLogisticsForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function setSvhField<K extends keyof ReturnType<typeof emptySvhForm>>(key: K, value: ReturnType<typeof emptySvhForm>[K]) {
+    setSvhForm((current) => ({ ...current, [key]: value }));
   }
 
   return (
@@ -566,17 +642,60 @@ export default function ProcurementOrderDetailPage() {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.svhToHqTransport')}</h3>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-lg font-bold">{t('procurement.orders.svhToHqTransport')}</h3>
+              {order.svhToHqTransport ? (
+                <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${svhStatusBadgeClass(svhForm.status)}`}>
+                  {t(`procurement.svhTransport.status.${svhForm.status}`)}
+                </span>
+              ) : null}
+            </div>
+            {!canEditSvh ? (
+              <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.svhTransport.notEligible')}</p>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-3">
               <TransportCompanySelect
                 label={t('procurement.transportCompanies.select')}
-                value={logisticsForm.svhToHqTransportCompanyId}
+                value={svhForm.transportCompanyId}
                 companies={transportCompanies}
-                onChange={(value) => setLogistics('svhToHqTransportCompanyId', value)}
-                disabled={finalized || readOnlyFinance || !canEditSvh}
+                onChange={(value) => setSvhField('transportCompanyId', value)}
+                disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh}
               />
-              <EditableField label={t('procurement.orders.costInKgs')} value={logisticsForm.localTransportKgs} onChange={(v) => setLogistics('localTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance || !canEditSvh} />
+              <EditableField
+                label={t('procurement.svhTransport.costKgs')}
+                value={svhForm.transportCostKgs}
+                onChange={(v) => setSvhField('transportCostKgs', v)}
+                type="number"
+                disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh}
+              />
+              <EditableField label={t('procurement.svhTransport.vehicleNumber')} value={svhForm.vehicleNumber} onChange={(v) => setSvhField('vehicleNumber', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
+              <EditableField label={t('procurement.svhTransport.driverName')} value={svhForm.driverName} onChange={(v) => setSvhField('driverName', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
+              <EditableField label={t('procurement.svhTransport.driverPhone')} value={svhForm.driverPhone} onChange={(v) => setSvhField('driverPhone', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
+              <EditableField label={t('procurement.svhTransport.dispatchDate')} value={svhForm.dispatchDate} onChange={(v) => setSvhField('dispatchDate', v)} type="date" disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
+              <EditableField label={t('procurement.svhTransport.arrivalDate')} value={svhForm.arrivalDate} onChange={(v) => setSvhField('arrivalDate', v)} type="date" disabled={finalized || readOnlyFinance || !canEditSvh || (!canManageSvh && !canConfirmSvh)} />
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('procurement.svhTransport.statusLabel')}</span>
+                <select
+                  value={svhForm.status}
+                  onChange={(e) => setSvhField('status', e.target.value as SvhToHqTransport['status'])}
+                  disabled={finalized || readOnlyFinance || !canEditSvh || (!canManageSvh && !canConfirmSvh)}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                >
+                  {svhStatusOptions.map((status) => (
+                    <option key={status} value={status}>{t(`procurement.svhTransport.status.${status}`)}</option>
+                  ))}
+                </select>
+              </label>
+              <EditableField label={t('procurement.svhTransport.notes')} value={svhForm.notes} onChange={(v) => setSvhField('notes', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
             </div>
+            {canSaveSvh && canEditSvh && !finalized && !readOnlyFinance ? (
+              <button type="button" disabled={savingSvh} onClick={() => void saveSvhTransport()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
+                {savingSvh ? t('common.loading') : order.svhToHqTransport ? t('procurement.svhTransport.save') : t('procurement.svhTransport.create')}
+              </button>
+            ) : null}
+            {!svhTransportCompleted && canReceive && readyForHqReceiving && !finalized ? (
+              <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.svhTransport.receiveBlocked')}</p>
+            ) : null}
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -677,7 +796,10 @@ export default function ProcurementOrderDetailPage() {
                   );
                 })}
               </div>
-              <button type="button" disabled={!!cargoValidationError} onClick={() => void receiveGoods()} className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white disabled:bg-emerald-300">{t('procurement.orders.receiveToHq')}</button>
+              <button type="button" disabled={!!cargoValidationError || !svhTransportCompleted} onClick={() => void receiveGoods()} className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white disabled:bg-emerald-300">{t('procurement.orders.receiveToHq')}</button>
+              {!svhTransportCompleted ? (
+                <p className="mt-3 text-sm text-amber-700">{t('procurement.svhTransport.receiveBlocked')}</p>
+              ) : null}
             </section>
           ) : null}
 
@@ -696,7 +818,7 @@ export default function ProcurementOrderDetailPage() {
             <div className="space-y-3">
               {auditLogs.length ? auditLogs.map((log) => (
                 <div key={log.id} className="rounded-2xl bg-slate-50 p-4 text-sm">
-                  <p className="font-semibold">{log.action}</p>
+                  <p className="font-semibold">{t(`procurement.audit.${log.action}`)}</p>
                   <p className="text-slate-500">{log.user?.fullName ?? '-'} · {new Date(log.timestamp).toLocaleString()}</p>
                 </div>
               )) : <p className="text-sm text-slate-500">{t('procurement.orders.noAudit')}</p>}
@@ -759,4 +881,19 @@ function formatOrderDate(value: string) {
 
 function formatKgs(value: number | string | null | undefined) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
+}
+
+function svhStatusBadgeClass(status: SvhToHqTransport['status']) {
+  switch (status) {
+    case 'WAITING':
+      return 'bg-slate-200 text-slate-700';
+    case 'IN_PROGRESS':
+      return 'bg-blue-100 text-blue-800';
+    case 'COMPLETED':
+      return 'bg-emerald-100 text-emerald-800';
+    case 'CANCELLED':
+      return 'bg-red-100 text-red-800';
+    default:
+      return 'bg-slate-200 text-slate-700';
+  }
 }

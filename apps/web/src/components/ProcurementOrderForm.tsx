@@ -36,7 +36,6 @@ type HeaderForm = {
   chinaDomesticTransportYuan: string;
   chinaDomesticTransportCompanyId: string;
   chinaExportTransportCompanyId: string;
-  svhToHqTransportCompanyId: string;
   customsCostKgs: string;
   insuranceCostKgs: string;
   bankFeeCostKgs: string;
@@ -82,7 +81,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     chinaDomesticTransportYuan: '0',
     chinaDomesticTransportCompanyId: '',
     chinaExportTransportCompanyId: '',
-    svhToHqTransportCompanyId: '',
     customsCostKgs: '0',
     insuranceCostKgs: '0',
     bankFeeCostKgs: '0',
@@ -151,7 +149,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             chinaDomesticTransportYuan: String(order.chinaDomesticTransportYuan ?? 0),
             chinaDomesticTransportCompanyId: order.chinaDomesticTransportCompanyId ?? '',
             chinaExportTransportCompanyId: order.chinaExportTransportCompanyId ?? '',
-            svhToHqTransportCompanyId: order.svhToHqTransportCompanyId ?? '',
             customsCostKgs: String(order.customsCostKgs ?? 0),
             insuranceCostKgs: String(order.insuranceCostKgs ?? 0),
             bankFeeCostKgs: String(order.bankFeeCostKgs ?? 0),
@@ -315,7 +312,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       chinaDomesticTransportYuan: Number(form.chinaDomesticTransportYuan || 0),
       chinaDomesticTransportCompanyId: form.chinaDomesticTransportCompanyId || null,
       chinaExportTransportCompanyId: form.chinaExportTransportCompanyId || null,
-      svhToHqTransportCompanyId: form.svhToHqTransportCompanyId || null,
       customsCostKgs: Number(form.customsCostKgs || 0),
       insuranceCostKgs: Number(form.insuranceCostKgs || 0),
       bankFeeCostKgs: Number(form.bankFeeCostKgs || 0),

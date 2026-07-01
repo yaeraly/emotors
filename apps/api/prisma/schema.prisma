@@ -382,6 +382,13 @@ enum TransportCompanyStatus {
   ARCHIVED
 }
 
+enum SvhToHqTransportStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
 enum StockTransferStatus {
   DRAFT
   APPROVED
@@ -635,6 +642,7 @@ model User {
   procurementCostAdjustments ProcurementCostAdjustment[] @relation("ProcurementCostAdjustmentCreator")
   unlockedProcurementOrders ProcurementOrder[] @relation("ProcurementOrderUnlocker")
   createdTransportCompanies TransportCompany[] @relation("TransportCompanyCreator")
+  createdSvhToHqTransports ProcurementSvhToHqTransport[] @relation("SvhToHqTransportCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1438,6 +1446,7 @@ model TransportCompany {
   chinaDomesticProcurementOrders ProcurementOrder[] @relation("ChinaDomesticTransportCompany")
   chinaExportProcurementOrders   ProcurementOrder[] @relation("ChinaExportTransportCompany")
   svhToHqProcurementOrders       ProcurementOrder[] @relation("SvhToHqTransportCompany")
+  svhToHqTransports              ProcurementSvhToHqTransport[]
   createdAt       DateTime               @default(now())
   updatedAt       DateTime               @updatedAt
   deletedAt       DateTime?
@@ -1594,6 +1603,7 @@ model ProcurementOrder {
   purchasePriceHistory     ProductPurchasePriceHistory[]
   supplierPayments         ProcurementSupplierPayment[]
   costAdjustments          ProcurementCostAdjustment[]
+  svhToHqTransport         ProcurementSvhToHqTransport?
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
@@ -1608,6 +1618,30 @@ model ProcurementOrder {
   @@index([chinaDomesticTransportCompanyId])
   @@index([chinaExportTransportCompanyId])
   @@index([svhToHqTransportCompanyId])
+}
+
+model ProcurementSvhToHqTransport {
+  id                 String                 @id @default(cuid())
+  procurementOrderId String                 @unique
+  procurementOrder   ProcurementOrder       @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  transportCompanyId String?
+  transportCompany   TransportCompany?      @relation(fields: [transportCompanyId], references: [id])
+  transportCostKgs   Decimal                @default(0) @db.Decimal(14, 2)
+  vehicleNumber      String?
+  driverName         String?
+  driverPhone        String?
+  dispatchDate       DateTime?
+  arrivalDate        DateTime?
+  status             SvhToHqTransportStatus @default(WAITING)
+  notes              String?
+  createdById        String
+  createdBy          User                   @relation("SvhToHqTransportCreator", fields: [createdById], references: [id])
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@index([transportCompanyId])
+  @@index([status])
+  @@index([createdById])
 }
 
 model ProcurementSupplierPayment {

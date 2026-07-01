@@ -394,6 +394,24 @@ export function canViewTransportCompany(user: Pick<User, 'role' | 'roles' | 'per
   );
 }
 
+export function canManageSvhToHqTransport(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+}
+
+export function canViewSvhToHqTransport(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return (
+    canManageSvhToHqTransport(user) ||
+    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT', 'PROCUREMENT_MANAGER'])
+  );
+}
+
+export function canConfirmSvhToHqArrival(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return canManageSvhToHqTransport(user) || hasRole(user, 'WAREHOUSE_MANAGER');
+}
+
 export function canEditProcurementOrderItemsInWindow(
   user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
   editWindow: {

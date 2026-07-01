@@ -322,6 +322,40 @@ export function canViewTransportCompany(user: Pick<AuthUser, 'role' | 'roles' | 
   );
 }
 
+export function canManageSvhToHqTransport(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
+export function canViewSvhToHqTransport(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageSvhToHqTransport(user) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.ACCOUNTANT) ||
+    roles.includes(Role.PROCUREMENT_MANAGER)
+  );
+}
+
+export function canConfirmSvhToHqArrival(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageSvhToHqTransport(user) ||
+    roles.includes(Role.WAREHOUSE_MANAGER)
+  );
+}
+
+export function canApproveSvhTransportCostAdjustment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.OWNER)
+  );
+}
+
 export function canManageUsers(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasAnyFullAccessRole(resolveUserRoles(user))) {
     return true;

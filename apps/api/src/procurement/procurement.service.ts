@@ -11,6 +11,7 @@ import {
   ProcurementSupplierPaymentStatus,
   Role,
   StockMovementType,
+  SvhToHqTransportStatus,
   TransportCompanyStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
@@ -24,6 +25,10 @@ import {
   canViewSupplierPayments,
   canManageTransportCompany,
   canViewTransportCompany,
+  canManageSvhToHqTransport,
+  canViewSvhToHqTransport,
+  canConfirmSvhToHqArrival,
+  canApproveSvhTransportCostAdjustment,
   isFullAccessRole,
 } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
@@ -59,6 +64,12 @@ import {
   resolveProcurementLogisticsInput,
   WEIGHTED_YUAN_RATE_REQUIRED_MESSAGE,
 } from './transport-logistics.util';
+import {
+  isSvhEligibleProcurementStatus,
+  isSvhTransportCompleted,
+  normalizeSvhTransportCostKgs,
+  SVH_TRANSPORT_NOT_COMPLETED_MESSAGE,
+} from './svh-to-hq-transport.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -422,6 +433,148 @@ export class ProcurementService {
         reason,
       );
       return archived;
+    });
+  }
+
+  async svhToHqTransport(user: AuthUser, orderId: string) {
+    this.assertCanViewSvhToHqTransport(user);
+    await this.getProcurementOrderForRead(orderId);
+    const transport = await this.prisma.procurementSvhToHqTransport.findUnique({
+      where: { procurementOrderId: orderId },
+      include: {
+        transportCompany: true,
+        createdBy: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+    return transport ? this.toSvhToHqTransportResponse(transport) : null;
+  }
+
+  upsertSvhToHqTransport(user: AuthUser, orderId: string, dto: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { items: true, supplierPayments: true, svhToHqTransport: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+      if (!isSvhEligibleProcurementStatus(order.status)) {
+        throw new BadRequestException('SVH to HQ transport can only be managed after cargo arrives in Kyrgyzstan');
+      }
+
+      const existing = order.svhToHqTransport;
+      if (!existing && !canManageSvhToHqTransport(user)) {
+        throw new ForbiddenException('You do not have permission to create SVH to HQ transport');
+      }
+      if (existing) {
+        this.assertSvhTransportUpdateAllowed(user, dto, order);
+      }
+
+      const transportCostKgs = dto.transportCostKgs !== undefined
+        ? normalizeSvhTransportCostKgs(dto.transportCostKgs)
+        : normalizeSvhTransportCostKgs(existing?.transportCostKgs ?? 0);
+      if (dto.transportCostKgs !== undefined && Number(dto.transportCostKgs) < 0) {
+        throw new BadRequestException('SVH to HQ transport cost must be greater than or equal to zero');
+      }
+
+      const transportCompanyId = dto.transportCompanyId !== undefined
+        ? dto.transportCompanyId || null
+        : existing?.transportCompanyId ?? null;
+      if (transportCompanyId) {
+        await this.assertSelectableTransportCompanies(tx, { svhToHqTransportCompanyId: transportCompanyId });
+      }
+
+      const nextStatus = dto.status ?? existing?.status ?? SvhToHqTransportStatus.WAITING;
+      if (
+        order.hqStockMovementCreatedAt &&
+        existing &&
+        transportCostKgs !== Number(existing.transportCostKgs) &&
+        !canApproveSvhTransportCostAdjustment(user)
+      ) {
+        throw new BadRequestException(
+          'Procurement already received to HQ. CEO or Finance approval is required to change SVH transport cost.',
+        );
+      }
+
+      const oldValue = existing ? this.pickSvhTransportAuditFields(existing) : null;
+      const data = {
+        transportCompanyId,
+        transportCostKgs,
+        vehicleNumber: dto.vehicleNumber !== undefined ? dto.vehicleNumber?.trim() || null : undefined,
+        driverName: dto.driverName !== undefined ? dto.driverName?.trim() || null : undefined,
+        driverPhone: dto.driverPhone !== undefined ? dto.driverPhone?.trim() || null : undefined,
+        dispatchDate: dto.dispatchDate !== undefined
+          ? dto.dispatchDate ? new Date(dto.dispatchDate) : null
+          : undefined,
+        arrivalDate: dto.arrivalDate !== undefined
+          ? dto.arrivalDate ? new Date(dto.arrivalDate) : null
+          : undefined,
+        status: nextStatus,
+        notes: dto.notes !== undefined ? dto.notes?.trim() || null : undefined,
+      };
+
+      const transport = existing
+        ? await tx.procurementSvhToHqTransport.update({
+            where: { id: existing.id },
+            data,
+            include: {
+              transportCompany: true,
+              createdBy: { select: { id: true, fullName: true, role: true } },
+            },
+          })
+        : await tx.procurementSvhToHqTransport.create({
+            data: {
+              procurementOrderId: order.id,
+              transportCompanyId,
+              transportCostKgs,
+              vehicleNumber: dto.vehicleNumber?.trim() || null,
+              driverName: dto.driverName?.trim() || null,
+              driverPhone: dto.driverPhone?.trim() || null,
+              dispatchDate: dto.dispatchDate ? new Date(dto.dispatchDate) : null,
+              arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : null,
+              status: nextStatus,
+              notes: dto.notes?.trim() || null,
+              createdById: user.id,
+            },
+            include: {
+              transportCompany: true,
+              createdBy: { select: { id: true, fullName: true, role: true } },
+            },
+          });
+
+      await tx.procurementOrder.update({
+        where: { id: order.id },
+        data: {
+          localTransportKgs: transport.transportCostKgs,
+          svhToHqTransportCompanyId: transport.transportCompanyId,
+        },
+      });
+
+      const updatedOrder = await this.recalculateOrderLandedCostAfterSvhChange(
+        tx,
+        user,
+        order.id,
+        existing ? 'SVH to HQ transport updated' : 'SVH to HQ transport created',
+      );
+
+      await this.auditSvhTransportChanges(
+        tx,
+        user,
+        order.id,
+        transport.transportCompanyId,
+        oldValue,
+        this.pickSvhTransportAuditFields(transport),
+        !existing,
+      );
+
+      if (isSvhTransportCompleted(transport.status) && !isSvhTransportCompleted(oldValue?.status)) {
+        await this.auditProcurement(tx, user, 'HQ_RECEIVING_ENABLED', order.id, oldValue, this.pickSvhTransportAuditFields(transport), undefined, {
+          transportCompanyId: transport.transportCompanyId,
+        });
+      }
+
+      return {
+        transport: this.toSvhToHqTransportResponse(transport),
+        order: updatedOrder,
+      };
     });
   }
 
@@ -828,6 +981,8 @@ export class ProcurementService {
 
   updateProcurementOrder(user: AuthUser, id: string, dto: any) {
     this.assertCanManageProcurement(user);
+    delete dto.localTransportKgs;
+    delete dto.svhToHqTransportCompanyId;
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.procurementOrder.findFirst({
         where: { id, deletedAt: null },
@@ -1308,7 +1463,7 @@ export class ProcurementService {
       hqWarehouse: true,
       chinaDomesticTransportCompany: true,
       chinaExportTransportCompany: true,
-      svhToHqTransportCompany: true,
+      svhToHqTransport: { include: { transportCompany: true, createdBy: { select: { id: true, fullName: true, role: true } } } },
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
       unlockedBy: { select: { id: true, fullName: true, role: true } },
@@ -1816,13 +1971,11 @@ export class ProcurementService {
     resolved: {
       chinaDomesticTransportYuan: number;
       chinaDomesticTransportKgs: number;
-      localTransportKgs: number;
     },
   ) {
     return {
       chinaDomesticTransportYuan: resolved.chinaDomesticTransportYuan,
       chinaDomesticTransportKgs: resolved.chinaDomesticTransportKgs,
-      localTransportKgs: resolved.localTransportKgs,
       chinaDomesticTransportCompanyId: this.resolveOptionalRelationId(
         dto.chinaDomesticTransportCompanyId,
         existing?.chinaDomesticTransportCompanyId,
@@ -1830,10 +1983,6 @@ export class ProcurementService {
       chinaExportTransportCompanyId: this.resolveOptionalRelationId(
         dto.chinaExportTransportCompanyId,
         existing?.chinaExportTransportCompanyId,
-      ),
-      svhToHqTransportCompanyId: this.resolveOptionalRelationId(
-        dto.svhToHqTransportCompanyId,
-        existing?.svhToHqTransportCompanyId,
       ),
     };
   }
@@ -1847,7 +1996,7 @@ export class ProcurementService {
     const companyIds = [
       this.resolveOptionalRelationId(dto.chinaDomesticTransportCompanyId, existing?.chinaDomesticTransportCompanyId),
       this.resolveOptionalRelationId(dto.chinaExportTransportCompanyId, existing?.chinaExportTransportCompanyId),
-      this.resolveOptionalRelationId(dto.svhToHqTransportCompanyId, existing?.svhToHqTransportCompanyId),
+      dto.svhToHqTransportCompanyId || dto.transportCompanyId || null,
     ].filter(Boolean) as string[];
 
     if (!companyIds.length) return;
@@ -1952,14 +2101,6 @@ export class ProcurementService {
   }
 
   private assertProcurementLogisticsEditable(order: any, dto: any) {
-    const svhEligible = ['ARRIVED_IN_KYRGYZSTAN', 'ARRIVED', 'CUSTOMS_CLEARANCE'].includes(order.status);
-    if (
-      dto.localTransportKgs !== undefined &&
-      Number(dto.localTransportKgs) !== Number(order.localTransportKgs) &&
-      !svhEligible
-    ) {
-      throw new BadRequestException('SVH to HQ transportation can only be edited after goods arrive in Kyrgyzstan');
-    }
     if (dto.hqWarehouseId && dto.hqWarehouseId !== order.hqWarehouseId) {
       // warehouse change validated separately on create/update via activeHqWarehouseWhere
     }
@@ -2157,12 +2298,6 @@ export class ProcurementService {
           oldValue: oldValue?.svhToHqTransportCompanyId,
           newValue: newValue?.svhToHqTransportCompanyId,
         },
-      });
-    }
-    if (String(oldValue?.localTransportKgs ?? '') !== String(newValue?.localTransportKgs ?? '')) {
-      audits.push({
-        action: 'SVH_TO_HQ_TRANSPORT_CHANGED',
-        extra: { field: 'localTransportKgs', oldValue: oldValue?.localTransportKgs, newValue: newValue?.localTransportKgs },
       });
     }
     if (String(oldValue?.hqWarehouseId ?? '') !== String(newValue?.hqWarehouseId ?? '')) {
@@ -2578,6 +2713,201 @@ export class ProcurementService {
       cargoAttachments: attachments.filter(
         (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
       ),
+      svhToHqTransport: order.svhToHqTransport
+        ? this.toSvhToHqTransportResponse(order.svhToHqTransport)
+        : null,
+      canReceiveToHq: isSvhTransportCompleted(order.svhToHqTransport?.status),
     };
+  }
+
+  private toSvhToHqTransportResponse(transport: any) {
+    return {
+      ...transport,
+      transportCostKgs: Number(transport.transportCostKgs ?? 0),
+    };
+  }
+
+  private pickSvhTransportAuditFields(transport: any) {
+    return {
+      id: transport.id,
+      procurementOrderId: transport.procurementOrderId,
+      transportCompanyId: transport.transportCompanyId,
+      transportCostKgs: transport.transportCostKgs?.toString?.() ?? transport.transportCostKgs,
+      vehicleNumber: transport.vehicleNumber,
+      driverName: transport.driverName,
+      driverPhone: transport.driverPhone,
+      dispatchDate: transport.dispatchDate,
+      arrivalDate: transport.arrivalDate,
+      status: transport.status,
+      notes: transport.notes,
+    };
+  }
+
+  private assertCanViewSvhToHqTransport(user: AuthUser) {
+    if (canViewSvhToHqTransport(user)) return;
+    throw new ForbiddenException('You do not have permission to view SVH to HQ transport');
+  }
+
+  private assertSvhTransportUpdateAllowed(user: AuthUser, dto: any, order: any) {
+    if (canManageSvhToHqTransport(user)) return;
+    if (!canConfirmSvhToHqArrival(user)) {
+      throw new ForbiddenException('You do not have permission to update SVH to HQ transport');
+    }
+    const restrictedFields = [
+      'transportCostKgs',
+      'transportCompanyId',
+      'vehicleNumber',
+      'driverName',
+      'driverPhone',
+      'dispatchDate',
+      'notes',
+    ];
+    const touchedRestricted = restrictedFields.some((field) => dto[field] !== undefined);
+    if (touchedRestricted) {
+      throw new ForbiddenException('Warehouse managers can only confirm SVH arrival and completion status');
+    }
+    if (dto.status !== undefined && dto.status !== SvhToHqTransportStatus.COMPLETED) {
+      throw new ForbiddenException('Warehouse managers can only mark SVH to HQ transport as completed');
+    }
+    if (order.hqStockMovementCreatedAt) {
+      throw new BadRequestException('Procurement stock has already been received');
+    }
+  }
+
+  private auditSvhTransportChanges(
+    tx: any,
+    user: AuthUser,
+    procurementOrderId: string,
+    transportCompanyId: string | null,
+    oldValue: any,
+    newValue: any,
+    created: boolean,
+  ) {
+    const audits: Array<{ action: string; extra?: Record<string, unknown> }> = [];
+    if (created) {
+      audits.push({ action: 'SVH_TRANSPORT_CREATED' });
+    }
+    if (oldValue && String(oldValue.transportCompanyId ?? '') !== String(newValue.transportCompanyId ?? '')) {
+      audits.push({
+        action: 'SVH_TRANSPORT_COMPANY_CHANGED',
+        extra: {
+          transportCompanyId: newValue.transportCompanyId,
+          oldValue: oldValue.transportCompanyId,
+          newValue: newValue.transportCompanyId,
+        },
+      });
+    }
+    if (oldValue && String(oldValue.transportCostKgs ?? '') !== String(newValue.transportCostKgs ?? '')) {
+      audits.push({
+        action: 'SVH_TRANSPORT_COST_CHANGED',
+        extra: {
+          oldValue: oldValue.transportCostKgs,
+          newValue: newValue.transportCostKgs,
+        },
+      });
+    }
+    if (oldValue && oldValue.status !== newValue.status) {
+      audits.push({
+        action: 'SVH_TRANSPORT_STATUS_CHANGED',
+        extra: { oldValue: oldValue.status, newValue: newValue.status },
+      });
+      if (newValue.status === SvhToHqTransportStatus.COMPLETED) {
+        audits.push({ action: 'SVH_TRANSPORT_ARRIVAL_CONFIRMED' });
+      }
+    } else if (!oldValue && newValue.arrivalDate) {
+      audits.push({ action: 'SVH_TRANSPORT_ARRIVAL_CONFIRMED' });
+    }
+    audits.push({ action: 'LANDED_COST_RECALCULATED' });
+
+    return Promise.all(audits.map((entry) =>
+      this.auditProcurement(tx, user, entry.action, procurementOrderId, oldValue, newValue, undefined, {
+        transportCompanyId,
+        ...entry.extra,
+      }),
+    ));
+  }
+
+  private async recalculateOrderLandedCostAfterSvhChange(
+    tx: any,
+    user: AuthUser,
+    orderId: string,
+    reason: string,
+  ) {
+    const order = await tx.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+      include: { items: true, supplierPayments: true, svhToHqTransport: true },
+    });
+    if (!order) throw new NotFoundException('Procurement order not found');
+
+    const oldValue = this.pickProcurementAuditFields(order);
+    const summary = summarizeSupplierPayments(order.supplierPayments, Number(order.totalYuan));
+    const effectiveRate =
+      summary.weightedAverageYuanRate && summary.totalPaidYuan > 0
+        ? summary.weightedAverageYuanRate
+        : Number(order.defaultYuanRate);
+    const resolved = this.resolveProcurementLogistics(order, undefined, effectiveRate);
+    const { logistics, cargo, ...transportResolved } = resolved;
+    const calculated = this.calculateProcurementLandedCosts(
+      order.items.map((item: any) => mapStoredProcurementItemToLandedCostInput({
+        ...item,
+        yuanRate: effectiveRate,
+      })),
+      logistics,
+      cargo,
+    );
+    const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
+
+    for (const [index, item] of order.items.entries()) {
+      const next = calculated.items[index];
+      await tx.procurementOrderItem.update({
+        where: { id: item.id },
+        data: this.mapRecalculatedItemFields(next, effectiveRate),
+      });
+    }
+
+    const updated = await tx.procurementOrder.update({
+      where: { id: order.id },
+      data: {
+        ...orderTotals,
+        ...this.buildProcurementTransportFields(order, order, transportResolved),
+        localTransportKgs: order.localTransportKgs,
+        svhToHqTransportCompanyId: order.svhToHqTransportCompanyId,
+        totalPaidYuan: summary.totalPaidYuan,
+        totalPaidKgs: summary.totalPaidKgs,
+        remainingYuan: summary.remainingYuan,
+        weightedAverageYuanRate: summary.weightedAverageYuanRate,
+        supplierPaymentStatus: summary.supplierPaymentStatus,
+      },
+      include: this.procurementOrderInclude(),
+    });
+
+    if (
+      order.hqStockMovementCreatedAt &&
+      Number(oldValue.totalCostKgs) !== Number(updated.totalCostKgs)
+    ) {
+      await tx.procurementCostAdjustment.create({
+        data: {
+          procurementOrderId: order.id,
+          oldTotalCostKgs: Number(oldValue.totalCostKgs),
+          newTotalCostKgs: Number(updated.totalCostKgs),
+          oldWeightedRate: oldValue.weightedAverageYuanRate
+            ? Number(oldValue.weightedAverageYuanRate)
+            : null,
+          newWeightedRate: summary.weightedAverageYuanRate,
+          reason,
+          createdById: user.id,
+        },
+      });
+      await this.auditProcurement(tx, user, 'PROCUREMENT_COST_ADJUSTMENT', order.id, {
+        oldTotalCostKgs: oldValue.totalCostKgs,
+        oldWeightedRate: oldValue.weightedAverageYuanRate,
+      }, {
+        newTotalCostKgs: updated.totalCostKgs,
+        newWeightedRate: summary.weightedAverageYuanRate,
+        reason,
+      });
+    }
+
+    return this.toProcurementOrderResponse(updated);
   }
 }

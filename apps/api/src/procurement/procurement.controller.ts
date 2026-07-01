@@ -118,6 +118,18 @@ export class ProcurementController {
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
   procurementOrder(@Param('id') id: string) { return this.service.procurementOrder(id); }
 
+  @Get('orders/:id/svh-to-hq-transport')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'procurement.receive')
+  svhToHqTransport(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.svhToHqTransport(user, id);
+  }
+
+  @Put('orders/:id/svh-to-hq-transport')
+  @RequirePermissions('procurement.manage', 'procurement.receive')
+  upsertSvhToHqTransport(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.upsertSvhToHqTransport(user, id, dto);
+  }
+
   @Get('orders/:id/audit-logs')
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
   procurementOrderAuditLogs(@Param('id') id: string) { return this.service.procurementOrderAuditLogs(id); }
