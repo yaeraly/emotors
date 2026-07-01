@@ -448,50 +448,21 @@ export default function ProcurementOrderDetailPage() {
             />
           ) : null}
 
-          {canEditOrder && !finalized ? (
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap gap-2">
-                {statusActions.map(([path, label]) => <button key={path} onClick={() => void action(path)} type="button" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t(label)}</button>)}
-              </div>
-            </section>
-          ) : null}
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-x-auto">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.productsTable')}</h3>
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">SKU</th>
-                  <th className="px-4 py-3">{t('procurement.orders.product')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.quantity')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.netWeightKg')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
-                  <th className="px-4 py-3">{t('inventory.finalCostKgs')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(previewTotals?.items ?? []).map((item, index) => {
-                  const row = (order.items ?? []).filter((entry) => entry.status !== 'CANCELLED')[index];
-                  if (!row) return null;
-                  return (
-                    <tr key={row.id}>
-                      <td className="px-4 py-3">{row.sku}</td>
-                      <td className="px-4 py-3">{row.productName}</td>
-                      <td className="px-4 py-3">{row.quantity}</td>
-                      <td className="px-4 py-3">{item.netWeightKg.toFixed(3)}</td>
-                      <td className="px-4 py-3">{item.lineNetWeightKg.toFixed(3)}</td>
-                      <td className="px-4 py-3">¥{Number(row.purchasePriceYuan).toFixed(2)}</td>
-                      <td className="px-4 py-3">¥{item.totalYuan.toFixed(2)}</td>
-                      <td className="px-4 py-3">{row.receivedQuantity ?? '-'}</td>
-                      <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.localTransport')}</h3>
+            <div className="grid gap-4 md:grid-cols-3">
+              <EditableField label={t('procurement.orders.chinaDomestic')} value={logisticsForm.chinaDomesticTransportKgs} onChange={(v) => setLogistics('chinaDomesticTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.svhToHqTransport')} value={logisticsForm.localTransportKgs} onChange={(v) => setLogistics('localTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance || !canEditSvh} />
+              <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.bankFees')} value={logisticsForm.bankFeeCostKgs} onChange={(v) => setLogistics('bankFeeCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.otherExpenses')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+            </div>
+            {canEditOrder && !finalized && !readOnlyFinance ? (
+              <button type="button" disabled={savingLogistics || !!cargoValidationError} onClick={() => void saveLogistics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
+                {savingLogistics ? t('common.loading') : t('procurement.orders.saveLogistics')}
+              </button>
+            ) : null}
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -538,29 +509,58 @@ export default function ProcurementOrderDetailPage() {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.localTransport')}</h3>
-            <div className="grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.chinaDomestic')} value={logisticsForm.chinaDomesticTransportKgs} onChange={(v) => setLogistics('chinaDomesticTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.svhToHqTransport')} value={logisticsForm.localTransportKgs} onChange={(v) => setLogistics('localTransportKgs', v)} type="number" disabled={finalized || readOnlyFinance || !canEditSvh} />
-              <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.bankFees')} value={logisticsForm.bankFeeCostKgs} onChange={(v) => setLogistics('bankFeeCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.otherExpenses')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-            </div>
-            {canEditOrder && !finalized && !readOnlyFinance ? (
-              <button type="button" disabled={savingLogistics || !!cargoValidationError} onClick={() => void saveLogistics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
-                {savingLogistics ? t('common.loading') : t('procurement.orders.saveLogistics')}
-              </button>
-            ) : null}
-          </section>
-
           <section className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
             <Info label={t('procurement.orders.totalNetWeightKg')} value={`${(previewTotals?.totalNetWeightKg ?? 0).toFixed(3)} kg`} />
             <Info label={t('procurement.orders.totalPackagingWeightKg')} value={`${(previewTotals?.totalPackagingWeightKg ?? 0).toFixed(3)} kg`} />
             <Info label={t('procurement.orders.shipmentWeight')} value={`${(previewTotals?.totalShipmentWeightKg ?? 0).toFixed(3)} kg`} />
             <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
             <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(previewTotals?.totalCostKgs ?? order.totalCostKgs)} />
+          </section>
+
+          {canEditOrder && !finalized ? (
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-wrap gap-2">
+                {statusActions.map(([path, label]) => <button key={path} onClick={() => void action(path)} type="button" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t(label)}</button>)}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-x-auto">
+            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.productsTable')}</h3>
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">SKU</th>
+                  <th className="px-4 py-3">{t('procurement.orders.product')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.quantity')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.netWeightKg')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
+                  <th className="px-4 py-3">{t('inventory.finalCostKgs')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(previewTotals?.items ?? []).map((item, index) => {
+                  const row = (order.items ?? []).filter((entry) => entry.status !== 'CANCELLED')[index];
+                  if (!row) return null;
+                  return (
+                    <tr key={row.id}>
+                      <td className="px-4 py-3">{row.sku}</td>
+                      <td className="px-4 py-3">{row.productName}</td>
+                      <td className="px-4 py-3">{row.quantity}</td>
+                      <td className="px-4 py-3">{item.netWeightKg.toFixed(3)}</td>
+                      <td className="px-4 py-3">{item.lineNetWeightKg.toFixed(3)}</td>
+                      <td className="px-4 py-3">¥{Number(row.purchasePriceYuan).toFixed(2)}</td>
+                      <td className="px-4 py-3">¥{item.totalYuan.toFixed(2)}</td>
+                      <td className="px-4 py-3">{row.receivedQuantity ?? '-'}</td>
+                      <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </section>
 
           {canReceive && readyForHqReceiving && !finalized ? (
