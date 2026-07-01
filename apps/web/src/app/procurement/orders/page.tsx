@@ -11,6 +11,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 type ProcurementOrder = {
   id: string;
   orderNumber: string;
+  createdAt?: string;
   status: string;
   totalYuan: string | number;
   totalCostKgs: string | number;
@@ -58,16 +59,26 @@ export default function ProcurementOrdersPage() {
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-              <tr><th className="px-4 py-3">{t('procurement.orders.orderNumber')}</th><th className="px-4 py-3">{t('procurement.orders.supplier')}</th><th className="px-4 py-3">{t('procurement.orders.factory')}</th><th className="px-4 py-3">{t('procurement.orders.status')}</th><th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th><th className="px-4 py-3">{t('procurement.orders.totalCostKgs')}</th><th className="px-4 py-3">{t('common.actions')}</th></tr>
+              <tr><th className="px-4 py-3">{t('procurement.orders.orderDate')}</th><th className="px-4 py-3">{t('procurement.orders.supplier')}</th><th className="px-4 py-3">{t('procurement.orders.factory')}</th><th className="px-4 py-3">{t('procurement.orders.status')}</th><th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th><th className="px-4 py-3">{t('procurement.orders.totalCostKgs')}</th><th className="px-4 py-3">{t('common.actions')}</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {orders.map((order) => <tr key={order.id}><td className="px-4 py-3 font-bold">{order.orderNumber}</td><td className="px-4 py-3">{order.supplier?.name ?? '-'}</td><td className="px-4 py-3">{order.factory?.name ?? '-'}</td><td className="px-4 py-3">{order.status}</td><td className="px-4 py-3">¥{Number(order.totalYuan ?? 0).toFixed(2)}</td><td className="px-4 py-3">{formatKgs(order.totalCostKgs)}</td><td className="px-4 py-3"><Link href={`/procurement/orders/${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td></tr>)}
+              {orders.map((order) => <tr key={order.id}><td className="px-4 py-3 font-bold">{order.createdAt ? formatOrderDate(order.createdAt) : '-'}</td><td className="px-4 py-3">{order.supplier?.name ?? '-'}</td><td className="px-4 py-3">{order.factory?.name ?? '-'}</td><td className="px-4 py-3">{order.status}</td><td className="px-4 py-3">¥{Number(order.totalYuan ?? 0).toFixed(2)}</td><td className="px-4 py-3">{formatKgs(order.totalCostKgs)}</td><td className="px-4 py-3"><Link href={`/procurement/orders/${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td></tr>)}
             </tbody>
           </table>
         </div>
       </section>
     </ProtectedShell>
   );
+}
+
+function formatOrderDate(value: string) {
+  return new Date(value).toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function formatKgs(value: number | string | null | undefined) {
