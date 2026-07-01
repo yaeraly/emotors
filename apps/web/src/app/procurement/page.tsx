@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { ModuleSectionNav } from '@/components/ModuleSectionNav';
+import { procurementHubSections } from '@/lib/scm-hub-sections';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProcurementPage() {
@@ -14,6 +16,7 @@ export default function ProcurementPage() {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">EMOTORS OS</p>
           <h2 className="text-3xl font-bold text-slate-950">{t('procurement.title')}</h2>
         </div>
+        <ModuleSectionNav sections={procurementHubSections} />
         <div className="grid gap-4 md:grid-cols-3">
           <ProcurementCard href="/procurement/suppliers" title={t('procurement.suppliers.title')} action={t('procurement.suppliers.new')} />
           <ProcurementCard href="/procurement/factories" title={t('procurement.factories.title')} action={t('procurement.factories.new')} />

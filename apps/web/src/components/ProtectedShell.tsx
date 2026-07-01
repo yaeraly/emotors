@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -88,6 +88,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeWarrantyClaims = hasPermission(user, 'service.manage') || hasPermission(user, 'distribution.manage');
   const canSeeSupplierClaims = hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
   const roleLabel = roleCodesForUser(user).join(', ');
+  const supplyChainManagerView = isSupplyChainManagerUser(user);
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -126,6 +127,17 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             {t('nav.modules')}
           </p>
           <nav className="space-y-2">
+            {supplyChainManagerView ? (
+              <>
+                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
+                <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouse')}</Link>
+                <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
+                <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
+                <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.supplyChain')}</Link>
+                <Link href="/alerts" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.notifications')}</Link>
+              </>
+            ) : (
+              <>
             {canSeeCrm ? (
               <Link
                 href="/customers"
@@ -265,6 +277,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 </p>
               ))}
             </div>
+              </>
+            )}
           </nav>
         </aside>
 

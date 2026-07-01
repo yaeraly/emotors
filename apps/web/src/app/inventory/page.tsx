@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { ModuleSectionNav } from '@/components/ModuleSectionNav';
+import { warehouseHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
 import type { InventoryBalance, ProductListResponse, StockValueReport } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -79,6 +81,8 @@ export default function InventoryPage() {
             </Link>
           </div>
         </div>
+
+        <ModuleSectionNav sections={warehouseHubSections} />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 

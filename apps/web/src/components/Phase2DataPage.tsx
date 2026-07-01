@@ -14,6 +14,7 @@ type Phase2DataPageProps = {
   defaultPayload?: Record<string, unknown>;
   actionHref?: string;
   actionKey?: string;
+  embedded?: boolean;
 };
 
 export function Phase2DataPage({
@@ -24,6 +25,7 @@ export function Phase2DataPage({
   defaultPayload = {},
   actionHref,
   actionKey,
+  embedded = false,
 }: Phase2DataPageProps) {
   const { t } = useTranslation();
   const [data, setData] = useState<unknown>(null);
@@ -61,9 +63,9 @@ export function Phase2DataPage({
     }
   }
 
-  return (
-    <ProtectedShell>
-      <section className="space-y-6">
+  const content = (
+    <>
+        {embedded ? null : (
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
@@ -92,6 +94,19 @@ export function Phase2DataPage({
             </button>
           </div>
         </div>
+        )}
+
+        {embedded ? (
+          <div className="flex justify-end">
+            <button
+              onClick={() => void load()}
+              className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              type="button"
+            >
+              {t('phase2.refresh')}
+            </button>
+          </div>
+        ) : null}
 
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -124,6 +139,17 @@ export function Phase2DataPage({
         ) : null}
 
         <DataView data={data} />
+    </>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <ProtectedShell>
+      <section className="space-y-6">
+        {content}
       </section>
     </ProtectedShell>
   );

@@ -105,6 +105,33 @@ export function hasFullAccess(user: Pick<User, 'role' | 'roles'> | null | undefi
   return hasAnyRole(user, ['OWNER', 'CEO']);
 }
 
+export function isSupplyChainManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user || hasFullAccess(user)) return false;
+  return hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+}
+
+const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/inventory',
+  '/products',
+  '/warehouses',
+  '/stock-movements',
+  '/hq-warehouses',
+  '/distribution',
+  '/procurement',
+  '/supply-chain',
+  '/alerts',
+  '/branch-purchase-requests',
+  '/supplier-claims',
+];
+
+function canSupplyChainManagerAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  return SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
   'MANAGER',
   'MASTER',
@@ -132,6 +159,7 @@ export function getDefaultRoute(role: Role) {
 
 export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasFullAccess(user)) return '/dashboard';
+  if (isSupplyChainManagerUser(user)) return '/supply-chain';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
@@ -151,6 +179,9 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
 
 export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/change-password') return true;
+  if (isSupplyChainManagerUser(user)) {
+    return canSupplyChainManagerAccessPath(pathname);
+  }
   if (pathname === '/dashboard') return true;
   if (pathname === '/branch-dashboard') {
     return hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');

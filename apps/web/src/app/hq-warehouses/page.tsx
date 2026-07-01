@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { ModuleSectionNav } from '@/components/ModuleSectionNav';
+import { hqWarehouseHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
 import { canManageHqWarehouse } from '@/lib/rbac';
 import type { Branch, User, Warehouse } from '@/lib/types';
@@ -56,6 +58,8 @@ export default function HqWarehousesPage() {
             </Link>
           ) : null}
         </div>
+
+        <ModuleSectionNav sections={hqWarehouseHubSections} />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
