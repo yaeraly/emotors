@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -7,6 +7,7 @@ import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
+import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
 import { HqWarehouseService } from './hq-warehouse.service';
 
 @Controller('hq-warehouses')
@@ -46,6 +47,15 @@ export class HqWarehouseController {
   @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
   deactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.deactivate(user, id);
+  }
+
+  @Delete(':id')
+  remove(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: DeleteArchiveDto,
+  ) {
+    return this.service.remove(user, id, dto?.reason);
   }
 
   @Get(':id/inventory')

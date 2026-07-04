@@ -381,6 +381,14 @@ export function canUnlockProcurementOrder(user: Pick<User, 'role' | 'roles' | 'p
   return hasFullAccess(user) || hasRole(user, 'CEO') || hasRole(user, 'OWNER');
 }
 
+export function canDeleteProcurementOrder(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canUnlockProcurementOrder(user);
+}
+
+export function canDeleteHqWarehouse(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canUnlockProcurementOrder(user);
+}
+
 export function canManageTransportCompany(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');

@@ -29,6 +29,7 @@ import {
   canViewSvhToHqTransport,
   canConfirmSvhToHqArrival,
   canApproveSvhTransportCostAdjustment,
+  canDeleteProcurementOrder,
   isFullAccessRole,
 } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
@@ -1431,6 +1432,81 @@ export class ProcurementService {
       );
 
       return this.toProcurementOrderResponse(updated);
+    });
+  }
+
+  deleteProcurementOrder(user: AuthUser, id: string, reason?: string) {
+    if (!canDeleteProcurementOrder(user)) {
+      throw new ForbiddenException('Only CEO can delete procurement orders');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: { items: true, svhToHqTransport: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const [
+        supplierPayments,
+        receivings,
+        attachments,
+        costAdjustments,
+      ] = await Promise.all([
+        tx.procurementSupplierPayment.count({ where: { procurementOrderId: id } }),
+        tx.procurementGoodsReceiving.count({ where: { procurementOrderId: id, deletedAt: null } }),
+        tx.fileAttachment.count({ where: { entityId: id, deletedAt: null } }),
+        tx.procurementCostAdjustment.count({ where: { procurementOrderId: id } }),
+      ]);
+
+      const hasCargoReceipt = !!(
+        order.cargoReceiptNumber ||
+        order.cargoReceiptDate ||
+        order.cargoCompany ||
+        Number(order.cargoTotalWeightKg) > 0 ||
+        Number(order.totalCargoCostKgs) > 0
+      );
+      const hasBusinessHistory =
+        supplierPayments > 0 ||
+        receivings > 0 ||
+        attachments > 0 ||
+        costAdjustments > 0 ||
+        !!order.hqStockMovementCreatedAt ||
+        !!order.sentToSupplierAt ||
+        !!order.svhToHqTransport ||
+        hasCargoReceipt ||
+        order.status !== 'DRAFT';
+
+      const oldValue = this.pickProcurementAuditFields(order);
+
+      if (!hasBusinessHistory && order.status === 'DRAFT') {
+        await tx.procurementOrder.delete({ where: { id } });
+        await this.auditProcurement(tx, user, 'PROCUREMENT_ORDER_DELETED', id, oldValue, { deleted: true }, reason);
+        return { success: true, archived: false };
+      }
+
+      const trimmedReason = reason?.trim();
+      if (!trimmedReason) {
+        throw new BadRequestException('Reason is required when archiving a procurement order with related records');
+      }
+
+      const archived = await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          deletedAt: new Date(),
+          status: order.status === 'CANCELLED' ? order.status : ProcurementOrderStatus.CANCELLED,
+        },
+      });
+      await this.auditProcurement(
+        tx,
+        user,
+        'PROCUREMENT_ORDER_ARCHIVED',
+        id,
+        oldValue,
+        this.pickProcurementAuditFields(archived),
+        trimmedReason,
+      );
+      return { success: true, archived: true };
     });
   }
 

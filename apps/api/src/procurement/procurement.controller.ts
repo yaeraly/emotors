@@ -11,6 +11,7 @@ import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
 import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
+import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
 import { ProcurementService } from './procurement.service';
 
 const PROCUREMENT_VIEW_PERMISSIONS = ['procurement.manage', 'procurement.view'] as const;
@@ -227,6 +228,15 @@ export class ProcurementController {
   @Put('orders/:id')
   @RequirePermissions('procurement.manage')
   updateProcurementOrder(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) { return this.service.updateProcurementOrder(user, id, dto); }
+
+  @Delete('orders/:id')
+  deleteProcurementOrder(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: DeleteArchiveDto,
+  ) {
+    return this.service.deleteProcurementOrder(user, id, dto?.reason);
+  }
 
   @Post('orders/:id/recalculate')
   @RequirePermissions('procurement.manage')

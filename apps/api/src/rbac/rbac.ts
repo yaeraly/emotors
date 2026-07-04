@@ -296,6 +296,14 @@ export function canUnlockProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' 
   return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO) || roles.includes(Role.OWNER);
 }
 
+export function canDeleteProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canUnlockProcurementOrder(user);
+}
+
+export function canDeleteHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canUnlockProcurementOrder(user);
+}
+
 export function canCreateDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
   return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);

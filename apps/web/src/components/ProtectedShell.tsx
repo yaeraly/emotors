@@ -73,7 +73,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeProcurement = canViewProcurement(user);
   const canManageProcurementOrders = hasPermission(user, 'procurement.manage');
   const canSeeDistribution = hasPermission(user, 'distribution.manage');
-  const canSeeSupplyChain = canSeeDistribution;
   const canSeeFinance = hasPermission(user, 'finance.view');
   const canSeeInvestment = hasFullAccess(user);
   const canSeeExpansion = hasFullAccess(user);
@@ -133,8 +132,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouse')}</Link>
                 <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
                 <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
-                <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.supplyChain')}</Link>
-                <Link href="/alerts" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.notifications')}</Link>
               </>
             ) : (
               <>
@@ -250,7 +247,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 </div>
               ) : null}
               {!canSeeProcurement && (canSeeCrm || canSeeSales) ? <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.branchPurchaseRequests')}</Link> : null}
-              {canSeeSupplyChain ? <Link href="/supply-chain" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyChain.title')}</Link> : null}
               {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}
               {canSeeExpansion ? <Link href="/expansion" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('expansion.title')}</Link> : null}
               {canSeeFinance ? <Link href="/finance" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
@@ -261,7 +257,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeePayroll ? <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('commissions.title')}</Link> : null}
               {canSeePayroll ? <Link href="/payroll" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('payroll.title')}</Link> : null}
               {canManageUsers ? <Link href="/users" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.users')}</Link> : null}
-              <Link href="/alerts" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.alerts')}</Link>
               {[
                 'nav.dashboard',
                 'nav.finance',

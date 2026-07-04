@@ -12,6 +12,7 @@ import {
   hqWarehouseWhere,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
+import { canDeleteHqWarehouse } from '../rbac/rbac';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 
@@ -143,8 +144,86 @@ export class HqWarehouseService {
       where: { id },
       data: { isActive: false },
     });
-    await this.audit(user, 'HQ_WAREHOUSE_DEACTIVATED', warehouse.id, { warehouse: existing });
+    await this.audit(user, 'HQ_WAREHOUSE_DEACTIVATED', warehouse.id, { oldValue: existing, newValue: warehouse });
     return warehouse;
+  }
+
+  async remove(user: AuthUser, id: string, reason?: string) {
+    if (!canDeleteHqWarehouse(user)) {
+      throw new ForbiddenException('Only CEO can delete HQ warehouses');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const warehouse = await tx.warehouse.findFirst({
+        where: { id, ...hqWarehouseWhere },
+      });
+      if (!warehouse || !isHqWarehouse(warehouse)) {
+        throw new NotFoundException('HQ warehouse not found');
+      }
+
+      const [
+        stockAggregate,
+        stockMovements,
+        receivings,
+        distributionOrders,
+        procurementOrders,
+        goodsReceivings,
+      ] = await Promise.all([
+        tx.inventoryBalance.aggregate({
+          where: { warehouseId: id },
+          _sum: { quantity: true },
+        }),
+        tx.stockMovement.count({ where: { warehouseId: id } }),
+        tx.procurementGoodsReceiving.count({ where: { hqWarehouseId: id, deletedAt: null } }),
+        tx.branchDistributionOrder.count({
+          where: {
+            deletedAt: null,
+            OR: [{ sourceWarehouseId: id }, { destinationWarehouseId: id }],
+          },
+        }),
+        tx.procurementOrder.count({ where: { hqWarehouseId: id, deletedAt: null } }),
+        tx.goodsReceiving.count({ where: { warehouseId: id } }),
+      ]);
+
+      const totalStock = stockAggregate._sum.quantity ?? 0;
+      const hasHistory =
+        totalStock > 0 ||
+        stockMovements > 0 ||
+        receivings > 0 ||
+        distributionOrders > 0 ||
+        procurementOrders > 0 ||
+        goodsReceivings > 0;
+
+      const oldValue = { ...warehouse };
+
+      if (!hasHistory) {
+        await tx.warehouse.delete({ where: { id } });
+        await this.audit(user, 'HQ_WAREHOUSE_DELETED', id, {
+          entityType: 'Warehouse',
+          oldValue,
+          newValue: { deleted: true },
+          reason: reason?.trim() || null,
+        });
+        return { success: true, archived: false };
+      }
+
+      const trimmedReason = reason?.trim();
+      if (!trimmedReason) {
+        throw new BadRequestException('Reason is required when archiving an HQ warehouse with related records');
+      }
+
+      const archived = await tx.warehouse.update({
+        where: { id },
+        data: { isActive: false, deletedAt: new Date() },
+      });
+      await this.audit(user, 'HQ_WAREHOUSE_ARCHIVED', id, {
+        entityType: 'Warehouse',
+        oldValue,
+        newValue: archived,
+        reason: trimmedReason,
+      });
+      return { success: true, archived: true };
+    });
   }
 
   async inventory(user: AuthUser, id: string) {
