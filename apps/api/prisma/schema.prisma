@@ -641,6 +641,7 @@ model User {
   fileAttachments FileAttachment[] @relation("FileAttachmentUploader")
   procurementCostAdjustments ProcurementCostAdjustment[] @relation("ProcurementCostAdjustmentCreator")
   unlockedProcurementOrders ProcurementOrder[] @relation("ProcurementOrderUnlocker")
+  chinaDomesticTransportUnlockedProcurementOrders ProcurementOrder[] @relation("ProcurementChinaDomesticTransportUnlocker")
   createdTransportCompanies TransportCompany[] @relation("TransportCompanyCreator")
   createdSvhToHqTransports ProcurementSvhToHqTransport[] @relation("SvhToHqTransportCreator")
   createdAt      DateTime        @default(now())
@@ -1596,6 +1597,11 @@ model ProcurementOrder {
   unlockedAt               DateTime?
   unlockExpiresAt          DateTime?
   unlockReason             String?
+  chinaDomesticTransportUnlockedAt DateTime?
+  chinaDomesticTransportUnlockExpiresAt DateTime?
+  chinaDomesticTransportUnlockReason String?
+  chinaDomesticTransportUnlockedById String?
+  chinaDomesticTransportUnlockedBy User? @relation("ProcurementChinaDomesticTransportUnlocker", fields: [chinaDomesticTransportUnlockedById], references: [id])
   note                     String?
   items                    ProcurementOrderItem[]
   receivings               ProcurementGoodsReceiving[]

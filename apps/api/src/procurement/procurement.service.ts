@@ -70,6 +70,13 @@ import {
   normalizeSvhTransportCostKgs,
   SVH_TRANSPORT_NOT_COMPLETED_MESSAGE,
 } from './svh-to-hq-transport.util';
+import {
+  canEditChinaDomesticTransport,
+  CHINA_DOMESTIC_TRANSPORT_LOCKED_MESSAGE,
+  computeChinaDomesticTransportUnlockExpiry,
+  isChinaDomesticTransportLockedByStatus,
+  touchesChinaDomesticTransportFields,
+} from './china-domestic-transport-lock.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -1010,7 +1017,7 @@ export class ProcurementService {
         ? Number(dto.defaultYuanRate)
         : await this.resolveEffectiveYuanRate(tx, existing);
       this.validateExchangeRate(exchangeRate);
-      this.assertProcurementLogisticsEditable(existing, dto);
+      this.assertProcurementLogisticsEditable(user, existing, dto);
       if (dto.hqWarehouseId && dto.hqWarehouseId !== existing.hqWarehouseId) {
         const warehouse = await tx.warehouse.findFirst({
           where: { id: dto.hqWarehouseId, ...activeHqWarehouseWhere },
@@ -1287,6 +1294,20 @@ export class ProcurementService {
       }
       const updated = await tx.procurementOrder.update({ where: { id }, data, include: this.procurementOrderInclude() });
       await this.auditProcurement(tx, user, 'PROCUREMENT_STATUS_CHANGE', id, oldValue, this.pickProcurementAuditFields(updated), reason, { status });
+      if (
+        isChinaDomesticTransportLockedByStatus(status) &&
+        !isChinaDomesticTransportLockedByStatus(existing.status)
+      ) {
+        await this.auditProcurement(
+          tx,
+          user,
+          'CHINA_DOMESTIC_TRANSPORT_LOCKED',
+          id,
+          { status: existing.status },
+          { status },
+          reason,
+        );
+      }
       return this.toProcurementOrderResponse(updated);
     });
   }
@@ -1346,6 +1367,65 @@ export class ProcurementService {
           unlockedAt: now,
           unlockExpiresAt,
           unlockReason: reason,
+        },
+        reason,
+      );
+
+      return this.toProcurementOrderResponse(updated);
+    });
+  }
+
+  unlockChinaDomesticTransport(user: AuthUser, id: string, dto: UnlockProcurementOrderDto) {
+    if (!canUnlockProcurementOrder(user)) {
+      throw new ForbiddenException('Only CEO can unlock China domestic transport');
+    }
+    const reason = dto.reason?.trim();
+    if (!reason) {
+      throw new BadRequestException('Unlock reason is required');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.procurementOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: { items: true },
+      });
+      if (!existing) throw new NotFoundException('Procurement order not found');
+      if (!isChinaDomesticTransportLockedByStatus(existing.status)) {
+        throw new BadRequestException('China domestic transport is not locked for this procurement order');
+      }
+      if (existing.hqStockMovementCreatedAt || isProcurementOrderCompleted(existing)) {
+        throw new BadRequestException('Completed or received procurement orders cannot be unlocked');
+      }
+
+      const now = new Date();
+      const unlockExpiresAt = computeChinaDomesticTransportUnlockExpiry(now);
+      const updated = await tx.procurementOrder.update({
+        where: { id },
+        data: {
+          chinaDomesticTransportUnlockedById: user.id,
+          chinaDomesticTransportUnlockedAt: now,
+          chinaDomesticTransportUnlockExpiresAt: unlockExpiresAt,
+          chinaDomesticTransportUnlockReason: reason,
+        },
+        include: this.procurementOrderInclude(),
+      });
+
+      await this.auditProcurement(
+        tx,
+        user,
+        'CHINA_DOMESTIC_TRANSPORT_UNLOCKED',
+        id,
+        {
+          chinaDomesticTransportUnlockedById: existing.chinaDomesticTransportUnlockedById,
+          chinaDomesticTransportUnlockedAt: existing.chinaDomesticTransportUnlockedAt,
+          chinaDomesticTransportUnlockExpiresAt: existing.chinaDomesticTransportUnlockExpiresAt,
+          chinaDomesticTransportUnlockReason: existing.chinaDomesticTransportUnlockReason,
+        },
+        {
+          chinaDomesticTransportUnlockedById: user.id,
+          chinaDomesticTransportUnlockedAt: now,
+          chinaDomesticTransportUnlockExpiresAt: unlockExpiresAt,
+          chinaDomesticTransportUnlockReason: reason,
         },
         reason,
       );
@@ -1467,6 +1547,7 @@ export class ProcurementService {
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
       unlockedBy: { select: { id: true, fullName: true, role: true } },
+      chinaDomesticTransportUnlockedBy: { select: { id: true, fullName: true, role: true } },
       items: { include: { product: true, supplier: true, factory: true }, orderBy: { createdAt: 'asc' as const } },
       receivings: { include: { items: true }, orderBy: { createdAt: 'desc' as const } },
       differenceReports: { orderBy: { createdAt: 'desc' as const } },
@@ -1785,6 +1866,9 @@ export class ProcurementService {
       unlockedAt: order.unlockedAt,
       unlockExpiresAt: order.unlockExpiresAt,
       unlockReason: order.unlockReason,
+      chinaDomesticTransportUnlockedAt: order.chinaDomesticTransportUnlockedAt,
+      chinaDomesticTransportUnlockExpiresAt: order.chinaDomesticTransportUnlockExpiresAt,
+      chinaDomesticTransportUnlockReason: order.chinaDomesticTransportUnlockReason,
       currency: order.currency,
       purchaseDate: order.purchaseDate,
       exchangeRate: order.defaultYuanRate?.toString?.() ?? order.defaultYuanRate,
@@ -2100,10 +2184,14 @@ export class ProcurementService {
     };
   }
 
-  private assertProcurementLogisticsEditable(order: any, dto: any) {
-    if (dto.hqWarehouseId && dto.hqWarehouseId !== order.hqWarehouseId) {
-      // warehouse change validated separately on create/update via activeHqWarehouseWhere
+  private assertProcurementLogisticsEditable(user: AuthUser, order: any, dto: any) {
+    if (!touchesChinaDomesticTransportFields(dto)) {
+      return;
     }
+    if (canEditChinaDomesticTransport(order)) {
+      return;
+    }
+    throw new ForbiddenException(CHINA_DOMESTIC_TRANSPORT_LOCKED_MESSAGE);
   }
 
   private calculateProcurementLandedCosts(
@@ -2687,6 +2775,11 @@ export class ProcurementService {
       defaultYuanRate: Number(order.defaultYuanRate),
       chinaDomesticTransportYuan: Number(order.chinaDomesticTransportYuan ?? 0),
       chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs ?? 0),
+      chinaDomesticTransportLocked: isChinaDomesticTransportLockedByStatus(order.status),
+      chinaDomesticTransportEditable: canEditChinaDomesticTransport(order),
+      chinaDomesticTransportUnlockExpiresAt: order.chinaDomesticTransportUnlockExpiresAt,
+      chinaDomesticTransportUnlockReason: order.chinaDomesticTransportUnlockReason,
+      chinaDomesticTransportUnlockedBy: order.chinaDomesticTransportUnlockedBy,
       localTransportKgs: Number(order.localTransportKgs ?? 0),
       yuanRateLocked: activePaymentCount > 0,
       effectiveYuanRate:

@@ -268,6 +268,16 @@ export class ProcurementController {
     return this.service.unlockProcurementOrder(user, id, dto);
   }
 
+  @Post('orders/:id/unlock-china-domestic-transport')
+  @RequirePermissions('procurement.manage')
+  unlockChinaDomesticTransport(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UnlockProcurementOrderDto,
+  ) {
+    return this.service.unlockChinaDomesticTransport(user, id, dto);
+  }
+
   @Post('orders/:id/mark-in-transit')
   @RequirePermissions('procurement.manage')
   markTransit(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.service.updateProcurementStatus(user, id, 'IN_TRANSIT' as any); }

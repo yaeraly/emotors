@@ -6,6 +6,8 @@ import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { calculateLandedCosts } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
+import { LockedFieldHint } from '@/components/LockedFieldHint';
+import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { canEditProcurementOrderItemsInWindow } from '@/lib/rbac';
 import type { Product, ProductListResponse, User, Warehouse } from '@/lib/types';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
@@ -98,6 +100,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     unlockReason?: string | null;
     unlockedBy?: { fullName?: string } | null;
   }>({});
+  const [chinaDomesticTransportEditable, setChinaDomesticTransportEditable] = useState(true);
 
   useEffect(() => {
     const loaders: Promise<unknown>[] = [
@@ -127,6 +130,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         setTransportCompanies(transportCompanyResult);
 
         if (mode === 'edit' && order) {
+          setChinaDomesticTransportEditable(
+            order.chinaDomesticTransportEditable ?? canEditChinaDomesticTransport(order),
+          );
           setEditWindow({
             isEditable: order.isEditable,
             editWindowStatus: order.editWindowStatus,
@@ -252,6 +258,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
   const sentToSupplier = !!editWindow.sentToSupplierAt;
   const canEditItems = canEditProcurementOrderItemsInWindow(user, editWindow);
   const itemsLocked = mode === 'edit' && sentToSupplier && !canEditItems;
+  const chinaDomesticLocked = mode === 'edit' && !chinaDomesticTransportEditable;
 
   function setField<K extends keyof HeaderForm>(key: K, value: HeaderForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -300,7 +307,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       return;
     }
     setSaving(true);
-    const payload = {
+    const payload: Record<string, unknown> = {
       supplierId: form.supplierId,
       factoryId: form.factoryId || undefined,
       hqWarehouseId: form.hqWarehouseId,
@@ -309,8 +316,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       purchaseDate: form.purchaseDate || undefined,
       estimatedArrivalDate: form.estimatedArrivalDate || undefined,
       note: form.note || undefined,
-      chinaDomesticTransportYuan: Number(form.chinaDomesticTransportYuan || 0),
-      chinaDomesticTransportCompanyId: form.chinaDomesticTransportCompanyId || null,
       chinaExportTransportCompanyId: form.chinaExportTransportCompanyId || null,
       customsCostKgs: Number(form.customsCostKgs || 0),
       insuranceCostKgs: Number(form.insuranceCostKgs || 0),
@@ -324,6 +329,10 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         purchasePriceYuan: Number(line.purchasePriceYuan || 0),
       })),
     };
+    if (chinaDomesticTransportEditable) {
+      payload.chinaDomesticTransportYuan = Number(form.chinaDomesticTransportYuan || 0);
+      payload.chinaDomesticTransportCompanyId = form.chinaDomesticTransportCompanyId || null;
+    }
     try {
       if (mode === 'edit' && orderId) {
         await apiFetch(`/procurement/orders/${orderId}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -381,13 +390,33 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
           <Field label={t('procurement.orders.estimatedArrivalDate')}><input type="date" value={form.estimatedArrivalDate} onChange={(e) => setField('estimatedArrivalDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
-          <Field label={t('procurement.transportCompanies.select')}>
-            <select value={form.chinaDomesticTransportCompanyId} onChange={(e) => setField('chinaDomesticTransportCompanyId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">
-              <option value="">-</option>
-              {transportCompanies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-            </select>
-          </Field>
-          <Field label={t('procurement.orders.costInYuan')}><input type="number" value={form.chinaDomesticTransportYuan} onChange={(e) => setField('chinaDomesticTransportYuan', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+          {chinaDomesticLocked ? (
+            <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
+          ) : null}
+          <LockedFieldHint locked={chinaDomesticLocked} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
+            <Field label={t('procurement.transportCompanies.select')}>
+              <select
+                disabled={chinaDomesticLocked}
+                value={form.chinaDomesticTransportCompanyId}
+                onChange={(e) => setField('chinaDomesticTransportCompanyId', e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              >
+                <option value="">-</option>
+                {transportCompanies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
+              </select>
+            </Field>
+          </LockedFieldHint>
+          <LockedFieldHint locked={chinaDomesticLocked} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
+            <Field label={t('procurement.orders.costInYuan')}>
+              <input
+                type="number"
+                disabled={chinaDomesticLocked}
+                value={form.chinaDomesticTransportYuan}
+                onChange={(e) => setField('chinaDomesticTransportYuan', e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+              />
+            </Field>
+          </LockedFieldHint>
           <Field label={t('procurement.orders.costInKgs')}><input type="number" readOnly value={chinaDomesticTransportKgs} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.customs')}><input type="number" value={form.customsCostKgs} onChange={(e) => setField('customsCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.insurance')}><input type="number" value={form.insuranceCostKgs} onChange={(e) => setField('insuranceCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>

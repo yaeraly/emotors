@@ -6,7 +6,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
+import { LockedFieldHint } from '@/components/LockedFieldHint';
+import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
+import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
 import {
@@ -133,22 +136,16 @@ type ProcurementOrder = {
   receivings?: Array<{ id: string; receivingNumber: string; receivedAt: string }>;
   svhToHqTransport?: SvhToHqTransport | null;
   canReceiveToHq?: boolean;
+  chinaDomesticTransportLocked?: boolean;
+  chinaDomesticTransportEditable?: boolean;
+  chinaDomesticTransportUnlockExpiresAt?: string | null;
+  chinaDomesticTransportUnlockReason?: string | null;
+  chinaDomesticTransportUnlockedBy?: { fullName?: string } | null;
 };
 
 type AuditLog = { id: string; action: string; timestamp: string; user?: { fullName: string } };
 
 const SHORTAGE_REASONS = ['FACTORY_SHORTAGE', 'SUPPLIER_SHORTAGE', 'DAMAGED_GOODS', 'LOST_IN_TRANSPORT', 'CUSTOMS_ISSUE', 'OTHER'] as const;
-const statusActions = [
-  ['approve', 'distribution.approve'],
-  ['mark-ordered', 'procurement.orders.markOrdered'],
-  ['mark-sent-to-supplier', 'procurement.orders.markSentToSupplier'],
-  ['mark-paid', 'paymentStatus.PAID'],
-  ['mark-production', 'procurement.inProduction'],
-  ['mark-shipped-to-yiwu', 'procurement.shippedToYiwu'],
-  ['mark-in-transit', 'procurement.inTransit'],
-  ['mark-arrived', 'procurement.markArrived'],
-  ['cancel', 'distribution.cancel'],
-] as const;
 
 const SVH_STATUSES = ['ARRIVED_IN_KYRGYZSTAN', 'ARRIVED', 'CUSTOMS_CLEARANCE', 'IN_TRANSIT'];
 const SVH_TRANSPORT_STATUSES = ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const;
@@ -199,6 +196,8 @@ export default function ProcurementOrderDetailPage() {
   const [savingSvh, setSavingSvh] = useState(false);
   const [svhForm, setSvhForm] = useState(emptySvhForm());
   const [unlocking, setUnlocking] = useState(false);
+  const [unlockingChinaDomestic, setUnlockingChinaDomestic] = useState(false);
+  const [chinaDomesticUnlockReason, setChinaDomesticUnlockReason] = useState('');
 
   const canEditOrder = canCreateProcurementOrder(user);
   const canEditItems = canEditProcurementOrderItemsInWindow(user, {
@@ -223,6 +222,12 @@ export default function ProcurementOrderDetailPage() {
       ? ([svhForm.status, 'COMPLETED'] as const).filter((status, index, list) => list.indexOf(status) === index)
       : ([] as const);
   const finalized = !!order?.hqStockMovementCreatedAt;
+  const chinaDomesticEditable = order
+    ? (order.chinaDomesticTransportEditable ?? canEditChinaDomesticTransport(order))
+    : true;
+  const chinaDomesticLockedByStatus = order?.chinaDomesticTransportLocked ?? false;
+  const chinaDomesticLocked = chinaDomesticLockedByStatus && !chinaDomesticEditable;
+  const canUnlockChinaDomestic = canUnlockProcurementOrder(user) && chinaDomesticLocked;
 
   const previewItems = useMemo(() => (order?.items ?? [])
     .filter((item) => item.status !== 'CANCELLED')
@@ -355,6 +360,30 @@ export default function ProcurementOrderDetailPage() {
     }
   }
 
+  async function unlockChinaDomesticTransport() {
+    const reason = chinaDomesticUnlockReason.trim();
+    if (!reason) {
+      setError(t('procurement.chinaDomestic.unlockReasonRequired'));
+      return;
+    }
+    setUnlockingChinaDomestic(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/unlock-china-domestic-transport`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      setSuccess(t('procurement.chinaDomestic.unlockSuccess'));
+      setChinaDomesticUnlockReason('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setUnlockingChinaDomestic(false);
+    }
+  }
+
   async function action(path: string) {
     setError('');
     setSuccess('');
@@ -373,11 +402,7 @@ export default function ProcurementOrderDetailPage() {
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/procurement/orders/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          chinaDomesticTransportYuan: Number(logisticsForm.chinaDomesticTransportYuan || 0),
-          chinaDomesticTransportCompanyId: logisticsForm.chinaDomesticTransportCompanyId || null,
+      const payload: Record<string, unknown> = {
           chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
@@ -387,12 +412,18 @@ export default function ProcurementOrderDetailPage() {
           cargoTotalWeightKg: Number(logisticsForm.cargoTotalWeightKg || 0),
           cargoRateUsdPerKg: Number(logisticsForm.cargoRateUsdPerKg || 0),
           defaultUsdRate: Number(logisticsForm.defaultUsdRate || 0),
-          cargoCompany: logisticsForm.cargoCompany || undefined,
           cargoReceiptNumber: logisticsForm.cargoReceiptNumber || undefined,
           cargoReceiptDate: logisticsForm.cargoReceiptDate || undefined,
           cargoReceiptNote: logisticsForm.cargoReceiptNote || undefined,
           hqWarehouseId: logisticsForm.hqWarehouseId || order.hqWarehouseId,
-        }),
+        };
+      if (chinaDomesticEditable) {
+        payload.chinaDomesticTransportYuan = Number(logisticsForm.chinaDomesticTransportYuan || 0);
+        payload.chinaDomesticTransportCompanyId = logisticsForm.chinaDomesticTransportCompanyId || null;
+      }
+      await apiFetch(`/procurement/orders/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
       });
       setSuccess(t('procurement.orders.logisticsSaved'));
       await load();
@@ -471,7 +502,6 @@ export default function ProcurementOrderDetailPage() {
           cargoTotalWeightKg: Number(logisticsForm.cargoTotalWeightKg || 0),
           cargoRateUsdPerKg: Number(logisticsForm.cargoRateUsdPerKg || 0),
           defaultUsdRate: Number(logisticsForm.defaultUsdRate || 0),
-          cargoCompany: logisticsForm.cargoCompany || undefined,
           cargoReceiptNumber: logisticsForm.cargoReceiptNumber || undefined,
           cargoReceiptDate: logisticsForm.cargoReceiptDate || undefined,
           cargoReceiptNote: logisticsForm.cargoReceiptNote || undefined,
@@ -573,19 +603,57 @@ export default function ProcurementOrderDetailPage() {
           ) : null}
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
+              {chinaDomesticLocked && !chinaDomesticEditable ? (
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold uppercase text-amber-800">{t('procurement.chinaDomestic.locked')}</span>
+              ) : null}
+            </div>
+            {chinaDomesticLocked && !chinaDomesticEditable ? (
+              <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-3">
-              <TransportCompanySelect
-                label={t('procurement.transportCompanies.select')}
-                value={logisticsForm.chinaDomesticTransportCompanyId}
-                companies={transportCompanies}
-                onChange={(value) => setLogistics('chinaDomesticTransportCompanyId', value)}
-                disabled={finalized || readOnlyFinance}
-              />
-              <EditableField label={t('procurement.orders.costInYuan')} value={logisticsForm.chinaDomesticTransportYuan} onChange={(v) => setLogistics('chinaDomesticTransportYuan', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
+                <TransportCompanySelect
+                  label={t('procurement.transportCompanies.select')}
+                  value={logisticsForm.chinaDomesticTransportCompanyId}
+                  companies={transportCompanies}
+                  onChange={(value) => setLogistics('chinaDomesticTransportCompanyId', value)}
+                  disabled={finalized || readOnlyFinance || !chinaDomesticEditable}
+                />
+              </LockedFieldHint>
+              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
+                <EditableField
+                  label={t('procurement.orders.costInYuan')}
+                  value={logisticsForm.chinaDomesticTransportYuan}
+                  onChange={(v) => setLogistics('chinaDomesticTransportYuan', v)}
+                  type="number"
+                  disabled={finalized || readOnlyFinance || !chinaDomesticEditable}
+                />
+              </LockedFieldHint>
               <Info label={t('procurement.orders.costInKgs')} value={formatKgs(previewChinaDomesticTransportKgs)} />
               <Info label={t('procurement.orders.weightedAverageYuanRate')} value={String(effectiveYuanRate || '-')} />
             </div>
+            {canUnlockChinaDomestic && !finalized ? (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-900">{t('procurement.chinaDomestic.unlockTitle')}</p>
+                <textarea
+                  value={chinaDomesticUnlockReason}
+                  onChange={(e) => setChinaDomesticUnlockReason(e.target.value)}
+                  placeholder={t('procurement.chinaDomestic.unlockReasonPlaceholder')}
+                  className="mt-3 w-full rounded-xl border border-amber-200 px-3 py-2 text-sm"
+                  rows={2}
+                />
+                <button
+                  type="button"
+                  disabled={unlockingChinaDomestic}
+                  onClick={() => void unlockChinaDomesticTransport()}
+                  className="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-amber-300"
+                >
+                  {unlockingChinaDomestic ? t('common.loading') : t('procurement.chinaDomestic.unlock')}
+                </button>
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -605,7 +673,6 @@ export default function ProcurementOrderDetailPage() {
               <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.cargoCompany')} value={logisticsForm.cargoCompany} onChange={(v) => setLogistics('cargoCompany', v)} disabled={finalized || readOnlyFinance} />
               <EditableField label={t('procurement.orders.cargoReceiptNumber')} value={logisticsForm.cargoReceiptNumber} onChange={(v) => setLogistics('cargoReceiptNumber', v)} disabled={finalized || readOnlyFinance} />
               <EditableField label={t('procurement.orders.cargoReceiptDate')} value={logisticsForm.cargoReceiptDate} onChange={(v) => setLogistics('cargoReceiptDate', v)} type="date" disabled={finalized || readOnlyFinance} />
               <EditableField label={t('procurement.orders.cargoReceiptNote')} value={logisticsForm.cargoReceiptNote} onChange={(v) => setLogistics('cargoReceiptNote', v)} disabled={finalized || readOnlyFinance} />
@@ -723,9 +790,7 @@ export default function ProcurementOrderDetailPage() {
 
           {canEditOrder && !finalized ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap gap-2">
-                {statusActions.map(([path, label]) => <button key={path} onClick={() => void action(path)} type="button" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t(label)}</button>)}
-              </div>
+              <ProcurementStatusButtons orderStatus={order.status} onAction={(path) => void action(path)} />
             </section>
           ) : null}
 
