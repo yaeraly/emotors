@@ -627,6 +627,7 @@ export default function ProcurementOrderDetailPage() {
                 totalPaidYuan: Number(order.totalPaidYuan ?? 0),
                 totalPaidKgs: Number(order.totalPaidKgs ?? 0),
                 remainingYuan: Number(order.remainingYuan ?? order.totalYuan),
+                hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
               }}
               user={user}
               onChanged={load}

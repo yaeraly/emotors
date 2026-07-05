@@ -34,6 +34,7 @@ type ProcurementOrderPayments = {
   effectiveYuanRate?: number;
   supplierPaymentStatus?: string;
   yuanRateLocked?: boolean;
+  hqStockMovementCreatedAt?: string | null;
   supplierPayments?: SupplierPayment[];
 };
 
@@ -45,6 +46,14 @@ type Props = {
 
 const paymentMethods = ['BANK', 'CASH', 'TRANSFER'] as const;
 
+type EditForm = {
+  paymentDate: string;
+  amountYuan: string;
+  exchangeRate: string;
+  notes: string;
+  changeReason: string;
+};
+
 export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const { t } = useTranslation();
   const [form, setForm] = useState({
@@ -55,6 +64,15 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
     receiptNumber: '',
     notes: '',
   });
+  const [editTarget, setEditTarget] = useState<SupplierPayment | null>(null);
+  const [editForm, setEditForm] = useState<EditForm>({
+    paymentDate: '',
+    amountYuan: '',
+    exchangeRate: '',
+    notes: '',
+    changeReason: '',
+  });
+  const [showConfirm, setShowConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -63,6 +81,75 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const canEdit = canEditSupplierPayment(user);
   const canVoid = canVoidSupplierPayment(user);
   const payments = order.supplierPayments ?? [];
+  const hqReceived = Boolean(order.hqStockMovementCreatedAt);
+
+  function openEdit(payment: SupplierPayment) {
+    setEditTarget(payment);
+    setEditForm({
+      paymentDate: payment.paymentDate.slice(0, 10),
+      amountYuan: String(payment.amountYuan),
+      exchangeRate: String(payment.exchangeRate),
+      notes: payment.notes ?? '',
+      changeReason: '',
+    });
+    setShowConfirm(false);
+    setError('');
+  }
+
+  function closeEdit() {
+    setEditTarget(null);
+    setShowConfirm(false);
+    setError('');
+  }
+
+  function validateEditForm() {
+    const amountYuan = Number(editForm.amountYuan);
+    const exchangeRate = Number(editForm.exchangeRate);
+    if (!amountYuan || amountYuan <= 0) {
+      setError(t('procurement.payments.amountRequired'));
+      return false;
+    }
+    if (!exchangeRate || exchangeRate <= 0) {
+      setError(t('procurement.payments.exchangeRateRequired'));
+      return false;
+    }
+    if (!editForm.changeReason.trim() || editForm.changeReason.trim().length < 3) {
+      setError(t('procurement.payments.changeReasonRequired'));
+      return false;
+    }
+    setError('');
+    return true;
+  }
+
+  function requestSave() {
+    if (!validateEditForm()) return;
+    setShowConfirm(true);
+  }
+
+  async function saveEdit() {
+    if (!editTarget || !validateEditForm()) return;
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${editTarget.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          paymentDate: editForm.paymentDate,
+          amountYuan: Number(editForm.amountYuan),
+          exchangeRate: Number(editForm.exchangeRate),
+          notes: editForm.notes || undefined,
+          changeReason: editForm.changeReason.trim(),
+        }),
+      });
+      closeEdit();
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+      setShowConfirm(false);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function createPayment() {
     setSaving(true);
@@ -247,6 +334,15 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 <td className="px-4 py-3">{payment.status}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
+                    {canEdit && payment.status === 'ACTIVE' ? (
+                      <button
+                        type="button"
+                        onClick={() => openEdit(payment)}
+                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
+                      >
+                        {t('procurement.payments.edit')}
+                      </button>
+                    ) : null}
                     {canCreate && payment.status === 'ACTIVE' ? (
                       <label className="cursor-pointer rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold">
                         {t('procurement.payments.uploadReceipt')}
@@ -267,6 +363,64 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
           </tbody>
         </table>
       </div>
+
+      {editTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+            <h4 className="text-xl font-bold text-slate-950">{t('procurement.payments.editPayment')}</h4>
+            <p className="mt-2 text-sm text-slate-500">
+              {t(`procurement.payments.method.${editTarget.paymentMethod}`)} · ¥{Number(editTarget.amountYuan).toFixed(2)}
+            </p>
+
+            {!showConfirm ? (
+              <div className="mt-5 space-y-4">
+                <Field label={t('procurement.payments.paymentDate')} type="date" value={editForm.paymentDate} onChange={(value) => setEditForm({ ...editForm, paymentDate: value })} />
+                <Field label={t('procurement.payments.amountYuan')} type="number" value={editForm.amountYuan} onChange={(value) => setEditForm({ ...editForm, amountYuan: value })} />
+                <Field label={t('procurement.payments.exchangeRate')} type="number" value={editForm.exchangeRate} onChange={(value) => setEditForm({ ...editForm, exchangeRate: value })} />
+                <Field label={t('procurement.payments.notes')} value={editForm.notes} onChange={(value) => setEditForm({ ...editForm, notes: value })} />
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.changeReason')}</span>
+                  <textarea
+                    value={editForm.changeReason}
+                    onChange={(e) => setEditForm({ ...editForm, changeReason: e.target.value })}
+                    placeholder={t('procurement.payments.changeReasonPlaceholder')}
+                    className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <div className="flex justify-end gap-3">
+                  <button type="button" onClick={closeEdit} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">
+                    {t('common.cancel')}
+                  </button>
+                  <button type="button" onClick={requestSave} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">
+                    {t('procurement.payments.saveChanges')}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-5 space-y-4">
+                <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  {hqReceived
+                    ? t('procurement.payments.confirmRateChangeHqReceived')
+                    : t('procurement.payments.confirmRateChange')}
+                </p>
+                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                  <p>{t('procurement.payments.exchangeRate')}: {Number(editTarget.exchangeRate).toFixed(4)} → {Number(editForm.exchangeRate || 0).toFixed(4)}</p>
+                  <p className="mt-1">{t('procurement.payments.amountYuan')}: ¥{Number(editTarget.amountYuan).toFixed(2)} → ¥{Number(editForm.amountYuan || 0).toFixed(2)}</p>
+                  <p className="mt-1">{t('procurement.payments.changeReason')}: {editForm.changeReason}</p>
+                </div>
+                <div className="flex justify-end gap-3">
+                  <button type="button" onClick={() => setShowConfirm(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">
+                    {t('common.cancel')}
+                  </button>
+                  <button type="button" disabled={saving} onClick={() => void saveEdit()} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white disabled:bg-blue-300">
+                    {saving ? t('common.loading') : t('common.confirm')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -296,6 +450,7 @@ function Field({
       <span className="text-sm font-semibold text-slate-700">{label}</span>
       <input
         type={type}
+        step={type === 'number' ? '0.0001' : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"

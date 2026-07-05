@@ -1,6 +1,6 @@
 import { ProcurementSupplierPaymentMethod } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsDateString, IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsNotEmpty, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 export class UpdateSupplierPaymentDto {
   @IsOptional()
@@ -33,4 +33,9 @@ export class UpdateSupplierPaymentDto {
 
   @IsOptional()
   allowOverpayment?: boolean;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Change reason is required' })
+  @MinLength(3, { message: 'Change reason must be at least 3 characters' })
+  changeReason!: string;
 }

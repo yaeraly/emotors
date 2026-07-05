@@ -409,7 +409,7 @@ export function canCreateSupplierPayment(user: Pick<User, 'role' | 'roles' | 'pe
 }
 
 export function canEditSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasFullAccess(user) || hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'FINANCE_MANAGER']);
+  return hasFullAccess(user);
 }
 
 export function canVoidSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

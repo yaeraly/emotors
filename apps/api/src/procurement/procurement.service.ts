@@ -797,6 +797,10 @@ export class ProcurementService {
       const oldValue = this.toSupplierPaymentResponse(payment);
       const amountYuan = dto.amountYuan ?? Number(payment.amountYuan);
       const exchangeRate = dto.exchangeRate ?? Number(payment.exchangeRate);
+      const changeReason = dto.changeReason?.trim();
+      if (!changeReason) {
+        throw new BadRequestException('Change reason is required');
+      }
       this.validateSupplierPaymentPayload(amountYuan, exchangeRate);
       const otherPayments = await tx.procurementSupplierPayment.findMany({
         where: {
@@ -830,15 +834,42 @@ export class ProcurementService {
         tx,
         user,
         order.id,
-        'Supplier payment updated',
+        changeReason,
       );
       await this.auditProcurement(
         tx,
         user,
-        'SUPPLIER_PAYMENT_EDITED',
+        'PAYMENT_EXCHANGE_RATE_UPDATED',
         order.id,
-        oldValue,
-        this.toSupplierPaymentResponse(updatedPayment),
+        {
+          paymentId: payment.id,
+          procurementOrderId: order.id,
+          oldExchangeRate: oldValue.exchangeRate,
+          newExchangeRate: Number(updatedPayment.exchangeRate),
+          oldAmountYuan: oldValue.amountYuan,
+          newAmountYuan: Number(updatedPayment.amountYuan),
+          oldAmountKgs: oldValue.amountKgs,
+          newAmountKgs: Number(updatedPayment.amountKgs),
+          oldPaymentDate: oldValue.paymentDate,
+          newPaymentDate: updatedPayment.paymentDate,
+        },
+        {
+          paymentId: updatedPayment.id,
+          procurementOrderId: order.id,
+          oldExchangeRate: oldValue.exchangeRate,
+          newExchangeRate: Number(updatedPayment.exchangeRate),
+          oldAmountYuan: oldValue.amountYuan,
+          newAmountYuan: Number(updatedPayment.amountYuan),
+          oldAmountKgs: oldValue.amountKgs,
+          newAmountKgs: Number(updatedPayment.amountKgs),
+          changedBy: user.id,
+          changeReason,
+        },
+        changeReason,
+        {
+          paymentId: payment.id,
+          changedByName: user.fullName ?? user.email ?? user.id,
+        },
       );
       return {
         payment: this.toSupplierPaymentResponse(updatedPayment),

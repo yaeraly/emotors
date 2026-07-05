@@ -249,12 +249,7 @@ export function canCreateSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' |
 }
 
 export function canEditSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  const roles = resolveUserRoles(user);
-  return (
-    hasAnyFullAccessRole(roles) ||
-    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
-    roles.includes(Role.FINANCE_MANAGER)
-  );
+  return hasAnyFullAccessRole(resolveUserRoles(user));
 }
 
 export function canVoidSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
