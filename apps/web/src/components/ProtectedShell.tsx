@@ -7,6 +7,7 @@ import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { NotificationBell } from './NotificationBell';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type ProtectedShellProps = {
@@ -102,6 +103,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             </h1>
           </div>
           <div className="flex items-center gap-4">
+            <NotificationBell />
             <LanguageSwitcher />
             <div className="text-right text-sm">
               <p className="font-semibold text-slate-900">{user?.fullName}</p>

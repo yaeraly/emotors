@@ -19,11 +19,22 @@ type Dashboard = {
   pendingTransfers: number;
 };
 
+type WarehouseMetrics = Warehouse & {
+  totalProductQuantity?: number;
+  totalStockValueKgs?: number;
+  totalPurchaseCostKgs?: number;
+  totalDistributedValueKgs?: number;
+  availableStockValueKgs?: number;
+  reservedStockValueKgs?: number;
+  pendingOutgoingOrders?: number;
+  pendingReceivingOrders?: number;
+};
+
 export default function HqWarehousesPage() {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [warehouses, setWarehouses] = useState<WarehouseMetrics[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Warehouse | null>(null);
@@ -39,7 +50,7 @@ export default function HqWarehousesPage() {
       const [me, stats, list] = await Promise.all([
         apiFetch<User>('/auth/me'),
         apiFetch<Dashboard>('/hq-warehouses/dashboard'),
-        apiFetch<Warehouse[]>('/hq-warehouses'),
+        apiFetch<WarehouseMetrics[]>('/hq-warehouses'),
       ]);
       setUser(me);
       setDashboard(stats);
@@ -111,7 +122,11 @@ export default function HqWarehousesPage() {
                 <th className="px-4 py-3">{t('warehouse.name')}</th>
                 <th className="px-4 py-3">{t('warehouse.code')}</th>
                 <th className="px-4 py-3">{t('hqWarehouse.city')}</th>
-                <th className="px-4 py-3">{t('hqWarehouse.country')}</th>
+                <th className="px-4 py-3">{t('hqWarehouse.totalStock')}</th>
+                <th className="px-4 py-3">{t('hqWarehouse.totalValue')}</th>
+                <th className="px-4 py-3">{t('hqWarehouse.distributedValue')}</th>
+                <th className="px-4 py-3">{t('hqWarehouse.pendingOutgoing')}</th>
+                <th className="px-4 py-3">{t('hqWarehouse.pendingReceiving')}</th>
                 <th className="px-4 py-3">{t('common.status')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
               </tr>
@@ -122,7 +137,11 @@ export default function HqWarehousesPage() {
                   <td className="px-4 py-3 font-bold">{warehouse.name}</td>
                   <td className="px-4 py-3">{warehouse.code}</td>
                   <td className="px-4 py-3">{(warehouse as Warehouse & { city?: string }).city ?? '—'}</td>
-                  <td className="px-4 py-3">{(warehouse as Warehouse & { country?: string }).country ?? '—'}</td>
+                  <td className="px-4 py-3">{warehouse.totalProductQuantity ?? 0}</td>
+                  <td className="px-4 py-3">{(warehouse.totalStockValueKgs ?? 0).toLocaleString()} KGS</td>
+                  <td className="px-4 py-3">{(warehouse.totalDistributedValueKgs ?? 0).toLocaleString()} KGS</td>
+                  <td className="px-4 py-3">{warehouse.pendingOutgoingOrders ?? 0}</td>
+                  <td className="px-4 py-3">{warehouse.pendingReceivingOrders ?? 0}</td>
                   <td className="px-4 py-3">{warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">

@@ -10,10 +10,16 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 const statuses: BranchDistributionOrderStatus[] = [
   'DRAFT',
-  'APPROVED',
-  'SENT',
-  'RECEIVED',
+  'INVOICED',
+  'PAYMENT_PENDING',
+  'PAID',
+  'SENT_TO_WAREHOUSE',
+  'PICKING',
+  'PACKED',
+  'SHIPPED',
+  'RECEIVED_BY_BRANCH',
   'RECEIVED_WITH_DIFFERENCE',
+  'COMPLETED',
   'CANCELLED',
 ];
 

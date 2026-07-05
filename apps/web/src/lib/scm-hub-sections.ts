@@ -19,7 +19,8 @@ export const hqWarehouseHubSections: ModuleSectionLink[] = [
 export const distributionHubSections: ModuleSectionLink[] = [
   { href: '/branch-purchase-requests', labelKey: 'scm.hub.distribution.branchOrders' },
   { href: '/distribution/orders', labelKey: 'scm.hub.distribution.shipmentOrders' },
-  { href: '/distribution/orders', labelKey: 'scm.hub.distribution.shipments' },
+  { href: '/distribution/picking-tasks', labelKey: 'distribution.pickingTasks' },
+  { href: '/distribution/invoices', labelKey: 'distribution.invoices' },
   { href: '/distribution/receivings', labelKey: 'scm.hub.distribution.branchReceiving' },
   { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
 ];

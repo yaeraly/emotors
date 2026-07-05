@@ -170,6 +170,12 @@ export class OperationsController {
     return this.service.createAlert(user, dto);
   }
 
+  @Post('alerts/:id/read')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+  markAlertRead(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.markAlertRead(user, id);
+  }
+
   @Get('operations/analytics')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
   analyticsPlaceholders() {

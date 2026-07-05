@@ -281,6 +281,16 @@ enum AlertType {
   WARRANTY_EXPIRING
   RESERVATION_EXPIRING
   RETURN_PENDING_APPROVAL
+  BRANCH_ORDER_SUBMITTED
+  BRANCH_INVOICE_CREATED
+  PAYMENT_RECEIVED
+  ORDER_SENT_TO_WAREHOUSE
+  PICKING_TASK_ASSIGNED
+  GOODS_SHIPPED
+  BRANCH_GOODS_RECEIVED
+  DIFFERENCE_ACT_CREATED
+  SHORTAGE_NEEDS_RESOLUTION
+  REPLACEMENT_GOODS_SHIPPED
 }
 
 enum AlertStatus {
@@ -400,16 +410,38 @@ enum StockTransferStatus {
 enum BranchDistributionOrderStatus {
   DRAFT
   SUBMITTED
+  ACCEPTED_BY_SUPPLY_CHAIN
   APPROVED
+  INVOICED
+  PAYMENT_PENDING
+  PAID
+  SENT_TO_WAREHOUSE
   PICKING
   PACKED
   SHIPPED
   DELIVERED
   SENT
   RECEIVED
+  RECEIVED_BY_BRANCH
   RECEIVED_WITH_DIFFERENCE
   CLOSED
+  COMPLETED
   CANCELLED
+}
+
+enum HqWarehousePickingTaskStatus {
+  ASSIGNED
+  PICKING
+  PACKED
+  SHIPPED
+  CANCELLED
+}
+
+enum ShortageResolutionType {
+  SEND_IMMEDIATELY
+  ADD_TO_NEXT_ORDER
+  CREDIT_BRANCH
+  CANCEL_WITH_REASON
 }
 
 enum GoodsReceivingStatus {
@@ -420,13 +452,16 @@ enum GoodsReceivingStatus {
 
 enum ShortageReportStatus {
   OPEN
+  ACKNOWLEDGED
   RESOLVED
+  CLOSED
   CANCELLED
 }
 
 enum ShortageReportItemType {
   SHORTAGE
   OVERAGE
+  DAMAGED
 }
 
 enum BranchInvoiceStatus {
@@ -618,6 +653,8 @@ model User {
   approvedDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderApprover")
   goodsReceivings GoodsReceiving[] @relation("GoodsReceivingReceiver")
   shortageReports ShortageReport[] @relation("ShortageReportCreator")
+  shortageResolutions ShortageResolution[] @relation("ShortageResolutionResolver")
+  assignedPickingTasks HqWarehousePickingTask[] @relation("PickingTaskAssignee")
   branchInvoices BranchInvoice[] @relation("BranchInvoiceCreator")
   branchPayments BranchPayment[] @relation("BranchPaymentCreator")
   createdProcurementOrders ProcurementOrder[] @relation("ProcurementOrderCreator")
@@ -952,6 +989,7 @@ model Warehouse {
   inventoryBalances InventoryBalance[]
   sourceDistributionOrders BranchDistributionOrder[] @relation("DistributionSourceWarehouse")
   destinationDistributionOrders BranchDistributionOrder[] @relation("DistributionDestinationWarehouse")
+  hqPickingTasks HqWarehousePickingTask[] @relation("HqPickingSourceWarehouse")
   goodsReceivings GoodsReceiving[]
   shortageReports ShortageReport[]
   partsConsumptions PartsConsumption[]
@@ -1900,6 +1938,7 @@ model BranchDistributionOrder {
   goodsReceivings        GoodsReceiving[]
   shortageReports        ShortageReport[]
   branchInvoice          BranchInvoice?
+  pickingTask            HqWarehousePickingTask?
   createdAt              DateTime                      @default(now())
   updatedAt              DateTime                      @updatedAt
   deletedAt              DateTime?
@@ -1910,6 +1949,27 @@ model BranchDistributionOrder {
   @@index([status])
   @@index([createdById])
   @@index([approvedById])
+}
+
+model HqWarehousePickingTask {
+  id                         String                       @id @default(cuid())
+  distributionOrderId        String                       @unique
+  distributionOrder          BranchDistributionOrder      @relation(fields: [distributionOrderId], references: [id])
+  sourceHqWarehouseId        String
+  sourceHqWarehouse          Warehouse                  @relation("HqPickingSourceWarehouse", fields: [sourceHqWarehouseId], references: [id])
+  assignedWarehouseManagerId String?
+  assignedWarehouseManager   User?                        @relation("PickingTaskAssignee", fields: [assignedWarehouseManagerId], references: [id])
+  status                     HqWarehousePickingTaskStatus @default(ASSIGNED)
+  assignedAt                 DateTime                     @default(now())
+  pickedAt                   DateTime?
+  packedAt                   DateTime?
+  shippedAt                  DateTime?
+  createdAt                  DateTime                     @default(now())
+  updatedAt                  DateTime                     @updatedAt
+
+  @@index([sourceHqWarehouseId])
+  @@index([assignedWarehouseManagerId])
+  @@index([status])
 }
 
 model BranchDistributionOrderItem {
@@ -2001,6 +2061,7 @@ model ShortageReport {
   createdById         String
   createdBy           User                  @relation("ShortageReportCreator", fields: [createdById], references: [id])
   items               ShortageReportItem[]
+  resolution          ShortageResolution?
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
   resolvedAt          DateTime?
@@ -2011,6 +2072,24 @@ model ShortageReport {
   @@index([warehouseId])
   @@index([status])
   @@index([createdById])
+}
+
+model ShortageResolution {
+  id                   String                 @id @default(cuid())
+  shortageReportId     String                 @unique
+  shortageReport       ShortageReport         @relation(fields: [shortageReportId], references: [id])
+  resolutionType       ShortageResolutionType
+  replacementOrderId   String?
+  nextOrderId          String?
+  note                 String?
+  resolvedById         String
+  resolvedBy           User                   @relation("ShortageResolutionResolver", fields: [resolvedById], references: [id])
+  resolvedAt           DateTime               @default(now())
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  @@index([resolvedById])
+  @@index([resolutionType])
 }
 
 model ShortageReportItem {
@@ -2041,14 +2120,15 @@ model BranchInvoice {
   branch              Branch              @relation(fields: [branchId], references: [id])
   distributionOrderId String              @unique
   distributionOrder   BranchDistributionOrder @relation(fields: [distributionOrderId], references: [id])
-  goodsReceivingId    String              @unique
-  goodsReceiving      GoodsReceiving      @relation(fields: [goodsReceivingId], references: [id])
+  goodsReceivingId    String?             @unique
+  goodsReceiving      GoodsReceiving?     @relation(fields: [goodsReceivingId], references: [id])
   status              BranchInvoiceStatus @default(ISSUED)
   totalAmount         Decimal             @default(0) @db.Decimal(14, 2)
   paidAmount          Decimal             @default(0) @db.Decimal(14, 2)
   debtAmount          Decimal             @default(0) @db.Decimal(14, 2)
   dueDate             DateTime
   issuedAt            DateTime            @default(now())
+  sentToBranchAt      DateTime?
   createdById         String
   createdBy           User                @relation("BranchInvoiceCreator", fields: [createdById], references: [id])
   payments            BranchPayment[]
@@ -3059,6 +3139,8 @@ model Alert {
   type       AlertType
   title      String
   message    String
+  entityType String?
+  entityId   String?
   status     AlertStatus @default(UNREAD)
   createdAt  DateTime @default(now())
   readAt     DateTime?
@@ -3068,4 +3150,5 @@ model Alert {
   @@index([type])
   @@index([status])
   @@index([createdAt])
+  @@index([entityType, entityId])
 }

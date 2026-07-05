@@ -8,6 +8,7 @@ import {
   canCreateDistributionOrder,
   canDispatchFromHq,
   hasRole,
+  hasPermission,
 } from '@/lib/rbac';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -57,15 +58,32 @@ export default function DistributionOrderDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  async function action(path: 'approve' | 'send' | 'cancel', message: string) {
+  async function action(
+    path:
+      | 'approve'
+      | 'send-invoice'
+      | 'send-to-warehouse'
+      | 'pick'
+      | 'pack'
+      | 'send'
+      | 'complete'
+      | 'cancel',
+    message: string,
+  ) {
     if (path === 'send' && !window.confirm(t('distribution.confirmSendDeductStock'))) {
       return;
     }
     setError('');
     setSuccess('');
     try {
-      setOrder(await apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}/${path}`, { method: 'POST' }));
+      setOrder(
+        await apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}/${path}`, {
+          method: 'POST',
+          body: path === 'send-to-warehouse' ? JSON.stringify({}) : undefined,
+        }),
+      );
       setSuccess(message);
+      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -117,7 +135,19 @@ export default function DistributionOrderDetailPage() {
 
   const canApprove = canCreateDistributionOrder(currentUser);
   const canDispatch = canDispatchFromHq(currentUser);
-  const canReceiveAtBranch = hasRole(currentUser, 'WAREHOUSE_OPERATOR') || hasRole(currentUser, 'FRANCHISE_OWNER') || hasRole(currentUser, 'MANAGER');
+  const canReceiveAtBranch =
+    hasRole(currentUser, 'WAREHOUSE_OPERATOR') ||
+    hasRole(currentUser, 'FRANCHISE_OWNER') ||
+    hasRole(currentUser, 'MANAGER');
+  const canPay =
+    hasPermission(currentUser, 'payments.manage') ||
+    hasRole(currentUser, 'ACCOUNTANT') ||
+    hasRole(currentUser, 'CASHIER');
+
+  const invoiceSent = Boolean(order?.branchInvoice?.sentToBranchAt);
+  const canReceive =
+    order?.status === 'SHIPPED' ||
+    order?.status === 'SENT';
 
   return (
     <ProtectedShell>
@@ -142,9 +172,46 @@ export default function DistributionOrderDetailPage() {
                 <Info label={t('common.createdDate')} value={new Date(order.createdAt).toLocaleString()} />
               </div>
               <div className="mt-6 flex flex-wrap gap-2">
-                {order.status === 'DRAFT' && canApprove ? <button onClick={() => void action('approve', t('distribution.orderApproved'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">{t('distribution.approve')}</button> : null}
-                {order.status === 'APPROVED' && canDispatch ? <button onClick={() => void action('send', t('distribution.orderSent'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">{t('distribution.send')}</button> : null}
-                {(order.status === 'DRAFT' || order.status === 'APPROVED') && (canApprove || canDispatch) ? <button onClick={() => void action('cancel', t('distribution.orderCancelled'))} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">{t('distribution.cancel')}</button> : null}
+                {order.status === 'DRAFT' && canApprove ? (
+                  <button onClick={() => void action('approve', t('distribution.orderApproved'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.approve')}
+                  </button>
+                ) : null}
+                {order.status === 'INVOICED' && canApprove && !invoiceSent ? (
+                  <button onClick={() => void action('send-invoice', t('distribution.invoiceSent'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.sendInvoice')}
+                  </button>
+                ) : null}
+                {['INVOICED', 'PAYMENT_PENDING', 'PAID'].includes(order.status) && canApprove && invoiceSent ? (
+                  <button onClick={() => void action('send-to-warehouse', t('distribution.sentToWarehouse'))} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.sendToWarehouse')}
+                  </button>
+                ) : null}
+                {order.status === 'SENT_TO_WAREHOUSE' && canDispatch ? (
+                  <button onClick={() => void action('pick', t('distribution.pickingStarted'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.pick')}
+                  </button>
+                ) : null}
+                {order.status === 'PICKING' && canDispatch ? (
+                  <button onClick={() => void action('pack', t('distribution.packed'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.pack')}
+                  </button>
+                ) : null}
+                {order.status === 'PACKED' && canDispatch ? (
+                  <button onClick={() => void action('send', t('distribution.orderSent'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.send')}
+                  </button>
+                ) : null}
+                {['RECEIVED', 'RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE'].includes(order.status) && canApprove ? (
+                  <button onClick={() => void action('complete', t('distribution.orderCompleted'))} className="rounded-xl bg-green-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.complete')}
+                  </button>
+                ) : null}
+                {['DRAFT', 'INVOICED', 'PAYMENT_PENDING', 'PAID', 'SENT_TO_WAREHOUSE', 'PICKING', 'PACKED'].includes(order.status) && (canApprove || canDispatch) ? (
+                  <button onClick={() => void action('cancel', t('distribution.orderCancelled'))} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">
+                    {t('distribution.cancel')}
+                  </button>
+                ) : null}
               </div>
             </section>
             {order.branchInvoice ? (
@@ -156,9 +223,16 @@ export default function DistributionOrderDetailPage() {
                   <Info label={t('distribution.paidAmount')} value={formatKgs(order.branchInvoice.paidAmount)} />
                   <Info label={t('distribution.debtAmount')} value={formatKgs(order.branchInvoice.debtAmount)} />
                 </div>
-                <a href={`/distribution/invoices/${order.branchInvoice.id}`} className="mt-4 inline-flex rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
-                  {t('common.open')}
-                </a>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <a href={`/distribution/invoices/${order.branchInvoice.id}`} className="inline-flex rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
+                    {canPay ? t('distribution.registerPayment') : t('common.open')}
+                  </a>
+                  {invoiceSent ? (
+                    <span className="rounded-xl bg-green-50 px-4 py-2 text-sm font-semibold text-green-700">
+                      {t('distribution.invoiceSentAt')}: {new Date(order.branchInvoice.sentToBranchAt!).toLocaleString()}
+                    </span>
+                  ) : null}
+                </div>
               </section>
             ) : null}
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -170,7 +244,7 @@ export default function DistributionOrderDetailPage() {
                 </table>
               </div>
             </section>
-            {order.status === 'SENT' && canReceiveAtBranch ? (
+            {canReceive && canReceiveAtBranch ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-bold">{t('distribution.receiveGoods')}</h3>
                 <div className="mt-4 overflow-x-auto">

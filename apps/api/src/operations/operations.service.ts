@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
+  AlertType,
   BranchDistributionOrderStatus,
   BranchPurchaseRequestStatus,
   HqWarrantyDecision,
@@ -64,6 +65,16 @@ export class OperationsService {
       include: { items: true },
     });
     await this.audit(user, branchId, 'BRANCH_PURCHASE_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
+    if (request.status === BranchPurchaseRequestStatus.SUBMITTED) {
+      await this.createWorkflowAlert({
+        branchId,
+        type: AlertType.BRANCH_ORDER_SUBMITTED,
+        title: 'Branch order submitted',
+        message: `Branch purchase request ${request.requestNumber} submitted`,
+        entityType: 'BranchPurchaseRequest',
+        entityId: request.id,
+      });
+    }
     return request;
   }
 
@@ -97,6 +108,35 @@ export class OperationsService {
       if (!sourceWarehouseId || !destinationWarehouseId) {
         throw new BadRequestException('sourceWarehouseId and destinationWarehouseId are required');
       }
+
+      const orderItems = [];
+      let totalAmount = 0;
+      let totalCost = 0;
+      for (const item of request.items) {
+        const product = await tx.product.findFirst({
+          where: { id: item.productId, deletedAt: null },
+        });
+        if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
+        const unitCost = Number(product.finalCostKgs);
+        const unitPrice = Number(product.sellingPriceKgs);
+        const quantity = item.quantity;
+        const lineCost = Math.round((unitCost * quantity + Number.EPSILON) * 100) / 100;
+        const linePrice = Math.round((unitPrice * quantity + Number.EPSILON) * 100) / 100;
+        totalCost += lineCost;
+        totalAmount += linePrice;
+        orderItems.push({
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+          quantity,
+          unitCost,
+          unitPrice,
+          totalCost: lineCost,
+          totalPrice: linePrice,
+          profit: Math.round((linePrice - lineCost + Number.EPSILON) * 100) / 100,
+        });
+      }
+
       const order = await tx.branchDistributionOrder.create({
         data: {
           orderNumber: dto.orderNumber ?? `DO-${Date.now()}`,
@@ -106,22 +146,10 @@ export class OperationsService {
           status: BranchDistributionOrderStatus.DRAFT,
           createdById: user.id,
           note: request.note,
-          totalAmount: 0,
-          totalCost: 0,
-          totalProfit: 0,
-          items: {
-            create: request.items.map((item) => ({
-              productId: item.productId,
-              sku: item.sku,
-              productName: item.productName,
-              quantity: item.quantity,
-              unitCost: 0,
-              unitPrice: 0,
-              totalCost: 0,
-              totalPrice: 0,
-              profit: 0,
-            })),
-          },
+          totalAmount,
+          totalCost,
+          totalProfit: Math.round((totalAmount - totalCost + Number.EPSILON) * 100) / 100,
+          items: { create: orderItems },
         },
       });
       await tx.branchPurchaseRequest.update({
@@ -683,7 +711,23 @@ export class OperationsService {
         title: dto.title,
         message: dto.message,
         status: dto.status,
+        entityType: dto.entityType,
+        entityId: dto.entityId,
       },
+    });
+  }
+
+  async markAlertRead(user: AuthUser, id: string) {
+    const alert = await this.prisma.alert.findFirst({
+      where: {
+        id,
+        ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+      },
+    });
+    if (!alert) throw new NotFoundException('Alert not found');
+    return this.prisma.alert.update({
+      where: { id },
+      data: { status: 'READ', readAt: new Date() },
     });
   }
 
@@ -757,6 +801,26 @@ export class OperationsService {
   private auditInTx(tx: PrismaTx, user: AuthUser, branchId: string | null, action: string, entity: string, entityId: string, extra?: Record<string, unknown>) {
     return tx.auditLog.create({
       data: { userId: user.id, role: user.role, action, entity, entityId, metadata: { branchId, roles: user.roles ?? [user.role], ...extra } },
+    });
+  }
+
+  private createWorkflowAlert(data: {
+    branchId: string | null;
+    type: AlertType;
+    title: string;
+    message: string;
+    entityType?: string;
+    entityId?: string;
+  }) {
+    return this.prisma.alert.create({
+      data: {
+        branchId: data.branchId,
+        type: data.type,
+        title: data.title,
+        message: data.message,
+        entityType: data.entityType,
+        entityId: data.entityId,
+      },
     });
   }
 }

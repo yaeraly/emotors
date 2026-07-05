@@ -76,10 +76,22 @@ export type SaleStatus =
   | 'CANCELLED';
 export type BranchDistributionOrderStatus =
   | 'DRAFT'
+  | 'SUBMITTED'
+  | 'ACCEPTED_BY_SUPPLY_CHAIN'
   | 'APPROVED'
+  | 'INVOICED'
+  | 'PAYMENT_PENDING'
+  | 'PAID'
+  | 'SENT_TO_WAREHOUSE'
+  | 'PICKING'
+  | 'PACKED'
+  | 'SHIPPED'
   | 'SENT'
   | 'RECEIVED'
+  | 'RECEIVED_BY_BRANCH'
   | 'RECEIVED_WITH_DIFFERENCE'
+  | 'COMPLETED'
+  | 'CLOSED'
   | 'CANCELLED';
 export type GoodsReceivingStatus = 'DRAFT' | 'COMPLETED' | 'CANCELLED';
 export type ShortageReportStatus = 'OPEN' | 'RESOLVED' | 'CANCELLED';
@@ -521,14 +533,15 @@ export type BranchInvoice = {
   branch?: Branch;
   distributionOrderId: string;
   distributionOrder?: BranchDistributionOrder;
-  goodsReceivingId: string;
-  goodsReceiving?: GoodsReceiving;
+  goodsReceivingId?: string | null;
+  goodsReceiving?: GoodsReceiving | null;
   status: BranchInvoiceStatus;
   totalAmount: number;
   paidAmount: number;
   debtAmount: number;
   dueDate: string;
   issuedAt: string;
+  sentToBranchAt?: string | null;
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   payments?: BranchPayment[];

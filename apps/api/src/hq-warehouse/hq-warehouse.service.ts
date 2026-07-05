@@ -56,10 +56,103 @@ export class HqWarehouseService {
 
   list(user: AuthUser) {
     this.assertCanView(user);
-    return this.prisma.warehouse.findMany({
-      where: hqWarehouseWhere,
-      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+    return this.prisma.$transaction(async (tx) => {
+      const warehouses = await tx.warehouse.findMany({
+        where: hqWarehouseWhere,
+        orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      });
+      const results = [];
+      for (const warehouse of warehouses) {
+        results.push(await this.buildWarehouseMetrics(tx, warehouse));
+      }
+      return results;
     });
+  }
+
+  private async buildWarehouseMetrics(
+    tx: Prisma.TransactionClient,
+    warehouse: {
+      id: string;
+      name: string;
+      code: string;
+      city: string | null;
+      address: string | null;
+      country: string;
+      isActive: boolean;
+      warehouseType: import('@prisma/client').WarehouseType;
+      branchId: string | null;
+      contactPerson: string | null;
+      phone: string | null;
+      notes: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+      deletedAt: Date | null;
+    },
+  ) {
+    const balances = await tx.inventoryBalance.findMany({
+      where: { warehouseId: warehouse.id },
+      include: { product: { select: { sellingPriceKgs: true } } },
+    });
+    const pendingOutgoing = await tx.branchDistributionOrder.count({
+      where: {
+        sourceWarehouseId: warehouse.id,
+        deletedAt: null,
+        status: {
+          in: [
+            'SENT_TO_WAREHOUSE',
+            'PICKING',
+            'PACKED',
+            'APPROVED',
+            'INVOICED',
+            'PAYMENT_PENDING',
+            'PAID',
+          ],
+        },
+      },
+    });
+    const pendingReceiving = await tx.procurementOrder.count({
+      where: {
+        hqWarehouseId: warehouse.id,
+        deletedAt: null,
+        hqStockMovementCreatedAt: null,
+        status: {
+          notIn: ['DRAFT', 'CANCELLED', 'RECEIVED_TO_HQ_WAREHOUSE', 'CLOSED'],
+        },
+      },
+    });
+    const distributedAggregate = await tx.branchDistributionOrder.aggregate({
+      where: {
+        sourceWarehouseId: warehouse.id,
+        deletedAt: null,
+        status: { in: ['SHIPPED', 'RECEIVED', 'RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE', 'COMPLETED', 'CLOSED'] },
+      },
+      _sum: { totalAmount: true },
+    });
+
+    const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
+    const reservedQuantity = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
+    const totalStockValueKgs = balances.reduce((sum, item) => sum + Number(item.totalValueKgs), 0);
+    const availableStockValueKgs = balances.reduce((sum, item) => {
+      const available = Math.max(item.quantity - item.reservedQuantity, 0);
+      return sum + available * Number(item.landedCostKgs || item.averageCostKgs);
+    }, 0);
+    const reservedStockValueKgs = balances.reduce((sum, item) => {
+      return sum + item.reservedQuantity * Number(item.landedCostKgs || item.averageCostKgs);
+    }, 0);
+
+    return {
+      ...warehouse,
+      totalProductQuantity: totalQuantity,
+      totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100,
+      totalPurchaseCostKgs: Math.round(totalStockValueKgs * 100) / 100,
+      totalDistributedValueKgs: Math.round(Number(distributedAggregate._sum.totalAmount ?? 0) * 100) / 100,
+      availableStockValueKgs: Math.round(availableStockValueKgs * 100) / 100,
+      reservedStockValueKgs: Math.round(reservedStockValueKgs * 100) / 100,
+      reservedQuantity,
+      availableQuantity: Math.max(totalQuantity - reservedQuantity, 0),
+      pendingOutgoingOrders: pendingOutgoing,
+      pendingReceivingOrders: pendingReceiving,
+    };
   }
 
   async detail(user: AuthUser, id: string) {
@@ -238,12 +331,16 @@ export class HqWarehouseService {
             sku: true,
             unit: true,
             isActive: true,
+            sellingPriceKgs: true,
           },
         },
       },
       orderBy: { updatedAt: 'desc' },
     });
-    return balances.map((balance) => this.toInventoryRow(balance));
+    return balances.map((balance) => ({
+      ...this.toInventoryRow(balance),
+      wholesalePriceKgs: Number(balance.product.sellingPriceKgs ?? 0),
+    }));
   }
 
   async receivings(user: AuthUser, id: string) {

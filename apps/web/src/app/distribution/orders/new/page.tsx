@@ -39,7 +39,7 @@ export default function NewDistributionOrderPage() {
         setBranchId(branchResult[0]?.id ?? '');
         setSourceWarehouseId(hqWarehouseResult[0]?.id ?? '');
         setDestinationWarehouseId(branchWarehouseResult.find((w) => w.branchId === branchResult[0]?.id)?.id ?? branchWarehouseResult[0]?.id ?? '');
-        setItems([{ productId: productResult.items[0]?.id ?? '', quantity: '1', unitPrice: '0' }]);
+        setItems([{ productId: productResult.items[0]?.id ?? '', quantity: '1', unitPrice: String(productResult.items[0]?.sellingPriceKgs ?? 0) }]);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
@@ -103,7 +103,10 @@ export default function NewDistributionOrderPage() {
             {items.map((item, index) => {
               const product = products.find((entry) => entry.id === item.productId);
               return <div key={index} className="grid gap-3 rounded-2xl bg-slate-50 p-3 md:grid-cols-5">
-                <Select label={t('sales.product')} value={item.productId} onChange={(value) => setItem(index, { productId: value })} options={products.map((product) => ({ value: product.id, label: `${product.sku} · ${product.name}` }))} />
+                <Select label={t('sales.product')} value={item.productId} onChange={(value) => {
+                  const product = products.find((entry) => entry.id === value);
+                  setItem(index, { productId: value, unitPrice: String(product?.sellingPriceKgs ?? 0) });
+                }} options={products.map((product) => ({ value: product.id, label: `${product.sku} · ${product.name}` }))} />
                 <Input label={t('distribution.quantity')} type="number" value={item.quantity} onChange={(value) => setItem(index, { quantity: value })} />
                 <Input label={t('distribution.unitPrice')} type="number" value={item.unitPrice} onChange={(value) => setItem(index, { unitPrice: value })} />
                 <div className="rounded-xl bg-white p-3 text-sm"><p className="text-slate-400">{t('distribution.unitCost')}</p><p className="font-bold">{formatKgs(product?.finalCostKgs)}</p></div>

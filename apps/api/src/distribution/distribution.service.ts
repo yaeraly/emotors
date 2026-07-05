@@ -5,18 +5,21 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AlertType,
   BranchDistributionOrderStatus,
   BranchInvoiceStatus,
+  HqWarehousePickingTaskStatus,
   Prisma,
   Role,
   ShortageReportItemType,
   ShortageReportStatus,
+  ShortageResolutionType,
   StockMovementType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isFullAccessRole, canCreateDistributionOrder, canDispatchFromHq } from '../rbac/rbac';
+import { isFullAccessRole, canCreateDistributionOrder, canDispatchFromHq, hasAnyFullAccessRole, userHasPermission } from '../rbac/rbac';
 import {
   activeHqWarehouseWhere,
   hqWarehouseWhere,
@@ -29,7 +32,10 @@ import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
+import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
+import { ResolveShortageDto } from './dto/resolve-shortage.dto';
+import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -46,7 +52,7 @@ export class DistributionService {
     }
     return this.prisma.$transaction(async (tx) => {
       await this.validateBranchesAndWarehouses(tx, dto);
-      const calculated = await this.calculateItems(tx, dto);
+      const calculated = await this.calculateItems(tx, dto, user);
       const orderNumber = await this.generateOrderNumber(tx);
       const order = await tx.branchDistributionOrder.create({
         data: {
@@ -111,7 +117,7 @@ export class DistributionService {
         throw new BadRequestException('Only draft orders can be edited');
       }
       await this.validateBranchesAndWarehouses(tx, dto);
-      const calculated = await this.calculateItems(tx, dto);
+      const calculated = await this.calculateItems(tx, dto, user);
       await tx.branchDistributionOrderItem.deleteMany({ where: { orderId: id } });
       const updated = await tx.branchDistributionOrder.update({
         where: { id },
@@ -186,26 +192,207 @@ export class DistributionService {
       const updated = await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
-          status: BranchDistributionOrderStatus.APPROVED,
+          status: BranchDistributionOrderStatus.INVOICED,
           approvedBy: { connect: { id: user.id } },
           approvedAt: new Date(),
         },
         include: this.include(),
       });
-      await this.auditTransfer(tx, user, 'TRANSFER_CREATED', updated);
+      const invoice = await this.createInvoiceForOrder(tx, user, updated);
+      await this.auditTransfer(tx, user, 'BRANCH_ORDER_ACCEPTED', updated);
+      await this.auditTransfer(tx, user, 'INVOICE_CREATED', updated);
+      await this.createWorkflowAlert(tx, {
+        branchId: updated.branchId,
+        type: AlertType.BRANCH_INVOICE_CREATED,
+        title: 'Branch invoice created',
+        message: `Invoice ${invoice.invoiceNumber} created for order ${updated.orderNumber}`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+      });
+      return this.toResponse({ ...updated, branchInvoice: invoice });
+    });
+  }
+
+  sendInvoice(user: AuthUser, id: string) {
+    if (!canCreateDistributionOrder(user)) {
+      throw new ForbiddenException('Only Supply Chain Manager can send invoices');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: { branchInvoice: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      if (order.status !== BranchDistributionOrderStatus.INVOICED) {
+        throw new BadRequestException('Invoice can only be sent for invoiced orders');
+      }
+      if (!order.branchInvoice) {
+        throw new BadRequestException('Invoice not found for this order');
+      }
+      const invoice = await tx.branchInvoice.update({
+        where: { id: order.branchInvoice.id },
+        data: { sentToBranchAt: new Date() },
+        include: this.invoiceInclude(),
+      });
+      await this.auditTransfer(tx, user, 'INVOICE_SENT', order);
+      await this.createWorkflowAlert(tx, {
+        branchId: order.branchId,
+        type: AlertType.BRANCH_INVOICE_CREATED,
+        title: 'Invoice sent to branch',
+        message: `Invoice ${invoice.invoiceNumber} sent for order ${order.orderNumber}`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+      });
+      return this.toInvoiceResponse(invoice);
+    });
+  }
+
+  sendToWarehouse(user: AuthUser, id: string, dto: SendToWarehouseDto) {
+    if (!canCreateDistributionOrder(user)) {
+      throw new ForbiddenException('Only Supply Chain Manager can send orders to warehouse');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: { id, deletedAt: null },
+        include: { branchInvoice: true, items: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      if (
+        order.status !== BranchDistributionOrderStatus.INVOICED &&
+        order.status !== BranchDistributionOrderStatus.PAYMENT_PENDING &&
+        order.status !== BranchDistributionOrderStatus.PAID
+      ) {
+        throw new BadRequestException(
+          'Order must be invoiced and payment registered before sending to warehouse',
+        );
+      }
+      if (!order.branchInvoice?.sentToBranchAt) {
+        throw new BadRequestException('Invoice must be sent to branch first');
+      }
+
+      const updated = await tx.branchDistributionOrder.update({
+        where: { id },
+        data: { status: BranchDistributionOrderStatus.SENT_TO_WAREHOUSE },
+        include: this.include(),
+      });
+
+      const existingTask = await tx.hqWarehousePickingTask.findUnique({
+        where: { distributionOrderId: id },
+      });
+      if (!existingTask) {
+        await tx.hqWarehousePickingTask.create({
+          data: {
+            distributionOrderId: id,
+            sourceHqWarehouseId: order.sourceWarehouseId,
+            assignedWarehouseManagerId: dto.assignedWarehouseManagerId,
+            status: HqWarehousePickingTaskStatus.ASSIGNED,
+          },
+        });
+      }
+
+      await this.auditTransfer(tx, user, 'ORDER_ASSIGNED_TO_WAREHOUSE', updated);
+      await this.createWorkflowAlert(tx, {
+        branchId: null,
+        type: AlertType.ORDER_SENT_TO_WAREHOUSE,
+        title: 'Order sent to warehouse',
+        message: `Order ${order.orderNumber} assigned for picking`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+      });
+      await this.createWorkflowAlert(tx, {
+        branchId: null,
+        type: AlertType.PICKING_TASK_ASSIGNED,
+        title: 'Picking task assigned',
+        message: `Picking task created for order ${order.orderNumber}`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+      });
       return this.toResponse(updated);
     });
   }
 
+  listPickingTasks(user: AuthUser, query: PickingTaskQueryDto) {
+    if (!this.canManage(user)) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.prisma.hqWarehousePickingTask.findMany({
+      where: {
+        ...(query.sourceHqWarehouseId ? { sourceHqWarehouseId: query.sourceHqWarehouseId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+      },
+      include: {
+        distributionOrder: {
+          include: {
+            branch: true,
+            items: true,
+            destinationWarehouse: true,
+          },
+        },
+        sourceHqWarehouse: true,
+        assignedWarehouseManager: { select: { id: true, fullName: true, role: true } },
+      },
+      orderBy: { assignedAt: 'desc' },
+    });
+  }
+
+  pickingTask(user: AuthUser, id: string) {
+    if (!this.canManage(user)) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.prisma.hqWarehousePickingTask.findUniqueOrThrow({
+      where: { id },
+      include: {
+        distributionOrder: {
+          include: {
+            branch: true,
+            items: { include: { product: true } },
+            destinationWarehouse: true,
+            branchInvoice: true,
+          },
+        },
+        sourceHqWarehouse: true,
+        assignedWarehouseManager: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+  }
+
   pick(user: AuthUser, id: string) {
-    return this.transition(user, id, BranchDistributionOrderStatus.APPROVED, {
-      status: BranchDistributionOrderStatus.PICKING,
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.getAccessibleOrderInTx(tx, user, id);
+      if (order.status !== BranchDistributionOrderStatus.SENT_TO_WAREHOUSE) {
+        throw new BadRequestException('Order must be sent to warehouse before picking');
+      }
+      const updated = await tx.branchDistributionOrder.update({
+        where: { id },
+        data: { status: BranchDistributionOrderStatus.PICKING },
+        include: this.include(),
+      });
+      await tx.hqWarehousePickingTask.updateMany({
+        where: { distributionOrderId: id },
+        data: { status: HqWarehousePickingTaskStatus.PICKING, pickedAt: new Date() },
+      });
+      await this.auditTransfer(tx, user, 'GOODS_PICKED', updated);
+      return this.toResponse(updated);
     });
   }
 
   pack(user: AuthUser, id: string) {
-    return this.transition(user, id, BranchDistributionOrderStatus.PICKING, {
-      status: BranchDistributionOrderStatus.PACKED,
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.getAccessibleOrderInTx(tx, user, id);
+      if (order.status !== BranchDistributionOrderStatus.PICKING) {
+        throw new BadRequestException('Order must be in PICKING before packing');
+      }
+      const updated = await tx.branchDistributionOrder.update({
+        where: { id },
+        data: { status: BranchDistributionOrderStatus.PACKED },
+        include: this.include(),
+      });
+      await tx.hqWarehousePickingTask.updateMany({
+        where: { distributionOrderId: id },
+        data: { status: HqWarehousePickingTaskStatus.PACKED, packedAt: new Date() },
+      });
+      await this.auditTransfer(tx, user, 'GOODS_PACKED', updated);
+      return this.toResponse(updated);
     });
   }
 
@@ -214,13 +401,14 @@ export class DistributionService {
       const order = await this.getAccessibleOrderInTx(tx, user, id);
       if (
         order.status !== BranchDistributionOrderStatus.RECEIVED &&
+        order.status !== BranchDistributionOrderStatus.RECEIVED_BY_BRANCH &&
         order.status !== BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE
       ) {
         throw new BadRequestException('Only received transfers can be completed');
       }
       const updated = await tx.branchDistributionOrder.update({
         where: { id },
-        data: { status: BranchDistributionOrderStatus.CLOSED },
+        data: { status: BranchDistributionOrderStatus.COMPLETED },
         include: this.include(),
       });
       await this.auditTransfer(tx, user, 'TRANSFER_COMPLETED', updated);
@@ -311,7 +499,19 @@ export class DistributionService {
         },
         include: this.include(),
       });
+      await tx.hqWarehousePickingTask.updateMany({
+        where: { distributionOrderId: id },
+        data: { status: HqWarehousePickingTaskStatus.SHIPPED, shippedAt: new Date() },
+      });
       await this.auditTransfer(tx, user, 'INVENTORY_SHIPPED', updated);
+      await this.createWorkflowAlert(tx, {
+        branchId: order.branchId,
+        type: AlertType.GOODS_SHIPPED,
+        title: 'Goods shipped to branch',
+        message: `Order ${order.orderNumber} has been shipped`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+      });
       return this.toResponse(updated);
     });
   }
@@ -321,14 +521,20 @@ export class DistributionService {
       const order = await this.getAccessibleOrderInTx(tx, user, id);
       if (
         order.status !== BranchDistributionOrderStatus.DRAFT &&
-        order.status !== BranchDistributionOrderStatus.APPROVED &&
+        order.status !== BranchDistributionOrderStatus.INVOICED &&
+        order.status !== BranchDistributionOrderStatus.PAYMENT_PENDING &&
+        order.status !== BranchDistributionOrderStatus.PAID &&
+        order.status !== BranchDistributionOrderStatus.SENT_TO_WAREHOUSE &&
         order.status !== BranchDistributionOrderStatus.PICKING &&
         order.status !== BranchDistributionOrderStatus.PACKED
       ) {
-        throw new BadRequestException('Only draft, approved, picking, or packed orders can be cancelled');
+        throw new BadRequestException('Only pre-shipment orders can be cancelled');
       }
       if (
-        order.status === BranchDistributionOrderStatus.APPROVED ||
+        order.status === BranchDistributionOrderStatus.INVOICED ||
+        order.status === BranchDistributionOrderStatus.PAYMENT_PENDING ||
+        order.status === BranchDistributionOrderStatus.PAID ||
+        order.status === BranchDistributionOrderStatus.SENT_TO_WAREHOUSE ||
         order.status === BranchDistributionOrderStatus.PICKING ||
         order.status === BranchDistributionOrderStatus.PACKED
       ) {
@@ -490,23 +696,55 @@ export class DistributionService {
           status:
             shortageItems.length > 0
               ? BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE
-              : BranchDistributionOrderStatus.RECEIVED,
+              : BranchDistributionOrderStatus.RECEIVED_BY_BRANCH,
         },
       });
-      const invoice = await this.createInvoiceForReceiving(
-        tx,
-        user,
-        order.id,
-        receiving.id,
-        order.branchId,
-        receivingItems,
-      );
+
+      const existingInvoice = await tx.branchInvoice.findFirst({
+        where: { distributionOrderId: order.id, deletedAt: null },
+      });
+      if (existingInvoice && !existingInvoice.goodsReceivingId) {
+        await tx.branchInvoice.update({
+          where: { id: existingInvoice.id },
+          data: { goodsReceivingId: receiving.id },
+        });
+      }
+
       await this.refreshBranchAccountBalance(tx, order.branchId);
+
+      await this.createWorkflowAlert(tx, {
+        branchId: order.branchId,
+        type: AlertType.BRANCH_GOODS_RECEIVED,
+        title: 'Goods received at branch',
+        message: `Order ${order.orderNumber} received at branch warehouse`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+      });
+      if (shortageItems.length > 0 && shortageReport) {
+        await this.createWorkflowAlert(tx, {
+          branchId: order.branchId,
+          type: AlertType.DIFFERENCE_ACT_CREATED,
+          title: 'Receiving difference act created',
+          message: `Difference act ${shortageReport.reportNumber} created for order ${order.orderNumber}`,
+          entityType: 'ShortageReport',
+          entityId: shortageReport.id,
+        });
+        await this.createWorkflowAlert(tx, {
+          branchId: null,
+          type: AlertType.SHORTAGE_NEEDS_RESOLUTION,
+          title: 'Shortage needs resolution',
+          message: `Shortage report ${shortageReport.reportNumber} requires SCM action`,
+          entityType: 'ShortageReport',
+          entityId: shortageReport.id,
+        });
+        await this.auditTransfer(tx, user, 'DIFFERENCE_ACT_CREATED', order);
+      }
+      await this.auditTransfer(tx, user, 'BRANCH_RECEIVED_GOODS', order);
 
       return {
         receiving: await this.receivingInTx(tx, user, receiving.id),
         shortageReport,
-        invoice,
+        invoice: existingInvoice ? this.toInvoiceResponse(existingInvoice) : null,
       };
     });
   }
@@ -563,12 +801,70 @@ export class DistributionService {
     return report;
   }
 
-  async resolveShortageReport(user: AuthUser, id: string) {
+  async resolveShortageReport(user: AuthUser, id: string, dto: ResolveShortageDto) {
+    if (!canCreateDistributionOrder(user)) {
+      throw new ForbiddenException('Only Supply Chain Manager can resolve shortages');
+    }
     const report = await this.shortageReport(user, id);
-    return this.prisma.shortageReport.update({
-      where: { id: report.id },
-      data: { status: ShortageReportStatus.RESOLVED, resolvedAt: new Date() },
-      include: this.shortageInclude(),
+    if (report.status === ShortageReportStatus.RESOLVED || report.status === ShortageReportStatus.CLOSED) {
+      throw new BadRequestException('Shortage report is already resolved');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const resolution = await tx.shortageResolution.upsert({
+        where: { shortageReportId: report.id },
+        create: {
+          shortageReportId: report.id,
+          resolutionType: dto.resolutionType,
+          replacementOrderId: dto.replacementOrderId,
+          nextOrderId: dto.nextOrderId,
+          note: dto.note,
+          resolvedById: user.id,
+        },
+        update: {
+          resolutionType: dto.resolutionType,
+          replacementOrderId: dto.replacementOrderId,
+          nextOrderId: dto.nextOrderId,
+          note: dto.note,
+          resolvedById: user.id,
+          resolvedAt: new Date(),
+        },
+        include: {
+          resolvedBy: { select: { id: true, fullName: true, role: true } },
+        },
+      });
+
+      const updated = await tx.shortageReport.update({
+        where: { id: report.id },
+        data: { status: ShortageReportStatus.RESOLVED, resolvedAt: new Date() },
+        include: this.shortageInclude(),
+      });
+
+      if (dto.resolutionType === ShortageResolutionType.SEND_IMMEDIATELY) {
+        await this.createWorkflowAlert(tx, {
+          branchId: report.branchId,
+          type: AlertType.REPLACEMENT_GOODS_SHIPPED,
+          title: 'Replacement goods scheduled',
+          message: `Shortage ${report.reportNumber} will be sent immediately`,
+          entityType: 'ShortageReport',
+          entityId: report.id,
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'SHORTAGE_RESOLVED',
+          entity: 'ShortageReport',
+          entityId: report.id,
+          metadata: {
+            resolutionType: dto.resolutionType,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+
+      return { ...updated, resolution };
     });
   }
 
@@ -659,7 +955,44 @@ export class DistributionService {
         where: { id: invoice.id },
         data: { paidAmount, debtAmount, status },
       });
+
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: { id: invoice.distributionOrderId, deletedAt: null },
+      });
+      if (order) {
+        const orderStatus =
+          status === BranchInvoiceStatus.PAID
+            ? BranchDistributionOrderStatus.PAID
+            : status === BranchInvoiceStatus.PARTIALLY_PAID
+              ? BranchDistributionOrderStatus.PAYMENT_PENDING
+              : order.status;
+        if (orderStatus !== order.status) {
+          await tx.branchDistributionOrder.update({
+            where: { id: order.id },
+            data: { status: orderStatus },
+          });
+        }
+      }
+
       await this.refreshBranchAccountBalance(tx, invoice.branchId);
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'PAYMENT_RECEIVED',
+          entity: 'BranchInvoice',
+          entityId: invoice.id,
+          metadata: { amount, method: dto.method, roles: user.roles ?? [user.role] },
+        },
+      });
+      await this.createWorkflowAlert(tx, {
+        branchId: invoice.branchId,
+        type: AlertType.PAYMENT_RECEIVED,
+        title: 'Payment received',
+        message: `Payment of ${amount} received for invoice ${invoice.invoiceNumber}`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+      });
 
       const updated = await tx.branchInvoice.findUniqueOrThrow({
         where: { id: invoice.id },
@@ -785,15 +1118,40 @@ export class DistributionService {
     });
   }
 
-  private async calculateItems(tx: PrismaTx, dto: CreateDistributionOrderDto) {
+  private async calculateItems(tx: PrismaTx, dto: CreateDistributionOrderDto, user?: AuthUser) {
     const items = [];
+    const userRoles = user ? (user.roles?.length ? user.roles : [user.role]) : [];
     for (const item of dto.items) {
       const product = await tx.product.findFirst({
         where: { id: item.productId, deletedAt: null },
       });
       if (!product) throw new NotFoundException('Product not found');
       const unitCost = Number(product.finalCostKgs);
-      const unitPrice = Number(item.unitPrice);
+      const wholesalePrice = Number(product.sellingPriceKgs);
+      const requestedPrice = Number(item.unitPrice);
+      if (Math.abs(requestedPrice - wholesalePrice) > 0.01) {
+        await tx.auditLog.create({
+          data: {
+            userId: user?.id ?? 'system',
+            role: user?.role ?? Role.SUPPLY_CHAIN_MANAGER,
+            action: 'PRICE_OVERRIDE_ATTEMPTED',
+            entity: 'Product',
+            entityId: product.id,
+            metadata: {
+              sku: product.sku,
+              requestedPrice,
+              wholesalePrice,
+              roles: userRoles,
+            },
+          },
+        });
+        if (!hasAnyFullAccessRole(userRoles)) {
+          throw new BadRequestException(
+            `Selling price must match approved wholesale price (${wholesalePrice}) for SKU ${product.sku}`,
+          );
+        }
+      }
+      const unitPrice = hasAnyFullAccessRole(userRoles) ? requestedPrice : wholesalePrice;
       const quantity = Number(item.quantity);
       const totalCost = this.roundMoney(unitCost * quantity);
       const totalPrice = this.roundMoney(unitPrice * quantity);
@@ -838,6 +1196,11 @@ export class DistributionService {
       approvedBy: { select: { id: true, fullName: true, role: true } },
       items: { include: { product: true } },
       branchInvoice: true,
+      pickingTask: {
+        include: {
+          assignedWarehouseManager: { select: { id: true, fullName: true, role: true } },
+        },
+      },
     };
   }
 
@@ -876,6 +1239,11 @@ export class DistributionService {
       warehouse: true,
       createdBy: { select: { id: true, fullName: true, role: true } },
       items: true,
+      resolution: {
+        include: {
+          resolvedBy: { select: { id: true, fullName: true, role: true } },
+        },
+      },
     };
   }
 
@@ -895,36 +1263,24 @@ export class DistributionService {
     return `BI-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
   }
 
-  private async createInvoiceForReceiving(
+  private async createInvoiceForOrder(
     tx: PrismaTx,
     user: AuthUser,
-    distributionOrderId: string,
-    goodsReceivingId: string,
-    branchId: string,
-    receivingItems: Array<{
-      receivedQuantity: number;
-      unitPrice: Prisma.Decimal;
-    }>,
+    order: { id: string; branchId: string; totalAmount: Prisma.Decimal },
   ) {
     const existing = await tx.branchInvoice.findFirst({
-      where: { distributionOrderId, goodsReceivingId, deletedAt: null },
+      where: { distributionOrderId: order.id, deletedAt: null },
       include: this.invoiceInclude(),
     });
     if (existing) return this.toInvoiceResponse(existing);
 
-    const totalAmount = this.roundMoney(
-      receivingItems.reduce(
-        (sum, item) => sum + item.receivedQuantity * Number(item.unitPrice),
-        0,
-      ),
-    );
+    const totalAmount = this.roundMoney(Number(order.totalAmount));
     const issuedAt = new Date();
     const invoice = await tx.branchInvoice.create({
       data: {
         invoiceNumber: await this.generateInvoiceNumber(tx),
-        branchId,
-        distributionOrderId,
-        goodsReceivingId,
+        branchId: order.branchId,
+        distributionOrderId: order.id,
         totalAmount,
         paidAmount: 0,
         debtAmount: totalAmount,
@@ -934,7 +1290,31 @@ export class DistributionService {
       },
       include: this.invoiceInclude(),
     });
+    await this.refreshBranchAccountBalance(tx, order.branchId);
     return this.toInvoiceResponse(invoice);
+  }
+
+  private createWorkflowAlert(
+    tx: PrismaTx,
+    data: {
+      branchId: string | null;
+      type: AlertType;
+      title: string;
+      message: string;
+      entityType?: string;
+      entityId?: string;
+    },
+  ) {
+    return tx.alert.create({
+      data: {
+        branchId: data.branchId,
+        type: data.type,
+        title: data.title,
+        message: data.message,
+        entityType: data.entityType,
+        entityId: data.entityId,
+      },
+    });
   }
 
   private async refreshBranchAccountBalance(tx: PrismaTx, branchId: string) {
@@ -1010,7 +1390,11 @@ export class DistributionService {
 
   private canManageFinance(user: AuthUser) {
     const roles = user.roles?.length ? user.roles : [user.role];
-    return this.canManage(user) || roles.some((role) => role === Role.ACCOUNTANT || role === Role.FINANCE_MANAGER);
+    return (
+      this.canManage(user) ||
+      roles.some((role) => role === Role.ACCOUNTANT || role === Role.FINANCE_MANAGER || role === Role.CASHIER) ||
+      userHasPermission(user, 'payments.manage')
+    );
   }
 
   private assertQueryBranchAccess(user: AuthUser, branchId?: string) {

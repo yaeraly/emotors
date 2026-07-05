@@ -10,7 +10,10 @@ import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
+import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
+import { ResolveShortageDto } from './dto/resolve-shortage.dto';
+import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 import { DistributionService } from './distribution.service';
 
 @Controller('distribution')
@@ -46,6 +49,34 @@ export class DistributionController {
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.approve(user, id);
+  }
+
+  @Post('orders/:id/send-invoice')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  sendInvoice(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.sendInvoice(user, id);
+  }
+
+  @Post('orders/:id/send-to-warehouse')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  sendToWarehouse(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: SendToWarehouseDto,
+  ) {
+    return this.distributionService.sendToWarehouse(user, id, dto);
+  }
+
+  @Get('picking-tasks')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  pickingTasks(@CurrentUser() user: AuthUser, @Query() query: PickingTaskQueryDto) {
+    return this.distributionService.listPickingTasks(user, query);
+  }
+
+  @Get('picking-tasks/:id')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  pickingTask(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.pickingTask(user, id);
   }
 
   @Post('orders/:id/pick')
@@ -114,8 +145,12 @@ export class DistributionController {
 
   @Post('shortage-reports/:id/resolve')
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
-  resolveShortageReport(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.distributionService.resolveShortageReport(user, id);
+  resolveShortageReport(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ResolveShortageDto,
+  ) {
+    return this.distributionService.resolveShortageReport(user, id, dto);
   }
 
   @Get('invoices')
