@@ -3,6 +3,7 @@ import {
   AlertType,
   BranchDistributionOrderStatus,
   BranchPurchaseRequestStatus,
+  FileAttachmentEntityType,
   HqWarrantyDecision,
   Prisma,
   ProcurementOrderStatus,
@@ -29,7 +30,11 @@ import {
   extractLogisticsCosts,
   mapStoredProcurementItemToLandedCostInput,
 } from '../procurement/landed-cost.util';
-import { SVH_TRANSPORT_NOT_COMPLETED_MESSAGE } from '../procurement/svh-to-hq-transport.util';
+import {
+  buildHqReceivingValidationResult,
+  hqReceivingBlockedMessage,
+  SVH_TRANSPORT_INCOMPLETE_MESSAGE,
+} from '../procurement/hq-receiving-validation.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -174,15 +179,82 @@ export class OperationsService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
         where: { id: procurementOrderId, deletedAt: null },
-        include: { items: true, svhToHqTransport: true },
+        include: {
+          items: true,
+          svhToHqTransport: { include: { transportCompany: true } },
+        },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       if (order.hqStockMovementCreatedAt) {
         throw new BadRequestException('Procurement stock has already been received');
       }
-      if (!order.svhToHqTransport || order.svhToHqTransport.status !== 'COMPLETED') {
-        throw new BadRequestException(SVH_TRANSPORT_NOT_COMPLETED_MESSAGE);
+
+      const cargoAttachmentCount = await tx.fileAttachment.count({
+        where: {
+          entityId: order.id,
+          entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+          deletedAt: null,
+        },
+      });
+
+      const cargoSnapshot = {
+        cargoTotalWeightKg: dto.cargoTotalWeightKg ?? order.cargoTotalWeightKg,
+        cargoRateUsdPerKg: dto.cargoRateUsdPerKg ?? order.cargoRateUsdPerKg,
+        defaultUsdRate: dto.defaultUsdRate ?? order.defaultUsdRate,
+        cargoReceiptNumber: dto.cargoReceiptNumber ?? order.cargoReceiptNumber,
+        cargoReceiptDate: dto.cargoReceiptDate ?? order.cargoReceiptDate,
+        cargoAttachmentCount,
+      };
+      const svhSnapshot = order.svhToHqTransport
+        ? {
+            transportCompanyId: order.svhToHqTransport.transportCompanyId,
+            transportCostKgs: Number(order.svhToHqTransport.transportCostKgs),
+            dispatchDate: order.svhToHqTransport.dispatchDate,
+            arrivalDate: order.svhToHqTransport.arrivalDate,
+            status: order.svhToHqTransport.status,
+            transportCompanyStatus: order.svhToHqTransport.transportCompany?.status ?? null,
+          }
+        : null;
+
+      const validation = buildHqReceivingValidationResult({
+        cargo: cargoSnapshot,
+        svh: svhSnapshot,
+      });
+
+      const validationResult = {
+        procurementOrderId: order.id,
+        cargoReceiptCompleted: validation.cargoReceiptCompleted,
+        svhToHqTransportCompleted: validation.svhToHqTransportCompleted,
+        cargoReceiptErrors: validation.cargoReceipt.errors,
+        svhTransportErrors: validation.svhTransport.errors,
+      };
+
+      if (!validation.canReceiveToHq) {
+        await this.auditInTx(tx, user, 'HQ', 'HQ_RECEIVING_BLOCKED', 'ProcurementOrder', order.id, {
+          userId: user.id,
+          procurementOrderId: order.id,
+          validationResult,
+        });
+        const message = hqReceivingBlockedMessage(validation);
+        throw new BadRequestException(message ?? SVH_TRANSPORT_INCOMPLETE_MESSAGE);
       }
+
+      await this.auditInTx(tx, user, 'HQ', 'CARGO_RECEIPT_VALIDATED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        procurementOrderId: order.id,
+        validationResult,
+      });
+      await this.auditInTx(tx, user, 'HQ', 'SVH_TO_HQ_TRANSPORT_VALIDATED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        procurementOrderId: order.id,
+        validationResult,
+      });
+      await this.auditInTx(tx, user, 'HQ', 'HQ_RECEIVING_ALLOWED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        procurementOrderId: order.id,
+        validationResult,
+      });
+
       const hqWarehouseId = dto.hqWarehouseId ?? order.hqWarehouseId;
       const hqWarehouse = await tx.warehouse.findFirst({
         where: { id: hqWarehouseId, ...activeHqWarehouseWhere },
@@ -393,6 +465,13 @@ export class OperationsService {
         hqWarehouseId,
         recalculatedLandedCost: true,
         reason: dto.reason,
+      });
+      await this.auditInTx(tx, user, 'HQ', 'GOODS_RECEIVED_TO_HQ', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        procurementOrderId: order.id,
+        receivingId: receiving.id,
+        hqWarehouseId,
+        validationResult,
       });
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.GOODS_RECEIVED_HQ,

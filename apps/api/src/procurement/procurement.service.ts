@@ -83,6 +83,7 @@ import {
   isChinaDomesticTransportLockedByStatus,
   touchesChinaDomesticTransportFields,
 } from './china-domestic-transport-lock.util';
+import { buildHqReceivingValidationResult } from './hq-receiving-validation.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -3154,7 +3155,36 @@ export class ProcurementService {
       svhToHqTransport: order.svhToHqTransport
         ? this.toSvhToHqTransportResponse(order.svhToHqTransport)
         : null,
-      canReceiveToHq: isSvhTransportCompleted(order.svhToHqTransport?.status),
+      ...(() => {
+        const cargoAttachments = attachments.filter(
+          (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
+        );
+        const receivingValidation = buildHqReceivingValidationResult({
+          cargo: {
+            cargoTotalWeightKg: order.cargoTotalWeightKg,
+            cargoRateUsdPerKg: order.cargoRateUsdPerKg,
+            defaultUsdRate: order.defaultUsdRate,
+            cargoReceiptNumber: order.cargoReceiptNumber,
+            cargoReceiptDate: order.cargoReceiptDate,
+            cargoAttachmentCount: cargoAttachments.length,
+          },
+          svh: order.svhToHqTransport
+            ? {
+                transportCompanyId: order.svhToHqTransport.transportCompanyId,
+                transportCostKgs: Number(order.svhToHqTransport.transportCostKgs),
+                dispatchDate: order.svhToHqTransport.dispatchDate,
+                arrivalDate: order.svhToHqTransport.arrivalDate,
+                status: order.svhToHqTransport.status,
+                transportCompanyStatus: order.svhToHqTransport.transportCompany?.status ?? null,
+              }
+            : null,
+        });
+        return {
+          cargoReceiptCompleted: receivingValidation.cargoReceiptCompleted,
+          svhToHqTransportCompleted: receivingValidation.svhToHqTransportCompleted,
+          canReceiveToHq: receivingValidation.canReceiveToHq,
+        };
+      })(),
     };
   }
 

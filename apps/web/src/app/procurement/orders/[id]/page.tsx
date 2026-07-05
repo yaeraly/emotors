@@ -10,6 +10,7 @@ import { LockedFieldHint } from '@/components/LockedFieldHint';
 import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
+import { buildHqReceivingValidationResult } from '@/lib/hq-receiving-validation';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs, effectiveLocalTransportKgs, storedLocalTransportKgsFromOrder } from '@/lib/transport-logistics';
 import {
@@ -138,6 +139,8 @@ type ProcurementOrder = {
   receivings?: Array<{ id: string; receivingNumber: string; receivedAt: string }>;
   svhToHqTransport?: SvhToHqTransport | null;
   canReceiveToHq?: boolean;
+  cargoReceiptCompleted?: boolean;
+  svhToHqTransportCompleted?: boolean;
   chinaDomesticTransportLocked?: boolean;
   chinaDomesticTransportEditable?: boolean;
   chinaDomesticTransportUnlockExpiresAt?: string | null;
@@ -235,7 +238,32 @@ export default function ProcurementOrderDetailPage() {
   const canEditLocal = canEditLocalTransport(user);
   const isCeoUser = canUnlockProcurementOrder(user);
   const canConfirmSvh = canConfirmSvhToHqArrival(user);
-  const svhTransportCompleted = order?.svhToHqTransport?.status === 'COMPLETED' || order?.canReceiveToHq === true;
+  const hqReceivingReadiness = useMemo(() => {
+    if (!order) return null;
+    return buildHqReceivingValidationResult({
+      cargo: {
+        cargoTotalWeightKg: logisticsForm.cargoTotalWeightKg,
+        cargoRateUsdPerKg: logisticsForm.cargoRateUsdPerKg,
+        defaultUsdRate: logisticsForm.defaultUsdRate,
+        cargoReceiptNumber: logisticsForm.cargoReceiptNumber,
+        cargoReceiptDate: logisticsForm.cargoReceiptDate,
+        cargoAttachmentCount: order.cargoAttachments?.length ?? 0,
+      },
+      svh: order.svhToHqTransport
+        ? {
+            transportCompanyId: order.svhToHqTransport.transportCompanyId,
+            transportCostKgs: order.svhToHqTransport.transportCostKgs,
+            dispatchDate: order.svhToHqTransport.dispatchDate,
+            arrivalDate: order.svhToHqTransport.arrivalDate,
+            status: order.svhToHqTransport.status,
+            transportCompanyStatus: order.svhToHqTransport.transportCompany?.status,
+          }
+        : null,
+    });
+  }, [order, logisticsForm]);
+  const cargoReceiptCompleted = hqReceivingReadiness?.cargoReceiptCompleted ?? false;
+  const svhTransportCompleted = hqReceivingReadiness?.svhToHqTransportCompleted ?? false;
+  const canReceiveToHq = hqReceivingReadiness?.canReceiveToHq ?? false;
   const canSaveSvh = canManageSvh || (canConfirmSvh && !!order?.svhToHqTransport);
   const svhStatusOptions = canManageSvh
     ? SVH_TRANSPORT_STATUSES
@@ -626,7 +654,7 @@ export default function ProcurementOrderDetailPage() {
   }
 
   async function receiveGoods() {
-    if (!order || cargoValidationError || !svhTransportCompleted) return;
+    if (!order || cargoValidationError || !canReceiveToHq) return;
     setError('');
     setSuccess('');
     try {
@@ -1114,10 +1142,32 @@ export default function ProcurementOrderDetailPage() {
                   );
                 })}
               </div>
-              <button type="button" disabled={!!cargoValidationError || !svhTransportCompleted} onClick={() => void receiveGoods()} className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white disabled:bg-emerald-300">{t('procurement.orders.receiveToHq')}</button>
-              {!svhTransportCompleted ? (
-                <p className="mt-3 text-sm text-amber-700">{t('procurement.svhTransport.receiveBlocked')}</p>
+              {!cargoReceiptCompleted ? (
+                <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.receiving.warning.cargo')}</p>
               ) : null}
+              {!svhTransportCompleted ? (
+                <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.receiving.warning.svh')}</p>
+              ) : null}
+              <ul className="mt-4 space-y-2 text-sm">
+                <li className={cargoReceiptCompleted ? 'text-emerald-700' : 'text-red-700'}>
+                  {cargoReceiptCompleted
+                    ? t('procurement.receiving.checklist.cargoComplete')
+                    : t('procurement.receiving.checklist.cargoIncomplete')}
+                </li>
+                <li className={svhTransportCompleted ? 'text-emerald-700' : 'text-red-700'}>
+                  {svhTransportCompleted
+                    ? t('procurement.receiving.checklist.svhComplete')
+                    : t('procurement.receiving.checklist.svhIncomplete')}
+                </li>
+              </ul>
+              <button
+                type="button"
+                disabled={!!cargoValidationError || !canReceiveToHq}
+                onClick={() => void receiveGoods()}
+                className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white disabled:bg-emerald-300"
+              >
+                {t('procurement.orders.receiveToHq')}
+              </button>
             </section>
           ) : null}
 
