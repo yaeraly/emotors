@@ -3,8 +3,10 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -61,6 +63,8 @@ export class CreateInventoryCountDto {
 
 export class UpdateInventoryCountItemDto {
   @Type(() => Number)
+  @IsNumber()
+  @Min(0)
   actualQuantity!: number;
 
   @IsOptional()
@@ -80,6 +84,8 @@ export class BulkInventoryCountItemEntry {
   itemId!: string;
 
   @Type(() => Number)
+  @IsNumber()
+  @Min(0)
   actualQuantity!: number;
 
   @IsOptional()
