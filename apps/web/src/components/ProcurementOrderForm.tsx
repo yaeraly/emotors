@@ -2,14 +2,15 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { calculateLandedCosts } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
 import { LockedFieldHint } from '@/components/LockedFieldHint';
+import { ProcurementProductSearch } from '@/components/ProcurementProductSearch';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { canEditProcurementOrderItemsInWindow } from '@/lib/rbac';
-import type { Product, ProductListResponse, User, Warehouse } from '@/lib/types';
+import type { Product, User, Warehouse } from '@/lib/types';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -68,6 +69,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [transportCompanies, setTransportCompanies] = useState<TransportCompany[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const productSearchRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(mode === 'edit');
@@ -88,7 +90,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     bankFeeCostKgs: '0',
     otherExpenseKgs: '0',
   });
-  const [lines, setLines] = useState<ProcurementLine[]>([emptyLine()]);
+  const [lines, setLines] = useState<ProcurementLine[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [editWindow, setEditWindow] = useState<{
     isEditable?: boolean;
@@ -107,7 +109,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       apiFetch<Supplier[]>('/procurement/suppliers'),
       apiFetch<Factory[]>('/procurement/factories'),
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
-      apiFetch<ProductListResponse>('/inventory/products?pageSize=500'),
       apiFetch<User>('/auth/me'),
       apiFetch<TransportCompany[]>('/procurement/transport-companies?selectable=true').catch(() => []),
     ];
@@ -118,18 +119,20 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         const supplierResult = results[0] as Supplier[];
         const factoryResult = results[1] as Factory[];
         const warehouseResult = results[2] as Warehouse[];
-        const productResult = results[3] as ProductListResponse;
-        const me = results[4] as User;
-        const transportCompanyResult = results[5] as TransportCompany[];
-        const order = mode === 'edit' && orderId ? results[6] as any : undefined;
+        const me = results[3] as User;
+        const transportCompanyResult = results[4] as TransportCompany[];
+        const order = mode === 'edit' && orderId ? results[5] as any : undefined;
         setUser(me);
         setSuppliers(supplierResult);
         setFactories(factoryResult);
         setWarehouses(warehouseResult);
-        setProducts(productResult.items);
         setTransportCompanies(transportCompanyResult);
 
         if (mode === 'edit' && order) {
+          const cachedProducts = (order.items ?? [])
+            .map((item: any) => item.product)
+            .filter(Boolean) as Product[];
+          setProducts(cachedProducts);
           setChinaDomesticTransportEditable(
             order.chinaDomesticTransportEditable ?? canEditChinaDomesticTransport(order),
           );
@@ -163,7 +166,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
           setLines((order.items ?? [])
             .filter((item: any) => item.status !== 'CANCELLED')
             .map((item: any) => {
-            const product = productResult.items.find((p) => p.id === item.productId);
+            const product = item.product as Product | undefined;
             const masterPrice = String(product?.purchasePriceYuan ?? item.purchasePriceYuan ?? 0);
             return {
               key: item.id,
@@ -175,23 +178,12 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             };
           }));
         } else {
-          const firstProduct = productResult.items[0];
           setForm((current) => ({
             ...current,
             supplierId: supplierResult[0]?.id ?? '',
             factoryId: factoryResult[0]?.id ?? '',
             hqWarehouseId: warehouseResult[0]?.id ?? '',
-            exchangeRate: String(firstProduct?.latestYuanRate ?? 0),
           }));
-          if (firstProduct) {
-            setLines([{
-              ...emptyLine(),
-              productId: firstProduct.id,
-              factoryId: factoryResult[0]?.id ?? '',
-              purchasePriceYuan: String(firstProduct.purchasePriceYuan ?? 0),
-              masterPriceYuan: String(firstProduct.purchasePriceYuan ?? 0),
-            }]);
-          }
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
@@ -280,19 +272,41 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     }));
   }
 
-  function addLine() {
-    const product = products[0];
+  function cacheProduct(product: Product) {
+    setProducts((current) => {
+      if (current.some((entry) => entry.id === product.id)) {
+        return current.map((entry) => (entry.id === product.id ? product : entry));
+      }
+      return [...current, product];
+    });
+  }
+
+  function addProductFromSearch(product: Product) {
+    cacheProduct(product);
+    const masterPrice = String(product.purchasePriceYuan ?? 0);
+    const defaultFactory = product.defaultFactoryId ?? form.factoryId;
+    if (!Number(form.exchangeRate || 0) && Number(product.latestYuanRate || 0)) {
+      setField('exchangeRate', String(product.latestYuanRate));
+    }
     setLines((current) => [...current, {
       ...emptyLine(),
-      productId: product?.id ?? '',
-      factoryId: form.factoryId,
-      purchasePriceYuan: String(product?.purchasePriceYuan ?? 0),
-      masterPriceYuan: String(product?.purchasePriceYuan ?? 0),
+      productId: product.id,
+      factoryId: defaultFactory,
+      purchasePriceYuan: masterPrice,
+      masterPriceYuan: masterPrice,
     }]);
   }
 
+  function focusProductSearch() {
+    productSearchRef.current?.focus();
+  }
+
+  function addLine() {
+    focusProductSearch();
+  }
+
   function removeLine(key: string) {
-    setLines((current) => (current.length <= 1 ? current : current.filter((line) => line.key !== key)));
+    setLines((current) => current.filter((line) => line.key !== key));
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -304,6 +318,10 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     }
     if (weightErrors.length) {
       setError(t('procurement.orders.weightNotConfigured'));
+      return;
+    }
+    if (!lines.length) {
+      setError(t('procurement.orders.productSearch.emptyOrder'));
       return;
     }
     setSaving(true);
@@ -425,16 +443,31 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between gap-4">
           <h3 className="text-lg font-bold text-slate-950">{t('procurement.orders.productsTable')}</h3>
           <button type="button" disabled={itemsLocked} onClick={addLine} className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 disabled:opacity-50">{t('procurement.orders.addProduct')}</button>
         </div>
+
+        <div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+          <ProcurementProductSearch
+            disabled={itemsLocked}
+            inputRef={productSearchRef}
+            onSelect={addProductFromSearch}
+          />
+        </div>
+
+        {!lines.length ? (
+          <p className="rounded-2xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
+            {t('procurement.orders.productSearch.emptyState')}
+          </p>
+        ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-3">{t('procurement.orders.product')}</th>
                 <th className="px-3 py-3">SKU</th>
+                <th className="px-3 py-3">{t('procurement.orders.unit')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.quantity')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.netWeightKg')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
@@ -448,12 +481,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             <tbody className="divide-y divide-slate-100">
               {lineDetails.map((line) => (
                 <tr key={line.key} className={line.missingWeight ? 'bg-amber-50' : line.priceChanged ? 'bg-blue-50' : ''}>
-                  <td className="px-3 py-3 min-w-48">
-                    <select disabled={itemsLocked} value={line.productId} onChange={(e) => updateLine(line.key, { productId: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5">
-                      {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </td>
+                  <td className="px-3 py-3 min-w-48 font-semibold text-slate-900">{line.productName}</td>
                   <td className="px-3 py-3 font-mono text-xs">{line.sku}</td>
+                  <td className="px-3 py-3">{line.product?.unit ?? 'pcs'}</td>
                   <td className="px-3 py-3"><input disabled={itemsLocked} type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
                   <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : `${line.netWeightKg.toFixed(3)} kg`}</td>
                   <td className="px-3 py-3">{line.totalNetWeightKg.toFixed(3)}</td>
@@ -477,12 +507,13 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                         : '-'}
                   </td>
                   <td className="px-3 py-3">¥{line.totalYuan.toFixed(2)}</td>
-                  <td className="px-3 py-3">{lines.length > 1 ? <button disabled={itemsLocked} type="button" onClick={() => removeLine(line.key)} className="text-red-600 disabled:opacity-50">{t('common.delete')}</button> : null}</td>
+                  <td className="px-3 py-3"><button disabled={itemsLocked} type="button" onClick={() => removeLine(line.key)} className="text-red-600 disabled:opacity-50">{t('common.delete')}</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        )}
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
@@ -492,7 +523,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       </section>
 
       <div className="flex justify-end">
-        <button disabled={saving || weightErrors.length > 0 || itemsLocked} type="submit" className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:bg-blue-300">
+        <button disabled={saving || weightErrors.length > 0 || itemsLocked || lines.length === 0} type="submit" className="rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white disabled:bg-blue-300">
           {saving ? t('common.loading') : t('procurement.orders.save')}
         </button>
       </div>

@@ -376,6 +376,7 @@ export class InventoryService {
       where.OR = [
         { name: { contains: search, mode: 'insensitive' } },
         { sku: { contains: search, mode: 'insensitive' } },
+        { barcode: { contains: search, mode: 'insensitive' } },
         { category: { contains: search, mode: 'insensitive' } },
         { productCategory: { nameKy: { contains: search, mode: 'insensitive' } } },
         { productCategory: { nameRu: { contains: search, mode: 'insensitive' } } },
