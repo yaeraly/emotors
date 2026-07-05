@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import {
@@ -16,38 +16,25 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 type Supplier = {
   id: string;
-  name: string;
-  companyName?: string | null;
-  country?: string | null;
-  city?: string | null;
+  isActive?: boolean;
 };
 
 type Factory = {
   id: string;
-  name: string;
-  city?: string | null;
-  supplier?: { name: string };
+  isActive?: boolean;
 };
 
 type TransportCompany = {
   id: string;
-  name: string;
-  companyCode: string;
-  transportType: string;
   status: string;
 };
 
 type ProcurementOrder = {
   id: string;
-  orderNumber: string;
-  createdAt?: string;
   status: string;
-  totalYuan: string | number;
-  supplier?: { name: string };
-  factory?: { name: string } | null;
 };
 
-const LIST_LIMIT = 5;
+const TERMINAL_ORDER_STATUSES = new Set(['CANCELLED', 'CLOSED', 'RECEIVED_TO_HQ_WAREHOUSE']);
 
 export default function ProcurementPage() {
   const { t } = useTranslation();
@@ -96,6 +83,39 @@ export default function ProcurementPage() {
     void loadData();
   }, [loadData]);
 
+  const supplierStats = useMemo(
+    () => ({
+      total: suppliers.length,
+      active: suppliers.filter((item) => item.isActive !== false).length,
+    }),
+    [suppliers],
+  );
+
+  const factoryStats = useMemo(
+    () => ({
+      total: factories.length,
+      active: factories.filter((item) => item.isActive !== false).length,
+    }),
+    [factories],
+  );
+
+  const transportStats = useMemo(
+    () => ({
+      total: transportCompanies.length,
+      active: transportCompanies.filter((item) => item.status === 'ACTIVE').length,
+    }),
+    [transportCompanies],
+  );
+
+  const orderStats = useMemo(
+    () => ({
+      total: orders.length,
+      draft: orders.filter((item) => item.status === 'DRAFT').length,
+      active: orders.filter((item) => item.status !== 'DRAFT' && !TERMINAL_ORDER_STATUSES.has(item.status)).length,
+    }),
+    [orders],
+  );
+
   if (!canView) {
     return (
       <ProtectedShell>
@@ -115,216 +135,156 @@ export default function ProcurementPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
-        <div className="space-y-6">
-          <DashboardSection
+        <div className="grid gap-6 md:grid-cols-2">
+          <ProcurementDashboardCard
             title={t('procurement.suppliers.title')}
+            href="/procurement/suppliers"
             newHref="/procurement/suppliers/new"
             newLabel={t('procurement.suppliers.new')}
-            viewAllHref="/procurement/suppliers"
-            viewAllLabel={t('procurement.dashboard.viewAll')}
             showNew={canManage}
-          >
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">{t('procurement.suppliers.name')}</th>
-                  <th className="px-4 py-3">{t('procurement.suppliers.companyName')}</th>
-                  <th className="px-4 py-3">{t('procurement.suppliers.city')}</th>
-                  <th className="px-4 py-3">{t('common.actions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {suppliers.slice(0, LIST_LIMIT).map((supplier) => (
-                  <tr key={supplier.id}>
-                    <td className="px-4 py-3 font-bold">{supplier.name}</td>
-                    <td className="px-4 py-3">{supplier.companyName ?? '-'}</td>
-                    <td className="px-4 py-3">{supplier.city ?? '-'}</td>
-                    <td className="px-4 py-3">
-                      <Link href={`/procurement/suppliers/${supplier.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-                {!suppliers.length ? (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-slate-500">{t('procurement.dashboard.empty')}</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </DashboardSection>
+            icon={<SupplierIcon />}
+            stats={[
+              { label: t('procurement.dashboard.totalSuppliers'), value: supplierStats.total },
+              { label: t('procurement.dashboard.activeSuppliers'), value: supplierStats.active },
+            ]}
+          />
 
-          <DashboardSection
+          <ProcurementDashboardCard
             title={t('procurement.factories.title')}
+            href="/procurement/factories"
             newHref="/procurement/factories/new"
             newLabel={t('procurement.factories.new')}
-            viewAllHref="/procurement/factories"
-            viewAllLabel={t('procurement.dashboard.viewAll')}
             showNew={canManage}
-          >
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">{t('procurement.factories.name')}</th>
-                  <th className="px-4 py-3">{t('procurement.factories.supplier')}</th>
-                  <th className="px-4 py-3">{t('procurement.factories.city')}</th>
-                  <th className="px-4 py-3">{t('common.actions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {factories.slice(0, LIST_LIMIT).map((factory) => (
-                  <tr key={factory.id}>
-                    <td className="px-4 py-3 font-bold">{factory.name}</td>
-                    <td className="px-4 py-3">{factory.supplier?.name ?? '-'}</td>
-                    <td className="px-4 py-3">{factory.city ?? '-'}</td>
-                    <td className="px-4 py-3">
-                      <Link href={`/procurement/factories/${factory.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-                {!factories.length ? (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-slate-500">{t('procurement.dashboard.empty')}</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </DashboardSection>
+            icon={<FactoryIcon />}
+            stats={[
+              { label: t('procurement.dashboard.totalFactories'), value: factoryStats.total },
+              { label: t('procurement.dashboard.activeFactories'), value: factoryStats.active },
+            ]}
+          />
 
           {canViewTransport ? (
-            <DashboardSection
+            <ProcurementDashboardCard
               title={t('procurement.transportCompanies.title')}
+              href="/procurement/transport-companies"
               newHref="/procurement/transport-companies/new"
               newLabel={t('procurement.transportCompanies.new')}
-              viewAllHref="/procurement/transport-companies"
-              viewAllLabel={t('procurement.dashboard.viewAll')}
               showNew={canManageTransport}
-            >
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">{t('procurement.transportCompanies.name')}</th>
-                    <th className="px-4 py-3">{t('procurement.transportCompanies.companyCode')}</th>
-                    <th className="px-4 py-3">{t('procurement.transportCompanies.transportType')}</th>
-                    <th className="px-4 py-3">{t('common.actions')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {transportCompanies.slice(0, LIST_LIMIT).map((company) => (
-                    <tr key={company.id}>
-                      <td className="px-4 py-3 font-bold">{company.name}</td>
-                      <td className="px-4 py-3">{company.companyCode}</td>
-                      <td className="px-4 py-3">{t(`procurement.transportCompanies.type.${company.transportType}`)}</td>
-                      <td className="px-4 py-3">
-                        <Link href={`/procurement/transport-companies/${company.id}/edit`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                          {t('common.open')}
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                  {!transportCompanies.length ? (
-                    <tr>
-                      <td colSpan={4} className="px-4 py-6 text-center text-slate-500">{t('procurement.dashboard.empty')}</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </DashboardSection>
+              icon={<TransportIcon />}
+              stats={[
+                { label: t('procurement.dashboard.totalTransportCompanies'), value: transportStats.total },
+                { label: t('procurement.dashboard.activeTransportCompanies'), value: transportStats.active },
+              ]}
+            />
           ) : null}
 
-          <DashboardSection
+          <ProcurementDashboardCard
             title={t('procurement.orders.title')}
+            href="/procurement/orders"
             newHref="/procurement/orders/new"
             newLabel={t('procurement.orders.new')}
-            viewAllHref="/procurement/orders"
-            viewAllLabel={t('procurement.dashboard.viewAll')}
             showNew={canCreateOrder}
-          >
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">{t('procurement.orders.orderDate')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.supplier')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.status')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
-                  <th className="px-4 py-3">{t('common.actions')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {orders.slice(0, LIST_LIMIT).map((order) => (
-                  <tr key={order.id}>
-                    <td className="px-4 py-3 font-bold">{order.createdAt ? formatOrderDate(order.createdAt) : '-'}</td>
-                    <td className="px-4 py-3">{order.supplier?.name ?? '-'}</td>
-                    <td className="px-4 py-3">{order.status}</td>
-                    <td className="px-4 py-3">¥{Number(order.totalYuan ?? 0).toFixed(2)}</td>
-                    <td className="px-4 py-3">
-                      <Link href={`/procurement/orders/${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-                {!orders.length ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-slate-500">{t('procurement.dashboard.empty')}</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </DashboardSection>
+            icon={<OrdersIcon />}
+            stats={[
+              { label: t('procurement.dashboard.totalOrders'), value: orderStats.total },
+              { label: t('procurement.dashboard.draftOrders'), value: orderStats.draft },
+              { label: t('procurement.dashboard.activeOrders'), value: orderStats.active },
+            ]}
+          />
         </div>
       </section>
     </ProtectedShell>
   );
 }
 
-function DashboardSection({
+function ProcurementDashboardCard({
   title,
+  href,
   newHref,
   newLabel,
-  viewAllHref,
-  viewAllLabel,
   showNew,
-  children,
+  icon,
+  stats,
 }: {
   title: string;
+  href: string;
   newHref: string;
   newLabel: string;
-  viewAllHref: string;
-  viewAllLabel: string;
   showNew: boolean;
-  children: ReactNode;
+  icon: ReactNode;
+  stats: Array<{ label: string; value: number }>;
 }) {
   return (
-    <article className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-4 border-b border-slate-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-xl font-bold text-slate-950">{title}</h3>
+    <article className="group relative flex min-h-[260px] flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-300 hover:shadow-md">
+      <Link href={href} className="absolute inset-0 rounded-3xl" aria-label={title} />
+
+      <div className="relative flex flex-1 flex-col">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
+          {icon}
+        </div>
+
+        <h3 className="mt-5 text-2xl font-bold text-slate-950">{title}</h3>
+
+        <dl className="mt-5 space-y-2">
+          {stats.map((stat) => (
+            <div key={stat.label} className="flex items-center justify-between gap-4 text-sm">
+              <dt className="font-medium text-slate-500">{stat.label}</dt>
+              <dd className="text-lg font-bold text-slate-950">{stat.value}</dd>
+            </div>
+          ))}
+        </dl>
+
         {showNew ? (
-          <Link href={newHref} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700">
-            <span aria-hidden>+</span>
-            {newLabel}
-          </Link>
+          <div className="relative z-10 mt-auto pt-6">
+            <Link
+              href={newHref}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              <span aria-hidden>+</span>
+              {newLabel}
+            </Link>
+          </div>
         ) : null}
-      </div>
-      <div className="overflow-x-auto">{children}</div>
-      <div className="border-t border-slate-100 px-6 py-4">
-        <Link href={viewAllHref} className="text-sm font-semibold text-blue-700 hover:text-blue-800">
-          {viewAllLabel}
-        </Link>
       </div>
     </article>
   );
 }
 
-function formatOrderDate(value: string) {
-  return new Date(value).toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+function SupplierIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path d="M4 20V10l8-5 8 5v10" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M9 20v-6h6v6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function FactoryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path d="M3 20h18" strokeLinecap="round" />
+      <path d="M6 20V9l4-2v13M14 20V6l4-2v16" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 12h1M10 15h1M18 10h1M18 13h1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function TransportIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path d="M3 8h11v8H3z" strokeLinejoin="round" />
+      <path d="M14 11h3l3 3v2h-6v-5z" strokeLinejoin="round" />
+      <circle cx="7" cy="18" r="2" />
+      <circle cx="17" cy="18" r="2" />
+    </svg>
+  );
+}
+
+function OrdersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+      <path d="M7 4h10l1 3H6l1-3z" strokeLinejoin="round" />
+      <path d="M6 7h12v13H6z" strokeLinejoin="round" />
+      <path d="M9 11h6M9 15h4" strokeLinecap="round" />
+    </svg>
+  );
 }
