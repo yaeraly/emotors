@@ -111,7 +111,8 @@ export class InventoryCountService {
           sessionNumber: await this.generateSessionNumber(tx),
           warehouseId: warehouse.id,
           inventoryType: dto.inventoryType,
-          status: InventoryCountStatus.DRAFT,
+          status: InventoryCountStatus.COUNTING,
+          startDate: new Date(),
           categoryId: dto.categoryId ?? dto.filterCategoryId,
           shelf: dto.shelf ?? dto.filterShelf,
           zone: dto.zone ?? dto.filterZone,
@@ -137,8 +138,16 @@ export class InventoryCountService {
 
       await this.audit(tx, user, 'INVENTORY_CREATED', session.id, {
         warehouseId: warehouse.id,
-        inventoryType: dto.inventoryType,
-        itemCount: items.length,
+        newValue: {
+          inventoryType: dto.inventoryType,
+          itemCount: items.length,
+          status: InventoryCountStatus.COUNTING,
+        },
+      });
+
+      await this.audit(tx, user, 'INVENTORY_STARTED', session.id, {
+        warehouseId: warehouse.id,
+        newValue: { status: InventoryCountStatus.COUNTING },
       });
 
       const created = await tx.inventoryCountSession.findUniqueOrThrow({
@@ -191,11 +200,15 @@ export class InventoryCountService {
     });
 
     await this.audit(this.prisma, user, 'PRODUCT_COUNT_UPDATED', sessionId, {
+      warehouseId: session.warehouseId,
       productId: item.productId,
-      sku: item.sku,
-      systemQuantity: item.systemQuantity,
-      actualQuantity,
-      differenceQuantity,
+      oldValue: item.actualQuantity,
+      newValue: actualQuantity,
+      extra: {
+        sku: item.sku,
+        systemQuantity: item.systemQuantity,
+        differenceQuantity,
+      },
     });
 
     return updated;
@@ -226,7 +239,8 @@ export class InventoryCountService {
     }
 
     await this.audit(this.prisma, user, 'PRODUCT_COUNT_UPDATED', sessionId, {
-      bulkCount: dto.items.length,
+      warehouseId: session.warehouseId,
+      newValue: { bulkCount: dto.items.length },
     });
 
     return this.detail(user, sessionId);
@@ -257,7 +271,10 @@ export class InventoryCountService {
         include: this.sessionInclude(),
       });
 
-      await this.audit(tx, user, 'INVENTORY_SUBMITTED', id, this.buildSummary(updated));
+      await this.audit(tx, user, 'INVENTORY_SUBMITTED', id, {
+        warehouseId: session.warehouseId,
+        newValue: this.buildSummary(updated),
+      });
       return this.toSessionResponse(updated);
     });
   }
@@ -291,12 +308,15 @@ export class InventoryCountService {
         });
 
         await this.audit(tx, user, 'STOCK_ADJUSTED', session.id, {
+          warehouseId: session.warehouseId,
           productId: item.productId,
-          sku: item.sku,
-          systemQuantity: item.systemQuantity,
-          actualQuantity: item.actualQuantity,
-          differenceQuantity: difference,
-          movementType,
+          oldValue: item.systemQuantity,
+          newValue: item.actualQuantity,
+          extra: {
+            sku: item.sku,
+            differenceQuantity: difference,
+            movementType,
+          },
         });
       }
 
@@ -311,7 +331,10 @@ export class InventoryCountService {
         include: this.sessionInclude(),
       });
 
-      await this.audit(tx, user, 'INVENTORY_APPROVED', id, this.buildSummary(updated));
+      await this.audit(tx, user, 'INVENTORY_APPROVED', id, {
+        warehouseId: session.warehouseId,
+        newValue: this.buildSummary(updated),
+      });
       return this.toSessionResponse(updated);
     });
   }
@@ -337,7 +360,12 @@ export class InventoryCountService {
         include: this.sessionInclude(),
       });
 
-      await this.audit(tx, user, 'INVENTORY_REJECTED', id, { reason: dto.reason });
+      await this.audit(tx, user, 'INVENTORY_REJECTED', id, {
+        warehouseId: session.warehouseId,
+        oldValue: InventoryCountStatus.SUBMITTED,
+        newValue: InventoryCountStatus.COUNTING,
+        extra: { reason: dto.reason },
+      });
       return this.toSessionResponse(updated);
     });
   }
@@ -426,7 +454,11 @@ export class InventoryCountService {
         data,
         include: this.sessionInclude(),
       });
-      await this.audit(tx, user, action, id, { status: updated.status });
+      await this.audit(tx, user, action, id, {
+        warehouseId: session.warehouseId,
+        oldValue: session.status,
+        newValue: updated.status,
+      });
       return this.toSessionResponse(updated);
     });
   }
@@ -543,13 +575,14 @@ export class InventoryCountService {
 
   private assertCanCount(user: AuthUser) {
     const roles = user.roles?.length ? user.roles : [user.role];
-    if (!(hasAnyFullAccessRole(roles) || roles.includes(Role.WAREHOUSE_MANAGER))) {
+    if (!roles.includes(Role.WAREHOUSE_MANAGER)) {
       throw new ForbiddenException('Only Warehouse Manager can perform inventory counts');
     }
   }
 
   private assertCanApprove(user: AuthUser) {
-    if (!isFullAccessRole(user.role) && !(user.roles ?? []).some((role) => isFullAccessRole(role))) {
+    const roles = user.roles?.length ? user.roles : [user.role];
+    if (!roles.some((role) => isFullAccessRole(role))) {
       throw new ForbiddenException('Only CEO can approve or reject inventory counts');
     }
   }
@@ -558,8 +591,14 @@ export class InventoryCountService {
     tx: PrismaTx | PrismaService,
     user: AuthUser,
     action: string,
-    entityId: string,
-    metadata?: Record<string, unknown>,
+    inventorySessionId: string,
+    opts?: {
+      warehouseId?: string;
+      productId?: string;
+      oldValue?: unknown;
+      newValue?: unknown;
+      extra?: Record<string, unknown>;
+    },
   ) {
     return (tx as PrismaTx).auditLog.create({
       data: {
@@ -567,10 +606,15 @@ export class InventoryCountService {
         role: user.role,
         action,
         entity: 'InventoryCountSession',
-        entityId,
+        entityId: inventorySessionId,
         metadata: {
           roles: user.roles ?? [user.role],
-          ...metadata,
+          inventorySessionId,
+          ...(opts?.warehouseId ? { warehouseId: opts.warehouseId } : {}),
+          ...(opts?.productId ? { productId: opts.productId } : {}),
+          ...(opts?.oldValue !== undefined ? { oldValue: opts.oldValue } : {}),
+          ...(opts?.newValue !== undefined ? { newValue: opts.newValue } : {}),
+          ...opts?.extra,
         },
       },
     });

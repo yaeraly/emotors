@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { warehouseHubSections } from '@/lib/scm-hub-sections';
+import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { apiFetch } from '@/lib/api';
 import { canManageInventoryCount } from '@/lib/rbac';
 import type { InventoryCountSession, User } from '@/lib/types';
@@ -157,5 +158,3 @@ function StatusBadge({
     </span>
   );
 }
-
-import { inventoryTypeLabel } from '@/lib/inventory-count';

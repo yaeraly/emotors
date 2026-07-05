@@ -454,7 +454,7 @@ export function canViewInventoryCount(user: Pick<User, 'role' | 'roles' | 'permi
 }
 
 export function canManageInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasFullAccess(user) || hasRole(user, 'WAREHOUSE_MANAGER');
+  return isWarehouseManagerUser(user);
 }
 
 export function canApproveInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

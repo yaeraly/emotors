@@ -70,9 +70,32 @@ export default function InventoryCountDetailPage() {
       (item) =>
         item.sku.toLowerCase().includes(term) ||
         item.productName.toLowerCase().includes(term) ||
-        item.product?.barcode?.toLowerCase().includes(term),
+        (item.product?.barcode?.toLowerCase().includes(term) ?? false),
     );
   }, [session?.items, search]);
+
+  function scrollToItem(itemId: string) {
+    setHighlightItemId(itemId);
+    document.getElementById(`item-row-${itemId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    barcodeRef.current?.focus();
+  }
+
+  function findSessionItem(term: string) {
+    const normalized = term.trim().toLowerCase();
+    if (!normalized || !session?.items) return null;
+
+    const exactBarcode = session.items.find(
+      (item) => item.product?.barcode?.toLowerCase() === normalized,
+    );
+    if (exactBarcode) return exactBarcode;
+
+    const exactSku = session.items.find((item) => item.sku.toLowerCase() === normalized);
+    if (exactSku) return exactSku;
+
+    return (
+      session.items.find((item) => item.productName.toLowerCase().includes(normalized)) ?? null
+    );
+  }
 
   async function startCounting() {
     setError('');
@@ -137,11 +160,23 @@ export default function InventoryCountDetailPage() {
     }
   }
 
-  async function handleBarcodeSearch(event: FormEvent<HTMLFormElement>) {
+  async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session) return;
     const term = search.trim();
     if (!term) return;
+
+    setError('');
+    const localMatch = findSessionItem(term);
+    if (localMatch) {
+      scrollToItem(localMatch.id);
+      return;
+    }
+
+    if (session.status !== 'COUNTING') {
+      setError(t('inventoryCount.noSearchResults'));
+      return;
+    }
 
     try {
       const results = await apiFetch<SearchResult[]>(
@@ -156,10 +191,7 @@ export default function InventoryCountDetailPage() {
       }
       const item = session.items?.find((entry) => entry.productId === match.productId);
       if (item) {
-        setHighlightItemId(item.id);
-        setPendingQty((current) => ({ ...current, [item.id]: current[item.id] ?? '' }));
-        document.getElementById(`item-row-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        barcodeRef.current?.focus();
+        scrollToItem(item.id);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -265,11 +297,14 @@ export default function InventoryCountDetailPage() {
           </p>
         ) : null}
 
-        <form onSubmit={handleBarcodeSearch} className="flex flex-col gap-3 sm:flex-row">
+        <form onSubmit={handleSearch} className="flex flex-col gap-3 sm:flex-row">
           <input
             ref={barcodeRef}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setError('');
+            }}
             placeholder={t('inventoryCount.searchPlaceholder')}
             className="flex-1 rounded-xl border border-slate-300 px-3 py-2"
           />

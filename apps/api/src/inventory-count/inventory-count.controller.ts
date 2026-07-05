@@ -48,19 +48,19 @@ export class InventoryCountController {
   }
 
   @Post('sessions')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.WAREHOUSE_MANAGER)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateInventoryCountDto) {
     return this.service.create(user, dto);
   }
 
   @Post('sessions/:id/start')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.WAREHOUSE_MANAGER)
   start(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.start(user, id);
   }
 
   @Put('sessions/:id/items/:itemId')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.WAREHOUSE_MANAGER)
   updateItem(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -71,7 +71,7 @@ export class InventoryCountController {
   }
 
   @Put('sessions/:id/items')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.WAREHOUSE_MANAGER)
   bulkUpdateItems(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -81,7 +81,7 @@ export class InventoryCountController {
   }
 
   @Post('sessions/:id/submit')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.WAREHOUSE_MANAGER)
   submit(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.submit(user, id);
   }

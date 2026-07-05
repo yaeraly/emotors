@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canManageInventoryCount, canViewProcurement } from '@/lib/rbac';
+import { canManageInventoryCount, canViewProcurement, isWarehouseManagerUser } from '@/lib/rbac';
 import type {
   InventoryCountSession,
   InventoryCountType,
@@ -77,7 +77,7 @@ export default function NewInventoryCountPage() {
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
-  if (currentUser && !canManageInventoryCount(currentUser)) {
+  if (currentUser && !isWarehouseManagerUser(currentUser)) {
     return (
       <ProtectedShell>
         <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t('common.forbiddenMessage')}</p>
