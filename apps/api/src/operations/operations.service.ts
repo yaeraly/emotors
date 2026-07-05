@@ -26,8 +26,6 @@ import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
   CARGO_WEIGHT_LESS_THAN_NET,
-  extractCargoConfig,
-  extractLogisticsCosts,
   mapStoredProcurementItemToLandedCostInput,
 } from '../procurement/landed-cost.util';
 import {
@@ -35,6 +33,8 @@ import {
   hqReceivingBlockedMessage,
   SVH_TRANSPORT_INCOMPLETE_MESSAGE,
 } from '../procurement/hq-receiving-validation.util';
+import { buildProcurementLandedCostInputs } from '../procurement/transport-logistics.util';
+import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -181,6 +181,7 @@ export class OperationsService {
         where: { id: procurementOrderId, deletedAt: null },
         include: {
           items: true,
+          supplierPayments: true,
           svhToHqTransport: { include: { transportCompany: true } },
         },
       });
@@ -263,16 +264,6 @@ export class OperationsService {
         throw new BadRequestException('Receiving requires an active HQ warehouse');
       }
       const receivedMap = new Map<string, any>((dto.items ?? []).map((item: any) => [item.procurementItemId ?? item.productId, item]));
-      const receiving = await tx.procurementGoodsReceiving.create({
-        data: {
-          receivingNumber: dto.receivingNumber ?? `PGR-${Date.now()}`,
-          procurementOrderId: order.id,
-          hqWarehouseId,
-          receivedById: user.id,
-          note: dto.note,
-        },
-      });
-
       const receivedItems = order.items.map((item) => {
         const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
         const receivedQuantity = Number(received.receivedQuantity ?? item.quantity);
@@ -292,7 +283,7 @@ export class OperationsService {
         cargoReceiptNumber: dto.cargoReceiptNumber ?? order.cargoReceiptNumber,
         cargoReceiptDate: dto.cargoReceiptDate ? new Date(dto.cargoReceiptDate) : order.cargoReceiptDate,
         cargoReceiptNote: dto.cargoReceiptNote ?? order.cargoReceiptNote,
-        localTransportKgs: dto.localTransportKgs ?? order.localTransportKgs,
+        chinaDomesticTransportYuan: dto.chinaDomesticTransportYuan ?? order.chinaDomesticTransportYuan,
         chinaDomesticTransportKgs: dto.chinaDomesticTransportKgs ?? order.chinaDomesticTransportKgs,
         customsCostKgs: dto.customsCostKgs ?? order.customsCostKgs,
         insuranceCostKgs: dto.insuranceCostKgs ?? order.insuranceCostKgs,
@@ -301,8 +292,19 @@ export class OperationsService {
         packagingCostKgs: dto.packagingCostKgs ?? order.packagingCostKgs,
       };
 
-      const logistics = extractLogisticsCosts(mergedOrder);
-      const cargo = extractCargoConfig(mergedOrder);
+      const paymentSummary = summarizeSupplierPayments(
+        (order.supplierPayments ?? []).map((payment) => ({
+          amountYuan: Number(payment.amountYuan),
+          exchangeRate: Number(payment.exchangeRate),
+          status: payment.status,
+        })),
+        Number(order.totalYuan),
+      );
+      const effectiveYuanRate =
+        paymentSummary.weightedAverageYuanRate && paymentSummary.totalPaidYuan > 0
+          ? paymentSummary.weightedAverageYuanRate
+          : Number(order.defaultYuanRate);
+      const { logistics, cargo } = buildProcurementLandedCostInputs(mergedOrder, effectiveYuanRate);
       let recalculated;
       try {
         recalculated = calculateLandedCosts(
@@ -314,8 +316,21 @@ export class OperationsService {
         if (error instanceof Error && error.message === CARGO_WEIGHT_LESS_THAN_NET) {
           throw new BadRequestException('Cargo total weight cannot be less than product net weight.');
         }
-        throw error;
+        throw new BadRequestException('Landed cost could not be calculated. Complete import cost sections first.');
       }
+      if (recalculated.totalCostKgs <= 0) {
+        throw new BadRequestException('Landed cost must be calculated before receiving to HQ warehouse.');
+      }
+
+      const receiving = await tx.procurementGoodsReceiving.create({
+        data: {
+          receivingNumber: dto.receivingNumber ?? `PGR-${Date.now()}`,
+          procurementOrderId: order.id,
+          hqWarehouseId,
+          receivedById: user.id,
+          note: dto.note,
+        },
+      });
       const cargoTotalWeightKg = Number(cargo.cargoTotalWeightKg ?? 0);
       const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
         logistics,

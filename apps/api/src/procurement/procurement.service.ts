@@ -37,7 +37,9 @@ import {
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
+import { UpdateCargoReceiptDto } from './dto/update-cargo-receipt.dto';
 import { UpdateChinaDomesticTransportDto } from './dto/update-china-domestic-transport.dto';
+import { UpdateImportCostsDto } from './dto/update-import-costs.dto';
 import { UpdateLocalTransportDto } from './dto/update-local-transport.dto';
 import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
@@ -708,6 +710,171 @@ export class ProcurementService {
         'LOCAL_TRANSPORT_UPDATED',
         dto.changeReason,
       );
+      return updatedOrder;
+    });
+  }
+
+  updateCargoReceipt(user: AuthUser, orderId: string, dto: UpdateCargoReceiptDto) {
+    this.assertCanManageProcurement(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { items: true, supplierPayments: true, svhToHqTransport: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const payload = {
+        chinaExportTransportCompanyId: dto.chinaExportTransportCompanyId,
+        cargoTotalWeightKg: dto.cargoTotalWeightKg,
+        cargoRateUsdPerKg: dto.cargoRateUsdPerKg,
+        defaultUsdRate: dto.defaultUsdRate,
+        cargoReceiptNumber: dto.cargoReceiptNumber,
+        cargoReceiptDate: dto.cargoReceiptDate,
+        cargoReceiptNote: dto.cargoReceiptNote,
+      };
+      await this.assertSelectableTransportCompanies(tx, payload, order);
+      const cargo = extractCargoConfig({
+        defaultUsdRate: dto.defaultUsdRate ?? order.defaultUsdRate,
+        cargoRateUsdPerKg: dto.cargoRateUsdPerKg ?? order.cargoRateUsdPerKg,
+        cargoTotalWeightKg: dto.cargoTotalWeightKg ?? order.cargoTotalWeightKg,
+      });
+      this.validateCargoConfig(cargo);
+
+      const oldSection = this.pickCargoReceiptAuditFields(order);
+      const updateData: Record<string, unknown> = {};
+      if (dto.chinaExportTransportCompanyId !== undefined) {
+        updateData.chinaExportTransportCompanyId = dto.chinaExportTransportCompanyId || null;
+      }
+      if (dto.cargoTotalWeightKg !== undefined) {
+        updateData.cargoTotalWeightKg = Number(dto.cargoTotalWeightKg);
+      }
+      if (dto.cargoRateUsdPerKg !== undefined) {
+        updateData.cargoRateUsdPerKg = Number(dto.cargoRateUsdPerKg);
+      }
+      if (dto.defaultUsdRate !== undefined) {
+        updateData.defaultUsdRate = Number(dto.defaultUsdRate);
+      }
+      if (dto.cargoReceiptNumber !== undefined) {
+        updateData.cargoReceiptNumber = dto.cargoReceiptNumber?.trim() || null;
+      }
+      if (dto.cargoReceiptDate !== undefined) {
+        updateData.cargoReceiptDate = dto.cargoReceiptDate ? new Date(dto.cargoReceiptDate) : null;
+      }
+      if (dto.cargoReceiptNote !== undefined) {
+        updateData.cargoReceiptNote = dto.cargoReceiptNote?.trim() || null;
+      }
+      if (!Object.keys(updateData).length) {
+        throw new BadRequestException('No cargo receipt fields to update');
+      }
+
+      await tx.procurementOrder.update({ where: { id: orderId }, data: updateData });
+      const updatedOrder = await this.recalculateOrderLandedCostInTx(
+        tx,
+        user,
+        orderId,
+        'Cargo receipt updated',
+        'cargo_receipt',
+      );
+      const newSection = this.pickCargoReceiptAuditFields(updatedOrder);
+      await this.auditTransportSectionUpdate(
+        tx,
+        user,
+        orderId,
+        'cargo_receipt',
+        oldSection,
+        newSection,
+        'CARGO_RECEIPT_UPDATED',
+      );
+      return updatedOrder;
+    });
+  }
+
+  updateImportCosts(user: AuthUser, orderId: string, dto: UpdateImportCostsDto) {
+    this.assertCanManageProcurement(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { items: true, supplierPayments: true, svhToHqTransport: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const oldSection = this.pickImportCostsAuditFields(order);
+      const updateData: Record<string, unknown> = {};
+      const audits: Array<{ action: string; oldValue: unknown; newValue: unknown }> = [];
+
+      if (dto.customsCostKgs !== undefined) {
+        if (Number(dto.customsCostKgs) < 0) {
+          throw new BadRequestException('Customs cost must be greater than or equal to zero');
+        }
+        updateData.customsCostKgs = Number(dto.customsCostKgs);
+        if (String(oldSection.customsCostKgs ?? '') !== String(updateData.customsCostKgs)) {
+          audits.push({
+            action: 'CUSTOMS_PAYMENT_UPDATED',
+            oldValue: { customsCostKgs: oldSection.customsCostKgs },
+            newValue: { customsCostKgs: updateData.customsCostKgs },
+          });
+        }
+      }
+      if (dto.insuranceCostKgs !== undefined) {
+        if (Number(dto.insuranceCostKgs) < 0) {
+          throw new BadRequestException('Insurance cost must be greater than or equal to zero');
+        }
+        updateData.insuranceCostKgs = Number(dto.insuranceCostKgs);
+        if (String(oldSection.insuranceCostKgs ?? '') !== String(updateData.insuranceCostKgs)) {
+          audits.push({
+            action: 'INSURANCE_UPDATED',
+            oldValue: { insuranceCostKgs: oldSection.insuranceCostKgs },
+            newValue: { insuranceCostKgs: updateData.insuranceCostKgs },
+          });
+        }
+      }
+      if (dto.bankFeeCostKgs !== undefined) {
+        if (Number(dto.bankFeeCostKgs) < 0) {
+          throw new BadRequestException('Bank fee cost must be greater than or equal to zero');
+        }
+        updateData.bankFeeCostKgs = Number(dto.bankFeeCostKgs);
+      }
+      if (dto.otherExpenseKgs !== undefined) {
+        if (Number(dto.otherExpenseKgs) < 0) {
+          throw new BadRequestException('Other expense cost must be greater than or equal to zero');
+        }
+        updateData.otherExpenseKgs = Number(dto.otherExpenseKgs);
+      }
+      if (!Object.keys(updateData).length) {
+        throw new BadRequestException('No import cost fields to update');
+      }
+
+      await tx.procurementOrder.update({ where: { id: orderId }, data: updateData });
+      const updatedOrder = await this.recalculateOrderLandedCostInTx(
+        tx,
+        user,
+        orderId,
+        'Import costs updated',
+        'import_costs',
+      );
+      const newSection = this.pickImportCostsAuditFields(updatedOrder);
+      await Promise.all(audits.map((entry) =>
+        this.auditTransportSectionUpdate(
+          tx,
+          user,
+          orderId,
+          'import_costs',
+          entry.oldValue,
+          entry.newValue,
+          entry.action,
+        ),
+      ));
+      if (!audits.length) {
+        await this.auditTransportSectionUpdate(
+          tx,
+          user,
+          orderId,
+          'import_costs',
+          oldSection,
+          newSection,
+          'LANDED_COST_RECALCULATED',
+        );
+      }
       return updatedOrder;
     });
   }
@@ -2512,6 +2679,28 @@ export class ProcurementService {
     };
   }
 
+  private pickCargoReceiptAuditFields(order: any) {
+    return {
+      chinaExportTransportCompanyId: order.chinaExportTransportCompanyId ?? null,
+      cargoTotalWeightKg: order.cargoTotalWeightKg?.toString?.() ?? order.cargoTotalWeightKg,
+      cargoRateUsdPerKg: order.cargoRateUsdPerKg?.toString?.() ?? order.cargoRateUsdPerKg,
+      defaultUsdRate: order.defaultUsdRate?.toString?.() ?? order.defaultUsdRate,
+      cargoReceiptNumber: order.cargoReceiptNumber ?? null,
+      cargoReceiptDate: order.cargoReceiptDate ?? null,
+      cargoReceiptNote: order.cargoReceiptNote ?? null,
+      totalCargoCostKgs: order.totalCargoCostKgs?.toString?.() ?? order.totalCargoCostKgs,
+    };
+  }
+
+  private pickImportCostsAuditFields(order: any) {
+    return {
+      customsCostKgs: order.customsCostKgs?.toString?.() ?? order.customsCostKgs,
+      insuranceCostKgs: order.insuranceCostKgs?.toString?.() ?? order.insuranceCostKgs,
+      bankFeeCostKgs: order.bankFeeCostKgs?.toString?.() ?? order.bankFeeCostKgs,
+      otherExpenseKgs: order.otherExpenseKgs?.toString?.() ?? order.otherExpenseKgs,
+    };
+  }
+
   private auditTransportSectionUpdate(
     tx: any,
     user: AuthUser,
@@ -2682,6 +2871,44 @@ export class ProcurementService {
       audits.push({
         action: 'CARGO_TOTAL_WEIGHT_CHANGED',
         extra: { field: 'cargoTotalWeightKg', oldValue: oldValue?.cargoTotalWeightKg, newValue: newValue?.cargoTotalWeightKg },
+      });
+    }
+    const cargoReceiptChanged =
+      String(oldValue?.cargoReceiptNumber ?? '') !== String(newValue?.cargoReceiptNumber ?? '') ||
+      String(oldValue?.cargoReceiptDate ?? '') !== String(newValue?.cargoReceiptDate ?? '') ||
+      String(oldValue?.cargoReceiptNote ?? '') !== String(newValue?.cargoReceiptNote ?? '') ||
+      String(oldValue?.totalCargoCostKgs ?? '') !== String(newValue?.totalCargoCostKgs ?? '') ||
+      String(oldValue?.cargoTotalWeightKg ?? '') !== String(newValue?.cargoTotalWeightKg ?? '') ||
+      String(oldValue?.cargoRateUsdPerKg ?? '') !== String(newValue?.cargoRateUsdPerKg ?? '');
+    if (cargoReceiptChanged) {
+      audits.push({
+        action: 'CARGO_RECEIPT_UPDATED',
+        extra: {
+          oldValue: {
+            cargoTotalWeightKg: oldValue?.cargoTotalWeightKg,
+            cargoRateUsdPerKg: oldValue?.cargoRateUsdPerKg,
+            cargoReceiptNumber: oldValue?.cargoReceiptNumber,
+            totalCargoCostKgs: oldValue?.totalCargoCostKgs,
+          },
+          newValue: {
+            cargoTotalWeightKg: newValue?.cargoTotalWeightKg,
+            cargoRateUsdPerKg: newValue?.cargoRateUsdPerKg,
+            cargoReceiptNumber: newValue?.cargoReceiptNumber,
+            totalCargoCostKgs: newValue?.totalCargoCostKgs,
+          },
+        },
+      });
+    }
+    if (String(oldValue?.insuranceCostKgs ?? '') !== String(newValue?.insuranceCostKgs ?? '')) {
+      audits.push({
+        action: 'INSURANCE_UPDATED',
+        extra: { field: 'insuranceCostKgs', oldValue: oldValue?.insuranceCostKgs, newValue: newValue?.insuranceCostKgs },
+      });
+    }
+    if (String(oldValue?.customsCostKgs ?? '') !== String(newValue?.customsCostKgs ?? '')) {
+      audits.push({
+        action: 'CUSTOMS_PAYMENT_UPDATED',
+        extra: { field: 'customsCostKgs', oldValue: oldValue?.customsCostKgs, newValue: newValue?.customsCostKgs },
       });
     }
     if (String(oldValue?.chinaDomesticTransportYuan ?? '') !== String(newValue?.chinaDomesticTransportYuan ?? '')) {

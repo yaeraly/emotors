@@ -17,7 +17,6 @@ import {
   canConfirmSvhToHqArrival,
   canCreateProcurementOrder,
   canCreateSupplierPayment,
-  canEditLocalTransport,
   canEditProcurementOrderItemsInWindow,
   canManageSvhToHqTransport,
   canReceiveProcurementToHq,
@@ -155,12 +154,12 @@ const SHORTAGE_REASONS = ['FACTORY_SHORTAGE', 'SUPPLIER_SHORTAGE', 'DAMAGED_GOOD
 const SVH_STATUSES = ['ARRIVED_IN_KYRGYZSTAN', 'ARRIVED', 'CUSTOMS_CLEARANCE', 'IN_TRANSIT'];
 const SVH_TRANSPORT_STATUSES = ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const;
 
-type OrderDetailTab = 'general' | 'payments' | 'localTransport' | 'cargo' | 'landedCost' | 'history';
+type OrderDetailTab = 'general' | 'payments' | 'transport' | 'cargo' | 'landedCost' | 'history';
 
 const ORDER_DETAIL_TABS: Array<{ id: OrderDetailTab; labelKey: string }> = [
   { id: 'general', labelKey: 'procurement.orders.tabs.general' },
   { id: 'payments', labelKey: 'procurement.orders.tabs.payments' },
-  { id: 'localTransport', labelKey: 'procurement.orders.tabs.localTransport' },
+  { id: 'transport', labelKey: 'procurement.orders.tabs.transport' },
   { id: 'cargo', labelKey: 'procurement.orders.tabs.cargo' },
   { id: 'landedCost', labelKey: 'procurement.orders.tabs.landedCost' },
   { id: 'history', labelKey: 'procurement.orders.tabs.history' },
@@ -208,12 +207,11 @@ export default function ProcurementOrderDetailPage() {
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [savingLogistics, setSavingLogistics] = useState(false);
   const [savingChinaDomestic, setSavingChinaDomestic] = useState(false);
-  const [savingLocalTransport, setSavingLocalTransport] = useState(false);
+  const [savingCargoReceipt, setSavingCargoReceipt] = useState(false);
+  const [savingImportCosts, setSavingImportCosts] = useState(false);
   const [savingSvh, setSavingSvh] = useState(false);
   const [svhForm, setSvhForm] = useState(emptySvhForm());
-  const [localTransportForm, setLocalTransportForm] = useState({ localTransportKgs: '0', note: '' });
   const [chinaDomesticChangeReason, setChinaDomesticChangeReason] = useState('');
   const [svhChangeReason, setSvhChangeReason] = useState('');
   const [unlocking, setUnlocking] = useState(false);
@@ -235,7 +233,6 @@ export default function ProcurementOrderDetailPage() {
   const readyForHqReceiving = order?.status === 'ARRIVED' || order?.status === 'ARRIVED_IN_KYRGYZSTAN' || order?.status === 'IN_TRANSIT';
   const canEditSvh = order ? SVH_STATUSES.includes(order.status) : false;
   const canManageSvh = canManageSvhToHqTransport(user);
-  const canEditLocal = canEditLocalTransport(user);
   const isCeoUser = canUnlockProcurementOrder(user);
   const canConfirmSvh = canConfirmSvhToHqArrival(user);
   const hqReceivingReadiness = useMemo(() => {
@@ -311,12 +308,12 @@ export default function ProcurementOrderDetailPage() {
     [logisticsForm.chinaDomesticTransportYuan, order?.chinaDomesticTransportKgs, effectiveYuanRate],
   );
 
-  const previewLocalTransportKgs = useMemo(
+  const previewSvhTransportKgs = useMemo(
     () => effectiveLocalTransportKgs(
-      Number(localTransportForm.localTransportKgs || 0),
+      storedLocalTransportKgsFromOrder(order?.localTransportKgs, order?.svhToHqTransport?.transportCostKgs),
       Number(svhForm.transportCostKgs || order?.svhToHqTransport?.transportCostKgs || 0),
     ),
-    [localTransportForm.localTransportKgs, svhForm.transportCostKgs, order?.svhToHqTransport?.transportCostKgs],
+    [order?.localTransportKgs, order?.svhToHqTransport?.transportCostKgs, svhForm.transportCostKgs],
   );
 
   const chinaDomesticDirty = useMemo(() => {
@@ -325,12 +322,24 @@ export default function ProcurementOrderDetailPage() {
       || logisticsForm.chinaDomesticTransportCompanyId !== (order.chinaDomesticTransportCompanyId ?? '');
   }, [order, logisticsForm.chinaDomesticTransportYuan, logisticsForm.chinaDomesticTransportCompanyId]);
 
-  const localTransportDirty = useMemo(() => {
+  const cargoReceiptDirty = useMemo(() => {
     if (!order) return false;
-    const storedLocal = storedLocalTransportKgsFromOrder(order.localTransportKgs, order.svhToHqTransport?.transportCostKgs);
-    return localTransportForm.localTransportKgs !== String(storedLocal)
-      || localTransportForm.note !== (order.note ?? '');
-  }, [order, localTransportForm]);
+    return logisticsForm.chinaExportTransportCompanyId !== (order.chinaExportTransportCompanyId ?? '')
+      || logisticsForm.cargoTotalWeightKg !== String(order.cargoTotalWeightKg ?? 0)
+      || logisticsForm.cargoRateUsdPerKg !== String(order.cargoRateUsdPerKg ?? 0)
+      || logisticsForm.defaultUsdRate !== String(order.defaultUsdRate ?? 0)
+      || logisticsForm.cargoReceiptNumber !== (order.cargoReceiptNumber ?? '')
+      || logisticsForm.cargoReceiptDate !== (order.cargoReceiptDate ? order.cargoReceiptDate.slice(0, 10) : '')
+      || logisticsForm.cargoReceiptNote !== (order.cargoReceiptNote ?? '');
+  }, [order, logisticsForm]);
+
+  const importCostsDirty = useMemo(() => {
+    if (!order) return false;
+    return logisticsForm.customsCostKgs !== String(order.customsCostKgs ?? 0)
+      || logisticsForm.insuranceCostKgs !== String(order.insuranceCostKgs ?? 0)
+      || logisticsForm.bankFeeCostKgs !== String(order.bankFeeCostKgs ?? 0)
+      || logisticsForm.otherExpenseKgs !== String(order.otherExpenseKgs ?? 0);
+  }, [order, logisticsForm]);
 
   const svhDirty = useMemo(() => {
     const svh = order?.svhToHqTransport;
@@ -363,7 +372,7 @@ export default function ProcurementOrderDetailPage() {
         {
           chinaDomesticTransportKgs: previewChinaDomesticTransportKgs,
           chinaExportTransportKgs: 0,
-          localTransportKgs: previewLocalTransportKgs,
+          localTransportKgs: previewSvhTransportKgs,
           packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
@@ -375,7 +384,27 @@ export default function ProcurementOrderDetailPage() {
     } catch (err) {
       return null;
     }
-  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, previewLocalTransportKgs]);
+  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, previewSvhTransportKgs]);
+
+  const importCostBreakdown = useMemo(() => {
+    if (!previewTotals) return null;
+    return {
+      chinaDomestic: previewChinaDomesticTransportKgs,
+      cargoReceipt: previewTotals.totalCargoCostKgs,
+      svhTransport: previewSvhTransportKgs,
+      insurance: Number(logisticsForm.insuranceCostKgs || 0),
+      customs: Number(logisticsForm.customsCostKgs || 0),
+      bankFees: Number(logisticsForm.bankFeeCostKgs || 0),
+      otherExpenses: Number(logisticsForm.otherExpenseKgs || 0),
+      totalImportLogistics: previewTotals.totalTransportCostKgs,
+      totalLandedCost: previewTotals.totalCostKgs,
+    };
+  }, [previewTotals, previewChinaDomesticTransportKgs, previewSvhTransportKgs, logisticsForm]);
+
+  const landedCostCalculated = useMemo(
+    () => (previewTotals?.totalCostKgs ?? Number(order?.totalCostKgs ?? 0)) > 0,
+    [previewTotals, order?.totalCostKgs],
+  );
 
   const cargoValidationError = useMemo(() => {
     if (!previewTotals) return t('procurement.orders.cargoWeightLessThanNet');
@@ -427,13 +456,6 @@ export default function ProcurementOrderDetailPage() {
         status: svh.status,
         notes: svh.notes ?? '',
       } : emptySvhForm());
-      setLocalTransportForm({
-        localTransportKgs: String(storedLocalTransportKgsFromOrder(
-          orderResult.localTransportKgs,
-          orderResult.svhToHqTransport?.transportCostKgs,
-        )),
-        note: orderResult.note ?? '',
-      });
       setChinaDomesticChangeReason('');
       setSvhChangeReason('');
     } catch (err) {
@@ -500,44 +522,6 @@ export default function ProcurementOrderDetailPage() {
     }
   }
 
-  async function saveLogistics() {
-    if (!order || finalized) return;
-    setSavingLogistics(true);
-    setError('');
-    setSuccess('');
-    try {
-      const payload: Record<string, unknown> = {
-          chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
-          customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
-          insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
-          bankFeeCostKgs: Number(logisticsForm.bankFeeCostKgs || 0),
-          otherExpenseKgs: Number(logisticsForm.otherExpenseKgs || 0),
-          packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
-          cargoTotalWeightKg: Number(logisticsForm.cargoTotalWeightKg || 0),
-          cargoRateUsdPerKg: Number(logisticsForm.cargoRateUsdPerKg || 0),
-          defaultUsdRate: Number(logisticsForm.defaultUsdRate || 0),
-          cargoReceiptNumber: logisticsForm.cargoReceiptNumber || undefined,
-          cargoReceiptDate: logisticsForm.cargoReceiptDate || undefined,
-          cargoReceiptNote: logisticsForm.cargoReceiptNote || undefined,
-          hqWarehouseId: logisticsForm.hqWarehouseId || order.hqWarehouseId,
-        };
-      if (chinaDomesticEditable) {
-        payload.chinaDomesticTransportYuan = Number(logisticsForm.chinaDomesticTransportYuan || 0);
-        payload.chinaDomesticTransportCompanyId = logisticsForm.chinaDomesticTransportCompanyId || null;
-      }
-      await apiFetch(`/procurement/orders/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-      setSuccess(t('procurement.orders.logisticsSaved'));
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSavingLogistics(false);
-    }
-  }
-
   async function saveChinaDomesticTransport() {
     if (!order || finalized || readOnlyFinance || !chinaDomesticFieldsEditable) return;
     if (chinaDomesticLocked && isCeoUser && !chinaDomesticChangeReason.trim()) {
@@ -566,17 +550,22 @@ export default function ProcurementOrderDetailPage() {
     }
   }
 
-  async function saveLocalTransport() {
-    if (!order || finalized || readOnlyFinance || !canEditLocal) return;
-    setSavingLocalTransport(true);
+  async function saveCargoReceipt() {
+    if (!order || finalized || readOnlyFinance) return;
+    setSavingCargoReceipt(true);
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/procurement/orders/${id}/local-transport`, {
+      await apiFetch(`/procurement/orders/${id}/cargo-receipt`, {
         method: 'PUT',
         body: JSON.stringify({
-          localTransportKgs: Number(localTransportForm.localTransportKgs || 0),
-          note: localTransportForm.note || null,
+          chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
+          cargoTotalWeightKg: Number(logisticsForm.cargoTotalWeightKg || 0),
+          cargoRateUsdPerKg: Number(logisticsForm.cargoRateUsdPerKg || 0),
+          defaultUsdRate: Number(logisticsForm.defaultUsdRate || 0),
+          cargoReceiptNumber: logisticsForm.cargoReceiptNumber || undefined,
+          cargoReceiptDate: logisticsForm.cargoReceiptDate || undefined,
+          cargoReceiptNote: logisticsForm.cargoReceiptNote || undefined,
         }),
       });
       setSuccess(t('procurement.transport.saved'));
@@ -584,7 +573,31 @@ export default function ProcurementOrderDetailPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
-      setSavingLocalTransport(false);
+      setSavingCargoReceipt(false);
+    }
+  }
+
+  async function saveImportCosts() {
+    if (!order || finalized || readOnlyFinance) return;
+    setSavingImportCosts(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/import-costs`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
+          insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
+          bankFeeCostKgs: Number(logisticsForm.bankFeeCostKgs || 0),
+          otherExpenseKgs: Number(logisticsForm.otherExpenseKgs || 0),
+        }),
+      });
+      setSuccess(t('procurement.transport.saved'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSavingImportCosts(false);
     }
   }
 
@@ -785,43 +798,8 @@ export default function ProcurementOrderDetailPage() {
             />
           ) : null}
 
-          {activeTab === 'localTransport' ? (
+          {activeTab === 'transport' ? (
           <>
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-lg font-bold">{t('procurement.orders.localTransport')}</h3>
-            </div>
-            <div className="grid gap-4 md:grid-cols-3">
-              <EditableField
-                label={t('procurement.transport.localCostKgs')}
-                value={localTransportForm.localTransportKgs}
-                onChange={(v) => setLocalTransportForm((current) => ({ ...current, localTransportKgs: v }))}
-                type="number"
-                disabled={finalized || readOnlyFinance || !canEditLocal}
-              />
-              <EditableField
-                label={t('procurement.transport.localNote')}
-                value={localTransportForm.note}
-                onChange={(v) => setLocalTransportForm((current) => ({ ...current, note: v }))}
-                disabled={finalized || readOnlyFinance || !canEditLocal}
-              />
-              <Info label={t('procurement.orders.costInKgs')} value={formatKgs(previewLocalTransportKgs)} />
-            </div>
-            {localTransportDirty && canEditLocal && !finalized && !readOnlyFinance ? (
-              <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
-            ) : null}
-            {canEditLocal && !finalized && !readOnlyFinance ? (
-              <button
-                type="button"
-                disabled={savingLocalTransport || !localTransportDirty}
-                onClick={() => void saveLocalTransport()}
-                className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
-              >
-                {savingLocalTransport ? t('common.loading') : t('procurement.transport.save')}
-              </button>
-            ) : null}
-          </section>
-
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
@@ -1008,56 +986,102 @@ export default function ProcurementOrderDetailPage() {
             <div className="mt-4 space-y-3">
               <div className="flex items-center justify-between gap-4">
                 <h4 className="font-semibold text-slate-900">{t('procurement.payments.cargoAttachments')}</h4>
-                {canUploadCargo && !finalized ? (
-                  <label className="cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">
-                    {t('procurement.payments.attachCargoReceipt')}
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.jpg,.jpeg,.png,.webp"
-                      onChange={(e) => void uploadCargoReceipt(e)}
-                    />
-                  </label>
-                ) : null}
-              </div>
-              {order.cargoAttachments?.length ? (
-                <ul className="space-y-2">
-                  {order.cargoAttachments.map((attachment) => (
-                    <li key={attachment.id}>
-                      <a href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-700">
-                        {attachment.fileName}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-slate-500">{t('procurement.payments.noCargoAttachments')}</p>
-              )}
-            </div>
-            {canEditOrder && !finalized && !readOnlyFinance ? (
-              <button type="button" disabled={savingLogistics || !!cargoValidationError} onClick={() => void saveLogistics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
-                {savingLogistics ? t('common.loading') : t('procurement.orders.saveLogistics')}
-              </button>
+            {canUploadCargo && !finalized ? (
+              <label className="cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">
+                {t('procurement.payments.attachCargoReceipt')}
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  onChange={(e) => void uploadCargoReceipt(e)}
+                />
+              </label>
             ) : null}
-          </section>
-          ) : null}
+          </div>
+          {order.cargoAttachments?.length ? (
+            <ul className="space-y-2">
+              {order.cargoAttachments.map((attachment) => (
+                <li key={attachment.id}>
+                  <a href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-700">
+                    {attachment.fileName}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-500">{t('procurement.payments.noCargoAttachments')}</p>
+          )}
+        </div>
+        {cargoReceiptDirty && canEditOrder && !finalized && !readOnlyFinance ? (
+          <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
+        ) : null}
+        {canEditOrder && !finalized && !readOnlyFinance ? (
+          <button
+            type="button"
+            disabled={savingCargoReceipt || !!cargoValidationError || !cargoReceiptDirty}
+            onClick={() => void saveCargoReceipt()}
+            className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
+          >
+            {savingCargoReceipt ? t('common.loading') : t('procurement.transport.save')}
+          </button>
+        ) : null}
+      </section>
+      ) : null}
 
-          {activeTab === 'landedCost' ? (
-          <>
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.transportCosts')}</h3>
-            <div className="grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.bankFees')} value={logisticsForm.bankFeeCostKgs} onChange={(v) => setLogistics('bankFeeCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.otherExpenses')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-            </div>
-            {canEditOrder && !finalized && !readOnlyFinance ? (
-              <button type="button" disabled={savingLogistics || !!cargoValidationError} onClick={() => void saveLogistics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
-                {savingLogistics ? t('common.loading') : t('procurement.orders.saveLogistics')}
-              </button>
-            ) : null}
-          </section>
+      {activeTab === 'landedCost' ? (
+      <>
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.importCostBreakdown')}</h3>
+        {importCostBreakdown ? (
+          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+            <Info label={t('procurement.orders.chinaDomestic')} value={formatKgs(importCostBreakdown.chinaDomestic)} />
+            <Info label={t('procurement.orders.cargoReceipt')} value={formatKgs(importCostBreakdown.cargoReceipt)} />
+            <Info label={t('procurement.orders.svhToHqTransport')} value={formatKgs(importCostBreakdown.svhTransport)} />
+            <Info label={t('procurement.orders.insurance')} value={formatKgs(importCostBreakdown.insurance)} />
+            <Info label={t('procurement.orders.customs')} value={formatKgs(importCostBreakdown.customs)} />
+            <Info label={t('procurement.orders.bankFees')} value={formatKgs(importCostBreakdown.bankFees)} />
+            <Info label={t('procurement.orders.otherExpenses')} value={formatKgs(importCostBreakdown.otherExpenses)} />
+            <Info label={t('procurement.orders.totalImportLogistics')} value={formatKgs(importCostBreakdown.totalImportLogistics)} />
+            <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(importCostBreakdown.totalLandedCost)} />
+          </div>
+        ) : null}
+        <p className="mt-4 text-sm text-slate-500">{t('procurement.orders.weightAllocationHint')}</p>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.insurance')}</h3>
+        <div className="grid gap-4 md:grid-cols-3">
+          <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.customs')}</h3>
+        <div className="grid gap-4 md:grid-cols-3">
+          <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.transportCosts')}</h3>
+        <div className="grid gap-4 md:grid-cols-3">
+          <EditableField label={t('procurement.orders.bankFees')} value={logisticsForm.bankFeeCostKgs} onChange={(v) => setLogistics('bankFeeCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+          <EditableField label={t('procurement.orders.otherExpenses')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+        </div>
+        {importCostsDirty && canEditOrder && !finalized && !readOnlyFinance ? (
+          <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
+        ) : null}
+        {canEditOrder && !finalized && !readOnlyFinance ? (
+          <button
+            type="button"
+            disabled={savingImportCosts || !!cargoValidationError || !importCostsDirty}
+            onClick={() => void saveImportCosts()}
+            className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
+          >
+            {savingImportCosts ? t('common.loading') : t('procurement.transport.save')}
+          </button>
+        ) : null}
+      </section>
 
           <section className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
             <Info label={t('procurement.orders.totalNetWeightKg')} value={`${(previewTotals?.totalNetWeightKg ?? 0).toFixed(3)} kg`} />
@@ -1159,10 +1183,18 @@ export default function ProcurementOrderDetailPage() {
                     ? t('procurement.receiving.checklist.svhComplete')
                     : t('procurement.receiving.checklist.svhIncomplete')}
                 </li>
+                <li className={landedCostCalculated ? 'text-emerald-700' : 'text-red-700'}>
+                  {landedCostCalculated
+                    ? t('procurement.receiving.checklist.landedCostComplete')
+                    : t('procurement.receiving.checklist.landedCostIncomplete')}
+                </li>
               </ul>
+              {!landedCostCalculated ? (
+                <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.receiving.warning.landedCost')}</p>
+              ) : null}
               <button
                 type="button"
-                disabled={!!cargoValidationError || !canReceiveToHq}
+                disabled={!!cargoValidationError || !canReceiveToHq || !landedCostCalculated}
                 onClick={() => void receiveGoods()}
                 className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white disabled:bg-emerald-300"
               >

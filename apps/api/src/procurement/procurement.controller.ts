@@ -9,7 +9,9 @@ import { PermissionsGuard } from '../roles/permissions.guard';
 import { RolesGuard } from '../roles/roles.guard';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
+import { UpdateCargoReceiptDto } from './dto/update-cargo-receipt.dto';
 import { UpdateChinaDomesticTransportDto } from './dto/update-china-domestic-transport.dto';
+import { UpdateImportCostsDto } from './dto/update-import-costs.dto';
 import { UpdateLocalTransportDto } from './dto/update-local-transport.dto';
 import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
@@ -152,6 +154,26 @@ export class ProcurementController {
     @Body() dto: UpdateLocalTransportDto,
   ) {
     return this.service.updateLocalTransport(user, id, dto);
+  }
+
+  @Put('orders/:id/cargo-receipt')
+  @RequirePermissions('procurement.manage')
+  updateCargoReceipt(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateCargoReceiptDto,
+  ) {
+    return this.service.updateCargoReceipt(user, id, dto);
+  }
+
+  @Put('orders/:id/import-costs')
+  @RequirePermissions('procurement.manage')
+  updateImportCosts(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateImportCostsDto,
+  ) {
+    return this.service.updateImportCosts(user, id, dto);
   }
 
   @Get('orders/:id/audit-logs')

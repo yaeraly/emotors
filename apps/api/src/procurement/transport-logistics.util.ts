@@ -107,3 +107,14 @@ export function resolveProcurementLogisticsInput(
     localTransportKgs: storedLocalTransportKgs,
   };
 }
+
+export function buildProcurementLandedCostInputs(
+  order: Record<string, unknown>,
+  effectiveYuanRate: number,
+) {
+  const resolved = resolveProcurementLogisticsInput(order, order, effectiveYuanRate);
+  return {
+    logistics: resolved.logistics,
+    cargo: resolved.cargo,
+  };
+}
