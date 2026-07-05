@@ -500,6 +500,10 @@ export function canDeleteHqWarehouse(user: Pick<User, 'role' | 'roles' | 'permis
   return canUnlockProcurementOrder(user);
 }
 
+export function canDeleteHqGoodsReceiving(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canUnlockProcurementOrder(user);
+}
+
 export function canManageTransportCompany(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');

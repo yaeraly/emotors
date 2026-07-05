@@ -4,21 +4,26 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, WarehouseType } from '@prisma/client';
+import { Prisma, ProcurementOrderStatus, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   activeHqWarehouseWhere,
   hqWarehouseWhere,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
-import { canDeleteHqWarehouse } from '../rbac/rbac';
+import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse } from '../rbac/rbac';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
+import { hasHqReceivingDownstreamUsage, HQ_RECEIVING_ARCHIVED_MESSAGE } from './hq-receiving-delete.util';
 
 @Injectable()
 export class HqWarehouseService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryService,
+  ) {}
 
   dashboard(user: AuthUser) {
     this.assertCanView(user);
@@ -357,6 +362,161 @@ export class HqWarehouseService {
     });
   }
 
+  async deleteReceiving(user: AuthUser, warehouseId: string, receivingId: string, reason?: string) {
+    if (!canDeleteHqGoodsReceiving(user)) {
+      throw new ForbiddenException('Only CEO can delete HQ goods receiving records');
+    }
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
+      throw new BadRequestException('Deletion reason is required');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.getHqWarehouse(user, warehouseId);
+      const receiving = await tx.procurementGoodsReceiving.findFirst({
+        where: { id: receivingId, hqWarehouseId: warehouseId, deletedAt: null },
+        include: {
+          items: true,
+          procurementOrder: {
+            include: { items: true },
+          },
+        },
+      });
+      if (!receiving) {
+        throw new NotFoundException('Goods receiving record not found');
+      }
+
+      const auditBase = {
+        userId: user.id,
+        roles: user.roles ?? [user.role],
+        goodsReceivingId: receiving.id,
+        procurementOrderId: receiving.procurementOrderId,
+        reason: trimmedReason,
+      };
+
+      const hasDownstream = await hasHqReceivingDownstreamUsage(tx, receiving);
+      const inMovements = await tx.stockMovement.findMany({
+        where: {
+          referenceType: 'PROCUREMENT_GOODS_RECEIVING',
+          referenceId: receiving.id,
+          type: StockMovementType.IN,
+          status: StockMovementStatus.ACTIVE,
+        },
+      });
+
+      let canRollbackStock = true;
+      for (const movement of inMovements) {
+        const balance = await tx.inventoryBalance.findUnique({
+          where: {
+            branchId_warehouseId_productId: {
+              branchId: movement.branchId,
+              warehouseId: movement.warehouseId,
+              productId: movement.productId,
+            },
+          },
+        });
+        const available = (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0);
+        if (available < movement.quantity) {
+          canRollbackStock = false;
+          break;
+        }
+      }
+
+      if (hasDownstream || !canRollbackStock) {
+        const archived = await tx.procurementGoodsReceiving.update({
+          where: { id: receiving.id },
+          data: { deletedAt: new Date() },
+        });
+        await this.auditReceiving(
+          tx,
+          user,
+          'HQ_RECEIVING_ARCHIVED',
+          receiving.id,
+          receiving,
+          archived,
+          auditBase,
+        );
+        return {
+          success: true,
+          archived: true,
+          deleted: false,
+          message: HQ_RECEIVING_ARCHIVED_MESSAGE,
+        };
+      }
+
+      for (const movement of inMovements) {
+        await this.inventoryService.createStockMovementInTx(tx, user, {
+          productId: movement.productId,
+          warehouseId: movement.warehouseId,
+          type: StockMovementType.OUT,
+          quantity: movement.quantity,
+          unitCostKgs: Number(movement.unitCostKgs),
+          referenceType: 'HQ_RECEIVING_STOCK_ROLLBACK',
+          referenceId: receiving.id,
+          note: `Rollback procurement receiving ${receiving.receivingNumber}`,
+        });
+        await tx.stockMovement.update({
+          where: { id: movement.id },
+          data: { status: StockMovementStatus.VOID },
+        });
+        await this.auditReceiving(
+          tx,
+          user,
+          'HQ_RECEIVING_STOCK_ROLLBACK',
+          receiving.id,
+          { stockMovementId: movement.id, quantity: movement.quantity },
+          { rolledBack: true },
+          {
+            ...auditBase,
+            productId: movement.productId,
+            quantity: movement.quantity,
+          },
+        );
+      }
+
+      await tx.procurementDifferenceReport.deleteMany({ where: { receivingId: receiving.id } });
+      await tx.procurementGoodsReceivingItem.deleteMany({ where: { receivingId: receiving.id } });
+      await tx.procurementGoodsReceiving.delete({ where: { id: receiving.id } });
+
+      const remainingReceivings = await tx.procurementGoodsReceiving.count({
+        where: {
+          procurementOrderId: receiving.procurementOrderId,
+          deletedAt: null,
+        },
+      });
+      if (!remainingReceivings) {
+        await tx.procurementOrderItem.updateMany({
+          where: { orderId: receiving.procurementOrderId },
+          data: { receivedQuantity: null },
+        });
+        await tx.procurementOrder.update({
+          where: { id: receiving.procurementOrderId },
+          data: {
+            status: ProcurementOrderStatus.ARRIVED_IN_KYRGYZSTAN,
+            receivedToHqAt: null,
+            hqStockMovementCreatedAt: null,
+          },
+        });
+      }
+
+      await this.auditReceiving(
+        tx,
+        user,
+        'HQ_RECEIVING_DELETED',
+        receiving.id,
+        receiving,
+        { deleted: true },
+        auditBase,
+      );
+
+      return {
+        success: true,
+        archived: false,
+        deleted: true,
+      };
+    });
+  }
+
   async transfers(user: AuthUser, id: string) {
     await this.getHqWarehouse(user, id);
     return this.prisma.branchDistributionOrder.findMany({
@@ -495,6 +655,33 @@ export class HqWarehouseService {
           warehouseId: entityId,
           roles: user.roles ?? [user.role],
           ...metadata,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private auditReceiving(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    action: string,
+    entityId: string,
+    oldValue: unknown,
+    newValue: unknown,
+    extra?: Record<string, unknown>,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'ProcurementGoodsReceiving',
+        entityId,
+        metadata: {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          oldValue,
+          newValue,
+          ...extra,
         } as Prisma.InputJsonValue,
       },
     });

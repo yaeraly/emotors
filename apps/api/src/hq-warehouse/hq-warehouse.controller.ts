@@ -68,6 +68,17 @@ export class HqWarehouseController {
     return this.service.receivings(user, id);
   }
 
+  @Delete(':id/receivings/:receivingId')
+  @Roles(Role.CEO)
+  deleteReceiving(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('receivingId') receivingId: string,
+    @Body() dto: DeleteArchiveDto,
+  ) {
+    return this.service.deleteReceiving(user, id, receivingId, dto?.reason);
+  }
+
   @Get(':id/transfers')
   transfers(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.transfers(user, id);

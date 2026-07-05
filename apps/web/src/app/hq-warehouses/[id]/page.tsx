@@ -1,11 +1,12 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canManageHqWarehouse } from '@/lib/rbac';
+import { canDeleteHqGoodsReceiving, canManageHqWarehouse } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -24,6 +25,14 @@ type InventoryRow = {
   product: { name: string };
 };
 
+type ReceivingRow = {
+  id: string;
+  receivingNumber: string;
+  receivedAt: string;
+  items?: Array<{ id: string }>;
+  procurementOrder?: { id: string; orderNumber: string };
+};
+
 export default function HqWarehouseDetailPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -31,10 +40,13 @@ export default function HqWarehouseDetailPage() {
   const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
   const [tab, setTab] = useState<Tab>('details');
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
-  const [receivings, setReceivings] = useState<any[]>([]);
+  const [receivings, setReceivings] = useState<ReceivingRow[]>([]);
   const [transfers, setTransfers] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<ReceivingRow | null>(null);
+  const [deletingReceiving, setDeletingReceiving] = useState(false);
   const [form, setForm] = useState({ name: '', code: '', country: '', city: '', address: '', contactPerson: '', phone: '', notes: '' });
 
   useEffect(() => {
@@ -87,6 +99,35 @@ export default function HqWarehouseDetailPage() {
     }
   }
 
+  async function confirmDeleteReceiving(reason?: string) {
+    if (!deleteTarget) return;
+    setDeletingReceiving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const result = await apiFetch<{ archived?: boolean; deleted?: boolean; message?: string }>(
+        `/hq-warehouses/${params.id}/receivings/${deleteTarget.id}`,
+        {
+          method: 'DELETE',
+          body: JSON.stringify({ reason }),
+        },
+      );
+      if (result.archived) {
+        setSuccess(t('hqWarehouse.receiving.archivedMessage'));
+      } else {
+        setSuccess(t('hqWarehouse.receiving.deletedSuccess'));
+      }
+      setDeleteTarget(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setDeletingReceiving(false);
+    }
+  }
+
+  const canDeleteReceiving = canDeleteHqGoodsReceiving(user);
+
   if (!warehouse) {
     return <ProtectedShell><p className="p-6">{t('common.loading')}</p></ProtectedShell>;
   }
@@ -104,6 +145,7 @@ export default function HqWarehouseDetailPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <div className="flex flex-wrap gap-2">
           {(['details', 'inventory', 'receivings', 'transfers', 'history'] as Tab[]).map((item) => (
@@ -136,10 +178,69 @@ export default function HqWarehouseDetailPage() {
         ) : null}
 
         {tab === 'inventory' ? <SimpleTable headers={[t('inventory.products'), 'SKU', t('hqWarehouse.quantity'), t('hqWarehouse.reserved'), t('hqWarehouse.available'), t('hqWarehouse.landedCost'), t('hqWarehouse.lastReceiving')]} rows={inventory.map((row) => [row.product.name, row.sku, row.quantity, row.reservedQuantity, row.availableQuantity, row.landedCostKgs, row.lastReceivingAt ? new Date(row.lastReceivingAt).toLocaleDateString() : '—'])} /> : null}
-        {tab === 'receivings' ? <SimpleTable headers={['#', t('common.date'), t('hqWarehouse.items')]} rows={receivings.map((row) => [row.receivingNumber, new Date(row.receivedAt).toLocaleString(), row.items?.length ?? 0])} /> : null}
+        {tab === 'receivings' ? (
+          <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">#</th>
+                  <th className="px-4 py-3">{t('common.date')}</th>
+                  <th className="px-4 py-3">{t('hqWarehouse.items')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.title')}</th>
+                  <th className="px-4 py-3">{t('common.actions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {receivings.map((row) => (
+                  <tr key={row.id}>
+                    <td className="px-4 py-3 font-bold">{row.receivingNumber}</td>
+                    <td className="px-4 py-3">{new Date(row.receivedAt).toLocaleString()}</td>
+                    <td className="px-4 py-3">{row.items?.length ?? 0}</td>
+                    <td className="px-4 py-3">{row.procurementOrder?.orderNumber ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        {row.procurementOrder?.id ? (
+                          <Link
+                            href={`/procurement/orders/${row.procurementOrder.id}`}
+                            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
+                          >
+                            {t('common.open')}
+                          </Link>
+                        ) : null}
+                        {canDeleteReceiving ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteTarget(row);
+                              setError('');
+                              setSuccess('');
+                            }}
+                            className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700"
+                          >
+                            {t('common.delete')}
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
         {tab === 'transfers' ? <SimpleTable headers={['#', t('common.branch'), t('common.status'), t('common.date')]} rows={transfers.map((row) => [row.orderNumber, row.branch?.name ?? '', row.status, new Date(row.createdAt).toLocaleDateString()])} /> : null}
         {tab === 'history' ? <SimpleTable headers={[t('common.date'), t('users.role'), t('hqWarehouse.action'), t('users.title')]} rows={history.map((row) => [new Date(row.timestamp).toLocaleString(), row.role ?? '', row.action, row.user?.fullName ?? '—'])} /> : null}
       </section>
+
+      <DeleteConfirmModal
+        open={!!deleteTarget}
+        title={t('common.deleteConfirmTitle')}
+        message={t('hqWarehouse.receiving.deleteConfirm')}
+        requireReason
+        loading={deletingReceiving}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDeleteReceiving}
+      />
     </ProtectedShell>
   );
 }

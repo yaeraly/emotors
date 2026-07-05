@@ -299,6 +299,10 @@ export function canDeleteHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'pe
   return canUnlockProcurementOrder(user);
 }
 
+export function canDeleteHqGoodsReceiving(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canUnlockProcurementOrder(user);
+}
+
 export function canCreateDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
   return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
