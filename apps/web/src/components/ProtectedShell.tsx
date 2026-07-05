@@ -277,17 +277,13 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 </div>
               ) : null}
               {canSeeProcurement ? (
-                <div className="rounded-xl px-3 py-2">
-                  <Link href="/procurement" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('procurement.title')}</Link>
-                  <div className="mt-2 space-y-1 pl-2">
-                    {canManageProcurementOrders ? <Link href="/procurement/suppliers" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.suppliers')}</Link> : null}
-                    {canManageProcurementOrders ? <Link href="/procurement/factories" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.factories')}</Link> : null}
-                    <Link href="/procurement/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('procurement.orders')}</Link>
-                    <Link href="/procurement/purchase-price-history" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('inventory.purchasePriceReport')}</Link>
-                    {canManageProcurementOrders ? <Link href="/branch-purchase-requests" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.branchPurchaseRequests')}</Link> : null}
-                    {canSeeSupplierClaims ? <Link href="/supplier-claims" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.supplierClaims')}</Link> : null}
-                  </div>
-                </div>
+                <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.title')}</Link>
+              ) : null}
+              {canSeeProcurement && canManageProcurementOrders ? (
+                <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.branchPurchaseRequests')}</Link>
+              ) : null}
+              {canSeeProcurement && canSeeSupplierClaims ? (
+                <Link href="/supplier-claims" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.supplierClaims')}</Link>
               ) : null}
               {!canSeeProcurement && (canSeeCrm || canSeeSales) ? <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.branchPurchaseRequests')}</Link> : null}
               {canSeeInvestment ? <Link href="/investment" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('investment.title')}</Link> : null}

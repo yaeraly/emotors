@@ -150,6 +150,17 @@ const SHORTAGE_REASONS = ['FACTORY_SHORTAGE', 'SUPPLIER_SHORTAGE', 'DAMAGED_GOOD
 const SVH_STATUSES = ['ARRIVED_IN_KYRGYZSTAN', 'ARRIVED', 'CUSTOMS_CLEARANCE', 'IN_TRANSIT'];
 const SVH_TRANSPORT_STATUSES = ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const;
 
+type OrderDetailTab = 'general' | 'payments' | 'localTransport' | 'cargo' | 'landedCost' | 'history';
+
+const ORDER_DETAIL_TABS: Array<{ id: OrderDetailTab; labelKey: string }> = [
+  { id: 'general', labelKey: 'procurement.orders.tabs.general' },
+  { id: 'payments', labelKey: 'procurement.orders.tabs.payments' },
+  { id: 'localTransport', labelKey: 'procurement.orders.tabs.localTransport' },
+  { id: 'cargo', labelKey: 'procurement.orders.tabs.cargo' },
+  { id: 'landedCost', labelKey: 'procurement.orders.tabs.landedCost' },
+  { id: 'history', labelKey: 'procurement.orders.tabs.history' },
+];
+
 const emptySvhForm = () => ({
   transportCompanyId: '',
   transportCostKgs: '0',
@@ -198,6 +209,7 @@ export default function ProcurementOrderDetailPage() {
   const [unlocking, setUnlocking] = useState(false);
   const [unlockingChinaDomestic, setUnlockingChinaDomestic] = useState(false);
   const [chinaDomesticUnlockReason, setChinaDomesticUnlockReason] = useState('');
+  const [activeTab, setActiveTab] = useState<OrderDetailTab>('general');
 
   const canEditOrder = canCreateProcurementOrder(user);
   const canEditItems = canEditProcurementOrderItemsInWindow(user, {
@@ -557,8 +569,25 @@ export default function ProcurementOrderDetailPage() {
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{cargoValidationError}</p>
         ) : null}
 
+        {order ? (
+          <nav className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+            {ORDER_DETAIL_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                  activeTab === tab.id ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {t(tab.labelKey)}
+              </button>
+            ))}
+          </nav>
+        ) : null}
+
         {order ? <>
-          {order.sentToSupplierAt ? (
+          {activeTab === 'general' && order.sentToSupplierAt ? (
             <ProcurementEditWindowPanel
               sentToSupplierAt={order.sentToSupplierAt}
               editableUntil={order.editableUntil}
@@ -575,6 +604,7 @@ export default function ProcurementOrderDetailPage() {
             />
           ) : null}
 
+          {activeTab === 'general' ? (
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.generalInfo')}</h3>
             <div className="grid gap-4 md:grid-cols-4">
@@ -587,8 +617,9 @@ export default function ProcurementOrderDetailPage() {
               <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.payments.rateLocked')}</p>
             ) : null}
           </section>
+          ) : null}
 
-          {canSeePayments ? (
+          {activeTab === 'payments' && canSeePayments ? (
             <ProcurementSupplierPayments
               order={{
                 ...order,
@@ -602,6 +633,8 @@ export default function ProcurementOrderDetailPage() {
             />
           ) : null}
 
+          {activeTab === 'localTransport' ? (
+          <>
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
@@ -654,58 +687,6 @@ export default function ProcurementOrderDetailPage() {
                 </button>
               </div>
             ) : null}
-          </section>
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.chinaExport')}</h3>
-            <div className="grid gap-4 md:grid-cols-3">
-              <TransportCompanySelect
-                label={t('procurement.transportCompanies.select')}
-                value={logisticsForm.chinaExportTransportCompanyId}
-                companies={transportCompanies}
-                onChange={(value) => setLogistics('chinaExportTransportCompanyId', value)}
-                disabled={finalized || readOnlyFinance}
-              />
-              <EditableField label={t('procurement.orders.cargoTotalWeightKg')} value={logisticsForm.cargoTotalWeightKg} onChange={(v) => setLogistics('cargoTotalWeightKg', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoRateUsdPerKg')} value={logisticsForm.cargoRateUsdPerKg} onChange={(v) => setLogistics('cargoRateUsdPerKg', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.usdExchangeRate')} value={logisticsForm.defaultUsdRate} onChange={(v) => setLogistics('defaultUsdRate', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <Info label={t('procurement.orders.totalCargoCostUsd')} value={`$${(previewTotals?.totalCargoCostUsd ?? 0).toFixed(2)}`} />
-              <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
-            </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.cargoReceiptNumber')} value={logisticsForm.cargoReceiptNumber} onChange={(v) => setLogistics('cargoReceiptNumber', v)} disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoReceiptDate')} value={logisticsForm.cargoReceiptDate} onChange={(v) => setLogistics('cargoReceiptDate', v)} type="date" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoReceiptNote')} value={logisticsForm.cargoReceiptNote} onChange={(v) => setLogistics('cargoReceiptNote', v)} disabled={finalized || readOnlyFinance} />
-            </div>
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between gap-4">
-                <h4 className="font-semibold text-slate-900">{t('procurement.payments.cargoAttachments')}</h4>
-                {canUploadCargo && !finalized ? (
-                  <label className="cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">
-                    {t('procurement.payments.attachCargoReceipt')}
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.jpg,.jpeg,.png,.webp"
-                      onChange={(e) => void uploadCargoReceipt(e)}
-                    />
-                  </label>
-                ) : null}
-              </div>
-              {order.cargoAttachments?.length ? (
-                <ul className="space-y-2">
-                  {order.cargoAttachments.map((attachment) => (
-                    <li key={attachment.id}>
-                      <a href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-700">
-                        {attachment.fileName}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-slate-500">{t('procurement.payments.noCargoAttachments')}</p>
-              )}
-            </div>
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -764,7 +745,70 @@ export default function ProcurementOrderDetailPage() {
               <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.svhTransport.receiveBlocked')}</p>
             ) : null}
           </section>
+          </>
+          ) : null}
 
+          {activeTab === 'cargo' ? (
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.cargoReceipt')}</h3>
+            <div className="grid gap-4 md:grid-cols-3">
+              <TransportCompanySelect
+                label={t('procurement.transportCompanies.select')}
+                value={logisticsForm.chinaExportTransportCompanyId}
+                companies={transportCompanies}
+                onChange={(value) => setLogistics('chinaExportTransportCompanyId', value)}
+                disabled={finalized || readOnlyFinance}
+              />
+              <EditableField label={t('procurement.orders.cargoTotalWeightKg')} value={logisticsForm.cargoTotalWeightKg} onChange={(v) => setLogistics('cargoTotalWeightKg', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.cargoRateUsdPerKg')} value={logisticsForm.cargoRateUsdPerKg} onChange={(v) => setLogistics('cargoRateUsdPerKg', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.usdExchangeRate')} value={logisticsForm.defaultUsdRate} onChange={(v) => setLogistics('defaultUsdRate', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <Info label={t('procurement.orders.totalCargoCostUsd')} value={`$${(previewTotals?.totalCargoCostUsd ?? 0).toFixed(2)}`} />
+              <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
+            </div>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <EditableField label={t('procurement.orders.cargoReceiptNumber')} value={logisticsForm.cargoReceiptNumber} onChange={(v) => setLogistics('cargoReceiptNumber', v)} disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.cargoReceiptDate')} value={logisticsForm.cargoReceiptDate} onChange={(v) => setLogistics('cargoReceiptDate', v)} type="date" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.cargoReceiptNote')} value={logisticsForm.cargoReceiptNote} onChange={(v) => setLogistics('cargoReceiptNote', v)} disabled={finalized || readOnlyFinance} />
+            </div>
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <h4 className="font-semibold text-slate-900">{t('procurement.payments.cargoAttachments')}</h4>
+                {canUploadCargo && !finalized ? (
+                  <label className="cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">
+                    {t('procurement.payments.attachCargoReceipt')}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      onChange={(e) => void uploadCargoReceipt(e)}
+                    />
+                  </label>
+                ) : null}
+              </div>
+              {order.cargoAttachments?.length ? (
+                <ul className="space-y-2">
+                  {order.cargoAttachments.map((attachment) => (
+                    <li key={attachment.id}>
+                      <a href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-700">
+                        {attachment.fileName}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500">{t('procurement.payments.noCargoAttachments')}</p>
+              )}
+            </div>
+            {canEditOrder && !finalized && !readOnlyFinance ? (
+              <button type="button" disabled={savingLogistics || !!cargoValidationError} onClick={() => void saveLogistics()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
+                {savingLogistics ? t('common.loading') : t('procurement.orders.saveLogistics')}
+              </button>
+            ) : null}
+          </section>
+          ) : null}
+
+          {activeTab === 'landedCost' ? (
+          <>
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.transportCosts')}</h3>
             <div className="grid gap-4 md:grid-cols-3">
@@ -787,12 +831,6 @@ export default function ProcurementOrderDetailPage() {
             <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
             <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(previewTotals?.totalCostKgs ?? order.totalCostKgs)} />
           </section>
-
-          {canEditOrder && !finalized ? (
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <ProcurementStatusButtons orderStatus={order.status} onAction={(path) => void action(path)} />
-            </section>
-          ) : null}
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-x-auto">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.productsTable')}</h3>
@@ -831,8 +869,16 @@ export default function ProcurementOrderDetailPage() {
               </tbody>
             </table>
           </section>
+          </>
+          ) : null}
 
-          {canReceive && readyForHqReceiving && !finalized ? (
+          {activeTab === 'general' && canEditOrder && !finalized ? (
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <ProcurementStatusButtons orderStatus={order.status} onAction={(path) => void action(path)} />
+            </section>
+          ) : null}
+
+          {activeTab === 'general' && canReceive && readyForHqReceiving && !finalized ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.receivingSummary')}</h3>
               <div className="mb-4">
@@ -868,7 +914,7 @@ export default function ProcurementOrderDetailPage() {
             </section>
           ) : null}
 
-          {order.differenceReports && order.differenceReports.length > 0 ? (
+          {activeTab === 'general' && order.differenceReports && order.differenceReports.length > 0 ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-x-auto">
               <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.shortageReport')}</h3>
               <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -878,6 +924,7 @@ export default function ProcurementOrderDetailPage() {
             </section>
           ) : null}
 
+          {activeTab === 'history' ? (
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.auditHistory')}</h3>
             <div className="space-y-3">
@@ -889,6 +936,7 @@ export default function ProcurementOrderDetailPage() {
               )) : <p className="text-sm text-slate-500">{t('procurement.orders.noAudit')}</p>}
             </div>
           </section>
+          ) : null}
         </> : null}
       </section>
     </ProtectedShell>
