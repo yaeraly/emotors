@@ -518,6 +518,10 @@ export function canManageSvhToHqTransport(user: Pick<User, 'role' | 'roles' | 'p
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }
 
+export function canEditLocalTransport(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canManageSvhToHqTransport(user);
+}
+
 export function canViewSvhToHqTransport(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return (

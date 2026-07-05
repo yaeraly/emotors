@@ -9,6 +9,9 @@ import { PermissionsGuard } from '../roles/permissions.guard';
 import { RolesGuard } from '../roles/roles.guard';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
+import { UpdateChinaDomesticTransportDto } from './dto/update-china-domestic-transport.dto';
+import { UpdateLocalTransportDto } from './dto/update-local-transport.dto';
+import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
 import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
 import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
@@ -127,8 +130,28 @@ export class ProcurementController {
 
   @Put('orders/:id/svh-to-hq-transport')
   @RequirePermissions('procurement.manage', 'procurement.receive')
-  upsertSvhToHqTransport(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+  upsertSvhToHqTransport(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateSvhToHqTransportDto) {
     return this.service.upsertSvhToHqTransport(user, id, dto);
+  }
+
+  @Put('orders/:id/china-domestic-transport')
+  @RequirePermissions('procurement.manage')
+  updateChinaDomesticTransport(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateChinaDomesticTransportDto,
+  ) {
+    return this.service.updateChinaDomesticTransport(user, id, dto);
+  }
+
+  @Put('orders/:id/local-transport')
+  @RequirePermissions('procurement.manage')
+  updateLocalTransport(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateLocalTransportDto,
+  ) {
+    return this.service.updateLocalTransport(user, id, dto);
   }
 
   @Get('orders/:id/audit-logs')

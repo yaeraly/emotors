@@ -41,15 +41,40 @@ export function resolveChinaDomesticTransport(params: {
   };
 }
 
+export function effectiveLocalTransportKgs(
+  localTransportKgs: number,
+  svhTransportCostKgs?: number | null,
+) {
+  const local = Math.max(0, Number(localTransportKgs ?? 0));
+  const svh = Math.max(0, Number(svhTransportCostKgs ?? 0));
+  if (svh > 0 && local === svh) {
+    return local;
+  }
+  return local + svh;
+}
+
+export function resolveSvhTransportCostKgs(
+  dto: Record<string, unknown>,
+  existing?: Record<string, unknown> | null,
+) {
+  const svhTransport = (dto.svhToHqTransport ?? existing?.svhToHqTransport) as
+    | { transportCostKgs?: number | string | null }
+    | null
+    | undefined;
+  return Number(svhTransport?.transportCostKgs ?? 0);
+}
+
 export function resolveProcurementLogisticsInput(
   dto: Record<string, unknown>,
   existing: Record<string, unknown> | undefined,
   effectiveYuanRate: number,
 ) {
-  const localTransportKgs = Math.max(0, Number(dto.localTransportKgs ?? existing?.localTransportKgs ?? 0));
+  const storedLocalTransportKgs = Math.max(0, Number(dto.localTransportKgs ?? existing?.localTransportKgs ?? 0));
   if (Number(dto.localTransportKgs ?? existing?.localTransportKgs ?? 0) < 0) {
     throw new Error('NEGATIVE_LOCAL_TRANSPORT');
   }
+  const svhTransportCostKgs = resolveSvhTransportCostKgs(dto, existing);
+  const localTransportKgs = effectiveLocalTransportKgs(storedLocalTransportKgs, svhTransportCostKgs);
 
   const chinaDomestic = resolveChinaDomesticTransport({
     chinaDomesticTransportYuan: Number(dto.chinaDomesticTransportYuan ?? existing?.chinaDomesticTransportYuan ?? 0),
@@ -79,6 +104,6 @@ export function resolveProcurementLogisticsInput(
     cargo,
     chinaDomesticTransportYuan: chinaDomestic.yuan,
     chinaDomesticTransportKgs: chinaDomestic.kgs,
-    localTransportKgs,
+    localTransportKgs: storedLocalTransportKgs,
   };
 }

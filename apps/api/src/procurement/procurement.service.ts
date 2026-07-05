@@ -37,6 +37,9 @@ import {
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
+import { UpdateChinaDomesticTransportDto } from './dto/update-china-domestic-transport.dto';
+import { UpdateLocalTransportDto } from './dto/update-local-transport.dto';
+import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
 import {
   buildLogisticsWithCargo,
@@ -460,7 +463,7 @@ export class ProcurementService {
     return transport ? this.toSvhToHqTransportResponse(transport) : null;
   }
 
-  upsertSvhToHqTransport(user: AuthUser, orderId: string, dto: any) {
+  upsertSvhToHqTransport(user: AuthUser, orderId: string, dto: UpdateSvhToHqTransportDto) {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
         where: { id: orderId, deletedAt: null },
@@ -503,6 +506,15 @@ export class ProcurementService {
         throw new BadRequestException(
           'Procurement already received to HQ. CEO or Finance approval is required to change SVH transport cost.',
         );
+      }
+      if (
+        order.hqStockMovementCreatedAt &&
+        existing &&
+        transportCostKgs !== Number(existing.transportCostKgs) &&
+        canApproveSvhTransportCostAdjustment(user) &&
+        !dto.changeReason?.trim()
+      ) {
+        throw new BadRequestException('Change reason is required to update SVH transport cost after HQ receiving');
       }
 
       const oldValue = existing ? this.pickSvhTransportAuditFields(existing) : null;
@@ -554,16 +566,16 @@ export class ProcurementService {
       await tx.procurementOrder.update({
         where: { id: order.id },
         data: {
-          localTransportKgs: transport.transportCostKgs,
           svhToHqTransportCompanyId: transport.transportCompanyId,
         },
       });
 
-      const updatedOrder = await this.recalculateOrderLandedCostAfterSvhChange(
+      const updatedOrder = await this.recalculateOrderLandedCostInTx(
         tx,
         user,
         order.id,
-        existing ? 'SVH to HQ transport updated' : 'SVH to HQ transport created',
+        dto.changeReason?.trim() || (existing ? 'SVH to HQ transport updated' : 'SVH to HQ transport created'),
+        'svh_to_hq',
       );
 
       await this.auditSvhTransportChanges(
@@ -574,6 +586,7 @@ export class ProcurementService {
         oldValue,
         this.pickSvhTransportAuditFields(transport),
         !existing,
+        dto.changeReason,
       );
 
       if (isSvhTransportCompleted(transport.status) && !isSvhTransportCompleted(oldValue?.status)) {
@@ -586,6 +599,115 @@ export class ProcurementService {
         transport: this.toSvhToHqTransportResponse(transport),
         order: updatedOrder,
       };
+    });
+  }
+
+  updateChinaDomesticTransport(user: AuthUser, orderId: string, dto: UpdateChinaDomesticTransportDto) {
+    this.assertCanManageProcurement(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { items: true, supplierPayments: true, svhToHqTransport: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      const payload = {
+        chinaDomesticTransportYuan: dto.chinaDomesticTransportYuan,
+        chinaDomesticTransportCompanyId: dto.chinaDomesticTransportCompanyId,
+      };
+      this.assertChinaDomesticTransportEditable(user, order, payload, dto.changeReason);
+      if (
+        !canEditChinaDomesticTransport(order) &&
+        canUnlockProcurementOrder(user) &&
+        !dto.changeReason?.trim()
+      ) {
+        throw new BadRequestException('Change reason is required when editing locked China domestic transport');
+      }
+      if (dto.chinaDomesticTransportYuan !== undefined && Number(dto.chinaDomesticTransportYuan) < 0) {
+        throw new BadRequestException('China domestic transport cost in yuan must be greater than or equal to zero');
+      }
+      await this.assertSelectableTransportCompanies(tx, payload, order);
+
+      const oldSection = this.pickChinaDomesticTransportAuditFields(order);
+      const updateData: Record<string, unknown> = {};
+      if (dto.chinaDomesticTransportYuan !== undefined) {
+        updateData.chinaDomesticTransportYuan = Number(dto.chinaDomesticTransportYuan);
+      }
+      if (dto.chinaDomesticTransportCompanyId !== undefined) {
+        updateData.chinaDomesticTransportCompanyId = dto.chinaDomesticTransportCompanyId || null;
+      }
+      if (!Object.keys(updateData).length) {
+        throw new BadRequestException('No China domestic transport fields to update');
+      }
+
+      await tx.procurementOrder.update({ where: { id: orderId }, data: updateData });
+      const updatedOrder = await this.recalculateOrderLandedCostInTx(
+        tx,
+        user,
+        orderId,
+        dto.changeReason?.trim() || 'China domestic transport updated',
+        'china_domestic',
+      );
+      const newSection = this.pickChinaDomesticTransportAuditFields(updatedOrder);
+      await this.auditTransportSectionUpdate(
+        tx,
+        user,
+        orderId,
+        'china_domestic',
+        oldSection,
+        newSection,
+        'CHINA_DOMESTIC_TRANSPORT_UPDATED',
+        dto.changeReason,
+      );
+      return updatedOrder;
+    });
+  }
+
+  updateLocalTransport(user: AuthUser, orderId: string, dto: UpdateLocalTransportDto) {
+    this.assertCanEditLocalTransport(user);
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.procurementOrder.findFirst({
+        where: { id: orderId, deletedAt: null },
+        include: { items: true, supplierPayments: true, svhToHqTransport: true },
+      });
+      if (!order) throw new NotFoundException('Procurement order not found');
+
+      if (dto.localTransportKgs !== undefined && Number(dto.localTransportKgs) < 0) {
+        throw new BadRequestException('Local transport cost must be greater than or equal to zero');
+      }
+
+      const oldSection = this.pickLocalTransportAuditFields(order);
+      const updateData: Record<string, unknown> = {};
+      if (dto.localTransportKgs !== undefined) {
+        updateData.localTransportKgs = Number(dto.localTransportKgs);
+      }
+      if (dto.note !== undefined) {
+        updateData.note = dto.note?.trim() || null;
+      }
+      if (!Object.keys(updateData).length) {
+        throw new BadRequestException('No local transport fields to update');
+      }
+
+      await tx.procurementOrder.update({ where: { id: orderId }, data: updateData });
+      const updatedOrder = await this.recalculateOrderLandedCostInTx(
+        tx,
+        user,
+        orderId,
+        dto.changeReason?.trim() || 'Local transport updated',
+        'local',
+      );
+      const newSection = this.pickLocalTransportAuditFields(updatedOrder);
+      await this.auditTransportSectionUpdate(
+        tx,
+        user,
+        orderId,
+        'local',
+        oldSection,
+        newSection,
+        'LOCAL_TRANSPORT_UPDATED',
+        dto.changeReason,
+      );
+      return updatedOrder;
     });
   }
 
@@ -1275,7 +1397,7 @@ export class ProcurementService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
         where: { id, deletedAt: null },
-        include: { items: true },
+        include: { items: true, svhToHqTransport: true },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       const oldValue = this.pickProcurementAuditFields(order);
@@ -1304,6 +1426,7 @@ export class ProcurementService {
         data: {
           ...orderTotals,
           ...this.buildProcurementTransportFields(order, order, transportResolved),
+          localTransportKgs: transportResolved.localTransportKgs,
         },
         include: this.procurementOrderInclude(),
       });
@@ -2343,14 +2466,75 @@ export class ProcurementService {
     };
   }
 
-  private assertProcurementLogisticsEditable(user: AuthUser, order: any, dto: any) {
+  private assertProcurementLogisticsEditable(user: AuthUser, order: any, dto: any, changeReason?: string) {
+    if (!touchesChinaDomesticTransportFields(dto)) {
+      return;
+    }
+    this.assertChinaDomesticTransportEditable(user, order, dto, changeReason);
+  }
+
+  private assertChinaDomesticTransportEditable(
+    user: AuthUser,
+    order: any,
+    dto: any,
+    changeReason?: string,
+  ) {
     if (!touchesChinaDomesticTransportFields(dto)) {
       return;
     }
     if (canEditChinaDomesticTransport(order)) {
       return;
     }
+    if (canUnlockProcurementOrder(user) && changeReason?.trim()) {
+      return;
+    }
     throw new ForbiddenException(CHINA_DOMESTIC_TRANSPORT_LOCKED_MESSAGE);
+  }
+
+  private assertCanEditLocalTransport(user: AuthUser) {
+    if (this.canManageProcurement(user)) return;
+    throw new ForbiddenException('You do not have permission to edit local transport');
+  }
+
+  private pickChinaDomesticTransportAuditFields(order: any) {
+    return {
+      chinaDomesticTransportYuan: order.chinaDomesticTransportYuan?.toString?.() ?? order.chinaDomesticTransportYuan,
+      chinaDomesticTransportKgs: order.chinaDomesticTransportKgs?.toString?.() ?? order.chinaDomesticTransportKgs,
+      chinaDomesticTransportCompanyId: order.chinaDomesticTransportCompanyId ?? null,
+    };
+  }
+
+  private pickLocalTransportAuditFields(order: any) {
+    return {
+      localTransportKgs: order.localTransportKgs?.toString?.() ?? order.localTransportKgs,
+      note: order.note ?? null,
+    };
+  }
+
+  private auditTransportSectionUpdate(
+    tx: any,
+    user: AuthUser,
+    procurementOrderId: string,
+    section: string,
+    oldValue: unknown,
+    newValue: unknown,
+    action: string,
+    reason?: string,
+  ) {
+    const metadata = { procurementOrderId, section };
+    return Promise.all([
+      this.auditProcurement(tx, user, action, procurementOrderId, oldValue, newValue, reason, metadata),
+      this.auditProcurement(
+        tx,
+        user,
+        'LANDED_COST_RECALCULATED',
+        procurementOrderId,
+        oldValue,
+        newValue,
+        reason,
+        metadata,
+      ),
+    ]);
   }
 
   private calculateProcurementLandedCosts(
@@ -2385,8 +2569,9 @@ export class ProcurementService {
       cargoTotalWeightKg,
       cargo,
     );
+    const { localTransportKgs: _storedLocalTransportKgs, ...logisticsTotals } = resolvedLogistics;
     return {
-      ...resolvedLogistics,
+      ...logisticsTotals,
       defaultUsdRate: cargo.usdRate,
       cargoRateUsdPerKg: cargo.cargoRateUsdPerKg,
       cargoTotalWeightKg,
@@ -2791,7 +2976,7 @@ export class ProcurementService {
   ) {
     const order = await tx.procurementOrder.findFirst({
       where: { id: orderId, deletedAt: null },
-      include: { items: true, supplierPayments: true },
+      include: { items: true, supplierPayments: true, svhToHqTransport: true },
     });
     if (!order) throw new NotFoundException('Procurement order not found');
 
@@ -2826,6 +3011,7 @@ export class ProcurementService {
       data: {
         ...orderTotals,
         ...this.buildProcurementTransportFields(order, order, transportResolved),
+        localTransportKgs: transportResolved.localTransportKgs,
         totalPaidYuan: summary.totalPaidYuan,
         totalPaidKgs: summary.totalPaidKgs,
         remainingYuan: summary.remainingYuan,
@@ -3034,10 +3220,13 @@ export class ProcurementService {
     oldValue: any,
     newValue: any,
     created: boolean,
+    reason?: string,
   ) {
     const audits: Array<{ action: string; extra?: Record<string, unknown> }> = [];
     if (created) {
       audits.push({ action: 'SVH_TRANSPORT_CREATED' });
+    } else {
+      audits.push({ action: 'SVH_TO_HQ_TRANSPORT_UPDATED' });
     }
     if (oldValue && String(oldValue.transportCompanyId ?? '') !== String(newValue.transportCompanyId ?? '')) {
       audits.push({
@@ -3072,18 +3261,21 @@ export class ProcurementService {
     audits.push({ action: 'LANDED_COST_RECALCULATED' });
 
     return Promise.all(audits.map((entry) =>
-      this.auditProcurement(tx, user, entry.action, procurementOrderId, oldValue, newValue, undefined, {
+      this.auditProcurement(tx, user, entry.action, procurementOrderId, oldValue, newValue, reason, {
+        procurementOrderId,
+        section: 'svh_to_hq',
         transportCompanyId,
         ...entry.extra,
       }),
     ));
   }
 
-  private async recalculateOrderLandedCostAfterSvhChange(
+  private async recalculateOrderLandedCostInTx(
     tx: any,
     user: AuthUser,
     orderId: string,
     reason: string,
+    _section?: string,
   ) {
     const order = await tx.procurementOrder.findFirst({
       where: { id: orderId, deletedAt: null },
@@ -3122,8 +3314,8 @@ export class ProcurementService {
       data: {
         ...orderTotals,
         ...this.buildProcurementTransportFields(order, order, transportResolved),
-        localTransportKgs: order.localTransportKgs,
-        svhToHqTransportCompanyId: order.svhToHqTransportCompanyId,
+        localTransportKgs: transportResolved.localTransportKgs,
+        svhToHqTransportCompanyId: order.svhToHqTransport?.transportCompanyId ?? order.svhToHqTransportCompanyId,
         totalPaidYuan: summary.totalPaidYuan,
         totalPaidKgs: summary.totalPaidKgs,
         remainingYuan: summary.remainingYuan,
@@ -3161,5 +3353,14 @@ export class ProcurementService {
     }
 
     return this.toProcurementOrderResponse(updated);
+  }
+
+  private async recalculateOrderLandedCostAfterSvhChange(
+    tx: any,
+    user: AuthUser,
+    orderId: string,
+    reason: string,
+  ) {
+    return this.recalculateOrderLandedCostInTx(tx, user, orderId, reason, 'svh_to_hq');
   }
 }

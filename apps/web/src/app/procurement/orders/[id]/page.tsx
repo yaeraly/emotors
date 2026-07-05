@@ -11,11 +11,12 @@ import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons'
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
-import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
+import { resolveChinaDomesticTransportKgs, effectiveLocalTransportKgs, storedLocalTransportKgsFromOrder } from '@/lib/transport-logistics';
 import {
   canConfirmSvhToHqArrival,
   canCreateProcurementOrder,
   canCreateSupplierPayment,
+  canEditLocalTransport,
   canEditProcurementOrderItemsInWindow,
   canManageSvhToHqTransport,
   canReceiveProcurementToHq,
@@ -131,6 +132,7 @@ type ProcurementOrder = {
   editWindowStatus?: 'DRAFT_EDITABLE' | 'EDITABLE' | 'LOCKED' | 'CEO_UNLOCKED';
   secondsRemaining?: number | null;
   unlockedBy?: { fullName?: string } | null;
+  note?: string | null;
   items?: ProcurementOrderItem[];
   differenceReports?: Array<{ id: string; reportNumber: string; type: string; sku: string; expectedQuantity: number; receivedQuantity: number; differenceQuantity: number; status: string; shortageReason?: string }>;
   receivings?: Array<{ id: string; receivingNumber: string; receivedAt: string }>;
@@ -204,8 +206,13 @@ export default function ProcurementOrderDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [savingLogistics, setSavingLogistics] = useState(false);
+  const [savingChinaDomestic, setSavingChinaDomestic] = useState(false);
+  const [savingLocalTransport, setSavingLocalTransport] = useState(false);
   const [savingSvh, setSavingSvh] = useState(false);
   const [svhForm, setSvhForm] = useState(emptySvhForm());
+  const [localTransportForm, setLocalTransportForm] = useState({ localTransportKgs: '0', note: '' });
+  const [chinaDomesticChangeReason, setChinaDomesticChangeReason] = useState('');
+  const [svhChangeReason, setSvhChangeReason] = useState('');
   const [unlocking, setUnlocking] = useState(false);
   const [unlockingChinaDomestic, setUnlockingChinaDomestic] = useState(false);
   const [chinaDomesticUnlockReason, setChinaDomesticUnlockReason] = useState('');
@@ -225,6 +232,8 @@ export default function ProcurementOrderDetailPage() {
   const readyForHqReceiving = order?.status === 'ARRIVED' || order?.status === 'ARRIVED_IN_KYRGYZSTAN' || order?.status === 'IN_TRANSIT';
   const canEditSvh = order ? SVH_STATUSES.includes(order.status) : false;
   const canManageSvh = canManageSvhToHqTransport(user);
+  const canEditLocal = canEditLocalTransport(user);
+  const isCeoUser = canUnlockProcurementOrder(user);
   const canConfirmSvh = canConfirmSvhToHqArrival(user);
   const svhTransportCompleted = order?.svhToHqTransport?.status === 'COMPLETED' || order?.canReceiveToHq === true;
   const canSaveSvh = canManageSvh || (canConfirmSvh && !!order?.svhToHqTransport);
@@ -239,7 +248,8 @@ export default function ProcurementOrderDetailPage() {
     : true;
   const chinaDomesticLockedByStatus = order?.chinaDomesticTransportLocked ?? false;
   const chinaDomesticLocked = chinaDomesticLockedByStatus && !chinaDomesticEditable;
-  const canUnlockChinaDomestic = canUnlockProcurementOrder(user) && chinaDomesticLocked;
+  const chinaDomesticFieldsEditable = chinaDomesticEditable || isCeoUser;
+  const canUnlockChinaDomestic = isCeoUser && chinaDomesticLocked && !chinaDomesticEditable;
 
   const previewItems = useMemo(() => (order?.items ?? [])
     .filter((item) => item.status !== 'CANCELLED')
@@ -273,6 +283,51 @@ export default function ProcurementOrderDetailPage() {
     [logisticsForm.chinaDomesticTransportYuan, order?.chinaDomesticTransportKgs, effectiveYuanRate],
   );
 
+  const previewLocalTransportKgs = useMemo(
+    () => effectiveLocalTransportKgs(
+      Number(localTransportForm.localTransportKgs || 0),
+      Number(svhForm.transportCostKgs || order?.svhToHqTransport?.transportCostKgs || 0),
+    ),
+    [localTransportForm.localTransportKgs, svhForm.transportCostKgs, order?.svhToHqTransport?.transportCostKgs],
+  );
+
+  const chinaDomesticDirty = useMemo(() => {
+    if (!order) return false;
+    return logisticsForm.chinaDomesticTransportYuan !== String(order.chinaDomesticTransportYuan ?? 0)
+      || logisticsForm.chinaDomesticTransportCompanyId !== (order.chinaDomesticTransportCompanyId ?? '');
+  }, [order, logisticsForm.chinaDomesticTransportYuan, logisticsForm.chinaDomesticTransportCompanyId]);
+
+  const localTransportDirty = useMemo(() => {
+    if (!order) return false;
+    const storedLocal = storedLocalTransportKgsFromOrder(order.localTransportKgs, order.svhToHqTransport?.transportCostKgs);
+    return localTransportForm.localTransportKgs !== String(storedLocal)
+      || localTransportForm.note !== (order.note ?? '');
+  }, [order, localTransportForm]);
+
+  const svhDirty = useMemo(() => {
+    const svh = order?.svhToHqTransport;
+    if (!svh) {
+      return svhForm.transportCompanyId !== ''
+        || svhForm.transportCostKgs !== '0'
+        || svhForm.vehicleNumber !== ''
+        || svhForm.driverName !== ''
+        || svhForm.driverPhone !== ''
+        || svhForm.dispatchDate !== ''
+        || svhForm.arrivalDate !== ''
+        || svhForm.status !== 'WAITING'
+        || svhForm.notes !== '';
+    }
+    return svhForm.transportCompanyId !== (svh.transportCompanyId ?? '')
+      || svhForm.transportCostKgs !== String(svh.transportCostKgs ?? 0)
+      || svhForm.vehicleNumber !== (svh.vehicleNumber ?? '')
+      || svhForm.driverName !== (svh.driverName ?? '')
+      || svhForm.driverPhone !== (svh.driverPhone ?? '')
+      || svhForm.dispatchDate !== (svh.dispatchDate ? svh.dispatchDate.slice(0, 10) : '')
+      || svhForm.arrivalDate !== (svh.arrivalDate ? svh.arrivalDate.slice(0, 10) : '')
+      || svhForm.status !== svh.status
+      || svhForm.notes !== (svh.notes ?? '');
+  }, [order?.svhToHqTransport, svhForm]);
+
   const previewTotals = useMemo(() => {
     try {
       return calculateLandedCosts(
@@ -280,7 +335,7 @@ export default function ProcurementOrderDetailPage() {
         {
           chinaDomesticTransportKgs: previewChinaDomesticTransportKgs,
           chinaExportTransportKgs: 0,
-          localTransportKgs: Number(svhForm.transportCostKgs || order?.localTransportKgs || 0),
+          localTransportKgs: previewLocalTransportKgs,
           packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
@@ -292,7 +347,7 @@ export default function ProcurementOrderDetailPage() {
     } catch (err) {
       return null;
     }
-  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, svhForm.transportCostKgs, order?.localTransportKgs]);
+  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, previewLocalTransportKgs]);
 
   const cargoValidationError = useMemo(() => {
     if (!previewTotals) return t('procurement.orders.cargoWeightLessThanNet');
@@ -344,6 +399,15 @@ export default function ProcurementOrderDetailPage() {
         status: svh.status,
         notes: svh.notes ?? '',
       } : emptySvhForm());
+      setLocalTransportForm({
+        localTransportKgs: String(storedLocalTransportKgsFromOrder(
+          orderResult.localTransportKgs,
+          orderResult.svhToHqTransport?.transportCostKgs,
+        )),
+        note: orderResult.note ?? '',
+      });
+      setChinaDomesticChangeReason('');
+      setSvhChangeReason('');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -446,8 +510,65 @@ export default function ProcurementOrderDetailPage() {
     }
   }
 
+  async function saveChinaDomesticTransport() {
+    if (!order || finalized || readOnlyFinance || !chinaDomesticFieldsEditable) return;
+    if (chinaDomesticLocked && isCeoUser && !chinaDomesticChangeReason.trim()) {
+      setError(t('procurement.transport.changeReasonRequired'));
+      return;
+    }
+    setSavingChinaDomestic(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/china-domestic-transport`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          chinaDomesticTransportYuan: Number(logisticsForm.chinaDomesticTransportYuan || 0),
+          chinaDomesticTransportCompanyId: logisticsForm.chinaDomesticTransportCompanyId || null,
+          changeReason: chinaDomesticChangeReason.trim() || undefined,
+        }),
+      });
+      setSuccess(t('procurement.transport.saved'));
+      setChinaDomesticChangeReason('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSavingChinaDomestic(false);
+    }
+  }
+
+  async function saveLocalTransport() {
+    if (!order || finalized || readOnlyFinance || !canEditLocal) return;
+    setSavingLocalTransport(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/local-transport`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          localTransportKgs: Number(localTransportForm.localTransportKgs || 0),
+          note: localTransportForm.note || null,
+        }),
+      });
+      setSuccess(t('procurement.transport.saved'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSavingLocalTransport(false);
+    }
+  }
+
   async function saveSvhTransport() {
     if (!order || finalized || !canEditSvh || !canSaveSvh) return;
+    const costChangedAfterHq = !!order.hqStockMovementCreatedAt
+      && order.svhToHqTransport
+      && Number(svhForm.transportCostKgs || 0) !== Number(order.svhToHqTransport.transportCostKgs || 0);
+    if (costChangedAfterHq && isCeoUser && !svhChangeReason.trim()) {
+      setError(t('procurement.transport.changeReasonRequired'));
+      return;
+    }
     setSavingSvh(true);
     setError('');
     setSuccess('');
@@ -464,9 +585,11 @@ export default function ProcurementOrderDetailPage() {
           arrivalDate: svhForm.arrivalDate || undefined,
           status: svhForm.status,
           notes: svhForm.notes || undefined,
+          changeReason: svhChangeReason.trim() || undefined,
         }),
       });
-      setSuccess(t('procurement.svhTransport.saved'));
+      setSuccess(t('procurement.transport.saved'));
+      setSvhChangeReason('');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -638,36 +761,86 @@ export default function ProcurementOrderDetailPage() {
           <>
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-lg font-bold">{t('procurement.orders.localTransport')}</h3>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <EditableField
+                label={t('procurement.transport.localCostKgs')}
+                value={localTransportForm.localTransportKgs}
+                onChange={(v) => setLocalTransportForm((current) => ({ ...current, localTransportKgs: v }))}
+                type="number"
+                disabled={finalized || readOnlyFinance || !canEditLocal}
+              />
+              <EditableField
+                label={t('procurement.transport.localNote')}
+                value={localTransportForm.note}
+                onChange={(v) => setLocalTransportForm((current) => ({ ...current, note: v }))}
+                disabled={finalized || readOnlyFinance || !canEditLocal}
+              />
+              <Info label={t('procurement.orders.costInKgs')} value={formatKgs(previewLocalTransportKgs)} />
+            </div>
+            {localTransportDirty && canEditLocal && !finalized && !readOnlyFinance ? (
+              <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
+            ) : null}
+            {canEditLocal && !finalized && !readOnlyFinance ? (
+              <button
+                type="button"
+                disabled={savingLocalTransport || !localTransportDirty}
+                onClick={() => void saveLocalTransport()}
+                className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
+              >
+                {savingLocalTransport ? t('common.loading') : t('procurement.transport.save')}
+              </button>
+            ) : null}
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
               {chinaDomesticLocked && !chinaDomesticEditable ? (
                 <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold uppercase text-amber-800">{t('procurement.chinaDomestic.locked')}</span>
               ) : null}
             </div>
-            {chinaDomesticLocked && !chinaDomesticEditable ? (
+            {chinaDomesticLocked && !chinaDomesticFieldsEditable ? (
               <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
             ) : null}
+            {chinaDomesticLocked && !chinaDomesticEditable && isCeoUser ? (
+              <p className="mb-4 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">{t('procurement.transport.changeReasonRequired')}</p>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-3">
-              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
+              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticFieldsEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
                 <TransportCompanySelect
                   label={t('procurement.transportCompanies.select')}
                   value={logisticsForm.chinaDomesticTransportCompanyId}
                   companies={transportCompanies}
                   onChange={(value) => setLogistics('chinaDomesticTransportCompanyId', value)}
-                  disabled={finalized || readOnlyFinance || !chinaDomesticEditable}
+                  disabled={finalized || readOnlyFinance || !chinaDomesticFieldsEditable}
                 />
               </LockedFieldHint>
-              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
+              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticFieldsEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
                 <EditableField
                   label={t('procurement.orders.costInYuan')}
                   value={logisticsForm.chinaDomesticTransportYuan}
                   onChange={(v) => setLogistics('chinaDomesticTransportYuan', v)}
                   type="number"
-                  disabled={finalized || readOnlyFinance || !chinaDomesticEditable}
+                  disabled={finalized || readOnlyFinance || !chinaDomesticFieldsEditable}
                 />
               </LockedFieldHint>
               <Info label={t('procurement.orders.costInKgs')} value={formatKgs(previewChinaDomesticTransportKgs)} />
               <Info label={t('procurement.orders.weightedAverageYuanRate')} value={String(effectiveYuanRate || '-')} />
             </div>
+            {chinaDomesticLocked && isCeoUser && !finalized ? (
+              <div className="mt-4">
+                <label className="block text-sm font-semibold text-slate-700">{t('procurement.chinaDomestic.unlockReasonPlaceholder')}</label>
+                <textarea
+                  value={chinaDomesticChangeReason}
+                  onChange={(e) => setChinaDomesticChangeReason(e.target.value)}
+                  placeholder={t('procurement.chinaDomestic.unlockReasonPlaceholder')}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                  rows={2}
+                />
+              </div>
+            ) : null}
             {canUnlockChinaDomestic && !finalized ? (
               <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
                 <p className="text-sm font-semibold text-amber-900">{t('procurement.chinaDomestic.unlockTitle')}</p>
@@ -687,6 +860,19 @@ export default function ProcurementOrderDetailPage() {
                   {unlockingChinaDomestic ? t('common.loading') : t('procurement.chinaDomestic.unlock')}
                 </button>
               </div>
+            ) : null}
+            {chinaDomesticDirty && chinaDomesticFieldsEditable && !finalized && !readOnlyFinance ? (
+              <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
+            ) : null}
+            {chinaDomesticFieldsEditable && !finalized && !readOnlyFinance ? (
+              <button
+                type="button"
+                disabled={savingChinaDomestic || !chinaDomesticDirty}
+                onClick={() => void saveChinaDomesticTransport()}
+                className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
+              >
+                {savingChinaDomestic ? t('common.loading') : t('procurement.transport.save')}
+              </button>
             ) : null}
           </section>
 
@@ -737,9 +923,29 @@ export default function ProcurementOrderDetailPage() {
               </label>
               <EditableField label={t('procurement.svhTransport.notes')} value={svhForm.notes} onChange={(v) => setSvhField('notes', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
             </div>
+            {finalized && isCeoUser && order.svhToHqTransport ? (
+              <div className="mt-4">
+                <label className="block text-sm font-semibold text-slate-700">{t('procurement.transport.changeReasonRequired')}</label>
+                <textarea
+                  value={svhChangeReason}
+                  onChange={(e) => setSvhChangeReason(e.target.value)}
+                  placeholder={t('procurement.chinaDomestic.unlockReasonPlaceholder')}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                  rows={2}
+                />
+              </div>
+            ) : null}
+            {svhDirty && canSaveSvh && canEditSvh && !finalized && !readOnlyFinance ? (
+              <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
+            ) : null}
             {canSaveSvh && canEditSvh && !finalized && !readOnlyFinance ? (
-              <button type="button" disabled={savingSvh} onClick={() => void saveSvhTransport()} className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300">
-                {savingSvh ? t('common.loading') : order.svhToHqTransport ? t('procurement.svhTransport.save') : t('procurement.svhTransport.create')}
+              <button
+                type="button"
+                disabled={savingSvh || !svhDirty}
+                onClick={() => void saveSvhTransport()}
+                className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
+              >
+                {savingSvh ? t('common.loading') : t('procurement.transport.save')}
               </button>
             ) : null}
             {!svhTransportCompleted && canReceive && readyForHqReceiving && !finalized ? (
