@@ -149,6 +149,7 @@ const WAREHOUSE_MANAGER_FORBIDDEN_PREFIXES = [
   '/branch-purchase-requests',
   '/supply-chain',
   '/alerts',
+  '/notifications',
 ];
 
 const WAREHOUSE_MANAGER_ALLOWED_PREFIXES = [
@@ -211,6 +212,7 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
   '/procurement',
   '/supply-chain',
   '/alerts',
+  '/notifications',
   '/branch-purchase-requests',
   '/supplier-claims',
 ];
@@ -320,7 +322,7 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/returns')) return hasPermission(user, 'sales.manage') || hasPermission(user, 'payments.manage');
   if (pathname.startsWith('/warranty/claims')) return hasPermission(user, 'service.manage') || hasPermission(user, 'distribution.manage');
   if (pathname.startsWith('/supplier-claims')) return hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
-  if (pathname.startsWith('/alerts')) return true;
+  if (pathname.startsWith('/alerts') || pathname.startsWith('/notifications')) return true;
   if (pathname.startsWith('/distribution/invoices')) {
     return hasPermission(user, 'distribution.manage') || hasPermission(user, 'finance.view') || hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   }

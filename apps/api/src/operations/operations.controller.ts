@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { BranchPurchaseRequestStatus, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -8,6 +8,7 @@ import { PermissionsGuard } from '../roles/permissions.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { OperationsService } from './operations.service';
+import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller()
@@ -160,8 +161,14 @@ export class OperationsController {
 
   @Get('alerts')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
-  alerts(@CurrentUser() user: AuthUser) {
-    return this.service.alerts(user);
+  alerts(@CurrentUser() user: AuthUser, @Query() query: NotificationQueryDto) {
+    return this.service.alerts(user, query);
+  }
+
+  @Get('alerts/unread-count')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+  unreadAlertCount(@CurrentUser() user: AuthUser) {
+    return this.service.unreadAlertCount(user);
   }
 
   @Post('alerts')
@@ -174,6 +181,12 @@ export class OperationsController {
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
   markAlertRead(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.markAlertRead(user, id);
+  }
+
+  @Post('alerts/:id/archive')
+  @Roles(Role.OWNER, Role.CEO)
+  archiveAlert(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.archiveAlert(user, id);
   }
 
   @Get('operations/analytics')

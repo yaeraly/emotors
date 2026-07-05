@@ -18,6 +18,7 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isFullAccessRole, canCreateDistributionOrder, canDispatchFromHq, hasAnyFullAccessRole, userHasPermission } from '../rbac/rbac';
 import {
@@ -44,6 +45,7 @@ export class DistributionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
@@ -201,7 +203,7 @@ export class DistributionService {
       const invoice = await this.createInvoiceForOrder(tx, user, updated);
       await this.auditTransfer(tx, user, 'BRANCH_ORDER_ACCEPTED', updated);
       await this.auditTransfer(tx, user, 'INVOICE_CREATED', updated);
-      await this.createWorkflowAlert(tx, {
+      await this.createWorkflowAlert(tx, user, {
         branchId: updated.branchId,
         type: AlertType.BRANCH_INVOICE_CREATED,
         title: 'Branch invoice created',
@@ -235,7 +237,7 @@ export class DistributionService {
         include: this.invoiceInclude(),
       });
       await this.auditTransfer(tx, user, 'INVOICE_SENT', order);
-      await this.createWorkflowAlert(tx, {
+      await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.BRANCH_INVOICE_CREATED,
         title: 'Invoice sent to branch',
@@ -291,7 +293,7 @@ export class DistributionService {
       }
 
       await this.auditTransfer(tx, user, 'ORDER_ASSIGNED_TO_WAREHOUSE', updated);
-      await this.createWorkflowAlert(tx, {
+      await this.createWorkflowAlert(tx, user, {
         branchId: null,
         type: AlertType.ORDER_SENT_TO_WAREHOUSE,
         title: 'Order sent to warehouse',
@@ -299,7 +301,7 @@ export class DistributionService {
         entityType: 'BranchDistributionOrder',
         entityId: order.id,
       });
-      await this.createWorkflowAlert(tx, {
+      await this.createWorkflowAlert(tx, user, {
         branchId: null,
         type: AlertType.PICKING_TASK_ASSIGNED,
         title: 'Picking task assigned',
@@ -504,7 +506,7 @@ export class DistributionService {
         data: { status: HqWarehousePickingTaskStatus.SHIPPED, shippedAt: new Date() },
       });
       await this.auditTransfer(tx, user, 'INVENTORY_SHIPPED', updated);
-      await this.createWorkflowAlert(tx, {
+      await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.GOODS_SHIPPED,
         title: 'Goods shipped to branch',
@@ -712,7 +714,7 @@ export class DistributionService {
 
       await this.refreshBranchAccountBalance(tx, order.branchId);
 
-      await this.createWorkflowAlert(tx, {
+      await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.BRANCH_GOODS_RECEIVED,
         title: 'Goods received at branch',
@@ -721,7 +723,7 @@ export class DistributionService {
         entityId: order.id,
       });
       if (shortageItems.length > 0 && shortageReport) {
-        await this.createWorkflowAlert(tx, {
+        await this.createWorkflowAlert(tx, user, {
           branchId: order.branchId,
           type: AlertType.DIFFERENCE_ACT_CREATED,
           title: 'Receiving difference act created',
@@ -729,7 +731,7 @@ export class DistributionService {
           entityType: 'ShortageReport',
           entityId: shortageReport.id,
         });
-        await this.createWorkflowAlert(tx, {
+        await this.createWorkflowAlert(tx, user, {
           branchId: null,
           type: AlertType.SHORTAGE_NEEDS_RESOLUTION,
           title: 'Shortage needs resolution',
@@ -840,7 +842,7 @@ export class DistributionService {
       });
 
       if (dto.resolutionType === ShortageResolutionType.SEND_IMMEDIATELY) {
-        await this.createWorkflowAlert(tx, {
+        await this.createWorkflowAlert(tx, user, {
           branchId: report.branchId,
           type: AlertType.REPLACEMENT_GOODS_SHIPPED,
           title: 'Replacement goods scheduled',
@@ -985,7 +987,7 @@ export class DistributionService {
           metadata: { amount, method: dto.method, roles: user.roles ?? [user.role] },
         },
       });
-      await this.createWorkflowAlert(tx, {
+      await this.createWorkflowAlert(tx, user, {
         branchId: invoice.branchId,
         type: AlertType.PAYMENT_RECEIVED,
         title: 'Payment received',
@@ -1296,6 +1298,7 @@ export class DistributionService {
 
   private createWorkflowAlert(
     tx: PrismaTx,
+    user: AuthUser,
     data: {
       branchId: string | null;
       type: AlertType;
@@ -1303,17 +1306,17 @@ export class DistributionService {
       message: string;
       entityType?: string;
       entityId?: string;
+      referenceNumber?: string;
     },
   ) {
-    return tx.alert.create({
-      data: {
-        branchId: data.branchId,
-        type: data.type,
-        title: data.title,
-        message: data.message,
-        entityType: data.entityType,
-        entityId: data.entityId,
-      },
+    return this.notificationsService.notifyInTx(tx, user, {
+      type: data.type,
+      branchId: data.branchId,
+      title: data.title,
+      message: data.message,
+      entityType: data.entityType,
+      entityId: data.entityId,
+      referenceNumber: data.referenceNumber,
     });
   }
 

@@ -5,6 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
+  AlertType,
   FileAttachmentEntityType,
   ProcurementOrderItemStatus,
   ProcurementOrderStatus,
@@ -16,6 +17,7 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   canAllowSupplierOverpayment,
@@ -98,6 +100,7 @@ export class ProcurementService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   createSupplier(dto: any) {
@@ -644,6 +647,13 @@ export class ProcurementService {
       });
 
       await this.auditProcurement(tx, user, 'CREATE_PROCUREMENT_ORDER', order.id, null, this.pickProcurementAuditFields(order));
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.PROCUREMENT_CREATED,
+        entityType: 'ProcurementOrder',
+        entityId: order.id,
+        referenceNumber: order.orderNumber,
+        message: `Procurement order ${order.orderNumber} was created.`,
+      });
       await this.inventoryService.syncProcurementPurchasePricesInTx(tx, user, {
         orderId: order.id,
         items: preparedItems.map((item) => ({
@@ -743,6 +753,24 @@ export class ProcurementService {
           paymentMethod: dto.paymentMethod,
         },
       );
+      const remainingYuan = Number(updated.remainingYuan ?? 0);
+      if (remainingYuan > 0) {
+        await this.notificationsService.notifyInTx(tx, user, {
+          type: AlertType.SUPPLIER_PAYMENT_DUE,
+          entityType: 'ProcurementOrder',
+          entityId: order.id,
+          referenceNumber: updated.orderNumber,
+          message: `Supplier payment due for procurement ${updated.orderNumber}. Remaining: ${remainingYuan} yuan.`,
+        });
+      } else {
+        await this.notificationsService.notifyInTx(tx, user, {
+          type: AlertType.SUPPLIER_PAYMENT_COMPLETED,
+          entityType: 'ProcurementOrder',
+          entityId: order.id,
+          referenceNumber: updated.orderNumber,
+          message: `Supplier payment completed for procurement ${updated.orderNumber}.`,
+        });
+      }
       return {
         payment: this.toSupplierPaymentResponse(payment),
         order: updated,
@@ -1295,6 +1323,22 @@ export class ProcurementService {
       }
       const updated = await tx.procurementOrder.update({ where: { id }, data, include: this.procurementOrderInclude() });
       await this.auditProcurement(tx, user, 'PROCUREMENT_STATUS_CHANGE', id, oldValue, this.pickProcurementAuditFields(updated), reason, { status });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.PROCUREMENT_STATUS_CHANGED,
+        entityType: 'ProcurementOrder',
+        entityId: id,
+        referenceNumber: updated.orderNumber,
+        message: `Procurement ${updated.orderNumber} status changed to ${status}.`,
+      });
+      if (status === ProcurementOrderStatus.SENT_TO_SUPPLIER) {
+        await this.notificationsService.notifyInTx(tx, user, {
+          type: AlertType.PROCUREMENT_WAITING_APPROVAL,
+          entityType: 'ProcurementOrder',
+          entityId: id,
+          referenceNumber: updated.orderNumber,
+          message: `Procurement ${updated.orderNumber} is waiting for CEO approval.`,
+        });
+      }
       if (
         isChinaDomesticTransportLockedByStatus(status) &&
         !isChinaDomesticTransportLockedByStatus(existing.status)
@@ -1528,7 +1572,7 @@ export class ProcurementService {
         throw new BadRequestException('Procurement order must target an active HQ warehouse');
       }
 
-      return tx.procurementOrder.update({
+      const updated = await tx.procurementOrder.update({
         where: { id },
         data: {
           status: ProcurementOrderStatus.ARRIVED,
@@ -1537,6 +1581,14 @@ export class ProcurementService {
         },
         include: this.procurementOrderInclude(),
       });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.GOODS_ARRIVED_FROM_CHINA,
+        entityType: 'ProcurementOrder',
+        entityId: id,
+        referenceNumber: updated.orderNumber,
+        message: `Goods arrived from China for procurement ${updated.orderNumber}.`,
+      });
+      return updated;
     });
   }
 

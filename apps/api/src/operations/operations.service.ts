@@ -17,6 +17,8 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
 import {
@@ -37,6 +39,7 @@ export class OperationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   branchPurchaseRequests(user: AuthUser) {
@@ -66,13 +69,13 @@ export class OperationsService {
     });
     await this.audit(user, branchId, 'BRANCH_PURCHASE_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
     if (request.status === BranchPurchaseRequestStatus.SUBMITTED) {
-      await this.createWorkflowAlert({
-        branchId,
+      await this.notificationsService.notify(user, {
         type: AlertType.BRANCH_ORDER_SUBMITTED,
-        title: 'Branch order submitted',
-        message: `Branch purchase request ${request.requestNumber} submitted`,
+        branchId,
         entityType: 'BranchPurchaseRequest',
         entityId: request.id,
+        referenceNumber: request.requestNumber,
+        message: `Branch purchase request ${request.requestNumber} submitted.`,
       });
     }
     return request;
@@ -391,6 +394,13 @@ export class OperationsService {
         recalculatedLandedCost: true,
         reason: dto.reason,
       });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.GOODS_RECEIVED_HQ,
+        entityType: 'ProcurementOrder',
+        entityId: order.id,
+        referenceNumber: order.orderNumber,
+        message: `Goods received into HQ warehouse for procurement ${order.orderNumber}.`,
+      });
       return tx.procurementGoodsReceiving.findUnique({ where: { id: receiving.id }, include: { items: true } });
     });
   }
@@ -695,40 +705,33 @@ export class OperationsService {
     return claim;
   }
 
-  alerts(user: AuthUser) {
-    return this.prisma.alert.findMany({
-      where: this.canAccessAllBranches(user) ? {} : { branchId: user.branchId },
-      orderBy: { createdAt: 'desc' },
-    });
+  alerts(user: AuthUser, query?: NotificationQueryDto) {
+    return this.notificationsService.listForUser(user, query ?? {});
+  }
+
+  unreadAlertCount(user: AuthUser) {
+    return this.notificationsService.unreadCount(user);
   }
 
   createAlert(user: AuthUser, dto: any) {
     const branchId = dto.branchId ?? (this.canAccessAllBranches(user) ? null : user.branchId);
-    return this.prisma.alert.create({
-      data: {
-        branchId,
-        type: dto.type,
-        title: dto.title,
-        message: dto.message,
-        status: dto.status,
-        entityType: dto.entityType,
-        entityId: dto.entityId,
-      },
+    return this.notificationsService.notify(user, {
+      type: dto.type,
+      branchId,
+      title: dto.title,
+      message: dto.message,
+      entityType: dto.entityType,
+      entityId: dto.entityId,
+      referenceNumber: dto.referenceNumber,
     });
   }
 
-  async markAlertRead(user: AuthUser, id: string) {
-    const alert = await this.prisma.alert.findFirst({
-      where: {
-        id,
-        ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
-      },
-    });
-    if (!alert) throw new NotFoundException('Alert not found');
-    return this.prisma.alert.update({
-      where: { id },
-      data: { status: 'READ', readAt: new Date() },
-    });
+  markAlertRead(user: AuthUser, id: string) {
+    return this.notificationsService.markRead(user, id);
+  }
+
+  archiveAlert(user: AuthUser, id: string) {
+    return this.notificationsService.archive(user, id);
   }
 
   async analyticsPlaceholders() {
@@ -801,26 +804,6 @@ export class OperationsService {
   private auditInTx(tx: PrismaTx, user: AuthUser, branchId: string | null, action: string, entity: string, entityId: string, extra?: Record<string, unknown>) {
     return tx.auditLog.create({
       data: { userId: user.id, role: user.role, action, entity, entityId, metadata: { branchId, roles: user.roles ?? [user.role], ...extra } },
-    });
-  }
-
-  private createWorkflowAlert(data: {
-    branchId: string | null;
-    type: AlertType;
-    title: string;
-    message: string;
-    entityType?: string;
-    entityId?: string;
-  }) {
-    return this.prisma.alert.create({
-      data: {
-        branchId: data.branchId,
-        type: data.type,
-        title: data.title,
-        message: data.message,
-        entityType: data.entityType,
-        entityId: data.entityId,
-      },
     });
   }
 }

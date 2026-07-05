@@ -6,13 +6,14 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ProcurementOrderStatus, PurchasePriceChangeReason, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
+import { AlertType, Prisma, ProcurementOrderStatus, PurchasePriceChangeReason, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { MultipartFile } from '@fastify/multipart';
 import { FastifyRequest } from 'fastify';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AuthUser } from '../auth/auth.types';
+import { NotificationsService } from '../notifications/notifications.service';
 import { normalizeBranchId, resolveWritableBranchId } from '../rbac/branch-scope';
 import {
   assertProductWarehouseBranchMatch,
@@ -46,7 +47,10 @@ type PrismaTx = Prisma.TransactionClient;
 export class InventoryService {
   private readonly logger = new Logger(InventoryService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async uploadProductImage(request: FastifyRequest) {
     let image: MultipartFile | undefined;
@@ -1121,6 +1125,17 @@ export class InventoryService {
 
     if (dto.type === StockMovementType.ADJUSTMENT) {
       await this.auditInTx(tx, user, product.branchId, 'INVENTORY_ADJUSTMENT', 'StockMovement', movement.id);
+    }
+
+    if (nextQuantity <= product.minStockLevel) {
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: nextQuantity === 0 ? AlertType.OUT_OF_STOCK : AlertType.LOW_STOCK,
+        branchId: product.branchId,
+        entityType: 'Product',
+        entityId: product.id,
+        referenceNumber: product.sku,
+        message: `${product.sku} stock is ${nextQuantity} (minimum ${product.minStockLevel}).`,
+      });
     }
 
     return movement;

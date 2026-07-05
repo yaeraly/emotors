@@ -310,12 +310,34 @@ enum AlertType {
   DIFFERENCE_ACT_CREATED
   SHORTAGE_NEEDS_RESOLUTION
   REPLACEMENT_GOODS_SHIPPED
+  INVENTORY_SUBMITTED
+  INVENTORY_APPROVED
+  INVENTORY_REJECTED
+  PROCUREMENT_CREATED
+  PROCUREMENT_WAITING_APPROVAL
+  PROCUREMENT_STATUS_CHANGED
+  GOODS_ARRIVED_FROM_CHINA
+  GOODS_RECEIVED_HQ
+  SUPPLIER_PAYMENT_DUE
+  SUPPLIER_PAYMENT_COMPLETED
+}
+
+enum NotificationModule {
+  INVENTORY
+  PROCUREMENT
+  WAREHOUSE
+  DISTRIBUTION
+  FINANCE
+  SUPPLIER_PAYMENT
+  BRANCH_ORDERS
+  SYSTEM
 }
 
 enum AlertStatus {
   UNREAD
   READ
   RESOLVED
+  ARCHIVED
 }
 
 enum StudentStatus {
@@ -3232,21 +3254,28 @@ model SupplierClaim {
 }
 
 model Alert {
-  id         String @id @default(cuid())
-  branchId   String?
-  type       AlertType
-  title      String
-  message    String
-  entityType String?
-  entityId   String?
-  status     AlertStatus @default(UNREAD)
-  createdAt  DateTime @default(now())
-  readAt     DateTime?
-  resolvedAt DateTime?
+  id              String              @id @default(cuid())
+  branchId        String?
+  type            AlertType
+  module          NotificationModule?
+  recipientRole   Role?
+  referenceNumber String?
+  title           String
+  message         String
+  entityType      String?
+  entityId        String?
+  status          AlertStatus         @default(UNREAD)
+  createdAt       DateTime            @default(now())
+  readAt          DateTime?
+  resolvedAt      DateTime?
+  archivedAt      DateTime?
 
   @@index([branchId])
   @@index([type])
+  @@index([module])
+  @@index([recipientRole])
   @@index([status])
   @@index([createdAt])
   @@index([entityType, entityId])
+  @@index([referenceNumber])
 }

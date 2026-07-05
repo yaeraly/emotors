@@ -7,12 +7,14 @@ import {
 import {
   InventoryCountStatus,
   InventoryCountType,
+  AlertType,
   Prisma,
   Role,
   StockMovementType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { activeHqWarehouseWhere, inventoryBranchIdForWarehouse, isHqWarehouse } from '../warehouse/warehouse.util';
@@ -31,6 +33,7 @@ export class InventoryCountService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   list(user: AuthUser, query: InventoryCountQueryDto) {
@@ -275,6 +278,13 @@ export class InventoryCountService {
         warehouseId: session.warehouseId,
         newValue: this.buildSummary(updated),
       });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.INVENTORY_SUBMITTED,
+        entityType: 'InventoryCountSession',
+        entityId: id,
+        referenceNumber: updated.sessionNumber,
+        message: `Warehouse Manager submitted inventory ${updated.sessionNumber} for approval.`,
+      });
       return this.toSessionResponse(updated);
     });
   }
@@ -353,6 +363,13 @@ export class InventoryCountService {
         warehouseId: session.warehouseId,
         newValue: this.buildSummary(updated),
       });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.INVENTORY_APPROVED,
+        entityType: 'InventoryCountSession',
+        entityId: id,
+        referenceNumber: updated.sessionNumber,
+        message: `Inventory ${updated.sessionNumber} was approved.`,
+      });
       return this.toSessionResponse(updated);
     });
   }
@@ -383,6 +400,15 @@ export class InventoryCountService {
         oldValue: InventoryCountStatus.SUBMITTED,
         newValue: InventoryCountStatus.COUNTING,
         extra: { reason: dto.reason },
+      });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.INVENTORY_REJECTED,
+        entityType: 'InventoryCountSession',
+        entityId: id,
+        referenceNumber: updated.sessionNumber,
+        message: dto.reason
+          ? `Inventory ${updated.sessionNumber} was rejected: ${dto.reason}`
+          : `Inventory ${updated.sessionNumber} was rejected.`,
       });
       return this.toSessionResponse(updated);
     });

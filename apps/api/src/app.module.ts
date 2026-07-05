@@ -19,6 +19,7 @@ import { OperationsModule } from './operations/operations.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { ProcurementModule } from './procurement/procurement.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { RoyaltyModule } from './royalty/royalty.module';
 import { SalesModule } from './sales/sales.module';
 import { ServiceModule } from './service/service.module';
@@ -32,6 +33,7 @@ import { UsersModule } from './users/users.module';
       isGlobal: true,
     }),
     PrismaModule,
+    NotificationsModule,
     AuthModule,
     BranchesModule,
     CommissionsModule,

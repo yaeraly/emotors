@@ -66,8 +66,8 @@ export const supplyChainHubSections: ModuleSectionLink[] = [
 ];
 
 export const alertsHubSections: ModuleSectionLink[] = [
-  { href: '/alerts', labelKey: 'scm.hub.alerts.all' },
-  { href: '/alerts', labelKey: 'scm.hub.alerts.unread' },
+  { href: '/notifications', labelKey: 'scm.hub.alerts.all' },
+  { href: '/notifications?status=UNREAD', labelKey: 'scm.hub.alerts.unread' },
   { href: '/procurement/orders', labelKey: 'scm.hub.alerts.overdueOrders' },
   { href: '/inventory', labelKey: 'scm.hub.alerts.lowStock' },
   { href: '/supply-chain', labelKey: 'scm.hub.alerts.deliveryDelay' },
