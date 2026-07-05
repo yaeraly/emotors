@@ -110,6 +110,96 @@ export function isSupplyChainManagerUser(user: Pick<User, 'role' | 'roles'> | nu
   return hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }
 
+export function isWarehouseManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user || hasFullAccess(user)) return false;
+  if (hasRole(user, 'SUPPLY_CHAIN_MANAGER')) return false;
+  return hasRole(user, 'WAREHOUSE_MANAGER');
+}
+
+const WAREHOUSE_MANAGER_FORBIDDEN_PREFIXES = [
+  '/finance',
+  '/reports',
+  '/users',
+  '/settings',
+  '/crm',
+  '/customers',
+  '/dashboard',
+  '/analytics',
+  '/tax',
+  '/payments',
+  '/kpi',
+  '/sales',
+  '/service',
+  '/reservations',
+  '/returns',
+  '/users',
+  '/branches',
+  '/academy',
+  '/marketing',
+  '/investment',
+  '/expansion',
+  '/royalty',
+  '/ai',
+  '/payroll',
+  '/commissions',
+  '/compensation',
+  '/warehouse-release',
+  '/warranty',
+  '/supplier-claims',
+  '/branch-purchase-requests',
+  '/supply-chain',
+  '/alerts',
+];
+
+const WAREHOUSE_MANAGER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/inventory',
+  '/products',
+  '/warehouses',
+  '/stock-movements',
+  '/hq-warehouses',
+  '/distribution',
+  '/procurement',
+];
+
+export function isWarehouseManagerForbiddenPath(pathname: string) {
+  return WAREHOUSE_MANAGER_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function canWarehouseManagerAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  if (isWarehouseManagerForbiddenPath(pathname)) return false;
+
+  if (
+    pathname.startsWith('/procurement/suppliers') ||
+    pathname.startsWith('/procurement/factories') ||
+    pathname.startsWith('/procurement/transport-companies') ||
+    pathname.startsWith('/procurement/purchase-price-history') ||
+    pathname.startsWith('/procurement/orders/new')
+  ) {
+    return false;
+  }
+
+  if (
+    pathname.startsWith('/distribution/invoices') ||
+    pathname.startsWith('/distribution/branch-balances') ||
+    pathname.startsWith('/distribution/orders/new') ||
+    pathname.startsWith('/hq-warehouses/new')
+  ) {
+    return false;
+  }
+
+  if (pathname.includes('/procurement/orders/') && pathname.endsWith('/edit')) {
+    return false;
+  }
+
+  return WAREHOUSE_MANAGER_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
   '/change-password',
   '/inventory',
@@ -160,6 +250,7 @@ export function getDefaultRoute(role: Role) {
 export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasFullAccess(user)) return '/dashboard';
   if (isSupplyChainManagerUser(user)) return '/supply-chain';
+  if (isWarehouseManagerUser(user)) return '/inventory';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
@@ -181,6 +272,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/change-password') return true;
   if (isSupplyChainManagerUser(user)) {
     return canSupplyChainManagerAccessPath(pathname);
+  }
+  if (isWarehouseManagerUser(user)) {
+    return canWarehouseManagerAccessPath(pathname);
   }
   if (pathname === '/dashboard') return true;
   if (pathname === '/branch-dashboard') {

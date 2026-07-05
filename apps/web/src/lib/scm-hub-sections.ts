@@ -25,6 +25,28 @@ export const distributionHubSections: ModuleSectionLink[] = [
   { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
 ];
 
+export const warehouseManagerHqHubSections: ModuleSectionLink[] = [
+  { href: '/procurement/orders', labelKey: 'scm.hub.hqWarehouses.receiving' },
+  { href: '/hq-warehouses', labelKey: 'scm.hub.hqWarehouses.balances' },
+  { href: '/distribution/orders', labelKey: 'scm.hub.hqWarehouses.transfers' },
+  { href: '/hq-warehouses', labelKey: 'scm.hub.hqWarehouses.history' },
+];
+
+export const warehouseManagerDistributionHubSections: ModuleSectionLink[] = [
+  { href: '/distribution/picking-tasks', labelKey: 'wm.hub.distribution.pickingTasks' },
+  { href: '/distribution/picking-tasks', labelKey: 'wm.hub.distribution.packing' },
+  { href: '/distribution/orders', labelKey: 'wm.hub.distribution.shipping' },
+  { href: '/distribution/orders', labelKey: 'wm.hub.distribution.shippedOrders' },
+  { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
+];
+
+export const warehouseManagerProcurementHubSections: ModuleSectionLink[] = [
+  { href: '/procurement/orders', labelKey: 'scm.hub.hqWarehouses.receiving' },
+  { href: '/procurement/shipments', labelKey: 'wm.hub.procurement.receivedCargo' },
+  { href: '/procurement/orders', labelKey: 'scm.hub.procurement.cargoReceipts' },
+  { href: '/procurement/orders', labelKey: 'wm.hub.procurement.receivingActs' },
+];
+
 export const procurementHubSections: ModuleSectionLink[] = [
   { href: '/procurement/suppliers', labelKey: 'scm.hub.procurement.suppliers' },
   { href: '/procurement/factories', labelKey: 'scm.hub.procurement.factories' },

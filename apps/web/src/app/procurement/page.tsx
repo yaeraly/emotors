@@ -1,13 +1,31 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
-import { procurementHubSections } from '@/lib/scm-hub-sections';
+import {
+  procurementHubSections,
+  warehouseManagerProcurementHubSections,
+} from '@/lib/scm-hub-sections';
+import { apiFetch } from '@/lib/api';
+import { isSupplyChainManagerUser, isWarehouseManagerUser } from '@/lib/rbac';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProcurementPage() {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => null);
+  }, []);
+
+  const warehouseManagerView = isWarehouseManagerUser(user);
+  const supplyChainManagerView = isSupplyChainManagerUser(user);
+  const sections = warehouseManagerView
+    ? warehouseManagerProcurementHubSections
+    : procurementHubSections;
 
   return (
     <ProtectedShell>
@@ -16,12 +34,14 @@ export default function ProcurementPage() {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">EMOTORS OS</p>
           <h2 className="text-3xl font-bold text-slate-950">{t('procurement.title')}</h2>
         </div>
-        <ModuleSectionNav sections={procurementHubSections} />
-        <div className="grid gap-4 md:grid-cols-3">
-          <ProcurementCard href="/procurement/suppliers" title={t('procurement.suppliers.title')} action={t('procurement.suppliers.new')} />
-          <ProcurementCard href="/procurement/factories" title={t('procurement.factories.title')} action={t('procurement.factories.new')} />
-          <ProcurementCard href="/procurement/orders" title={t('procurement.orders.title')} action={t('procurement.orders.new')} />
-        </div>
+        <ModuleSectionNav sections={sections} />
+        {supplyChainManagerView ? (
+          <div className="grid gap-4 md:grid-cols-3">
+            <ProcurementCard href="/procurement/suppliers" title={t('procurement.suppliers.title')} action={t('procurement.suppliers.new')} />
+            <ProcurementCard href="/procurement/factories" title={t('procurement.factories.title')} action={t('procurement.factories.new')} />
+            <ProcurementCard href="/procurement/orders" title={t('procurement.orders.title')} action={t('procurement.orders.new')} />
+          </div>
+        ) : null}
       </section>
     </ProtectedShell>
   );

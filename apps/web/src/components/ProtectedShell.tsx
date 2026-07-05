@@ -5,9 +5,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
+import { ForbiddenView } from './ForbiddenView';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type ProtectedShellProps = {
@@ -20,6 +21,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
 
   useEffect(() => {
     if (!getToken()) {
@@ -34,9 +36,15 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           return;
         }
         if (!canAccessPath(currentUser, pathname)) {
+          if (isWarehouseManagerUser(currentUser) && isWarehouseManagerForbiddenPath(pathname)) {
+            setUser(currentUser);
+            setForbidden(true);
+            return;
+          }
           router.replace(getDefaultRouteForUser(currentUser));
           return;
         }
+        setForbidden(false);
         setUser(currentUser);
       })
       .catch(() => router.replace('/login'))
@@ -89,6 +97,32 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeSupplierClaims = hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
   const roleLabel = roleCodesForUser(user).join(', ');
   const supplyChainManagerView = isSupplyChainManagerUser(user);
+  const warehouseManagerView = isWarehouseManagerUser(user);
+
+  if (forbidden) {
+    return (
+      <div className="min-h-screen bg-slate-100">
+        <header className="border-b border-slate-200 bg-white">
+          <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-blue-600">{t('app.name')}</p>
+              <h1 className="text-xl font-bold text-slate-950">{t('app.name')}</h1>
+            </div>
+            <div className="flex items-center gap-4">
+              <NotificationBell />
+              <LanguageSwitcher />
+              <button onClick={logout} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" type="button">
+                {t('common.logout')}
+              </button>
+            </div>
+          </div>
+        </header>
+        <div className="mx-auto max-w-7xl px-4 py-6">
+          <ForbiddenView />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-100">
@@ -129,6 +163,13 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           </p>
           <nav className="space-y-2">
             {supplyChainManagerView ? (
+              <>
+                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
+                <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouse')}</Link>
+                <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
+                <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
+              </>
+            ) : warehouseManagerView ? (
               <>
                 <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
                 <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouse')}</Link>
