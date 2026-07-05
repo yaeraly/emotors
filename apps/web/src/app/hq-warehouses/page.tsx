@@ -3,10 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { ModuleSectionNav } from '@/components/ModuleSectionNav';
-import { hqWarehouseHubSections, warehouseManagerHqHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
-import { canManageHqWarehouse, canDeleteHqWarehouse, isWarehouseManagerUser } from '@/lib/rbac';
+import { canManageHqWarehouse, canDeleteHqWarehouse } from '@/lib/rbac';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -61,7 +59,6 @@ export default function HqWarehousesPage() {
   }
 
   const canDelete = canDeleteHqWarehouse(user);
-  const hubSections = isWarehouseManagerUser(user) ? warehouseManagerHqHubSections : hqWarehouseHubSections;
 
   async function confirmDelete(reason?: string) {
     if (!deleteTarget) return;
@@ -100,8 +97,6 @@ export default function HqWarehousesPage() {
             </Link>
           ) : null}
         </div>
-
-        <ModuleSectionNav sections={hubSections} />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}

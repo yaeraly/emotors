@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -72,7 +72,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canManageProducts = canManageProductCatalog(user);
   const canSeeService = hasPermission(user, 'service.manage');
   const canSeeHqWarehouse = canViewHqWarehouse(user);
-  const canManageHqWarehouses = canManageHqWarehouse(user);
   const canManageBranches = hasPermission(user, 'branches.manage');
   const canSeeKpi = hasPermission(user, 'kpi.view');
   const canSeeReports = hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
@@ -250,13 +249,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {t('phase2.title')}
               </p>
               {canSeeHqWarehouse ? (
-                <div className="rounded-xl px-3 py-2">
-                  <Link href="/hq-warehouses" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('hqWarehouse.title')}</Link>
-                  <div className="mt-2 space-y-1 pl-2">
-                    <Link href="/hq-warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('hqWarehouse.list')}</Link>
-                    {canManageHqWarehouses ? <Link href="/hq-warehouses/new" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('hqWarehouse.create')}</Link> : null}
-                  </div>
-                </div>
+                <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouse')}</Link>
               ) : null}
               {canManageBranches ? <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link> : null}
               {canSeeKpi ? <Link href="/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.kpi')}</Link> : null}
