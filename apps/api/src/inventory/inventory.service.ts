@@ -1530,10 +1530,12 @@ export class InventoryService {
     const absolute = Math.abs(quantity);
 
     if (type === StockMovementType.IN) return absolute;
+    if (type === StockMovementType.INVENTORY_ADJUSTMENT_IN) return absolute;
     if (
       type === StockMovementType.OUT ||
       type === StockMovementType.SALE ||
-      type === StockMovementType.SERVICE_USE
+      type === StockMovementType.SERVICE_USE ||
+      type === StockMovementType.INVENTORY_ADJUSTMENT_OUT
     ) {
       return -absolute;
     }

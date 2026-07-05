@@ -7,7 +7,16 @@ import { canCreateStockMovement } from '@/lib/rbac';
 import type { Product, ProductListResponse, StockMovement, StockMovementType, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
-const movementTypes: StockMovementType[] = ['IN', 'OUT', 'TRANSFER', 'ADJUSTMENT', 'SALE', 'SERVICE_USE'];
+const movementTypes: StockMovementType[] = [
+  'IN',
+  'OUT',
+  'TRANSFER',
+  'ADJUSTMENT',
+  'SALE',
+  'SERVICE_USE',
+  'INVENTORY_ADJUSTMENT_IN',
+  'INVENTORY_ADJUSTMENT_OUT',
+];
 
 export default function StockMovementsPage() {
   const { t } = useTranslation();
@@ -129,6 +138,8 @@ function movementTypeLabel(type: StockMovementType, t: (key: string) => string) 
     ADJUSTMENT: 'inventory.adjustment',
     SALE: 'inventory.sale',
     SERVICE_USE: 'inventory.serviceUse',
+    INVENTORY_ADJUSTMENT_IN: 'inventory.inventoryAdjustmentIn',
+    INVENTORY_ADJUSTMENT_OUT: 'inventory.inventoryAdjustmentOut',
   };
   return t(keys[type]);
 }

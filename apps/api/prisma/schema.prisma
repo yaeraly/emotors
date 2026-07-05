@@ -124,6 +124,25 @@ enum StockMovementType {
   SALE
   SERVICE_USE
   DEFECTIVE_IN
+  INVENTORY_ADJUSTMENT_IN
+  INVENTORY_ADJUSTMENT_OUT
+}
+
+enum InventoryCountType {
+  FULL_WAREHOUSE
+  CATEGORY
+  SHELF
+  ZONE
+  PRODUCT
+}
+
+enum InventoryCountStatus {
+  DRAFT
+  COUNTING
+  SUBMITTED
+  APPROVED
+  REJECTED
+  COMPLETED
 }
 
 enum BranchPurchaseRequestStatus {
@@ -681,6 +700,9 @@ model User {
   chinaDomesticTransportUnlockedProcurementOrders ProcurementOrder[] @relation("ProcurementChinaDomesticTransportUnlocker")
   createdTransportCompanies TransportCompany[] @relation("TransportCompanyCreator")
   createdSvhToHqTransports ProcurementSvhToHqTransport[] @relation("SvhToHqTransportCreator")
+  createdInventoryCounts InventoryCountSession[] @relation("InventoryCountCreator")
+  approvedInventoryCounts InventoryCountSession[] @relation("InventoryCountApprover")
+  rejectedInventoryCounts InventoryCountSession[] @relation("InventoryCountRejecter")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -995,6 +1017,7 @@ model Warehouse {
   partsConsumptions PartsConsumption[]
   procurementOrders ProcurementOrder[]
   procurementReceivings ProcurementGoodsReceiving[]
+  inventoryCountSessions InventoryCountSession[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -1015,6 +1038,7 @@ model Product {
   productCategory   ProductCategory @relation(fields: [categoryId], references: [id])
   name              String
   sku               String
+  barcode           String?
   category          String
   photoUrl          String?
   description       String?
@@ -1044,6 +1068,7 @@ model Product {
   distributionOrderItems BranchDistributionOrderItem[]
   goodsReceivingItems GoodsReceivingItem[]
   shortageReportItems ShortageReportItem[]
+  inventoryCountItems InventoryCountItem[]
   partsConsumptions PartsConsumption[]
   warranties Warranty[]
   procurementOrderItems ProcurementOrderItem[]
@@ -1056,6 +1081,7 @@ model Product {
   @@index([warehouseId])
   @@index([categoryId])
   @@index([category])
+  @@index([barcode])
   @@index([isActive])
   @@index([defaultSupplierId])
   @@index([defaultFactoryId])
@@ -1072,6 +1098,7 @@ model ProductCategory {
   createdById String?
   createdBy   User?     @relation("ProductCategoryCreator", fields: [createdById], references: [id])
   products    Product[]
+  inventoryCountSessions InventoryCountSession[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -1179,6 +1206,8 @@ model InventoryBalance {
   product       Product   @relation(fields: [productId], references: [id])
   quantity      Int       @default(0)
   reservedQuantity Int    @default(0)
+  shelf         String?
+  zone          String?
   averageCostKgs Decimal  @default(0) @db.Decimal(14, 2)
   landedCostKgs Decimal   @default(0) @db.Decimal(14, 2)
   totalValueKgs Decimal   @default(0) @db.Decimal(14, 2)
@@ -1189,6 +1218,75 @@ model InventoryBalance {
   @@index([branchId])
   @@index([warehouseId])
   @@index([productId])
+}
+
+model InventoryCountSession {
+  id               String               @id @default(cuid())
+  sessionNumber    String               @unique
+  warehouseId      String
+  warehouse        Warehouse            @relation(fields: [warehouseId], references: [id])
+  inventoryType    InventoryCountType
+  status           InventoryCountStatus @default(DRAFT)
+  categoryId       String?
+  category         ProductCategory?     @relation(fields: [categoryId], references: [id])
+  shelf            String?
+  zone             String?
+  filterCategoryId String?
+  filterShelf      String?
+  filterZone       String?
+  filterBrand      String?
+  filterSupplierId String?
+  filterProductIds Json?
+  notes            String?
+  createdById      String
+  createdBy        User                 @relation("InventoryCountCreator", fields: [createdById], references: [id])
+  approvedById     String?
+  approvedBy       User?                @relation("InventoryCountApprover", fields: [approvedById], references: [id])
+  rejectedById     String?
+  rejectedBy       User?                @relation("InventoryCountRejecter", fields: [rejectedById], references: [id])
+  rejectionReason  String?
+  startDate        DateTime?
+  finishDate       DateTime?
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  rejectedAt       DateTime?
+  completedAt      DateTime?
+  items            InventoryCountItem[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@index([warehouseId])
+  @@index([status])
+  @@index([inventoryType])
+  @@index([createdById])
+  @@index([approvedById])
+}
+
+model InventoryCountItem {
+  id                 String              @id @default(cuid())
+  sessionId          String
+  session            InventoryCountSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  productId          String
+  product            Product             @relation(fields: [productId], references: [id])
+  sku                String
+  productName        String
+  categoryName       String
+  shelf              String?
+  zone               String?
+  systemQuantity     Int
+  actualQuantity     Int?
+  differenceQuantity Int                 @default(0)
+  unitCostKgs        Decimal             @default(0) @db.Decimal(14, 2)
+  differenceValueKgs Decimal             @default(0) @db.Decimal(14, 2)
+  remark             String?
+  countedAt          DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  @@unique([sessionId, productId])
+  @@index([sessionId])
+  @@index([productId])
+  @@index([sku])
 }
 
 model KpiSnapshot {

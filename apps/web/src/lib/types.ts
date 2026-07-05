@@ -67,7 +67,91 @@ export type StockMovementType =
   | 'TRANSFER'
   | 'ADJUSTMENT'
   | 'SALE'
-  | 'SERVICE_USE';
+  | 'SERVICE_USE'
+  | 'INVENTORY_ADJUSTMENT_IN'
+  | 'INVENTORY_ADJUSTMENT_OUT';
+
+export type InventoryCountType =
+  | 'FULL_WAREHOUSE'
+  | 'CATEGORY'
+  | 'SHELF'
+  | 'ZONE'
+  | 'PRODUCT';
+
+export type InventoryCountStatus =
+  | 'DRAFT'
+  | 'COUNTING'
+  | 'SUBMITTED'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'COMPLETED';
+
+export type InventoryCountSummary = {
+  totalProducts: number;
+  countedProducts: number;
+  remainingProducts: number;
+  shortages: number;
+  overages: number;
+  matched: number;
+  totalDifferenceValueKgs: number;
+};
+
+export type InventoryCountItem = {
+  id: string;
+  sessionId: string;
+  productId: string;
+  product?: Pick<Product, 'id' | 'sku' | 'barcode'>;
+  sku: string;
+  productName: string;
+  categoryName: string;
+  shelf?: string | null;
+  zone?: string | null;
+  systemQuantity: number;
+  actualQuantity: number | null;
+  differenceQuantity: number;
+  unitCostKgs: number;
+  differenceValueKgs: number;
+  differenceType?: 'SHORTAGE' | 'OVERAGE' | 'MATCHED' | null;
+  remark?: string | null;
+  countedAt?: string | null;
+};
+
+export type InventoryCountSession = {
+  id: string;
+  sessionNumber: string;
+  warehouseId: string;
+  warehouse?: Warehouse;
+  inventoryType: InventoryCountType;
+  status: InventoryCountStatus;
+  categoryId?: string | null;
+  category?: ProductCategory | null;
+  shelf?: string | null;
+  zone?: string | null;
+  filterCategoryId?: string | null;
+  filterShelf?: string | null;
+  filterZone?: string | null;
+  filterBrand?: string | null;
+  filterSupplierId?: string | null;
+  filterProductIds?: string[] | null;
+  notes?: string | null;
+  createdById: string;
+  createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
+  approvedById?: string | null;
+  approvedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;
+  rejectedById?: string | null;
+  rejectedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;
+  rejectionReason?: string | null;
+  startDate?: string | null;
+  finishDate?: string | null;
+  submittedAt?: string | null;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  completedAt?: string | null;
+  items?: InventoryCountItem[];
+  summary?: InventoryCountSummary;
+  createdAt: string;
+  updatedAt: string;
+};
 export type SaleStatus =
   | 'DRAFT'
   | 'SENT_TO_CUSTOMER'
@@ -339,6 +423,7 @@ export type Product = {
   productCategory?: ProductCategory;
   name: string;
   sku: string;
+  barcode?: string | null;
   category: string;
   photoUrl?: string | null;
   description?: string | null;

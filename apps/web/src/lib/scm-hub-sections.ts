@@ -5,7 +5,7 @@ export const warehouseHubSections: ModuleSectionLink[] = [
   { href: '/inventory/categories', labelKey: 'scm.hub.warehouse.categories' },
   { href: '/warehouses', labelKey: 'scm.hub.warehouse.balances' },
   { href: '/stock-movements', labelKey: 'scm.hub.warehouse.movements' },
-  { href: '/inventory', labelKey: 'scm.hub.warehouse.stocktake' },
+  { href: '/inventory/count', labelKey: 'scm.hub.warehouse.stocktake' },
 ];
 
 export const hqWarehouseHubSections: ModuleSectionLink[] = [

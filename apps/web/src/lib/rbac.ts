@@ -446,6 +446,21 @@ export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'perm
   return hasPermission(user, 'inventory.manage');
 }
 
+export function canViewInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return (
+    hasFullAccess(user) ||
+    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'SUPPLY_CHAIN_MANAGER'])
+  );
+}
+
+export function canManageInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user) || hasRole(user, 'WAREHOUSE_MANAGER');
+}
+
+export function canApproveInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
 export function canManageProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return hasPermission(user, 'procurement.manage');
 }

@@ -1,0 +1,409 @@
+'use client';
+
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ProtectedShell } from '@/components/ProtectedShell';
+import { apiFetch } from '@/lib/api';
+import {
+  canApproveInventoryCount,
+  canManageInventoryCount,
+} from '@/lib/rbac';
+import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
+import { inventoryTypeLabel } from '@/lib/inventory-count';
+
+type SearchResult = {
+  productId: string;
+  sku: string;
+  barcode?: string | null;
+  productName: string;
+  categoryName: string;
+  shelf?: string | null;
+  zone?: string | null;
+  systemQuantity: number;
+  unitCostKgs: number;
+};
+
+export default function InventoryCountDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const { t } = useTranslation();
+  const [session, setSession] = useState<InventoryCountSession | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [search, setSearch] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
+  const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
+  const [pendingQty, setPendingQty] = useState<Record<string, string>>({});
+  const barcodeRef = useRef<HTMLInputElement>(null);
+
+  const canManage = canManageInventoryCount(currentUser);
+  const canApprove = canApproveInventoryCount(currentUser);
+
+  async function load() {
+    const [result, me] = await Promise.all([
+      apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}`),
+      apiFetch<User>('/auth/me'),
+    ]);
+    setSession(result);
+    setCurrentUser(me);
+    setPendingQty(
+      Object.fromEntries(
+        (result.items ?? []).map((item) => [
+          item.id,
+          item.actualQuantity !== null ? String(item.actualQuantity) : '',
+        ]),
+      ),
+    );
+  }
+
+  useEffect(() => {
+    void load().catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const filteredItems = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term || !session?.items) return session?.items ?? [];
+    return session.items.filter(
+      (item) =>
+        item.sku.toLowerCase().includes(term) ||
+        item.productName.toLowerCase().includes(term) ||
+        item.product?.barcode?.toLowerCase().includes(term),
+    );
+  }, [session?.items, search]);
+
+  async function startCounting() {
+    setError('');
+    try {
+      setSession(await apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}/start`, { method: 'POST' }));
+      setSuccess(t('inventoryCount.started'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function saveItem(item: InventoryCountItem) {
+    if (!session || session.status !== 'COUNTING' || !canManage) return;
+    const actualQuantity = Number(pendingQty[item.id] ?? '');
+    if (Number.isNaN(actualQuantity) || actualQuantity < 0) return;
+
+    setError('');
+    try {
+      await apiFetch(`/inventory-count/sessions/${id}/items/${item.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ actualQuantity }),
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function submitInventory() {
+    setError('');
+    try {
+      setSession(await apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}/submit`, { method: 'POST' }));
+      setSuccess(t('inventoryCount.submitted'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function approveInventory() {
+    setError('');
+    try {
+      setSession(await apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}/approve`, { method: 'POST' }));
+      setSuccess(t('inventoryCount.approved'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function rejectInventory(event: FormEvent) {
+    event.preventDefault();
+    setError('');
+    try {
+      setSession(
+        await apiFetch<InventoryCountSession>(`/inventory-count/sessions/${id}/reject`, {
+          method: 'POST',
+          body: JSON.stringify({ reason: rejectReason || undefined }),
+        }),
+      );
+      setSuccess(t('inventoryCount.rejected'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function handleBarcodeSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session) return;
+    const term = search.trim();
+    if (!term) return;
+
+    try {
+      const results = await apiFetch<SearchResult[]>(
+        `/inventory-count/search?warehouseId=${session.warehouseId}&q=${encodeURIComponent(term)}`,
+      );
+      const match = results.find((row) =>
+        session.items?.some((item) => item.productId === row.productId),
+      );
+      if (!match) {
+        setError(t('inventoryCount.productNotInSession'));
+        return;
+      }
+      const item = session.items?.find((entry) => entry.productId === match.productId);
+      if (item) {
+        setHighlightItemId(item.id);
+        setPendingQty((current) => ({ ...current, [item.id]: current[item.id] ?? '' }));
+        document.getElementById(`item-row-${item.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        barcodeRef.current?.focus();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  if (!session) {
+    return (
+      <ProtectedShell>
+        <p className="text-slate-500">{t('common.loading')}</p>
+      </ProtectedShell>
+    );
+  }
+
+  const summary = session.summary;
+  const isCounting = session.status === 'COUNTING';
+  const isDraft = session.status === 'DRAFT';
+  const isSubmitted = session.status === 'SUBMITTED';
+
+  return (
+    <ProtectedShell>
+      <section className="space-y-6">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+          <div>
+            <Link href="/inventory/count" className="text-sm font-semibold text-blue-600">
+              ← {t('inventoryCount.title')}
+            </Link>
+            <h2 className="mt-2 text-3xl font-bold text-slate-950">{session.sessionNumber}</h2>
+            <p className="mt-2 text-slate-500">
+              {session.warehouse?.name} · {inventoryTypeLabel(session.inventoryType, t)} ·{' '}
+              {t(`inventoryCount.status.${session.status}`)}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {isDraft && canManage ? (
+              <button
+                type="button"
+                onClick={() => void startCounting()}
+                className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white"
+              >
+                {t('inventoryCount.startCounting')}
+              </button>
+            ) : null}
+            {isCounting && canManage ? (
+              <button
+                type="button"
+                onClick={() => void submitInventory()}
+                className="rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white"
+              >
+                {t('inventoryCount.submit')}
+              </button>
+            ) : null}
+            {isSubmitted && canApprove ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void approveInventory()}
+                  className="rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white"
+                >
+                  {t('inventoryCount.approve')}
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
+
+        {summary ? (
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            <SummaryCard label={t('inventoryCount.totalProducts')} value={String(summary.totalProducts)} />
+            <SummaryCard label={t('inventoryCount.countedProducts')} value={String(summary.countedProducts)} />
+            <SummaryCard label={t('inventoryCount.remainingProducts')} value={String(summary.remainingProducts)} />
+            <SummaryCard label={t('inventoryCount.shortages')} value={String(summary.shortages)} tone="red" />
+            <SummaryCard label={t('inventoryCount.overages')} value={String(summary.overages)} tone="amber" />
+            <SummaryCard
+              label={t('inventoryCount.totalDifferenceValue')}
+              value={formatKgs(summary.totalDifferenceValueKgs)}
+            />
+          </div>
+        ) : null}
+
+        {isSubmitted && canApprove ? (
+          <form onSubmit={rejectInventory} className="flex flex-col gap-3 rounded-3xl border border-red-200 bg-red-50 p-4 sm:flex-row sm:items-end">
+            <label className="flex-1">
+              <span className="text-sm font-semibold text-red-800">{t('inventoryCount.rejectReason')}</span>
+              <input
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-red-200 px-3 py-2"
+              />
+            </label>
+            <button type="submit" className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white">
+              {t('inventoryCount.reject')}
+            </button>
+          </form>
+        ) : null}
+
+        {session.rejectionReason ? (
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {t('inventoryCount.rejectionReason')}: {session.rejectionReason}
+          </p>
+        ) : null}
+
+        <form onSubmit={handleBarcodeSearch} className="flex flex-col gap-3 sm:flex-row">
+          <input
+            ref={barcodeRef}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('inventoryCount.searchPlaceholder')}
+            className="flex-1 rounded-xl border border-slate-300 px-3 py-2"
+          />
+          <button type="submit" className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">
+            {t('common.search')}
+          </button>
+        </form>
+
+        <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-4 py-3">{t('inventory.name')}</th>
+                <th className="px-4 py-3">{t('inventory.sku')}</th>
+                <th className="px-4 py-3">{t('inventory.category')}</th>
+                <th className="px-4 py-3">{t('inventoryCount.shelf')}</th>
+                <th className="px-4 py-3">{t('inventoryCount.zone')}</th>
+                <th className="px-4 py-3">{t('inventoryCount.systemQuantity')}</th>
+                <th className="px-4 py-3">{t('inventoryCount.actualQuantity')}</th>
+                <th className="px-4 py-3">{t('inventoryCount.difference')}</th>
+                <th className="px-4 py-3">{t('inventoryCount.differenceValue')}</th>
+                {isCounting && canManage ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredItems.map((item) => (
+                <tr
+                  key={item.id}
+                  id={`item-row-${item.id}`}
+                  className={rowClass(item, highlightItemId === item.id)}
+                >
+                  <td className="px-4 py-3 font-medium">{item.productName}</td>
+                  <td className="px-4 py-3">{item.sku}</td>
+                  <td className="px-4 py-3">{item.categoryName}</td>
+                  <td className="px-4 py-3">{item.shelf ?? '—'}</td>
+                  <td className="px-4 py-3">{item.zone ?? '—'}</td>
+                  <td className="px-4 py-3">{item.systemQuantity}</td>
+                  <td className="px-4 py-3">
+                    {isCounting && canManage ? (
+                      <input
+                        type="number"
+                        min="0"
+                        value={pendingQty[item.id] ?? ''}
+                        onChange={(e) =>
+                          setPendingQty((current) => ({ ...current, [item.id]: e.target.value }))
+                        }
+                        className="w-24 rounded-lg border border-slate-300 px-2 py-1"
+                      />
+                    ) : (
+                      (item.actualQuantity ?? '—')
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <DifferenceBadge item={item} t={t} />
+                  </td>
+                  <td className="px-4 py-3">{formatKgs(item.differenceValueKgs)}</td>
+                  {isCounting && canManage ? (
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => void saveItem(item)}
+                        className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold"
+                      >
+                        {t('common.save')}
+                      </button>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </ProtectedShell>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'red' | 'amber';
+}) {
+  const toneClass =
+    tone === 'red'
+      ? 'border-red-100 bg-red-50'
+      : tone === 'amber'
+        ? 'border-amber-100 bg-amber-50'
+        : 'border-slate-200 bg-white';
+  return (
+    <div className={`rounded-2xl border p-4 shadow-sm ${toneClass}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-2 text-xl font-bold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function DifferenceBadge({ item, t }: { item: InventoryCountItem; t: (key: string) => string }) {
+  if (item.actualQuantity === null) return <span className="text-slate-400">—</span>;
+  if (item.differenceQuantity < 0) {
+    return (
+      <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-800">
+        {t('inventoryCount.shortage')} ({item.differenceQuantity})
+      </span>
+    );
+  }
+  if (item.differenceQuantity > 0) {
+    return (
+      <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+        {t('inventoryCount.overage')} (+{item.differenceQuantity})
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-800">
+      {t('inventoryCount.matched')}
+    </span>
+  );
+}
+
+function rowClass(item: InventoryCountItem, highlighted: boolean) {
+  if (highlighted) return 'bg-blue-50 ring-2 ring-blue-300';
+  if (item.actualQuantity === null) return '';
+  if (item.differenceQuantity < 0) return 'bg-red-50/60';
+  if (item.differenceQuantity > 0) return 'bg-amber-50/60';
+  return '';
+}
+
+function formatKgs(value: number | string | null | undefined) {
+  return `${Number(value ?? 0).toLocaleString('ru-RU', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })} сом`;
+}

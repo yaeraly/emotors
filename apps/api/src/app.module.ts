@@ -10,6 +10,7 @@ import { CustomersModule } from './customers/customers.module';
 import { DistributionModule } from './distribution/distribution.module';
 import { ExpansionModule } from './expansion/expansion.module';
 import { HqWarehouseModule } from './hq-warehouse/hq-warehouse.module';
+import { InventoryCountModule } from './inventory-count/inventory-count.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { InvestmentModule } from './investment/investment.module';
 import { KpiModule } from './kpi/kpi.module';
@@ -37,6 +38,7 @@ import { UsersModule } from './users/users.module';
     CustomersModule,
     DistributionModule,
     InventoryModule,
+    InventoryCountModule,
     HqWarehouseModule,
     SalesModule,
     ServiceModule,
