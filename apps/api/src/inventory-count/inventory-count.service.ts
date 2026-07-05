@@ -15,7 +15,7 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
-import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
+import { activeHqWarehouseWhere, inventoryBranchIdForWarehouse, isHqWarehouse } from '../warehouse/warehouse.util';
 import {
   BulkUpdateInventoryCountItemsDto,
   CreateInventoryCountDto,
@@ -288,11 +288,28 @@ export class InventoryCountService {
       }
 
       for (const item of session.items) {
-        const difference = item.differenceQuantity;
-        if (difference === 0) continue;
+        if (item.actualQuantity === null) continue;
+
+        const product = await tx.product.findUniqueOrThrow({
+          where: { id: item.productId },
+          select: { branchId: true },
+        });
+        const balanceBranchId = inventoryBranchIdForWarehouse(session.warehouse, product.branchId);
+        const balance = await tx.inventoryBalance.findUnique({
+          where: {
+            branchId_warehouseId_productId: {
+              branchId: balanceBranchId,
+              warehouseId: session.warehouseId,
+              productId: item.productId,
+            },
+          },
+        });
+        const currentQuantity = balance?.quantity ?? 0;
+        const delta = item.actualQuantity - currentQuantity;
+        if (delta === 0) continue;
 
         const movementType =
-          difference > 0
+          delta > 0
             ? StockMovementType.INVENTORY_ADJUSTMENT_IN
             : StockMovementType.INVENTORY_ADJUSTMENT_OUT;
 
@@ -300,7 +317,7 @@ export class InventoryCountService {
           productId: item.productId,
           warehouseId: session.warehouseId,
           type: movementType,
-          quantity: Math.abs(difference),
+          quantity: Math.abs(delta),
           unitCostKgs: Number(item.unitCostKgs),
           referenceType: 'INVENTORY_COUNT',
           referenceId: session.id,
@@ -310,11 +327,12 @@ export class InventoryCountService {
         await this.audit(tx, user, 'STOCK_ADJUSTED', session.id, {
           warehouseId: session.warehouseId,
           productId: item.productId,
-          oldValue: item.systemQuantity,
+          oldValue: currentQuantity,
           newValue: item.actualQuantity,
           extra: {
             sku: item.sku,
-            differenceQuantity: difference,
+            countedSystemQuantity: item.systemQuantity,
+            differenceQuantity: delta,
             movementType,
           },
         });
