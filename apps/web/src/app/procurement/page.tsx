@@ -1,7 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import {
@@ -138,11 +138,10 @@ export default function ProcurementPage() {
         <div className="grid gap-6 md:grid-cols-2">
           <ProcurementDashboardCard
             title={t('procurement.suppliers.title')}
-            href="/procurement/suppliers"
-            newHref="/procurement/suppliers/new"
+            listHref="/procurement/suppliers"
+            createHref="/procurement/suppliers/new"
             newLabel={t('procurement.suppliers.new')}
             showNew={canManage}
-            icon={<SupplierIcon />}
             stats={[
               { label: t('procurement.dashboard.totalSuppliers'), value: supplierStats.total },
               { label: t('procurement.dashboard.activeSuppliers'), value: supplierStats.active },
@@ -151,11 +150,10 @@ export default function ProcurementPage() {
 
           <ProcurementDashboardCard
             title={t('procurement.factories.title')}
-            href="/procurement/factories"
-            newHref="/procurement/factories/new"
+            listHref="/procurement/factories"
+            createHref="/procurement/factories/new"
             newLabel={t('procurement.factories.new')}
             showNew={canManage}
-            icon={<FactoryIcon />}
             stats={[
               { label: t('procurement.dashboard.totalFactories'), value: factoryStats.total },
               { label: t('procurement.dashboard.activeFactories'), value: factoryStats.active },
@@ -165,11 +163,10 @@ export default function ProcurementPage() {
           {canViewTransport ? (
             <ProcurementDashboardCard
               title={t('procurement.transportCompanies.title')}
-              href="/procurement/transport-companies"
-              newHref="/procurement/transport-companies/new"
+              listHref="/procurement/transport-companies"
+              createHref="/procurement/transport-companies/new"
               newLabel={t('procurement.transportCompanies.new')}
               showNew={canManageTransport}
-              icon={<TransportIcon />}
               stats={[
                 { label: t('procurement.dashboard.totalTransportCompanies'), value: transportStats.total },
                 { label: t('procurement.dashboard.activeTransportCompanies'), value: transportStats.active },
@@ -179,11 +176,10 @@ export default function ProcurementPage() {
 
           <ProcurementDashboardCard
             title={t('procurement.orders.title')}
-            href="/procurement/orders"
-            newHref="/procurement/orders/new"
+            listHref="/procurement/orders"
+            createHref="/procurement/orders/new"
             newLabel={t('procurement.orders.new')}
             showNew={canCreateOrder}
-            icon={<OrdersIcon />}
             stats={[
               { label: t('procurement.dashboard.totalOrders'), value: orderStats.total },
               { label: t('procurement.dashboard.draftOrders'), value: orderStats.draft },
@@ -198,31 +194,48 @@ export default function ProcurementPage() {
 
 function ProcurementDashboardCard({
   title,
-  href,
-  newHref,
+  listHref,
+  createHref,
   newLabel,
   showNew,
-  icon,
   stats,
 }: {
   title: string;
-  href: string;
-  newHref: string;
+  listHref: string;
+  createHref: string;
   newLabel: string;
   showNew: boolean;
-  icon: ReactNode;
   stats: Array<{ label: string; value: number }>;
 }) {
+  const router = useRouter();
+
+  function openList() {
+    router.push(listHref);
+  }
+
+  function openCreate(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    router.push(createHref);
+  }
+
+  function handleCardKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openList();
+    }
+  }
+
   return (
-    <article className="group relative flex min-h-[260px] flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-300 hover:shadow-md">
-      <Link href={href} className="absolute inset-0 rounded-3xl" aria-label={title} />
-
-      <div className="relative flex flex-1 flex-col">
-        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
-          {icon}
-        </div>
-
-        <h3 className="mt-5 text-2xl font-bold text-slate-950">{title}</h3>
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={openList}
+      onKeyDown={handleCardKeyDown}
+      aria-label={title}
+      className="group flex min-h-[260px] cursor-pointer flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-300 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+    >
+      <div className="flex flex-1 flex-col">
+        <h3 className="text-2xl font-bold text-slate-950">{title}</h3>
 
         <dl className="mt-5 space-y-2">
           {stats.map((stat) => (
@@ -234,57 +247,18 @@ function ProcurementDashboardCard({
         </dl>
 
         {showNew ? (
-          <div className="relative z-10 mt-auto pt-6">
-            <Link
-              href={newHref}
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+          <div className="mt-auto pt-6">
+            <button
+              type="button"
+              onClick={openCreate}
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
             >
               <span aria-hidden>+</span>
               {newLabel}
-            </Link>
+            </button>
           </div>
         ) : null}
       </div>
     </article>
-  );
-}
-
-function SupplierIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M4 20V10l8-5 8 5v10" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M9 20v-6h6v6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function FactoryIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M3 20h18" strokeLinecap="round" />
-      <path d="M6 20V9l4-2v13M14 20V6l4-2v16" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M10 12h1M10 15h1M18 10h1M18 13h1" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function TransportIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M3 8h11v8H3z" strokeLinejoin="round" />
-      <path d="M14 11h3l3 3v2h-6v-5z" strokeLinejoin="round" />
-      <circle cx="7" cy="18" r="2" />
-      <circle cx="17" cy="18" r="2" />
-    </svg>
-  );
-}
-
-function OrdersIcon() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-      <path d="M7 4h10l1 3H6l1-3z" strokeLinejoin="round" />
-      <path d="M6 7h12v13H6z" strokeLinejoin="round" />
-      <path d="M9 11h6M9 15h4" strokeLinecap="round" />
-    </svg>
   );
 }
