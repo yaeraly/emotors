@@ -35,8 +35,10 @@ export default function NewUserPage() {
     startDate: '',
     status: 'ACTIVE',
   });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([apiFetch<User>('/auth/me'), apiFetch<Branch[]>('/branches')])
       .then(async ([me, result]) => {
         const hqCreator = canCreateHqEmployee(me);
@@ -48,26 +50,37 @@ export default function NewUserPage() {
         setHqWarehouses(warehouseList);
         setForm((current) => ({
           ...current,
-          roles: hqCreator ? ['SUPPLY_CHAIN_MANAGER'] : current.roles,
+          roles: hqCreator ? ['ACCOUNTANT'] : current.roles,
           branchId: hqCreator ? '' : me.branchId ?? result[0]?.id ?? '',
         }));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
+      .finally(() => setLoading(false));
   }, [t]);
 
   const isHqCreator = canCreateHqEmployee(currentUser);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!currentUser) return;
     setError('');
     setTemporaryPassword('');
     try {
       const created = await apiFetch<User & { temporaryPassword?: string }>('/users', {
         method: 'POST',
         body: JSON.stringify({
-          ...form,
+          fullName: form.fullName,
+          employeeId: form.employeeId || undefined,
+          phone: form.phone || undefined,
+          email: form.email || undefined,
+          username: form.username || undefined,
+          roles: form.roles,
+          status: form.status,
+          department: form.department || undefined,
+          notes: form.notes || undefined,
+          hasLogin: form.hasLogin,
           userType: isHqCreator ? 'HQ' : 'BRANCH',
-          branchId: isHqCreator ? null : currentUser?.branchId ?? form.branchId,
+          branchId: isHqCreator ? null : currentUser.branchId ?? form.branchId,
           password: form.hasLogin ? form.password || undefined : undefined,
           salary: form.salary ? Number(form.salary) : undefined,
           startDate: form.startDate || undefined,
@@ -108,6 +121,9 @@ export default function NewUserPage() {
 
   return (
     <ProtectedShell>
+      {loading ? (
+        <p className="p-6 text-slate-500">{t('common.loading')}</p>
+      ) : (
       <form onSubmit={submit} className="space-y-6">
         <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('users.title')}</p><h2 className="text-3xl font-bold">{isHqCreator ? t('users.createHqEmployee') : t('users.create')}</h2></div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -115,7 +131,7 @@ export default function NewUserPage() {
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
           <Input label={t('crm.fullName')} value={form.fullName} onChange={(value) => setField('fullName', value)} required />
           <Input label={t('users.employeeId')} value={form.employeeId} onChange={(value) => setField('employeeId', value)} />
-          <Input label={t('users.phone')} value={form.phone} onChange={(value) => setField('phone', value)} required />
+          <Input label={t('users.phone')} value={form.phone} onChange={(value) => setField('phone', value)} required={!isHqCreator || !form.hasLogin} />
           {isHqCreator ? (
             <>
               <label className="flex items-center gap-3 rounded-2xl border border-slate-200 p-4 md:col-span-2">
@@ -153,7 +169,7 @@ export default function NewUserPage() {
           ) : (
             <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
           )}
-          <RoleSelector label={isHqCreator ? t('users.hqRoles') : t('users.role')} selectedRoles={form.roles} onChange={setRoles} roles={isHqCreator ? hqAssignableRoles : undefined} />
+          <RoleSelector label={isHqCreator ? t('users.hqRoles') : t('users.role')} selectedRoles={form.roles} onChange={setRoles} roles={isHqCreator ? hqAssignableRoles : undefined} singleSelect={isHqCreator || isBranchPanelUser(currentUser)} />
           {isHqCreator ? (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-semibold text-slate-800">{t('users.hqEmployee')}</p>
@@ -174,9 +190,10 @@ export default function NewUserPage() {
               onChange={(hqWarehouseIds) => setForm((current) => ({ ...current, hqWarehouseIds }))}
             />
           ) : null}
-          <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.create')}</button>
+          <button disabled={!currentUser} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-blue-300 md:col-span-2" type="submit">{t('common.create')}</button>
         </section>
       </form>
+      )}
     </ProtectedShell>
   );
 }

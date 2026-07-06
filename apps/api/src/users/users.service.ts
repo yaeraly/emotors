@@ -95,11 +95,16 @@ export class UsersService {
       dto.roles,
       dto.role ? [dto.role] : [userType === 'HQ' ? Role.SUPPLY_CHAIN_MANAGER : Role.MANAGER],
     );
-    this.validateUserTypeForCreate(user, userType, roles, dto.branchId);
+    const normalizedBranchId = this.normalizeOptionalString(dto.branchId);
+    this.validateUserTypeForCreate(user, userType, roles, normalizedBranchId);
     const primaryRole = this.primaryRole(roles, dto.role);
-    this.assertCanManage(user, dto.branchId, roles);
+    this.assertCanManage(user, normalizedBranchId ?? undefined, roles);
 
     const hasLogin = dto.hasLogin !== false;
+    const phone = this.normalizeOptionalString(dto.phone);
+    const employeeId = this.normalizeOptionalString(dto.employeeId);
+    const password = this.resolvePassword(dto.password);
+
     if (!hasLogin) {
       if (!this.hasFullAccess(user)) {
         throw new ForbiddenException('Only CEO can create employees without login');
@@ -113,11 +118,11 @@ export class UsersService {
       if (!dto.fullName?.trim()) {
         throw new BadRequestException('Full name is required');
       }
-      if (!dto.phone?.trim()) {
+      if (!phone) {
         throw new BadRequestException('Phone is required');
       }
     } else {
-      this.validatePassword(dto.password ?? TEMP_PASSWORD);
+      this.validatePassword(password);
     }
 
     const username = hasLogin ? String(dto.username ?? '').trim().toLowerCase() : null;
@@ -127,16 +132,18 @@ export class UsersService {
       ? dto.email?.trim().toLowerCase() || `${username}@emotors.local`
       : dto.email?.trim().toLowerCase() || `no-login+${Date.now()}@emotors.internal`;
 
-    const branchId = userType === 'HQ' ? null : this.resolveBranchId(user, dto.branchId, roles);
+    await this.assertUserIdentifiersAvailable({ email, username, phone, employeeId });
+
+    const branchId = userType === 'HQ' ? null : this.resolveBranchId(user, normalizedBranchId ?? undefined, roles);
     const passwordHash = hasLogin
-      ? await bcrypt.hash(dto.password ?? TEMP_PASSWORD, 12)
+      ? await bcrypt.hash(password, 12)
       : await bcrypt.hash(`${NO_LOGIN_PASSWORD_PLACEHOLDER}:${Date.now()}:${Math.random()}`, 12);
 
     const created = await this.prisma.user.create({
       data: {
-        fullName: dto.fullName,
-        employeeId: dto.employeeId,
-        phone: dto.phone,
+        fullName: dto.fullName?.trim(),
+        employeeId,
+        phone,
         email,
         username,
         passwordHash,
@@ -146,7 +153,7 @@ export class UsersService {
         hasLogin,
         department: dto.department?.trim() || null,
         notes: dto.notes?.trim() || null,
-        salary: dto.salary != null ? Number(dto.salary) : null,
+        salary: dto.salary != null && dto.salary !== '' ? Number(dto.salary) : null,
         startDate: dto.startDate ? new Date(dto.startDate) : null,
         mustChangePassword: hasLogin,
       },
@@ -183,7 +190,7 @@ export class UsersService {
       : [];
     return {
       ...this.enrichUser({ ...created, userRoles: synced }, assignments),
-      temporaryPassword: hasLogin && !dto.password ? TEMP_PASSWORD : undefined,
+      temporaryPassword: hasLogin && !dto.password?.trim() ? TEMP_PASSWORD : undefined,
     };
   }
 
@@ -744,6 +751,49 @@ export class UsersService {
     }
   }
 
+  private resolvePassword(password: unknown) {
+    const value = typeof password === 'string' ? password.trim() : '';
+    return value || TEMP_PASSWORD;
+  }
+
+  private normalizeOptionalString(value: unknown) {
+    if (value == null) return null;
+    const trimmed = String(value).trim();
+    return trimmed || null;
+  }
+
+  private async assertUserIdentifiersAvailable(input: {
+    email: string;
+    username: string | null;
+    phone: string | null;
+    employeeId: string | null;
+  }) {
+    const orConditions: Prisma.UserWhereInput[] = [{ email: input.email }];
+    if (input.username) orConditions.push({ username: input.username });
+    if (input.phone) orConditions.push({ phone: input.phone });
+    if (input.employeeId) orConditions.push({ employeeId: input.employeeId });
+
+    const existing = await this.prisma.user.findFirst({
+      where: { OR: orConditions },
+      select: { id: true, email: true, username: true, phone: true, employeeId: true },
+    });
+    if (!existing) return;
+
+    if (existing.email === input.email) {
+      throw new ConflictException('User with this email already exists');
+    }
+    if (input.username && existing.username === input.username) {
+      throw new ConflictException('User with this username already exists');
+    }
+    if (input.phone && existing.phone === input.phone) {
+      throw new ConflictException('User with this phone already exists');
+    }
+    if (input.employeeId && existing.employeeId === input.employeeId) {
+      throw new ConflictException('User with this employee ID already exists');
+    }
+    throw new ConflictException('User with the same login, email, or phone already exists');
+  }
+
   private async syncUserRoles(userId: string, roleCodes: Role[], actor: AuthUser) {
     const roles = await Promise.all(
       roleCodes.map((roleCode) =>
@@ -876,6 +926,11 @@ export class UsersService {
       Role.HQ_SALES_MANAGER,
       Role.HQ_CASHIER,
       Role.WAREHOUSE_MANAGER,
+      Role.FINANCE_MANAGER,
+      Role.ACCOUNTANT,
+      Role.MARKETING_MANAGER,
+      Role.CONTENT_CREATOR,
+      Role.ACADEMY_DIRECTOR,
       Role.PROCUREMENT_MANAGER,
       Role.MANAGER,
       Role.MASTER,

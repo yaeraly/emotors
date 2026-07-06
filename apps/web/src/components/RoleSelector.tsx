@@ -64,15 +64,21 @@ export function RoleSelector({
   selectedRoles,
   onChange,
   roles = assignableRoles,
+  singleSelect = false,
 }: {
   label: string;
   selectedRoles: Role[];
   onChange: (roles: Role[]) => void;
   roles?: Role[];
+  singleSelect?: boolean;
 }) {
   const { t } = useTranslation();
 
   function toggle(role: Role) {
+    if (singleSelect) {
+      onChange([role]);
+      return;
+    }
     if (selectedRoles.includes(role)) {
       const next = selectedRoles.filter((selectedRole) => selectedRole !== role);
       onChange(next.length ? next : selectedRoles);
@@ -90,8 +96,9 @@ export function RoleSelector({
             <input
               checked={selectedRoles.includes(role)}
               onChange={() => toggle(role)}
-              type="checkbox"
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              type={singleSelect ? 'radio' : 'checkbox'}
+              name={singleSelect ? 'hq-role' : undefined}
+              className={singleSelect ? 'h-4 w-4 border-slate-300 text-blue-600' : 'h-4 w-4 rounded border-slate-300 text-blue-600'}
             />
             <span>
               <span className="block">{roleLabel(role, t)}</span>
