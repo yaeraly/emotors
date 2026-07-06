@@ -201,6 +201,15 @@ export class HqWarehouseService {
   }
 
   async create(user: AuthUser, dto: CreateHqWarehouseDto) {
+    const roles = user.roles?.length ? user.roles : [user.role];
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && !roles.some((role) => role === Role.CEO || role === Role.OWNER)) {
+      await this.audit(user, 'HQ_WAREHOUSE_CREATE_DENIED', 'denied', {
+        attemptedName: dto.name,
+        attemptedCode: dto.code,
+        reason: 'HQ Warehouse Manager cannot create HQ warehouses',
+      });
+      throw new ForbiddenException('HQ Warehouse Manager cannot create HQ warehouses');
+    }
     this.assertCanManage(user);
     if (dto.branchId?.trim()) {
       throw new BadRequestException('HQ warehouse cannot be linked to a branch.');

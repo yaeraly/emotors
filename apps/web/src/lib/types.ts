@@ -87,7 +87,8 @@ export type InventoryCountStatus =
   | 'SUBMITTED'
   | 'APPROVED'
   | 'REJECTED'
-  | 'COMPLETED';
+  | 'COMPLETED'
+  | 'ARCHIVED';
 
 export type InventoryCountSummary = {
   totalProducts: number;

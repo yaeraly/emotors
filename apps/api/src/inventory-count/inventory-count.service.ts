@@ -48,6 +48,7 @@ export class InventoryCountService {
     this.assertCanView(user);
     const warehouseScope = this.buildWarehouseScope(user);
     const where: Prisma.InventoryCountSessionWhereInput = {
+      deletedAt: null,
       ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.search?.trim()
@@ -773,6 +774,80 @@ export class InventoryCountService {
           ...opts?.extra,
         },
       },
+    });
+  }
+
+  async remove(user: AuthUser, id: string, reason?: string) {
+    const roles = resolveUserRoles(user);
+    if (!hasAnyFullAccessRole(roles)) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'INVENTORY_DELETE_DENIED',
+          entity: 'InventoryCountSession',
+          entityId: id,
+          metadata: {
+            userId: user.id,
+            roles,
+            reason: 'Only CEO can delete or archive inventory sessions',
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      throw new ForbiddenException('Only CEO can delete or archive inventory sessions');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const session = await tx.inventoryCountSession.findUnique({
+        where: { id },
+        include: { warehouse: true, items: true },
+      });
+      if (!session || session.deletedAt) throw new NotFoundException('Inventory count session not found');
+
+      const stockMovements = await tx.stockMovement.count({
+        where: { referenceType: 'INVENTORY_COUNT', referenceId: id },
+      });
+
+      const canHardDelete =
+        (session.status === InventoryCountStatus.DRAFT || session.status === InventoryCountStatus.COUNTING) &&
+        stockMovements === 0;
+
+      const oldValue = { ...session };
+
+      if (canHardDelete) {
+        await tx.inventoryCountSession.delete({ where: { id } });
+        await this.audit(tx, user, 'INVENTORY_DELETED', id, {
+          warehouseId: session.warehouseId,
+          oldValue,
+          newValue: { deleted: true },
+          extra: { reason: reason?.trim() || null },
+        });
+        return { success: true, archived: false };
+      }
+
+      const trimmedReason = reason?.trim();
+      if (!trimmedReason) {
+        throw new BadRequestException('Reason is required when archiving an inventory session');
+      }
+
+      const archived = await tx.inventoryCountSession.update({
+        where: { id },
+        data: {
+          status: InventoryCountStatus.ARCHIVED,
+          deletedAt: new Date(),
+        },
+        include: this.sessionInclude(),
+      });
+
+      await this.audit(tx, user, 'INVENTORY_ARCHIVED', id, {
+        warehouseId: session.warehouseId,
+        oldValue,
+        newValue: archived,
+        extra: { reason: trimmedReason },
+      });
+
+      return { success: true, archived: true, session: this.toSessionResponse(archived) };
     });
   }
 

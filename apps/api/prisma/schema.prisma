@@ -146,6 +146,7 @@ enum InventoryCountStatus {
   APPROVED
   REJECTED
   COMPLETED
+  ARCHIVED
 }
 
 enum BranchPurchaseRequestStatus {
@@ -735,6 +736,7 @@ model User {
   createdInventoryCounts InventoryCountSession[] @relation("InventoryCountCreator")
   approvedInventoryCounts InventoryCountSession[] @relation("InventoryCountApprover")
   rejectedInventoryCounts InventoryCountSession[] @relation("InventoryCountRejecter")
+  createdProcurementDifferenceReports ProcurementDifferenceReport[] @relation("ProcurementDifferenceReportCreator")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1049,6 +1051,7 @@ model Warehouse {
   partsConsumptions PartsConsumption[]
   procurementOrders ProcurementOrder[]
   procurementReceivings ProcurementGoodsReceiving[]
+  procurementDifferenceReports ProcurementDifferenceReport[]
   inventoryCountSessions InventoryCountSession[]
   hqManagerAssignments HqWarehouseManagerAssignment[]
   createdAt DateTime  @default(now())
@@ -1309,6 +1312,7 @@ model InventoryCountSession {
   approvedAt       DateTime?
   rejectedAt       DateTime?
   completedAt      DateTime?
+  deletedAt        DateTime?
   items            InventoryCountItem[]
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
@@ -2923,9 +2927,13 @@ model ProcurementGoodsReceivingItem {
 model ProcurementDifferenceReport {
   id                 String                 @id @default(cuid())
   reportNumber       String                 @unique
-  receivingId        String
+  receivingId        String?
   procurementOrderId String
   procurementOrder   ProcurementOrder       @relation(fields: [procurementOrderId], references: [id])
+  warehouseId        String?
+  warehouse          Warehouse?             @relation(fields: [warehouseId], references: [id])
+  createdById        String?
+  createdBy          User?                  @relation("ProcurementDifferenceReportCreator", fields: [createdById], references: [id])
   type               ShortageReportItemType
   status             ShortageReportStatus   @default(OPEN)
   productId          String
@@ -2943,6 +2951,8 @@ model ProcurementDifferenceReport {
 
   @@index([receivingId])
   @@index([procurementOrderId])
+  @@index([warehouseId])
+  @@index([createdById])
   @@index([type])
   @@index([status])
 }

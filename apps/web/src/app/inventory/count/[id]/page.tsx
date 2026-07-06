@@ -1,12 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canApproveInventoryCount, canManageInventoryCountForWarehouse } from '@/lib/rbac';
+import { canApproveInventoryCount, canDeleteInventoryCount, canManageInventoryCountForWarehouse } from '@/lib/rbac';
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
@@ -25,6 +26,7 @@ type SearchResult = {
 
 export default function InventoryCountDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { t } = useTranslation();
   const [session, setSession] = useState<InventoryCountSession | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -34,10 +36,41 @@ export default function InventoryCountDetailPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState<Record<string, string>>({});
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteRequireReason, setDeleteRequireReason] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
   const canManage = canManageInventoryCountForWarehouse(currentUser, session?.warehouseId);
   const canApprove = canApproveInventoryCount(currentUser);
+  const canDelete = canDeleteInventoryCount(currentUser);
+
+  async function confirmDelete(reason?: string) {
+    if (!session) return;
+    setDeleting(true);
+    setError('');
+    try {
+      const result = await apiFetch<{ archived?: boolean }>(`/inventory-count/sessions/${session.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+      setDeleteModalOpen(false);
+      if (result.archived) {
+        setSuccess(t('inventoryCount.archivedSuccess'));
+        await load();
+      } else {
+        router.replace('/inventory/count');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('common.error');
+      if (message.toLowerCase().includes('reason is required')) {
+        setDeleteRequireReason(true);
+      }
+      setError(message);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   async function load() {
     const [result, me] = await Promise.all([
@@ -253,8 +286,30 @@ export default function InventoryCountDetailPage() {
                 </button>
               </>
             ) : null}
+            {canDelete ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteRequireReason(!['DRAFT', 'COUNTING'].includes(session.status));
+                  setDeleteModalOpen(true);
+                }}
+                className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 font-semibold text-red-700"
+              >
+                {t('common.delete')}
+              </button>
+            ) : null}
           </div>
         </div>
+
+        <DeleteConfirmModal
+          open={deleteModalOpen}
+          title={t('common.deleteConfirmTitle')}
+          message={t('common.deleteConfirmMessage')}
+          requireReason={deleteRequireReason}
+          loading={deleting}
+          onClose={() => setDeleteModalOpen(false)}
+          onConfirm={confirmDelete}
+        />
 
         <WarehouseTopNav />
 

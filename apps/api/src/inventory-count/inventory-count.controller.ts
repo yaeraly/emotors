@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -13,6 +13,7 @@ import {
 } from './dto/inventory-count.dto';
 import { InventoryCountQueryDto } from './dto/inventory-count-query.dto';
 import { InventoryCountService } from './inventory-count.service';
+import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
 
 const INVENTORY_VIEW_ROLES = [
   Role.OWNER,
@@ -111,5 +112,15 @@ export class InventoryCountController {
     @Body() dto: RejectInventoryCountDto,
   ) {
     return this.service.reject(user, id, dto);
+  }
+
+  @Delete('sessions/:id')
+  @Roles(Role.OWNER, Role.CEO)
+  remove(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: DeleteArchiveDto,
+  ) {
+    return this.service.remove(user, id, dto?.reason);
   }
 }

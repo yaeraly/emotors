@@ -610,6 +610,15 @@ export function canReceiveProcurementToHq(user: Pick<User, 'role' | 'roles' | 'p
   return hasRole(user, 'WAREHOUSE_MANAGER') && hasPermission(user, 'procurement.receive');
 }
 
+export function canViewChinaReceiving(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || canViewProcurement(user) || canReceiveProcurementToHq(user);
+}
+
+export function canDeleteInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
 export function canAssignHqWarehouseManager(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return hasFullAccess(user);
 }

@@ -38,6 +38,11 @@ import { buildProcurementLandedCostInputs } from '../procurement/transport-logis
 import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
+import {
+  buildChinaReceivingValidation,
+  isChinaReceivingTaskVisible,
+  resolveChinaReceivingListStatus,
+} from './china-receiving.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -439,12 +444,16 @@ export class OperationsService {
           }
         }
         if (item.difference !== 0) {
+          const differenceType =
+            item.difference < 0 ? ShortageReportItemType.SHORTAGE : ShortageReportItemType.OVERAGE;
           await tx.procurementDifferenceReport.create({
             data: {
               reportNumber: `PDR-${Date.now()}-${item.id.slice(-4)}`,
               receivingId: receiving.id,
               procurementOrderId: order.id,
-              type: item.difference < 0 ? ShortageReportItemType.SHORTAGE : ShortageReportItemType.OVERAGE,
+              warehouseId: hqWarehouseId,
+              createdById: user.id,
+              type: differenceType,
               productId: item.productId,
               sku: item.sku,
               productName: item.productName,
@@ -455,12 +464,22 @@ export class OperationsService {
               note: receivedMap.get(item.id)?.note ?? receivedMap.get(item.productId)?.note,
             },
           });
-          await this.auditInTx(tx, user, 'HQ', 'SHORTAGE_CREATED', 'ProcurementOrder', order.id, {
-            procurementItemId: item.id,
-            sku: item.sku,
-            expectedQuantity: item.quantity,
-            receivedQuantity: item.receivedQuantity,
-          });
+          await this.auditInTx(
+            tx,
+            user,
+            'HQ',
+            item.difference < 0 ? 'RECEIVING_SHORTAGE_CREATED' : 'RECEIVING_OVERAGE_CREATED',
+            'ProcurementOrder',
+            order.id,
+            {
+              procurementItemId: item.id,
+              sku: item.sku,
+              expectedQuantity: item.quantity,
+              receivedQuantity: item.receivedQuantity,
+              warehouseId: hqWarehouseId,
+              receivingId: receiving.id,
+            },
+          );
         }
       }
 
@@ -538,6 +557,284 @@ export class OperationsService {
       include: { items: true },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async listChinaReceivingTasks(user: AuthUser) {
+    const roles = resolveUserRoles(user);
+    const isCeo = hasAnyFullAccessRole(roles);
+    const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+    const isWm = roles.includes(Role.WAREHOUSE_MANAGER);
+
+    if (!isCeo && !isScm && !canReceiveProcurementToHq(user)) {
+      throw new ForbiddenException('You do not have access to China goods receiving');
+    }
+
+    let warehouseIds: string[] | null = null;
+    if (isWm && !isCeo) {
+      warehouseIds = await this.assignmentService.getActiveAssignedWarehouseIds(user.id);
+      if (!warehouseIds.length) return [];
+    }
+
+    const orders = await this.prisma.procurementOrder.findMany({
+      where: {
+        deletedAt: null,
+        status: { notIn: [ProcurementOrderStatus.DRAFT, ProcurementOrderStatus.CANCELLED] },
+        ...(warehouseIds ? { hqWarehouseId: { in: warehouseIds } } : {}),
+      },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        factory: { select: { id: true, name: true } },
+        hqWarehouse: { select: { id: true, name: true, code: true, isActive: true } },
+        items: true,
+        svhToHqTransport: { include: { transportCompany: true } },
+        differenceReports: { where: { deletedAt: null } },
+        receivings: {
+          where: { deletedAt: null },
+          include: { items: true },
+        },
+      },
+      orderBy: [{ hqStockMovementCreatedAt: 'asc' }, { actualArrivalDate: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    const attachmentCounts = await this.prisma.fileAttachment.groupBy({
+      by: ['entityId'],
+      where: {
+        entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+        deletedAt: null,
+        entityId: { in: orders.map((order) => order.id) },
+      },
+      _count: { _all: true },
+    });
+    const attachmentCountMap = new Map(attachmentCounts.map((row) => [row.entityId, row._count._all]));
+
+    const tasks = [];
+    for (const order of orders) {
+      const enriched = { ...order, cargoAttachmentCount: attachmentCountMap.get(order.id) ?? 0 };
+      if (!isChinaReceivingTaskVisible(enriched)) continue;
+      if (isWm && !isCeo) {
+        try {
+          await this.assignmentService.assertAssignedToWarehouse(user.id, order.hqWarehouseId);
+        } catch {
+          continue;
+        }
+      }
+
+      const expectedQuantity = order.items.reduce((sum, item) => sum + item.quantity, 0);
+      const receivedQuantity = order.hqStockMovementCreatedAt
+        ? order.items.reduce((sum, item) => sum + (item.receivedQuantity ?? 0), 0)
+        : 0;
+      const validation = buildChinaReceivingValidation(enriched);
+
+      tasks.push({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        supplier: order.supplier,
+        factory: order.factory,
+        hqWarehouse: order.hqWarehouse,
+        status: resolveChinaReceivingListStatus(enriched),
+        procurementStatus: order.status,
+        expectedQuantity,
+        receivedQuantity,
+        arrivalDate: order.actualArrivalDate ?? order.estimatedArrivalDate ?? order.svhToHqTransport?.arrivalDate,
+        canReceive: validation.canReceiveToHq && !order.hqStockMovementCreatedAt && isWm && !isScm,
+        canViewOnly: isScm && !isCeo,
+        validation,
+      });
+    }
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'CHINA_RECEIVING_MENU_OPENED',
+        entity: 'ProcurementOrder',
+        entityId: 'list',
+        metadata: {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          warehouseIds,
+          count: tasks.length,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    return tasks;
+  }
+
+  async getChinaReceivingTask(user: AuthUser, orderId: string) {
+    const order = await this.loadChinaReceivingOrder(orderId);
+    await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
+
+    const attachmentCount = await this.prisma.fileAttachment.count({
+      where: {
+        entityId: order.id,
+        entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+        deletedAt: null,
+      },
+    });
+
+    const enriched = { ...order, cargoAttachmentCount: attachmentCount };
+    const validation = buildChinaReceivingValidation(enriched);
+    const roles = resolveUserRoles(user);
+    const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles);
+    const isWm = canReceiveProcurementToHq(user);
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'GOODS_RECEIVING_OPENED',
+        entity: 'ProcurementOrder',
+        entityId: order.id,
+        metadata: {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          warehouseId: order.hqWarehouseId,
+          procurementOrderId: order.id,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    return {
+      ...order,
+      receivingStatus: resolveChinaReceivingListStatus(enriched),
+      validation,
+      canReceive: validation.canReceiveToHq && !order.hqStockMovementCreatedAt && isWm && !isScm,
+      canCreateAct: isWm && !isScm && !order.hqStockMovementCreatedAt,
+      differenceReports: order.differenceReports,
+      lineItems: order.items.map((item) => ({
+        id: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        productName: item.productName,
+        orderedQuantity: item.quantity,
+        expectedQuantity: item.quantity,
+        actualReceivedQuantity: item.receivedQuantity,
+        difference: (item.receivedQuantity ?? item.quantity) - item.quantity,
+      })),
+    };
+  }
+
+  async createReceivingDifferenceActs(user: AuthUser, orderId: string, dto: any) {
+    const roles = resolveUserRoles(user);
+    if (roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      throw new ForbiddenException('Supply Chain Manager cannot create receiving acts');
+    }
+    if (!canReceiveProcurementToHq(user) && !hasAnyFullAccessRole(roles)) {
+      throw new ForbiddenException('Only assigned HQ Warehouse Manager can create receiving acts');
+    }
+
+    const order = await this.loadChinaReceivingOrder(orderId);
+    await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
+    if (order.hqStockMovementCreatedAt) {
+      throw new BadRequestException('Goods have already been received for this procurement order');
+    }
+
+    const warehouseId = dto.warehouseId ?? order.hqWarehouseId;
+    const items = Array.isArray(dto.items) ? dto.items : [];
+    if (!items.length) throw new BadRequestException('At least one difference act item is required');
+
+    return this.prisma.$transaction(async (tx) => {
+      const created = [];
+      for (const item of items) {
+        const orderItem = order.items.find(
+          (row) => row.id === item.procurementItemId || row.productId === item.productId,
+        );
+        if (!orderItem) continue;
+
+        const expectedQty = Number(item.expectedQuantity ?? orderItem.quantity);
+        const actualQty = Number(item.actualQuantity ?? orderItem.quantity);
+        const differenceQty = Math.abs(actualQty - expectedQty);
+        if (differenceQty === 0) continue;
+
+        let differenceType = item.differenceType as ShortageReportItemType;
+        if (!differenceType) {
+          differenceType = actualQty < expectedQty ? ShortageReportItemType.SHORTAGE : ShortageReportItemType.OVERAGE;
+        }
+
+        const report = await tx.procurementDifferenceReport.create({
+          data: {
+            reportNumber: `PDR-${Date.now()}-${orderItem.id.slice(-4)}`,
+            procurementOrderId: order.id,
+            warehouseId,
+            createdById: user.id,
+            type: differenceType,
+            productId: orderItem.productId,
+            sku: orderItem.sku,
+            productName: orderItem.productName,
+            expectedQuantity: expectedQty,
+            receivedQuantity: actualQty,
+            differenceQuantity: differenceQty,
+            shortageReason: item.reason ?? item.shortageReason,
+            note: item.note,
+          },
+        });
+        created.push(report);
+
+        const auditAction =
+          differenceType === ShortageReportItemType.SHORTAGE
+            ? 'RECEIVING_SHORTAGE_CREATED'
+            : differenceType === ShortageReportItemType.OVERAGE
+              ? 'RECEIVING_OVERAGE_CREATED'
+              : 'RECEIVING_DIFFERENCE_ACT_CREATED';
+
+        await this.auditInTx(tx, user, 'HQ', auditAction, 'ProcurementDifferenceReport', report.id, {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          warehouseId,
+          procurementOrderId: order.id,
+          receivingId: null,
+          productId: orderItem.productId,
+          expectedQty,
+          actualQty,
+          differenceQty,
+          differenceType,
+          reason: item.reason ?? item.note,
+        });
+      }
+
+      if (!created.length) {
+        throw new BadRequestException('No quantity differences found for act creation');
+      }
+
+      await this.auditInTx(tx, user, 'HQ', 'RECEIVING_DIFFERENCE_ACT_CREATED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        roles: user.roles ?? [user.role],
+        warehouseId,
+        procurementOrderId: order.id,
+        createdActIds: created.map((row) => row.id),
+      });
+
+      return created;
+    });
+  }
+
+  private async loadChinaReceivingOrder(orderId: string) {
+    const order = await this.prisma.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+      include: {
+        supplier: true,
+        factory: true,
+        hqWarehouse: true,
+        items: true,
+        svhToHqTransport: { include: { transportCompany: true } },
+        differenceReports: { where: { deletedAt: null } },
+        receivings: { where: { deletedAt: null }, include: { items: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Procurement order not found');
+    return order;
+  }
+
+  private async assertChinaReceivingAccess(user: AuthUser, warehouseId: string) {
+    const roles = resolveUserRoles(user);
+    if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) return;
+    if (!canReceiveProcurementToHq(user)) {
+      throw new ForbiddenException('You do not have access to China goods receiving');
+    }
+    await this.assignmentService.assertAssignedToWarehouse(user.id, warehouseId);
   }
 
   reservations(user: AuthUser) {
