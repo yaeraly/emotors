@@ -6,7 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { distributionHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
-import { canCreateDistributionOrder } from '@/lib/rbac';
+import { canManageBranchPurchaseRequests } from '@/lib/rbac';
 import type { Branch, Product, ProductListResponse, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -113,7 +113,7 @@ export default function BranchPurchaseRequestsPage() {
     }
   }
 
-  const canManage = canCreateDistributionOrder(user);
+  const canManage = canManageBranchPurchaseRequests(user);
 
   return (
     <ProtectedShell>

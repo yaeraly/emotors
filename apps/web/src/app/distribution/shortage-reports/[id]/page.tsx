@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCreateDistributionOrder } from '@/lib/rbac';
+import { canManageDistributionOrders } from '@/lib/rbac';
 import type { ShortageReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -58,7 +58,7 @@ export default function ShortageReportDetailPage() {
     }
   }
 
-  const canResolve = canCreateDistributionOrder(user);
+  const canResolve = canManageDistributionOrders(user);
 
   return (
     <ProtectedShell>

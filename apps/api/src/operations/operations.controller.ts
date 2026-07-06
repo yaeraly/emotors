@@ -16,7 +16,7 @@ export class OperationsController {
   constructor(private readonly service: OperationsService) {}
 
   @Get('branch-purchase-requests')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER)
   branchPurchaseRequests(@CurrentUser() user: AuthUser) {
     return this.service.branchPurchaseRequests(user);
   }
@@ -28,19 +28,19 @@ export class OperationsController {
   }
 
   @Post('branch-purchase-requests/:id/approve')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
   approveBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.reviewBranchPurchaseRequest(user, id, BranchPurchaseRequestStatus.APPROVED);
   }
 
   @Post('branch-purchase-requests/:id/reject')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
   rejectBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.reviewBranchPurchaseRequest(user, id, BranchPurchaseRequestStatus.REJECTED);
   }
 
   @Post('branch-purchase-requests/:id/convert')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
   convertBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
     return this.service.convertBranchPurchaseRequest(user, id, dto);
   }

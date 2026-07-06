@@ -16,49 +16,96 @@ import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 import { DistributionService } from './distribution.service';
 
+const DISTRIBUTION_VIEW_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.HQ_SALES_MANAGER,
+  Role.HQ_CASHIER,
+  Role.WAREHOUSE_MANAGER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.FINANCE_MANAGER,
+  Role.ACCOUNTANT,
+] as const;
+
+const DISTRIBUTION_MANAGE_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.HQ_SALES_MANAGER,
+] as const;
+
+const DISTRIBUTION_DISPATCH_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.WAREHOUSE_MANAGER,
+] as const;
+
+const DISTRIBUTION_INVOICE_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.FRANCHISE_OWNER,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.HQ_SALES_MANAGER,
+  Role.HQ_CASHIER,
+  Role.WAREHOUSE_MANAGER,
+  Role.ACCOUNTANT,
+  Role.FINANCE_MANAGER,
+  Role.CASHIER,
+] as const;
+
+const DISTRIBUTION_PAYMENT_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.FRANCHISE_OWNER,
+  Role.HQ_CASHIER,
+  Role.ACCOUNTANT,
+  Role.FINANCE_MANAGER,
+  Role.CASHIER,
+] as const;
+
 @Controller('distribution')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class DistributionController {
   constructor(private readonly distributionService: DistributionService) {}
 
   @Post('orders')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateDistributionOrderDto) {
     return this.distributionService.create(user, dto);
   }
 
   @Get('orders')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   list(@CurrentUser() user: AuthUser, @Query() query: DistributionOrderQueryDto) {
     return this.distributionService.list(user, query);
   }
 
   @Get('orders/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   detail(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.detail(user, id);
   }
 
   @Put('orders/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES)
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CreateDistributionOrderDto) {
     return this.distributionService.update(user, id, dto);
   }
 
   @Post('orders/:id/approve')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.approve(user, id);
   }
 
   @Post('orders/:id/send-invoice')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES)
   sendInvoice(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.sendInvoice(user, id);
   }
 
   @Post('orders/:id/send-to-warehouse')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES)
   sendToWarehouse(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -68,43 +115,43 @@ export class DistributionController {
   }
 
   @Get('picking-tasks')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   pickingTasks(@CurrentUser() user: AuthUser, @Query() query: PickingTaskQueryDto) {
     return this.distributionService.listPickingTasks(user, query);
   }
 
   @Get('picking-tasks/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   pickingTask(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.pickingTask(user, id);
   }
 
   @Post('orders/:id/pick')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_DISPATCH_ROLES)
   pick(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.pick(user, id);
   }
 
   @Post('orders/:id/pack')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_DISPATCH_ROLES)
   pack(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.pack(user, id);
   }
 
   @Post('orders/:id/send')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_DISPATCH_ROLES)
   send(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.send(user, id);
   }
 
   @Post('orders/:id/cancel')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES, ...DISTRIBUTION_DISPATCH_ROLES)
   cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.cancel(user, id);
   }
 
   @Post('orders/:id/receive')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
   receive(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -114,37 +161,37 @@ export class DistributionController {
   }
 
   @Post('orders/:id/complete')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_DISPATCH_ROLES)
   complete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.complete(user, id);
   }
 
   @Get('receivings')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   receivings(@CurrentUser() user: AuthUser, @Query() query: DistributionReportQueryDto) {
     return this.distributionService.receivings(user, query);
   }
 
   @Get('receivings/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   receiving(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.receiving(user, id);
   }
 
   @Get('shortage-reports')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   shortageReports(@CurrentUser() user: AuthUser, @Query() query: DistributionReportQueryDto) {
     return this.distributionService.shortageReports(user, query);
   }
 
   @Get('shortage-reports/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(...DISTRIBUTION_VIEW_ROLES)
   shortageReport(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.shortageReport(user, id);
   }
 
   @Post('shortage-reports/:id/resolve')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES)
   resolveShortageReport(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -154,19 +201,19 @@ export class DistributionController {
   }
 
   @Get('invoices')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(...DISTRIBUTION_INVOICE_ROLES)
   invoices(@CurrentUser() user: AuthUser, @Query() query: BranchInvoiceQueryDto) {
     return this.distributionService.invoices(user, query);
   }
 
   @Get('invoices/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(...DISTRIBUTION_INVOICE_ROLES)
   invoice(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.invoice(user, id);
   }
 
   @Post('invoices/:id/payments')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(...DISTRIBUTION_PAYMENT_ROLES)
   addInvoicePayment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -176,13 +223,13 @@ export class DistributionController {
   }
 
   @Get('branches/:branchId/account-balance')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(...DISTRIBUTION_INVOICE_ROLES)
   branchAccountBalance(@CurrentUser() user: AuthUser, @Param('branchId') branchId: string) {
     return this.distributionService.branchAccountBalance(user, branchId);
   }
 
   @Get('branch-balances')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.ACCOUNTANT, Role.FINANCE_MANAGER, Role.CASHIER)
+  @Roles(...DISTRIBUTION_INVOICE_ROLES)
   branchBalances(@CurrentUser() user: AuthUser) {
     return this.distributionService.branchBalances(user);
   }

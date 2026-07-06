@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canViewDistribution, canManageBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -80,7 +80,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeMarketing = hasPermission(user, 'marketing.manage');
   const canSeeProcurement = canViewProcurement(user);
   const canManageProcurementOrders = hasPermission(user, 'procurement.manage');
-  const canSeeDistribution = hasPermission(user, 'distribution.manage');
+  const canSeeDistribution = canViewDistribution(user);
+  const canManageDistribution = hasPermission(user, 'distribution.manage');
   const canSeeFinance = hasPermission(user, 'finance.view');
   const canSeeInvestment = hasFullAccess(user);
   const canSeeExpansion = hasFullAccess(user);
@@ -97,6 +98,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const roleLabel = roleCodesForUser(user).join(', ');
   const supplyChainManagerView = isSupplyChainManagerUser(user);
   const warehouseManagerView = isWarehouseManagerUser(user);
+  const hqSalesManagerView = isHqSalesManagerUser(user);
+  const hqCashierView = isHqCashierUser(user);
   const canSeeBranchWarehouses = canViewBranchWarehouses(user);
   const canSeeProductMaster = canViewProductMaster(user);
 
@@ -177,6 +180,27 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeProcurement ? (
                   <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
                 ) : null}
+                {canSeeDistribution ? (
+                  <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
+                ) : null}
+              </>
+            ) : hqSalesManagerView ? (
+              <>
+                <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.orders')}</Link>
+                <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.branchPurchaseRequests')}</Link>
+                <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
+                {canSeeBranchWarehouses ? (
+                  <Link href="/branch-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.branchWarehouses')}</Link>
+                ) : null}
+                {canSeeProductMaster ? (
+                  <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
+                ) : null}
+              </>
+            ) : hqCashierView ? (
+              <>
+                <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
+                <Link href="/distribution/branch-balances" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.branchBalances')}</Link>
+                <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.orders')}</Link>
               </>
             ) : warehouseManagerView ? (
               <>
@@ -280,6 +304,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/distribution/orders" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('distribution.title')}</Link>
                   <div className="mt-2 space-y-1 pl-2">
                     <Link href="/distribution/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.orders')}</Link>
+                    {canManageDistribution ? (
+                      <Link href="/distribution/orders/new" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.newOrder')}</Link>
+                    ) : null}
                     <Link href="/distribution/receivings" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.receiveGoods')}</Link>
                     <Link href="/distribution/shortage-reports" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.shortageReports')}</Link>
                     <Link href="/distribution/invoices" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.invoices')}</Link>
@@ -290,7 +317,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeeProcurement ? (
                 <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.title')}</Link>
               ) : null}
-              {canSeeProcurement && canManageProcurementOrders ? (
+              {canManageBranchPurchaseRequests(user) ? (
                 <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.branchPurchaseRequests')}</Link>
               ) : null}
               {canSeeProcurement && canSeeSupplierClaims ? (

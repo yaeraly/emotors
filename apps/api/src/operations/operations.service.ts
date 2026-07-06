@@ -21,7 +21,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { canManageBranchPurchaseRequests, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
 import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
@@ -53,7 +53,7 @@ export class OperationsService {
     return this.prisma.branchPurchaseRequest.findMany({
       where: {
         deletedAt: null,
-        ...(this.canManageSupplyChain(user) ? {} : { branchId: user.branchId }),
+        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
       },
       include: { items: true },
       orderBy: { createdAt: 'desc' },
@@ -89,7 +89,7 @@ export class OperationsService {
   }
 
   async reviewBranchPurchaseRequest(user: AuthUser, id: string, status: BranchPurchaseRequestStatus) {
-    if (!this.canManageSupplyChain(user)) throw new ForbiddenException('Forbidden resource');
+    if (!canManageBranchPurchaseRequests(user)) throw new ForbiddenException('Forbidden resource');
     if (status !== BranchPurchaseRequestStatus.APPROVED && status !== BranchPurchaseRequestStatus.REJECTED) {
       throw new BadRequestException('Request can only be approved or rejected');
     }
@@ -103,7 +103,7 @@ export class OperationsService {
   }
 
   async convertBranchPurchaseRequest(user: AuthUser, id: string, dto: any) {
-    if (!this.canManageSupplyChain(user)) throw new ForbiddenException('Forbidden resource');
+    if (!canManageBranchPurchaseRequests(user)) throw new ForbiddenException('Forbidden resource');
     return this.prisma.$transaction(async (tx) => {
       const request = await tx.branchPurchaseRequest.findFirst({
         where: { id, deletedAt: null },
@@ -932,6 +932,17 @@ export class OperationsService {
 
   private canManageSupplyChain(user: AuthUser) {
     return this.hasAnyRole(user, [Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER]);
+  }
+
+  private canViewAllBranchPurchaseRequests(user: AuthUser) {
+    return this.hasAnyRole(user, [
+      Role.OWNER,
+      Role.CEO,
+      Role.SYSTEM_ADMINISTRATOR,
+      Role.SUPPLY_CHAIN_MANAGER,
+      Role.HQ_SALES_MANAGER,
+      Role.WAREHOUSE_MANAGER,
+    ]);
   }
 
   private canManageWarehouse(user: AuthUser) {

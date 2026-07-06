@@ -17,6 +17,8 @@ export const HQ_EMPLOYEE_ROLES: Role[] = [
   Role.CONTENT_CREATOR,
   Role.ACADEMY_DIRECTOR,
   Role.SYSTEM_ADMINISTRATOR,
+  Role.HQ_SALES_MANAGER,
+  Role.HQ_CASHIER,
 ];
 
 export const HQ_ROLES: Role[] = [
@@ -56,6 +58,7 @@ export const ALL_PERMISSION_CODES = [
   'procurement.view',
   'procurement.receive',
   'distribution.manage',
+  'distribution.view',
   'academy.manage',
   'marketing.manage',
   'analytics.view',
@@ -84,8 +87,18 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'inventory.view',
     'procurement.manage',
     'procurement.view',
-    'distribution.manage',
+    'distribution.view',
     'products.manage',
+  ],
+  HQ_SALES_MANAGER: [
+    'distribution.manage',
+    'distribution.view',
+    'inventory.view',
+    'products.view',
+  ],
+  HQ_CASHIER: [
+    'distribution.view',
+    'payments.manage',
   ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
@@ -316,8 +329,38 @@ export function canDeleteHqGoodsReceiving(user: Pick<AuthUser, 'role' | 'roles' 
 }
 
 export function canCreateDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canManageDistributionOrders(user);
+}
+
+export function canManageDistributionOrders(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
-  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_SALES_MANAGER);
+}
+
+export function canViewDistribution(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return (
+    canManageDistributionOrders(user) ||
+    canDispatchFromHq(user) ||
+    userHasAnyPermission(user, ['distribution.manage', 'distribution.view'])
+  );
+}
+
+export function canRecordHqDistributionPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.HQ_CASHIER) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.ACCOUNTANT)
+  );
+}
+
+export function canRecordDistributionPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canRecordHqDistributionPayment(user) || userHasPermission(user, 'payments.manage');
+}
+
+export function canManageBranchPurchaseRequests(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canManageDistributionOrders(user);
 }
 
 export function canDispatchFromHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

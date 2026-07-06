@@ -20,6 +20,7 @@ const ALL_PERMISSIONS = [
   'procurement.view',
   'procurement.receive',
   'distribution.manage',
+  'distribution.view',
   'academy.manage',
   'marketing.manage',
   'analytics.view',
@@ -48,8 +49,18 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'inventory.view',
     'procurement.manage',
     'procurement.view',
-    'distribution.manage',
+    'distribution.view',
     'products.manage',
+  ],
+  HQ_SALES_MANAGER: [
+    'distribution.manage',
+    'distribution.view',
+    'inventory.view',
+    'products.view',
+  ],
+  HQ_CASHIER: [
+    'distribution.view',
+    'payments.manage',
   ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
@@ -110,7 +121,19 @@ export function isSupplyChainManagerUser(user: Pick<User, 'role' | 'roles'> | nu
 export function isWarehouseManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   if (!user || hasFullAccess(user)) return false;
   if (hasRole(user, 'SUPPLY_CHAIN_MANAGER')) return false;
+  if (hasRole(user, 'HQ_SALES_MANAGER')) return false;
+  if (hasRole(user, 'HQ_CASHIER')) return false;
   return hasRole(user, 'WAREHOUSE_MANAGER');
+}
+
+export function isHqSalesManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user || hasFullAccess(user)) return false;
+  return hasRole(user, 'HQ_SALES_MANAGER');
+}
+
+export function isHqCashierUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user || hasFullAccess(user)) return false;
+  return hasRole(user, 'HQ_CASHIER');
 }
 
 const WAREHOUSE_MANAGER_FORBIDDEN_PREFIXES = [
@@ -219,7 +242,43 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
 
 function canSupplyChainManagerAccessPath(pathname: string) {
   if (pathname === '/') return false;
+  if (pathname.startsWith('/distribution/orders/new')) return false;
   return SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+const HQ_SALES_MANAGER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/distribution',
+  '/branch-purchase-requests',
+  '/branch-warehouses',
+  '/inventory',
+  '/products',
+  '/product-master',
+  '/alerts',
+  '/notifications',
+];
+
+function canHqSalesManagerAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  return HQ_SALES_MANAGER_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+const HQ_CASHIER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/distribution',
+  '/alerts',
+  '/notifications',
+];
+
+function canHqCashierAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  if (pathname.startsWith('/distribution/orders/new')) return false;
+  if (pathname.startsWith('/distribution/picking-tasks')) return false;
+  return HQ_CASHIER_ALLOWED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
 }
@@ -235,6 +294,8 @@ const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
 export function getDefaultRoute(role: Role) {
   if (role === 'OWNER' || role === 'CEO' || role === 'SYSTEM_ADMINISTRATOR') return '/dashboard';
   if (role === 'SUPPLY_CHAIN_MANAGER') return '/procurement';
+  if (role === 'HQ_SALES_MANAGER') return '/distribution';
+  if (role === 'HQ_CASHIER') return '/distribution/invoices';
   if (role === 'WAREHOUSE_MANAGER') return '/inventory';
   if (role === 'FINANCE_MANAGER' || role === 'ACCOUNTANT') return '/finance';
   if (role === 'FRANCHISE_OWNER') return '/dashboard';
@@ -253,6 +314,8 @@ export function getDefaultRoute(role: Role) {
 export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasFullAccess(user)) return '/dashboard';
   if (isSupplyChainManagerUser(user)) return '/supply-chain';
+  if (isHqSalesManagerUser(user)) return '/distribution';
+  if (isHqCashierUser(user)) return '/distribution/invoices';
   if (isWarehouseManagerUser(user)) return '/inventory';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
@@ -275,6 +338,12 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/change-password') return true;
   if (isSupplyChainManagerUser(user)) {
     return canSupplyChainManagerAccessPath(pathname);
+  }
+  if (isHqSalesManagerUser(user)) {
+    return canHqSalesManagerAccessPath(pathname);
+  }
+  if (isHqCashierUser(user)) {
+    return canHqCashierAccessPath(pathname);
   }
   if (isWarehouseManagerUser(user)) {
     return canWarehouseManagerAccessPath(pathname);
@@ -318,7 +387,7 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (pathname.startsWith('/procurement')) return canViewProcurement(user);
   if (pathname.startsWith('/branch-purchase-requests')) {
-    return hasPermission(user, 'procurement.manage') || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
+    return canManageBranchPurchaseRequests(user) || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage') || hasPermission(user, 'distribution.view');
   }
   if (pathname.startsWith('/reservations')) return hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/warehouse-release')) return hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
@@ -327,13 +396,15 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/supplier-claims')) return hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
   if (pathname.startsWith('/alerts') || pathname.startsWith('/notifications')) return true;
   if (pathname.startsWith('/distribution/invoices')) {
-    return hasPermission(user, 'distribution.manage') || hasPermission(user, 'finance.view') || hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
+    return canViewDistribution(user) || hasPermission(user, 'finance.view') || hasPermission(user, 'payments.manage');
   }
-  if (pathname.startsWith('/distribution/orders/new')) return canCreateDistributionOrder(user);
+  if (pathname.startsWith('/distribution/orders/new')) return canManageDistributionOrders(user);
   if (pathname.startsWith('/distribution')) {
-    return hasPermission(user, 'distribution.manage') || hasPermission(user, 'finance.view');
+    return canViewDistribution(user) || hasPermission(user, 'finance.view');
   }
-  if (pathname.startsWith('/supply-chain')) return hasPermission(user, 'distribution.manage');
+  if (pathname.startsWith('/supply-chain')) {
+    return hasPermission(user, 'distribution.view') || hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage');
+  }
   if (pathname.startsWith('/tax')) return hasPermission(user, 'finance.view');
   if (pathname.startsWith('/payroll') || pathname.startsWith('/commissions') || pathname.startsWith('/compensation')) {
     return hasPermission(user, 'payroll.manage');
@@ -383,6 +454,7 @@ export function canViewBranchWarehouses(user: Pick<User, 'role' | 'roles' | 'per
   return (
     hasFullAccess(user) ||
     hasRole(user, 'SUPPLY_CHAIN_MANAGER') ||
+    hasRole(user, 'HQ_SALES_MANAGER') ||
     hasRole(user, 'FRANCHISE_OWNER') ||
     hasRole(user, 'WAREHOUSE_OPERATOR') ||
     hasRole(user, 'MANAGER')
@@ -625,8 +697,42 @@ export function canEditProcurementOrderItemsInWindow(
   return canEditProcurementOrderItems(user);
 }
 
-export function canCreateDistributionOrder(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+export function canCreateDistributionOrder(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canManageDistributionOrders(user);
+}
+
+export function canManageDistributionOrders(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'HQ_SALES_MANAGER');
+}
+
+export function canViewDistribution(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return (
+    canManageDistributionOrders(user) ||
+    canDispatchFromHq(user) ||
+    hasPermission(user, 'distribution.manage') ||
+    hasPermission(user, 'distribution.view')
+  );
+}
+
+export function canRecordHqDistributionPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return (
+    hasFullAccess(user) ||
+    hasRole(user, 'HQ_CASHIER') ||
+    hasRole(user, 'FINANCE_MANAGER') ||
+    hasRole(user, 'ACCOUNTANT')
+  );
+}
+
+export function canRecordDistributionPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return canRecordHqDistributionPayment(user) || hasPermission(user, 'payments.manage');
+}
+
+export function canManageBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canManageDistributionOrders(user);
 }
 
 export function canDispatchFromHq(user: Pick<User, 'role' | 'roles'> | null | undefined) {

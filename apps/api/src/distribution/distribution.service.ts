@@ -20,7 +20,15 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isFullAccessRole, canCreateDistributionOrder, canDispatchFromHq, hasAnyFullAccessRole, userHasPermission } from '../rbac/rbac';
+import {
+  canCreateDistributionOrder,
+  canDispatchFromHq,
+  canManageDistributionOrders,
+  canRecordDistributionPayment,
+  canRecordHqDistributionPayment,
+  canViewDistribution,
+  hasAnyFullAccessRole,
+} from '../rbac/rbac';
 import {
   activeHqWarehouseWhere,
   hqWarehouseWhere,
@@ -50,7 +58,7 @@ export class DistributionService {
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
     if (!canCreateDistributionOrder(user)) {
-      throw new ForbiddenException('Only Supply Chain Manager can create distribution orders');
+      throw new ForbiddenException('Недостаточно прав для создания заказа распределения');
     }
     return this.prisma.$transaction(async (tx) => {
       await this.validateBranchesAndWarehouses(tx, dto);
@@ -77,13 +85,16 @@ export class DistributionService {
   }
 
   async list(user: AuthUser, query: DistributionOrderQueryDto) {
+    if (!canViewDistribution(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра заказов распределения');
+    }
     const where: Prisma.BranchDistributionOrderWhereInput = {
       deletedAt: null,
-      ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+      ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
     };
 
     if (query.branchId) {
-      if (!this.canManage(user) && query.branchId !== user.branchId) {
+      if (!this.canAccessAllDistributionBranches(user) && query.branchId !== user.branchId) {
         throw new ForbiddenException('Forbidden branch');
       }
       where.branchId = query.branchId;
@@ -108,11 +119,17 @@ export class DistributionService {
   }
 
   async detail(user: AuthUser, id: string) {
+    if (!canViewDistribution(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра заказа распределения');
+    }
     const order = await this.getAccessibleOrder(user, id);
     return this.toResponse(order);
   }
 
   update(user: AuthUser, id: string, dto: CreateDistributionOrderDto) {
+    if (!canManageDistributionOrders(user)) {
+      throw new ForbiddenException('Недостаточно прав для редактирования заказа распределения');
+    }
     return this.prisma.$transaction(async (tx) => {
       const order = await this.getAccessibleOrderInTx(tx, user, id);
       if (order.status !== BranchDistributionOrderStatus.DRAFT) {
@@ -140,15 +157,15 @@ export class DistributionService {
   }
 
   approve(user: AuthUser, id: string) {
-    if (!canCreateDistributionOrder(user)) {
-      throw new ForbiddenException('Only Supply Chain Manager can approve distribution orders');
+    if (!canManageDistributionOrders(user)) {
+      throw new ForbiddenException('Недостаточно прав для утверждения заказа распределения');
     }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: {
           id,
           deletedAt: null,
-          ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
         },
         include: { items: true, sourceWarehouse: true },
       });
@@ -216,8 +233,8 @@ export class DistributionService {
   }
 
   sendInvoice(user: AuthUser, id: string) {
-    if (!canCreateDistributionOrder(user)) {
-      throw new ForbiddenException('Only Supply Chain Manager can send invoices');
+    if (!canManageDistributionOrders(user)) {
+      throw new ForbiddenException('Недостаточно прав для отправки счёта');
     }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
@@ -250,8 +267,8 @@ export class DistributionService {
   }
 
   sendToWarehouse(user: AuthUser, id: string, dto: SendToWarehouseDto) {
-    if (!canCreateDistributionOrder(user)) {
-      throw new ForbiddenException('Only Supply Chain Manager can send orders to warehouse');
+    if (!canManageDistributionOrders(user)) {
+      throw new ForbiddenException('Недостаточно прав для отправки на склад');
     }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
@@ -314,8 +331,8 @@ export class DistributionService {
   }
 
   listPickingTasks(user: AuthUser, query: PickingTaskQueryDto) {
-    if (!this.canManage(user)) {
-      throw new ForbiddenException('Forbidden resource');
+    if (!canViewDistribution(user) && !canDispatchFromHq(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра заданий на комплектацию');
     }
     return this.prisma.hqWarehousePickingTask.findMany({
       where: {
@@ -338,8 +355,8 @@ export class DistributionService {
   }
 
   pickingTask(user: AuthUser, id: string) {
-    if (!this.canManage(user)) {
-      throw new ForbiddenException('Forbidden resource');
+    if (!canViewDistribution(user) && !canDispatchFromHq(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра задания на комплектацию');
     }
     return this.prisma.hqWarehousePickingTask.findUniqueOrThrow({
       where: { id },
@@ -427,7 +444,7 @@ export class DistributionService {
         where: {
           id,
           deletedAt: null,
-          ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
         },
         include: {
           items: true,
@@ -519,6 +536,9 @@ export class DistributionService {
   }
 
   cancel(user: AuthUser, id: string) {
+    if (!canManageDistributionOrders(user) && !canDispatchFromHq(user)) {
+      throw new ForbiddenException('Недостаточно прав для отмены заказа распределения');
+    }
     return this.prisma.$transaction(async (tx) => {
       const order = await this.getAccessibleOrderInTx(tx, user, id);
       if (
@@ -581,7 +601,7 @@ export class DistributionService {
         where: {
           id,
           deletedAt: null,
-          ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
         },
         include: { items: true },
       });
@@ -756,7 +776,7 @@ export class DistributionService {
     return this.prisma.goodsReceiving.findMany({
       where: {
         deletedAt: null,
-        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
         ...(query.branchId ? { branchId: query.branchId } : {}),
       },
       include: this.receivingInclude(),
@@ -769,7 +789,7 @@ export class DistributionService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
       },
       include: this.receivingInclude(),
     });
@@ -782,7 +802,7 @@ export class DistributionService {
     return this.prisma.shortageReport.findMany({
       where: {
         deletedAt: null,
-        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
         ...(query.branchId ? { branchId: query.branchId } : {}),
       },
       include: this.shortageInclude(),
@@ -795,7 +815,7 @@ export class DistributionService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
       },
       include: this.shortageInclude(),
     });
@@ -804,8 +824,8 @@ export class DistributionService {
   }
 
   async resolveShortageReport(user: AuthUser, id: string, dto: ResolveShortageDto) {
-    if (!canCreateDistributionOrder(user)) {
-      throw new ForbiddenException('Only Supply Chain Manager can resolve shortages');
+    if (!canManageDistributionOrders(user)) {
+      throw new ForbiddenException('Недостаточно прав для обработки отчёта о нехватке');
     }
     const report = await this.shortageReport(user, id);
     if (report.status === ShortageReportStatus.RESOLVED || report.status === ShortageReportStatus.CLOSED) {
@@ -871,10 +891,13 @@ export class DistributionService {
   }
 
   invoices(user: AuthUser, query: BranchInvoiceQueryDto) {
+    if (!canViewDistribution(user) && !canRecordHqDistributionPayment(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра счетов');
+    }
     this.assertQueryBranchAccessForFinance(user, query.branchId);
     const where: Prisma.BranchInvoiceWhereInput = {
       deletedAt: null,
-      ...(this.canManageFinance(user) ? {} : { branchId: user.branchId }),
+      ...(this.canAccessAllDistributionBranches(user) || canRecordHqDistributionPayment(user) ? {} : { branchId: user.branchId }),
       ...(query.branchId ? { branchId: query.branchId } : {}),
     };
     if (query.status) where.status = query.status;
@@ -896,11 +919,14 @@ export class DistributionService {
   }
 
   async invoice(user: AuthUser, id: string) {
+    if (!canViewDistribution(user) && !canRecordHqDistributionPayment(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра счёта');
+    }
     const invoice = await this.prisma.branchInvoice.findFirst({
       where: {
         id,
         deletedAt: null,
-        ...(this.canManageFinance(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) || canRecordHqDistributionPayment(user) ? {} : { branchId: user.branchId }),
       },
       include: this.invoiceInclude(),
     });
@@ -909,12 +935,15 @@ export class DistributionService {
   }
 
   async addInvoicePayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
+    if (!canRecordDistributionPayment(user)) {
+      throw new ForbiddenException('Недостаточно прав для записи оплаты');
+    }
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.branchInvoice.findFirst({
         where: {
           id,
           deletedAt: null,
-          ...(this.canManageFinance(user) ? {} : { branchId: user.branchId }),
+          ...(this.canAccessAllDistributionBranches(user) || canRecordHqDistributionPayment(user) ? {} : { branchId: user.branchId }),
         },
       });
       if (!invoice) throw new NotFoundException('Branch invoice not found');
@@ -1254,7 +1283,7 @@ export class DistributionService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
       },
       include: this.receivingInclude(),
     });
@@ -1362,7 +1391,7 @@ export class DistributionService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
       },
       include: this.include(),
     });
@@ -1375,33 +1404,23 @@ export class DistributionService {
       where: {
         id,
         deletedAt: null,
-        ...(this.canManage(user) ? {} : { branchId: user.branchId }),
+        ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
       },
     });
     if (!order) throw new NotFoundException('Distribution order not found');
     return order;
   }
 
-  private canManage(user: AuthUser) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    return roles.some((role) =>
-      isFullAccessRole(role) ||
-      role === Role.SUPPLY_CHAIN_MANAGER ||
-      role === Role.WAREHOUSE_MANAGER
-    );
+  private canAccessAllDistributionBranches(user: AuthUser) {
+    return canViewDistribution(user) || canRecordHqDistributionPayment(user);
   }
 
   private canManageFinance(user: AuthUser) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    return (
-      this.canManage(user) ||
-      roles.some((role) => role === Role.ACCOUNTANT || role === Role.FINANCE_MANAGER || role === Role.CASHIER) ||
-      userHasPermission(user, 'payments.manage')
-    );
+    return this.canAccessAllDistributionBranches(user) || canRecordDistributionPayment(user);
   }
 
   private assertQueryBranchAccess(user: AuthUser, branchId?: string) {
-    if (!this.canManage(user) && branchId && branchId !== user.branchId) {
+    if (!this.canAccessAllDistributionBranches(user) && branchId && branchId !== user.branchId) {
       throw new ForbiddenException('Forbidden branch');
     }
   }

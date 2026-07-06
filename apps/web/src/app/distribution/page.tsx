@@ -5,10 +5,13 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import {
   distributionHubSections,
+  hqCashierDistributionHubSections,
+  hqSalesDistributionHubSections,
+  scmDistributionHubSections,
   warehouseManagerDistributionHubSections,
 } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
-import { isWarehouseManagerUser } from '@/lib/rbac';
+import { isHqCashierUser, isHqSalesManagerUser, isSupplyChainManagerUser, isWarehouseManagerUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -22,7 +25,13 @@ export default function DistributionPage() {
 
   const sections = isWarehouseManagerUser(user)
     ? warehouseManagerDistributionHubSections
-    : distributionHubSections;
+    : isHqSalesManagerUser(user)
+      ? hqSalesDistributionHubSections
+      : isHqCashierUser(user)
+        ? hqCashierDistributionHubSections
+        : isSupplyChainManagerUser(user)
+          ? scmDistributionHubSections
+          : distributionHubSections;
 
   return (
     <ProtectedShell>

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCreateDistributionOrder } from '@/lib/rbac';
+import { canManageDistributionOrders } from '@/lib/rbac';
 import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -61,7 +61,7 @@ export default function DistributionOrdersPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('distribution.title')}</p>
             <h2 className="text-3xl font-bold text-slate-950">{t('distribution.orders')}</h2>
           </div>
-          {canCreateDistributionOrder(currentUser) ? (
+          {canManageDistributionOrders(currentUser) ? (
             <Link href="/distribution/orders/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
               {t('distribution.newOrder')}
             </Link>

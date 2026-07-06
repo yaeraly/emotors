@@ -25,6 +25,27 @@ export const distributionHubSections: ModuleSectionLink[] = [
   { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
 ];
 
+export const scmDistributionHubSections: ModuleSectionLink[] = [
+  { href: '/distribution/orders', labelKey: 'scm.hub.distribution.shipmentOrders' },
+  { href: '/distribution/invoices', labelKey: 'distribution.invoices' },
+  { href: '/distribution/receivings', labelKey: 'scm.hub.distribution.branchReceiving' },
+  { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
+];
+
+export const hqSalesDistributionHubSections: ModuleSectionLink[] = [
+  { href: '/branch-purchase-requests', labelKey: 'scm.hub.distribution.branchOrders' },
+  { href: '/distribution/orders', labelKey: 'scm.hub.distribution.shipmentOrders' },
+  { href: '/distribution/invoices', labelKey: 'distribution.invoices' },
+  { href: '/distribution/receivings', labelKey: 'scm.hub.distribution.branchReceiving' },
+  { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
+];
+
+export const hqCashierDistributionHubSections: ModuleSectionLink[] = [
+  { href: '/distribution/invoices', labelKey: 'distribution.invoices' },
+  { href: '/distribution/branch-balances', labelKey: 'distribution.branchBalances' },
+  { href: '/distribution/orders', labelKey: 'distribution.orders' },
+];
+
 export const warehouseManagerHqHubSections: ModuleSectionLink[] = [
   { href: '/procurement/orders', labelKey: 'scm.hub.hqWarehouses.receiving' },
   { href: '/hq-warehouses', labelKey: 'scm.hub.hqWarehouses.balances' },

@@ -5,10 +5,9 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import {
-  canCreateDistributionOrder,
   canDispatchFromHq,
-  hasRole,
-  hasPermission,
+  canManageDistributionOrders,
+  canRecordDistributionPayment,
 } from '@/lib/rbac';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -133,16 +132,16 @@ export default function DistributionOrderDetailPage() {
     }
   }
 
-  const canApprove = canCreateDistributionOrder(currentUser);
+  const canApprove = canManageDistributionOrders(currentUser);
   const canDispatch = canDispatchFromHq(currentUser);
   const canReceiveAtBranch =
-    hasRole(currentUser, 'WAREHOUSE_OPERATOR') ||
-    hasRole(currentUser, 'FRANCHISE_OWNER') ||
-    hasRole(currentUser, 'MANAGER');
-  const canPay =
-    hasPermission(currentUser, 'payments.manage') ||
-    hasRole(currentUser, 'ACCOUNTANT') ||
-    hasRole(currentUser, 'CASHIER');
+    currentUser?.role === 'WAREHOUSE_OPERATOR' ||
+    currentUser?.roles?.includes('WAREHOUSE_OPERATOR') ||
+    currentUser?.role === 'FRANCHISE_OWNER' ||
+    currentUser?.roles?.includes('FRANCHISE_OWNER') ||
+    currentUser?.role === 'MANAGER' ||
+    currentUser?.roles?.includes('MANAGER');
+  const canPay = canRecordDistributionPayment(currentUser);
 
   const invoiceSent = Boolean(order?.branchInvoice?.sentToBranchAt);
   const canReceive =

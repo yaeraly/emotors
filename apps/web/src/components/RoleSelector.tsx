@@ -16,6 +16,8 @@ export const branchOwnerAssignableRoles: Role[] = [
 export const hqAssignableRoles: Role[] = [
   'FRANCHISE_DIRECTOR',
   'SUPPLY_CHAIN_MANAGER',
+  'HQ_SALES_MANAGER',
+  'HQ_CASHIER',
   'WAREHOUSE_MANAGER',
   'FINANCE_MANAGER',
   'ACCOUNTANT',
@@ -34,6 +36,8 @@ const roleLabels: Partial<Record<Role, string>> = {
   ACCOUNTANT: 'Accountant',
   FRANCHISE_DIRECTOR: 'Franchise Director',
   SUPPLY_CHAIN_MANAGER: 'Supply Chain Manager',
+  HQ_SALES_MANAGER: 'HQ Sales Manager',
+  HQ_CASHIER: 'HQ Cashier',
   WAREHOUSE_MANAGER: 'Warehouse Manager',
   FINANCE_MANAGER: 'Finance Manager',
   MARKETING_MANAGER: 'Marketing Manager',

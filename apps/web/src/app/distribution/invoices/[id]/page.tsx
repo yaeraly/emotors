@@ -4,7 +4,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { BranchInvoice, BranchPaymentMethod } from '@/lib/types';
+import { canRecordDistributionPayment } from '@/lib/rbac';
+import type { BranchInvoice, BranchPaymentMethod, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const methods: BranchPaymentMethod[] = ['CASH', 'QR', 'BANK', 'TRANSFER', 'INSTALLMENT', 'BALANCE'];
@@ -13,6 +14,7 @@ export default function BranchInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const [invoice, setInvoice] = useState<BranchInvoice | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<BranchPaymentMethod>('CASH');
   const [note, setNote] = useState('');
@@ -21,7 +23,12 @@ export default function BranchInvoiceDetailPage() {
 
   async function load() {
     try {
-      setInvoice(await apiFetch<BranchInvoice>(`/distribution/invoices/${id}`));
+      const [invoiceData, me] = await Promise.all([
+        apiFetch<BranchInvoice>(`/distribution/invoices/${id}`),
+        apiFetch<User>('/auth/me'),
+      ]);
+      setInvoice(invoiceData);
+      setCurrentUser(me);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -46,6 +53,8 @@ export default function BranchInvoiceDetailPage() {
     }
   }
 
+  const canPay = canRecordDistributionPayment(currentUser);
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -62,12 +71,14 @@ export default function BranchInvoiceDetailPage() {
             <Info label={t('distribution.dueDate')} value={new Date(invoice.dueDate).toLocaleDateString()} />
             <Info label={t('distribution.issuedAt')} value={new Date(invoice.issuedAt).toLocaleDateString()} />
           </section>
+          {canPay ? (
           <form onSubmit={submit} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
             <label className="block"><span className="text-sm font-semibold text-slate-700">{t('distribution.paidAmount')}</span><input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min="0.01" step="0.01" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" required /></label>
             <label className="block"><span className="text-sm font-semibold text-slate-700">{t('distribution.paymentMethod')}</span><select value={method} onChange={(event) => setMethod(event.target.value as BranchPaymentMethod)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{methods.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
             <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span><input value={note} onChange={(event) => setNote(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>
             <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" type="submit">{t('distribution.addPayment')}</button>
           </form>
+          ) : null}
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-lg font-bold">{t('sales.paymentHistory')}</h3>
             <div className="mt-4 space-y-3">{invoice.payments?.map((payment) => <div key={payment.id} className="rounded-2xl bg-slate-50 p-4 text-sm"><p className="font-bold">{formatKgs(payment.amount)} · {payment.method}</p><p>{new Date(payment.paidAt).toLocaleString()}</p><p>{payment.note}</p></div>)}</div>
