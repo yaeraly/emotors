@@ -137,9 +137,10 @@ export class InventoryService {
     }));
   }
 
-  async createCategory(dto: CreateCategoryDto) {
+  async createCategory(user: AuthUser, dto: CreateCategoryDto) {
+    this.assertCanManageProductCatalog(user);
     await this.ensureCategoryCodeAvailable(dto.code);
-    return this.prisma.productCategory.create({
+    const category = await this.prisma.productCategory.create({
       data: {
         code: dto.code.toUpperCase(),
         nameKy: dto.nameKy,
@@ -149,6 +150,8 @@ export class InventoryService {
         isActive: dto.isActive ?? true,
       },
     });
+    await this.auditCategory(user, 'CATEGORY_CREATED', category.id, { categoryId: category.id, newValue: category });
+    return category;
   }
 
   async category(id: string) {
@@ -169,14 +172,15 @@ export class InventoryService {
     };
   }
 
-  async updateCategory(id: string, dto: UpdateCategoryDto) {
-    await this.category(id);
+  async updateCategory(user: AuthUser, id: string, dto: UpdateCategoryDto) {
+    this.assertCanManageProductCatalog(user);
+    const existing = await this.category(id);
 
     if (dto.code) {
       await this.ensureCategoryCodeAvailable(dto.code, id);
     }
 
-    return this.prisma.productCategory.update({
+    const category = await this.prisma.productCategory.update({
       where: { id },
       data: {
         code: dto.code?.toUpperCase(),
@@ -187,18 +191,26 @@ export class InventoryService {
         isActive: dto.isActive,
       },
     });
+    const action =
+      dto.isActive === false && existing.isActive !== false ? 'CATEGORY_DISABLED' : 'CATEGORY_UPDATED';
+    await this.auditCategory(user, action, id, { categoryId: id, oldValue: existing, newValue: category });
+    return category;
   }
 
-  async deleteCategory(id: string) {
+  async deleteCategory(user: AuthUser, id: string) {
+    this.assertCanArchiveProduct(user);
     const category = await this.category(id);
 
     if (category.productCount > 0) {
-      return this.prisma.productCategory.update({
+      const updated = await this.prisma.productCategory.update({
         where: { id },
         data: { isActive: false },
       });
+      await this.auditCategory(user, 'CATEGORY_DISABLED', id, { categoryId: id, newValue: updated });
+      return updated;
     }
 
+    await this.auditCategory(user, 'CATEGORY_DISABLED', id, { categoryId: id, oldValue: category });
     return this.prisma.productCategory.delete({ where: { id } });
   }
 
@@ -1509,6 +1521,31 @@ export class InventoryService {
     if (!canManageProductCatalog(user)) {
       throw new ForbiddenException('You do not have permission to manage product catalog');
     }
+  }
+
+  private auditCategory(
+    user: AuthUser,
+    action: string,
+    categoryId: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'ProductCategory',
+        entityId: categoryId,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          categoryId,
+          roles: user.roles ?? [user.role],
+          timestamp: new Date().toISOString(),
+          ...metadata,
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   private assertCanEditPurchasePriceYuan(user: AuthUser) {

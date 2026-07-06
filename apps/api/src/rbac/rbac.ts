@@ -71,9 +71,9 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'inventory.manage',
     'inventory.view',
     'distribution.manage',
-    'products.manage',
     'procurement.view',
     'procurement.receive',
+    'products.view',
   ],
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
@@ -203,11 +203,16 @@ export function rolesCanAccessRequiredRoles(roles: Role[], requiredRoles: Role[]
 }
 
 export function canManageProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return userHasPermission(user, 'products.manage');
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER)
+  );
 }
 
 export function canArchiveProduct(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return userHasPermission(user, 'products.archive');
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
 }
 
 export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

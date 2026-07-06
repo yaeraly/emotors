@@ -54,8 +54,8 @@ export class InventoryController {
 
   @Post('categories')
   @RequirePermissions('products.manage')
-  createCategory(@Body() dto: CreateCategoryDto) {
-    return this.inventoryService.createCategory(dto);
+  createCategory(@CurrentUser() user: AuthUser, @Body() dto: CreateCategoryDto) {
+    return this.inventoryService.createCategory(user, dto);
   }
 
   @Get('categories/:id')
@@ -66,14 +66,14 @@ export class InventoryController {
 
   @Put('categories/:id')
   @RequirePermissions('products.manage')
-  updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
-    return this.inventoryService.updateCategory(id, dto);
+  updateCategory(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateCategoryDto) {
+    return this.inventoryService.updateCategory(user, id, dto);
   }
 
   @Delete('categories/:id')
   @RequirePermissions('products.archive')
-  deleteCategory(@Param('id') id: string) {
-    return this.inventoryService.deleteCategory(id);
+  deleteCategory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.inventoryService.deleteCategory(user, id);
   }
 
   @Post('products')

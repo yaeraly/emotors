@@ -162,19 +162,28 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           </p>
           <nav className="space-y-2">
             {supplyChainManagerView ? (
-              <>
-                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
-                <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouse')}</Link>
-                <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
-                <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
-              </>
+              <div className="rounded-xl px-3 py-2">
+                <p className="text-sm font-semibold text-slate-700">{t('scm.sidebar.warehouse')}</p>
+                <div className="mt-2 space-y-1 pl-2">
+                  <Link href="/hq-warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('scm.sidebar.hqWarehouses')}</Link>
+                  <Link href="/branch-warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('scm.sidebar.branchWarehouses')}</Link>
+                  <Link href="/product-master" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('scm.sidebar.productMaster')}</Link>
+                  <Link href="/inventory/count" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('inventoryCount.title')}</Link>
+                </div>
+                <Link href="/distribution" className="mt-3 block text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-xl px-0 py-2">{t('scm.sidebar.distribution')}</Link>
+                <Link href="/procurement" className="block text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-xl px-0 py-2">{t('scm.sidebar.procurement')}</Link>
+              </div>
             ) : warehouseManagerView ? (
-              <>
-                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
-                <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouse')}</Link>
-                <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
-                <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
-              </>
+              <div className="rounded-xl px-3 py-2">
+                <p className="text-sm font-semibold text-slate-700">{t('scm.sidebar.warehouse')}</p>
+                <div className="mt-2 space-y-1 pl-2">
+                  <Link href="/hq-warehouses" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('scm.sidebar.hqWarehouses')}</Link>
+                  <Link href="/product-master" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('scm.sidebar.productMaster')}</Link>
+                  <Link href="/inventory/count" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('inventoryCount.title')}</Link>
+                </div>
+                <Link href="/distribution" className="mt-3 block text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-xl px-0 py-2">{t('scm.sidebar.distribution')}</Link>
+                <Link href="/procurement" className="block text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-xl px-0 py-2">{t('scm.sidebar.procurement')}</Link>
+              </div>
             ) : (
               <>
             {canSeeCrm ? (

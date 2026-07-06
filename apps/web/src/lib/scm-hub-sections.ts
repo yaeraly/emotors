@@ -1,11 +1,11 @@
 import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 
 export const warehouseHubSections: ModuleSectionLink[] = [
-  { href: '/products', labelKey: 'scm.hub.warehouse.products' },
-  { href: '/inventory/categories', labelKey: 'scm.hub.warehouse.categories' },
-  { href: '/warehouses', labelKey: 'scm.hub.warehouse.balances' },
-  { href: '/stock-movements', labelKey: 'scm.hub.warehouse.movements' },
+  { href: '/hq-warehouses', labelKey: 'scm.hub.warehouse.hqWarehouses' },
+  { href: '/branch-warehouses', labelKey: 'scm.hub.warehouse.branchWarehouses' },
+  { href: '/product-master', labelKey: 'scm.hub.warehouse.productMaster' },
   { href: '/inventory/count', labelKey: 'scm.hub.warehouse.stocktake' },
+  { href: '/stock-movements', labelKey: 'scm.hub.warehouse.movements' },
 ];
 
 export const hqWarehouseHubSections: ModuleSectionLink[] = [

@@ -35,9 +35,9 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'inventory.manage',
     'inventory.view',
     'distribution.manage',
-    'products.manage',
     'procurement.view',
     'procurement.receive',
+    'products.view',
   ],
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
@@ -156,6 +156,7 @@ const WAREHOUSE_MANAGER_ALLOWED_PREFIXES = [
   '/change-password',
   '/inventory',
   '/products',
+  '/product-master',
   '/warehouses',
   '/stock-movements',
   '/hq-warehouses',
@@ -205,7 +206,9 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
   '/change-password',
   '/inventory',
   '/products',
+  '/product-master',
   '/warehouses',
+  '/branch-warehouses',
   '/stock-movements',
   '/hq-warehouses',
   '/distribution',
@@ -297,6 +300,8 @@ export function canAccessPath(user: User, pathname: string) {
     return hasPermission(user, 'inventory.manage');
   }
   if (pathname.startsWith('/hq-warehouses')) return canViewHqWarehouse(user);
+  if (pathname.startsWith('/branch-warehouses')) return canViewBranchWarehouses(user);
+  if (pathname.startsWith('/product-master')) return canViewProductMaster(user);
   if (pathname.startsWith('/inventory') ||
     pathname.startsWith('/warehouses')
   ) {
@@ -368,7 +373,23 @@ export function canResetUserPassword(
 }
 
 export function canManageProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasPermission(user, 'products.manage');
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+}
+
+export function canViewProductMaster(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canViewProductCatalog(user);
+}
+
+export function canViewBranchWarehouses(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  return (
+    hasFullAccess(user) ||
+    hasRole(user, 'SUPPLY_CHAIN_MANAGER') ||
+    hasRole(user, 'FRANCHISE_OWNER') ||
+    hasRole(user, 'WAREHOUSE_OPERATOR') ||
+    hasRole(user, 'MANAGER')
+  );
 }
 
 export function canEditProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
@@ -376,7 +397,8 @@ export function canEditProductCatalog(user: Pick<User, 'role' | 'roles' | 'permi
 }
 
 export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasPermission(user, 'products.archive');
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }
 
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

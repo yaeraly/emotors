@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { ModuleSectionNav } from '@/components/ModuleSectionNav';
+import { warehouseHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
 import { canManageHqWarehouse, canDeleteHqWarehouse } from '@/lib/rbac';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
@@ -18,8 +20,11 @@ type Dashboard = {
 };
 
 type WarehouseMetrics = Warehouse & {
+  totalSkuCount?: number;
   totalProductQuantity?: number;
   totalStockValueKgs?: number;
+  reservedQuantity?: number;
+  availableQuantity?: number;
   totalPurchaseCostKgs?: number;
   totalDistributedValueKgs?: number;
   availableStockValueKgs?: number;
@@ -101,6 +106,8 @@ export default function HqWarehousesPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
+        <ModuleSectionNav sections={warehouseHubSections} />
+
         {dashboard ? (
           <div className="grid gap-4 md:grid-cols-5">
             <Card label={t('hqWarehouse.totalWarehouses')} value={String(dashboard.totalHqWarehouses)} />
@@ -116,13 +123,13 @@ export default function HqWarehousesPage() {
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">{t('warehouse.name')}</th>
-                <th className="px-4 py-3">{t('warehouse.code')}</th>
                 <th className="px-4 py-3">{t('hqWarehouse.city')}</th>
+                <th className="px-4 py-3">{t('warehouse.code')}</th>
+                <th className="px-4 py-3">{t('branchWarehouse.skuCount')}</th>
                 <th className="px-4 py-3">{t('hqWarehouse.totalStock')}</th>
                 <th className="px-4 py-3">{t('hqWarehouse.totalValue')}</th>
-                <th className="px-4 py-3">{t('hqWarehouse.distributedValue')}</th>
-                <th className="px-4 py-3">{t('hqWarehouse.pendingOutgoing')}</th>
-                <th className="px-4 py-3">{t('hqWarehouse.pendingReceiving')}</th>
+                <th className="px-4 py-3">{t('branchWarehouse.reserved')}</th>
+                <th className="px-4 py-3">{t('branchWarehouse.available')}</th>
                 <th className="px-4 py-3">{t('common.status')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
               </tr>
@@ -131,13 +138,13 @@ export default function HqWarehousesPage() {
               {warehouses.map((warehouse) => (
                 <tr key={warehouse.id}>
                   <td className="px-4 py-3 font-bold">{warehouse.name}</td>
-                  <td className="px-4 py-3">{warehouse.code}</td>
                   <td className="px-4 py-3">{(warehouse as Warehouse & { city?: string }).city ?? '—'}</td>
+                  <td className="px-4 py-3">{warehouse.code}</td>
+                  <td className="px-4 py-3">{warehouse.totalSkuCount ?? 0}</td>
                   <td className="px-4 py-3">{warehouse.totalProductQuantity ?? 0}</td>
                   <td className="px-4 py-3">{(warehouse.totalStockValueKgs ?? 0).toLocaleString()} KGS</td>
-                  <td className="px-4 py-3">{(warehouse.totalDistributedValueKgs ?? 0).toLocaleString()} KGS</td>
-                  <td className="px-4 py-3">{warehouse.pendingOutgoingOrders ?? 0}</td>
-                  <td className="px-4 py-3">{warehouse.pendingReceivingOrders ?? 0}</td>
+                  <td className="px-4 py-3">{warehouse.reservedQuantity ?? 0}</td>
+                  <td className="px-4 py-3">{warehouse.availableQuantity ?? 0}</td>
                   <td className="px-4 py-3">{warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">

@@ -3,7 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { ProductCategory } from '@/lib/types';
+import { canManageProductCatalog } from '@/lib/rbac';
+import type { ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const emptyForm = {
@@ -17,6 +18,7 @@ const emptyForm = {
 export default function InventoryCategoriesPage() {
   const { t, language } = useTranslation();
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<ProductCategory | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -29,9 +31,12 @@ export default function InventoryCategoriesPage() {
   }, [search]);
 
   useEffect(() => {
+    apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => setCurrentUser(null));
     void loadCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
+
+  const canManage = canManageProductCatalog(currentUser);
 
   async function loadCategories() {
     try {
@@ -111,6 +116,7 @@ export default function InventoryCategoriesPage() {
           </p>
         ) : null}
 
+        {canManage ? (
         <form
           onSubmit={submit}
           className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3"
@@ -124,6 +130,9 @@ export default function InventoryCategoriesPage() {
             {editing ? t('inventory.editCategory') : t('inventory.createCategory')}
           </button>
         </form>
+        ) : (
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('productMaster.readOnlyNotice')}</p>
+        )}
 
         <input
           value={search}
@@ -160,6 +169,7 @@ export default function InventoryCategoriesPage() {
                       {category.isActive ? t('warehouse.active') : t('warehouse.inactive')}
                     </td>
                     <td className="px-4 py-3">
+                      {canManage ? (
                       <div className="flex gap-2">
                         <button onClick={() => startEdit(category)} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold" type="button">
                           {t('common.edit')}
@@ -168,6 +178,7 @@ export default function InventoryCategoriesPage() {
                           {t('common.delete')}
                         </button>
                       </div>
+                      ) : '—'}
                     </td>
                   </tr>
                 ))

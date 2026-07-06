@@ -144,9 +144,11 @@ export class HqWarehouseService {
     const reservedStockValueKgs = balances.reduce((sum, item) => {
       return sum + item.reservedQuantity * Number(item.landedCostKgs || item.averageCostKgs);
     }, 0);
+    const productIds = new Set(balances.filter((b) => b.quantity > 0).map((b) => b.productId));
 
     return {
       ...warehouse,
+      totalSkuCount: productIds.size,
       totalProductQuantity: totalQuantity,
       totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100,
       totalPurchaseCostKgs: Math.round(totalStockValueKgs * 100) / 100,
@@ -162,6 +164,7 @@ export class HqWarehouseService {
 
   async detail(user: AuthUser, id: string) {
     const warehouse = await this.getHqWarehouse(user, id);
+    await this.audit(user, 'HQ_WAREHOUSE_VIEWED', id, { warehouseId: id });
     const [inventoryCount, pendingTransfers] = await Promise.all([
       this.prisma.inventoryBalance.count({
         where: { warehouseId: id, quantity: { gt: 0 } },
