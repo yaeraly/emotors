@@ -13,7 +13,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   anyRoleRequiresBranch,
   hasAnyFullAccessRole,
-  isHqRole,
   uniqueRoles,
   userHasPermission,
 } from '../rbac/rbac';
@@ -71,6 +70,7 @@ const BRANCH_EMPLOYEE_ROLES: Role[] = [
   Role.CASHIER,
   Role.ACCOUNTANT,
 ];
+const HQ_ONLY_ROLES: Role[] = HQ_ROLES.filter((role) => !BRANCH_ROLES.includes(role));
 const NO_LOGIN_PASSWORD_PLACEHOLDER = 'no-login-placeholder';
 
 @Injectable()
@@ -668,7 +668,7 @@ export class UsersService {
     }
     if (this.hasRole(user, Role.FRANCHISE_OWNER)) {
       if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
-      if (roles.some((role) => isHqRole(role))) {
+      if (roles.some((role) => HQ_ONLY_ROLES.includes(role))) {
         throw new ForbiddenException('Cannot create HQ users');
       }
       if (roles.includes(Role.FRANCHISE_OWNER)) {
