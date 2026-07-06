@@ -665,7 +665,12 @@ model User {
   role           Role            @default(MANAGER)
   status         UserStatus      @default(ACTIVE)
   mustChangePassword Boolean     @default(false)
-  lastLoginAt    DateTime?
+  hasLogin           Boolean     @default(true)
+  department         String?
+  notes              String?
+  salary             Decimal?    @db.Decimal(14, 2)
+  startDate          DateTime?
+  lastLoginAt        DateTime?
   branchId       String?
   branch         Branch?         @relation(fields: [branchId], references: [id])
   customerEvents CustomerEvent[]

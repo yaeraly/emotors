@@ -223,6 +223,11 @@ export type User = {
   branch?: Branch | null;
   status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   mustChangePassword?: boolean;
+  hasLogin?: boolean;
+  department?: string | null;
+  notes?: string | null;
+  salary?: number | string | null;
+  startDate?: string | null;
   permissions?: string[];
   assignedHqWarehouseIds?: string[];
   assignedHqWarehouses?: Array<Pick<Warehouse, 'id' | 'name' | 'code' | 'city'>>;

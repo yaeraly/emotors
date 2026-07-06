@@ -48,6 +48,11 @@ export class AuthService {
       throw new UnauthorizedException('User is not active');
     }
 
+    if (!user.hasLogin) {
+      await this.recordLogin(user.id, false, meta);
+      throw new UnauthorizedException('This account does not have login credentials');
+    }
+
     const roles = this.roleCodes(user);
 
     if (anyRoleRequiresBranch(roles) && !user.branchId) {

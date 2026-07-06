@@ -69,6 +69,22 @@ export class UsersController {
     return this.usersService.resetPassword(user, id);
   }
 
+  @Post(':id/create-login')
+  @Roles(Role.OWNER, Role.CEO)
+  createLogin(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.usersService.createLogin(user, id, dto);
+  }
+
+  @Delete(':id')
+  @Roles(Role.OWNER, Role.CEO)
+  removeEmployee(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto?: { reason?: string },
+  ) {
+    return this.usersService.removeEmployee(user, id, dto?.reason);
+  }
+
   @Post(':id/activate')
   activate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.usersService.setStatus(user, id, UserStatus.ACTIVE);

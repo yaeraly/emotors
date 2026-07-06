@@ -36,7 +36,6 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     'inventory.manage',
     'inventory.view',
     'distribution.manage',
-    'procurement.view',
     'procurement.receive',
     'products.view',
   ],
@@ -113,6 +112,19 @@ export function hasFullAccess(user: Pick<User, 'role' | 'roles'> | null | undefi
   return hasAnyRole(user, ['OWNER', 'CEO']);
 }
 
+export function isCeoUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
+export function canCreateServiceOrder(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasPermission(user, 'service.manage') && !hasFullAccess(user);
+}
+
+export function canDeleteEmployee(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
 export function isSupplyChainManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   if (!user || hasFullAccess(user)) return false;
   return hasRole(user, 'SUPPLY_CHAIN_MANAGER');
@@ -176,12 +188,10 @@ const WAREHOUSE_MANAGER_ALLOWED_PREFIXES = [
   '/change-password',
   '/inventory',
   '/products',
-  '/product-master',
   '/warehouses',
   '/stock-movements',
   '/hq-warehouses',
   '/distribution',
-  '/procurement',
 ];
 
 export function isWarehouseManagerForbiddenPath(pathname: string) {
@@ -195,11 +205,16 @@ function canWarehouseManagerAccessPath(pathname: string) {
   if (isWarehouseManagerForbiddenPath(pathname)) return false;
 
   if (
-    pathname.startsWith('/procurement/suppliers') ||
-    pathname.startsWith('/procurement/factories') ||
-    pathname.startsWith('/procurement/transport-companies') ||
-    pathname.startsWith('/procurement/purchase-price-history') ||
-    pathname.startsWith('/procurement/orders/new')
+    pathname.startsWith('/procurement') &&
+    !/^\/procurement\/orders\/[^/]+$/.test(pathname)
+  ) {
+    return false;
+  }
+
+  if (
+    pathname.startsWith('/product-master') ||
+    pathname.startsWith('/products/new') ||
+    pathname.startsWith('/inventory/categories')
   ) {
     return false;
   }
@@ -442,15 +457,19 @@ export function canResetUserPassword(
 
 export function canManageProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
+  if (isWarehouseManagerUser(user)) return false;
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }
 
 export function canViewProductMaster(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (isWarehouseManagerUser(user)) return false;
   return canViewProductCatalog(user);
 }
 
 export function canViewBranchWarehouses(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
+  if (isWarehouseManagerUser(user)) return false;
   return (
     hasFullAccess(user) ||
     hasRole(user, 'SUPPLY_CHAIN_MANAGER') ||
@@ -578,6 +597,8 @@ export function canCreateProcurementOrder(user: Pick<User, 'role' | 'roles' | 'p
 }
 
 export function canViewProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (isWarehouseManagerUser(user)) return false;
   return hasPermission(user, 'procurement.manage') || hasPermission(user, 'procurement.view');
 }
 

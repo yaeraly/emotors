@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canViewDistribution, canManageBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canViewDistribution, canManageBranchPurchaseRequests, canCreateServiceOrder, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -67,7 +67,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
 
   const canSeeCrm = hasPermission(user, 'crm.manage');
   const canSeeSales = hasPermission(user, 'sales.manage');
-  const canSeeInventory = hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view') || canViewProductCatalog(user);
+  const canSeeInventory = !isCeoUser(user) && (hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view') || canViewProductCatalog(user));
   const canManageInventory = hasPermission(user, 'inventory.manage');
   const canManageProducts = canManageProductCatalog(user);
   const canSeeService = hasPermission(user, 'service.manage');
@@ -95,8 +95,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeWarehouseRelease = hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
   const canSeeWarrantyClaims = hasPermission(user, 'service.manage') || hasPermission(user, 'distribution.manage');
   const canSeeSupplierClaims = hasPermission(user, 'procurement.manage') || hasPermission(user, 'distribution.manage');
+  const canCreateService = canCreateServiceOrder(user);
   const roleLabel = roleCodesForUser(user).join(', ');
   const supplyChainManagerView = isSupplyChainManagerUser(user);
+  const ceoOperationalView = isCeoUser(user);
   const warehouseManagerView = isWarehouseManagerUser(user);
   const hqSalesManagerView = isHqSalesManagerUser(user);
   const hqCashierView = isHqCashierUser(user);
@@ -166,7 +168,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             {t('nav.modules')}
           </p>
           <nav className="space-y-2">
-            {supplyChainManagerView ? (
+            {supplyChainManagerView || ceoOperationalView ? (
               <>
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
@@ -182,6 +184,26 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 ) : null}
                 {canSeeDistribution ? (
                   <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
+                ) : null}
+                {ceoOperationalView ? (
+                  <div className="border-t border-slate-100 pt-2">
+                    {canManageUsers ? <Link href="/users" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.users')}</Link> : null}
+                    {canManageBranches ? <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link> : null}
+                    {canSeeFinance ? <Link href="/finance" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
+                    {canSeeService ? (
+                      <div className="rounded-xl px-3 py-2">
+                        <Link href="/service" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('service.title')}</Link>
+                        <div className="mt-2 space-y-1 pl-2">
+                          <Link href="/service/warranties" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.warranties')}</Link>
+                          <Link href="/service/reports" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('nav.reports')}</Link>
+                        </div>
+                      </div>
+                    ) : null}
+                    {canSeeKpi ? <Link href="/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.kpi')}</Link> : null}
+                    {canSeeReports ? <Link href="/analytics" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.analytics')}</Link> : null}
+                    {canSeeAcademy ? <Link href="/academy" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.academy')}</Link> : null}
+                    {canSeeMarketing ? <Link href="/marketing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.marketing')}</Link> : null}
+                  </div>
                 ) : null}
               </>
             ) : hqSalesManagerView ? (
@@ -207,15 +229,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
                 ) : null}
-                {canSeeBranchWarehouses ? (
-                  <Link href="/branch-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.branchWarehouses')}</Link>
-                ) : null}
-                {canSeeProductMaster ? (
-                  <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
-                ) : null}
-                {canSeeProcurement ? (
-                  <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
-                ) : null}
+                <Link href="/inventory/count" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventoryCount.title')}</Link>
+                <Link href="/stock-movements" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventory.stockMovements')}</Link>
+                <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
               </>
             ) : (
               <>
@@ -278,7 +294,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               <div className="rounded-xl px-3 py-2">
                 <Link href="/service" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('service.title')}</Link>
                 <div className="mt-2 space-y-1 pl-2">
-                  <Link href="/service/new" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.newOrder')}</Link>
+                  {canCreateService ? (
+                    <Link href="/service/new" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.newOrder')}</Link>
+                  ) : null}
                   <Link href="/service/warranties" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('service.warranties')}</Link>
                   <Link href="/service/reports" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('nav.reports')}</Link>
                   {canSeeWarrantyClaims ? <Link href="/warranty/claims" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('operations.warrantyClaims')}</Link> : null}

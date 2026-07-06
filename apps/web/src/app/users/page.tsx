@@ -13,6 +13,8 @@ const hqRoles: Role[] = [
   'CEO',
   'FRANCHISE_DIRECTOR',
   'SUPPLY_CHAIN_MANAGER',
+  'HQ_SALES_MANAGER',
+  'HQ_CASHIER',
   'WAREHOUSE_MANAGER',
   'FINANCE_MANAGER',
   'ACCOUNTANT',
@@ -262,7 +264,7 @@ export default function UsersPage() {
                 {visibleUsers.map((user) => (
                   <tr key={user.id} className="hover:bg-blue-50/40">
                     <td className="px-4 py-3 font-bold">{user.fullName}</td>
-                    <td className="px-4 py-3">{user.username || '-'}</td>
+                    <td className="px-4 py-3">{user.username || (user.hasLogin === false ? t('users.noLoginBadge') : '-')}</td>
                     <td className="px-4 py-3">{user.phone || '-'}</td>
                     <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : user.branch?.name ?? user.branchId}</td>
                     <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : t('users.branchEmployees')}</td>

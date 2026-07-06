@@ -25,7 +25,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { canArchiveProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { canArchiveProduct, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -1577,6 +1577,25 @@ export class InventoryService {
   }
 
   private assertCanManageProductCatalog(user: AuthUser) {
+    const roles = user.roles?.length ? user.roles : [user.role];
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      void this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'PRODUCT_CREATE_DENIED_FOR_WAREHOUSE_MANAGER',
+          entity: 'Product',
+          entityId: null,
+          metadata: {
+            userId: user.id,
+            role: user.role,
+            roles,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      }).catch(() => null);
+      throw new ForbiddenException('You do not have permission to manage product catalog');
+    }
     if (!canManageProductCatalog(user)) {
       throw new ForbiddenException('You do not have permission to manage product catalog');
     }

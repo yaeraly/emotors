@@ -5,7 +5,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import type { InventoryBalance, ProductListResponse, StockValueReport } from '@/lib/types';
+import { canManageProductCatalog, isWarehouseManagerUser } from '@/lib/rbac';
+import type { InventoryBalance, ProductListResponse, StockValueReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function InventoryPage() {
@@ -15,14 +16,17 @@ export default function InventoryPage() {
   const [products, setProducts] = useState<ProductListResponse | null>(null);
   const [error, setError] = useState('');
   const [yuanRate, setYuanRate] = useState('');
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
     Promise.all([
+      apiFetch<User>('/auth/me'),
       apiFetch<StockValueReport>('/inventory/stock-value'),
       apiFetch<InventoryBalance[]>('/inventory/low-stock'),
       apiFetch<ProductListResponse>('/inventory/products?pageSize=1'),
     ])
-      .then(([stockValueResult, lowStockResult, productsResult]) => {
+      .then(([me, stockValueResult, lowStockResult, productsResult]) => {
+        setCurrentUser(me);
         setStockValue(stockValueResult);
         setLowStock(lowStockResult);
         setProducts(productsResult);
@@ -47,6 +51,9 @@ export default function InventoryPage() {
     }
   }
 
+  const canManageProducts = canManageProductCatalog(currentUser);
+  const hideWarehouseNav = isWarehouseManagerUser(currentUser);
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -63,25 +70,29 @@ export default function InventoryPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" href="/products/new">
-              {t('inventory.createProduct')}
-            </Link>
+            {canManageProducts ? (
+              <Link className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" href="/products/new">
+                {t('inventory.createProduct')}
+              </Link>
+            ) : null}
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/products">
               {t('inventory.products')}
             </Link>
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/warehouses">
               {t('inventory.warehouses')}
             </Link>
-            <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/inventory/categories">
-              {t('inventory.categories')}
-            </Link>
+            {canManageProducts ? (
+              <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/inventory/categories">
+                {t('inventory.categories')}
+              </Link>
+            ) : null}
             <Link className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700" href="/inventory/count">
               {t('inventoryCount.title')}
             </Link>
           </div>
         </div>
 
-        <WarehouseTopNav />
+        {!hideWarehouseNav ? <WarehouseTopNav /> : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 

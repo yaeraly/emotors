@@ -286,6 +286,7 @@ export class HqWarehouseService {
         distributionOrders,
         procurementOrders,
         goodsReceivings,
+        inventorySessions,
       ] = await Promise.all([
         tx.inventoryBalance.aggregate({
           where: { warehouseId: id },
@@ -301,6 +302,7 @@ export class HqWarehouseService {
         }),
         tx.procurementOrder.count({ where: { hqWarehouseId: id, deletedAt: null } }),
         tx.goodsReceiving.count({ where: { warehouseId: id } }),
+        tx.inventoryCountSession.count({ where: { warehouseId: id } }),
       ]);
 
       const totalStock = stockAggregate._sum.quantity ?? 0;
@@ -310,7 +312,8 @@ export class HqWarehouseService {
         receivings > 0 ||
         distributionOrders > 0 ||
         procurementOrders > 0 ||
-        goodsReceivings > 0;
+        goodsReceivings > 0 ||
+        inventorySessions > 0;
 
       const oldValue = { ...warehouse };
 

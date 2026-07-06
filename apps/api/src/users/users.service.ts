@@ -51,6 +51,19 @@ const BRANCH_ROLES: Role[] = [
   Role.ACCOUNTANT,
 ];
 
+const HQ_NO_LOGIN_ALLOWED_ROLES: Role[] = [
+  Role.FRANCHISE_DIRECTOR,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.WAREHOUSE_MANAGER,
+  Role.FINANCE_MANAGER,
+  Role.ACCOUNTANT,
+  Role.MARKETING_MANAGER,
+  Role.CONTENT_CREATOR,
+  Role.ACADEMY_DIRECTOR,
+  Role.SYSTEM_ADMINISTRATOR,
+  Role.HQ_SALES_MANAGER,
+  Role.HQ_CASHIER,
+];
 const BRANCH_EMPLOYEE_ROLES: Role[] = [
   Role.MANAGER,
   Role.MASTER,
@@ -58,6 +71,7 @@ const BRANCH_EMPLOYEE_ROLES: Role[] = [
   Role.CASHIER,
   Role.ACCOUNTANT,
 ];
+const NO_LOGIN_PASSWORD_PLACEHOLDER = 'no-login-placeholder';
 
 @Injectable()
 export class UsersService {
@@ -84,12 +98,40 @@ export class UsersService {
     this.validateUserTypeForCreate(user, userType, roles, dto.branchId);
     const primaryRole = this.primaryRole(roles, dto.role);
     this.assertCanManage(user, dto.branchId, roles);
-    this.validatePassword(dto.password ?? TEMP_PASSWORD);
-    const username = String(dto.username ?? '').trim().toLowerCase();
-    if (!username) throw new BadRequestException('Username is required');
-    const email = dto.email?.trim().toLowerCase() || `${username}@emotors.local`;
+
+    const hasLogin = dto.hasLogin !== false;
+    if (!hasLogin) {
+      if (!this.hasFullAccess(user)) {
+        throw new ForbiddenException('Only CEO can create employees without login');
+      }
+      if (userType !== 'HQ') {
+        throw new BadRequestException('Employees without login are supported for HQ staff only');
+      }
+      if (!roles.every((role) => HQ_NO_LOGIN_ALLOWED_ROLES.includes(role))) {
+        throw new BadRequestException('Selected role cannot be created without login');
+      }
+      if (!dto.fullName?.trim()) {
+        throw new BadRequestException('Full name is required');
+      }
+      if (!dto.phone?.trim()) {
+        throw new BadRequestException('Phone is required');
+      }
+    } else {
+      this.validatePassword(dto.password ?? TEMP_PASSWORD);
+    }
+
+    const username = hasLogin ? String(dto.username ?? '').trim().toLowerCase() : null;
+    if (hasLogin && !username) throw new BadRequestException('Username is required');
+
+    const email = hasLogin
+      ? dto.email?.trim().toLowerCase() || `${username}@emotors.local`
+      : dto.email?.trim().toLowerCase() || `no-login+${Date.now()}@emotors.internal`;
+
     const branchId = userType === 'HQ' ? null : this.resolveBranchId(user, dto.branchId, roles);
-    const passwordHash = await bcrypt.hash(dto.password ?? TEMP_PASSWORD, 12);
+    const passwordHash = hasLogin
+      ? await bcrypt.hash(dto.password ?? TEMP_PASSWORD, 12)
+      : await bcrypt.hash(`${NO_LOGIN_PASSWORD_PLACEHOLDER}:${Date.now()}:${Math.random()}`, 12);
+
     const created = await this.prisma.user.create({
       data: {
         fullName: dto.fullName,
@@ -101,7 +143,12 @@ export class UsersService {
         role: primaryRole,
         branchId,
         status: dto.status ?? UserStatus.ACTIVE,
-        mustChangePassword: true,
+        hasLogin,
+        department: dto.department?.trim() || null,
+        notes: dto.notes?.trim() || null,
+        salary: dto.salary != null ? Number(dto.salary) : null,
+        startDate: dto.startDate ? new Date(dto.startDate) : null,
+        mustChangePassword: hasLogin,
       },
       include: { branch: true, userRoles: { include: { role: true } } },
     });
@@ -109,18 +156,143 @@ export class UsersService {
     if (roles.includes(Role.WAREHOUSE_MANAGER) && Array.isArray(dto.hqWarehouseIds)) {
       await this.hqWarehouseAssignmentService.syncUserAssignments(user, created.id, dto.hqWarehouseIds);
     }
-    const auditAction = this.hasRole(user, Role.FRANCHISE_OWNER) ? 'BRANCH_EMPLOYEE_CREATED' : 'user_created';
+    const auditAction = !hasLogin
+      ? 'EMPLOYEE_CREATED_WITHOUT_LOGIN'
+      : this.hasRole(user, Role.FRANCHISE_OWNER)
+        ? 'BRANCH_EMPLOYEE_CREATED'
+        : 'user_created';
     await this.audit(user, auditAction, 'User', created.id, {
       branchId: created.branchId ?? undefined,
       roles,
+      hasLogin,
+      department: created.department,
     });
     const assignments = roles.includes(Role.WAREHOUSE_MANAGER)
       ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(created.id)
       : [];
     return {
       ...this.enrichUser({ ...created, userRoles: synced }, assignments),
+      temporaryPassword: hasLogin && !dto.password ? TEMP_PASSWORD : undefined,
+    };
+  }
+
+  async createLogin(user: AuthUser, id: string, dto: any) {
+    if (!this.hasFullAccess(user)) {
+      throw new ForbiddenException('Only CEO can create login credentials');
+    }
+    const existing = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      include: { userRoles: { include: { role: true } } },
+    });
+    if (!existing) throw new NotFoundException('User not found');
+    if (existing.hasLogin) {
+      throw new BadRequestException('Employee already has login credentials');
+    }
+
+    const username = String(dto.username ?? '').trim().toLowerCase();
+    if (!username) throw new BadRequestException('Username is required');
+    this.validatePassword(dto.password ?? TEMP_PASSWORD);
+    const email = dto.email?.trim().toLowerCase() || existing.email;
+    const passwordHash = await bcrypt.hash(dto.password ?? TEMP_PASSWORD, 12);
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: {
+        username,
+        email,
+        passwordHash,
+        hasLogin: true,
+        mustChangePassword: true,
+      },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
+
+    await this.audit(user, 'EMPLOYEE_LOGIN_CREATED', 'User', id, {
+      userId: id,
+      oldValue: { hasLogin: false },
+      newValue: { hasLogin: true, username, email },
+    });
+
+    return {
+      ...this.safeUser(updated),
       temporaryPassword: dto.password ? undefined : TEMP_PASSWORD,
     };
+  }
+
+  async removeEmployee(user: AuthUser, id: string, reason?: string) {
+    if (!this.hasFullAccess(user)) {
+      throw new ForbiddenException('Only CEO can delete employees');
+    }
+    if (user.id === id) {
+      throw new BadRequestException('You cannot delete your own account');
+    }
+
+    const existing = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      include: { userRoles: { include: { role: true } } },
+    });
+    if (!existing) throw new NotFoundException('User not found');
+
+    const [
+      sales,
+      payments,
+      stockMovements,
+      auditLogs,
+      assignments,
+      procurementOrders,
+      distributionOrders,
+    ] = await Promise.all([
+      this.prisma.sale.count({ where: { sellerId: id } }),
+      this.prisma.payment.count({ where: { createdById: id } }),
+      this.prisma.stockMovement.count({ where: { createdById: id } }),
+      this.prisma.auditLog.count({ where: { userId: id } }),
+      this.prisma.hqWarehouseManagerAssignment.count({ where: { userId: id } }),
+      this.prisma.procurementOrder.count({ where: { createdById: id } }),
+      this.prisma.branchDistributionOrder.count({ where: { createdById: id } }),
+    ]);
+
+    const hasHistory =
+      sales > 0 ||
+      payments > 0 ||
+      stockMovements > 0 ||
+      auditLogs > 0 ||
+      assignments > 0 ||
+      procurementOrders > 0 ||
+      distributionOrders > 0;
+
+    const oldValue = this.safeUser(existing);
+
+    if (!hasHistory) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.userRole.deleteMany({ where: { userId: id } });
+        await tx.hqWarehouseManagerAssignment.deleteMany({ where: { userId: id } });
+        await tx.user.delete({ where: { id } });
+        await this.auditInTx(tx, user, 'EMPLOYEE_DELETED', 'User', id, {
+          entityType: 'User',
+          oldValue,
+          reason: reason?.trim() || null,
+        });
+      });
+      return { success: true, archived: false };
+    }
+
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
+      throw new BadRequestException('Reason is required when archiving an employee with history');
+    }
+
+    const archived = await this.prisma.user.update({
+      where: { id },
+      data: { status: UserStatus.INACTIVE, deletedAt: new Date() },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
+    await this.audit(user, 'EMPLOYEE_ARCHIVED', 'User', id, {
+      entityType: 'User',
+      oldValue,
+      newValue: this.safeUser(archived),
+      reason: trimmedReason,
+    });
+    return { success: true, archived: true };
   }
 
   async createBranchOwner(user: AuthUser, dto: import('./dto/create-branch-owner.dto').CreateBranchOwnerDto) {
@@ -382,7 +554,10 @@ export class UsersService {
         username: dto.username?.toLowerCase(),
         role: primaryRole,
         branchId,
-        status: dto.status,
+        department: dto.department !== undefined ? dto.department?.trim() || null : undefined,
+        notes: dto.notes !== undefined ? dto.notes?.trim() || null : undefined,
+        salary: dto.salary !== undefined ? (dto.salary != null ? Number(dto.salary) : null) : undefined,
+        startDate: dto.startDate !== undefined ? (dto.startDate ? new Date(dto.startDate) : null) : undefined,
       },
       include: { branch: true, userRoles: { include: { role: true } } },
     });
@@ -409,6 +584,9 @@ export class UsersService {
       include: { branch: true, userRoles: { include: { role: true } } },
     });
     if (!target) throw new NotFoundException('User not found');
+    if (!target.hasLogin) {
+      throw new BadRequestException('Employee does not have login credentials. Use Create Login instead.');
+    }
 
     const targetRoles = this.extractRoles(target);
     this.assertCanResetPassword(user, target, targetRoles);

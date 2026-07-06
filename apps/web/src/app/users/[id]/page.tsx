@@ -6,7 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { hqAssignableRoles, RoleBadges, RoleSelector } from '@/components/RoleSelector';
 import { HqWarehouseMultiSelect } from '@/components/users/HqWarehouseMultiSelect';
 import { apiFetch } from '@/lib/api';
-import { canAssignHqWarehouseManager, canResetUserPassword } from '@/lib/rbac';
+import { canAssignHqWarehouseManager, canDeleteEmployee, canResetUserPassword } from '@/lib/rbac';
 import type { Branch, Role, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -20,6 +20,10 @@ export default function UserDetailPage() {
   const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState('');
   const [temporaryPassword, setTemporaryPassword] = useState('');
+  const [showCreateLogin, setShowCreateLogin] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [loginForm, setLoginForm] = useState({ username: '', email: '', password: '' });
   const [form, setForm] = useState({
     fullName: '',
     employeeId: '',
@@ -30,6 +34,10 @@ export default function UserDetailPage() {
     branchId: '',
     status: 'ACTIVE',
     hqWarehouseIds: [] as string[],
+    department: '',
+    notes: '',
+    salary: '',
+    startDate: '',
   });
 
   async function load() {
@@ -58,6 +66,15 @@ export default function UserDetailPage() {
         branchId: userResult.branchId ?? '',
         status: userResult.status ?? 'ACTIVE',
         hqWarehouseIds: userResult.assignedHqWarehouseIds ?? [],
+        department: userResult.department ?? '',
+        notes: userResult.notes ?? '',
+        salary: userResult.salary != null ? String(userResult.salary) : '',
+        startDate: userResult.startDate ? userResult.startDate.slice(0, 10) : '',
+      });
+      setLoginForm({
+        username: userResult.username ?? '',
+        email: userResult.email ?? '',
+        password: '',
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -73,7 +90,14 @@ export default function UserDetailPage() {
     event.preventDefault();
     setError('');
     try {
-      setUser(await apiFetch<User>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(form) }));
+      setUser(await apiFetch<User>(`/users/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          ...form,
+          salary: form.salary ? Number(form.salary) : null,
+          startDate: form.startDate || null,
+        }),
+      }));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -93,6 +117,39 @@ export default function UserDetailPage() {
     }
   }
 
+  async function createLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setTemporaryPassword('');
+    try {
+      const result = await apiFetch<User & { temporaryPassword?: string }>(`/users/${id}/create-login`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...loginForm,
+          password: loginForm.password || undefined,
+        }),
+      });
+      if (result.temporaryPassword) setTemporaryPassword(result.temporaryPassword);
+      setShowCreateLogin(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function deleteEmployee() {
+    setError('');
+    try {
+      await apiFetch(`/users/${id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason: deleteReason }),
+      });
+      window.location.href = '/users';
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   function setField(key: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [key]: value }));
   }
@@ -101,10 +158,11 @@ export default function UserDetailPage() {
     setForm((current) => ({ ...current, roles }));
   }
 
-  const canResetPassword = canResetUserPassword(currentUser, user);
+  const canResetPassword = canResetUserPassword(currentUser, user) && user?.hasLogin !== false;
   const isHqEmployee = user?.branchId === null;
   const isWarehouseManagerRole = form.roles.includes('WAREHOUSE_MANAGER');
   const canEditAssignments = canAssignHqWarehouseManager(currentUser) && isHqEmployee && isWarehouseManagerRole;
+  const canDelete = canDeleteEmployee(currentUser) && currentUser?.id !== user?.id;
 
   return (
     <ProtectedShell>
@@ -113,6 +171,9 @@ export default function UserDetailPage() {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('users.title')}</p>
           <h2 className="text-3xl font-bold">{user?.fullName ?? '-'}</h2>
           {user ? <RoleBadges roles={user.roles?.length ? user.roles : [user.role]} /> : null}
+          {user?.hasLogin === false ? (
+            <p className="inline-flex rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">{t('users.noLoginBadge')}</p>
+          ) : null}
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {temporaryPassword ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{t('users.temporaryPassword')}: {temporaryPassword}</p> : null}
@@ -120,8 +181,25 @@ export default function UserDetailPage() {
           <Input label={t('crm.fullName')} value={form.fullName} onChange={(value) => setField('fullName', value)} />
           <Input label={t('users.employeeId')} value={form.employeeId} onChange={(value) => setField('employeeId', value)} />
           <Input label={t('users.phone')} value={form.phone} onChange={(value) => setField('phone', value)} />
-          <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
-          <Input label={t('users.username')} value={form.username} onChange={(value) => setField('username', value)} />
+          {isHqEmployee ? (
+            <>
+              <Input label={t('users.department')} value={form.department} onChange={(value) => setField('department', value)} />
+              <Input label={t('users.salary')} value={form.salary} onChange={(value) => setField('salary', value)} type="number" />
+              <Input label={t('users.startDate')} value={form.startDate} onChange={(value) => setField('startDate', value)} type="date" />
+              <label className="block md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">{t('users.notes')}</span>
+                <textarea value={form.notes} onChange={(event) => setField('notes', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" />
+              </label>
+            </>
+          ) : null}
+          {user?.hasLogin !== false ? (
+            <>
+              <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
+              <Input label={t('users.username')} value={form.username} onChange={(value) => setField('username', value)} />
+            </>
+          ) : (
+            <Input label={t('auth.email')} value={form.email} onChange={(value) => setField('email', value)} />
+          )}
           <RoleSelector label={isHqEmployee ? t('users.hqRoles') : t('users.role')} selectedRoles={form.roles} onChange={setRoles} roles={isHqEmployee ? hqAssignableRoles : undefined} />
           {isHqEmployee ? (
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
@@ -155,9 +233,41 @@ export default function UserDetailPage() {
           {canResetPassword ? (
             <button onClick={() => void action('reset-password')} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold" type="button">{t('users.resetPassword')}</button>
           ) : null}
+          {user?.hasLogin === false && canDeleteEmployee(currentUser) ? (
+            <button onClick={() => setShowCreateLogin(true)} className="rounded-xl border border-blue-200 px-4 py-2 font-semibold text-blue-700" type="button">{t('users.createLogin')}</button>
+          ) : null}
           <button onClick={() => void action('activate')} className="rounded-xl border border-green-200 px-4 py-2 font-semibold text-green-700" type="button">{t('users.activate')}</button>
           <button onClick={() => void action('suspend')} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">{t('users.suspend')}</button>
+          {canDelete ? (
+            <button onClick={() => setShowDeleteModal(true)} className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 font-semibold text-red-700" type="button">{t('users.deleteEmployee')}</button>
+          ) : null}
         </div>
+        {showCreateLogin ? (
+          <form onSubmit={createLogin} className="grid gap-4 rounded-3xl border border-blue-200 bg-blue-50/40 p-6 md:grid-cols-2">
+            <h3 className="text-lg font-bold text-slate-900 md:col-span-2">{t('users.createLogin')}</h3>
+            <Input label={t('users.username')} value={loginForm.username} onChange={(value) => setLoginForm((current) => ({ ...current, username: value }))} required />
+            <Input label={t('auth.email')} value={loginForm.email} onChange={(value) => setLoginForm((current) => ({ ...current, email: value }))} />
+            <Input label={t('auth.password')} value={loginForm.password} onChange={(value) => setLoginForm((current) => ({ ...current, password: value }))} />
+            <div className="flex gap-2 md:col-span-2">
+              <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" type="submit">{t('users.createLogin')}</button>
+              <button onClick={() => setShowCreateLogin(false)} className="rounded-xl border border-slate-300 px-4 py-3 font-semibold" type="button">{t('common.cancel')}</button>
+            </div>
+          </form>
+        ) : null}
+        {showDeleteModal ? (
+          <div className="rounded-3xl border border-red-200 bg-red-50/40 p-6">
+            <h3 className="text-lg font-bold text-slate-900">{t('users.deleteEmployee')}</h3>
+            <p className="mt-2 text-sm text-slate-600">{t('users.deleteEmployeeHint')}</p>
+            <label className="mt-4 block">
+              <span className="text-sm font-semibold text-slate-700">{t('users.deleteReason')}</span>
+              <textarea value={deleteReason} onChange={(event) => setDeleteReason(event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" />
+            </label>
+            <div className="mt-4 flex gap-2">
+              <button onClick={() => void deleteEmployee()} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white" type="button">{t('users.confirmDelete')}</button>
+              <button onClick={() => setShowDeleteModal(false)} className="rounded-xl border border-slate-300 px-4 py-3 font-semibold" type="button">{t('common.cancel')}</button>
+            </div>
+          </div>
+        ) : null}
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-bold">{t('users.loginHistory')}</h3>
           <pre className="mt-4 max-h-96 overflow-auto rounded-2xl bg-slate-50 p-4 text-xs">{JSON.stringify(history, null, 2)}</pre>
@@ -167,6 +277,29 @@ export default function UserDetailPage() {
   );
 }
 
-function Input({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
+function Input({
+  label,
+  value,
+  onChange,
+  required,
+  type = 'text',
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  required?: boolean;
+  type?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        type={type}
+        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+      />
+    </label>
+  );
 }
