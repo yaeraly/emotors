@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { canDeleteHqGoodsReceiving, canManageHqWarehouse } from '@/lib/rbac';
@@ -144,8 +143,6 @@ export default function HqWarehouseDetailPage() {
           </div>
           <Link href="/hq-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t('common.back')}</Link>
         </div>
-
-        <WarehouseTopNav />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
