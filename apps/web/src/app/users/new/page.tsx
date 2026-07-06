@@ -7,7 +7,7 @@ import { hqAssignableRoles, RoleSelector } from '@/components/RoleSelector';
 import { HqWarehouseMultiSelect } from '@/components/users/HqWarehouseMultiSelect';
 import { apiFetch } from '@/lib/api';
 import type { Branch, Role, User, Warehouse } from '@/lib/types';
-import { canAssignHqWarehouseManager, canCreateHqEmployee } from '@/lib/rbac';
+import { canAssignHqWarehouseManager, canCreateHqEmployee, isBranchPanelUser } from '@/lib/rbac';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewUserPage() {
@@ -49,7 +49,7 @@ export default function NewUserPage() {
         setForm((current) => ({
           ...current,
           roles: hqCreator ? ['SUPPLY_CHAIN_MANAGER'] : current.roles,
-          branchId: hqCreator ? '' : result[0]?.id ?? '',
+          branchId: hqCreator ? '' : me.branchId ?? result[0]?.id ?? '',
         }));
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -67,15 +67,23 @@ export default function NewUserPage() {
         body: JSON.stringify({
           ...form,
           userType: isHqCreator ? 'HQ' : 'BRANCH',
-          branchId: isHqCreator ? null : form.branchId,
+          branchId: isHqCreator ? null : currentUser?.branchId ?? form.branchId,
           password: form.hasLogin ? form.password || undefined : undefined,
           salary: form.salary ? Number(form.salary) : undefined,
           startDate: form.startDate || undefined,
           hqWarehouseIds: form.roles.includes('WAREHOUSE_MANAGER') ? form.hqWarehouseIds : undefined,
         }),
       });
-      if (created.temporaryPassword) setTemporaryPassword(created.temporaryPassword);
-      else router.push(`/users/${created.id}`);
+      if (created.temporaryPassword) {
+        setTemporaryPassword(created.temporaryPassword);
+        return;
+      }
+      if (!isHqCreator) {
+        sessionStorage.setItem('users.createSuccess', '1');
+        router.push('/users');
+        return;
+      }
+      router.push(`/users/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -150,6 +158,11 @@ export default function NewUserPage() {
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               <p className="font-semibold text-slate-800">{t('users.hqEmployee')}</p>
               <p>{form.hasLogin ? t('users.hqEmployeeNoBranch') : t('users.hqEmployeeNoLoginHint')}</p>
+            </div>
+          ) : isBranchPanelUser(currentUser) ? (
+            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600 md:col-span-2">
+              <p className="font-semibold text-slate-800">{currentUser?.branch?.name ?? t('users.branchEmployees')}</p>
+              <p>{t('users.branchEmployeeAutoAssign')}</p>
             </div>
           ) : (
             <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>

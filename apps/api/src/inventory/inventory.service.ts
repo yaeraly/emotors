@@ -941,6 +941,25 @@ export class InventoryService {
   }
 
   createYuanRate(user: AuthUser, dto: CreateYuanRateDto) {
+    if (this.isBranchInventoryUser(user)) {
+      void this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'YUAN_RATE_ACTION_REMOVED',
+          entity: 'YuanRateHistory',
+          metadata: {
+            userId: user.id,
+            role: user.role,
+            branchId: user.branchId,
+            reason: 'Branch users cannot manage yuan exchange rates',
+            timestamp: new Date().toISOString(),
+          },
+        },
+      }).catch(() => null);
+      void this.auditBranchDataAccessDenied(user, user.branchId ?? undefined, 'Yuan rate management is not allowed for branch users');
+      throw new ForbiddenException('Branch users cannot manage yuan exchange rates');
+    }
     return this.prisma.yuanRateHistory.create({
       data: {
         rate: dto.rate,
@@ -1070,7 +1089,7 @@ export class InventoryService {
   async balances(user: AuthUser, query: ProductQueryDto) {
     const balances = await this.prisma.inventoryBalance.findMany({
       where: {
-        ...this.buildBranchWhere(user, query.branchId),
+        ...this.buildInventoryBalanceWhere(user, query.branchId),
         ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
       },
       include: { product: true, warehouse: true },
@@ -1082,7 +1101,7 @@ export class InventoryService {
 
   async stockValue(user: AuthUser, branchId?: string) {
     const balances = await this.prisma.inventoryBalance.findMany({
-      where: this.buildBranchWhere(user, branchId),
+      where: this.buildInventoryBalanceWhere(user, branchId),
       include: { product: { include: { productCategory: true } }, warehouse: true },
     });
     const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
@@ -1267,10 +1286,66 @@ export class InventoryService {
     }
 
     if (requested && requested !== userBranch) {
+      void this.auditBranchDataAccessDenied(user, requested);
       throw new ForbiddenException('You can only access your own branch');
     }
 
     return { branchId: userBranch };
+  }
+
+  private buildInventoryBalanceWhere(user: AuthUser, requestedBranchId?: string) {
+    const requested = normalizeBranchId(requestedBranchId);
+    const userBranch = normalizeBranchId(user.branchId);
+
+    if (this.isBranchInventoryUser(user)) {
+      if (requested && requested !== userBranch) {
+        void this.auditBranchDataAccessDenied(user, requested);
+        throw new ForbiddenException('You can only access your own branch warehouse data');
+      }
+      return {
+        branchId: userBranch,
+        warehouse: {
+          warehouseType: WarehouseType.BRANCH,
+          branchId: userBranch,
+          deletedAt: null,
+        },
+      };
+    }
+
+    if (this.canAccessAllInventory(user)) {
+      return requested ? { branchId: requested } : {};
+    }
+
+    if (requested && requested !== userBranch) {
+      void this.auditBranchDataAccessDenied(user, requested);
+      throw new ForbiddenException('You can only access your own branch');
+    }
+
+    return { branchId: userBranch };
+  }
+
+  private isBranchInventoryUser(user: AuthUser) {
+    return !!normalizeBranchId(user.branchId) && !this.canAccessAllInventory(user);
+  }
+
+  private auditBranchDataAccessDenied(user: AuthUser, requestedBranchId?: string, reason?: string) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'BRANCH_DATA_ACCESS_DENIED',
+        entity: 'Branch',
+        entityId: requestedBranchId ?? user.branchId ?? undefined,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          branchId: user.branchId,
+          requestedBranchId: requestedBranchId ?? null,
+          reason: reason ?? 'Cross-branch access denied',
+          timestamp: new Date().toISOString(),
+        },
+      },
+    }).catch(() => null);
   }
 
   private buildProductCatalogWhere(
@@ -1280,12 +1355,25 @@ export class InventoryService {
     const requested = normalizeBranchId(requestedBranchId);
     const userBranch = normalizeBranchId(user.branchId);
 
+    if (this.isBranchInventoryUser(user)) {
+      if (requested && requested !== userBranch) {
+        void this.auditBranchDataAccessDenied(user, requested);
+        throw new ForbiddenException('You can only access your own branch');
+      }
+      return {
+        branchId: userBranch,
+        deletedAt: null,
+        warehouse: activeBranchWarehouseWhere,
+      };
+    }
+
     if (this.canAccessAllInventory(user)) {
       return requested ? { branchId: requested } : {};
     }
 
     if (canViewProductCatalog(user) && userBranch) {
       if (requested && requested !== userBranch) {
+        void this.auditBranchDataAccessDenied(user, requested);
         throw new ForbiddenException('You can only access your own branch');
       }
       return {

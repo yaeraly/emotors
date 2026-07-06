@@ -658,6 +658,15 @@ export function canDeleteHqWarehouse(user: Pick<User, 'role' | 'roles' | 'permis
   return canUnlockProcurementOrder(user);
 }
 
+export function isBranchPanelUser(user: Pick<User, 'branchId'> | null | undefined) {
+  return !!user?.branchId;
+}
+
+export function canManageYuanRate(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  return canManageProductCatalog(user);
+}
+
 export function canDeleteHqGoodsReceiving(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return canUnlockProcurementOrder(user);
 }

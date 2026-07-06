@@ -1,4 +1,5 @@
 import type { Role } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
 
 export const assignableRoles: Role[] = [
   'MANAGER',
@@ -27,26 +28,7 @@ export const hqAssignableRoles: Role[] = [
   'SYSTEM_ADMINISTRATOR',
 ];
 
-const roleLabels: Partial<Record<Role, string>> = {
-  FRANCHISE_OWNER: 'Branch Owner',
-  MANAGER: 'Sales Manager',
-  MASTER: 'Technician',
-  WAREHOUSE_OPERATOR: 'Warehouse Manager',
-  CASHIER: 'Cashier',
-  ACCOUNTANT: 'Accountant',
-  FRANCHISE_DIRECTOR: 'Franchise Director',
-  SUPPLY_CHAIN_MANAGER: 'Supply Chain Manager',
-  HQ_SALES_MANAGER: 'HQ Sales Manager',
-  HQ_CASHIER: 'HQ Cashier',
-  WAREHOUSE_MANAGER: 'Warehouse Manager',
-  FINANCE_MANAGER: 'Finance Manager',
-  MARKETING_MANAGER: 'Marketing Manager',
-  CONTENT_CREATOR: 'Content Creator',
-  ACADEMY_DIRECTOR: 'Academy Director',
-  SYSTEM_ADMINISTRATOR: 'System Administrator',
-};
-
-const roleDescriptions: Partial<Record<Role, string>> = {
+const branchRoleDescriptions: Partial<Record<Role, string>> = {
   FRANCHISE_OWNER: 'Own branch CRM, sales, service, inventory, finance, KPI, employees, reports',
   MANAGER: 'CRM, customers, sales, installments, service coordination',
   MASTER: 'Service orders, diagnosis, repairs, warranty, parts consumption',
@@ -55,16 +37,22 @@ const roleDescriptions: Partial<Record<Role, string>> = {
   ACCOUNTANT: 'Branch finance view, payments, optional payroll support',
 };
 
-export function roleLabel(role: Role) {
-  return roleLabels[role] ?? role.replaceAll('_', ' ');
+export function roleLabel(role: Role, t?: (key: string) => string) {
+  if (t) {
+    const key = `roles.${role}`;
+    const translated = t(key);
+    if (translated !== key) return translated;
+  }
+  return role.replaceAll('_', ' ');
 }
 
 export function RoleBadges({ roles }: { roles: Role[] }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-1.5">
       {roles.map((role) => (
         <span key={role} className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
-          {roleLabel(role)}
+          {roleLabel(role, t)}
         </span>
       ))}
     </div>
@@ -82,6 +70,8 @@ export function RoleSelector({
   onChange: (roles: Role[]) => void;
   roles?: Role[];
 }) {
+  const { t } = useTranslation();
+
   function toggle(role: Role) {
     if (selectedRoles.includes(role)) {
       const next = selectedRoles.filter((selectedRole) => selectedRole !== role);
@@ -104,8 +94,10 @@ export function RoleSelector({
               className="h-4 w-4 rounded border-slate-300 text-blue-600"
             />
             <span>
-              <span className="block">{roleLabel(role)}</span>
-              <span className="block text-xs font-normal text-slate-500">{roleDescriptions[role]}</span>
+              <span className="block">{roleLabel(role, t)}</span>
+              {branchRoleDescriptions[role] ? (
+                <span className="block text-xs font-normal text-slate-500">{branchRoleDescriptions[role]}</span>
+              ) : null}
             </span>
           </label>
         ))}

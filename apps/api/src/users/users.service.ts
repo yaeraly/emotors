@@ -156,17 +156,28 @@ export class UsersService {
     if (roles.includes(Role.WAREHOUSE_MANAGER) && Array.isArray(dto.hqWarehouseIds)) {
       await this.hqWarehouseAssignmentService.syncUserAssignments(user, created.id, dto.hqWarehouseIds);
     }
-    const auditAction = !hasLogin
-      ? 'EMPLOYEE_CREATED_WITHOUT_LOGIN'
-      : this.hasRole(user, Role.FRANCHISE_OWNER)
-        ? 'BRANCH_EMPLOYEE_CREATED'
-        : 'user_created';
+    const auditAction =
+      userType === 'HQ'
+        ? 'HQ_EMPLOYEE_REGISTERED'
+        : this.hasRole(user, Role.FRANCHISE_OWNER)
+          ? 'BRANCH_EMPLOYEE_CREATED'
+          : 'user_created';
     await this.audit(user, auditAction, 'User', created.id, {
       branchId: created.branchId ?? undefined,
       roles,
       hasLogin,
       department: created.department,
+      entityType: 'User',
+      entityId: created.id,
     });
+    if (userType === 'BRANCH' && this.hasRole(user, Role.FRANCHISE_OWNER)) {
+      await this.audit(user, 'BRANCH_USER_CREATE_SUCCESS', 'User', created.id, {
+        branchId: created.branchId ?? undefined,
+        roles,
+        entityType: 'User',
+        entityId: created.id,
+      });
+    }
     const assignments = roles.includes(Role.WAREHOUSE_MANAGER)
       ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(created.id)
       : [];

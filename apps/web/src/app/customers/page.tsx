@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer } from '@/lib/rbac';
+import { canArchiveCustomer, isBranchPanelUser } from '@/lib/rbac';
 import type { Branch, Customer, CustomerStatus, User } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -98,6 +98,8 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  const isBranchPanel = isBranchPanelUser(currentUser);
+
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (search.trim()) {
@@ -106,13 +108,13 @@ export default function CustomersPage() {
     if (status) {
       params.set('status', status);
     }
-    if (branchId) {
+    if (!isBranchPanel && branchId) {
       params.set('branchId', branchId);
     }
 
     const value = params.toString();
     return value ? `?${value}` : '';
-  }, [branchId, search, status]);
+  }, [branchId, isBranchPanel, search, status]);
 
   const sortedCustomers = useMemo(() => {
     return [...customers].sort((a, b) => {
@@ -179,7 +181,7 @@ export default function CustomersPage() {
           fullName: form.fullName.trim(),
           phone: form.phone.trim(),
           whatsappPhone: form.whatsappPhone.trim() || undefined,
-          branchId: form.branchId || undefined,
+          branchId: form.branchId || currentUser?.branchId || undefined,
           status: form.status,
           notes: form.notes.trim() || undefined,
           totalPurchaseAmount: Number(form.totalPurchaseAmount || 0),
@@ -405,18 +407,20 @@ export default function CustomersPage() {
               placeholder={t('crm.searchPlaceholder')}
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             />
-            <select
-              value={branchId}
-              onChange={(event) => setBranchId(event.target.value)}
-              className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-            >
-              <option value="">{t('common.all')} {t('crm.branch')}</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
+            {!isBranchPanel ? (
+              <select
+                value={branchId}
+                onChange={(event) => setBranchId(event.target.value)}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+              >
+                <option value="">{t('common.all')} {t('crm.branch')}</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value)}
@@ -472,7 +476,7 @@ export default function CustomersPage() {
                 form={form}
                 onChange={(updates) => setForm({ ...form, ...updates })}
               />
-              {branches.length > 1 ? (
+              {branches.length > 1 && !isBranchPanel ? (
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">
                     {t('crm.branch')}

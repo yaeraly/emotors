@@ -328,7 +328,51 @@ async function main() {
     },
   ];
 
+  const hqStaffRecords: Array<{
+    email: string;
+    fullName: string;
+    role: Role;
+    employeeId: string;
+    phone: string;
+    hasLogin: boolean;
+    username?: string;
+  }> = [
+    {
+      email: 'marketing@emotors.kg',
+      fullName: 'Marketing Manager',
+      role: Role.MARKETING_MANAGER,
+      employeeId: 'HQ-MARKETING-001',
+      phone: '+996700000010',
+      hasLogin: false,
+    },
+    {
+      email: 'content@emotors.kg',
+      fullName: 'Content Creator',
+      role: Role.CONTENT_CREATOR,
+      employeeId: 'HQ-CONTENT-001',
+      phone: '+996700000011',
+      hasLogin: false,
+    },
+    {
+      email: 'academy@emotors.kg',
+      fullName: 'Academy Director',
+      role: Role.ACADEMY_DIRECTOR,
+      employeeId: 'HQ-ACADEMY-001',
+      phone: '+996700000012',
+      hasLogin: false,
+    },
+    {
+      email: 'franchise-director@emotors.kg',
+      fullName: 'Franchise Director',
+      role: Role.FRANCHISE_DIRECTOR,
+      employeeId: 'HQ-FRANCHISE-DIR-001',
+      phone: '+996700000013',
+      hasLogin: false,
+    },
+  ];
+
   const hqPasswordHash = await bcrypt.hash('Emotors@2026', 12);
+  const noLoginPasswordHash = await bcrypt.hash('hq-employee-no-login-seed', 12);
   for (const hqUser of hqTestUsers) {
     await prisma.user.upsert({
       where: { email: hqUser.email },
@@ -365,6 +409,41 @@ async function main() {
         create: { userId: createdUser.id, roleId: role.id },
       });
     }
+  }
+
+  for (const record of hqStaffRecords) {
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [{ email: record.email }, { employeeId: record.employeeId }],
+      },
+    });
+    if (existing) {
+      console.log(`HQ employee already exists: ${record.fullName}`);
+      continue;
+    }
+
+    const created = await prisma.user.create({
+      data: {
+        email: record.email,
+        passwordHash: record.hasLogin ? hqPasswordHash : noLoginPasswordHash,
+        fullName: record.fullName,
+        role: record.role,
+        branchId: null,
+        employeeId: record.employeeId,
+        phone: record.phone,
+        username: record.hasLogin ? record.username ?? record.email.split('@')[0] : null,
+        status: 'ACTIVE',
+        hasLogin: record.hasLogin,
+        mustChangePassword: record.hasLogin,
+      },
+    });
+    const role = await prisma.rbacRole.findUnique({ where: { code: record.role } });
+    if (role) {
+      await prisma.userRole.create({
+        data: { userId: created.id, roleId: role.id },
+      });
+    }
+    console.log(`Registered HQ employee: ${record.fullName}`);
   }
 
   const hqWarehouse = await prisma.warehouse.findFirst({

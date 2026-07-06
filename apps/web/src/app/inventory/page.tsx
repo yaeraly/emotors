@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog, isWarehouseManagerUser } from '@/lib/rbac';
+import { canManageProductCatalog, canManageYuanRate, isWarehouseManagerUser } from '@/lib/rbac';
 import type { InventoryBalance, ProductListResponse, StockValueReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -52,6 +52,7 @@ export default function InventoryPage() {
   }
 
   const canManageProducts = canManageProductCatalog(currentUser);
+  const canManageYuan = canManageYuanRate(currentUser);
   const hideWarehouseNav = isWarehouseManagerUser(currentUser);
 
   return (
@@ -130,6 +131,7 @@ export default function InventoryPage() {
           <Breakdown title={`${t('inventory.stockValue')} · ${t('inventory.category')}`} items={stockValue?.byCategory ?? []} empty={t('inventory.noStockValue')} quantityLabel={t('inventory.quantity')} />
         </div>
 
+        {canManageYuan ? (
         <form onSubmit={createYuanRate} className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-end">
           <label className="flex-1">
             <span className="text-sm font-semibold text-slate-700">{t('inventory.addYuanRate')}</span>
@@ -147,6 +149,7 @@ export default function InventoryPage() {
             {t('common.save')}
           </button>
         </form>
+        ) : null}
       </section>
     </ProtectedShell>
   );

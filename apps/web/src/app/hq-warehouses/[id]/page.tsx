@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canAssignHqWarehouseManager, canDeleteHqGoodsReceiving, canManageHqWarehouse } from '@/lib/rbac';
+import { canAssignHqWarehouseManager, canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canManageHqWarehouse } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -43,6 +43,7 @@ type ManagerAssignment = {
 
 export default function HqWarehouseDetailPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const [user, setUser] = useState<User | null>(null);
   const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
@@ -54,6 +55,9 @@ export default function HqWarehouseDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<ReceivingRow | null>(null);
+  const [deleteWarehouseOpen, setDeleteWarehouseOpen] = useState(false);
+  const [deleteWarehouseRequireReason, setDeleteWarehouseRequireReason] = useState(false);
+  const [deletingWarehouse, setDeletingWarehouse] = useState(false);
   const [deletingReceiving, setDeletingReceiving] = useState(false);
   const [form, setForm] = useState({ name: '', code: '', country: '', city: '', address: '', contactPerson: '', phone: '', notes: '' });
   const [managers, setManagers] = useState<ManagerAssignment[]>([]);
@@ -152,6 +156,32 @@ export default function HqWarehouseDetailPage() {
     }
   }
 
+  async function confirmDeleteWarehouse(reason?: string) {
+    setDeletingWarehouse(true);
+    setError('');
+    try {
+      const result = await apiFetch<{ archived?: boolean }>(`/hq-warehouses/${params.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+      setSuccess(result.archived ? t('hqWarehouse.archivedInstead') : t('hqWarehouse.deletedSuccess'));
+      setDeleteWarehouseOpen(false);
+      if (!result.archived) {
+        router.push('/hq-warehouses');
+        return;
+      }
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('common.error');
+      if (message.toLowerCase().includes('reason is required')) {
+        setDeleteWarehouseRequireReason(true);
+      }
+      setError(message);
+    } finally {
+      setDeletingWarehouse(false);
+    }
+  }
+
   async function confirmDeleteReceiving(reason?: string) {
     if (!deleteTarget) return;
     setDeletingReceiving(true);
@@ -180,6 +210,7 @@ export default function HqWarehouseDetailPage() {
   }
 
   const canDeleteReceiving = canDeleteHqGoodsReceiving(user);
+  const canDeleteWarehouse = canDeleteHqWarehouse(user);
 
   if (!warehouse) {
     return <ProtectedShell><p className="p-6">{t('common.loading')}</p></ProtectedShell>;
@@ -194,7 +225,22 @@ export default function HqWarehouseDetailPage() {
             <h2 className="text-3xl font-bold text-slate-950">{warehouse.name}</h2>
             <p className="text-sm text-slate-500">{warehouse.code} · {warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')}</p>
           </div>
-          <Link href="/hq-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t('common.back')}</Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/hq-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t('common.back')}</Link>
+            {canDeleteWarehouse ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteWarehouseOpen(true);
+                  setDeleteWarehouseRequireReason(false);
+                  setError('');
+                }}
+                className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700"
+              >
+                {t('common.delete')}
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -343,6 +389,15 @@ export default function HqWarehouseDetailPage() {
         loading={deletingReceiving}
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDeleteReceiving}
+      />
+      <DeleteConfirmModal
+        open={deleteWarehouseOpen}
+        title={t('common.deleteConfirmTitle')}
+        message={t('common.deleteConfirmMessage')}
+        requireReason={deleteWarehouseRequireReason}
+        loading={deletingWarehouse}
+        onClose={() => setDeleteWarehouseOpen(false)}
+        onConfirm={confirmDeleteWarehouse}
       />
     </ProtectedShell>
   );

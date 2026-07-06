@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { RoleBadges } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
-import { canCreateBranchOwner, canResetUserPassword } from '@/lib/rbac';
+import { canCreateBranchOwner, canResetUserPassword, isBranchPanelUser } from '@/lib/rbac';
 import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -51,6 +51,17 @@ export default function UsersPage() {
   const [multiRoleFilter, setMultiRoleFilter] = useState<Role[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  const isBranchOwnerPanel = isBranchPanelUser(currentUser);
+
+  useEffect(() => {
+    if (sessionStorage.getItem('users.createSuccess') === '1') {
+      sessionStorage.removeItem('users.createSuccess');
+      setSuccessMessage(t('users.createSuccess'));
+      window.setTimeout(() => setSuccessMessage(''), 5000);
+    }
+  }, [t]);
 
   useEffect(() => {
     Promise.all([apiFetch<User>('/auth/me'), apiFetch<User[]>('/users'), apiFetch<Branch[]>('/branches')])
@@ -185,26 +196,30 @@ export default function UsersPage() {
               />
             </label>
             <Select label={t('users.roleFilter')} value={roleFilter} onChange={setRoleFilter} options={[{ value: '', label: t('common.all') }, ...roleFilterOptions.map((role) => ({ value: role, label: roleLabel(role, t) }))]} />
-            <Select
-              label={t('users.branchFilter')}
-              value={branchFilter}
-              onChange={setBranchFilter}
-              options={[
-                { value: '', label: t('users.allBranches') },
-                { value: 'HQ', label: t('users.hqEmployees') },
-                ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
-              ]}
-            />
-            <Select
-              label={t('users.userType')}
-              value={userTypeFilter}
-              onChange={setUserTypeFilter}
-              options={[
-                { value: '', label: t('users.allUsers') },
-                { value: 'HQ', label: t('users.hqEmployees') },
-                { value: 'BRANCH', label: t('users.branchEmployees') },
-              ]}
-            />
+            {!isBranchOwnerPanel ? (
+              <>
+                <Select
+                  label={t('users.branchFilter')}
+                  value={branchFilter}
+                  onChange={setBranchFilter}
+                  options={[
+                    { value: '', label: t('users.allBranches') },
+                    { value: 'HQ', label: t('users.hqEmployees') },
+                    ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
+                  ]}
+                />
+                <Select
+                  label={t('users.userType')}
+                  value={userTypeFilter}
+                  onChange={setUserTypeFilter}
+                  options={[
+                    { value: '', label: t('users.allUsers') },
+                    { value: 'HQ', label: t('users.hqEmployees') },
+                    { value: 'BRANCH', label: t('users.branchEmployees') },
+                  ]}
+                />
+              </>
+            ) : null}
             <Select
               label={t('users.status')}
               value={statusFilter}
@@ -242,6 +257,7 @@ export default function UsersPage() {
         </section>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {successMessage ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">{successMessage}</p> : null}
         {temporaryPassword ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{t('users.temporaryPassword')}: {temporaryPassword}</p> : null}
 
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
