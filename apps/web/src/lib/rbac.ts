@@ -398,7 +398,12 @@ export function canEditProductCatalog(user: Pick<User, 'role' | 'roles' | 'permi
 
 export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
-  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+  return hasFullAccess(user);
+}
+
+export function canEditSellingPrice(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user);
 }
 
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

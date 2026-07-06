@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
-import { canArchiveProduct, canEditProductCatalog } from '@/lib/rbac';
+import { canArchiveProduct } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -142,7 +142,7 @@ export function ProductsListContent() {
 
       <div className="h-[calc(100vh-250px)] min-h-[420px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-[1180px] divide-y divide-slate-200 text-sm">
+          <table className="min-w-[960px] divide-y divide-slate-200 text-sm">
             <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">{t('inventory.photo')}</th>
@@ -152,8 +152,6 @@ export function ProductsListContent() {
                 <th className="px-4 py-3">{t('inventory.warehouse')}</th>
                 <th className="px-4 py-3">{t('inventory.quantity')}</th>
                 <th className="px-4 py-3">{t('inventory.finalCost')}</th>
-                <th className="px-4 py-3">{t('inventory.sellingPriceKgs')}</th>
-                <th className="px-4 py-3">{t('inventory.marginPercent')}</th>
                 <th className="px-4 py-3">{t('inventory.lowStock')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
               </tr>
@@ -188,8 +186,6 @@ export function ProductsListContent() {
                   <td className="px-4 py-3">{product.warehouse?.name}</td>
                   <td className="px-4 py-3">{product.quantity}</td>
                   <td className="px-4 py-3">{formatKgs(product.finalCostKgs)}</td>
-                  <td className="px-4 py-3">{formatKgs(product.sellingPriceKgs)}</td>
-                  <td className="px-4 py-3">{Number(product.marginPercent).toFixed(2)}%</td>
                   <td className="px-4 py-3">
                     <StockBadge quantity={product.quantity} lowStock={product.lowStock} />
                   </td>

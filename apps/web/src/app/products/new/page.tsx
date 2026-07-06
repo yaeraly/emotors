@@ -5,7 +5,8 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import type { Product, ProductCategory, Warehouse, YuanRateHistory } from '@/lib/types';
+import { canEditSellingPrice } from '@/lib/rbac';
+import type { Product, ProductCategory, User, Warehouse, YuanRateHistory } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewProductPage() {
@@ -13,6 +14,7 @@ export default function NewProductPage() {
   const { t, language } = useTranslation();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [skuError, setSkuError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -38,10 +40,12 @@ export default function NewProductPage() {
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<YuanRateHistory | null>('/inventory/yuan-rates/latest'),
       apiFetch<ProductCategory[]>('/inventory/categories'),
+      apiFetch<User>('/auth/me'),
     ])
-      .then(([warehouseResult, rate, categoryResult]) => {
+      .then(([warehouseResult, rate, categoryResult, userResult]) => {
         setWarehouses(warehouseResult);
         setCategories(categoryResult);
+        setCurrentUser(userResult);
         setForm((current) => ({
           ...current,
           warehouseId: warehouseResult[0]?.id ?? '',
@@ -67,6 +71,8 @@ export default function NewProductPage() {
         : (marginAmount / Number(form.sellingPriceKgs || 0)) * 100;
     return { purchaseCostKgs, transportCostKgs, finalCostKgs, marginAmount, marginPercent };
   }, [form]);
+
+  const canEditPrice = canEditSellingPrice(currentUser);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,7 +112,7 @@ export default function NewProductPage() {
           purchasePriceYuan: Number(form.purchasePriceYuan),
           latestYuanRate: Number(form.latestYuanRate),
           transportCostPerKg: Number(form.transportCostPerKg),
-          sellingPriceKgs: Number(form.sellingPriceKgs),
+          sellingPriceKgs: canEditPrice ? Number(form.sellingPriceKgs) : 0,
           minStockLevel: Number(form.minStockLevel),
           initialQuantity: Number(form.initialQuantity),
         }),
@@ -169,7 +175,9 @@ export default function NewProductPage() {
             <Input label={t('inventory.purchasePriceYuan')} type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
             <Input label={t('inventory.latestYuanRate')} type="number" value={form.latestYuanRate} onChange={(value) => setField('latestYuanRate', value)} />
             <Input label={t('inventory.transportCost')} type="number" value={form.transportCostPerKg} onChange={(value) => setField('transportCostPerKg', value)} />
-            <Input label={t('inventory.sellingPriceKgs')} type="number" value={form.sellingPriceKgs} onChange={(value) => setField('sellingPriceKgs', value)} />
+            {canEditPrice ? (
+              <Input label={t('inventory.sellingPriceKgs')} type="number" value={form.sellingPriceKgs} onChange={(value) => setField('sellingPriceKgs', value)} />
+            ) : null}
             <Input label={t('inventory.minStockLevel')} type="number" value={form.minStockLevel} onChange={(value) => setField('minStockLevel', value)} />
             <Input label={t('inventory.initialQuantity')} type="number" value={form.initialQuantity} onChange={(value) => setField('initialQuantity', value)} />
             <label className="block md:col-span-2">
@@ -186,8 +194,12 @@ export default function NewProductPage() {
             <Preview label={t('inventory.purchaseCostKgs')} value={formatKgs(preview.purchaseCostKgs)} />
             <Preview label={t('inventory.transportCostKgs')} value={formatKgs(preview.transportCostKgs)} />
             <Preview label={t('inventory.finalCostKgs')} value={formatKgs(preview.finalCostKgs)} />
-            <Preview label={t('inventory.marginAmount')} value={formatKgs(preview.marginAmount)} />
-            <Preview label={t('inventory.marginPercent')} value={`${preview.marginPercent.toFixed(2)}%`} />
+            {canEditPrice ? (
+              <>
+                <Preview label={t('inventory.marginAmount')} value={formatKgs(preview.marginAmount)} />
+                <Preview label={t('inventory.marginPercent')} value={`${preview.marginPercent.toFixed(2)}%`} />
+              </>
+            ) : null}
             <button disabled={saving} className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300" type="submit">
               {saving ? t('common.loading') : t('inventory.createProduct')}
             </button>

@@ -39,7 +39,7 @@ const rolePermissions: Record<string, string[]> = {
   WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'products.manage', 'procurement.view', 'procurement.receive'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
-  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'inventory.view', 'procurement.manage', 'procurement.view', 'procurement.receive', 'distribution.manage', 'products.manage', 'products.archive'],
+  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'inventory.view', 'procurement.manage', 'procurement.view', 'procurement.receive', 'distribution.manage', 'products.manage'],
   PROCUREMENT_MANAGER: ['procurement.manage', 'procurement.view'],
   SALESPERSON: ['sales.manage'],
   MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],

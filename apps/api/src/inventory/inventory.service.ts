@@ -25,7 +25,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { canArchiveProduct, canEditPurchasePriceYuan, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { canArchiveProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -42,6 +42,9 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
+
+const SELLING_PRICE_EDIT_DENIED_MESSAGE =
+  'Supply Chain Manager cannot change selling price. | Supply Chain Manager не может изменять цену продажи. | Supply Chain Manager сатуу баасын өзгөртө албайт.';
 
 @Injectable()
 export class InventoryService {
@@ -154,6 +157,16 @@ export class InventoryService {
     return category;
   }
 
+  async logCategoryCreateOpened(user: AuthUser) {
+    this.assertCanManageProductCatalog(user);
+    await this.auditCategory(user, 'CATEGORY_CREATE_OPENED', 'new', {
+      action: 'CATEGORY_CREATE_OPENED',
+      oldValue: null,
+      newValue: null,
+    });
+    return { success: true };
+  }
+
   async category(id: string) {
     const category = await this.prisma.productCategory.findUnique({
       where: { id },
@@ -217,6 +230,9 @@ export class InventoryService {
   async createProduct(user: AuthUser, dto: CreateProductDto) {
     try {
       this.assertCanManageProductCatalog(user);
+      if (!canEditSellingPrice(user) && Number(dto.sellingPriceKgs ?? 0) !== 0) {
+        throw new ForbiddenException(SELLING_PRICE_EDIT_DENIED_MESSAGE);
+      }
       return await this.prisma.$transaction(async (tx) => {
         if (!dto.name?.trim()) throw new BadRequestException('Product name is required');
         if (!dto.sku?.trim()) throw new BadRequestException('SKU is required');
@@ -460,6 +476,15 @@ export class InventoryService {
 
   async updateProduct(user: AuthUser, id: string, dto: UpdateProductDto) {
     this.assertCanManageProductCatalog(user);
+    if (dto.sellingPriceKgs !== undefined && !canEditSellingPrice(user)) {
+      const product = await this.prisma.product.findFirst({ where: { id, deletedAt: null } });
+      await this.auditProductAccessDenied(user, id, product?.branchId ?? null, 'PRODUCT_PRICE_EDIT_DENIED', {
+        productId: id,
+        oldValue: product ? { sellingPriceKgs: Number(product.sellingPriceKgs) } : null,
+        newValue: { sellingPriceKgs: dto.sellingPriceKgs },
+      });
+      throw new ForbiddenException(SELLING_PRICE_EDIT_DENIED_MESSAGE);
+    }
     return this.prisma.$transaction(async (tx) => {
       const current = await this.getProductForWrite(tx, user, id);
 
@@ -577,6 +602,7 @@ export class InventoryService {
       await this.auditInTx(tx, user, current.branchId, 'PRODUCT_UPDATED', 'Product', id, {
         module: 'inventory',
         sku: dto.sku ?? current.sku,
+        productId: id,
         oldValue: { name: current.name, sku: current.sku, sellingPriceKgs: Number(current.sellingPriceKgs) },
         newValue: {
           name: dto.name ?? current.name,
@@ -584,6 +610,18 @@ export class InventoryService {
           sellingPriceKgs: next.sellingPriceKgs,
         },
       });
+
+      if (
+        dto.sellingPriceKgs !== undefined &&
+        canEditSellingPrice(user) &&
+        Number(dto.sellingPriceKgs) !== Number(current.sellingPriceKgs)
+      ) {
+        await this.auditInTx(tx, user, current.branchId, 'PRODUCT_PRICE_UPDATED', 'Product', id, {
+          productId: id,
+          oldValue: { sellingPriceKgs: Number(current.sellingPriceKgs) },
+          newValue: { sellingPriceKgs: Number(dto.sellingPriceKgs) },
+        });
+      }
 
       if (weightChanged && dto.weightKg !== undefined) {
         await this.auditInTx(tx, user, current.branchId, 'PRODUCT_WEIGHT_CHANGED', 'Product', id, {
@@ -614,7 +652,15 @@ export class InventoryService {
   }
 
   async deleteProduct(user: AuthUser, id: string) {
-    this.assertCanArchiveProduct(user);
+    if (!canArchiveProduct(user)) {
+      const product = await this.prisma.product.findFirst({ where: { id, deletedAt: null } });
+      await this.auditProductAccessDenied(user, id, product?.branchId ?? null, 'PRODUCT_DELETE_DENIED', {
+        productId: id,
+        oldValue: product ? { name: product.name, sku: product.sku, isActive: product.isActive } : null,
+        newValue: null,
+      });
+      throw new ForbiddenException('You do not have permission to archive products');
+    }
     const product = await this.getProductForWrite(this.prisma, user, id);
     const [stockMovements, saleItems, balances, priceHistory] =
       await Promise.all([
@@ -654,6 +700,19 @@ export class InventoryService {
     dto: CreatePriceHistoryDto,
   ) {
     this.assertCanManageProductCatalog(user);
+    if (!canEditSellingPrice(user)) {
+      const product = await this.prisma.product.findFirst({ where: { id: productId, deletedAt: null } });
+      if (
+        Number(dto.sellingPriceKgs) !== Number(product?.sellingPriceKgs ?? 0)
+      ) {
+        await this.auditProductAccessDenied(user, productId, product?.branchId ?? null, 'PRODUCT_PRICE_EDIT_DENIED', {
+          productId,
+          oldValue: product ? { sellingPriceKgs: Number(product.sellingPriceKgs) } : null,
+          newValue: { sellingPriceKgs: dto.sellingPriceKgs },
+        });
+        throw new ForbiddenException(SELLING_PRICE_EDIT_DENIED_MESSAGE);
+      }
+    }
     return this.prisma.$transaction(async (tx) => {
       const product = await this.getProductForWrite(tx, user, productId);
       if (
@@ -1539,7 +1598,34 @@ export class InventoryService {
         metadata: {
           userId: user.id,
           role: user.role,
-          categoryId,
+          categoryId: categoryId === 'new' ? null : categoryId,
+          roles: user.roles ?? [user.role],
+          timestamp: new Date().toISOString(),
+          ...metadata,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private auditProductAccessDenied(
+    user: AuthUser,
+    productId: string,
+    branchId: string | null,
+    action: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'Product',
+        entityId: productId,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          productId,
+          branchId,
           roles: user.roles ?? [user.role],
           timestamp: new Date().toISOString(),
           ...metadata,

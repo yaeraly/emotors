@@ -211,8 +211,11 @@ export function canManageProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 
 }
 
 export function canArchiveProduct(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  const roles = resolveUserRoles(user);
-  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canEditSellingPrice(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
 }
 
 export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

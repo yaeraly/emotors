@@ -14,7 +14,15 @@ const emptyForm = {
   description: '',
 };
 
-export function CategoriesListContent() {
+type CategoriesListContentProps = {
+  createFormOpen?: boolean;
+  onCreateFormOpenChange?: (open: boolean) => void;
+};
+
+export function CategoriesListContent({
+  createFormOpen = false,
+  onCreateFormOpenChange,
+}: CategoriesListContentProps) {
   const { t, language } = useTranslation();
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -36,6 +44,7 @@ export function CategoriesListContent() {
   }, [query]);
 
   const canManage = canManageProductCatalog(currentUser);
+  const showForm = Boolean(editing) || createFormOpen;
 
   async function loadCategories() {
     try {
@@ -67,6 +76,7 @@ export function CategoriesListContent() {
       }
       setEditing(null);
       setForm(emptyForm);
+      onCreateFormOpenChange?.(false);
       await loadCategories();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -87,6 +97,7 @@ export function CategoriesListContent() {
   }
 
   function startEdit(category: ProductCategory) {
+    onCreateFormOpenChange?.(false);
     setEditing(category);
     setForm({
       code: category.code,
@@ -97,6 +108,12 @@ export function CategoriesListContent() {
     });
   }
 
+  function cancelForm() {
+    setEditing(null);
+    setForm(emptyForm);
+    onCreateFormOpenChange?.(false);
+  }
+
   return (
     <div className="space-y-6">
       {error ? (
@@ -105,7 +122,13 @@ export function CategoriesListContent() {
         </p>
       ) : null}
 
-      {canManage ? (
+      {!canManage ? (
+        <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {t('productMaster.readOnlyNotice')}
+        </p>
+      ) : null}
+
+      {canManage && showForm ? (
         <form
           id="category-create-form"
           onSubmit={submit}
@@ -136,15 +159,20 @@ export function CategoriesListContent() {
             value={form.description}
             onChange={(value) => setForm({ ...form, description: value })}
           />
-          <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" type="submit">
-            {editing ? t('inventory.editCategory') : t('inventory.createCategory')}
-          </button>
+          <div className="flex flex-wrap gap-2 md:col-span-3">
+            <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white" type="submit">
+              {editing ? t('inventory.editCategory') : t('inventory.createCategory')}
+            </button>
+            <button
+              className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
+              type="button"
+              onClick={cancelForm}
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
         </form>
-      ) : (
-        <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {t('productMaster.readOnlyNotice')}
-        </p>
-      )}
+      ) : null}
 
       <input
         value={search}

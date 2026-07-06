@@ -33,6 +33,7 @@ function ProductMasterPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
 
   const tabParam = searchParams.get('tab');
   const activeTab: ProductMasterTab = tabParam === 'categories' ? 'categories' : 'products';
@@ -40,6 +41,12 @@ function ProductMasterPageContent() {
   useEffect(() => {
     apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'categories') {
+      setCategoryCreateOpen(false);
+    }
+  }, [activeTab]);
 
   const canManage = canManageProductCatalog(user);
 
@@ -79,7 +86,10 @@ function ProductMasterPageContent() {
             ) : createAction && activeTab === 'categories' ? (
               <button
                 type="button"
-                onClick={() => document.getElementById('category-create-form')?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => {
+                  setCategoryCreateOpen(true);
+                  void apiFetch('/inventory/categories/create-opened', { method: 'POST' }).catch(() => undefined);
+                }}
                 className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white"
               >
                 {createAction.label}
@@ -88,7 +98,14 @@ function ProductMasterPageContent() {
           }
         />
 
-        {activeTab === 'products' ? <ProductsListContent /> : <CategoriesListContent />}
+        {activeTab === 'products' ? (
+          <ProductsListContent />
+        ) : (
+          <CategoriesListContent
+            createFormOpen={categoryCreateOpen}
+            onCreateFormOpenChange={setCategoryCreateOpen}
+          />
+        )}
       </section>
     </ProtectedShell>
   );

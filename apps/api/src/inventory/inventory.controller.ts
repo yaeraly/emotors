@@ -58,6 +58,12 @@ export class InventoryController {
     return this.inventoryService.createCategory(user, dto);
   }
 
+  @Post('categories/create-opened')
+  @RequirePermissions('products.manage')
+  logCategoryCreateOpened(@CurrentUser() user: AuthUser) {
+    return this.inventoryService.logCategoryCreateOpened(user);
+  }
+
   @Get('categories/:id')
   @RequirePermissions(...PRODUCT_VIEW_PERMISSIONS)
   category(@Param('id') id: string) {

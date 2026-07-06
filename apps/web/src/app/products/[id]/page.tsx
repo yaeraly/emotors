@@ -7,7 +7,7 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import { canEditProductCatalog, canEditPurchasePriceYuan } from '@/lib/rbac';
+import { canEditProductCatalog, canEditPurchasePriceYuan, canEditSellingPrice } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -76,6 +76,7 @@ export default function ProductDetailPage() {
 
   const currentWarehouseInactive = Boolean(product?.warehouse && product.warehouse.isActive === false);
   const canSaveWarehouse = !currentWarehouseInactive || Boolean(editForm.warehouseId);
+  const canEditPrice = canEditSellingPrice(currentUser);
 
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -111,7 +112,7 @@ export default function ProductDetailPage() {
           ...(canEditProductCatalog(currentUser)
             ? { weightKg: nextWeight, warehouseId: editForm.warehouseId }
             : {}),
-          sellingPriceKgs: Number(editForm.sellingPriceKgs),
+          ...(canEditPrice ? { sellingPriceKgs: Number(editForm.sellingPriceKgs) } : {}),
           minStockLevel: Number(editForm.minStockLevel),
         }),
       });
@@ -228,7 +229,9 @@ export default function ProductDetailPage() {
                     ))}
                   </select>
                 </label>
-                <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
+                {canEditPrice ? (
+                  <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
+                ) : null}
                 <Input label={t('inventory.weightPerUnitKg')} type="number" value={editForm.weightKg} onChange={(value) => setEditForm({ ...editForm, weightKg: value })} min="0.001" step="0.001" />
                 <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
                 <button disabled={saving || !canSaveWarehouse} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
