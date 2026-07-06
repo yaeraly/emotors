@@ -1,17 +1,41 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { WarehouseTopNav } from '@/components/WarehouseTopNav';
+import { SectionTopNav } from '@/components/SectionTopNav';
+import { CategoriesListContent } from '@/components/product-master/CategoriesListContent';
+import { ProductsListContent } from '@/components/product-master/ProductsListContent';
 import { apiFetch } from '@/lib/api';
 import { canManageProductCatalog } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+type ProductMasterTab = 'products' | 'categories';
+
 export default function ProductMasterPage() {
+  return (
+    <Suspense
+      fallback={
+        <ProtectedShell>
+          <p className="p-6 text-slate-500">...</p>
+        </ProtectedShell>
+      }
+    >
+      <ProductMasterPageContent />
+    </Suspense>
+  );
+}
+
+function ProductMasterPageContent() {
   const { t } = useTranslation();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
+
+  const tabParam = searchParams.get('tab');
+  const activeTab: ProductMasterTab = tabParam === 'categories' ? 'categories' : 'products';
 
   useEffect(() => {
     apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
@@ -19,73 +43,53 @@ export default function ProductMasterPage() {
 
   const canManage = canManageProductCatalog(user);
 
+  const tabs = useMemo(
+    () => [
+      { id: 'products', label: t('productMaster.products') },
+      { id: 'categories', label: t('productMaster.categories') },
+    ],
+    [t],
+  );
+
+  const createAction =
+    activeTab === 'products' && canManage
+      ? { href: '/products/new', label: t('productMaster.createProduct') }
+      : activeTab === 'categories' && canManage
+        ? { href: '/product-master?tab=categories', label: t('inventory.createCategory') }
+        : null;
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('scm.sidebar.warehouse')}</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('productMaster.title')}</p>
           <h2 className="text-3xl font-bold text-slate-950">{t('productMaster.title')}</h2>
           <p className="mt-2 text-slate-500">{t('productMaster.subtitle')}</p>
         </div>
 
-        <WarehouseTopNav />
+        <SectionTopNav
+          tabs={tabs}
+          activeTab={activeTab}
+          onTabChange={(tabId) => router.replace(`/product-master?tab=${tabId}`)}
+          action={
+            createAction && activeTab === 'products' ? (
+              <Link href={createAction.href} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">
+                {createAction.label}
+              </Link>
+            ) : createAction && activeTab === 'categories' ? (
+              <button
+                type="button"
+                onClick={() => document.getElementById('category-create-form')?.scrollIntoView({ behavior: 'smooth' })}
+                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white"
+              >
+                {createAction.label}
+              </button>
+            ) : null
+          }
+        />
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <SectionCard
-            title={t('productMaster.products')}
-            description={t('productMaster.productsDescription')}
-            href="/products"
-            manageHref={canManage ? '/products/new' : undefined}
-            manageLabel={t('productMaster.createProduct')}
-            viewLabel={t('productMaster.viewProducts')}
-          />
-          <SectionCard
-            title={t('productMaster.categories')}
-            description={t('productMaster.categoriesDescription')}
-            href="/inventory/categories"
-            manageHref={canManage ? '/inventory/categories' : undefined}
-            manageLabel={t('productMaster.manageCategories')}
-            viewLabel={t('productMaster.viewCategories')}
-          />
-        </div>
-
-        {!canManage ? (
-          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('productMaster.readOnlyNotice')}</p>
-        ) : null}
+        {activeTab === 'products' ? <ProductsListContent /> : <CategoriesListContent />}
       </section>
     </ProtectedShell>
-  );
-}
-
-function SectionCard({
-  title,
-  description,
-  href,
-  manageHref,
-  manageLabel,
-  viewLabel,
-}: {
-  title: string;
-  description: string;
-  href: string;
-  manageHref?: string;
-  manageLabel: string;
-  viewLabel: string;
-}) {
-  return (
-    <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h3 className="text-xl font-bold text-slate-950">{title}</h3>
-      <p className="mt-2 text-sm text-slate-500">{description}</p>
-      <div className="mt-5 flex flex-wrap gap-3">
-        <Link href={href} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">
-          {viewLabel}
-        </Link>
-        {manageHref ? (
-          <Link href={manageHref} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
-            {manageLabel}
-          </Link>
-        ) : null}
-      </div>
-    </article>
   );
 }

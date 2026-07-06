@@ -1,16 +1,18 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { WarehouseTopNav } from '@/components/WarehouseTopNav';
+import { SectionTopNav } from '@/components/SectionTopNav';
+import { InventoryCountListContent } from '@/components/inventory/InventoryCountListContent';
 import { WarehouseDataTable } from '@/components/warehouse/WarehouseDataTable';
 import { WarehouseListToolbar } from '@/components/warehouse/WarehouseListToolbar';
 import { WarehousePagination } from '@/components/warehouse/WarehousePagination';
 import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canManageHqWarehouse, canDeleteHqWarehouse } from '@/lib/rbac';
+import { canManageHqWarehouse, canDeleteHqWarehouse, canManageInventoryCount } from '@/lib/rbac';
 import {
   filterWarehouseRows,
   paginateRows,
@@ -23,6 +25,8 @@ import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const PAGE_SIZE = 10;
+
+type HqTab = 'warehouses' | 'inventory';
 
 type Dashboard = {
   totalHqWarehouses: number;
@@ -43,7 +47,25 @@ type WarehouseMetrics = Warehouse & {
 };
 
 export default function HqWarehousesPage() {
+  return (
+    <Suspense
+      fallback={
+        <ProtectedShell>
+          <p className="p-6 text-slate-500">...</p>
+        </ProtectedShell>
+      }
+    >
+      <HqWarehousesPageContent />
+    </Suspense>
+  );
+}
+
+function HqWarehousesPageContent() {
   const { t } = useTranslation();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeTab: HqTab = tabParam === 'inventory' ? 'inventory' : 'warehouses';
   const [user, setUser] = useState<User | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [warehouses, setWarehouses] = useState<WarehouseMetrics[]>([]);
@@ -165,26 +187,49 @@ export default function HqWarehousesPage() {
     setSortDirection('asc');
   }
 
+  const hqTabs = useMemo(
+    () => [
+      { id: 'warehouses', label: t('scm.sidebar.hqWarehouses') },
+      { id: 'inventory', label: t('scm.hub.warehouse.stocktake') },
+    ],
+    [t],
+  );
+
+  const createAction =
+    activeTab === 'warehouses' && canManageHqWarehouse(user)
+      ? { href: '/hq-warehouses/new', label: t('hqWarehouse.create') }
+      : activeTab === 'inventory' && canManageInventoryCount(user)
+        ? { href: '/inventory/count/new', label: t('inventoryCount.newInventory') }
+        : null;
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('hqWarehouse.title')}</p>
-            <h2 className="text-3xl font-bold text-slate-950">{t('hqWarehouse.list')}</h2>
-          </div>
-          {canManageHqWarehouse(user) ? (
-            <Link href="/hq-warehouses/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
-              {t('hqWarehouse.create')}
-            </Link>
-          ) : null}
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('hqWarehouse.title')}</p>
+          <h2 className="text-3xl font-bold text-slate-950">{t('hqWarehouse.list')}</h2>
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
-        <WarehouseTopNav />
+        <SectionTopNav
+          tabs={hqTabs}
+          activeTab={activeTab}
+          onTabChange={(tabId) => router.replace(`/hq-warehouses?tab=${tabId}`)}
+          action={
+            createAction ? (
+              <Link href={createAction.href} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">
+                {createAction.label}
+              </Link>
+            ) : null
+          }
+        />
 
+        {activeTab === 'inventory' ? (
+          <InventoryCountListContent />
+        ) : (
+          <>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
           <WarehouseSummaryCard label={t('hqWarehouse.totalWarehouses')} value={String(summary.totalHqWarehouses)} />
           <WarehouseSummaryCard label={t('hqWarehouse.totalProducts')} value={String(summary.totalProducts)} />
@@ -325,6 +370,8 @@ export default function HqWarehousesPage() {
           pageSize={PAGE_SIZE}
           onPageChange={setPage}
         />
+          </>
+        )}
       </section>
 
       <DeleteConfirmModal

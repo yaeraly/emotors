@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { WarehouseDataTable } from '@/components/warehouse/WarehouseDataTable';
 import { WarehouseListToolbar } from '@/components/warehouse/WarehouseListToolbar';
 import { WarehousePagination } from '@/components/warehouse/WarehousePagination';
@@ -131,8 +130,6 @@ export default function BranchWarehousesPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-
-        <WarehouseTopNav />
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
           <WarehouseSummaryCard label={t('branchWarehouse.totalWarehouses')} value={String(summary.totalBranchWarehouses)} />

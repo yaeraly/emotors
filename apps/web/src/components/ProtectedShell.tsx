@@ -165,7 +165,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           <nav className="space-y-2">
             {supplyChainManagerView ? (
               <>
-                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
                 ) : null}
@@ -175,12 +174,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeProductMaster ? (
                   <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
                 ) : null}
-                <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
-                <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
+                {canSeeProcurement ? (
+                  <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
+                ) : null}
               </>
             ) : warehouseManagerView ? (
               <>
-                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
                 ) : null}
@@ -190,8 +189,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeProductMaster ? (
                   <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
                 ) : null}
-                <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
-                <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
+                {canSeeProcurement ? (
+                  <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
+                ) : null}
               </>
             ) : (
               <>
