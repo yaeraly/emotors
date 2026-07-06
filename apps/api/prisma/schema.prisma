@@ -696,6 +696,8 @@ model User {
   shortageReports ShortageReport[] @relation("ShortageReportCreator")
   shortageResolutions ShortageResolution[] @relation("ShortageResolutionResolver")
   assignedPickingTasks HqWarehousePickingTask[] @relation("PickingTaskAssignee")
+  hqWarehouseManagerAssignments HqWarehouseManagerAssignment[] @relation("HqWarehouseManagerAssignments")
+  assignedHqWarehouseManagerAssignments HqWarehouseManagerAssignment[] @relation("HqWarehouseAssignmentAssigner")
   branchInvoices BranchInvoice[] @relation("BranchInvoiceCreator")
   branchPayments BranchPayment[] @relation("BranchPaymentCreator")
   createdProcurementOrders ProcurementOrder[] @relation("ProcurementOrderCreator")
@@ -1040,6 +1042,7 @@ model Warehouse {
   procurementOrders ProcurementOrder[]
   procurementReceivings ProcurementGoodsReceiving[]
   inventoryCountSessions InventoryCountSession[]
+  hqManagerAssignments HqWarehouseManagerAssignment[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -1048,6 +1051,31 @@ model Warehouse {
   @@index([branchId])
   @@index([warehouseType])
   @@index([deletedAt])
+}
+
+enum HqWarehouseAssignmentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model HqWarehouseManagerAssignment {
+  id           String                      @id @default(cuid())
+  userId       String
+  user         User                        @relation("HqWarehouseManagerAssignments", fields: [userId], references: [id])
+  warehouseId  String
+  warehouse    Warehouse                   @relation(fields: [warehouseId], references: [id])
+  assignedById String?
+  assignedBy   User?                       @relation("HqWarehouseAssignmentAssigner", fields: [assignedById], references: [id])
+  assignedAt   DateTime                    @default(now())
+  status       HqWarehouseAssignmentStatus @default(ACTIVE)
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+
+  @@unique([userId, warehouseId])
+  @@index([userId])
+  @@index([warehouseId])
+  @@index([status])
+  @@index([assignedById])
 }
 
 model Product {

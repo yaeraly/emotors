@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canDeleteHqGoodsReceiving, canManageHqWarehouse } from '@/lib/rbac';
+import { canAssignHqWarehouseManager, canDeleteHqGoodsReceiving, canManageHqWarehouse } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -33,6 +33,14 @@ type ReceivingRow = {
   procurementOrder?: { id: string; orderNumber: string };
 };
 
+type ManagerAssignment = {
+  id: string;
+  userId: string;
+  warehouseId: string;
+  assignedAt: string;
+  user: { id: string; fullName: string; email: string };
+};
+
 export default function HqWarehouseDetailPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -48,10 +56,28 @@ export default function HqWarehouseDetailPage() {
   const [deleteTarget, setDeleteTarget] = useState<ReceivingRow | null>(null);
   const [deletingReceiving, setDeletingReceiving] = useState(false);
   const [form, setForm] = useState({ name: '', code: '', country: '', city: '', address: '', contactPerson: '', phone: '', notes: '' });
+  const [managers, setManagers] = useState<ManagerAssignment[]>([]);
+  const [managerCandidates, setManagerCandidates] = useState<User[]>([]);
+  const [assignUserId, setAssignUserId] = useState('');
 
   useEffect(() => {
     void load();
   }, [params.id, tab]);
+
+  async function loadManagers(me: User) {
+    if (!canAssignHqWarehouseManager(me)) {
+      setManagers([]);
+      setManagerCandidates([]);
+      return;
+    }
+    const [assignmentResult, usersResult] = await Promise.all([
+      apiFetch<ManagerAssignment[]>(`/hq-warehouses/${params.id}/managers`),
+      apiFetch<User[]>('/users?role=WAREHOUSE_MANAGER'),
+    ]);
+    setManagers(assignmentResult);
+    setManagerCandidates(usersResult);
+    setAssignUserId(usersResult[0]?.id ?? '');
+  }
 
   async function load() {
     try {
@@ -73,6 +99,7 @@ export default function HqWarehouseDetailPage() {
       if (tab === 'receivings') setReceivings(await apiFetch(`/hq-warehouses/${params.id}/receivings`));
       if (tab === 'transfers') setTransfers(await apiFetch(`/hq-warehouses/${params.id}/transfers`));
       if (tab === 'history') setHistory(await apiFetch(`/hq-warehouses/${params.id}/history`));
+      if (tab === 'details') await loadManagers(me);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -84,6 +111,32 @@ export default function HqWarehouseDetailPage() {
     try {
       await apiFetch(`/hq-warehouses/${params.id}`, { method: 'PUT', body: JSON.stringify(form) });
       await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function assignManager() {
+    if (!assignUserId) return;
+    setError('');
+    try {
+      await apiFetch(`/hq-warehouses/${params.id}/managers`, {
+        method: 'POST',
+        body: JSON.stringify({ userId: assignUserId }),
+      });
+      if (user) await loadManagers(user);
+      setSuccess(t('common.success'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function unassignManager(targetUserId: string) {
+    setError('');
+    try {
+      await apiFetch(`/hq-warehouses/${params.id}/managers/${targetUserId}`, { method: 'DELETE' });
+      if (user) await loadManagers(user);
+      setSuccess(t('common.success'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -175,6 +228,56 @@ export default function HqWarehouseDetailPage() {
               </div>
             ) : null}
           </form>
+        ) : null}
+
+        {tab === 'details' && canAssignHqWarehouseManager(user) ? (
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-950">{t('hqWarehouse.managers')}</h3>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="block flex-1">
+                <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.assignManager')}</span>
+                <select
+                  value={assignUserId}
+                  onChange={(event) => setAssignUserId(event.target.value)}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                >
+                  {managerCandidates.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {candidate.fullName} ({candidate.email})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void assignManager()}
+                className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white"
+              >
+                {t('hqWarehouse.assignManager')}
+              </button>
+            </div>
+            <div className="mt-4 space-y-2">
+              {managers.length === 0 ? (
+                <p className="text-sm text-slate-500">{t('hqWarehouse.noManagers')}</p>
+              ) : (
+                managers.map((assignment) => (
+                  <div key={assignment.id} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 text-sm">
+                    <div>
+                      <p className="font-semibold text-slate-900">{assignment.user.fullName}</p>
+                      <p className="text-slate-500">{assignment.user.email}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void unassignManager(assignment.userId)}
+                      className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600"
+                    >
+                      {t('common.delete')}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
         ) : null}
 
         {tab === 'inventory' ? <SimpleTable headers={[t('inventory.products'), 'SKU', t('hqWarehouse.quantity'), t('hqWarehouse.reserved'), t('hqWarehouse.available'), t('hqWarehouse.landedCost'), t('hqWarehouse.lastReceiving')]} rows={inventory.map((row) => [row.product.name, row.sku, row.quantity, row.reservedQuantity, row.availableQuantity, row.landedCostKgs, row.lastReceivingAt ? new Date(row.lastReceivingAt).toLocaleDateString() : '—'])} /> : null}

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canManageInventoryCount, canViewProcurement, isBranchWarehouseOperator } from '@/lib/rbac';
+import { canManageInventoryCount, canViewProcurement, hasFullAccess, isBranchWarehouseOperator, isWarehouseManagerUser } from '@/lib/rbac';
 import type {
   InventoryCountSession,
   InventoryCountType,
@@ -63,12 +63,19 @@ export default function NewInventoryCountPage() {
           apiFetch<ProductCategory[]>('/inventory/categories'),
           apiFetch<ProductListResponse>('/inventory/products?pageSize=300'),
         ]);
-        setWarehouses(warehouseResult);
+        const filteredWarehouses = isBranchWarehouseOperator(me)
+          ? warehouseResult
+          : isWarehouseManagerUser(me) && !hasFullAccess(me)
+            ? warehouseResult.filter((warehouse) =>
+                (me.assignedHqWarehouseIds ?? []).includes(warehouse.id),
+              )
+            : warehouseResult;
+        setWarehouses(filteredWarehouses);
         setCategories(categoryResult);
         setProducts(productResult.items);
         setForm((current) => ({
           ...current,
-          warehouseId: current.warehouseId || warehouseResult[0]?.id || '',
+          warehouseId: current.warehouseId || filteredWarehouses[0]?.id || '',
         }));
         if (canViewProcurement(me)) {
           try {

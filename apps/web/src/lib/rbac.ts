@@ -45,14 +45,11 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],
   PROCUREMENT_MANAGER: ['procurement.manage'],
   SUPPLY_CHAIN_MANAGER: [
-    'inventory.manage',
     'inventory.view',
     'procurement.manage',
     'procurement.view',
-    'procurement.receive',
     'distribution.manage',
     'products.manage',
-    'products.archive',
   ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
@@ -513,7 +510,38 @@ export function canViewProcurement(user: Pick<User, 'role' | 'roles' | 'permissi
 }
 
 export function canReceiveProcurementToHq(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasPermission(user, 'procurement.receive') || hasPermission(user, 'procurement.manage');
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  if (hasRole(user, 'SUPPLY_CHAIN_MANAGER')) return false;
+  return hasRole(user, 'WAREHOUSE_MANAGER') && hasPermission(user, 'procurement.receive');
+}
+
+export function canAssignHqWarehouseManager(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
+export function canManageInventoryCountForWarehouse(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId' | 'assignedHqWarehouseIds'> | null | undefined,
+  warehouseId?: string | null,
+) {
+  if (!canManageInventoryCount(user)) return false;
+  if (!user || !warehouseId) return canManageInventoryCount(user);
+  if (hasFullAccess(user)) return true;
+  if (isWarehouseManagerUser(user)) {
+    return (user.assignedHqWarehouseIds ?? []).includes(warehouseId);
+  }
+  return true;
+}
+
+export function canCreateHqInventoryCount(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'assignedHqWarehouseIds'> | null | undefined,
+) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  if (isWarehouseManagerUser(user)) {
+    return (user.assignedHqWarehouseIds?.length ?? 0) > 0;
+  }
+  return false;
 }
 
 export function canEditProcurementOrderItems(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

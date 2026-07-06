@@ -5,16 +5,21 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
+import { AssignHqWarehouseManagerDto } from './dto/assign-hq-warehouse-manager.dto';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
+import { HqWarehouseAssignmentService } from './hq-warehouse-assignment.service';
 import { HqWarehouseService } from './hq-warehouse.service';
 
 @Controller('hq-warehouses')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
 export class HqWarehouseController {
-  constructor(private readonly service: HqWarehouseService) {}
+  constructor(
+    private readonly service: HqWarehouseService,
+    private readonly assignmentService: HqWarehouseAssignmentService,
+  ) {}
 
   @Get('dashboard')
   dashboard(@CurrentUser() user: AuthUser) {
@@ -87,5 +92,31 @@ export class HqWarehouseController {
   @Get(':id/history')
   history(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.history(user, id);
+  }
+
+  @Get(':id/managers')
+  @Roles(Role.CEO)
+  listManagers(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.assignmentService.listManagersForWarehouse(user, id);
+  }
+
+  @Post(':id/managers')
+  @Roles(Role.CEO)
+  assignManager(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AssignHqWarehouseManagerDto,
+  ) {
+    return this.assignmentService.assignManager(user, id, dto.userId);
+  }
+
+  @Delete(':id/managers/:userId')
+  @Roles(Role.CEO)
+  unassignManager(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.assignmentService.unassignManager(user, id, userId);
   }
 }

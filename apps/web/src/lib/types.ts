@@ -222,6 +222,7 @@ export type User = {
   status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
   mustChangePassword?: boolean;
   permissions?: string[];
+  assignedHqWarehouseIds?: string[];
   lastLoginAt?: string | null;
   createdAt?: string;
   updatedAt?: string;

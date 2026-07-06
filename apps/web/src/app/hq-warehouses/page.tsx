@@ -12,7 +12,7 @@ import { WarehousePagination } from '@/components/warehouse/WarehousePagination'
 import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canManageHqWarehouse, canDeleteHqWarehouse, canManageInventoryCount } from '@/lib/rbac';
+import { canManageHqWarehouse, canDeleteHqWarehouse, canCreateHqInventoryCount } from '@/lib/rbac';
 import {
   filterWarehouseRows,
   paginateRows,
@@ -198,7 +198,7 @@ function HqWarehousesPageContent() {
   const createAction =
     activeTab === 'warehouses' && canManageHqWarehouse(user)
       ? { href: '/hq-warehouses/new', label: t('hqWarehouse.create') }
-      : activeTab === 'inventory' && canManageInventoryCount(user)
+      : activeTab === 'inventory' && canCreateHqInventoryCount(user)
         ? { href: '/inventory/count/new', label: t('inventoryCount.newInventory') }
         : null;
 

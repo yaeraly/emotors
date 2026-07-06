@@ -81,14 +81,11 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],
   PROCUREMENT_MANAGER: ['procurement.manage'],
   SUPPLY_CHAIN_MANAGER: [
-    'inventory.manage',
     'inventory.view',
     'procurement.manage',
     'procurement.view',
-    'procurement.receive',
     'distribution.manage',
     'products.manage',
-    'products.archive',
   ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
@@ -279,7 +276,14 @@ export function canViewProcurement(user: Pick<AuthUser, 'role' | 'roles' | 'perm
 }
 
 export function canReceiveProcurementToHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return userHasAnyPermission(user, ['procurement.receive', 'procurement.manage']);
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) {
+    return true;
+  }
+  if (roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
+    return false;
+  }
+  return roles.includes(Role.WAREHOUSE_MANAGER) && userHasPermission(user, 'procurement.receive');
 }
 
 export function canEditProcurementOrderItems(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

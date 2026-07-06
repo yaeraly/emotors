@@ -17,12 +17,14 @@ import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse } from '../rbac/rbac';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 import { hasHqReceivingDownstreamUsage, HQ_RECEIVING_ARCHIVED_MESSAGE } from './hq-receiving-delete.util';
+import { HqWarehouseAssignmentService } from './hq-warehouse-assignment.service';
 
 @Injectable()
 export class HqWarehouseService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly assignmentService: HqWarehouseAssignmentService,
   ) {}
 
   dashboard(user: AuthUser) {
@@ -61,9 +63,10 @@ export class HqWarehouseService {
 
   list(user: AuthUser) {
     this.assertCanView(user);
+    const assignmentScope = this.assignmentService.buildAssignedWarehouseScope(user);
     return this.prisma.$transaction(async (tx) => {
       const warehouses = await tx.warehouse.findMany({
-        where: hqWarehouseWhere,
+        where: assignmentScope ?? hqWarehouseWhere,
         orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
       });
       const results = [];
@@ -571,6 +574,7 @@ export class HqWarehouseService {
     if (!warehouse || !isHqWarehouse(warehouse)) {
       throw new NotFoundException('HQ warehouse not found');
     }
+    await this.assignmentService.assertCanAccessHqWarehouse(user, id);
     return warehouse;
   }
 

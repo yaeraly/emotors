@@ -52,7 +52,8 @@ export class OperationsController {
   }
 
   @Post('procurement/orders/:id/receive-to-hq')
-  @RequirePermissions('procurement.receive', 'procurement.manage')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive')
   receiveProcurementToHq(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
     return this.service.receiveProcurementToHq(user, id, dto);
   }

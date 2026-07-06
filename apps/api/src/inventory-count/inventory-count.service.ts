@@ -31,6 +31,7 @@ import {
   UpdateInventoryCountItemDto,
 } from './dto/inventory-count.dto';
 import { InventoryCountQueryDto } from './dto/inventory-count-query.dto';
+import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -40,6 +41,7 @@ export class InventoryCountService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
+    private readonly assignmentService: HqWarehouseAssignmentService,
   ) {}
 
   list(user: AuthUser, query: InventoryCountQueryDto) {
@@ -76,7 +78,7 @@ export class InventoryCountService {
       where: { id: warehouseId, deletedAt: null, isActive: true },
     });
     if (!warehouse) throw new NotFoundException('Warehouse not found');
-    this.assertWarehouseAccess(user, warehouse);
+    await this.assertWarehouseAccess(user, warehouse);
 
     const term = q.trim();
     if (!term) return [];
@@ -119,8 +121,8 @@ export class InventoryCountService {
       if (!warehouse) {
         throw new BadRequestException('Warehouse not found');
       }
-      this.assertWarehouseAccess(user, warehouse);
-      this.assertCanCountWarehouse(user, warehouse);
+      await this.assertWarehouseAccess(user, warehouse);
+      await this.assertCanCountWarehouse(user, warehouse);
 
       this.validateTypeFilters(dto);
 
@@ -531,7 +533,7 @@ export class InventoryCountService {
       include: this.sessionInclude(),
     });
     if (!session) throw new NotFoundException('Inventory count session not found');
-    this.assertWarehouseAccess(user, session.warehouse);
+    await this.assertWarehouseAccess(user, session.warehouse);
     return session;
   }
 
@@ -542,8 +544,8 @@ export class InventoryCountService {
       include: { items: true, warehouse: true },
     });
     if (!session) throw new NotFoundException('Inventory count session not found');
-    this.assertWarehouseAccess(user, session.warehouse);
-    this.assertCanCountWarehouse(user, session.warehouse);
+    await this.assertWarehouseAccess(user, session.warehouse);
+    await this.assertCanCountWarehouse(user, session.warehouse);
     if (session.status === InventoryCountStatus.COMPLETED) {
       throw new BadRequestException('Completed inventory cannot be modified');
     }
@@ -556,7 +558,7 @@ export class InventoryCountService {
       include: { items: true, warehouse: true },
     });
     if (!session) throw new NotFoundException('Inventory count session not found');
-    this.assertWarehouseAccess(user, session.warehouse);
+    await this.assertWarehouseAccess(user, session.warehouse);
     if (session.status === InventoryCountStatus.COMPLETED) {
       throw new BadRequestException('Completed inventory cannot be modified');
     }
@@ -652,22 +654,6 @@ export class InventoryCountService {
     throw new ForbiddenException('Only warehouse managers can perform inventory counts');
   }
 
-  private assertCanCountWarehouse(
-    user: AuthUser,
-    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
-  ) {
-    const roles = resolveUserRoles(user);
-    if (isHqWarehouse(warehouse)) {
-      if (!roles.includes(Role.WAREHOUSE_MANAGER)) {
-        throw new ForbiddenException('Only HQ warehouse managers can count HQ inventory');
-      }
-      return;
-    }
-    if (!roles.includes(Role.WAREHOUSE_OPERATOR)) {
-      throw new ForbiddenException('Only branch warehouse managers can count branch inventory');
-    }
-  }
-
   private assertCanApprove(
     user: AuthUser,
     warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
@@ -685,9 +671,26 @@ export class InventoryCountService {
     throw new ForbiddenException('You cannot approve this inventory count');
   }
 
-  private assertWarehouseAccess(
+  private async assertCanCountWarehouse(
     user: AuthUser,
-    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+    warehouse: { id: string; warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+  ) {
+    const roles = resolveUserRoles(user);
+    if (isHqWarehouse(warehouse)) {
+      if (!roles.includes(Role.WAREHOUSE_MANAGER)) {
+        throw new ForbiddenException('Only HQ warehouse managers can count HQ inventory');
+      }
+      await this.assignmentService.assertAssignedToWarehouse(user.id, warehouse.id);
+      return;
+    }
+    if (!roles.includes(Role.WAREHOUSE_OPERATOR)) {
+      throw new ForbiddenException('Only branch warehouse managers can count branch inventory');
+    }
+  }
+
+  private async assertWarehouseAccess(
+    user: AuthUser,
+    warehouse: { id: string; warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
   ) {
     const roles = resolveUserRoles(user);
     if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
@@ -695,6 +698,7 @@ export class InventoryCountService {
     }
     if (isHqWarehouse(warehouse)) {
       if (roles.includes(Role.WAREHOUSE_MANAGER)) {
+        await this.assignmentService.assertAssignedToWarehouse(user.id, warehouse.id);
         return;
       }
       throw new ForbiddenException('You cannot access HQ warehouse inventory');
@@ -712,12 +716,13 @@ export class InventoryCountService {
   }
 
   private buildWarehouseScope(user: AuthUser): Prisma.WarehouseWhereInput | null {
+    const assignmentScope = this.assignmentService.buildAssignedWarehouseScope(user);
+    if (assignmentScope) {
+      return assignmentScope;
+    }
     const roles = resolveUserRoles(user);
     if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
       return null;
-    }
-    if (roles.includes(Role.WAREHOUSE_MANAGER)) {
-      return activeHqWarehouseWhere;
     }
     if (roles.includes(Role.FRANCHISE_OWNER) || roles.includes(Role.WAREHOUSE_OPERATOR)) {
       if (!user.branchId) {

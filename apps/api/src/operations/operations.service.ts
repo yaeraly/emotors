@@ -21,7 +21,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
+import { canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
 import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
@@ -36,6 +36,7 @@ import {
 import { buildProcurementLandedCostInputs } from '../procurement/transport-logistics.util';
 import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
+import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -45,6 +46,7 @@ export class OperationsService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
+    private readonly assignmentService: HqWarehouseAssignmentService,
   ) {}
 
   branchPurchaseRequests(user: AuthUser) {
@@ -173,8 +175,14 @@ export class OperationsService {
   }
 
   async receiveProcurementToHq(user: AuthUser, procurementOrderId: string, dto: any) {
+    const roles = resolveUserRoles(user);
+    if (roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      await this.auditReceivingDenied(user, procurementOrderId, null, 'Supply Chain Manager cannot receive goods into HQ warehouse');
+      throw new ForbiddenException('Supply Chain Manager cannot receive goods into HQ warehouse');
+    }
     if (!canReceiveProcurementToHq(user)) {
-      throw new ForbiddenException('Only Warehouse Manager can receive goods into HQ warehouse');
+      await this.auditReceivingDenied(user, procurementOrderId, null, 'Only assigned HQ Warehouse Manager can receive goods into HQ warehouse');
+      throw new ForbiddenException('Only assigned HQ Warehouse Manager can receive goods into HQ warehouse');
     }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
@@ -257,6 +265,20 @@ export class OperationsService {
       });
 
       const hqWarehouseId = dto.hqWarehouseId ?? order.hqWarehouseId;
+      if (!hasAnyFullAccessRole(roles)) {
+        try {
+          await this.assignmentService.assertAssignedToWarehouse(user.id, hqWarehouseId, tx);
+        } catch (error) {
+          await this.auditReceivingDenied(
+            user,
+            order.id,
+            hqWarehouseId,
+            'You are not assigned to this HQ warehouse',
+            tx,
+          );
+          throw error;
+        }
+      }
       const hqWarehouse = await tx.warehouse.findFirst({
         where: { id: hqWarehouseId, ...activeHqWarehouseWhere },
       });
@@ -480,6 +502,16 @@ export class OperationsService {
         hqWarehouseId,
         recalculatedLandedCost: true,
         reason: dto.reason,
+      });
+      await this.auditInTx(tx, user, 'HQ', 'HQ_RECEIVING_COMPLETED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        roles: user.roles ?? [user.role],
+        warehouseId: hqWarehouseId,
+        procurementOrderId: order.id,
+        receivingId: receiving.id,
+        oldValue: null,
+        newValue: { status: ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE },
+        timestamp: new Date().toISOString(),
       });
       await this.auditInTx(tx, user, 'HQ', 'GOODS_RECEIVED_TO_HQ', 'ProcurementOrder', order.id, {
         userId: user.id,
@@ -860,6 +892,32 @@ export class OperationsService {
       });
     }
     return resolved;
+  }
+
+  private auditReceivingDenied(
+    user: AuthUser,
+    procurementOrderId: string,
+    warehouseId: string | null,
+    reason: string,
+    tx: PrismaTx | PrismaService = this.prisma,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'HQ_RECEIVING_DENIED',
+        entity: 'ProcurementOrder',
+        entityId: procurementOrderId,
+        metadata: {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          warehouseId,
+          procurementOrderId,
+          reason,
+          timestamp: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {

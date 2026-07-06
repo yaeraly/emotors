@@ -36,10 +36,10 @@ const rolePermissions: Record<string, string[]> = {
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
   MASTER: ['service.manage', 'kpi.view', 'products.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage', 'products.view'],
-  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'products.manage', 'procurement.view', 'procurement.receive'],
+  WAREHOUSE_MANAGER: ['inventory.manage', 'inventory.view', 'distribution.manage', 'procurement.view', 'procurement.receive', 'products.view'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
-  SUPPLY_CHAIN_MANAGER: ['inventory.manage', 'inventory.view', 'procurement.manage', 'procurement.view', 'procurement.receive', 'distribution.manage', 'products.manage'],
+  SUPPLY_CHAIN_MANAGER: ['inventory.view', 'procurement.manage', 'procurement.view', 'distribution.manage', 'products.manage'],
   PROCUREMENT_MANAGER: ['procurement.manage', 'procurement.view'],
   SALESPERSON: ['sales.manage'],
   MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],
@@ -346,6 +346,33 @@ async function main() {
         create: { userId: createdUser.id, roleId: role.id },
       });
     }
+  }
+
+  const hqWarehouse = await prisma.warehouse.findFirst({
+    where: { code: 'HQ-MAIN', warehouseType: 'HQ' },
+  });
+  const warehouseManager = await prisma.user.findUnique({ where: { email: 'warehouse@emotors.kg' } });
+  const ceoUser = await prisma.user.findUnique({ where: { email: 'ceo@emotors.kg' } });
+  if (hqWarehouse && warehouseManager) {
+    await prisma.hqWarehouseManagerAssignment.upsert({
+      where: {
+        userId_warehouseId: {
+          userId: warehouseManager.id,
+          warehouseId: hqWarehouse.id,
+        },
+      },
+      update: {
+        status: 'ACTIVE',
+        assignedById: ceoUser?.id ?? null,
+        assignedAt: new Date(),
+      },
+      create: {
+        userId: warehouseManager.id,
+        warehouseId: hqWarehouse.id,
+        assignedById: ceoUser?.id ?? null,
+        status: 'ACTIVE',
+      },
+    });
   }
 
   for (const [code, nameKy, nameRu, nameEn] of productCategories) {

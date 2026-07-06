@@ -131,11 +131,16 @@ export class AuthService {
 
     const roles = this.roleCodes(currentUser);
     const permissions = await this.permissionsForUser(user.id, currentUser.role);
+    const assignedHqWarehouseIds = await this.prisma.hqWarehouseManagerAssignment.findMany({
+      where: { userId: user.id, status: 'ACTIVE' },
+      select: { warehouseId: true },
+    });
 
     return {
       ...currentUser,
       roles,
       permissions,
+      assignedHqWarehouseIds: assignedHqWarehouseIds.map((row) => row.warehouseId),
     };
   }
 

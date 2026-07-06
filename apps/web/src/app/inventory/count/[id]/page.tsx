@@ -6,10 +6,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import {
-  canApproveInventoryCount,
-  canManageInventoryCount,
-} from '@/lib/rbac';
+import { canApproveInventoryCount, canManageInventoryCountForWarehouse } from '@/lib/rbac';
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
@@ -39,7 +36,7 @@ export default function InventoryCountDetailPage() {
   const [pendingQty, setPendingQty] = useState<Record<string, string>>({});
   const barcodeRef = useRef<HTMLInputElement>(null);
 
-  const canManage = canManageInventoryCount(currentUser);
+  const canManage = canManageInventoryCountForWarehouse(currentUser, session?.warehouseId);
   const canApprove = canApproveInventoryCount(currentUser);
 
   async function load() {
