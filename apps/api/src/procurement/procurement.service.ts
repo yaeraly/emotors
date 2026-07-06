@@ -783,7 +783,7 @@ export class ProcurementService {
         'cargo_receipt',
         oldSection,
         newSection,
-        'CARGO_RECEIPT_UPDATED',
+        'CARGO_PAYMENT_UPDATED',
       );
       return updatedOrder;
     });
@@ -809,7 +809,7 @@ export class ProcurementService {
         updateData.customsCostKgs = Number(dto.customsCostKgs);
         if (String(oldSection.customsCostKgs ?? '') !== String(updateData.customsCostKgs)) {
           audits.push({
-            action: 'CUSTOMS_PAYMENT_UPDATED',
+            action: 'CUSTOMS_UPDATED',
             oldValue: { customsCostKgs: oldSection.customsCostKgs },
             newValue: { customsCostKgs: updateData.customsCostKgs },
           });
@@ -833,12 +833,26 @@ export class ProcurementService {
           throw new BadRequestException('Bank fee cost must be greater than or equal to zero');
         }
         updateData.bankFeeCostKgs = Number(dto.bankFeeCostKgs);
+        if (String(oldSection.bankFeeCostKgs ?? '') !== String(updateData.bankFeeCostKgs)) {
+          audits.push({
+            action: 'TRANSPORT_EXPENSES_UPDATED',
+            oldValue: { bankFeeCostKgs: oldSection.bankFeeCostKgs },
+            newValue: { bankFeeCostKgs: updateData.bankFeeCostKgs },
+          });
+        }
       }
       if (dto.otherExpenseKgs !== undefined) {
         if (Number(dto.otherExpenseKgs) < 0) {
           throw new BadRequestException('Other expense cost must be greater than or equal to zero');
         }
         updateData.otherExpenseKgs = Number(dto.otherExpenseKgs);
+        if (String(oldSection.otherExpenseKgs ?? '') !== String(updateData.otherExpenseKgs)) {
+          audits.push({
+            action: 'OTHER_EXPENSES_UPDATED',
+            oldValue: { otherExpenseKgs: oldSection.otherExpenseKgs },
+            newValue: { otherExpenseKgs: updateData.otherExpenseKgs },
+          });
+        }
       }
       if (!Object.keys(updateData).length) {
         throw new BadRequestException('No import cost fields to update');
@@ -2882,7 +2896,7 @@ export class ProcurementService {
       String(oldValue?.cargoRateUsdPerKg ?? '') !== String(newValue?.cargoRateUsdPerKg ?? '');
     if (cargoReceiptChanged) {
       audits.push({
-        action: 'CARGO_RECEIPT_UPDATED',
+        action: 'CARGO_PAYMENT_UPDATED',
         extra: {
           oldValue: {
             cargoTotalWeightKg: oldValue?.cargoTotalWeightKg,
@@ -2907,8 +2921,20 @@ export class ProcurementService {
     }
     if (String(oldValue?.customsCostKgs ?? '') !== String(newValue?.customsCostKgs ?? '')) {
       audits.push({
-        action: 'CUSTOMS_PAYMENT_UPDATED',
+        action: 'CUSTOMS_UPDATED',
         extra: { field: 'customsCostKgs', oldValue: oldValue?.customsCostKgs, newValue: newValue?.customsCostKgs },
+      });
+    }
+    if (String(oldValue?.otherExpenseKgs ?? '') !== String(newValue?.otherExpenseKgs ?? '')) {
+      audits.push({
+        action: 'OTHER_EXPENSES_UPDATED',
+        extra: { field: 'otherExpenseKgs', oldValue: oldValue?.otherExpenseKgs, newValue: newValue?.otherExpenseKgs },
+      });
+    }
+    if (String(oldValue?.bankFeeCostKgs ?? '') !== String(newValue?.bankFeeCostKgs ?? '')) {
+      audits.push({
+        action: 'TRANSPORT_EXPENSES_UPDATED',
+        extra: { field: 'bankFeeCostKgs', oldValue: oldValue?.bankFeeCostKgs, newValue: newValue?.bankFeeCostKgs },
       });
     }
     if (String(oldValue?.chinaDomesticTransportYuan ?? '') !== String(newValue?.chinaDomesticTransportYuan ?? '')) {
