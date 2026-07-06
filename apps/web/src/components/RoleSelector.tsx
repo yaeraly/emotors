@@ -1,11 +1,16 @@
 import type { Role } from '@/lib/types';
 
 export const assignableRoles: Role[] = [
-  'FRANCHISE_OWNER',
   'MANAGER',
   'MASTER',
   'WAREHOUSE_OPERATOR',
   'CASHIER',
+  'ACCOUNTANT',
+];
+
+export const branchOwnerAssignableRoles: Role[] = [
+  'FRANCHISE_OWNER',
+  ...assignableRoles,
 ];
 
 export const hqAssignableRoles: Role[] = [
@@ -21,16 +26,16 @@ export const hqAssignableRoles: Role[] = [
 ];
 
 const roleLabels: Partial<Record<Role, string>> = {
-  FRANCHISE_OWNER: 'Franchise Owner',
-  MANAGER: 'Manager',
-  MASTER: 'Master',
-  WAREHOUSE_OPERATOR: 'Warehouse Operator',
+  FRANCHISE_OWNER: 'Branch Owner',
+  MANAGER: 'Sales Manager',
+  MASTER: 'Technician',
+  WAREHOUSE_OPERATOR: 'Warehouse Manager',
   CASHIER: 'Cashier',
+  ACCOUNTANT: 'Accountant',
   FRANCHISE_DIRECTOR: 'Franchise Director',
   SUPPLY_CHAIN_MANAGER: 'Supply Chain Manager',
   WAREHOUSE_MANAGER: 'Warehouse Manager',
   FINANCE_MANAGER: 'Finance Manager',
-  ACCOUNTANT: 'Accountant',
   MARKETING_MANAGER: 'Marketing Manager',
   CONTENT_CREATOR: 'Content Creator',
   ACADEMY_DIRECTOR: 'Academy Director',
@@ -39,10 +44,11 @@ const roleLabels: Partial<Record<Role, string>> = {
 
 const roleDescriptions: Partial<Record<Role, string>> = {
   FRANCHISE_OWNER: 'Own branch CRM, sales, service, inventory, finance, KPI, employees, reports',
-  MANAGER: 'CRM, customers, sales, installments, receipts, product catalog, inventory read-only',
+  MANAGER: 'CRM, customers, sales, installments, service coordination',
   MASTER: 'Service orders, diagnosis, repairs, warranty, parts consumption',
-  WAREHOUSE_OPERATOR: 'Inventory, goods receiving, transfers, stock count, stock movement history',
+  WAREHOUSE_OPERATOR: 'Branch warehouse receiving, stock count, stock movements',
   CASHIER: 'Payments, receipts, cash register, daily cash closing',
+  ACCOUNTANT: 'Branch finance view, payments, optional payroll support',
 };
 
 export function roleLabel(role: Role) {

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { RoleBadges } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
-import { canResetUserPassword } from '@/lib/rbac';
+import { canCreateBranchOwner, canResetUserPassword } from '@/lib/rbac';
 import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -28,6 +28,7 @@ const branchRoles: Role[] = [
   'MASTER',
   'WAREHOUSE_OPERATOR',
   'CASHIER',
+  'ACCOUNTANT',
 ];
 
 const allFilterRoles: Role[] = [...hqRoles, ...branchRoles];
@@ -144,7 +145,14 @@ export default function UsersPage() {
               {isHqUser(currentUser) ? t('users.hqPanelDescription') : t('users.branchPanelDescription')}
             </p>
           </div>
-          <Link href="/users/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">{t('users.create')}</Link>
+          <div className="flex flex-wrap gap-3">
+            {canCreateBranchOwner(currentUser) ? (
+              <Link href="/users/branch-owners/new" className="rounded-xl border border-blue-200 px-5 py-3 font-semibold text-blue-700">
+                {t('users.createBranchOwner')}
+              </Link>
+            ) : null}
+            <Link href="/users/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">{t('users.create')}</Link>
+          </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">

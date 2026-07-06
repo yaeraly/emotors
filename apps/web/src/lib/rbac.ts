@@ -229,6 +229,7 @@ const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
   'MASTER',
   'WAREHOUSE_OPERATOR',
   'CASHIER',
+  'ACCOUNTANT',
 ];
 
 export function getDefaultRoute(role: Role) {
@@ -448,19 +449,28 @@ export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'perm
   return hasPermission(user, 'inventory.manage');
 }
 
+export function isBranchWarehouseOperator(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user?.branchId) return false;
+  return hasRole(user, 'WAREHOUSE_OPERATOR');
+}
+
+export function canCreateBranchOwner(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
 export function canViewInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return (
     hasFullAccess(user) ||
-    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'SUPPLY_CHAIN_MANAGER'])
+    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'SUPPLY_CHAIN_MANAGER', 'FRANCHISE_OWNER', 'WAREHOUSE_OPERATOR'])
   );
 }
 
-export function canManageInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return isWarehouseManagerUser(user);
+export function canManageInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  return isWarehouseManagerUser(user) || isBranchWarehouseOperator(user);
 }
 
-export function canApproveInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasFullAccess(user);
+export function canApproveInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  return hasFullAccess(user) || (hasRole(user, 'FRANCHISE_OWNER') && !!user?.branchId);
 }
 
 export function canManageProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

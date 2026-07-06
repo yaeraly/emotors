@@ -16,8 +16,14 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
-import { activeHqWarehouseWhere, inventoryBranchIdForWarehouse, isHqWarehouse } from '../warehouse/warehouse.util';
+import { hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
+import {
+  activeBranchWarehouseWhere,
+  activeHqWarehouseWhere,
+  inventoryBranchIdForWarehouse,
+  isBranchWarehouse,
+  isHqWarehouse,
+} from '../warehouse/warehouse.util';
 import {
   BulkUpdateInventoryCountItemsDto,
   CreateInventoryCountDto,
@@ -38,12 +44,14 @@ export class InventoryCountService {
 
   list(user: AuthUser, query: InventoryCountQueryDto) {
     this.assertCanView(user);
+    const warehouseScope = this.buildWarehouseScope(user);
     const where: Prisma.InventoryCountSessionWhereInput = {
       ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.search?.trim()
         ? { sessionNumber: { contains: query.search.trim(), mode: 'insensitive' } }
         : {}),
+      ...(warehouseScope ? { warehouse: warehouseScope } : {}),
     };
     return this.prisma.inventoryCountSession.findMany({
       where,
@@ -62,15 +70,20 @@ export class InventoryCountService {
     return this.buildSummary(session);
   }
 
-  search(user: AuthUser, warehouseId: string, q: string) {
+  async search(user: AuthUser, warehouseId: string, q: string) {
     this.assertCanView(user);
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: warehouseId, deletedAt: null, isActive: true },
+    });
+    if (!warehouse) throw new NotFoundException('Warehouse not found');
+    this.assertWarehouseAccess(user, warehouse);
+
     const term = q.trim();
     if (!term) return [];
 
     return this.prisma.inventoryBalance.findMany({
       where: {
         warehouseId,
-        warehouse: activeHqWarehouseWhere,
         OR: [
           { product: { sku: { contains: term, mode: 'insensitive' } } },
           { product: { name: { contains: term, mode: 'insensitive' } } },
@@ -101,11 +114,13 @@ export class InventoryCountService {
     this.assertCanCount(user);
     return this.prisma.$transaction(async (tx) => {
       const warehouse = await tx.warehouse.findFirst({
-        where: { id: dto.warehouseId, ...activeHqWarehouseWhere },
+        where: { id: dto.warehouseId, deletedAt: null, isActive: true },
       });
-      if (!warehouse || !isHqWarehouse(warehouse)) {
-        throw new BadRequestException('Inventory count requires an active HQ warehouse');
+      if (!warehouse) {
+        throw new BadRequestException('Warehouse not found');
       }
+      this.assertWarehouseAccess(user, warehouse);
+      this.assertCanCountWarehouse(user, warehouse);
 
       this.validateTypeFilters(dto);
 
@@ -139,8 +154,9 @@ export class InventoryCountService {
 
       await tx.inventoryCountItem.createMany({ data: items });
 
-      await this.audit(tx, user, 'INVENTORY_CREATED', session.id, {
+      await this.audit(tx, user, this.inventoryCreatedAction(warehouse), session.id, {
         warehouseId: warehouse.id,
+        branchId: warehouse.branchId ?? undefined,
         newValue: {
           inventoryType: dto.inventoryType,
           itemCount: items.length,
@@ -290,9 +306,9 @@ export class InventoryCountService {
   }
 
   async approve(user: AuthUser, id: string) {
-    this.assertCanApprove(user);
     return this.prisma.$transaction(async (tx) => {
       const session = await this.getSessionForWriteInTx(tx, user, id);
+      this.assertCanApprove(user, session.warehouse);
       if (session.status !== InventoryCountStatus.SUBMITTED) {
         throw new BadRequestException('Only submitted inventory can be approved');
       }
@@ -359,8 +375,9 @@ export class InventoryCountService {
         include: this.sessionInclude(),
       });
 
-      await this.audit(tx, user, 'INVENTORY_APPROVED', id, {
+      await this.audit(tx, user, this.inventoryApprovedAction(session.warehouse), id, {
         warehouseId: session.warehouseId,
+        branchId: session.warehouse.branchId ?? undefined,
         newValue: this.buildSummary(updated),
       });
       await this.notificationsService.notifyInTx(tx, user, {
@@ -375,9 +392,9 @@ export class InventoryCountService {
   }
 
   async reject(user: AuthUser, id: string, dto: RejectInventoryCountDto) {
-    this.assertCanApprove(user);
     return this.prisma.$transaction(async (tx) => {
       const session = await this.getSessionForWriteInTx(tx, user, id);
+      this.assertCanApprove(user, session.warehouse);
       if (session.status !== InventoryCountStatus.SUBMITTED) {
         throw new BadRequestException('Only submitted inventory can be rejected');
       }
@@ -514,6 +531,7 @@ export class InventoryCountService {
       include: this.sessionInclude(),
     });
     if (!session) throw new NotFoundException('Inventory count session not found');
+    this.assertWarehouseAccess(user, session.warehouse);
     return session;
   }
 
@@ -524,6 +542,8 @@ export class InventoryCountService {
       include: { items: true, warehouse: true },
     });
     if (!session) throw new NotFoundException('Inventory count session not found');
+    this.assertWarehouseAccess(user, session.warehouse);
+    this.assertCanCountWarehouse(user, session.warehouse);
     if (session.status === InventoryCountStatus.COMPLETED) {
       throw new BadRequestException('Completed inventory cannot be modified');
     }
@@ -536,6 +556,7 @@ export class InventoryCountService {
       include: { items: true, warehouse: true },
     });
     if (!session) throw new NotFoundException('Inventory count session not found');
+    this.assertWarehouseAccess(user, session.warehouse);
     if (session.status === InventoryCountStatus.COMPLETED) {
       throw new BadRequestException('Completed inventory cannot be modified');
     }
@@ -610,25 +631,109 @@ export class InventoryCountService {
   }
 
   private assertCanView(user: AuthUser) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    const allowed = hasAnyFullAccessRole(roles) ||
+    const roles = resolveUserRoles(user);
+    const allowed =
+      hasAnyFullAccessRole(roles) ||
       roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
-      roles.includes(Role.WAREHOUSE_MANAGER);
+      roles.includes(Role.WAREHOUSE_MANAGER) ||
+      roles.includes(Role.FRANCHISE_OWNER) ||
+      roles.includes(Role.WAREHOUSE_OPERATOR);
     if (!allowed) throw new ForbiddenException('Forbidden resource');
   }
 
   private assertCanCount(user: AuthUser) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    if (!roles.includes(Role.WAREHOUSE_MANAGER)) {
-      throw new ForbiddenException('Only Warehouse Manager can perform inventory counts');
+    const roles = resolveUserRoles(user);
+    if (
+      roles.includes(Role.WAREHOUSE_MANAGER) ||
+      roles.includes(Role.WAREHOUSE_OPERATOR)
+    ) {
+      return;
+    }
+    throw new ForbiddenException('Only warehouse managers can perform inventory counts');
+  }
+
+  private assertCanCountWarehouse(
+    user: AuthUser,
+    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+  ) {
+    const roles = resolveUserRoles(user);
+    if (isHqWarehouse(warehouse)) {
+      if (!roles.includes(Role.WAREHOUSE_MANAGER)) {
+        throw new ForbiddenException('Only HQ warehouse managers can count HQ inventory');
+      }
+      return;
+    }
+    if (!roles.includes(Role.WAREHOUSE_OPERATOR)) {
+      throw new ForbiddenException('Only branch warehouse managers can count branch inventory');
     }
   }
 
-  private assertCanApprove(user: AuthUser) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    if (!roles.some((role) => isFullAccessRole(role))) {
-      throw new ForbiddenException('Only CEO can approve or reject inventory counts');
+  private assertCanApprove(
+    user: AuthUser,
+    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+  ) {
+    const roles = resolveUserRoles(user);
+    if (hasAnyFullAccessRole(roles)) {
+      return;
     }
+    if (isBranchWarehouse(warehouse) && roles.includes(Role.FRANCHISE_OWNER)) {
+      if (warehouse.branchId !== user.branchId) {
+        throw new ForbiddenException('Branch owners can approve only their own branch inventory');
+      }
+      return;
+    }
+    throw new ForbiddenException('You cannot approve this inventory count');
+  }
+
+  private assertWarehouseAccess(
+    user: AuthUser,
+    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+  ) {
+    const roles = resolveUserRoles(user);
+    if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
+      return;
+    }
+    if (isHqWarehouse(warehouse)) {
+      if (roles.includes(Role.WAREHOUSE_MANAGER)) {
+        return;
+      }
+      throw new ForbiddenException('You cannot access HQ warehouse inventory');
+    }
+    if (!warehouse.branchId || warehouse.branchId !== user.branchId) {
+      throw new ForbiddenException('You can only access inventory for your own branch warehouse');
+    }
+    if (
+      roles.includes(Role.FRANCHISE_OWNER) ||
+      roles.includes(Role.WAREHOUSE_OPERATOR)
+    ) {
+      return;
+    }
+    throw new ForbiddenException('Forbidden resource');
+  }
+
+  private buildWarehouseScope(user: AuthUser): Prisma.WarehouseWhereInput | null {
+    const roles = resolveUserRoles(user);
+    if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
+      return null;
+    }
+    if (roles.includes(Role.WAREHOUSE_MANAGER)) {
+      return activeHqWarehouseWhere;
+    }
+    if (roles.includes(Role.FRANCHISE_OWNER) || roles.includes(Role.WAREHOUSE_OPERATOR)) {
+      if (!user.branchId) {
+        throw new ForbiddenException('Branch is required');
+      }
+      return { ...activeBranchWarehouseWhere, branchId: user.branchId };
+    }
+    return { id: '__none__' };
+  }
+
+  private inventoryCreatedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_CREATED' : 'INVENTORY_CREATED';
+  }
+
+  private inventoryApprovedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_APPROVED' : 'INVENTORY_APPROVED';
   }
 
   private audit(
@@ -641,6 +746,7 @@ export class InventoryCountService {
       productId?: string;
       oldValue?: unknown;
       newValue?: unknown;
+      branchId?: string;
       extra?: Record<string, unknown>;
     },
   ) {
@@ -653,6 +759,7 @@ export class InventoryCountService {
         entityId: inventorySessionId,
         metadata: {
           roles: user.roles ?? [user.role],
+          branchId: opts?.branchId ?? opts?.extra?.branchId ?? undefined,
           inventorySessionId,
           ...(opts?.warehouseId ? { warehouseId: opts.warehouseId } : {}),
           ...(opts?.productId ? { productId: opts.productId } : {}),

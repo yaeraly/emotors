@@ -14,31 +14,42 @@ import {
 import { InventoryCountQueryDto } from './dto/inventory-count-query.dto';
 import { InventoryCountService } from './inventory-count.service';
 
+const INVENTORY_VIEW_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.SUPPLY_CHAIN_MANAGER,
+  Role.WAREHOUSE_MANAGER,
+  Role.FRANCHISE_OWNER,
+  Role.WAREHOUSE_OPERATOR,
+] as const;
+
+const INVENTORY_COUNT_ROLES = [Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR] as const;
+
 @Controller('inventory-count')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class InventoryCountController {
   constructor(private readonly service: InventoryCountService) {}
 
   @Get('sessions')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_VIEW_ROLES)
   list(@CurrentUser() user: AuthUser, @Query() query: InventoryCountQueryDto) {
     return this.service.list(user, query);
   }
 
   @Get('sessions/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_VIEW_ROLES)
   detail(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.detail(user, id);
   }
 
   @Get('sessions/:id/summary')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_VIEW_ROLES)
   summary(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.summary(user, id);
   }
 
   @Get('search')
-  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_VIEW_ROLES)
   search(
     @CurrentUser() user: AuthUser,
     @Query('warehouseId') warehouseId: string,
@@ -48,19 +59,19 @@ export class InventoryCountController {
   }
 
   @Post('sessions')
-  @Roles(Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_COUNT_ROLES)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateInventoryCountDto) {
     return this.service.create(user, dto);
   }
 
   @Post('sessions/:id/start')
-  @Roles(Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_COUNT_ROLES)
   start(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.start(user, id);
   }
 
   @Put('sessions/:id/items/:itemId')
-  @Roles(Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_COUNT_ROLES)
   updateItem(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -71,7 +82,7 @@ export class InventoryCountController {
   }
 
   @Put('sessions/:id/items')
-  @Roles(Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_COUNT_ROLES)
   bulkUpdateItems(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -81,19 +92,19 @@ export class InventoryCountController {
   }
 
   @Post('sessions/:id/submit')
-  @Roles(Role.WAREHOUSE_MANAGER)
+  @Roles(...INVENTORY_COUNT_ROLES)
   submit(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.submit(user, id);
   }
 
   @Post('sessions/:id/approve')
-  @Roles(Role.OWNER, Role.CEO)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.approve(user, id);
   }
 
   @Post('sessions/:id/reject')
-  @Roles(Role.OWNER, Role.CEO)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
   reject(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

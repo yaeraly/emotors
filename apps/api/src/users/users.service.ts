@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, UserStatus } from '@prisma/client';
+import { BranchStatus, Prisma, Role, UserStatus, WarehouseType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -22,6 +23,7 @@ const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
   Role.MASTER,
   Role.WAREHOUSE_OPERATOR,
   Role.CASHIER,
+  Role.ACCOUNTANT,
 ];
 const OWN_BRANCH_PASSWORD_RESET_ERROR =
   'You can reset passwords only for employees in your own branch.';
@@ -43,6 +45,15 @@ const BRANCH_ROLES: Role[] = [
   Role.MASTER,
   Role.WAREHOUSE_OPERATOR,
   Role.CASHIER,
+  Role.ACCOUNTANT,
+];
+
+const BRANCH_EMPLOYEE_ROLES: Role[] = [
+  Role.MANAGER,
+  Role.MASTER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.CASHIER,
+  Role.ACCOUNTANT,
 ];
 
 @Injectable()
@@ -89,8 +100,232 @@ export class UsersService {
       include: { branch: true, userRoles: { include: { role: true } } },
     });
     const synced = await this.syncUserRoles(created.id, roles, user);
-    await this.audit(user, 'user_created', 'User', created.id);
+    const auditAction = this.hasRole(user, Role.FRANCHISE_OWNER) ? 'BRANCH_EMPLOYEE_CREATED' : 'user_created';
+    await this.audit(user, auditAction, 'User', created.id, {
+      branchId: created.branchId ?? undefined,
+      roles,
+    });
     return { ...this.safeUser({ ...created, userRoles: synced }), temporaryPassword: dto.password ? undefined : TEMP_PASSWORD };
+  }
+
+  async createBranchOwner(user: AuthUser, dto: import('./dto/create-branch-owner.dto').CreateBranchOwnerDto) {
+    if (!this.hasFullAccess(user)) {
+      throw new ForbiddenException('Only CEO can create branch owners');
+    }
+
+    const username = String(dto.username ?? '').trim().toLowerCase();
+    if (!username) throw new BadRequestException('Username is required');
+    this.validatePassword(dto.password);
+
+    const branchCode = dto.branchCode.trim().toUpperCase();
+    const existingBranch = await this.prisma.branch.findUnique({ where: { code: branchCode } });
+    if (existingBranch) {
+      throw new ConflictException('Branch code already exists');
+    }
+
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { username },
+          ...(dto.email ? [{ email: dto.email.trim().toLowerCase() }] : []),
+          ...(dto.phone ? [{ phone: dto.phone.trim() }] : []),
+        ],
+      },
+    });
+    if (existingUser) {
+      throw new ConflictException('User with the same login, email, or phone already exists');
+    }
+
+    const email = dto.email?.trim().toLowerCase() || `${username}@emotors.local`;
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+    const warehouseName = `${dto.branchName.trim()}нын склады`;
+    const warehouseCode = `${branchCode}-WH`;
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const branch = await tx.branch.create({
+        data: {
+          name: dto.branchName.trim(),
+          code: branchCode,
+          city: dto.city?.trim() || null,
+          address: dto.address?.trim() || null,
+          phone: dto.branchPhone?.trim() || dto.phone?.trim() || null,
+          ownerName: dto.fullName.trim(),
+          status: dto.branchStatus ?? BranchStatus.ACTIVE,
+          openedAt: new Date(),
+        },
+      });
+
+      const warehouse = await tx.warehouse.create({
+        data: {
+          branchId: branch.id,
+          warehouseType: WarehouseType.BRANCH,
+          name: warehouseName,
+          code: warehouseCode,
+          address: dto.address?.trim() || null,
+          city: dto.city?.trim() || null,
+          isActive: true,
+        },
+      });
+
+      const owner = await tx.user.create({
+        data: {
+          fullName: dto.fullName.trim(),
+          phone: dto.phone?.trim() || null,
+          email,
+          username,
+          passwordHash,
+          role: Role.FRANCHISE_OWNER,
+          branchId: branch.id,
+          status: dto.status ?? UserStatus.ACTIVE,
+          mustChangePassword: true,
+        },
+        include: { branch: true, userRoles: { include: { role: true } } },
+      });
+
+      await this.auditInTx(tx, user, 'BRANCH_CREATED', 'Branch', branch.id, {
+        branchId: branch.id,
+        warehouseId: warehouse.id,
+        newValue: { name: branch.name, code: branch.code },
+      });
+      await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_CREATED', 'Warehouse', warehouse.id, {
+        branchId: branch.id,
+        warehouseId: warehouse.id,
+        newValue: { name: warehouse.name, code: warehouse.code, warehouseType: WarehouseType.BRANCH },
+      });
+      await this.auditInTx(tx, user, 'BRANCH_OWNER_CREATED', 'User', owner.id, {
+        branchId: branch.id,
+        warehouseId: warehouse.id,
+        newValue: { fullName: owner.fullName, username: owner.username },
+      });
+
+      return { owner, branch, warehouse };
+    });
+
+    const synced = await this.syncUserRoles(result.owner.id, [Role.FRANCHISE_OWNER], user);
+    return {
+      ...this.safeUser({ ...result.owner, userRoles: synced }),
+      branch: result.branch,
+      warehouse: result.warehouse,
+    };
+  }
+
+  async updateBranchOwner(user: AuthUser, id: string, dto: import('./dto/update-branch-owner.dto').UpdateBranchOwnerDto) {
+    if (!this.hasFullAccess(user)) {
+      throw new ForbiddenException('Only CEO can edit branch owners');
+    }
+
+    const existing = await this.prisma.user.findFirst({
+      where: { id },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
+    if (!existing) throw new NotFoundException('Branch owner not found');
+    const existingRoles = this.extractRoles(existing);
+    if (!existingRoles.includes(Role.FRANCHISE_OWNER) || !existing.branchId) {
+      throw new BadRequestException('User is not a branch owner');
+    }
+
+    if (dto.branchCode && dto.branchCode.trim().toUpperCase() !== existing.branch?.code) {
+      const duplicate = await this.prisma.branch.findUnique({
+        where: { code: dto.branchCode.trim().toUpperCase() },
+      });
+      if (duplicate) throw new ConflictException('Branch code already exists');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const branch = await tx.branch.update({
+        where: { id: existing.branchId! },
+        data: {
+          ...(dto.branchName ? { name: dto.branchName.trim() } : {}),
+          ...(dto.branchCode ? { code: dto.branchCode.trim().toUpperCase() } : {}),
+          ...(dto.city !== undefined ? { city: dto.city?.trim() || null } : {}),
+          ...(dto.address !== undefined ? { address: dto.address?.trim() || null } : {}),
+          ...(dto.branchPhone !== undefined ? { phone: dto.branchPhone?.trim() || null } : {}),
+          ...(dto.branchStatus ? { status: dto.branchStatus } : {}),
+          ...(dto.fullName ? { ownerName: dto.fullName.trim() } : {}),
+        },
+      });
+
+      const owner = await tx.user.update({
+        where: { id },
+        data: {
+          ...(dto.fullName ? { fullName: dto.fullName.trim() } : {}),
+          ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
+          ...(dto.email ? { email: dto.email.trim().toLowerCase() } : {}),
+          ...(dto.username ? { username: dto.username.trim().toLowerCase() } : {}),
+          ...(dto.status ? { status: dto.status } : {}),
+        },
+        include: { branch: true, userRoles: { include: { role: true } } },
+      });
+
+      await this.auditInTx(tx, user, 'user_updated', 'User', id, {
+        branchId: branch.id,
+        rolesBefore: existingRoles,
+        rolesAfter: existingRoles,
+      });
+
+      return { owner, branch };
+    });
+
+    return this.safeUser(updated.owner);
+  }
+
+  async deleteBranchOwner(user: AuthUser, id: string) {
+    if (!this.hasFullAccess(user)) {
+      throw new ForbiddenException('Only CEO can delete branch owners');
+    }
+
+    const existing = await this.prisma.user.findFirst({
+      where: { id },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
+    if (!existing) throw new NotFoundException('Branch owner not found');
+    const existingRoles = this.extractRoles(existing);
+    if (!existingRoles.includes(Role.FRANCHISE_OWNER) || !existing.branchId) {
+      throw new BadRequestException('User is not a branch owner');
+    }
+
+    const branchId = existing.branchId;
+    const [users, customers, sales] = await Promise.all([
+      this.prisma.user.count({ where: { branchId, id: { not: id } } }),
+      this.prisma.customer.count({ where: { branchId } }),
+      this.prisma.sale.count({ where: { branchId } }),
+    ]);
+    if (users + customers + sales > 0) {
+      throw new BadRequestException(
+        'Branch owner cannot be deleted while branch has employees, customers, or sales. Deactivate instead.',
+      );
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id },
+        data: { status: UserStatus.INACTIVE },
+      });
+      await tx.branch.update({
+        where: { id: branchId },
+        data: { status: BranchStatus.INACTIVE, deletedAt: new Date() },
+      });
+      await tx.warehouse.updateMany({
+        where: { branchId },
+        data: { isActive: false, deletedAt: new Date() },
+      });
+      await this.auditInTx(tx, user, 'user_suspended', 'User', id, { branchId });
+    });
+
+    return { success: true, deactivated: true };
+  }
+
+  listBranchOwners(user: AuthUser) {
+    if (!this.hasFullAccess(user)) {
+      throw new ForbiddenException('Only CEO can list all branch owners');
+    }
+    return this.prisma.user.findMany({
+      where: {
+        userRoles: { some: { role: { code: Role.FRANCHISE_OWNER } } },
+      },
+      include: { branch: true, userRoles: { include: { role: true } } },
+      orderBy: { fullName: 'asc' },
+    }).then((users) => users.map((item) => this.safeUser(item)));
   }
 
   async detail(user: AuthUser, id: string) {
@@ -212,6 +447,12 @@ export class UsersService {
       if (branchId && branchId !== user.branchId) throw new ForbiddenException('Forbidden branch');
       if (roles.some((role) => isHqRole(role))) {
         throw new ForbiddenException('Cannot create HQ users');
+      }
+      if (roles.includes(Role.FRANCHISE_OWNER)) {
+        throw new ForbiddenException('Branch owners cannot create another branch owner');
+      }
+      if (roles.some((role) => !BRANCH_EMPLOYEE_ROLES.includes(role))) {
+        throw new ForbiddenException('Branch owners can only assign branch employee roles');
       }
       return;
     }
@@ -344,7 +585,40 @@ export class UsersService {
 
   private audit(user: AuthUser, action: string, entity: string, entityId?: string, metadata?: Prisma.InputJsonValue) {
     return this.prisma.auditLog.create({
-      data: { userId: user.id, role: user.role, action, entity, entityId, metadata },
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          roles: user.roles ?? [user.role],
+          ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+        },
+      },
+    });
+  }
+
+  private auditInTx(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    action: string,
+    entity: string,
+    entityId?: string,
+    metadata?: Prisma.InputJsonValue,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          roles: user.roles ?? [user.role],
+          ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+        },
+      },
     });
   }
 

@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role, UserStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
+import { CreateBranchOwnerDto } from './dto/create-branch-owner.dto';
+import { UpdateBranchOwnerDto } from './dto/update-branch-owner.dto';
 import { UsersService } from './users.service';
 
 @Controller('users')
@@ -21,6 +23,34 @@ export class UsersController {
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.usersService.create(user, dto);
+  }
+
+  @Get('branch-owners')
+  @Roles(Role.OWNER, Role.CEO)
+  listBranchOwners(@CurrentUser() user: AuthUser) {
+    return this.usersService.listBranchOwners(user);
+  }
+
+  @Post('branch-owners')
+  @Roles(Role.OWNER, Role.CEO)
+  createBranchOwner(@CurrentUser() user: AuthUser, @Body() dto: CreateBranchOwnerDto) {
+    return this.usersService.createBranchOwner(user, dto);
+  }
+
+  @Put('branch-owners/:id')
+  @Roles(Role.OWNER, Role.CEO)
+  updateBranchOwner(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateBranchOwnerDto,
+  ) {
+    return this.usersService.updateBranchOwner(user, id, dto);
+  }
+
+  @Delete('branch-owners/:id')
+  @Roles(Role.OWNER, Role.CEO)
+  deleteBranchOwner(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.usersService.deleteBranchOwner(user, id);
   }
 
   @Get(':id')

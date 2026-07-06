@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canManageInventoryCount, canViewProcurement, isWarehouseManagerUser } from '@/lib/rbac';
+import { canManageInventoryCount, canViewProcurement, isBranchWarehouseOperator } from '@/lib/rbac';
 import type {
   InventoryCountSession,
   InventoryCountType,
@@ -50,14 +50,18 @@ export default function NewInventoryCountPage() {
   });
 
   useEffect(() => {
-    Promise.all([
-      apiFetch<User>('/auth/me'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
-      apiFetch<ProductCategory[]>('/inventory/categories'),
-      apiFetch<ProductListResponse>('/inventory/products?pageSize=300'),
-    ])
-      .then(async ([me, warehouseResult, categoryResult, productResult]) => {
+    apiFetch<User>('/auth/me')
+      .then(async (me) => {
         setCurrentUser(me);
+        const [warehouseResult, categoryResult, productResult] = await Promise.all([
+          apiFetch<Warehouse[]>(
+            isBranchWarehouseOperator(me)
+              ? '/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'
+              : '/inventory/warehouses?warehouseType=HQ&status=ACTIVE',
+          ),
+          apiFetch<ProductCategory[]>('/inventory/categories'),
+          apiFetch<ProductListResponse>('/inventory/products?pageSize=300'),
+        ]);
         setWarehouses(warehouseResult);
         setCategories(categoryResult);
         setProducts(productResult.items);
@@ -77,7 +81,7 @@ export default function NewInventoryCountPage() {
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
-  if (currentUser && !isWarehouseManagerUser(currentUser)) {
+  if (currentUser && !canManageInventoryCount(currentUser)) {
     return (
       <ProtectedShell>
         <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t('common.forbiddenMessage')}</p>
