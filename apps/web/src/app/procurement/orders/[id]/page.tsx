@@ -1087,11 +1087,11 @@ export default function ProcurementOrderDetailPage() {
                   <th className="px-4 py-3">SKU</th>
                   <th className="px-4 py-3">{t('procurement.orders.product')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.quantity')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.netWeightKg')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
                   <th className="px-4 py-3">{t('inventory.finalCostKgs')}</th>
                 </tr>
               </thead>
@@ -1104,11 +1104,11 @@ export default function ProcurementOrderDetailPage() {
                       <td className="px-4 py-3">{row.sku}</td>
                       <td className="px-4 py-3">{row.productName}</td>
                       <td className="px-4 py-3">{row.quantity}</td>
+                      <td className="px-4 py-3">{row.receivedQuantity ?? '-'}</td>
                       <td className="px-4 py-3">{item.netWeightKg.toFixed(3)}</td>
                       <td className="px-4 py-3">{item.lineNetWeightKg.toFixed(3)}</td>
                       <td className="px-4 py-3">¥{Number(row.purchasePriceYuan).toFixed(2)}</td>
                       <td className="px-4 py-3">¥{item.totalYuan.toFixed(2)}</td>
-                      <td className="px-4 py-3">{row.receivedQuantity ?? '-'}</td>
                       <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>
                     </tr>
                   );
