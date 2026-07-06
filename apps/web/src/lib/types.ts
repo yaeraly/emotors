@@ -225,6 +225,7 @@ export type User = {
   mustChangePassword?: boolean;
   permissions?: string[];
   assignedHqWarehouseIds?: string[];
+  assignedHqWarehouses?: Array<Pick<Warehouse, 'id' | 'name' | 'code' | 'city'>>;
   lastLoginAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
@@ -413,6 +414,7 @@ export type Warehouse = {
   phone?: string | null;
   notes?: string | null;
   isActive: boolean;
+  managers?: Array<{ id: string; fullName: string }>;
   createdAt: string;
   updatedAt: string;
 };

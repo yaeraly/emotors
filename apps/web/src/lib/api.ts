@@ -44,10 +44,19 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null);
-    const message =
-      errorBody?.message ??
-      `Request failed with status ${response.status}`;
-    throw new Error(Array.isArray(message) ? message.join(', ') : message);
+    const rawMessage = errorBody?.message ?? `Request failed with status ${response.status}`;
+    const message = Array.isArray(rawMessage) ? rawMessage.join(', ') : String(rawMessage);
+    if (message === 'HQ_WAREHOUSE_ACCESS_DENIED' && errorBody?.messages) {
+      const storedLanguage =
+        typeof window !== 'undefined'
+          ? window.localStorage.getItem('emotors-language')
+          : null;
+      const localized =
+        errorBody.messages[storedLanguage === 'ky' || storedLanguage === 'ru' ? storedLanguage : 'en'] ??
+        errorBody.messages.en;
+      throw new Error(localized);
+    }
+    throw new Error(message);
   }
 
   return response.json() as Promise<T>;

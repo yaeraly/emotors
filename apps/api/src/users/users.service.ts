@@ -8,6 +8,7 @@ import {
 import { BranchStatus, Prisma, Role, UserStatus, WarehouseType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { AuthUser } from '../auth/auth.types';
+import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   anyRoleRequiresBranch,
@@ -60,7 +61,10 @@ const BRANCH_EMPLOYEE_ROLES: Role[] = [
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly hqWarehouseAssignmentService: HqWarehouseAssignmentService,
+  ) {}
 
   list(user: AuthUser, roleFilter?: string) {
     this.assertRoleFilterAllowed(user, roleFilter);
@@ -102,12 +106,21 @@ export class UsersService {
       include: { branch: true, userRoles: { include: { role: true } } },
     });
     const synced = await this.syncUserRoles(created.id, roles, user);
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && Array.isArray(dto.hqWarehouseIds)) {
+      await this.hqWarehouseAssignmentService.syncUserAssignments(user, created.id, dto.hqWarehouseIds);
+    }
     const auditAction = this.hasRole(user, Role.FRANCHISE_OWNER) ? 'BRANCH_EMPLOYEE_CREATED' : 'user_created';
     await this.audit(user, auditAction, 'User', created.id, {
       branchId: created.branchId ?? undefined,
       roles,
     });
-    return { ...this.safeUser({ ...created, userRoles: synced }), temporaryPassword: dto.password ? undefined : TEMP_PASSWORD };
+    const assignments = roles.includes(Role.WAREHOUSE_MANAGER)
+      ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(created.id)
+      : [];
+    return {
+      ...this.enrichUser({ ...created, userRoles: synced }, assignments),
+      temporaryPassword: dto.password ? undefined : TEMP_PASSWORD,
+    };
   }
 
   async createBranchOwner(user: AuthUser, dto: import('./dto/create-branch-owner.dto').CreateBranchOwnerDto) {
@@ -340,7 +353,10 @@ export class UsersService {
       },
     });
     if (!found) throw new NotFoundException('User not found');
-    return this.safeUser(found);
+    const assignments = found.role === Role.WAREHOUSE_MANAGER || this.extractRoles(found).includes(Role.WAREHOUSE_MANAGER)
+      ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(found.id)
+      : [];
+    return this.enrichUser(found, assignments);
   }
 
   async update(user: AuthUser, id: string, dto: any) {
@@ -371,11 +387,20 @@ export class UsersService {
       include: { branch: true, userRoles: { include: { role: true } } },
     });
     const synced = await this.syncUserRoles(id, roles, user);
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && Array.isArray(dto.hqWarehouseIds)) {
+      await this.hqWarehouseAssignmentService.syncUserAssignments(user, id, dto.hqWarehouseIds);
+    } else if (!roles.includes(Role.WAREHOUSE_MANAGER) && existingRoles.includes(Role.WAREHOUSE_MANAGER)) {
+      const currentIds = await this.hqWarehouseAssignmentService.getActiveAssignedWarehouseIds(id);
+      await this.hqWarehouseAssignmentService.syncUserAssignments(user, id, []);
+    }
     await this.audit(user, 'user_updated', 'User', id, {
       rolesBefore: existingRoles,
       rolesAfter: roles,
     });
-    return this.safeUser({ ...updated, userRoles: synced });
+    const assignments = roles.includes(Role.WAREHOUSE_MANAGER)
+      ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(id)
+      : [];
+    return this.enrichUser({ ...updated, userRoles: synced }, assignments);
   }
 
   async resetPassword(user: AuthUser, id: string) {
@@ -628,6 +653,15 @@ export class UsersService {
     const { passwordHash, ...rest } = user;
     const roles = rest.userRoles?.map((userRole: any) => userRole.role.code) ?? [rest.role];
     return { ...rest, roles };
+  }
+
+  private enrichUser(user: any, assignments: Array<{ warehouseId: string; warehouse: { id: string; name: string; code: string } }>) {
+    const safe = this.safeUser(user);
+    return {
+      ...safe,
+      assignedHqWarehouseIds: assignments.map((row) => row.warehouseId),
+      assignedHqWarehouses: assignments.map((row) => row.warehouse),
+    };
   }
 
   private normalizeRoles(value: unknown, fallback: Role[]) {

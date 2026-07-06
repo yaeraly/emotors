@@ -4,9 +4,10 @@ import { useParams } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { hqAssignableRoles, RoleBadges, RoleSelector } from '@/components/RoleSelector';
+import { HqWarehouseMultiSelect } from '@/components/users/HqWarehouseMultiSelect';
 import { apiFetch } from '@/lib/api';
-import { canResetUserPassword } from '@/lib/rbac';
-import type { Branch, Role, User } from '@/lib/types';
+import { canAssignHqWarehouseManager, canResetUserPassword } from '@/lib/rbac';
+import type { Branch, Role, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function UserDetailPage() {
@@ -16,6 +17,7 @@ export default function UserDetailPage() {
   const [user, setUser] = useState<User | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [history, setHistory] = useState<any[]>([]);
+  const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState('');
   const [temporaryPassword, setTemporaryPassword] = useState('');
   const [form, setForm] = useState({
@@ -27,6 +29,7 @@ export default function UserDetailPage() {
     roles: ['MANAGER'] as Role[],
     branchId: '',
     status: 'ACTIVE',
+    hqWarehouseIds: [] as string[],
   });
 
   async function load() {
@@ -37,10 +40,14 @@ export default function UserDetailPage() {
         apiFetch<Branch[]>('/branches'),
         apiFetch<any[]>(`/users/${id}/login-history`),
       ]);
+      const warehouseList = canAssignHqWarehouseManager(currentUserResult)
+        ? await apiFetch<Warehouse[]>('/hq-warehouses').catch(() => [])
+        : [];
       setCurrentUser(currentUserResult);
       setUser(userResult);
       setBranches(branchResult);
       setHistory(historyResult);
+      setHqWarehouses(warehouseList);
       setForm({
         fullName: userResult.fullName,
         employeeId: userResult.employeeId ?? '',
@@ -50,6 +57,7 @@ export default function UserDetailPage() {
         roles: userResult.roles?.length ? userResult.roles : [userResult.role],
         branchId: userResult.branchId ?? '',
         status: userResult.status ?? 'ACTIVE',
+        hqWarehouseIds: userResult.assignedHqWarehouseIds ?? [],
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -95,6 +103,8 @@ export default function UserDetailPage() {
 
   const canResetPassword = canResetUserPassword(currentUser, user);
   const isHqEmployee = user?.branchId === null;
+  const isWarehouseManagerRole = form.roles.includes('WAREHOUSE_MANAGER');
+  const canEditAssignments = canAssignHqWarehouseManager(currentUser) && isHqEmployee && isWarehouseManagerRole;
 
   return (
     <ProtectedShell>
@@ -122,6 +132,23 @@ export default function UserDetailPage() {
             <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
           )}
           <label className="block"><span className="text-sm font-semibold text-slate-700">{t('users.status')}</span><select value={form.status} onChange={(event) => setField('status', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option><option value="SUSPENDED">SUSPENDED</option></select></label>
+          {canEditAssignments ? (
+            <HqWarehouseMultiSelect
+              warehouses={hqWarehouses}
+              selectedIds={form.hqWarehouseIds}
+              onChange={(hqWarehouseIds) => setForm((current) => ({ ...current, hqWarehouseIds }))}
+            />
+          ) : null}
+          {!canEditAssignments && isWarehouseManagerRole && user?.assignedHqWarehouses?.length ? (
+            <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
+              <p className="text-sm font-semibold text-slate-700">{t('users.assignedHqWarehouses')}</p>
+              <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                {user.assignedHqWarehouses.map((warehouse) => (
+                  <li key={warehouse.id}>{warehouse.name} ({warehouse.code})</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.save')}</button>
         </form>
         <div className="flex flex-wrap gap-2">

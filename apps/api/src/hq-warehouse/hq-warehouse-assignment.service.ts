@@ -4,6 +4,10 @@ import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
+import {
+  HQ_WAREHOUSE_ACCESS_DENIED,
+  HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES,
+} from './hq-warehouse-assignment.constants';
 
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
 
@@ -39,8 +43,91 @@ export class HqWarehouseAssignmentService {
       },
     });
     if (!assignment) {
-      throw new ForbiddenException('You are not assigned to this HQ warehouse');
+      throw new ForbiddenException({
+        message: HQ_WAREHOUSE_ACCESS_DENIED,
+        messages: HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES,
+      });
     }
+  }
+
+  async listAssignmentsForUser(targetUserId: string) {
+    return this.prisma.hqWarehouseManagerAssignment.findMany({
+      where: { userId: targetUserId, status: HqWarehouseAssignmentStatus.ACTIVE },
+      include: {
+        warehouse: {
+          select: { id: true, name: true, code: true, city: true, isActive: true },
+        },
+        assignedBy: { select: { id: true, fullName: true, role: true } },
+      },
+      orderBy: { assignedAt: 'desc' },
+    });
+  }
+
+  async syncUserAssignments(actor: AuthUser, targetUserId: string, warehouseIds: string[]) {
+    this.assertCanAssign(actor);
+    const targetUser = await this.prisma.user.findFirst({
+      where: { id: targetUserId, deletedAt: null },
+      include: { userRoles: { include: { role: true } } },
+    });
+    if (!targetUser) {
+      throw new NotFoundException('User not found');
+    }
+    const targetRoles = targetUser.userRoles?.length
+      ? targetUser.userRoles.map((entry) => entry.role.code as Role)
+      : [targetUser.role];
+    if (!targetRoles.includes(Role.WAREHOUSE_MANAGER)) {
+      throw new ForbiddenException('Only HQ Warehouse Manager users can have warehouse assignments');
+    }
+
+    const uniqueWarehouseIds = Array.from(new Set(warehouseIds.filter(Boolean)));
+    for (const warehouseId of uniqueWarehouseIds) {
+      await this.ensureHqWarehouse(warehouseId);
+    }
+
+    const currentIds = await this.getActiveAssignedWarehouseIds(targetUserId);
+    const toAdd = uniqueWarehouseIds.filter((id) => !currentIds.includes(id));
+    const toRemove = currentIds.filter((id) => !uniqueWarehouseIds.includes(id));
+
+    for (const warehouseId of toRemove) {
+      await this.unassignManager(actor, warehouseId, targetUserId);
+    }
+    for (const warehouseId of toAdd) {
+      await this.assignManager(actor, warehouseId, targetUserId);
+    }
+
+    if (toAdd.length || toRemove.length) {
+      await this.audit(actor, 'HQ_WAREHOUSE_MANAGER_REASSIGNED', targetUserId, {
+        userId: targetUserId,
+        assignedById: actor.id,
+        oldAssignment: currentIds,
+        newAssignment: uniqueWarehouseIds,
+      });
+    }
+
+    return this.listAssignmentsForUser(targetUserId);
+  }
+
+  async listActiveManagersByWarehouseIds(warehouseIds: string[]) {
+    if (!warehouseIds.length) {
+      return new Map<string, Array<{ id: string; fullName: string }>>();
+    }
+    const rows = await this.prisma.hqWarehouseManagerAssignment.findMany({
+      where: {
+        warehouseId: { in: warehouseIds },
+        status: HqWarehouseAssignmentStatus.ACTIVE,
+      },
+      include: {
+        user: { select: { id: true, fullName: true } },
+      },
+      orderBy: { assignedAt: 'asc' },
+    });
+    const map = new Map<string, Array<{ id: string; fullName: string }>>();
+    for (const row of rows) {
+      const current = map.get(row.warehouseId) ?? [];
+      current.push({ id: row.user.id, fullName: row.user.fullName });
+      map.set(row.warehouseId, current);
+    }
+    return map;
   }
 
   buildAssignedWarehouseScope(user: AuthUser): Prisma.WarehouseWhereInput | null {

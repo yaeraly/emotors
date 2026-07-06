@@ -39,6 +39,7 @@ type Dashboard = {
 type WarehouseMetrics = Warehouse & {
   country?: string | null;
   city?: string | null;
+  managers?: Array<{ id: string; fullName: string }>;
   totalSkuCount?: number;
   totalProductQuantity?: number;
   totalStockValueKgs?: number;
@@ -293,6 +294,16 @@ function HqWarehousesPageContent() {
               label: t('warehouse.code'),
               sortable: true,
               render: (row) => row.code,
+            },
+            {
+              key: 'managers',
+              label: t('hqWarehouse.managers'),
+              render: (row) =>
+                row.managers?.length ? (
+                  <span className="text-sm text-slate-700">{row.managers.map((manager) => manager.fullName).join(', ')}</span>
+                ) : (
+                  <span className="text-sm text-slate-400">—</span>
+                ),
             },
             {
               key: 'totalSkuCount',

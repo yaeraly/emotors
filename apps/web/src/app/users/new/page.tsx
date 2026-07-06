@@ -4,9 +4,10 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { hqAssignableRoles, RoleSelector } from '@/components/RoleSelector';
+import { HqWarehouseMultiSelect } from '@/components/users/HqWarehouseMultiSelect';
 import { apiFetch } from '@/lib/api';
-import type { Branch, Role, User } from '@/lib/types';
-import { canCreateHqEmployee } from '@/lib/rbac';
+import type { Branch, Role, User, Warehouse } from '@/lib/types';
+import { canAssignHqWarehouseManager, canCreateHqEmployee } from '@/lib/rbac';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewUserPage() {
@@ -14,6 +15,7 @@ export default function NewUserPage() {
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState('');
   const [temporaryPassword, setTemporaryPassword] = useState('');
   const [form, setForm] = useState({
@@ -25,14 +27,19 @@ export default function NewUserPage() {
     roles: ['MANAGER'] as Role[],
     branchId: '',
     password: '',
+    hqWarehouseIds: [] as string[],
   });
 
   useEffect(() => {
     Promise.all([apiFetch<User>('/auth/me'), apiFetch<Branch[]>('/branches')])
-      .then(([me, result]) => {
+      .then(async ([me, result]) => {
         const hqCreator = canCreateHqEmployee(me);
+        const warehouseList = canAssignHqWarehouseManager(me)
+          ? await apiFetch<Warehouse[]>('/hq-warehouses').catch(() => [])
+          : [];
         setCurrentUser(me);
         setBranches(result);
+        setHqWarehouses(warehouseList);
         setForm((current) => ({
           ...current,
           roles: hqCreator ? ['SUPPLY_CHAIN_MANAGER'] : current.roles,
@@ -54,6 +61,7 @@ export default function NewUserPage() {
           userType: canCreateHqEmployee(currentUser) ? 'HQ' : 'BRANCH',
           branchId: canCreateHqEmployee(currentUser) ? null : form.branchId,
           password: form.password || undefined,
+          hqWarehouseIds: form.roles.includes('WAREHOUSE_MANAGER') ? form.hqWarehouseIds : undefined,
         }),
       });
       if (created.temporaryPassword) setTemporaryPassword(created.temporaryPassword);
@@ -68,8 +76,17 @@ export default function NewUserPage() {
   }
 
   function setRoles(roles: Role[]) {
-    setForm((current) => ({ ...current, roles }));
+    setForm((current) => ({
+      ...current,
+      roles,
+      hqWarehouseIds: roles.includes('WAREHOUSE_MANAGER') ? current.hqWarehouseIds : [],
+    }));
   }
+
+  const canEditAssignments =
+    canAssignHqWarehouseManager(currentUser) &&
+    canCreateHqEmployee(currentUser) &&
+    form.roles.includes('WAREHOUSE_MANAGER');
 
   return (
     <ProtectedShell>
@@ -93,6 +110,13 @@ export default function NewUserPage() {
           ) : (
             <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
           )}
+          {canEditAssignments ? (
+            <HqWarehouseMultiSelect
+              warehouses={hqWarehouses}
+              selectedIds={form.hqWarehouseIds}
+              onChange={(hqWarehouseIds) => setForm((current) => ({ ...current, hqWarehouseIds }))}
+            />
+          ) : null}
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.create')}</button>
         </section>
       </form>

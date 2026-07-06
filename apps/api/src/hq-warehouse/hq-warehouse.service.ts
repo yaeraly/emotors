@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ProcurementOrderStatus, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
+import { HqWarehouseAssignmentStatus, Prisma, ProcurementOrderStatus, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -148,9 +148,23 @@ export class HqWarehouseService {
       return sum + item.reservedQuantity * Number(item.landedCostKgs || item.averageCostKgs);
     }, 0);
     const productIds = new Set(balances.filter((b) => b.quantity > 0).map((b) => b.productId));
+    const managers = await tx.hqWarehouseManagerAssignment.findMany({
+      where: {
+        warehouseId: warehouse.id,
+        status: HqWarehouseAssignmentStatus.ACTIVE,
+      },
+      include: {
+        user: { select: { id: true, fullName: true } },
+      },
+      orderBy: { assignedAt: 'asc' },
+    });
 
     return {
       ...warehouse,
+      managers: managers.map((row) => ({
+        id: row.user.id,
+        fullName: row.user.fullName,
+      })),
       totalSkuCount: productIds.size,
       totalProductQuantity: totalQuantity,
       totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100,

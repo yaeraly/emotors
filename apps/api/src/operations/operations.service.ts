@@ -21,6 +21,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { HQ_WAREHOUSE_ACCESS_DENIED } from '../hq-warehouse/hq-warehouse-assignment.constants';
 import { canManageBranchPurchaseRequests, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
 import {
   buildLogisticsWithCargo,
@@ -273,7 +274,7 @@ export class OperationsService {
             user,
             order.id,
             hqWarehouseId,
-            'You are not assigned to this HQ warehouse',
+            HQ_WAREHOUSE_ACCESS_DENIED,
             tx,
           );
           throw error;
