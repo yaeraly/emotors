@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { ModuleSectionNav } from '@/components/ModuleSectionNav';
-import { warehouseHubSections } from '@/lib/scm-hub-sections';
+import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { apiFetch } from '@/lib/api';
 import { canManageInventoryCount } from '@/lib/rbac';
@@ -57,7 +56,7 @@ export default function InventoryCountListPage() {
           ) : null}
         </div>
 
-        <ModuleSectionNav sections={warehouseHubSections} />
+        <WarehouseTopNav />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 

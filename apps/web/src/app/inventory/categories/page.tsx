@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
 import { canManageProductCatalog } from '@/lib/rbac';
 import type { ProductCategory, User } from '@/lib/types';
@@ -109,6 +110,8 @@ export default function InventoryCategoriesPage() {
             {t('inventory.categories')}
           </h2>
         </div>
+
+        <WarehouseTopNav />
 
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">

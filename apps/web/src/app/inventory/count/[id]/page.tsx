@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
 import {
   canApproveInventoryCount,
@@ -257,6 +258,8 @@ export default function InventoryCountDetailPage() {
             ) : null}
           </div>
         </div>
+
+        <WarehouseTopNav />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}

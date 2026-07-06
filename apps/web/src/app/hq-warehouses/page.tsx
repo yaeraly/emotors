@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { ModuleSectionNav } from '@/components/ModuleSectionNav';
-import { warehouseHubSections } from '@/lib/scm-hub-sections';
+import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
 import { canManageHqWarehouse, canDeleteHqWarehouse } from '@/lib/rbac';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
@@ -106,7 +105,7 @@ export default function HqWarehousesPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
-        <ModuleSectionNav sections={warehouseHubSections} />
+        <WarehouseTopNav />
 
         {dashboard ? (
           <div className="grid gap-4 md:grid-cols-5">

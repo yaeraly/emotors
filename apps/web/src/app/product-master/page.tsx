@@ -3,8 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { ModuleSectionNav } from '@/components/ModuleSectionNav';
-import { warehouseHubSections } from '@/lib/scm-hub-sections';
+import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
 import { canManageProductCatalog } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -29,7 +28,7 @@ export default function ProductMasterPage() {
           <p className="mt-2 text-slate-500">{t('productMaster.subtitle')}</p>
         </div>
 
-        <ModuleSectionNav sections={warehouseHubSections} />
+        <WarehouseTopNav />
 
         <div className="grid gap-4 md:grid-cols-2">
           <SectionCard

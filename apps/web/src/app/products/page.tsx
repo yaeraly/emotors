@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
 import { canArchiveProduct, canEditProductCatalog } from '@/lib/rbac';
@@ -128,6 +129,8 @@ export default function ProductsPage() {
             </Link>
           ) : null}
         </div>
+
+        <WarehouseTopNav />
 
         <div className="grid gap-3 md:grid-cols-2">
           <input
