@@ -26,6 +26,7 @@ import {
 } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 type ProcurementOrderItem = {
   id: string;
@@ -227,7 +228,7 @@ export default function ProcurementOrderDetailPage() {
   const canUnlock = canUnlockProcurementOrder(user) && order?.editWindowStatus === 'LOCKED';
   const canSeePayments = canViewSupplierPayments(user);
   const canUploadCargo = canCreateSupplierPayment(user);
-  const readOnlyFinance = hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'ACCOUNTANT');
+  const readOnlyFinance = hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'HQ_ACCOUNTANT') || hasRole(user, 'ACCOUNTANT');
   const canReceive = canReceiveProcurementToHq(user);
   const readyForHqReceiving = order?.status === 'ARRIVED' || order?.status === 'ARRIVED_IN_KYRGYZSTAN' || order?.status === 'IN_TRANSIT';
   const canEditSvh = order ? SVH_STATUSES.includes(order.status) : false;
@@ -773,7 +774,7 @@ export default function ProcurementOrderDetailPage() {
               <Info label={t('procurement.orders.supplier')} value={order.supplier?.name ?? ''} />
               <Info label={t('procurement.orders.factory')} value={order.factory?.name ?? '-'} />
               <Info label={t('procurement.orders.exchangeRate')} value={String(order.effectiveYuanRate ?? order.defaultYuanRate ?? '-')} />
-              <Info label={t('procurement.orders.status')} value={order.status} />
+              <Info label={t('procurement.orders.status')} value={translateStatus(t, order.status, 'procurement')} />
             </div>
             {order.yuanRateLocked ? (
               <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.payments.rateLocked')}</p>

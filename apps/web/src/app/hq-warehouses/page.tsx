@@ -12,7 +12,7 @@ import { WarehousePagination } from '@/components/warehouse/WarehousePagination'
 import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canManageHqWarehouse, canDeleteHqWarehouse, canCreateHqInventoryCount } from '@/lib/rbac';
+import { canManageHqWarehouse, canDeleteHqWarehouse, canCreateHqInventoryCount, hasFullAccess, isWarehouseManagerUser } from '@/lib/rbac';
 import {
   filterWarehouseRows,
   paginateRows,
@@ -45,6 +45,7 @@ type WarehouseMetrics = Warehouse & {
   totalStockValueKgs?: number;
   reservedQuantity?: number;
   availableQuantity?: number;
+  hasDeleteHistory?: boolean;
 };
 
 export default function HqWarehousesPage() {
@@ -96,18 +97,26 @@ function HqWarehousesPageContent() {
       ]);
       setUser(me);
       setDashboard(stats);
-      setWarehouses(
-        list.map((warehouse) => ({
-          ...warehouse,
-          country: warehouse.country ?? 'Kyrgyzstan',
-        })),
-      );
+      const normalized = list.map((warehouse) => ({
+        ...warehouse,
+        country: warehouse.country ?? 'Kyrgyzstan',
+      }));
+      setWarehouses(normalized);
+
+      if (isWarehouseManagerUser(me) && !hasFullAccess(me) && tabParam !== 'inventory') {
+        const assignedIds = me.assignedHqWarehouseIds ?? [];
+        if (assignedIds.length === 1) {
+          router.replace(`/hq-warehouses/${assignedIds[0]}`);
+          return;
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
   const canDelete = canDeleteHqWarehouse(user);
+  const isWmScopedView = isWarehouseManagerUser(user) && !hasFullAccess(user);
 
   async function confirmDelete(reason?: string) {
     if (!deleteTarget) return;
@@ -249,6 +258,7 @@ function HqWarehousesPageContent() {
           </p>
         ) : null}
 
+        {!isWmScopedView ? (
         <WarehouseListToolbar
           search={search}
           region={region}
@@ -274,6 +284,7 @@ function HqWarehousesPageContent() {
             setPage(1);
           }}
         />
+        ) : null}
 
         <WarehouseDataTable
           columns={[
@@ -354,7 +365,7 @@ function HqWarehousesPageContent() {
                       type="button"
                       onClick={() => {
                         setDeleteTarget(row);
-                        setDeleteRequireReason(false);
+                        setDeleteRequireReason(Boolean(row.hasDeleteHistory));
                         setError('');
                       }}
                       className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700"

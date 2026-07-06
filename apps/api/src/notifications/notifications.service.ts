@@ -215,7 +215,7 @@ export class NotificationsService {
         NotificationModule.PROCUREMENT,
       ].forEach((module) => modules.add(module));
     }
-    if (roles.includes(Role.FINANCE_MANAGER) || roles.includes(Role.ACCOUNTANT)) {
+    if (roles.includes(Role.FINANCE_MANAGER) || roles.includes(Role.HQ_ACCOUNTANT)) {
       [NotificationModule.FINANCE, NotificationModule.SUPPLIER_PAYMENT].forEach((module) => modules.add(module));
     }
     return Array.from(modules);

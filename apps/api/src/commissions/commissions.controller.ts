@@ -9,12 +9,12 @@ import { CommissionsService } from './commissions.service';
 
 @Controller('commissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER)
 export class CommissionsController {
   constructor(private readonly commissionsService: CommissionsService) {}
 
   @Post('rules')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER)
   createRule(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.commissionsService.createRule(user, dto);
   }
@@ -42,7 +42,7 @@ export class CommissionsController {
 
 @Controller('compensation')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.FINANCE_MANAGER)
+@Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER)
 export class CompensationController {
   constructor(private readonly commissionsService: CommissionsService) {}
 

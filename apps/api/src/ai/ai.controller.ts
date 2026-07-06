@@ -9,7 +9,7 @@ import { AiService } from './ai.service';
 
 @Controller('ai')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT)
+@Roles(Role.OWNER, Role.MANAGER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT)
 export class AiController {
   constructor(private readonly service: AiService) {}
   @Get('insights') insights(@CurrentUser() user: AuthUser) { return this.service.insights(user); }

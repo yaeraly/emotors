@@ -229,7 +229,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
                 ) : null}
-                <Link href="/inventory/count" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventoryCount.title')}</Link>
                 <Link href="/stock-movements" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventory.stockMovements')}</Link>
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
               </>

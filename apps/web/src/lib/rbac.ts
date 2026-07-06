@@ -81,6 +81,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage', 'products.view'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
+  HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
 
@@ -312,7 +313,7 @@ export function getDefaultRoute(role: Role) {
   if (role === 'HQ_SALES_MANAGER') return '/distribution';
   if (role === 'HQ_CASHIER') return '/distribution/invoices';
   if (role === 'WAREHOUSE_MANAGER') return '/inventory';
-  if (role === 'FINANCE_MANAGER' || role === 'ACCOUNTANT') return '/finance';
+  if (role === 'FINANCE_MANAGER' || role === 'HQ_ACCOUNTANT' || role === 'ACCOUNTANT') return '/finance';
   if (role === 'FRANCHISE_OWNER') return '/dashboard';
   if (role === 'MANAGER') return '/sales';
   if (role === 'MASTER') return '/service';
@@ -510,7 +511,7 @@ export function canEditPurchasePriceYuan(user: Pick<User, 'role' | 'roles'> | nu
 export function canViewSupplierPayments(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return (
     hasFullAccess(user) ||
-    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT']) ||
+    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT']) ||
     hasPermission(user, 'procurement.view') ||
     hasPermission(user, 'procurement.manage') ||
     hasPermission(user, 'finance.view')
@@ -520,7 +521,7 @@ export function canViewSupplierPayments(user: Pick<User, 'role' | 'roles' | 'per
 export function canCreateSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return (
     hasFullAccess(user) ||
-    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT'])
+    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT'])
   );
 }
 
@@ -639,7 +640,7 @@ export function canCreateHqInventoryCount(
 
 export function canEditProcurementOrderItems(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
-  if (hasRole(user, 'WAREHOUSE_MANAGER') || hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'ACCOUNTANT')) {
+  if (hasRole(user, 'WAREHOUSE_MANAGER') || hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'HQ_ACCOUNTANT') || hasRole(user, 'ACCOUNTANT')) {
     return false;
   }
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER') || hasRole(user, 'PROCUREMENT_MANAGER');
@@ -680,7 +681,7 @@ export function canViewTransportCompany(user: Pick<User, 'role' | 'roles' | 'per
   if (!user) return false;
   return (
     canManageTransportCompany(user) ||
-    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT', 'PROCUREMENT_MANAGER'])
+    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT', 'PROCUREMENT_MANAGER'])
   );
 }
 
@@ -697,7 +698,7 @@ export function canViewSvhToHqTransport(user: Pick<User, 'role' | 'roles' | 'per
   if (!user) return false;
   return (
     canManageSvhToHqTransport(user) ||
-    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'FINANCE_MANAGER', 'ACCOUNTANT', 'PROCUREMENT_MANAGER'])
+    hasAnyRole(user, ['WAREHOUSE_MANAGER', 'FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT', 'PROCUREMENT_MANAGER'])
   );
 }
 
@@ -752,7 +753,7 @@ export function canRecordHqDistributionPayment(user: Pick<User, 'role' | 'roles'
     hasFullAccess(user) ||
     hasRole(user, 'HQ_CASHIER') ||
     hasRole(user, 'FINANCE_MANAGER') ||
-    hasRole(user, 'ACCOUNTANT')
+    hasRole(user, 'HQ_ACCOUNTANT') || hasRole(user, 'ACCOUNTANT')
   );
 }
 

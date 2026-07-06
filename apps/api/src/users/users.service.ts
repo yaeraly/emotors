@@ -35,7 +35,7 @@ const HQ_ROLES: Role[] = [
   Role.HQ_CASHIER,
   Role.WAREHOUSE_MANAGER,
   Role.FINANCE_MANAGER,
-  Role.ACCOUNTANT,
+  Role.HQ_ACCOUNTANT,
   Role.MARKETING_MANAGER,
   Role.CONTENT_CREATOR,
   Role.ACADEMY_DIRECTOR,
@@ -55,7 +55,7 @@ const HQ_NO_LOGIN_ALLOWED_ROLES: Role[] = [
   Role.SUPPLY_CHAIN_MANAGER,
   Role.WAREHOUSE_MANAGER,
   Role.FINANCE_MANAGER,
-  Role.ACCOUNTANT,
+  Role.HQ_ACCOUNTANT,
   Role.MARKETING_MANAGER,
   Role.CONTENT_CREATOR,
   Role.ACADEMY_DIRECTOR,
@@ -183,6 +183,21 @@ export class UsersService {
         roles,
         entityType: 'User',
         entityId: created.id,
+      });
+    }
+    if (roles.includes(Role.HQ_ACCOUNTANT)) {
+      await this.audit(user, 'HQ_ACCOUNTANT_CREATED', 'User', created.id, {
+        entityType: 'User',
+        entityId: created.id,
+        roles,
+      });
+    }
+    if (roles.includes(Role.ACCOUNTANT) && userType === 'BRANCH') {
+      await this.audit(user, 'BRANCH_ACCOUNTANT_CREATED', 'User', created.id, {
+        entityType: 'User',
+        entityId: created.id,
+        branchId: created.branchId ?? undefined,
+        roles,
       });
     }
     const assignments = roles.includes(Role.WAREHOUSE_MANAGER)
@@ -927,6 +942,7 @@ export class UsersService {
       Role.HQ_CASHIER,
       Role.WAREHOUSE_MANAGER,
       Role.FINANCE_MANAGER,
+      Role.HQ_ACCOUNTANT,
       Role.ACCOUNTANT,
       Role.MARKETING_MANAGER,
       Role.CONTENT_CREATOR,

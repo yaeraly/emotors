@@ -161,13 +161,13 @@ export class OperationsController {
   }
 
   @Get('alerts')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT)
   alerts(@CurrentUser() user: AuthUser, @Query() query: NotificationQueryDto) {
     return this.service.alerts(user, query);
   }
 
   @Get('alerts/unread-count')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT)
   unreadAlertCount(@CurrentUser() user: AuthUser) {
     return this.service.unreadAlertCount(user);
   }
@@ -179,7 +179,7 @@ export class OperationsController {
   }
 
   @Post('alerts/:id/read')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.MASTER, Role.WAREHOUSE_OPERATOR, Role.CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT)
   markAlertRead(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.markAlertRead(user, id);
   }
@@ -191,7 +191,7 @@ export class OperationsController {
   }
 
   @Get('operations/analytics')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT)
   analyticsPlaceholders() {
     return this.service.analyticsPlaceholders();
   }

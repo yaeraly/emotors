@@ -9,6 +9,7 @@ import {
 } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 export type SupplierPayment = {
   id: string;
@@ -331,7 +332,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                     </div>
                   ) : payment.receiptNumber || '-'}
                 </td>
-                <td className="px-4 py-3">{payment.status}</td>
+                <td className="px-4 py-3">{translateStatus(t, payment.status, 'payment')}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
                     {canEdit && payment.status === 'ACTIVE' ? (

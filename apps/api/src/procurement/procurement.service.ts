@@ -2044,7 +2044,7 @@ export class ProcurementService {
   private canViewProcurementCosts(user: AuthUser) {
     const roles = user.roles?.length ? user.roles : [user.role];
     return this.canManageProcurement(user) ||
-      roles.some((role) => role === Role.FINANCE_MANAGER || role === Role.ACCOUNTANT || role === Role.WAREHOUSE_MANAGER);
+      roles.some((role) => role === Role.FINANCE_MANAGER || role === Role.HQ_ACCOUNTANT || role === Role.ACCOUNTANT || role === Role.WAREHOUSE_MANAGER);
   }
 
   assertCanViewProcurement(user: AuthUser) {

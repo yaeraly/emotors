@@ -136,6 +136,7 @@ export function canUserEditProcurementItems(
   if (
     roles.includes(Role.WAREHOUSE_MANAGER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
     roles.includes(Role.ACCOUNTANT)
   ) {
     return false;

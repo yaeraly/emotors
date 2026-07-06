@@ -12,7 +12,7 @@ export const HQ_EMPLOYEE_ROLES: Role[] = [
   Role.SUPPLY_CHAIN_MANAGER,
   Role.WAREHOUSE_MANAGER,
   Role.FINANCE_MANAGER,
-  Role.ACCOUNTANT,
+  Role.HQ_ACCOUNTANT,
   Role.MARKETING_MANAGER,
   Role.CONTENT_CREATOR,
   Role.ACADEMY_DIRECTOR,
@@ -119,6 +119,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage', 'products.view'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
+  HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
 
@@ -255,7 +256,7 @@ export function canViewSupplierPayments(user: Pick<AuthUser, 'role' | 'roles' | 
     roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
     roles.includes(Role.PROCUREMENT_MANAGER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
-    roles.includes(Role.ACCOUNTANT) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
     userHasPermission(user, 'procurement.view') ||
     userHasPermission(user, 'procurement.manage') ||
     userHasPermission(user, 'finance.view')
@@ -268,7 +269,7 @@ export function canCreateSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' |
     hasAnyFullAccessRole(roles) ||
     roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
-    roles.includes(Role.ACCOUNTANT)
+    roles.includes(Role.HQ_ACCOUNTANT)
   );
 }
 
@@ -311,7 +312,7 @@ export function canReceiveProcurementToHq(user: Pick<AuthUser, 'role' | 'roles' 
 
 export function canEditProcurementOrderItems(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
-  if (roles.includes(Role.WAREHOUSE_MANAGER) || roles.includes(Role.FINANCE_MANAGER) || roles.includes(Role.ACCOUNTANT)) {
+  if (roles.includes(Role.WAREHOUSE_MANAGER) || roles.includes(Role.FINANCE_MANAGER) || roles.includes(Role.HQ_ACCOUNTANT)) {
     return false;
   }
   return (
@@ -361,7 +362,7 @@ export function canRecordHqDistributionPayment(user: Pick<AuthUser, 'role' | 'ro
     hasAnyFullAccessRole(roles) ||
     roles.includes(Role.HQ_CASHIER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
-    roles.includes(Role.ACCOUNTANT)
+    roles.includes(Role.HQ_ACCOUNTANT)
   );
 }
 
@@ -389,7 +390,7 @@ export function canViewTransportCompany(user: Pick<AuthUser, 'role' | 'roles' | 
     canManageTransportCompany(user) ||
     roles.includes(Role.WAREHOUSE_MANAGER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
-    roles.includes(Role.ACCOUNTANT) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
     roles.includes(Role.PROCUREMENT_MANAGER)
   );
 }
@@ -405,7 +406,7 @@ export function canViewSvhToHqTransport(user: Pick<AuthUser, 'role' | 'roles' | 
     canManageSvhToHqTransport(user) ||
     roles.includes(Role.WAREHOUSE_MANAGER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
-    roles.includes(Role.ACCOUNTANT) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
     roles.includes(Role.PROCUREMENT_MANAGER)
   );
 }

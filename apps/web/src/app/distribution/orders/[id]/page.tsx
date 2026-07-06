@@ -11,6 +11,7 @@ import {
 } from '@/lib/rbac';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 type ReceiveItemForm = {
   distributionOrderItemId: string;
@@ -164,7 +165,7 @@ export default function DistributionOrderDetailPage() {
                 <Info label={t('distribution.branch')} value={order.branch?.name ?? ''} />
                 <Info label={t('distribution.sourceWarehouse')} value={order.sourceWarehouse?.name ?? ''} />
                 <Info label={t('distribution.destinationWarehouse')} value={order.destinationWarehouse?.name ?? ''} />
-                <Info label={t('distribution.status')} value={order.status} />
+                <Info label={t('distribution.status')} value={translateStatus(t, order.status, 'distribution')} />
                 <Info label={t('distribution.totalAmount')} value={formatKgs(order.totalAmount)} />
                 <Info label={t('distribution.totalCost')} value={formatKgs(order.totalCost)} />
                 <Info label={t('distribution.totalProfit')} value={formatKgs(order.totalProfit)} />

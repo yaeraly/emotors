@@ -8,6 +8,7 @@ import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
 import type { Branch } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 type BranchForm = {
   name: string;
@@ -222,7 +223,7 @@ export default function BranchesPage() {
             >
               <option value="">{t('branches.allStatuses')}</option>
               {['ACTIVE', 'INACTIVE', 'PENDING', 'SUSPENDED'].map((status) => (
-                <option key={status} value={status}>{status}</option>
+                <option key={status} value={status}>{translateStatus(t, status, 'branch')}</option>
               ))}
             </select>
             <input
@@ -310,7 +311,7 @@ export default function BranchesPage() {
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">status</span>
                   <select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as BranchForm['status'] })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                    {['ACTIVE', 'INACTIVE', 'PENDING', 'SUSPENDED'].map((status) => <option key={status} value={status}>{status}</option>)}
+                    {['ACTIVE', 'INACTIVE', 'PENDING', 'SUSPENDED'].map((status) => <option key={status} value={status}>{translateStatus(t, status, 'branch')}</option>)}
                   </select>
                 </label>
               </div>

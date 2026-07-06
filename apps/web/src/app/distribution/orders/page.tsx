@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { canManageDistributionOrders } from '@/lib/rbac';
 import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 const statuses: BranchDistributionOrderStatus[] = [
   'DRAFT',
@@ -76,7 +77,7 @@ export default function DistributionOrdersPage() {
           </select>
           <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })} className="rounded-xl border border-slate-300 px-4 py-3">
             <option value="">{t('common.all')} {t('distribution.status')}</option>
-            {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+            {statuses.map((status) => <option key={status} value={status}>{translateStatus(t, status, 'distribution')}</option>)}
           </select>
         </div>
         <div className="h-[calc(100vh-300px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -101,7 +102,7 @@ export default function DistributionOrdersPage() {
                   <td className="px-4 py-3">{order.branch?.name}</td>
                   <td className="px-4 py-3">{order.sourceWarehouse?.name}</td>
                   <td className="px-4 py-3">{order.destinationWarehouse?.name}</td>
-                  <td className="px-4 py-3">{order.status}</td>
+                  <td className="px-4 py-3">{translateStatus(t, order.status, 'distribution')}</td>
                   <td className="px-4 py-3">{formatKgs(order.totalAmount)}</td>
                   <td className="px-4 py-3">{formatKgs(order.totalProfit)}</td>
                   <td className="px-4 py-3">{new Date(order.createdAt).toLocaleDateString()}</td>

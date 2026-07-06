@@ -6,6 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { ServiceOrder } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 export default function ServicePage() {
   const { t } = useTranslation();
@@ -35,7 +36,7 @@ export default function ServicePage() {
               <tr><th className="px-4 py-3">{t('service.orderNumber')}</th><th className="px-4 py-3">{t('service.customer')}</th><th className="px-4 py-3">{t('service.master')}</th><th className="px-4 py-3">{t('service.status')}</th><th className="px-4 py-3">{t('service.problem')}</th><th className="px-4 py-3">{t('service.totalAmount')}</th><th className="px-4 py-3">{t('sales.paidAmount')}</th><th className="px-4 py-3">{t('sales.debtAmount')}</th><th className="px-4 py-3">{t('common.createdDate')}</th><th className="px-4 py-3">{t('common.actions')}</th></tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {orders.map((order) => <tr key={order.id}><td className="px-4 py-3 font-bold">{order.orderNumber}</td><td className="px-4 py-3">{order.customer?.fullName}</td><td className="px-4 py-3">{order.master?.fullName}</td><td className="px-4 py-3">{order.status}</td><td className="px-4 py-3">{order.problemDescription}</td><td className="px-4 py-3">{formatKgs(order.totalAmount)}</td><td className="px-4 py-3">{formatKgs(order.paidAmount)}</td><td className="px-4 py-3">{formatKgs(order.debtAmount)}</td><td className="px-4 py-3">{new Date(order.createdAt).toLocaleDateString()}</td><td className="px-4 py-3"><Link href={`/service/${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td></tr>)}
+              {orders.map((order) => <tr key={order.id}><td className="px-4 py-3 font-bold">{order.orderNumber}</td><td className="px-4 py-3">{order.customer?.fullName}</td><td className="px-4 py-3">{order.master?.fullName}</td><td className="px-4 py-3">{translateStatus(t, order.status, 'service')}</td><td className="px-4 py-3">{order.problemDescription}</td><td className="px-4 py-3">{formatKgs(order.totalAmount)}</td><td className="px-4 py-3">{formatKgs(order.paidAmount)}</td><td className="px-4 py-3">{formatKgs(order.debtAmount)}</td><td className="px-4 py-3">{new Date(order.createdAt).toLocaleDateString()}</td><td className="px-4 py-3"><Link href={`/service/${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td></tr>)}
             </tbody>
           </table>
         </div>

@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { canCreateProcurementOrder, canDeleteProcurementOrder, canManageProcurement, canManageTransportCompany, canViewTransportCompany } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 type Supplier = {
   id: string;
@@ -342,7 +343,7 @@ export function ProcurementOrdersListPanel() {
                 <td className="px-4 py-3 font-bold">{order.createdAt ? new Date(order.createdAt).toLocaleString('ru-RU') : '-'}</td>
                 <td className="px-4 py-3">{order.supplier?.name ?? '-'}</td>
                 <td className="px-4 py-3">{order.factory?.name ?? '-'}</td>
-                <td className="px-4 py-3">{order.status}</td>
+                <td className="px-4 py-3">{translateStatus(t, order.status, 'procurement')}</td>
                 <td className="px-4 py-3">¥{Number(order.totalYuan ?? 0).toFixed(2)}</td>
                 <td className="px-4 py-3">{Number(order.totalCostKgs ?? 0).toLocaleString('ru-RU')} сом</td>
                 <td className="px-4 py-3">

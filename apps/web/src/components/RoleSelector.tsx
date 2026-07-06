@@ -21,7 +21,7 @@ export const hqAssignableRoles: Role[] = [
   'HQ_CASHIER',
   'WAREHOUSE_MANAGER',
   'FINANCE_MANAGER',
-  'ACCOUNTANT',
+  'HQ_ACCOUNTANT',
   'MARKETING_MANAGER',
   'CONTENT_CREATOR',
   'ACADEMY_DIRECTOR',
@@ -35,6 +35,7 @@ const branchRoleDescriptions: Partial<Record<Role, string>> = {
   WAREHOUSE_OPERATOR: 'Branch warehouse receiving, stock count, stock movements',
   CASHIER: 'Payments, receipts, cash register, daily cash closing',
   ACCOUNTANT: 'Branch finance view, payments, optional payroll support',
+  HQ_ACCOUNTANT: 'HQ finance, cash, invoices, and reports',
 };
 
 export function roleLabel(role: Role, t?: (key: string) => string) {

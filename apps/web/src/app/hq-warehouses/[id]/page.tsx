@@ -46,7 +46,7 @@ export default function HqWarehouseDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const [user, setUser] = useState<User | null>(null);
-  const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
+  const [warehouse, setWarehouse] = useState<(Warehouse & { hasDeleteHistory?: boolean }) | null>(null);
   const [tab, setTab] = useState<Tab>('details');
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
   const [receivings, setReceivings] = useState<ReceivingRow[]>([]);
@@ -232,7 +232,7 @@ export default function HqWarehouseDetailPage() {
                 type="button"
                 onClick={() => {
                   setDeleteWarehouseOpen(true);
-                  setDeleteWarehouseRequireReason(false);
+                  setDeleteWarehouseRequireReason(Boolean(warehouse?.hasDeleteHistory));
                   setError('');
                 }}
                 className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700"

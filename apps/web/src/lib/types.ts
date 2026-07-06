@@ -10,6 +10,7 @@ export type Role =
   | 'MANAGER'
   | 'MASTER'
   | 'ACCOUNTANT'
+  | 'HQ_ACCOUNTANT'
   | 'SALESPERSON'
   | 'FRANCHISE_OWNER'
   | 'WAREHOUSE_OPERATOR'

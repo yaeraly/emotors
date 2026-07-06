@@ -158,6 +158,7 @@ export class HqWarehouseService {
       },
       orderBy: { assignedAt: 'asc' },
     });
+    const hasDeleteHistory = await this.warehouseHasDeleteHistory(tx, warehouse.id);
 
     return {
       ...warehouse,
@@ -165,6 +166,7 @@ export class HqWarehouseService {
         id: row.user.id,
         fullName: row.user.fullName,
       })),
+      hasDeleteHistory,
       totalSkuCount: productIds.size,
       totalProductQuantity: totalQuantity,
       totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100,
@@ -182,7 +184,7 @@ export class HqWarehouseService {
   async detail(user: AuthUser, id: string) {
     const warehouse = await this.getHqWarehouse(user, id);
     await this.audit(user, 'HQ_WAREHOUSE_VIEWED', id, { warehouseId: id });
-    const [inventoryCount, pendingTransfers] = await Promise.all([
+    const [inventoryCount, pendingTransfers, hasDeleteHistory] = await Promise.all([
       this.prisma.inventoryBalance.count({
         where: { warehouseId: id, quantity: { gt: 0 } },
       }),
@@ -193,8 +195,9 @@ export class HqWarehouseService {
           status: { in: ['DRAFT', 'APPROVED', 'PICKING', 'PACKED', 'SHIPPED', 'SENT'] },
         },
       }),
+      this.prisma.$transaction((tx) => this.warehouseHasDeleteHistory(tx, id)),
     ]);
-    return { ...warehouse, inventoryCount, pendingTransfers };
+    return { ...warehouse, inventoryCount, pendingTransfers, hasDeleteHistory };
   }
 
   async create(user: AuthUser, dto: CreateHqWarehouseDto) {
@@ -279,45 +282,23 @@ export class HqWarehouseService {
         throw new NotFoundException('HQ warehouse not found');
       }
 
-      const [
-        stockAggregate,
-        stockMovements,
-        receivings,
-        distributionOrders,
-        procurementOrders,
-        goodsReceivings,
-        inventorySessions,
-      ] = await Promise.all([
-        tx.inventoryBalance.aggregate({
-          where: { warehouseId: id },
-          _sum: { quantity: true },
-        }),
-        tx.stockMovement.count({ where: { warehouseId: id } }),
-        tx.procurementGoodsReceiving.count({ where: { hqWarehouseId: id, deletedAt: null } }),
-        tx.branchDistributionOrder.count({
-          where: {
-            deletedAt: null,
-            OR: [{ sourceWarehouseId: id }, { destinationWarehouseId: id }],
-          },
-        }),
-        tx.procurementOrder.count({ where: { hqWarehouseId: id, deletedAt: null } }),
-        tx.goodsReceiving.count({ where: { warehouseId: id } }),
-        tx.inventoryCountSession.count({ where: { warehouseId: id } }),
-      ]);
-
-      const totalStock = stockAggregate._sum.quantity ?? 0;
-      const hasHistory =
-        totalStock > 0 ||
-        stockMovements > 0 ||
-        receivings > 0 ||
-        distributionOrders > 0 ||
-        procurementOrders > 0 ||
-        goodsReceivings > 0 ||
-        inventorySessions > 0;
+      const hasHistory = await this.warehouseHasDeleteHistory(tx, id);
+      await this.audit(user, 'HQ_WAREHOUSE_DELETE_ALLOWED', id, {
+        entityType: 'Warehouse',
+        warehouseId: id,
+        hasHistory,
+        reason: reason?.trim() || null,
+      });
 
       const oldValue = { ...warehouse };
 
+      await tx.hqWarehouseManagerAssignment.updateMany({
+        where: { warehouseId: id, status: HqWarehouseAssignmentStatus.ACTIVE },
+        data: { status: HqWarehouseAssignmentStatus.INACTIVE },
+      });
+
       if (!hasHistory) {
+        await tx.hqWarehouseManagerAssignment.deleteMany({ where: { warehouseId: id } });
         await tx.warehouse.delete({ where: { id } });
         await this.audit(user, 'HQ_WAREHOUSE_DELETED', id, {
           entityType: 'Warehouse',
@@ -345,6 +326,48 @@ export class HqWarehouseService {
       });
       return { success: true, archived: true };
     });
+  }
+
+  private async warehouseHasDeleteHistory(tx: Prisma.TransactionClient, id: string) {
+    const [
+      stockAggregate,
+      stockMovements,
+      receivings,
+      distributionOrders,
+      procurementOrders,
+      goodsReceivings,
+      inventorySessions,
+      managerAssignments,
+    ] = await Promise.all([
+      tx.inventoryBalance.aggregate({
+        where: { warehouseId: id },
+        _sum: { quantity: true },
+      }),
+      tx.stockMovement.count({ where: { warehouseId: id } }),
+      tx.procurementGoodsReceiving.count({ where: { hqWarehouseId: id, deletedAt: null } }),
+      tx.branchDistributionOrder.count({
+        where: {
+          deletedAt: null,
+          OR: [{ sourceWarehouseId: id }, { destinationWarehouseId: id }],
+        },
+      }),
+      tx.procurementOrder.count({ where: { hqWarehouseId: id, deletedAt: null } }),
+      tx.goodsReceiving.count({ where: { warehouseId: id } }),
+      tx.inventoryCountSession.count({ where: { warehouseId: id } }),
+      tx.hqWarehouseManagerAssignment.count({ where: { warehouseId: id } }),
+    ]);
+
+    const totalStock = stockAggregate._sum.quantity ?? 0;
+    return (
+      totalStock > 0 ||
+      stockMovements > 0 ||
+      receivings > 0 ||
+      distributionOrders > 0 ||
+      procurementOrders > 0 ||
+      goodsReceivings > 0 ||
+      inventorySessions > 0 ||
+      managerAssignments > 0
+    );
   }
 
   async inventory(user: AuthUser, id: string) {

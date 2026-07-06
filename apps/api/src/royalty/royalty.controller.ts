@@ -9,7 +9,7 @@ import { RoyaltyService } from './royalty.service';
 
 @Controller('royalty')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.OWNER, Role.ACCOUNTANT)
+@Roles(Role.OWNER, Role.ACCOUNTANT, Role.HQ_ACCOUNTANT)
 export class RoyaltyController {
   constructor(private readonly royaltyService: RoyaltyService) {}
 

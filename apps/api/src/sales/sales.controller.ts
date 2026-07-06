@@ -28,7 +28,7 @@ import { SalesService } from './sales.service';
   Role.FRANCHISE_OWNER,
   Role.MANAGER,
   Role.CASHIER,
-  Role.ACCOUNTANT,
+  Role.HQ_ACCOUNTANT,
   Role.FINANCE_MANAGER,
 )
 export class SalesController {

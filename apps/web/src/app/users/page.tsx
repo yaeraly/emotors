@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api';
 import { canCreateBranchOwner, canResetUserPassword, isBranchPanelUser } from '@/lib/rbac';
 import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 const hqRoles: Role[] = [
   'CEO',
@@ -17,7 +18,7 @@ const hqRoles: Role[] = [
   'HQ_CASHIER',
   'WAREHOUSE_MANAGER',
   'FINANCE_MANAGER',
-  'ACCOUNTANT',
+  'HQ_ACCOUNTANT',
   'MARKETING_MANAGER',
   'CONTENT_CREATOR',
   'ACADEMY_DIRECTOR',
@@ -226,17 +227,19 @@ export default function UsersPage() {
               onChange={setStatusFilter}
               options={[
                 { value: '', label: t('common.all') },
-                { value: 'ACTIVE', label: 'ACTIVE' },
-                { value: 'INACTIVE', label: 'INACTIVE' },
-                { value: 'SUSPENDED', label: 'SUSPENDED' },
+                { value: 'ACTIVE', label: translateStatus(t, 'ACTIVE') },
+                { value: 'INACTIVE', label: translateStatus(t, 'INACTIVE') },
+                { value: 'SUSPENDED', label: translateStatus(t, 'SUSPENDED') },
               ]}
             />
-            <Select
-              label={t('users.pageSize')}
-              value={String(pageSize)}
-              onChange={(value) => setPageSize(Number(value))}
-              options={pageSizeOptions.map((option) => ({ value: String(option), label: String(option) }))}
-            />
+            {!isBranchOwnerPanel ? (
+              <Select
+                label={t('users.pageSize')}
+                value={String(pageSize)}
+                onChange={(value) => setPageSize(Number(value))}
+                options={pageSizeOptions.map((option) => ({ value: String(option), label: String(option) }))}
+              />
+            ) : null}
           </div>
           <div className="mt-5">
             <p className="text-sm font-semibold text-slate-700">{t('users.multiRoleFilter')}</p>
@@ -285,7 +288,7 @@ export default function UsersPage() {
                     <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : user.branch?.name ?? user.branchId}</td>
                     <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : t('users.branchEmployees')}</td>
                     <td className="px-4 py-3"><RoleBadges roles={rolesForUser(user)} /></td>
-                    <td className="px-4 py-3">{user.status}</td>
+                    <td className="px-4 py-3">{translateStatus(t, user.status)}</td>
                     <td className="px-4 py-3">{formatDate(user.lastLoginAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">

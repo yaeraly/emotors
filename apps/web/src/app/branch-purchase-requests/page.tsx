@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/api';
 import { canManageBranchPurchaseRequests } from '@/lib/rbac';
 import type { Branch, Product, ProductListResponse, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 type BranchPurchaseRequest = {
   id: string;
@@ -179,7 +180,7 @@ export default function BranchPurchaseRequestsPage() {
                 <tr key={request.id}>
                   <td className="px-4 py-3 font-bold">{request.requestNumber}</td>
                   <td className="px-4 py-3">{branches.find((b) => b.id === request.branchId)?.name ?? request.branchId}</td>
-                  <td className="px-4 py-3">{request.status}</td>
+                  <td className="px-4 py-3">{translateStatus(t, request.status)}</td>
                   <td className="px-4 py-3">{request.items.map((item) => `${item.sku} × ${item.quantity}`).join(', ')}</td>
                   <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3">

@@ -50,7 +50,7 @@ export default function NewUserPage() {
         setHqWarehouses(warehouseList);
         setForm((current) => ({
           ...current,
-          roles: hqCreator ? ['ACCOUNTANT'] : current.roles,
+          roles: hqCreator ? ['HQ_ACCOUNTANT'] : current.roles,
           branchId: hqCreator ? '' : me.branchId ?? result[0]?.id ?? '',
         }));
       })
