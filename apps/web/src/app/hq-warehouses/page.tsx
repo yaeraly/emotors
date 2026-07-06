@@ -1,14 +1,28 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
+import { WarehouseDataTable } from '@/components/warehouse/WarehouseDataTable';
+import { WarehouseListToolbar } from '@/components/warehouse/WarehouseListToolbar';
+import { WarehousePagination } from '@/components/warehouse/WarehousePagination';
+import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
+import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { canManageHqWarehouse, canDeleteHqWarehouse } from '@/lib/rbac';
-import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
+import {
+  filterWarehouseRows,
+  paginateRows,
+  sortWarehouseRows,
+  type SortDirection,
+  type StatusFilter,
+  uniqueSortedValues,
+} from '@/lib/warehouse-list-utils';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+
+const PAGE_SIZE = 10;
 
 type Dashboard = {
   totalHqWarehouses: number;
@@ -19,17 +33,13 @@ type Dashboard = {
 };
 
 type WarehouseMetrics = Warehouse & {
+  country?: string | null;
+  city?: string | null;
   totalSkuCount?: number;
   totalProductQuantity?: number;
   totalStockValueKgs?: number;
   reservedQuantity?: number;
   availableQuantity?: number;
-  totalPurchaseCostKgs?: number;
-  totalDistributedValueKgs?: number;
-  availableStockValueKgs?: number;
-  reservedStockValueKgs?: number;
-  pendingOutgoingOrders?: number;
-  pendingReceivingOrders?: number;
 };
 
 export default function HqWarehousesPage() {
@@ -42,6 +52,13 @@ export default function HqWarehousesPage() {
   const [deleteTarget, setDeleteTarget] = useState<Warehouse | null>(null);
   const [deleteRequireReason, setDeleteRequireReason] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [search, setSearch] = useState('');
+  const [region, setRegion] = useState('');
+  const [city, setCity] = useState('');
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [sortKey, setSortKey] = useState('name');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     void load();
@@ -56,7 +73,12 @@ export default function HqWarehousesPage() {
       ]);
       setUser(me);
       setDashboard(stats);
-      setWarehouses(list);
+      setWarehouses(
+        list.map((warehouse) => ({
+          ...warehouse,
+          country: warehouse.country ?? 'Kyrgyzstan',
+        })),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -87,6 +109,62 @@ export default function HqWarehousesPage() {
     }
   }
 
+  const regionOptions = useMemo(
+    () => uniqueSortedValues(warehouses.map((warehouse) => warehouse.country ?? 'Kyrgyzstan')),
+    [warehouses],
+  );
+  const cityOptions = useMemo(
+    () => uniqueSortedValues(warehouses.map((warehouse) => warehouse.city)),
+    [warehouses],
+  );
+
+  const filteredWarehouses = useMemo(
+    () =>
+      sortWarehouseRows(
+        filterWarehouseRows(warehouses, { search, region, city, status }),
+        sortKey,
+        sortDirection,
+        {
+          name: (row) => row.name,
+          city: (row) => row.city ?? '',
+          code: (row) => row.code,
+          totalSkuCount: (row) => row.totalSkuCount ?? 0,
+          totalProductQuantity: (row) => row.totalProductQuantity ?? 0,
+          totalStockValueKgs: (row) => row.totalStockValueKgs ?? 0,
+          reservedQuantity: (row) => row.reservedQuantity ?? 0,
+          availableQuantity: (row) => row.availableQuantity ?? 0,
+          isActive: (row) => (row.isActive ? 1 : 0),
+        },
+      ),
+    [warehouses, search, region, city, status, sortKey, sortDirection],
+  );
+
+  const pagination = useMemo(
+    () => paginateRows(filteredWarehouses, page, PAGE_SIZE),
+    [filteredWarehouses, page],
+  );
+
+  const summary = useMemo(
+    () => ({
+      totalHqWarehouses: filteredWarehouses.length,
+      totalProducts: filteredWarehouses.reduce((sum, row) => sum + (row.totalSkuCount ?? 0), 0),
+      totalStock: filteredWarehouses.reduce((sum, row) => sum + (row.totalProductQuantity ?? 0), 0),
+      totalInventoryValueKgs: filteredWarehouses.reduce((sum, row) => sum + (row.totalStockValueKgs ?? 0), 0),
+      totalReserved: filteredWarehouses.reduce((sum, row) => sum + (row.reservedQuantity ?? 0), 0),
+      totalAvailable: filteredWarehouses.reduce((sum, row) => sum + (row.availableQuantity ?? 0), 0),
+    }),
+    [filteredWarehouses],
+  );
+
+  function handleSort(nextKey: string) {
+    if (sortKey === nextKey) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection('asc');
+  }
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -107,69 +185,146 @@ export default function HqWarehousesPage() {
 
         <WarehouseTopNav />
 
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          <WarehouseSummaryCard label={t('hqWarehouse.totalWarehouses')} value={String(summary.totalHqWarehouses)} />
+          <WarehouseSummaryCard label={t('hqWarehouse.totalProducts')} value={String(summary.totalProducts)} />
+          <WarehouseSummaryCard label={t('hqWarehouse.totalStock')} value={String(summary.totalStock)} />
+          <WarehouseSummaryCard
+            label={t('hqWarehouse.totalValue')}
+            value={`${summary.totalInventoryValueKgs.toLocaleString()} KGS`}
+          />
+          <WarehouseSummaryCard label={t('branchWarehouse.totalReserved')} value={String(summary.totalReserved)} />
+          <WarehouseSummaryCard label={t('branchWarehouse.totalAvailable')} value={String(summary.totalAvailable)} />
+        </div>
+
         {dashboard ? (
-          <div className="grid gap-4 md:grid-cols-5">
-            <Card label={t('hqWarehouse.totalWarehouses')} value={String(dashboard.totalHqWarehouses)} />
-            <Card label={t('hqWarehouse.totalProducts')} value={String(dashboard.totalProducts)} />
-            <Card label={t('hqWarehouse.totalStock')} value={String(dashboard.totalStock)} />
-            <Card label={t('hqWarehouse.totalValue')} value={`${dashboard.totalInventoryValueKgs.toLocaleString()} KGS`} />
-            <Card label={t('hqWarehouse.pendingTransfers')} value={String(dashboard.pendingTransfers)} />
-          </div>
+          <p className="text-sm text-slate-500">
+            {t('hqWarehouse.pendingTransfers')}: {dashboard.pendingTransfers}
+          </p>
         ) : null}
 
-        <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">{t('warehouse.name')}</th>
-                <th className="px-4 py-3">{t('hqWarehouse.city')}</th>
-                <th className="px-4 py-3">{t('warehouse.code')}</th>
-                <th className="px-4 py-3">{t('branchWarehouse.skuCount')}</th>
-                <th className="px-4 py-3">{t('hqWarehouse.totalStock')}</th>
-                <th className="px-4 py-3">{t('hqWarehouse.totalValue')}</th>
-                <th className="px-4 py-3">{t('branchWarehouse.reserved')}</th>
-                <th className="px-4 py-3">{t('branchWarehouse.available')}</th>
-                <th className="px-4 py-3">{t('common.status')}</th>
-                <th className="px-4 py-3">{t('common.actions')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {warehouses.map((warehouse) => (
-                <tr key={warehouse.id}>
-                  <td className="px-4 py-3 font-bold">{warehouse.name}</td>
-                  <td className="px-4 py-3">{(warehouse as Warehouse & { city?: string }).city ?? '—'}</td>
-                  <td className="px-4 py-3">{warehouse.code}</td>
-                  <td className="px-4 py-3">{warehouse.totalSkuCount ?? 0}</td>
-                  <td className="px-4 py-3">{warehouse.totalProductQuantity ?? 0}</td>
-                  <td className="px-4 py-3">{(warehouse.totalStockValueKgs ?? 0).toLocaleString()} KGS</td>
-                  <td className="px-4 py-3">{warehouse.reservedQuantity ?? 0}</td>
-                  <td className="px-4 py-3">{warehouse.availableQuantity ?? 0}</td>
-                  <td className="px-4 py-3">{warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-2">
-                      <Link href={`/hq-warehouses/${warehouse.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
-                      {canDelete ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDeleteTarget(warehouse);
-                            setDeleteRequireReason(false);
-                            setError('');
-                          }}
-                          className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700"
-                        >
-                          {t('common.delete')}
-                        </button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <WarehouseListToolbar
+          search={search}
+          region={region}
+          city={city}
+          status={status}
+          regionOptions={regionOptions}
+          cityOptions={cityOptions}
+          searchPlaceholder={t('warehouse.searchHqPlaceholder')}
+          onSearchChange={(value) => {
+            setSearch(value);
+            setPage(1);
+          }}
+          onRegionChange={(value) => {
+            setRegion(value);
+            setPage(1);
+          }}
+          onCityChange={(value) => {
+            setCity(value);
+            setPage(1);
+          }}
+          onStatusChange={(value) => {
+            setStatus(value);
+            setPage(1);
+          }}
+        />
+
+        <WarehouseDataTable
+          columns={[
+            {
+              key: 'name',
+              label: t('warehouse.name'),
+              sortable: true,
+              render: (row) => <span className="font-bold">{row.name}</span>,
+            },
+            {
+              key: 'city',
+              label: t('hqWarehouse.city'),
+              sortable: true,
+              render: (row) => row.city ?? '—',
+            },
+            {
+              key: 'code',
+              label: t('warehouse.code'),
+              sortable: true,
+              render: (row) => row.code,
+            },
+            {
+              key: 'totalSkuCount',
+              label: t('branchWarehouse.skuCount'),
+              sortable: true,
+              render: (row) => row.totalSkuCount ?? 0,
+            },
+            {
+              key: 'totalProductQuantity',
+              label: t('hqWarehouse.totalStock'),
+              sortable: true,
+              render: (row) => row.totalProductQuantity ?? 0,
+            },
+            {
+              key: 'totalStockValueKgs',
+              label: t('hqWarehouse.totalValue'),
+              sortable: true,
+              render: (row) => `${(row.totalStockValueKgs ?? 0).toLocaleString()} KGS`,
+            },
+            {
+              key: 'reservedQuantity',
+              label: t('branchWarehouse.reserved'),
+              sortable: true,
+              render: (row) => row.reservedQuantity ?? 0,
+            },
+            {
+              key: 'availableQuantity',
+              label: t('branchWarehouse.available'),
+              sortable: true,
+              render: (row) => row.availableQuantity ?? 0,
+            },
+            {
+              key: 'isActive',
+              label: t('common.status'),
+              sortable: true,
+              render: (row) => (row.isActive ? t('warehouse.active') : t('warehouse.inactive')),
+            },
+            {
+              key: 'actions',
+              label: t('common.actions'),
+              render: (row) => (
+                <div className="flex flex-wrap gap-2">
+                  <Link href={`/hq-warehouses/${row.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
+                    {t('common.open')}
+                  </Link>
+                  {canDelete ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteTarget(row);
+                        setDeleteRequireReason(false);
+                        setError('');
+                      }}
+                      className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700"
+                    >
+                      {t('common.delete')}
+                    </button>
+                  ) : null}
+                </div>
+              ),
+            },
+          ]}
+          rows={pagination.items}
+          rowKey={(row) => row.id}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onSort={handleSort}
+          emptyLabel={t('warehouse.list')}
+        />
+
+        <WarehousePagination
+          currentPage={pagination.currentPage}
+          totalPages={pagination.totalPages}
+          total={pagination.total}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+        />
       </section>
 
       <DeleteConfirmModal
@@ -182,14 +337,5 @@ export default function HqWarehousesPage() {
         onConfirm={confirmDelete}
       />
     </ProtectedShell>
-  );
-}
-
-function Card({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-slate-950">{value}</p>
-    </div>
   );
 }

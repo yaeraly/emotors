@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewHqWarehouse, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -97,6 +97,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const roleLabel = roleCodesForUser(user).join(', ');
   const supplyChainManagerView = isSupplyChainManagerUser(user);
   const warehouseManagerView = isWarehouseManagerUser(user);
+  const canSeeBranchWarehouses = canViewBranchWarehouses(user);
+  const canSeeProductMaster = canViewProductMaster(user);
 
   if (forbidden) {
     return (
@@ -164,12 +166,30 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             {supplyChainManagerView ? (
               <>
                 <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
+                {canSeeHqWarehouse ? (
+                  <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
+                ) : null}
+                {canSeeBranchWarehouses ? (
+                  <Link href="/branch-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.branchWarehouses')}</Link>
+                ) : null}
+                {canSeeProductMaster ? (
+                  <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
+                ) : null}
                 <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
                 <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
               </>
             ) : warehouseManagerView ? (
               <>
                 <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.warehouse')}</Link>
+                {canSeeHqWarehouse ? (
+                  <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
+                ) : null}
+                {canSeeBranchWarehouses ? (
+                  <Link href="/branch-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.branchWarehouses')}</Link>
+                ) : null}
+                {canSeeProductMaster ? (
+                  <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
+                ) : null}
                 <Link href="/distribution" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.distribution')}</Link>
                 <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
               </>
