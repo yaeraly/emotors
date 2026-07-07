@@ -19,6 +19,13 @@ type RequestDetail = {
   requestNumber: string;
   branchId: string;
   branchWarehouseId?: string | null;
+  assignedHqWarehouseId?: string | null;
+  assignedHqWarehouse?: { id: string; name: string; code?: string } | null;
+  branch?: {
+    id: string;
+    name: string;
+    assignedHqWarehouse?: { id: string; name: string; code?: string } | null;
+  };
   status: string;
   note?: string | null;
   transportCompany?: string | null;
@@ -64,25 +71,25 @@ export default function BranchPurchaseRequestDetailPage() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [convertForm, setConvertForm] = useState({ sourceWarehouseId: '', destinationWarehouseId: '' });
+
+  function localizeBranchRequestError(message: string) {
+    if (message.includes('NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH')) return t('branchHqRouting.noWarehouseAssigned');
+    if (message.includes('INACTIVE_HQ_WAREHOUSE')) return t('branchHqRouting.inactiveWarehouse');
+    if (message.includes('NO_HQ_WAREHOUSE_MANAGER_ASSIGNED')) return t('branchHqRouting.noWarehouseManager');
+    return message;
+  }
 
   async function load() {
-    const [detail, me, branchList, hqList, bwList] = await Promise.all([
+    const [detail, me, branchList, bwList] = await Promise.all([
       apiFetch<RequestDetail>(`/branch-purchase-requests/${params.id}`),
       apiFetch<User>('/auth/me'),
       apiFetch<Branch[]>('/branches'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'),
     ]);
     setRequest(detail);
     setUser(me);
     setBranches(branchList);
-    setConvertForm({
-      sourceWarehouseId: hqList[0]?.id ?? '',
-      destinationWarehouseId:
-        bwList.find((warehouse) => warehouse.branchId === detail.branchId)?.id ?? bwList[0]?.id ?? '',
-    });
-    setWarehouses([...hqList, ...bwList]);
+    setWarehouses(bwList);
   }
 
   useEffect(() => {
@@ -104,18 +111,19 @@ export default function BranchPurchaseRequestDetailPage() {
     }
   }
 
-  async function convert() {
+  async function sendToHqWarehouse() {
     if (!request) return;
     setError('');
     try {
-      const order = await apiFetch<{ id: string }>(`/branch-purchase-requests/${request.id}/convert`, {
+      const order = await apiFetch<{ id: string }>(`/branch-purchase-requests/${request.id}/send-to-hq-warehouse`, {
         method: 'POST',
-        body: JSON.stringify(convertForm),
+        body: JSON.stringify({}),
       });
-      setSuccess(t('distribution.convertedToOrder'));
+      setSuccess(t('branchHqRouting.sentToWarehouse'));
       window.location.href = `/distribution/orders/${order.id}`;
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(localizeBranchRequestError(message));
     }
   }
 
@@ -139,7 +147,12 @@ export default function BranchPurchaseRequestDetailPage() {
     );
   }
 
-  const branchName = branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId;
+  const branchName = request.branch?.name ?? branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId;
+  const assignedHqWarehouseName =
+    request.assignedHqWarehouse?.name ??
+    request.branch?.assignedHqWarehouse?.name ??
+    branches.find((branch) => branch.id === request.branchId)?.assignedHqWarehouse?.name ??
+    '-';
   const branchWarehouseName =
     warehouses.find((warehouse) => warehouse.id === request.branchWarehouseId)?.name ?? request.branchWarehouseId ?? '-';
 
@@ -165,9 +178,9 @@ export default function BranchPurchaseRequestDetailPage() {
                 </button>
               </>
             ) : null}
-            {canManage && request.status === 'APPROVED' ? (
-              <button type="button" onClick={() => void convert()} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
-                {t('distribution.convertToOrder')}
+            {canManage && (request.status === 'APPROVED' || request.status === 'CONFIRMED') ? (
+              <button type="button" onClick={() => void sendToHqWarehouse()} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
+                {t('branchHqRouting.sendToWarehouseManager')}
               </button>
             ) : null}
           </div>
@@ -188,6 +201,10 @@ export default function BranchPurchaseRequestDetailPage() {
           <div>
             <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.requestedBy')}</p>
             <p className="mt-1 font-semibold text-slate-900">{request.createdBy?.fullName ?? '-'}</p>
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase text-slate-400">{t('branchHqRouting.assignedHqWarehouse')}</p>
+            <p className="mt-1 font-semibold text-slate-900">{assignedHqWarehouseName}</p>
           </div>
           <div>
             <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.requestDate')}</p>
@@ -257,30 +274,6 @@ export default function BranchPurchaseRequestDetailPage() {
               {request.transportNotes ? (
                 <p className="md:col-span-2"><span className="font-semibold">{t('branchProductRequest.transportNotes')}:</span> {request.transportNotes}</p>
               ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        {canManage && request.status === 'APPROVED' ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold">{t('distribution.convertToOrder')}</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-semibold">{t('distribution.sourceWarehouse')}</span>
-                <select value={convertForm.sourceWarehouseId} onChange={(e) => setConvertForm({ ...convertForm, sourceWarehouseId: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                  {warehouses.filter((warehouse) => warehouse.warehouseType === 'HQ').map((warehouse) => (
-                    <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold">{t('distribution.destinationWarehouse')}</span>
-                <select value={convertForm.destinationWarehouseId} onChange={(e) => setConvertForm({ ...convertForm, destinationWarehouseId: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                  {warehouses.filter((warehouse) => warehouse.warehouseType === 'BRANCH').map((warehouse) => (
-                    <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
-                  ))}
-                </select>
-              </label>
             </div>
           </div>
         ) : null}

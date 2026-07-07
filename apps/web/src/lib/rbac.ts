@@ -281,6 +281,7 @@ const HQ_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/distribution',
   '/branch-purchase-requests',
   '/branch-warehouses',
+  '/branches',
   '/inventory',
   '/products',
   '/product-master',
@@ -901,6 +902,18 @@ export function canRecordDistributionPayment(user: Pick<User, 'role' | 'roles' |
 
 export function canManageBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return canManageDistributionOrders(user);
+}
+
+export function canAssignBranchHqWarehouse(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  return hasRole(user, 'HQ_SALES_MANAGER');
+}
+
+export function canManageBranches(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  return hasPermission(user, 'branches.manage');
 }
 
 /** Only Branch Manager (MANAGER) creates routine HQ orders. */

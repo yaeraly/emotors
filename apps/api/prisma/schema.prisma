@@ -658,9 +658,14 @@ model Branch {
   stockRiskPredictions StockRiskPrediction[]
   customerPredictions CustomerPrediction[]
   kpiRecommendations KpiRecommendation[]
+  assignedHqWarehouseId String?
+  assignedHqWarehouse   Warehouse? @relation("BranchAssignedHqWarehouse", fields: [assignedHqWarehouseId], references: [id])
+  branchPurchaseRequests BranchPurchaseRequest[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
+
+  @@index([assignedHqWarehouseId])
 }
 
 model User {
@@ -1063,6 +1068,8 @@ model Warehouse {
   procurementDifferenceReports ProcurementDifferenceReport[]
   inventoryCountSessions InventoryCountSession[]
   hqManagerAssignments HqWarehouseManagerAssignment[]
+  assignedBranches Branch[] @relation("BranchAssignedHqWarehouse")
+  assignedBranchRequests BranchPurchaseRequest[] @relation("BranchRequestAssignedHqWarehouse")
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -2970,7 +2977,10 @@ model BranchPurchaseRequest {
   id                 String   @id @default(cuid())
   requestNumber      String   @unique
   branchId           String
+  branch             Branch   @relation(fields: [branchId], references: [id])
   branchWarehouseId  String?
+  assignedHqWarehouseId String?
+  assignedHqWarehouse   Warehouse? @relation("BranchRequestAssignedHqWarehouse", fields: [assignedHqWarehouseId], references: [id])
   status             BranchPurchaseRequestStatus @default(DRAFT)
   createdById        String
   createdBy          User     @relation("BranchPurchaseRequestCreator", fields: [createdById], references: [id])
@@ -2994,6 +3004,7 @@ model BranchPurchaseRequest {
 
   @@index([branchId])
   @@index([branchWarehouseId])
+  @@index([assignedHqWarehouseId])
   @@index([status])
   @@index([createdById])
   @@index([convertedOrderId])

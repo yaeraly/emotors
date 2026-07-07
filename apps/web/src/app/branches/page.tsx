@@ -6,9 +6,10 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
-import type { Branch } from '@/lib/types';
+import type { Branch, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
+import { canAssignBranchHqWarehouse, canManageBranches } from '@/lib/rbac';
 
 type BranchForm = {
   name: string;
@@ -47,6 +48,7 @@ export default function BranchesPage() {
   const [deletingBranchId, setDeletingBranchId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [user, setUser] = useState<User | null>(null);
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (filters.search.trim()) params.set('search', filters.search.trim());
@@ -77,12 +79,14 @@ export default function BranchesPage() {
 
   async function loadBranches() {
     try {
-      const [filtered, all] = await Promise.all([
+      const [filtered, all, me] = await Promise.all([
         apiFetch<Branch[]>(`/branches${query}`),
         apiFetch<Branch[]>('/branches'),
+        apiFetch<User>('/auth/me'),
       ]);
       setBranches(filtered);
       setAllBranches(all);
+      setUser(me);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -179,6 +183,9 @@ export default function BranchesPage() {
     }
   }
 
+  const canManage = canManageBranches(user);
+  const canAssignHq = canAssignBranchHqWarehouse(user);
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -189,9 +196,11 @@ export default function BranchesPage() {
             </p>
             <h2 className="text-3xl font-bold text-slate-950">{t('branches.title')}</h2>
           </div>
-          <Link href="/branches/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
-            {t('branches.new')}
-          </Link>
+          {canManage ? (
+            <Link href="/branches/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
+              {t('branches.new')}
+            </Link>
+          ) : null}
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -252,6 +261,7 @@ export default function BranchesPage() {
                   <th className="px-4 py-3">City</th>
                   <th className="px-4 py-3">Phone</th>
                   <th className="px-4 py-3">Owner</th>
+                  <th className="px-4 py-3">{t('branchHqRouting.assignedHqWarehouse')}</th>
                   <th className="px-4 py-3">{t('common.status')}</th>
                   <th className="px-4 py-3">{t('common.actions')}</th>
                 </tr>
@@ -259,7 +269,7 @@ export default function BranchesPage() {
               <tbody className="divide-y divide-slate-100">
                 {branches.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                       {t('branches.noBranchesFound')}
                     </td>
                   </tr>
@@ -270,18 +280,23 @@ export default function BranchesPage() {
                     <td className="px-4 py-3">{branch.city ?? '-'}</td>
                     <td className="px-4 py-3">{branch.phone ?? '-'}</td>
                     <td className="px-4 py-3">{branch.ownerName ?? '-'}</td>
+                    <td className="px-4 py-3">{branch.assignedHqWarehouse?.name ?? '—'}</td>
                     <td className="px-4 py-3">{branch.status ?? 'ACTIVE'}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <Link href={`/branches/${branch.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                          {t('common.open')}
+                          {canAssignHq && !canManage ? t('branchHqRouting.assignHqWarehouse') : t('common.open')}
                         </Link>
-                        <button onClick={() => openEdit(branch)} type="button" className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700">
-                          {t('common.edit')}
-                        </button>
-                        <button onClick={() => void deleteBranch(branch)} disabled={deletingBranchId === branch.id} type="button" className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 disabled:opacity-50">
-                          {deletingBranchId === branch.id ? t('common.loading') : t('common.delete')}
-                        </button>
+                        {canManage ? (
+                          <>
+                            <button onClick={() => openEdit(branch)} type="button" className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700">
+                              {t('common.edit')}
+                            </button>
+                            <button onClick={() => void deleteBranch(branch)} disabled={deletingBranchId === branch.id} type="button" className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 disabled:opacity-50">
+                              {deletingBranchId === branch.id ? t('common.loading') : t('common.delete')}
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

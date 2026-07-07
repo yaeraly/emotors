@@ -9,6 +9,7 @@ import { BranchesService } from './branches.service';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { BranchQueryDto } from './dto/branch-query.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
+import { AssignBranchHqWarehouseDto } from './dto/assign-branch-hq-warehouse.dto';
 
 @Controller('branches')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -41,6 +42,16 @@ export class BranchesController {
   @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_DIRECTOR)
   delete(@Param('id') id: string) {
     return this.branchesService.delete(id);
+  }
+
+  @Put(':id/assigned-hq-warehouse')
+  @Roles(Role.OWNER, Role.CEO, Role.HQ_SALES_MANAGER)
+  assignHqWarehouse(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AssignBranchHqWarehouseDto,
+  ) {
+    return this.branchesService.assignHqWarehouse(user, id, dto);
   }
 
   @Get(':id/dashboard')

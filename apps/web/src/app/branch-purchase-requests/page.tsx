@@ -41,6 +41,13 @@ type BranchPurchaseRequest = {
   requestNumber: string;
   branchId: string;
   branchWarehouseId?: string | null;
+  assignedHqWarehouseId?: string | null;
+  assignedHqWarehouse?: { id: string; name: string; code?: string } | null;
+  branch?: {
+    id: string;
+    name: string;
+    assignedHqWarehouse?: { id: string; name: string; code?: string } | null;
+  };
   status: string;
   note?: string | null;
   transportCompany?: string | null;
@@ -96,13 +103,11 @@ export default function BranchPurchaseRequestsPage() {
   const productSearchRef = useRef<HTMLInputElement>(null);
   const [requests, setRequests] = useState<BranchPurchaseRequest[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
   const [branchWarehouses, setBranchWarehouses] = useState<Warehouse[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [convertId, setConvertId] = useState<string | null>(null);
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   const [form, setForm] = useState({
     branchId: '',
@@ -115,20 +120,16 @@ export default function BranchPurchaseRequestsPage() {
     dispatchDate: '',
     transportNotes: '',
   });
-  const [convertForm, setConvertForm] = useState({ sourceWarehouseId: '', destinationWarehouseId: '' });
-
   async function load() {
-    const [list, me, branchList, hqList, bwList] = await Promise.all([
+    const [list, me, branchList, bwList] = await Promise.all([
       apiFetch<BranchPurchaseRequest[]>('/branch-purchase-requests'),
       apiFetch<User>('/auth/me'),
       apiFetch<Branch[]>('/branches'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'),
     ]);
     setRequests(list);
     setUser(me);
     setBranches(branchList);
-    setHqWarehouses(hqList);
     setBranchWarehouses(bwList);
     const branchId = me.branchId || branchList[0]?.id || '';
     const branchWarehouseId =
@@ -138,10 +139,6 @@ export default function BranchPurchaseRequestsPage() {
       branchId: current.branchId || branchId,
       branchWarehouseId: current.branchWarehouseId || branchWarehouseId,
     }));
-    setConvertForm({
-      sourceWarehouseId: hqList[0]?.id ?? '',
-      destinationWarehouseId: branchWarehouseId,
-    });
   }
 
   useEffect(() => {
@@ -221,7 +218,8 @@ export default function BranchPurchaseRequestsPage() {
       setLines([emptyLine()]);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(localizeBranchRequestError(message));
     }
   }
 
@@ -258,18 +256,25 @@ export default function BranchPurchaseRequestsPage() {
     }
   }
 
-  async function convert(id: string) {
+  function localizeBranchRequestError(message: string) {
+    if (message.includes('NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH')) return t('branchHqRouting.noWarehouseAssigned');
+    if (message.includes('INACTIVE_HQ_WAREHOUSE')) return t('branchHqRouting.inactiveWarehouse');
+    if (message.includes('NO_HQ_WAREHOUSE_MANAGER_ASSIGNED')) return t('branchHqRouting.noWarehouseManager');
+    return message;
+  }
+
+  async function sendToHqWarehouse(id: string) {
     setError('');
     try {
-      const order = await apiFetch<{ id: string }>(`/branch-purchase-requests/${id}/convert`, {
+      const order = await apiFetch<{ id: string }>(`/branch-purchase-requests/${id}/send-to-hq-warehouse`, {
         method: 'POST',
-        body: JSON.stringify(convertForm),
+        body: JSON.stringify({}),
       });
-      setConvertId(null);
-      setSuccess(t('distribution.convertedToOrder'));
+      setSuccess(t('branchHqRouting.sentToWarehouse'));
       window.location.href = `/distribution/orders/${order.id}`;
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(localizeBranchRequestError(message));
     }
   }
 
@@ -474,6 +479,7 @@ export default function BranchPurchaseRequestsPage() {
                 <th className="px-4 py-3">#</th>
                 <th className="px-4 py-3">{t('distribution.branch')}</th>
                 {hqSalesView ? <th className="px-4 py-3">{t('branchProductRequest.requestedBy')}</th> : null}
+                {hqSalesView ? <th className="px-4 py-3">{t('branchHqRouting.assignedHqWarehouse')}</th> : null}
                 <th className="px-4 py-3">{t('distribution.status')}</th>
                 <th className="px-4 py-3">{t('distribution.items')}</th>
                 {hqSalesView ? (
@@ -492,6 +498,14 @@ export default function BranchPurchaseRequestsPage() {
                   <td className="px-4 py-3 font-bold">{request.requestNumber}</td>
                   <td className="px-4 py-3">{branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId}</td>
                   {hqSalesView ? <td className="px-4 py-3">{request.createdBy?.fullName ?? '-'}</td> : null}
+                  {hqSalesView ? (
+                    <td className="px-4 py-3">
+                      {request.assignedHqWarehouse?.name ??
+                        request.branch?.assignedHqWarehouse?.name ??
+                        branches.find((branch) => branch.id === request.branchId)?.assignedHqWarehouse?.name ??
+                        '—'}
+                    </td>
+                  ) : null}
                   <td className="px-4 py-3">{translateStatus(t, request.status)}</td>
                   <td className="px-4 py-3">{request.items.length}</td>
                   {hqSalesView ? (
@@ -521,8 +535,8 @@ export default function BranchPurchaseRequestsPage() {
                           <button type="button" onClick={() => void review(request.id, 'reject')} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('distribution.reject')}</button>
                         </>
                       ) : null}
-                      {canManage && request.status === 'APPROVED' ? (
-                        <button type="button" onClick={() => setConvertId(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('distribution.convertToOrder')}</button>
+                      {canManage && (request.status === 'APPROVED' || request.status === 'CONFIRMED') ? (
+                        <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('branchHqRouting.sendToWarehouseManager')}</button>
                       ) : null}
                       {request.convertedOrderId && !branchSalesManagerView ? (
                         <Link href={`/distribution/orders/${request.convertedOrderId}`} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('distribution.title')}</Link>
@@ -534,30 +548,6 @@ export default function BranchPurchaseRequestsPage() {
             </tbody>
           </table>
         </div>
-
-        {convertId ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold">{t('distribution.convertToOrder')}</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-semibold">{t('distribution.sourceWarehouse')}</span>
-                <select value={convertForm.sourceWarehouseId} onChange={(e) => setConvertForm({ ...convertForm, sourceWarehouseId: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                  {hqWarehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
-                </select>
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold">{t('distribution.destinationWarehouse')}</span>
-                <select value={convertForm.destinationWarehouseId} onChange={(e) => setConvertForm({ ...convertForm, destinationWarehouseId: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                  {branchWarehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
-                </select>
-              </label>
-            </div>
-            <div className="mt-4 flex gap-2">
-              <button type="button" onClick={() => void convert(convertId)} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('distribution.convertToOrder')}</button>
-              <button type="button" onClick={() => setConvertId(null)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
-            </div>
-          </div>
-        ) : null}
       </section>
     </ProtectedShell>
   );

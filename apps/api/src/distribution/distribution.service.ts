@@ -29,6 +29,7 @@ import {
   canRecordHqDistributionPayment,
   canViewDistribution,
   hasAnyFullAccessRole,
+  resolveUserRoles,
 } from '../rbac/rbac';
 import {
   activeHqWarehouseWhere,
@@ -335,11 +336,34 @@ export class DistributionService {
     if (!canViewDistribution(user) && !canDispatchFromHq(user)) {
       throw new ForbiddenException('Недостаточно прав для просмотра заданий на комплектацию');
     }
+    return this.buildPickingTasksQuery(user, query);
+  }
+
+  private async buildPickingTasksQuery(user: AuthUser, query: PickingTaskQueryDto) {
+    const roles = resolveUserRoles(user);
+    const where: Prisma.HqWarehousePickingTaskWhereInput = {
+      ...(query.status ? { status: query.status } : {}),
+    };
+
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      const assignments = await this.prisma.hqWarehouseManagerAssignment.findMany({
+        where: { userId: user.id, status: 'ACTIVE' },
+        select: { warehouseId: true },
+      });
+      const warehouseIds = assignments.map((row) => row.warehouseId);
+      if (!warehouseIds.length) return [];
+      if (query.sourceHqWarehouseId) {
+        if (!warehouseIds.includes(query.sourceHqWarehouseId)) return [];
+        where.sourceHqWarehouseId = query.sourceHqWarehouseId;
+      } else {
+        where.sourceHqWarehouseId = { in: warehouseIds };
+      }
+    } else if (query.sourceHqWarehouseId) {
+      where.sourceHqWarehouseId = query.sourceHqWarehouseId;
+    }
+
     return this.prisma.hqWarehousePickingTask.findMany({
-      where: {
-        ...(query.sourceHqWarehouseId ? { sourceHqWarehouseId: query.sourceHqWarehouseId } : {}),
-        ...(query.status ? { status: query.status } : {}),
-      },
+      where,
       include: {
         distributionOrder: {
           include: {
@@ -355,11 +379,11 @@ export class DistributionService {
     });
   }
 
-  pickingTask(user: AuthUser, id: string) {
+  async pickingTask(user: AuthUser, id: string) {
     if (!canViewDistribution(user) && !canDispatchFromHq(user)) {
       throw new ForbiddenException('Недостаточно прав для просмотра задания на комплектацию');
     }
-    return this.prisma.hqWarehousePickingTask.findUniqueOrThrow({
+    const task = await this.prisma.hqWarehousePickingTask.findUniqueOrThrow({
       where: { id },
       include: {
         distributionOrder: {
@@ -374,6 +398,18 @@ export class DistributionService {
         assignedWarehouseManager: { select: { id: true, fullName: true, role: true } },
       },
     });
+    const roles = resolveUserRoles(user);
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      const assignments = await this.prisma.hqWarehouseManagerAssignment.findMany({
+        where: { userId: user.id, status: 'ACTIVE' },
+        select: { warehouseId: true },
+      });
+      const warehouseIds = assignments.map((row) => row.warehouseId);
+      if (!warehouseIds.includes(task.sourceHqWarehouseId)) {
+        throw new ForbiddenException('Недостаточно прав для просмотра задания на комплектацию');
+      }
+    }
+    return task;
   }
 
   pick(user: AuthUser, id: string) {

@@ -209,6 +209,14 @@ export type Branch = {
   ownerName?: string | null;
   status?: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
   openedAt?: string | null;
+  assignedHqWarehouseId?: string | null;
+  assignedHqWarehouse?: {
+    id: string;
+    name: string;
+    code: string;
+    city?: string | null;
+    isActive?: boolean;
+  } | null;
   deletedAt?: string | null;
 };
 

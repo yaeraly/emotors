@@ -83,6 +83,12 @@ export class OperationsController {
     return this.service.reviewBranchPurchaseRequest(user, id, BranchPurchaseRequestStatus.REJECTED);
   }
 
+  @Post('branch-purchase-requests/:id/send-to-hq-warehouse')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
+  sendBranchRequestToHqWarehouse(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.routeBranchRequestToHqWarehouse(user, id, dto);
+  }
+
   @Post('branch-purchase-requests/:id/convert')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
   convertBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
