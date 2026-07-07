@@ -535,6 +535,8 @@ export class PricingCatalogService {
       id: string;
       name: string;
       sku: string;
+      isActive: boolean;
+      categoryId: string;
       pricingMode: ProductPricingMode;
       costPriceKgs: Prisma.Decimal;
       wholesalePriceKgs: Prisma.Decimal;
@@ -545,7 +547,7 @@ export class PricingCatalogService {
       hqBranchWholesaleMarkupPercent: Prisma.Decimal;
       recommendedRetailMarkupPercent: Prisma.Decimal;
       minimumSellingMarkupPercent: Prisma.Decimal;
-      productCategory?: { nameRu: string; nameKy: string; nameEn: string; code: string } | null;
+      productCategory?: { id: string; nameRu: string; nameKy: string; nameEn: string; code: string } | null;
     },
     cost: { costPriceKgs: number; source: string; batchId: string | null; receivedAt: Date | null },
   ) {
@@ -553,7 +555,9 @@ export class PricingCatalogService {
       id: product.id,
       name: product.name,
       sku: product.sku,
+      categoryId: product.categoryId,
       categoryName: product.productCategory?.nameRu ?? product.productCategory?.nameEn ?? '-',
+      isActive: product.isActive,
       pricingMode: product.pricingMode,
       costPriceKgs: cost.costPriceKgs,
       costSource: cost.source,
