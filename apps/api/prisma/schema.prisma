@@ -749,6 +749,9 @@ model User {
   approvedInventoryCounts InventoryCountSession[] @relation("InventoryCountApprover")
   rejectedInventoryCounts InventoryCountSession[] @relation("InventoryCountRejecter")
   createdProcurementDifferenceReports ProcurementDifferenceReport[] @relation("ProcurementDifferenceReportCreator")
+  createdPricingPolicies ProductPricingPolicy[] @relation("PricingPolicyCreator")
+  updatedPricingPolicies ProductPricingPolicy[] @relation("PricingPolicyUpdater")
+  pricingChangeHistory ProductPricingChangeHistory[] @relation("PricingChangeHistoryChanger")
   createdBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestCreator")
   reviewedBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestReviewer")
   createdAt      DateTime        @default(now())
@@ -1133,12 +1136,18 @@ model Product {
   transportCostKgs  Decimal   @default(0) @db.Decimal(14, 2)
   finalCostKgs      Decimal   @default(0) @db.Decimal(14, 2)
   sellingPriceKgs   Decimal   @default(0) @db.Decimal(14, 2)
+  wholesalePriceKgs Decimal   @default(0) @db.Decimal(14, 2)
+  hqBranchWholesalePriceKgs Decimal @default(0) @db.Decimal(14, 2)
+  recommendedRetailPriceKgs Decimal @default(0) @db.Decimal(14, 2)
+  minimumSellingPriceKgs Decimal @default(0) @db.Decimal(14, 2)
+  maximumDiscountPercent Decimal @default(0) @db.Decimal(8, 2)
   marginAmount      Decimal   @default(0) @db.Decimal(14, 2)
   marginPercent     Decimal   @default(0) @db.Decimal(8, 2)
   minStockLevel     Int       @default(0)
   isActive          Boolean   @default(true)
   priceHistory      ProductPriceHistory[]
   purchasePriceHistory ProductPurchasePriceHistory[]
+  pricingChangeHistory ProductPricingChangeHistory[]
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
@@ -1162,6 +1171,63 @@ model Product {
   @@index([isActive])
   @@index([defaultSupplierId])
   @@index([defaultFactoryId])
+}
+
+enum PricingPolicyStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+model ProductPricingPolicy {
+  id                        String              @id @default(cuid())
+  sku                       String              @unique
+  productName               String?
+  hqCatalogProductId        String?
+  purchasePriceYuan         Decimal             @default(0) @db.Decimal(14, 2)
+  landedCostKgs             Decimal             @default(0) @db.Decimal(14, 2)
+  wholesalePriceKgs         Decimal             @default(0) @db.Decimal(14, 2)
+  hqBranchWholesalePriceKgs Decimal             @default(0) @db.Decimal(14, 2)
+  recommendedRetailPriceKgs Decimal             @default(0) @db.Decimal(14, 2)
+  minimumSellingPriceKgs    Decimal             @default(0) @db.Decimal(14, 2)
+  maximumDiscountPercent    Decimal             @default(0) @db.Decimal(8, 2)
+  status                    PricingPolicyStatus @default(DRAFT)
+  reason                    String?
+  effectiveFrom             DateTime            @default(now())
+  createdById               String
+  createdBy                 User                @relation("PricingPolicyCreator", fields: [createdById], references: [id])
+  updatedById               String?
+  updatedBy                 User?               @relation("PricingPolicyUpdater", fields: [updatedById], references: [id])
+  history                   ProductPricingChangeHistory[]
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+
+  @@index([status])
+  @@index([createdById])
+  @@index([updatedById])
+  @@index([hqCatalogProductId])
+}
+
+model ProductPricingChangeHistory {
+  id          String                @id @default(cuid())
+  policyId    String?
+  policy      ProductPricingPolicy? @relation(fields: [policyId], references: [id])
+  productId   String?
+  product     Product?              @relation(fields: [productId], references: [id])
+  sku         String
+  fieldName   String
+  oldValue    String?
+  newValue    String?
+  reason      String?
+  changedById String
+  changedBy   User                  @relation("PricingChangeHistoryChanger", fields: [changedById], references: [id])
+  createdAt   DateTime              @default(now())
+
+  @@index([policyId])
+  @@index([productId])
+  @@index([sku])
+  @@index([changedById])
+  @@index([createdAt])
 }
 
 model ProductCategory {

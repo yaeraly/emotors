@@ -19,6 +19,7 @@ import { MarketingModule } from './marketing/marketing.module';
 import { OperationsModule } from './operations/operations.module';
 import { PayrollModule } from './payroll/payroll.module';
 import { ProcurementModule } from './procurement/procurement.module';
+import { PricingModule } from './pricing/pricing.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RoyaltyModule } from './royalty/royalty.module';
@@ -54,6 +55,7 @@ import { UsersModule } from './users/users.module';
     RoyaltyModule,
     AnalyticsModule,
     ProcurementModule,
+    PricingModule,
     SupplyChainModule,
     InvestmentModule,
     ExpansionModule,

@@ -486,6 +486,7 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/hq-warehouses')) return canViewHqWarehouse(user);
   if (pathname.startsWith('/branch-warehouses')) return canViewBranchWarehouses(user);
   if (pathname.startsWith('/product-master')) return canViewProductMaster(user);
+  if (pathname.startsWith('/pricing')) return canViewPricing(user);
   if (pathname.startsWith('/inventory') ||
     pathname.startsWith('/warehouses')
   ) {
@@ -599,6 +600,33 @@ export function canDeleteCategory(user: Pick<User, 'role' | 'roles' | 'permissio
 export function canEditSellingPrice(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return hasFullAccess(user);
+}
+
+export function canManagePricingPolicy(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user);
+}
+
+export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  if (hasRole(user, 'ACADEMY_DIRECTOR')) return false;
+  return hasAnyRole(user, [
+    'HQ_SALES_MANAGER',
+    'SUPPLY_CHAIN_MANAGER',
+    'WAREHOUSE_MANAGER',
+    'FINANCE_MANAGER',
+    'HQ_ACCOUNTANT',
+    'ACCOUNTANT',
+    'MARKETING_MANAGER',
+    'CONTENT_CREATOR',
+    'SYSTEM_ADMINISTRATOR',
+    'HQ_CASHIER',
+    'FRANCHISE_OWNER',
+    'MANAGER',
+    'WAREHOUSE_OPERATOR',
+    'CASHIER',
+  ]);
 }
 
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

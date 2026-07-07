@@ -18,6 +18,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
 import { AddPaymentDto } from './dto/add-payment.dto';
@@ -32,6 +33,7 @@ export class SalesService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly commissionsService: CommissionsService,
+    private readonly pricingService: PricingService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -41,6 +43,7 @@ export class SalesService {
   async createDraft(user: AuthUser, dto: CreateSaleDto) {
     return this.prisma.$transaction(async (tx) => {
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
+      await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? new Date();
       const receiptNumber = await this.generateReceiptNumber(tx, saleDate);
       const totals = this.calculateSale(dto);
@@ -139,6 +142,7 @@ export class SalesService {
       }
 
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
+      await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? sale.saleDate;
       const totals = this.calculateSale(dto);
       const paymentAggregate = await tx.payment.aggregate({

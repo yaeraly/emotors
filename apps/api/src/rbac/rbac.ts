@@ -235,6 +235,32 @@ export function canEditSellingPrice(user: Pick<AuthUser, 'role' | 'roles' | 'per
   return hasAnyFullAccessRole(resolveUserRoles(user));
 }
 
+export function canManagePricingPolicy(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  if (roles.includes(Role.ACADEMY_DIRECTOR)) return false;
+  return [
+    Role.HQ_SALES_MANAGER,
+    Role.SUPPLY_CHAIN_MANAGER,
+    Role.WAREHOUSE_MANAGER,
+    Role.FINANCE_MANAGER,
+    Role.HQ_ACCOUNTANT,
+    Role.ACCOUNTANT,
+    Role.MARKETING_MANAGER,
+    Role.CONTENT_CREATOR,
+    Role.SYSTEM_ADMINISTRATOR,
+    Role.HQ_CASHIER,
+    Role.FRANCHISE_OWNER,
+    Role.MANAGER,
+    Role.WAREHOUSE_OPERATOR,
+    Role.CASHIER,
+  ].some((role) => roles.includes(role));
+}
+
 export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return userHasAnyPermission(user, [
     'products.view',
