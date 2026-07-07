@@ -1070,6 +1070,7 @@ model Warehouse {
   procurementReceivings ProcurementGoodsReceiving[]
   procurementDifferenceReports ProcurementDifferenceReport[]
   inventoryCountSessions InventoryCountSession[]
+  fifoBatches FifoInventoryBatch[]
   hqManagerAssignments HqWarehouseManagerAssignment[]
   assignedBranches Branch[] @relation("BranchAssignedHqWarehouse")
   assignedBranchRequests BranchPurchaseRequest[] @relation("BranchRequestAssignedHqWarehouse")
@@ -1135,12 +1136,18 @@ model Product {
   purchaseCostKgs   Decimal   @default(0) @db.Decimal(14, 2)
   transportCostKgs  Decimal   @default(0) @db.Decimal(14, 2)
   finalCostKgs      Decimal   @default(0) @db.Decimal(14, 2)
+  costPriceKgs      Decimal   @default(0) @db.Decimal(14, 2)
   sellingPriceKgs   Decimal   @default(0) @db.Decimal(14, 2)
   wholesalePriceKgs Decimal   @default(0) @db.Decimal(14, 2)
   hqBranchWholesalePriceKgs Decimal @default(0) @db.Decimal(14, 2)
   recommendedRetailPriceKgs Decimal @default(0) @db.Decimal(14, 2)
   minimumSellingPriceKgs Decimal @default(0) @db.Decimal(14, 2)
   maximumDiscountPercent Decimal @default(0) @db.Decimal(8, 2)
+  pricingMode       ProductPricingMode @default(AUTO)
+  wholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  hqBranchWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  recommendedRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  minimumSellingMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   marginAmount      Decimal   @default(0) @db.Decimal(14, 2)
   marginPercent     Decimal   @default(0) @db.Decimal(8, 2)
   minStockLevel     Int       @default(0)
@@ -1148,6 +1155,8 @@ model Product {
   priceHistory      ProductPriceHistory[]
   purchasePriceHistory ProductPurchasePriceHistory[]
   pricingChangeHistory ProductPricingChangeHistory[]
+  fifoBatches       FifoInventoryBatch[]
+  saleFifoAllocations SaleFifoAllocation[]
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
@@ -1171,6 +1180,11 @@ model Product {
   @@index([isActive])
   @@index([defaultSupplierId])
   @@index([defaultFactoryId])
+}
+
+enum ProductPricingMode {
+  AUTO
+  MANUAL
 }
 
 enum PricingPolicyStatus {
@@ -1218,6 +1232,9 @@ model ProductPricingChangeHistory {
   fieldName   String
   oldValue    String?
   newValue    String?
+  oldMarkup   String?
+  newMarkup   String?
+  pricingMode ProductPricingMode?
   reason      String?
   changedById String
   changedBy   User                  @relation("PricingChangeHistoryChanger", fields: [changedById], references: [id])
@@ -1230,6 +1247,48 @@ model ProductPricingChangeHistory {
   @@index([createdAt])
 }
 
+model FifoInventoryBatch {
+  id                 String    @id @default(cuid())
+  productId          String
+  product            Product   @relation(fields: [productId], references: [id])
+  warehouseId        String
+  warehouse          Warehouse @relation(fields: [warehouseId], references: [id])
+  stockMovementId    String?   @unique
+  receivedAt         DateTime  @default(now())
+  unitCostKgs        Decimal   @default(0) @db.Decimal(14, 2)
+  initialQuantity    Int
+  remainingQuantity  Int
+  referenceType      String?
+  referenceId        String?
+  allocations        SaleFifoAllocation[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([productId])
+  @@index([warehouseId])
+  @@index([receivedAt])
+  @@index([remainingQuantity])
+}
+
+model SaleFifoAllocation {
+  id            String   @id @default(cuid())
+  saleId        String?
+  saleItemId    String?
+  fifoBatchId   String
+  fifoBatch     FifoInventoryBatch @relation(fields: [fifoBatchId], references: [id])
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  quantity      Int
+  unitCostKgs   Decimal  @db.Decimal(14, 2)
+  totalCostKgs  Decimal  @db.Decimal(14, 2)
+  createdAt     DateTime @default(now())
+
+  @@index([saleId])
+  @@index([saleItemId])
+  @@index([fifoBatchId])
+  @@index([productId])
+}
+
 model ProductCategory {
   id          String    @id @default(cuid())
   code        String    @unique
@@ -1237,6 +1296,10 @@ model ProductCategory {
   nameRu      String
   nameEn      String
   description String?
+  wholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  hqBranchWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  recommendedRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  minimumSellingMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   isActive    Boolean   @default(true)
   createdById String?
   createdBy   User?     @relation("ProductCategoryCreator", fields: [createdById], references: [id])

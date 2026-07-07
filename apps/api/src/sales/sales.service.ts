@@ -18,6 +18,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { PricingCatalogService } from '../pricing/pricing-catalog.service';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
@@ -34,6 +35,7 @@ export class SalesService {
     private readonly inventoryService: InventoryService,
     private readonly commissionsService: CommissionsService,
     private readonly pricingService: PricingService,
+    private readonly pricingCatalogService: PricingCatalogService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -440,17 +442,26 @@ export class SalesService {
         },
       });
 
+      await this.pricingCatalogService.applyFifoCostsOnFinalize(
+        tx,
+        user,
+        { id: sale.id, branchId: sale.branchId, items: refreshed.items },
+        (productId) => this.getProductWarehouseId(tx, productId),
+      );
+
       for (const item of refreshed.items) {
         if (!item.productId) {
           continue;
         }
+
+        const latestItem = await tx.saleItem.findUniqueOrThrow({ where: { id: item.id } });
 
         await this.inventoryService.createStockMovementInTx(tx, user, {
           productId: item.productId,
           warehouseId: await this.getProductWarehouseId(tx, item.productId),
           type: StockMovementType.SALE,
           quantity: item.quantity,
-          unitCostKgs: Number(item.unitCost),
+          unitCostKgs: Number(latestItem.unitCost),
           referenceType: 'SALE',
           referenceId: sale.id,
           note: `Sale ${sale.receiptNumber}`,

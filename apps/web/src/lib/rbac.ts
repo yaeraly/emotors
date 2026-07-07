@@ -604,7 +604,7 @@ export function canEditSellingPrice(user: Pick<User, 'role' | 'roles' | 'permiss
 
 export function canManagePricingPolicy(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
-  return hasFullAccess(user);
+  return hasRole(user, 'CEO');
 }
 
 export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

@@ -236,7 +236,7 @@ export function canEditSellingPrice(user: Pick<AuthUser, 'role' | 'roles' | 'per
 }
 
 export function canManagePricingPolicy(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return hasAnyFullAccessRole(resolveUserRoles(user));
+  return resolveUserRoles(user).includes(Role.CEO);
 }
 
 export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
