@@ -36,7 +36,7 @@ export function scoreProduct(product: Product, rawQuery: string) {
   if (!query) return 0;
 
   const terms = query.split(/\s+/).filter(Boolean);
-  const fields = [product.name, product.sku, product.barcode ?? ''].map(normalize);
+  const fields = [product.name, product.sku, product.barcode ?? '', product.category, product.productCategory?.code ?? ''].map(normalize);
   const haystack = fields.join(' ');
 
   const allTermsMatch = terms.every((term) => fields.some((field) => field.includes(term) || fuzzySubsequenceScore(term, field) > 0));
@@ -46,12 +46,16 @@ export function scoreProduct(product: Product, rawQuery: string) {
     fieldScore(query, product.name),
     fieldScore(query, product.sku),
     fieldScore(query, product.barcode),
+    fieldScore(query, product.category),
+    fieldScore(query, product.productCategory?.code),
   );
 
   const termBonus = terms.reduce((sum, term) => sum + Math.max(
     fieldScore(term, product.name),
     fieldScore(term, product.sku),
     fieldScore(term, product.barcode),
+    fieldScore(term, product.category),
+    fieldScore(term, product.productCategory?.code),
   ), 0);
 
   return baseScore + termBonus + (haystack.includes(query) ? 10 : 0);

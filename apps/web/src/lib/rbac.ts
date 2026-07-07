@@ -910,6 +910,17 @@ export function canCreateBranchHqOrder(user: Pick<User, 'role' | 'roles' | 'perm
   return hasRole(user, 'MANAGER');
 }
 
+/** Branch Warehouse Manager creates product requests to HQ. */
+export function canCreateBranchProductRequest(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  return hasRole(user, 'WAREHOUSE_OPERATOR');
+}
+
+export function canManageOwnBranchProductRequest(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canCreateBranchHqOrder(user) || canCreateBranchProductRequest(user);
+}
+
 /** Branch Warehouse Operator receives HQ shipments at branch. */
 export function canReceiveBranchDistribution(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;

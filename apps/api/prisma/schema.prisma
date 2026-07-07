@@ -152,9 +152,16 @@ enum InventoryCountStatus {
 enum BranchPurchaseRequestStatus {
   DRAFT
   SUBMITTED
+  SUBMITTED_TO_HQ
+  REVIEWED_BY_HQ_SALES
   APPROVED
   REJECTED
   CONVERTED_TO_DISTRIBUTION_ORDER
+  SENT_TO_HQ_WAREHOUSE
+  SHIPPED
+  RECEIVED
+  RECEIVED_WITH_DIFFERENCE
+  COMPLETED
   CANCELLED
 }
 
@@ -737,6 +744,8 @@ model User {
   approvedInventoryCounts InventoryCountSession[] @relation("InventoryCountApprover")
   rejectedInventoryCounts InventoryCountSession[] @relation("InventoryCountRejecter")
   createdProcurementDifferenceReports ProcurementDifferenceReport[] @relation("ProcurementDifferenceReportCreator")
+  createdBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestCreator")
+  reviewedBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestReviewer")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -2958,37 +2967,58 @@ model ProcurementDifferenceReport {
 }
 
 model BranchPurchaseRequest {
-  id               String   @id @default(cuid())
-  requestNumber    String   @unique
-  branchId         String
-  status           BranchPurchaseRequestStatus @default(DRAFT)
-  createdById      String
-  reviewedById     String?
-  reviewedAt       DateTime?
-  convertedOrderId String?
-  note             String?
-  items            BranchPurchaseRequestItem[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  deletedAt        DateTime?
+  id                 String   @id @default(cuid())
+  requestNumber      String   @unique
+  branchId           String
+  branchWarehouseId  String?
+  status             BranchPurchaseRequestStatus @default(DRAFT)
+  createdById        String
+  createdBy          User     @relation("BranchPurchaseRequestCreator", fields: [createdById], references: [id])
+  reviewedById       String?
+  reviewedBy         User?    @relation("BranchPurchaseRequestReviewer", fields: [reviewedById], references: [id])
+  reviewedAt         DateTime?
+  convertedOrderId   String?
+  note               String?
+  transportCompany   String?
+  transportCostKgs   Decimal  @default(0) @db.Decimal(14, 2)
+  driverName         String?
+  vehicleNumber      String?
+  dispatchDate       DateTime?
+  transportNotes     String?
+  totalQuantity      Int      @default(0)
+  totalEstimatedAmount Decimal @default(0) @db.Decimal(14, 2)
+  items              BranchPurchaseRequestItem[]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
 
   @@index([branchId])
+  @@index([branchWarehouseId])
   @@index([status])
   @@index([createdById])
   @@index([convertedOrderId])
 }
 
 model BranchPurchaseRequestItem {
-  id          String   @id @default(cuid())
-  requestId   String
-  request     BranchPurchaseRequest @relation(fields: [requestId], references: [id])
-  productId   String
-  sku         String
-  productName String
-  quantity    Int
-  note        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                        String   @id @default(cuid())
+  requestId                 String
+  request                   BranchPurchaseRequest @relation(fields: [requestId], references: [id])
+  productId                 String
+  sku                       String
+  productName               String
+  quantity                  Int
+  approvedQuantity          Int?
+  unit                      String   @default("pcs")
+  currentBranchStock        Int      @default(0)
+  hqAvailableStock          Int?
+  wholesalePriceKgs         Decimal  @default(0) @db.Decimal(14, 2)
+  transportExpenseAllocation Decimal @default(0) @db.Decimal(14, 2)
+  estimatedUnitCost         Decimal  @default(0) @db.Decimal(14, 2)
+  totalAmount               Decimal  @default(0) @db.Decimal(14, 2)
+  weightKg                  Decimal  @default(0) @db.Decimal(14, 3)
+  note                      String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   @@index([requestId])
   @@index([productId])

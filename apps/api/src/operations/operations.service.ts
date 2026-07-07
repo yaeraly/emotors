@@ -22,7 +22,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_WAREHOUSE_ACCESS_DENIED } from '../hq-warehouse/hq-warehouse-assignment.constants';
-import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
 import { DistributionService } from '../distribution/distribution.service';
 import {
   buildLogisticsWithCargo,
@@ -39,6 +39,10 @@ import { buildProcurementLandedCostInputs } from '../procurement/transport-logis
 import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
+import {
+  allocateBranchRequestTransportCost,
+  isSubmittedBranchPurchaseStatus,
+} from './branch-product-request.util';
 import {
   buildChinaReceivingValidation,
   isChinaReceivingTaskVisible,
@@ -64,35 +68,168 @@ export class OperationsService {
         deletedAt: null,
         ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
       },
-      include: { items: true },
+      include: {
+        items: true,
+        createdBy: { select: { id: true, fullName: true, role: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
 
+  async branchPurchaseRequestById(user: AuthUser, id: string) {
+    const request = await this.prisma.branchPurchaseRequest.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
+      },
+      include: {
+        items: true,
+        createdBy: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+    if (!request) throw new NotFoundException('Branch purchase request not found');
+    return request;
+  }
+
+  async branchProductOptions(user: AuthUser, search?: string, branchWarehouseId?: string) {
+    if (!canManageOwnBranchProductRequest(user) && !this.canViewAllBranchPurchaseRequests(user)) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const branchId = user.branchId;
+    if (!branchId && !this.canViewAllBranchPurchaseRequests(user)) {
+      throw new ForbiddenException('Branch context required');
+    }
+    const resolvedBranchId = branchId ?? undefined;
+    const trimmed = search?.trim();
+    const products = await this.prisma.product.findMany({
+      where: {
+        deletedAt: null,
+        isActive: true,
+        ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+        ...(trimmed
+          ? {
+              OR: [
+                { name: { contains: trimmed, mode: 'insensitive' } },
+                { sku: { contains: trimmed, mode: 'insensitive' } },
+                { barcode: { contains: trimmed, mode: 'insensitive' } },
+                { category: { contains: trimmed, mode: 'insensitive' } },
+                { productCategory: { code: { contains: trimmed, mode: 'insensitive' } } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        productCategory: { select: { id: true, code: true, nameRu: true, nameEn: true, nameKy: true } },
+        inventoryBalances: {
+          where: {
+            ...(branchWarehouseId ? { warehouseId: branchWarehouseId } : {}),
+            ...(resolvedBranchId ? { branchId: resolvedBranchId } : {}),
+          },
+          include: { warehouse: { select: { id: true, name: true, warehouseType: true } } },
+        },
+      },
+      take: 60,
+      orderBy: { name: 'asc' },
+    });
+
+    const canSeeHqStock = this.canViewAllBranchPurchaseRequests(user) || canManageOwnBranchProductRequest(user);
+    const skuList = products.map((product) => product.sku);
+    const hqBalances = canSeeHqStock
+      ? await this.prisma.inventoryBalance.findMany({
+          where: {
+            product: { sku: { in: skuList }, deletedAt: null },
+            warehouse: { warehouseType: 'HQ', isActive: true, deletedAt: null },
+          },
+          select: { quantity: true, reservedQuantity: true, product: { select: { sku: true } } },
+        })
+      : [];
+    const hqStockBySku = new Map<string, number>();
+    for (const balance of hqBalances) {
+      const available = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
+      hqStockBySku.set(balance.product.sku, (hqStockBySku.get(balance.product.sku) ?? 0) + available);
+    }
+
+    return products.map((product) => {
+      const branchStock = product.inventoryBalances
+        .filter((balance) => balance.warehouse.warehouseType === 'BRANCH')
+        .reduce((sum, balance) => sum + Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0), 0);
+      return {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        barcode: product.barcode,
+        category: product.category,
+        productCode: product.productCategory?.code ?? null,
+        unit: product.unit,
+        weightKg: Number(product.weightKg),
+        wholesalePriceKgs: Number(product.sellingPriceKgs),
+        branchStock,
+        hqStock: canSeeHqStock ? (hqStockBySku.get(product.sku) ?? 0) : null,
+      };
+    });
+  }
+
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
-    if (!canCreateBranchHqOrder(user)) {
-      await this.audit(user, user.branchId, 'BRANCH_ORDER_CREATE_DENIED', 'BranchPurchaseRequest', 'create');
-      throw new ForbiddenException('Only Branch Manager can create HQ orders');
+    if (!canManageOwnBranchProductRequest(user)) {
+      await this.auditBranchRequest(user, user.branchId, 'BRANCH_ORDER_CREATE_DENIED', 'BranchPurchaseRequest', 'create');
+      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can create HQ product requests');
     }
     const branchId = this.resolveBranchId(user, dto.branchId);
-    const items = await this.resolveItems(dto.items ?? []);
+    const branchWarehouseId = dto.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(branchId));
+    const transportCostKgs = Number(dto.transportCostKgs ?? 0);
+    const resolvedItems = await this.resolveBranchPurchaseItems(branchId, branchWarehouseId, dto.items ?? [], transportCostKgs);
+    const status =
+      dto.status === BranchPurchaseRequestStatus.DRAFT
+        ? BranchPurchaseRequestStatus.DRAFT
+        : BranchPurchaseRequestStatus.SUBMITTED_TO_HQ;
+    const totalQuantity = resolvedItems.reduce((sum, item) => sum + item.quantity, 0);
+    const totalEstimatedAmount = resolvedItems.reduce((sum, item) => sum + Number(item.totalAmount), 0);
+
     const request = await this.prisma.branchPurchaseRequest.create({
       data: {
         requestNumber: dto.requestNumber ?? `BPR-${Date.now()}`,
         branchId,
-        status: dto.status ?? BranchPurchaseRequestStatus.SUBMITTED,
+        branchWarehouseId,
+        status,
         createdById: user.id,
         note: dto.note,
-        items: { create: items.map((item) => ({ ...item, quantity: Number(item.quantity ?? 0) })) },
+        transportCompany: dto.transportCompany,
+        transportCostKgs,
+        driverName: dto.driverName,
+        vehicleNumber: dto.vehicleNumber,
+        dispatchDate: dto.dispatchDate ? new Date(dto.dispatchDate) : undefined,
+        transportNotes: dto.transportNotes,
+        totalQuantity,
+        totalEstimatedAmount,
+        items: { create: resolvedItems },
       },
-      include: { items: true },
+      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
     });
-    await this.audit(user, branchId, 'BRANCH_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
-    await this.audit(user, branchId, 'HQ_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
-    await this.audit(user, branchId, 'BRANCH_PURCHASE_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
-    if (request.status === BranchPurchaseRequestStatus.SUBMITTED) {
-      await this.audit(user, branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
-      await this.audit(user, branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
+
+    await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
+    await this.auditBranchRequest(user, branchId, 'BRANCH_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
+    if (transportCostKgs > 0) {
+      await this.auditBranchRequest(user, branchId, 'TRANSPORT_COST_ADDED', 'BranchPurchaseRequest', request.id, {
+        transportCostKgs,
+      });
+      await this.auditBranchRequest(user, branchId, 'TRANSPORT_COST_ALLOCATED', 'BranchPurchaseRequest', request.id, {
+        items: request.items.map((item) => ({
+          productId: item.productId,
+          transportExpenseAllocation: Number(item.transportExpenseAllocation),
+        })),
+      });
+    }
+    for (const item of request.items) {
+      await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_ITEM_ADDED', 'BranchPurchaseRequest', request.id, {
+        productId: item.productId,
+        quantity: item.quantity,
+      });
+    }
+    if (status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ) {
+      await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_SUBMITTED', 'BranchPurchaseRequest', request.id);
+      await this.auditBranchRequest(user, branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
+      await this.auditBranchRequest(user, branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
       await this.notificationsService.notify(user, {
         type: AlertType.BRANCH_ORDER_SUBMITTED,
         branchId,
@@ -106,8 +243,8 @@ export class OperationsService {
   }
 
   async updateBranchPurchaseRequest(user: AuthUser, id: string, dto: any) {
-    if (!canCreateBranchHqOrder(user)) {
-      throw new ForbiddenException('Only Branch Manager can update HQ orders');
+    if (!canManageOwnBranchProductRequest(user)) {
+      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can update HQ product requests');
     }
 
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
@@ -127,33 +264,58 @@ export class OperationsService {
       throw new BadRequestException('Only draft HQ orders can be edited');
     }
 
-    const items = dto.items ? await this.resolveItems(dto.items) : undefined;
+    const branchWarehouseId = dto.branchWarehouseId ?? existing.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(existing.branchId));
+    const transportCostKgs = dto.transportCostKgs !== undefined ? Number(dto.transportCostKgs) : Number(existing.transportCostKgs);
+    const resolvedItems = dto.items
+      ? await this.resolveBranchPurchaseItems(existing.branchId, branchWarehouseId, dto.items, transportCostKgs)
+      : undefined;
+    const totalQuantity = resolvedItems?.reduce((sum, item) => sum + item.quantity, 0);
+    const totalEstimatedAmount = resolvedItems?.reduce((sum, item) => sum + Number(item.totalAmount), 0);
+
     const updated = await this.prisma.branchPurchaseRequest.update({
       where: { id },
       data: {
         note: dto.note ?? existing.note,
-        ...(items
+        branchWarehouseId,
+        transportCompany: dto.transportCompany ?? existing.transportCompany,
+        transportCostKgs,
+        driverName: dto.driverName ?? existing.driverName,
+        vehicleNumber: dto.vehicleNumber ?? existing.vehicleNumber,
+        dispatchDate: dto.dispatchDate ? new Date(dto.dispatchDate) : existing.dispatchDate,
+        transportNotes: dto.transportNotes ?? existing.transportNotes,
+        ...(resolvedItems
           ? {
+              totalQuantity,
+              totalEstimatedAmount,
               items: {
                 deleteMany: {},
-                create: items.map((item) => ({
-                  ...item,
-                  quantity: Number(item.quantity ?? 0),
-                })),
+                create: resolvedItems,
               },
             }
           : {}),
       },
-      include: { items: true },
+      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
     });
 
-    await this.audit(user, updated.branchId, 'HQ_ORDER_UPDATED', 'BranchPurchaseRequest', id);
+    await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_UPDATED', 'BranchPurchaseRequest', id);
+    if (dto.transportCostKgs !== undefined && transportCostKgs > 0) {
+      await this.auditBranchRequest(user, updated.branchId, 'TRANSPORT_COST_ADDED', 'BranchPurchaseRequest', id, {
+        oldValue: Number(existing.transportCostKgs),
+        newValue: transportCostKgs,
+      });
+      await this.auditBranchRequest(user, updated.branchId, 'TRANSPORT_COST_ALLOCATED', 'BranchPurchaseRequest', id, {
+        items: updated.items.map((item) => ({
+          productId: item.productId,
+          transportExpenseAllocation: Number(item.transportExpenseAllocation),
+        })),
+      });
+    }
     return updated;
   }
 
   async submitBranchPurchaseRequest(user: AuthUser, id: string) {
-    if (!canCreateBranchHqOrder(user)) {
-      throw new ForbiddenException('Only Branch Manager can submit HQ orders');
+    if (!canManageOwnBranchProductRequest(user)) {
+      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can submit HQ product requests');
     }
 
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
@@ -174,12 +336,13 @@ export class OperationsService {
 
     const updated = await this.prisma.branchPurchaseRequest.update({
       where: { id },
-      data: { status: BranchPurchaseRequestStatus.SUBMITTED },
-      include: { items: true },
+      data: { status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ },
+      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
     });
 
-    await this.audit(user, updated.branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
-    await this.audit(user, updated.branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
+    await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_SUBMITTED', 'BranchPurchaseRequest', id);
+    await this.auditBranchRequest(user, updated.branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
+    await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
     await this.notificationsService.notify(user, {
       type: AlertType.BRANCH_ORDER_SUBMITTED,
       branchId: updated.branchId,
@@ -192,8 +355,8 @@ export class OperationsService {
   }
 
   async cancelBranchPurchaseRequest(user: AuthUser, id: string) {
-    if (!canCreateBranchHqOrder(user)) {
-      throw new ForbiddenException('Only Branch Manager can cancel HQ orders');
+    if (!canManageOwnBranchProductRequest(user)) {
+      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can cancel HQ product requests');
     }
 
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
@@ -210,7 +373,7 @@ export class OperationsService {
 
     if (
       existing.status !== BranchPurchaseRequestStatus.DRAFT &&
-      existing.status !== BranchPurchaseRequestStatus.SUBMITTED
+      !isSubmittedBranchPurchaseStatus(existing.status)
     ) {
       throw new BadRequestException('Only draft or submitted HQ orders can be cancelled');
     }
@@ -221,7 +384,7 @@ export class OperationsService {
       include: { items: true },
     });
 
-    await this.audit(user, updated.branchId, 'HQ_ORDER_CANCELLED', 'BranchPurchaseRequest', id);
+    await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_CANCELLED', 'BranchPurchaseRequest', id);
     return updated;
   }
 
@@ -233,77 +396,62 @@ export class OperationsService {
     return this.audit(user, user.branchId, 'BRANCH_SALES_MANAGER_MENU_UPDATED', 'Navigation', 'branch-sales-manager');
   }
 
-  async reviewBranchPurchaseRequest(user: AuthUser, id: string, status: BranchPurchaseRequestStatus) {
+  async reviewBranchPurchaseRequest(user: AuthUser, id: string, status: BranchPurchaseRequestStatus, dto?: any) {
     if (!canManageBranchPurchaseRequests(user)) throw new ForbiddenException('Forbidden resource');
     if (status !== BranchPurchaseRequestStatus.APPROVED && status !== BranchPurchaseRequestStatus.REJECTED) {
       throw new BadRequestException('Request can only be approved or rejected');
     }
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: { id, deletedAt: null },
+      include: { items: true },
+    });
+    if (!existing) throw new NotFoundException('Branch purchase request not found');
+    if (!isSubmittedBranchPurchaseStatus(existing.status)) {
+      throw new BadRequestException('Only submitted requests can be reviewed');
+    }
+
+    if (dto?.items && status === BranchPurchaseRequestStatus.APPROVED) {
+      const approvedMap = new Map<string, number>(
+        (dto.items as Array<{ id?: string; productId?: string; approvedQuantity: number }>).map((item) => [
+          item.id ?? item.productId ?? '',
+          Number(item.approvedQuantity),
+        ]),
+      );
+      for (const item of existing.items) {
+        const approvedQuantity = approvedMap.get(item.id) ?? approvedMap.get(item.productId);
+        if (approvedQuantity !== undefined) {
+          await this.prisma.branchPurchaseRequestItem.update({
+            where: { id: item.id },
+            data: { approvedQuantity },
+          });
+        }
+      }
+    }
+
     const updated = await this.prisma.branchPurchaseRequest.update({
       where: { id },
       data: { status, reviewedById: user.id, reviewedAt: new Date() },
-      include: { items: true },
+      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+    });
+
+    await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_REVIEWED', 'BranchPurchaseRequest', id, {
+      oldValue: existing.status,
+      newValue: status,
     });
     const auditAction =
       status === BranchPurchaseRequestStatus.APPROVED ? 'HQ_ORDER_APPROVED' : `BRANCH_PURCHASE_REQUEST_${status}`;
-    await this.audit(user, updated.branchId, auditAction, 'BranchPurchaseRequest', id);
-    await this.audit(user, updated.branchId, `BRANCH_PURCHASE_REQUEST_${status}`, 'BranchPurchaseRequest', id);
-
-    if (status === BranchPurchaseRequestStatus.APPROVED) {
-      await this.autoFulfillApprovedBranchOrder(user, updated);
-    }
+    await this.auditBranchRequest(user, updated.branchId, auditAction, 'BranchPurchaseRequest', id);
+    await this.auditBranchRequest(
+      user,
+      updated.branchId,
+      status === BranchPurchaseRequestStatus.APPROVED
+        ? 'BRANCH_PRODUCT_REQUEST_APPROVED'
+        : 'BRANCH_PRODUCT_REQUEST_REJECTED',
+      'BranchPurchaseRequest',
+      id,
+    );
     return updated;
-  }
-
-  private async autoFulfillApprovedBranchOrder(user: AuthUser, request: { id: string; branchId: string; items: any[]; note?: string | null }) {
-    const { sourceWarehouseId, destinationWarehouseId, assignedWarehouseManagerId } =
-      await this.resolveDistributionWarehouses(request.branchId);
-
-    const order = await this.convertBranchPurchaseRequest(user, request.id, {
-      sourceWarehouseId,
-      destinationWarehouseId,
-    });
-
-    await this.audit(user, request.branchId, 'DISTRIBUTION_CREATED', 'BranchDistributionOrder', order.id);
-
-    await this.distributionService.approve(user, order.id);
-    await this.distributionService.sendInvoice(user, order.id);
-    await this.distributionService.sendToWarehouse(user, order.id, {
-      assignedWarehouseManagerId,
-    });
-
-    await this.audit(user, request.branchId, 'WAREHOUSE_TASK_ASSIGNED', 'BranchDistributionOrder', order.id);
-  }
-
-  private async resolveDistributionWarehouses(branchId: string) {
-    const sourceWarehouse = await this.prisma.warehouse.findFirst({
-      where: { deletedAt: null, isActive: true, warehouseType: 'HQ' },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!sourceWarehouse) {
-      throw new BadRequestException('No active HQ warehouse found for distribution');
-    }
-
-    const destinationWarehouse = await this.prisma.warehouse.findFirst({
-      where: { deletedAt: null, isActive: true, warehouseType: 'BRANCH', branchId },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!destinationWarehouse) {
-      throw new BadRequestException('No active branch warehouse found for this branch');
-    }
-
-    const assignment = await this.prisma.hqWarehouseManagerAssignment.findFirst({
-      where: {
-        warehouseId: sourceWarehouse.id,
-        status: 'ACTIVE',
-      },
-      orderBy: { assignedAt: 'asc' },
-    });
-
-    return {
-      sourceWarehouseId: sourceWarehouse.id,
-      destinationWarehouseId: destinationWarehouse.id,
-      assignedWarehouseManagerId: assignment?.userId,
-    };
   }
 
   async convertBranchPurchaseRequest(user: AuthUser, id: string, dto: any) {
@@ -333,7 +481,7 @@ export class OperationsService {
         if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
         const unitCost = Number(product.finalCostKgs);
         const unitPrice = Number(product.sellingPriceKgs);
-        const quantity = item.quantity;
+        const quantity = item.approvedQuantity ?? item.quantity;
         const lineCost = Math.round((unitCost * quantity + Number.EPSILON) * 100) / 100;
         const linePrice = Math.round((unitPrice * quantity + Number.EPSILON) * 100) / 100;
         totalCost += lineCost;
@@ -369,11 +517,14 @@ export class OperationsService {
       await tx.branchPurchaseRequest.update({
         where: { id: request.id },
         data: {
-          status: BranchPurchaseRequestStatus.CONVERTED_TO_DISTRIBUTION_ORDER,
+          status: BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE,
           convertedOrderId: order.id,
         },
       });
       await this.auditInTx(tx, user, request.branchId, 'BRANCH_PURCHASE_REQUEST_CONVERTED', 'BranchPurchaseRequest', request.id);
+      await this.auditInTx(tx, user, request.branchId, 'DISTRIBUTION_ORDER_CREATED_FROM_BRANCH_REQUEST', 'BranchDistributionOrder', order.id, {
+        requestId: request.id,
+      });
       await this.auditInTx(tx, user, request.branchId, 'DISTRIBUTION_CREATED', 'BranchDistributionOrder', order.id);
       return order;
     });
@@ -1771,6 +1922,115 @@ export class OperationsService {
   private hasAnyRole(user: AuthUser, roles: Role[]) {
     const userRoles = user.roles?.length ? user.roles : [user.role];
     return hasAnyFullAccessRole(userRoles) || roles.some((role) => userRoles.includes(role));
+  }
+
+  private async resolveBranchPurchaseItems(
+    branchId: string,
+    branchWarehouseId: string | null,
+    items: any[],
+    transportCostKgs: number,
+  ) {
+    if (!items.length) throw new BadRequestException('At least one product line is required');
+
+    const productIds = items.map((item) => item.productId);
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds }, branchId, deletedAt: null },
+    });
+    const productMap = new Map(products.map((product) => [product.id, product]));
+    const skuList = products.map((product) => product.sku);
+
+    const branchBalances = branchWarehouseId
+      ? await this.prisma.inventoryBalance.findMany({
+          where: { warehouseId: branchWarehouseId, productId: { in: productIds } },
+        })
+      : [];
+    const branchStockMap = new Map(branchBalances.map((balance) => [balance.productId, balance.quantity]));
+
+    const hqBalances = await this.prisma.inventoryBalance.findMany({
+      where: {
+        product: { sku: { in: skuList }, deletedAt: null },
+        warehouse: { warehouseType: 'HQ', isActive: true, deletedAt: null },
+      },
+      select: { quantity: true, reservedQuantity: true, product: { select: { sku: true } } },
+    });
+    const hqStockBySku = new Map<string, number>();
+    for (const balance of hqBalances) {
+      const available = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
+      hqStockBySku.set(balance.product.sku, (hqStockBySku.get(balance.product.sku) ?? 0) + available);
+    }
+
+    const lineInputs = items.map((item) => {
+      const product = productMap.get(item.productId);
+      if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
+      return {
+        productId: product.id,
+        quantity: Number(item.quantity ?? 0),
+        weightKg: Number(product.weightKg),
+      };
+    });
+
+    const wholesalePrices = new Map(
+      products.map((product) => [product.id, Number(product.sellingPriceKgs)]),
+    );
+    const costRows = allocateBranchRequestTransportCost(lineInputs, wholesalePrices, transportCostKgs);
+    const costMap = new Map(costRows.map((row) => [row.productId, row]));
+
+    return items.map((item) => {
+      const product = productMap.get(item.productId)!;
+      const quantity = Number(item.quantity ?? 0);
+      const costs = costMap.get(product.id)!;
+      return {
+        productId: product.id,
+        sku: product.sku,
+        productName: product.name,
+        quantity,
+        unit: product.unit,
+        currentBranchStock: branchStockMap.get(product.id) ?? 0,
+        hqAvailableStock: hqStockBySku.get(product.sku) ?? 0,
+        wholesalePriceKgs: Number(product.sellingPriceKgs),
+        weightKg: Number(product.weightKg),
+        transportExpenseAllocation: costs.transportExpenseAllocation,
+        estimatedUnitCost: costs.estimatedUnitCost,
+        totalAmount: costs.totalAmount,
+        note: item.note,
+      };
+    });
+  }
+
+  private async resolveDefaultBranchWarehouseId(branchId: string) {
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { branchId, warehouseType: 'BRANCH', isActive: true, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+    });
+    return warehouse?.id ?? null;
+  }
+
+  private auditBranchRequest(
+    user: AuthUser,
+    branchId: string | null,
+    action: string,
+    entity: string,
+    entityId: string,
+    extra?: Record<string, unknown>,
+  ) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          branchId,
+          roles: user.roles ?? [user.role],
+          requestId: entity === 'BranchPurchaseRequest' ? entityId : undefined,
+          timestamp: new Date().toISOString(),
+          ...extra,
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   private audit(user: AuthUser, branchId: string | null, action: string, entity: string, entityId: string) {

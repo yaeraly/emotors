@@ -16,31 +16,47 @@ export class OperationsController {
   constructor(private readonly service: OperationsService) {}
 
   @Get('branch-purchase-requests')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER)
   branchPurchaseRequests(@CurrentUser() user: AuthUser) {
     return this.service.branchPurchaseRequests(user);
   }
 
+  @Get('branch-purchase-requests/product-options')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER)
+  branchProductOptions(
+    @CurrentUser() user: AuthUser,
+    @Query('search') search?: string,
+    @Query('branchWarehouseId') branchWarehouseId?: string,
+  ) {
+    return this.service.branchProductOptions(user, search, branchWarehouseId);
+  }
+
+  @Get('branch-purchase-requests/:id')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR, Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER)
+  branchPurchaseRequestById(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.branchPurchaseRequestById(user, id);
+  }
+
   @Post('branch-purchase-requests')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.WAREHOUSE_OPERATOR)
   createBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.service.createBranchPurchaseRequest(user, dto);
   }
 
   @Put('branch-purchase-requests/:id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.WAREHOUSE_OPERATOR)
   updateBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
     return this.service.updateBranchPurchaseRequest(user, id, dto);
   }
 
   @Post('branch-purchase-requests/:id/submit')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.WAREHOUSE_OPERATOR)
   submitBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.submitBranchPurchaseRequest(user, id);
   }
 
   @Post('branch-purchase-requests/:id/cancel')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER, Role.WAREHOUSE_OPERATOR)
   cancelBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.cancelBranchPurchaseRequest(user, id);
   }
@@ -57,8 +73,8 @@ export class OperationsController {
 
   @Post('branch-purchase-requests/:id/approve')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
-  approveBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.service.reviewBranchPurchaseRequest(user, id, BranchPurchaseRequestStatus.APPROVED);
+  approveBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.reviewBranchPurchaseRequest(user, id, BranchPurchaseRequestStatus.APPROVED, dto);
   }
 
   @Post('branch-purchase-requests/:id/reject')

@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canCreateServiceOrder, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -120,6 +120,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const hqSalesManagerView = isHqSalesManagerUser(user);
   const hqCashierView = isHqCashierUser(user);
   const branchSalesManagerView = isBranchSalesManagerUser(user);
+  const branchWarehouseOperatorView = isBranchWarehouseOperator(user);
   const canSeeBranchWarehouses = canViewBranchWarehouses(user);
   const canSeeProductMaster = canViewProductMaster(user);
 
@@ -227,7 +228,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             ) : hqSalesManagerView ? (
               <>
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.orders')}</Link>
-                <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.branchPurchaseRequests')}</Link>
+                <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.hqBranchRequests')}</Link>
                 <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
                 {canSeeBranchWarehouses ? (
                   <Link href="/branch-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.branchWarehouses')}</Link>
@@ -251,6 +252,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
                 ) : null}
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
+              </>
+            ) : branchWarehouseOperatorView ? (
+              <>
+                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.inventory')}</Link>
+                <Link href="/branch-purchase-requests" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{t('operations.branchPurchaseRequests')}</Link>
+                <Link href="/distribution/receivings" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.receiveGoods')}</Link>
               </>
             ) : branchSalesManagerView ? (
               <>

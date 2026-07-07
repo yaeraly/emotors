@@ -386,6 +386,17 @@ export function canCreateBranchHqOrder(user: Pick<AuthUser, 'role' | 'roles' | '
   return roles.includes(Role.MANAGER);
 }
 
+/** Branch Warehouse Manager creates product requests to HQ. */
+export function canCreateBranchProductRequest(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  return roles.includes(Role.WAREHOUSE_OPERATOR);
+}
+
+export function canManageOwnBranchProductRequest(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canCreateBranchHqOrder(user) || canCreateBranchProductRequest(user);
+}
+
 export function isBranchSalesManagerUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
   if (!user.branchId || hasAnyFullAccessRole(resolveUserRoles(user))) return false;
   const roles = resolveUserRoles(user);
