@@ -711,7 +711,7 @@ export class OperationsService {
         expectedQuantity,
         receivedQuantity,
         arrivalDate: order.actualArrivalDate ?? order.estimatedArrivalDate ?? order.svhToHqTransport?.arrivalDate,
-        canReceive: validation.canReceiveToHq && !order.hqStockMovementCreatedAt && isWm && !isScm,
+        canReceive: !order.hqStockMovementCreatedAt && isWm && !isScm,
         canMarkArrival:
           !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
         canViewOnly: isScm && !isCeo,
@@ -837,7 +837,7 @@ export class OperationsService {
       ...order,
       receivingStatus: resolveChinaReceivingListStatus(enriched),
       validation,
-      canReceive: validation.canReceiveToHq && !order.hqStockMovementCreatedAt && isWm && !isScm,
+      canReceive: !order.hqStockMovementCreatedAt && isWm && !isScm,
       canMarkArrival:
         !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
       canCreateAct: isWm && !isScm && !order.hqStockMovementCreatedAt,

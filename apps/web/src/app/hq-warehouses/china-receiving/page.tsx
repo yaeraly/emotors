@@ -14,7 +14,8 @@ type ChinaReceivingTask = {
   factory?: { name: string } | null;
   hqWarehouse?: { id: string; name: string; code: string } | null;
   status: string;
-  arrivalDate?: string | null;
+  expectedQuantity: number;
+  receivedQuantity: number;
 };
 
 export default function ChinaReceivingListPage() {
@@ -55,8 +56,9 @@ export default function ChinaReceivingListPage() {
                 <th className="px-4 py-3">{t('procurement.orders.supplier')}</th>
                 <th className="px-4 py-3">{t('procurement.orders.factory')}</th>
                 <th className="px-4 py-3">{t('chinaReceiving.targetWarehouse')}</th>
-                <th className="px-4 py-3">{t('chinaReceiving.arrivalDate')}</th>
                 <th className="px-4 py-3">{t('common.status')}</th>
+                <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
+                <th className="px-4 py-3">{t('chinaReceiving.receivedQty')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
               </tr>
             </thead>
@@ -67,10 +69,9 @@ export default function ChinaReceivingListPage() {
                   <td className="px-4 py-3">{task.supplier?.name ?? '-'}</td>
                   <td className="px-4 py-3">{task.factory?.name ?? '-'}</td>
                   <td className="px-4 py-3">{task.hqWarehouse?.name ?? '-'}</td>
-                  <td className="px-4 py-3">
-                    {task.arrivalDate ? new Date(task.arrivalDate).toLocaleDateString() : '-'}
-                  </td>
                   <td className="px-4 py-3">{translateStatus(t, task.status, 'procurement')}</td>
+                  <td className="px-4 py-3">{task.expectedQuantity}</td>
+                  <td className="px-4 py-3">{task.receivedQuantity}</td>
                   <td className="px-4 py-3">
                     <Link
                       href={`/hq-warehouses/china-receiving/${task.id}`}

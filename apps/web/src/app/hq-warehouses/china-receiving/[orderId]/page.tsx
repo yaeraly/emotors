@@ -79,7 +79,8 @@ export default function ChinaReceivingDetailPage() {
 
   const wmView = isWarehouseManagerUser(user);
   const canEditQuantities =
-    wmView && canReceiveProcurementToHq(user) && task && !task.hqStockMovementCreatedAt && task.canReceive;
+    wmView && canReceiveProcurementToHq(user) && task && !task.hqStockMovementCreatedAt;
+  const canSubmitReceive = canEditQuantities;
 
   const hasDifference = useMemo(() => {
     if (!task) return false;
@@ -90,7 +91,7 @@ export default function ChinaReceivingDetailPage() {
   }, [task, quantities]);
 
   async function receiveToHq() {
-    if (!task || !task.canReceive || !wmView) return;
+    if (!task || !canSubmitReceive) return;
     setLoading(true);
     setError('');
     try {
@@ -216,7 +217,7 @@ export default function ChinaReceivingDetailPage() {
               </table>
             </div>
 
-            {wmView && task.canReceive && !task.hqStockMovementCreatedAt ? (
+            {canSubmitReceive ? (
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
