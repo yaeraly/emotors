@@ -232,7 +232,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canViewChinaReceivingMenu(user) ? (
                   <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
                 ) : null}
-                <Link href="/stock-movements" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventory.stockMovements')}</Link>
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
               </>
             ) : (

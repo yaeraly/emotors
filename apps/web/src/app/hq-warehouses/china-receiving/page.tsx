@@ -4,8 +4,6 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canReceiveProcurementToHq } from '@/lib/rbac';
-import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
@@ -19,30 +17,27 @@ type ChinaReceivingTask = {
   expectedQuantity: number;
   receivedQuantity: number;
   arrivalDate?: string | null;
-  canReceive?: boolean;
-  canMarkArrival?: boolean;
-  canViewOnly?: boolean;
 };
 
 export default function ChinaReceivingListPage() {
   const { t } = useTranslation();
-  const [user, setUser] = useState<User | null>(null);
   const [tasks, setTasks] = useState<ChinaReceivingTask[]>([]);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    Promise.all([
-      apiFetch<User>('/auth/me'),
-      apiFetch<ChinaReceivingTask[]>('/procurement/china-receiving'),
-    ])
-      .then(([me, list]) => {
-        setUser(me);
+    const successMessage = window.localStorage.getItem('emotors_china_receiving_success');
+    if (successMessage) {
+      setSuccess(successMessage);
+      window.localStorage.removeItem('emotors_china_receiving_success');
+    }
+
+    apiFetch<ChinaReceivingTask[]>('/procurement/china-receiving')
+      .then((list) => {
         setTasks(list);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
-
-  const canReceive = canReceiveProcurementToHq(user);
 
   return (
     <ProtectedShell>
@@ -53,6 +48,7 @@ export default function ChinaReceivingListPage() {
           <p className="mt-2 text-sm text-slate-500">{t('chinaReceiving.listDescription')}</p>
         </div>
 
+        {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
         <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -88,11 +84,7 @@ export default function ChinaReceivingListPage() {
                       href={`/hq-warehouses/china-receiving/${task.id}`}
                       className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
                     >
-                      {task.canMarkArrival && canReceive
-                        ? t('chinaReceiving.markArrival')
-                        : task.canReceive && canReceive
-                          ? t('chinaReceiving.receive')
-                          : t('common.open')}
+                      {t('common.open')}
                     </Link>
                   </td>
                 </tr>

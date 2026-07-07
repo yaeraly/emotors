@@ -1,12 +1,16 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canReceiveProcurementToHq, canViewChinaReceivingActs, isSupplyChainManagerUser } from '@/lib/rbac';
+import {
+  canReceiveProcurementToHq,
+  canViewChinaReceivingActs,
+  isSupplyChainManagerUser,
+  isWarehouseManagerUser,
+} from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -43,11 +47,7 @@ type ChinaReceivingDetail = {
   factory?: { name: string };
   receivingStatus: string;
   canReceive: boolean;
-  canMarkArrival?: boolean;
-  canCreateAct: boolean;
   canViewActs?: boolean;
-  canViewOnly?: boolean;
-  arrivalMarked?: boolean;
   hqStockMovementCreatedAt?: string | null;
   cargoTotalWeightKg?: number | string;
   cargoRateUsdPerKg?: number | string;
@@ -65,16 +65,14 @@ type ChinaReceivingDetail = {
 
 export default function ChinaReceivingDetailPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const params = useParams<{ orderId: string }>();
   const [user, setUser] = useState<User | null>(null);
   const [task, setTask] = useState<ChinaReceivingDetail | null>(null);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [reasons, setReasons] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const [actModalOpen, setActModalOpen] = useState(false);
 
   useEffect(() => {
     void load();
@@ -98,6 +96,12 @@ export default function ChinaReceivingDetailPage() {
     }
   }
 
+  const wmView = isWarehouseManagerUser(user);
+  const scmViewOnly = isSupplyChainManagerUser(user);
+  const canEditQuantities =
+    wmView && canReceiveProcurementToHq(user) && task && !task.hqStockMovementCreatedAt && task.canReceive;
+  const canViewActs = canViewChinaReceivingActs(user) && task?.canViewActs && scmViewOnly;
+
   const hasDifference = useMemo(() => {
     if (!task) return false;
     return task.lineItems.some((item) => {
@@ -106,74 +110,8 @@ export default function ChinaReceivingDetailPage() {
     });
   }, [task, quantities]);
 
-  const canEditQuantities =
-    canReceiveProcurementToHq(user) && task && !task.hqStockMovementCreatedAt && (task.canMarkArrival || task.canReceive);
-  const canViewActs = canViewChinaReceivingActs(user) && task?.canViewActs;
-  const scmViewOnly = isSupplyChainManagerUser(user);
-
-  async function markArrival() {
-    if (!task?.canMarkArrival) return;
-    setLoading(true);
-    setError('');
-    try {
-      await apiFetch(`/procurement/china-receiving/${task.id}/mark-arrival`, {
-        method: 'POST',
-        body: JSON.stringify({
-          items: task.lineItems.map((item) => ({
-            procurementItemId: item.id,
-            actualQuantity: Number(quantities[item.id] ?? item.expectedQuantity),
-            note: notes[item.id] || undefined,
-          })),
-        }),
-      });
-      setSuccess(t('chinaReceiving.markArrivalSuccess'));
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function createActs() {
-    if (!task) return;
-    setLoading(true);
-    setError('');
-    try {
-      const items = task.lineItems
-        .map((item) => {
-          const actual = Number(quantities[item.id] ?? item.expectedQuantity);
-          const expected = item.expectedQuantity;
-          if (actual === expected) return null;
-          const differenceType = actual < expected ? 'SHORTAGE' : 'OVERAGE';
-          return {
-            procurementItemId: item.id,
-            productId: item.productId,
-            expectedQuantity: expected,
-            actualQuantity: actual,
-            differenceType,
-            reason: reasons[item.id] || notes[item.id] || undefined,
-            note: notes[item.id] || undefined,
-          };
-        })
-        .filter(Boolean);
-
-      await apiFetch(`/procurement/china-receiving/${task.id}/difference-acts`, {
-        method: 'POST',
-        body: JSON.stringify({ warehouseId: task.hqWarehouseId, items }),
-      });
-      setSuccess(t('chinaReceiving.actCreated'));
-      setActModalOpen(false);
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function receiveToHq() {
-    if (!task || !task.canReceive) return;
+    if (!task || !task.canReceive || !wmView) return;
     setLoading(true);
     setError('');
     try {
@@ -197,13 +135,13 @@ export default function ChinaReceivingDetailPage() {
             note: notes[item.id] || undefined,
             shortageReason:
               Number(quantities[item.id] ?? item.expectedQuantity) !== item.expectedQuantity
-                ? reasons[item.id] || 'OTHER'
+                ? 'OTHER'
                 : undefined,
           })),
         }),
       });
-      setSuccess(t('procurement.orders.received'));
-      await load();
+      window.localStorage.setItem('emotors_china_receiving_success', t('chinaReceiving.receivedSuccess'));
+      router.push('/hq-warehouses/china-receiving');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -228,12 +166,13 @@ export default function ChinaReceivingDetailPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         {scmViewOnly ? (
           <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{t('productMaster.readOnlyNotice')}</p>
         ) : null}
         {hasDifference && canEditQuantities ? (
-          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">{t('chinaReceiving.differenceWarning')}</p>
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            {t('chinaReceiving.differenceAutoWarning')}
+          </p>
         ) : null}
 
         {task ? (
@@ -254,7 +193,7 @@ export default function ChinaReceivingDetailPage() {
                     <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
                     <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
-                    <th className="px-4 py-3">{t('chinaReceiving.differenceType')}</th>
+                    {!wmView ? <th className="px-4 py-3">{t('chinaReceiving.differenceType')}</th> : null}
                     <th className="px-4 py-3">{t('inventoryCount.notes')}</th>
                   </tr>
                 </thead>
@@ -284,7 +223,9 @@ export default function ChinaReceivingDetailPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">{diff}</td>
-                        <td className="px-4 py-3">{diffType === '-' ? '-' : translateStatus(t, diffType)}</td>
+                        {!wmView ? (
+                          <td className="px-4 py-3">{diffType === '-' ? '-' : translateStatus(t, diffType)}</td>
+                        ) : null}
                         <td className="px-4 py-3">
                           {!task.hqStockMovementCreatedAt && canEditQuantities ? (
                             <input
@@ -334,55 +275,29 @@ export default function ChinaReceivingDetailPage() {
               </div>
             ) : null}
 
-            <div className="flex flex-wrap gap-3">
-              <Link href={`/procurement/orders/${task.id}`} className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold">
-                {t('common.open')}
-              </Link>
-              {task.canMarkArrival && !task.hqStockMovementCreatedAt ? (
+            {wmView && task.canReceive && !task.hqStockMovementCreatedAt ? (
+              <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
                   disabled={loading}
-                  onClick={() => void markArrival()}
-                  className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                  onClick={() => void receiveToHq()}
+                  className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
                 >
-                  {t('chinaReceiving.markArrival')}
+                  {t('procurement.orders.receiveToHq')}
                 </button>
-              ) : null}
-              {task.canReceive && !task.hqStockMovementCreatedAt ? (
-                <>
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => void receiveToHq()}
-                    className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
-                  >
-                    {t('procurement.orders.receiveToHq')}
-                  </button>
-                  {hasDifference ? (
-                    <button
-                      type="button"
-                      disabled={loading}
-                      onClick={() => setActModalOpen(true)}
-                      className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800"
-                    >
-                      {t('chinaReceiving.createAct')}
-                    </button>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
+
+            {scmViewOnly ? (
+              <div className="flex flex-wrap gap-3">
+                <Link href={`/procurement/orders/${task.id}`} className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold">
+                  {t('common.open')}
+                </Link>
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>
-
-      <DeleteConfirmModal
-        open={actModalOpen}
-        title={t('chinaReceiving.createAct')}
-        message={t('chinaReceiving.createActConfirm')}
-        loading={loading}
-        onClose={() => setActModalOpen(false)}
-        onConfirm={async () => createActs()}
-      />
     </ProtectedShell>
   );
 }

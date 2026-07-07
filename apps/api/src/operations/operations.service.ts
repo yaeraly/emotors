@@ -300,8 +300,23 @@ export class OperationsService {
           ...item,
           receivedQuantity,
           difference: receivedQuantity - item.quantity,
+          receivedNote: received.note,
+          shortageReason: received.shortageReason,
         };
       });
+
+      for (const item of receivedItems) {
+        await this.auditInTx(tx, user, 'HQ', 'RECEIVING_QUANTITY_ENTERED', 'ProcurementOrderItem', item.id, {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          warehouseId: order.hqWarehouseId,
+          procurementOrderId: order.id,
+          productId: item.productId,
+          oldValue: item.quantity,
+          newValue: item.receivedQuantity,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       const mergedOrder = {
         ...order,
@@ -445,9 +460,16 @@ export class OperationsService {
           }
         }
         if (item.difference !== 0) {
-          const differenceType =
-            item.difference < 0 ? ShortageReportItemType.SHORTAGE : ShortageReportItemType.OVERAGE;
-          await tx.procurementDifferenceReport.create({
+          const shortageReason = item.shortageReason;
+          let differenceType: ShortageReportItemType;
+          if (shortageReason === 'DAMAGED_GOODS' || shortageReason === 'DAMAGED') {
+            differenceType = ShortageReportItemType.DAMAGED;
+          } else if (item.difference < 0) {
+            differenceType = ShortageReportItemType.SHORTAGE;
+          } else {
+            differenceType = ShortageReportItemType.OVERAGE;
+          }
+          const report = await tx.procurementDifferenceReport.create({
             data: {
               reportNumber: `PDR-${Date.now()}-${item.id.slice(-4)}`,
               receivingId: receiving.id,
@@ -461,24 +483,32 @@ export class OperationsService {
               expectedQuantity: item.quantity,
               receivedQuantity: item.receivedQuantity,
               differenceQuantity: Math.abs(item.difference),
-              shortageReason: receivedMap.get(item.id)?.shortageReason ?? receivedMap.get(item.productId)?.shortageReason,
-              note: receivedMap.get(item.id)?.note ?? receivedMap.get(item.productId)?.note,
+              shortageReason: item.shortageReason,
+              note: item.receivedNote,
             },
           });
           await this.auditInTx(
             tx,
             user,
             'HQ',
-            item.difference < 0 ? 'RECEIVING_SHORTAGE_CREATED' : 'RECEIVING_OVERAGE_CREATED',
-            'ProcurementOrder',
-            order.id,
+            'RECEIVING_DIFFERENCE_ACT_AUTO_CREATED',
+            'ProcurementDifferenceReport',
+            report.id,
             {
-              procurementItemId: item.id,
-              sku: item.sku,
-              expectedQuantity: item.quantity,
-              receivedQuantity: item.receivedQuantity,
+              userId: user.id,
+              roles: user.roles ?? [user.role],
               warehouseId: hqWarehouseId,
+              procurementOrderId: order.id,
               receivingId: receiving.id,
+              productId: item.productId,
+              expectedQty: item.quantity,
+              actualQty: item.receivedQuantity,
+              differenceQty: Math.abs(item.difference),
+              differenceType,
+              reason: item.shortageReason ?? item.receivedNote,
+              oldValue: item.quantity,
+              newValue: item.receivedQuantity,
+              timestamp: new Date().toISOString(),
             },
           );
         }
@@ -687,6 +717,25 @@ export class OperationsService {
       });
     }
 
+    if (isWm && !isCeo) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'HQ_WAREHOUSE_MANAGER_MENU_UPDATED',
+          entity: 'ProcurementOrder',
+          entityId: 'list',
+          metadata: {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseIds,
+            removedMenuItems: ['stock-movements'],
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
+
     return tasks;
   }
 
@@ -712,7 +761,7 @@ export class OperationsService {
       data: {
         userId: user.id,
         role: user.role,
-        action: 'GOODS_RECEIVING_OPENED',
+        action: 'CHINA_RECEIVING_OPENED',
         entity: 'ProcurementOrder',
         entityId: order.id,
         metadata: {
