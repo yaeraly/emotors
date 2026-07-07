@@ -25,7 +25,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { canArchiveProduct, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -1069,6 +1069,9 @@ export class InventoryService {
   }
 
   createStockMovement(user: AuthUser, dto: CreateStockMovementDto) {
+    if (!canBranchSalesManagerModifyStock(user)) {
+      throw new ForbiddenException('Branch Sales Manager cannot change warehouse stock');
+    }
     return this.prisma.$transaction((tx) =>
       this.createStockMovementInTx(tx, user, dto),
     );

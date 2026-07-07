@@ -386,6 +386,30 @@ export function canCreateBranchHqOrder(user: Pick<AuthUser, 'role' | 'roles' | '
   return roles.includes(Role.MANAGER);
 }
 
+export function isBranchSalesManagerUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  if (!user.branchId || hasAnyFullAccessRole(resolveUserRoles(user))) return false;
+  const roles = resolveUserRoles(user);
+  if (
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.HQ_SALES_MANAGER) ||
+    roles.includes(Role.HQ_CASHIER)
+  ) {
+    return false;
+  }
+  if (roles.includes(Role.FRANCHISE_OWNER)) return false;
+  return roles.includes(Role.MANAGER);
+}
+
+export function canArchiveCustomer(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FRANCHISE_OWNER) || isBranchSalesManagerUser(user);
+}
+
+export function canBranchSalesManagerModifyStock(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  return !isBranchSalesManagerUser(user);
+}
+
 /** Branch Warehouse Operator receives HQ shipments at branch. */
 export function canReceiveBranchDistribution(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);

@@ -27,6 +27,34 @@ export class OperationsController {
     return this.service.createBranchPurchaseRequest(user, dto);
   }
 
+  @Put('branch-purchase-requests/:id')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  updateBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.updateBranchPurchaseRequest(user, id, dto);
+  }
+
+  @Post('branch-purchase-requests/:id/submit')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  submitBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.submitBranchPurchaseRequest(user, id);
+  }
+
+  @Post('branch-purchase-requests/:id/cancel')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  cancelBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.cancelBranchPurchaseRequest(user, id);
+  }
+
+  @Post('audit/forbidden-route')
+  logForbiddenRoute(@CurrentUser() user: AuthUser, @Body() body: { pathname: string }) {
+    return this.service.logForbiddenRouteAccess(user, body.pathname);
+  }
+
+  @Post('audit/branch-sales-manager-menu')
+  logBranchSalesManagerMenu(@CurrentUser() user: AuthUser) {
+    return this.service.logBranchSalesManagerMenuUpdated(user);
+  }
+
   @Post('branch-purchase-requests/:id/approve')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
   approveBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {

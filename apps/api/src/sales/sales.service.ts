@@ -94,7 +94,37 @@ export class SalesService {
       });
 
       return this.toSaleResponse(sale);
+    }).then(async (sale) => {
+      if (sale.installments?.length) {
+        await this.audit(user, sale.branchId, 'INSTALLMENT_CREATED', 'Sale', sale.id);
+      }
+      return sale;
     });
+  }
+
+  async listInstallments(user: AuthUser) {
+    const where: Prisma.InstallmentScheduleWhereInput = {
+      ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+    };
+
+    const installments = await this.prisma.installmentSchedule.findMany({
+      where,
+      include: {
+        customer: {
+          select: { id: true, fullName: true, phone: true },
+        },
+        sale: {
+          select: { id: true, receiptNumber: true, saleDate: true },
+        },
+      },
+      orderBy: [{ status: 'asc' }, { dueDate: 'asc' }],
+    });
+
+    return installments.map((installment) => ({
+      ...installment,
+      amount: Number(installment.amount),
+      paidAmount: Number(installment.paidAmount),
+    }));
   }
 
   async updateDraft(user: AuthUser, id: string, dto: CreateSaleDto) {
@@ -427,7 +457,9 @@ export class SalesService {
       await this.commissionsService.createSalesCommission(tx, sale.id);
     });
 
-    return this.findOne(user, id);
+    const finalized = await this.findOne(user, id);
+    await this.audit(user, finalized.branchId, 'SALE_CREATED', 'Sale', id);
+    return finalized;
   }
 
   async cancel(user: AuthUser, id: string) {
@@ -937,6 +969,22 @@ export class SalesService {
         paidAmount: Number(installment.paidAmount),
       })),
     };
+  }
+
+  private audit(user: AuthUser, branchId: string, action: string, entity: string, entityId: string) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity,
+        entityId,
+        metadata: {
+          branchId,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
   }
 
   private sumDecimals(values: Prisma.Decimal[]) {

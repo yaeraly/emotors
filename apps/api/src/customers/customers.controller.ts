@@ -33,6 +33,11 @@ export class CustomersController {
     return this.customersService.findAll(user, query);
   }
 
+  @Get('follow-ups')
+  listFollowUps(@CurrentUser() user: AuthUser) {
+    return this.customersService.listFollowUps(user);
+  }
+
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateCustomerDto) {
     return this.customersService.create(user, dto);
@@ -53,7 +58,7 @@ export class CustomersController {
   }
 
   @Delete(':id')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   softDelete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.customersService.softDelete(user, id);
   }

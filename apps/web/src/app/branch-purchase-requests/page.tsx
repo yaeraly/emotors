@@ -6,7 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { distributionHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
-import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canViewBranchPurchaseRequests } from '@/lib/rbac';
+import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canViewBranchPurchaseRequests, isBranchSalesManagerUser } from '@/lib/rbac';
 import type { Branch, Product, ProductListResponse, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -67,7 +67,7 @@ export default function BranchPurchaseRequestsPage() {
     void load().catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
-  async function submitRequest(event: FormEvent) {
+  async function submitRequest(event: FormEvent, asDraft = false) {
     event.preventDefault();
     setError('');
     try {
@@ -76,12 +76,34 @@ export default function BranchPurchaseRequestsPage() {
         body: JSON.stringify({
           branchId: form.branchId,
           note: form.note,
-          status: 'SUBMITTED',
+          status: asDraft ? 'DRAFT' : 'SUBMITTED',
           items: [{ productId: form.productId, quantity: Number(form.quantity) }],
         }),
       });
-      setSuccess(t('distribution.branchOrderSubmitted'));
+      setSuccess(asDraft ? t('distribution.saveDraft') : t('distribution.branchOrderSubmitted'));
       setShowForm(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function submitDraft(id: string) {
+    setError('');
+    try {
+      await apiFetch(`/branch-purchase-requests/${id}/submit`, { method: 'POST' });
+      setSuccess(t('distribution.branchOrderSubmitted'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function cancelRequest(id: string) {
+    setError('');
+    try {
+      await apiFetch(`/branch-purchase-requests/${id}/cancel`, { method: 'POST' });
+      setSuccess(t('common.success'));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -117,6 +139,7 @@ export default function BranchPurchaseRequestsPage() {
   const canManage = canManageBranchPurchaseRequests(user);
   const canCreate = canCreateBranchHqOrder(user);
   const canView = canViewBranchPurchaseRequests(user);
+  const branchSalesManagerView = isBranchSalesManagerUser(user);
 
   if (user && !canView) {
     return (
@@ -141,13 +164,13 @@ export default function BranchPurchaseRequestsPage() {
           ) : null}
         </div>
 
-        <ModuleSectionNav sections={distributionHubSections} />
+        {!branchSalesManagerView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         {showForm ? (
-          <form onSubmit={submitRequest} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+          <form onSubmit={(event) => void submitRequest(event, false)} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('distribution.branch')}</span>
               <select value={form.branchId} onChange={(e) => setForm({ ...form, branchId: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
@@ -170,6 +193,7 @@ export default function BranchPurchaseRequestsPage() {
             </label>
             <div className="flex gap-2 md:col-span-2">
               <button type="submit" className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('distribution.submitOrder')}</button>
+              <button type="button" onClick={(event) => void submitRequest(event, true)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('distribution.saveDraft')}</button>
               <button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
             </div>
           </form>
@@ -197,6 +221,15 @@ export default function BranchPurchaseRequestsPage() {
                   <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-2">
+                      {canCreate && request.status === 'DRAFT' ? (
+                        <>
+                          <button type="button" onClick={() => void submitDraft(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">{t('distribution.submitOrder')}</button>
+                          <button type="button" onClick={() => void cancelRequest(request.id)} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('common.cancel')}</button>
+                        </>
+                      ) : null}
+                      {canCreate && request.status === 'SUBMITTED' ? (
+                        <button type="button" onClick={() => void cancelRequest(request.id)} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('common.cancel')}</button>
+                      ) : null}
                       {canManage && request.status === 'SUBMITTED' ? (
                         <>
                           <button type="button" onClick={() => void review(request.id, 'approve')} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">{t('distribution.approve')}</button>
@@ -206,7 +239,7 @@ export default function BranchPurchaseRequestsPage() {
                       {canManage && request.status === 'APPROVED' ? (
                         <button type="button" onClick={() => setConvertId(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('distribution.convertToOrder')}</button>
                       ) : null}
-                      {request.convertedOrderId ? (
+                      {request.convertedOrderId && !branchSalesManagerView ? (
                         <Link href={`/distribution/orders/${request.convertedOrderId}`} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('common.open')}</Link>
                       ) : null}
                     </div>

@@ -311,6 +311,92 @@ function canHqCashierAccessPath(pathname: string) {
   );
 }
 
+/** Branch Sales Manager = branch-scoped MANAGER role (not Franchise Owner). */
+export function isBranchSalesManagerUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user || !user.branchId || hasFullAccess(user)) return false;
+  if (
+    isSupplyChainManagerUser(user) ||
+    isWarehouseManagerUser(user) ||
+    isHqSalesManagerUser(user) ||
+    isHqCashierUser(user)
+  ) {
+    return false;
+  }
+  if (hasRole(user, 'FRANCHISE_OWNER')) return false;
+  return hasRole(user, 'MANAGER');
+}
+
+const BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES = [
+  '/finance',
+  '/reports',
+  '/analytics',
+  '/users',
+  '/settings',
+  '/dashboard',
+  '/branch-dashboard',
+  '/products/new',
+  '/inventory/categories',
+  '/stock-movements',
+  '/warehouse-release',
+  '/warehouses',
+  '/distribution',
+  '/procurement',
+  '/service',
+  '/reservations',
+  '/returns',
+  '/payments',
+  '/tax',
+  '/payroll',
+  '/kpi',
+  '/branches',
+  '/academy',
+  '/marketing',
+  '/investment',
+  '/expansion',
+  '/royalty',
+  '/ai',
+  '/supply-chain',
+  '/supplier-claims',
+  '/warranty',
+  '/hq-warehouses',
+  '/branch-warehouses',
+  '/product-master',
+  '/commissions',
+  '/compensation',
+  '/warehouse/products',
+  '/warehouse/issue',
+  '/warehouse/list',
+];
+
+const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/customers',
+  '/crm',
+  '/sales',
+  '/installments',
+  '/inventory',
+  '/products',
+  '/branch-purchase-requests',
+  '/follow-ups',
+  '/alerts',
+  '/notifications',
+];
+
+export function isBranchSalesManagerForbiddenPath(pathname: string) {
+  return BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function canBranchSalesManagerAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  if (isBranchSalesManagerForbiddenPath(pathname)) return false;
+  if (pathname.startsWith('/products/') && pathname.endsWith('/edit')) return false;
+  return BRANCH_SALES_MANAGER_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
   'MANAGER',
   'MASTER',
@@ -375,6 +461,9 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (isWarehouseManagerUser(user)) {
     return canWarehouseManagerAccessPath(pathname);
+  }
+  if (isBranchSalesManagerUser(user)) {
+    return canBranchSalesManagerAccessPath(pathname);
   }
   if (pathname === '/dashboard') return true;
   if (pathname === '/branch-dashboard') {
@@ -553,8 +642,8 @@ export function canAllowSupplierOverpayment(user: Pick<User, 'role' | 'roles' | 
   return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER');
 }
 
-export function canArchiveCustomer(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
+export function canArchiveCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER') || isBranchSalesManagerUser(user);
 }
 
 export function canCancelSale(user: Pick<User, 'role' | 'roles'> | null | undefined) {
@@ -577,7 +666,8 @@ export function canCreateHqEmployee(user: Pick<User, 'role' | 'roles'> | null | 
   return hasFullAccess(user) || hasRole(user, 'SYSTEM_ADMINISTRATOR');
 }
 
-export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+export function canCreateStockMovement(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (isBranchSalesManagerUser(user)) return false;
   return hasPermission(user, 'inventory.manage');
 }
 

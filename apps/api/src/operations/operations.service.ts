@@ -88,9 +88,11 @@ export class OperationsService {
       include: { items: true },
     });
     await this.audit(user, branchId, 'BRANCH_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
+    await this.audit(user, branchId, 'HQ_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
     await this.audit(user, branchId, 'BRANCH_PURCHASE_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
     if (request.status === BranchPurchaseRequestStatus.SUBMITTED) {
       await this.audit(user, branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
+      await this.audit(user, branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
       await this.notificationsService.notify(user, {
         type: AlertType.BRANCH_ORDER_SUBMITTED,
         branchId,
@@ -101,6 +103,134 @@ export class OperationsService {
       });
     }
     return request;
+  }
+
+  async updateBranchPurchaseRequest(user: AuthUser, id: string, dto: any) {
+    if (!canCreateBranchHqOrder(user)) {
+      throw new ForbiddenException('Only Branch Manager can update HQ orders');
+    }
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
+      },
+      include: { items: true },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Branch purchase request not found');
+    }
+
+    if (existing.status !== BranchPurchaseRequestStatus.DRAFT) {
+      throw new BadRequestException('Only draft HQ orders can be edited');
+    }
+
+    const items = dto.items ? await this.resolveItems(dto.items) : undefined;
+    const updated = await this.prisma.branchPurchaseRequest.update({
+      where: { id },
+      data: {
+        note: dto.note ?? existing.note,
+        ...(items
+          ? {
+              items: {
+                deleteMany: {},
+                create: items.map((item) => ({
+                  ...item,
+                  quantity: Number(item.quantity ?? 0),
+                })),
+              },
+            }
+          : {}),
+      },
+      include: { items: true },
+    });
+
+    await this.audit(user, updated.branchId, 'HQ_ORDER_UPDATED', 'BranchPurchaseRequest', id);
+    return updated;
+  }
+
+  async submitBranchPurchaseRequest(user: AuthUser, id: string) {
+    if (!canCreateBranchHqOrder(user)) {
+      throw new ForbiddenException('Only Branch Manager can submit HQ orders');
+    }
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Branch purchase request not found');
+    }
+
+    if (existing.status !== BranchPurchaseRequestStatus.DRAFT) {
+      throw new BadRequestException('Only draft HQ orders can be submitted');
+    }
+
+    const updated = await this.prisma.branchPurchaseRequest.update({
+      where: { id },
+      data: { status: BranchPurchaseRequestStatus.SUBMITTED },
+      include: { items: true },
+    });
+
+    await this.audit(user, updated.branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
+    await this.audit(user, updated.branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
+    await this.notificationsService.notify(user, {
+      type: AlertType.BRANCH_ORDER_SUBMITTED,
+      branchId: updated.branchId,
+      entityType: 'BranchPurchaseRequest',
+      entityId: updated.id,
+      referenceNumber: updated.requestNumber,
+      message: `Branch purchase request ${updated.requestNumber} submitted.`,
+    });
+    return updated;
+  }
+
+  async cancelBranchPurchaseRequest(user: AuthUser, id: string) {
+    if (!canCreateBranchHqOrder(user)) {
+      throw new ForbiddenException('Only Branch Manager can cancel HQ orders');
+    }
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Branch purchase request not found');
+    }
+
+    if (
+      existing.status !== BranchPurchaseRequestStatus.DRAFT &&
+      existing.status !== BranchPurchaseRequestStatus.SUBMITTED
+    ) {
+      throw new BadRequestException('Only draft or submitted HQ orders can be cancelled');
+    }
+
+    const updated = await this.prisma.branchPurchaseRequest.update({
+      where: { id },
+      data: { status: BranchPurchaseRequestStatus.CANCELLED },
+      include: { items: true },
+    });
+
+    await this.audit(user, updated.branchId, 'HQ_ORDER_CANCELLED', 'BranchPurchaseRequest', id);
+    return updated;
+  }
+
+  logForbiddenRouteAccess(user: AuthUser, pathname: string) {
+    return this.audit(user, user.branchId, 'FORBIDDEN_ROUTE_ACCESS_DENIED', 'Route', pathname);
+  }
+
+  logBranchSalesManagerMenuUpdated(user: AuthUser) {
+    return this.audit(user, user.branchId, 'BRANCH_SALES_MANAGER_MENU_UPDATED', 'Navigation', 'branch-sales-manager');
   }
 
   async reviewBranchPurchaseRequest(user: AuthUser, id: string, status: BranchPurchaseRequestStatus) {

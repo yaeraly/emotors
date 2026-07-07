@@ -51,6 +51,11 @@ export class SalesController {
     return this.salesService.findAll(user, query);
   }
 
+  @Get('installments')
+  listInstallments(@CurrentUser() user: AuthUser) {
+    return this.salesService.listInstallments(user);
+  }
+
   @Get('reports/daily')
   dailyReport(@CurrentUser() user: AuthUser, @Query() query: SaleQueryDto) {
     return this.salesService.dailyReport(user, query);

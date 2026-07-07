@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canCreateServiceOrder, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canCreateServiceOrder, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -41,11 +41,28 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             setForbidden(true);
             return;
           }
+          if (isBranchSalesManagerUser(currentUser) && isBranchSalesManagerForbiddenPath(pathname)) {
+            void apiFetch('/audit/forbidden-route', {
+              method: 'POST',
+              body: JSON.stringify({ pathname }),
+            }).catch(() => null);
+            setUser(currentUser);
+            setForbidden(true);
+            return;
+          }
           router.replace(getDefaultRouteForUser(currentUser));
           return;
         }
         setForbidden(false);
         setUser(currentUser);
+        if (
+          isBranchSalesManagerUser(currentUser) &&
+          typeof window !== 'undefined' &&
+          !window.sessionStorage.getItem('bsm-menu-audit')
+        ) {
+          window.sessionStorage.setItem('bsm-menu-audit', '1');
+          void apiFetch('/audit/branch-sales-manager-menu', { method: 'POST' }).catch(() => null);
+        }
       })
       .catch(() => router.replace('/login'))
       .finally(() => setLoading(false));
@@ -102,6 +119,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const warehouseManagerView = isWarehouseManagerUser(user);
   const hqSalesManagerView = isHqSalesManagerUser(user);
   const hqCashierView = isHqCashierUser(user);
+  const branchSalesManagerView = isBranchSalesManagerUser(user);
   const canSeeBranchWarehouses = canViewBranchWarehouses(user);
   const canSeeProductMaster = canViewProductMaster(user);
 
@@ -233,6 +251,16 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
                 ) : null}
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
+              </>
+            ) : branchSalesManagerView ? (
+              <>
+                <Link href="/customers" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{t('nav.customers')}</Link>
+                <Link href="/crm" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.crm')}</Link>
+                <Link href="/sales" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.sales')}</Link>
+                <Link href="/installments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.installments')}</Link>
+                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.inventory')}</Link>
+                <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
+                <Link href="/follow-ups" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.followUps')}</Link>
               </>
             ) : (
               <>

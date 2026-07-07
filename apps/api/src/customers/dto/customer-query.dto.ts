@@ -1,5 +1,6 @@
 import { CustomerStatus } from '@prisma/client';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class CustomerQueryDto {
   @IsOptional()
@@ -13,4 +14,9 @@ export class CustomerQueryDto {
   @IsOptional()
   @IsString()
   branchId?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  includeArchived?: boolean;
 }

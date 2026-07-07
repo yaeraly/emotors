@@ -19,6 +19,7 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { canArchiveCustomer } from '../rbac/rbac';
 
 type CustomerSaleHistory = {
   id: string;
@@ -58,6 +59,8 @@ export class CustomersService {
 
     if (query.status) {
       where.status = query.status;
+    } else if (!query.includeArchived) {
+      where.status = { not: CustomerStatus.ARCHIVED };
     }
 
     if (query.search) {
@@ -126,6 +129,7 @@ export class CustomersService {
       include: { branch: true, events: true, sales: true },
     });
 
+    await this.audit(user, branchId, 'CUSTOMER_CREATED', 'Customer', customer.id);
     return this.toCustomerProfile(customer, customer.events, customer.sales);
   }
 
@@ -152,10 +156,15 @@ export class CustomersService {
       include: { branch: true, events: true, sales: true },
     });
 
+    await this.audit(user, customer.branchId, 'CUSTOMER_UPDATED', 'Customer', id);
     return this.toCustomerProfile(customer, customer.events, customer.sales);
   }
 
   async softDelete(user: AuthUser, id: string) {
+    if (!canArchiveCustomer(user)) {
+      throw new ForbiddenException('You do not have permission to archive this customer');
+    }
+
     const existing = await this.getAccessibleCustomer(user, id);
 
     const archived = await this.prisma.customer.update({
@@ -163,8 +172,27 @@ export class CustomersService {
       data: { status: CustomerStatus.ARCHIVED },
       select: { id: true, status: true },
     });
-    await this.audit(user, existing.branchId, 'CUSTOMER_ARCHIVE', 'Customer', id);
+    await this.audit(user, existing.branchId, 'CUSTOMER_ARCHIVED', 'Customer', id);
     return archived;
+  }
+
+  async listFollowUps(user: AuthUser) {
+    const where: Prisma.FollowUpWhereInput = {
+      ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+    };
+
+    return this.prisma.followUp.findMany({
+      where,
+      include: {
+        customer: {
+          select: { id: true, fullName: true, phone: true },
+        },
+        createdBy: {
+          select: { id: true, fullName: true, role: true },
+        },
+      },
+      orderBy: [{ status: 'asc' }, { dueAt: 'asc' }],
+    });
   }
 
   async addEvent(user: AuthUser, customerId: string, dto: AddCustomerEventDto) {
@@ -222,6 +250,9 @@ export class CustomersService {
           },
         },
       },
+    }).then(async (followUp) => {
+      await this.audit(user, customer.branchId, 'FOLLOWUP_CREATED', 'FollowUp', followUp.id);
+      return followUp;
     });
   }
 

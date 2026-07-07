@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer, isBranchPanelUser } from '@/lib/rbac';
+import { canArchiveCustomer, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
 import type { Branch, Customer, CustomerStatus, User } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -77,6 +77,7 @@ export default function CustomersPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
   const [branchId, setBranchId] = useState('');
   const [form, setForm] = useState<CreateCustomerState>(initialCreateState);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -111,10 +112,13 @@ export default function CustomersPage() {
     if (!isBranchPanel && branchId) {
       params.set('branchId', branchId);
     }
+    if (showArchived) {
+      params.set('includeArchived', 'true');
+    }
 
     const value = params.toString();
     return value ? `?${value}` : '';
-  }, [branchId, isBranchPanel, search, status]);
+  }, [branchId, isBranchPanel, search, showArchived, status]);
 
   const sortedCustomers = useMemo(() => {
     return [...customers].sort((a, b) => {
@@ -138,7 +142,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [branchId, pageSize, search, status]);
+  }, [branchId, pageSize, search, showArchived, status]);
 
   useEffect(() => {
     void loadCustomers();
@@ -362,7 +366,11 @@ export default function CustomersPage() {
       }
 
       await loadCustomers();
-      showSuccess(t('crm.customerDeleted'));
+      showSuccess(
+        isBranchSalesManagerUser(currentUser)
+          ? t('crm.customerArchived')
+          : t('crm.customerDeleted'),
+      );
     } catch (err) {
       console.error('Customer archive failed', err);
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -433,6 +441,14 @@ export default function CustomersPage() {
                 </option>
               ))}
             </select>
+            <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(event) => setShowArchived(event.target.checked)}
+              />
+              {t('crm.showArchived')}
+            </label>
             <select
               value={pageSize}
               onChange={(event) => setPageSize(Number(event.target.value))}
