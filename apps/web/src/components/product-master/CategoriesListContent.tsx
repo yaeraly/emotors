@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog } from '@/lib/rbac';
+import { canDeleteCategory, canManageProductCatalog } from '@/lib/rbac';
 import type { ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -44,6 +44,7 @@ export function CategoriesListContent({
   }, [query]);
 
   const canManage = canManageProductCatalog(currentUser);
+  const canDelete = canDeleteCategory(currentUser);
   const showForm = Boolean(editing) || createFormOpen;
 
   async function loadCategories() {
@@ -218,13 +219,15 @@ export function CategoriesListContent({
                         >
                           {t('common.edit')}
                         </button>
-                        <button
-                          onClick={() => void deleteCategory(category)}
-                          className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600"
-                          type="button"
-                        >
-                          {t('common.delete')}
-                        </button>
+                        {canDelete ? (
+                          <button
+                            onClick={() => void deleteCategory(category)}
+                            className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600"
+                            type="button"
+                          >
+                            {t('common.delete')}
+                          </button>
+                        ) : null}
                       </div>
                     ) : (
                       '—'

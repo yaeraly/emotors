@@ -1,3 +1,4 @@
+import { ProcurementOrderStatus } from '@prisma/client';
 import { buildHqReceivingValidationResult } from '../procurement/hq-receiving-validation.util';
 
 export type ChinaReceivingListStatus =
@@ -6,8 +7,21 @@ export type ChinaReceivingListStatus =
   | 'RECEIVED'
   | 'RECEIVED_WITH_DIFFERENCE';
 
+/** Procurement statuses when goods left Yiwu — visible to assigned HQ Warehouse Manager. */
+export const GOODS_LEFT_YIWU_VISIBLE_STATUSES = new Set<string>([
+  ProcurementOrderStatus.SHIPPED_TO_YIWU,
+  'GOODS_LEFT_YIWU',
+  ProcurementOrderStatus.IN_TRANSIT,
+  ProcurementOrderStatus.ARRIVED,
+  ProcurementOrderStatus.ARRIVED_IN_KYRGYZSTAN,
+  ProcurementOrderStatus.CUSTOMS_CLEARANCE,
+  ProcurementOrderStatus.READY_TO_SHIP,
+]);
+
 type OrderLike = {
+  status?: string | null;
   hqStockMovementCreatedAt?: Date | string | null;
+  actualArrivalDate?: Date | string | null;
   items?: Array<{ quantity: number; receivedQuantity?: number | null }>;
   differenceReports?: Array<{ deletedAt?: Date | string | null }>;
   receivings?: Array<{
@@ -30,6 +44,11 @@ type OrderLike = {
   cargoAttachmentCount?: number;
 };
 
+export function isGoodsLeftYiwuStatus(status?: string | null) {
+  if (!status) return false;
+  return GOODS_LEFT_YIWU_VISIBLE_STATUSES.has(status);
+}
+
 export function resolveChinaReceivingListStatus(order: OrderLike): ChinaReceivingListStatus {
   if (order.hqStockMovementCreatedAt) {
     const hasDifference =
@@ -41,7 +60,8 @@ export function resolveChinaReceivingListStatus(order: OrderLike): ChinaReceivin
   }
 
   const partial = (order.items ?? []).some((item) => (item.receivedQuantity ?? 0) > 0);
-  if (partial) return 'PARTIALLY_RECEIVED';
+  if (partial || order.actualArrivalDate) return 'PARTIALLY_RECEIVED';
+  if (isGoodsLeftYiwuStatus(order.status)) return 'READY_FOR_RECEIVING';
   return 'READY_FOR_RECEIVING';
 }
 
@@ -76,5 +96,6 @@ export function buildChinaReceivingValidation(order: OrderLike) {
 
 export function isChinaReceivingTaskVisible(order: OrderLike) {
   if (order.hqStockMovementCreatedAt) return true;
+  if (isGoodsLeftYiwuStatus(order.status)) return true;
   return buildChinaReceivingValidation(order).canReceiveToHq;
 }

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canReceiveProcurementToHq } from '@/lib/rbac';
+import { canReceiveProcurementToHq, canViewChinaReceivingActs, isSupplyChainManagerUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -22,6 +22,18 @@ type LineItem = {
   difference: number;
 };
 
+type DifferenceReport = {
+  id: string;
+  reportNumber: string;
+  type: string;
+  status: string;
+  expectedQuantity: number;
+  receivedQuantity: number;
+  differenceQuantity: number;
+  shortageReason?: string | null;
+  note?: string | null;
+};
+
 type ChinaReceivingDetail = {
   id: string;
   orderNumber: string;
@@ -31,7 +43,11 @@ type ChinaReceivingDetail = {
   factory?: { name: string };
   receivingStatus: string;
   canReceive: boolean;
+  canMarkArrival?: boolean;
   canCreateAct: boolean;
+  canViewActs?: boolean;
+  canViewOnly?: boolean;
+  arrivalMarked?: boolean;
   hqStockMovementCreatedAt?: string | null;
   cargoTotalWeightKg?: number | string;
   cargoRateUsdPerKg?: number | string;
@@ -44,7 +60,7 @@ type ChinaReceivingDetail = {
   otherExpenseKgs?: number | string;
   packagingCostKgs?: number | string;
   lineItems: LineItem[];
-  differenceReports?: Array<{ id: string; reportNumber: string; type: string }>;
+  differenceReports?: DifferenceReport[];
 };
 
 export default function ChinaReceivingDetailPage() {
@@ -89,6 +105,35 @@ export default function ChinaReceivingDetailPage() {
       return actual !== item.expectedQuantity;
     });
   }, [task, quantities]);
+
+  const canEditQuantities =
+    canReceiveProcurementToHq(user) && task && !task.hqStockMovementCreatedAt && (task.canMarkArrival || task.canReceive);
+  const canViewActs = canViewChinaReceivingActs(user) && task?.canViewActs;
+  const scmViewOnly = isSupplyChainManagerUser(user);
+
+  async function markArrival() {
+    if (!task?.canMarkArrival) return;
+    setLoading(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/china-receiving/${task.id}/mark-arrival`, {
+        method: 'POST',
+        body: JSON.stringify({
+          items: task.lineItems.map((item) => ({
+            procurementItemId: item.id,
+            actualQuantity: Number(quantities[item.id] ?? item.expectedQuantity),
+            note: notes[item.id] || undefined,
+          })),
+        }),
+      });
+      setSuccess(t('chinaReceiving.markArrivalSuccess'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function createActs() {
     if (!task) return;
@@ -166,8 +211,6 @@ export default function ChinaReceivingDetailPage() {
     }
   }
 
-  const canReceive = canReceiveProcurementToHq(user) && task?.canReceive;
-
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -186,7 +229,10 @@ export default function ChinaReceivingDetailPage() {
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
-        {hasDifference && canReceive ? (
+        {scmViewOnly ? (
+          <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{t('productMaster.readOnlyNotice')}</p>
+        ) : null}
+        {hasDifference && canEditQuantities ? (
           <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">{t('chinaReceiving.differenceWarning')}</p>
         ) : null}
 
@@ -224,7 +270,7 @@ export default function ChinaReceivingDetailPage() {
                         <td className="px-4 py-3">{item.orderedQuantity}</td>
                         <td className="px-4 py-3">{item.expectedQuantity}</td>
                         <td className="px-4 py-3">
-                          {task.hqStockMovementCreatedAt ? (
+                          {task.hqStockMovementCreatedAt || scmViewOnly ? (
                             actual
                           ) : (
                             <input
@@ -233,14 +279,14 @@ export default function ChinaReceivingDetailPage() {
                               value={quantities[item.id] ?? ''}
                               onChange={(e) => setQuantities((c) => ({ ...c, [item.id]: e.target.value }))}
                               className="w-24 rounded-lg border border-slate-300 px-2 py-1"
-                              disabled={!canReceive}
+                              disabled={!canEditQuantities}
                             />
                           )}
                         </td>
                         <td className="px-4 py-3">{diff}</td>
                         <td className="px-4 py-3">{diffType === '-' ? '-' : translateStatus(t, diffType)}</td>
                         <td className="px-4 py-3">
-                          {!task.hqStockMovementCreatedAt && canReceive ? (
+                          {!task.hqStockMovementCreatedAt && canEditQuantities ? (
                             <input
                               value={notes[item.id] ?? ''}
                               onChange={(e) => setNotes((c) => ({ ...c, [item.id]: e.target.value }))}
@@ -248,7 +294,7 @@ export default function ChinaReceivingDetailPage() {
                               placeholder={t('inventoryCount.notes')}
                             />
                           ) : (
-                            '-'
+                            notes[item.id] ?? '-'
                           )}
                         </td>
                       </tr>
@@ -258,11 +304,51 @@ export default function ChinaReceivingDetailPage() {
               </table>
             </div>
 
+            {canViewActs && (task.differenceReports?.length ?? 0) > 0 ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.differenceActs')}</h3>
+                <div className="mt-4 overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">#</th>
+                        <th className="px-4 py-3">{t('chinaReceiving.differenceType')}</th>
+                        <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
+                        <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
+                        <th className="px-4 py-3">{t('common.status')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {task.differenceReports?.map((report) => (
+                        <tr key={report.id}>
+                          <td className="px-4 py-3 font-semibold">{report.reportNumber}</td>
+                          <td className="px-4 py-3">{translateStatus(t, report.type)}</td>
+                          <td className="px-4 py-3">{report.expectedQuantity}</td>
+                          <td className="px-4 py-3">{report.receivedQuantity}</td>
+                          <td className="px-4 py-3">{translateStatus(t, report.status)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap gap-3">
               <Link href={`/procurement/orders/${task.id}`} className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold">
                 {t('common.open')}
               </Link>
-              {canReceive && !task.hqStockMovementCreatedAt ? (
+              {task.canMarkArrival && !task.hqStockMovementCreatedAt ? (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void markArrival()}
+                  className="rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {t('chinaReceiving.markArrival')}
+                </button>
+              ) : null}
+              {task.canReceive && !task.hqStockMovementCreatedAt ? (
                 <>
                   <button
                     type="button"

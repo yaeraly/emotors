@@ -85,6 +85,11 @@ function HqWarehousesPageContent() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
+    const success = window.localStorage.getItem('emotors_warehouse_success');
+    if (success) {
+      setSuccess(success);
+      window.localStorage.removeItem('emotors_warehouse_success');
+    }
     void load();
   }, []);
 

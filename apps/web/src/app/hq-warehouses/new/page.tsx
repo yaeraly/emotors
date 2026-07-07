@@ -3,7 +3,6 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -27,11 +26,12 @@ export default function NewHqWarehousePage() {
     event.preventDefault();
     setError('');
     try {
-      const warehouse = await apiFetch<{ id: string }>('/hq-warehouses', {
+      await apiFetch<{ id: string }>('/hq-warehouses', {
         method: 'POST',
         body: JSON.stringify(form),
       });
-      router.push(`/hq-warehouses/${warehouse.id}`);
+      window.localStorage.setItem('emotors_warehouse_success', t('warehouse.createdSuccess'));
+      router.push('/hq-warehouses');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -44,8 +44,6 @@ export default function NewHqWarehousePage() {
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('hqWarehouse.title')}</p>
           <h2 className="text-3xl font-bold text-slate-950">{t('hqWarehouse.create')}</h2>
         </div>
-
-        <WarehouseTopNav />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <form onSubmit={submit} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">

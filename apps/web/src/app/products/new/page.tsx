@@ -1,19 +1,20 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import { canEditSellingPrice } from '@/lib/rbac';
-import type { Product, ProductCategory, User, Warehouse, YuanRateHistory } from '@/lib/types';
+import { canEditPurchasePriceYuan, canEditSellingPrice } from '@/lib/rbac';
+import type { Product, ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewProductPage() {
   const router = useRouter();
   const { t, language } = useTranslation();
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [suppliers, setSuppliers] = useState<Array<{ id: string; name: string }>>([]);
+  const [factories, setFactories] = useState<Array<{ id: string; name: string }>>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [skuError, setSkuError] = useState('');
@@ -21,58 +22,41 @@ export default function NewProductPage() {
   const [form, setForm] = useState({
     name: '',
     sku: '',
+    barcode: '',
     categoryId: '',
+    unit: 'pcs',
     photoUrl: '',
     description: '',
-    characteristics: '',
-    weightKg: '0',
+    weightKg: '',
     purchasePriceYuan: '0',
-    latestYuanRate: '0',
-    transportCostPerKg: '0',
+    defaultSupplierId: '',
+    defaultFactoryId: '',
+    isActive: true,
     sellingPriceKgs: '0',
-    minStockLevel: '0',
-    initialQuantity: '0',
-    warehouseId: '',
   });
 
   useEffect(() => {
     Promise.all([
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
-      apiFetch<YuanRateHistory | null>('/inventory/yuan-rates/latest'),
       apiFetch<ProductCategory[]>('/inventory/categories'),
+      apiFetch<Array<{ id: string; name: string }>>('/procurement/suppliers'),
+      apiFetch<Array<{ id: string; name: string }>>('/procurement/factories'),
       apiFetch<User>('/auth/me'),
     ])
-      .then(([warehouseResult, rate, categoryResult, userResult]) => {
-        setWarehouses(warehouseResult);
+      .then(([categoryResult, supplierResult, factoryResult, userResult]) => {
         setCategories(categoryResult);
+        setSuppliers(supplierResult);
+        setFactories(factoryResult);
         setCurrentUser(userResult);
         setForm((current) => ({
           ...current,
-          warehouseId: warehouseResult[0]?.id ?? '',
           categoryId: categoryResult[0]?.id ?? '',
-          latestYuanRate: rate ? String(rate.rate) : current.latestYuanRate,
         }));
       })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : t('common.error')),
-      );
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
-  const preview = useMemo(() => {
-    const purchaseCostKgs =
-      Number(form.purchasePriceYuan || 0) * Number(form.latestYuanRate || 0);
-    const transportCostKgs =
-      Number(form.weightKg || 0) * Number(form.transportCostPerKg || 0);
-    const finalCostKgs = purchaseCostKgs + transportCostKgs;
-    const marginAmount = Number(form.sellingPriceKgs || 0) - finalCostKgs;
-    const marginPercent =
-      Number(form.sellingPriceKgs || 0) === 0
-        ? 0
-        : (marginAmount / Number(form.sellingPriceKgs || 0)) * 100;
-    return { purchaseCostKgs, transportCostKgs, finalCostKgs, marginAmount, marginPercent };
-  }, [form]);
-
   const canEditPrice = canEditSellingPrice(currentUser);
+  const canEditPurchase = canEditPurchasePriceYuan(currentUser);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,12 +71,6 @@ export default function NewProductPage() {
         return;
       }
 
-      if (!form.warehouseId) {
-        setError(t('inventory.activeWarehouseRequired'));
-        setSaving(false);
-        return;
-      }
-
       const weightKg = Number(form.weightKg);
       if (!Number.isFinite(weightKg) || weightKg <= 0) {
         setError(t('inventory.weightMustBePositive'));
@@ -103,31 +81,30 @@ export default function NewProductPage() {
       const product = await apiFetch<Product & { restored?: boolean }>('/inventory/products', {
         method: 'POST',
         body: JSON.stringify({
-          ...form,
-          characteristics: form.characteristics
-            ? JSON.parse(form.characteristics)
-            : undefined,
+          name: form.name,
+          sku: form.sku,
+          barcode: form.barcode || undefined,
           categoryId: form.categoryId,
+          unit: form.unit,
+          photoUrl: form.photoUrl || undefined,
+          description: form.description || undefined,
           weightKg,
-          purchasePriceYuan: Number(form.purchasePriceYuan),
-          latestYuanRate: Number(form.latestYuanRate),
-          transportCostPerKg: Number(form.transportCostPerKg),
+          purchasePriceYuan: canEditPurchase ? Number(form.purchasePriceYuan) : 0,
           sellingPriceKgs: canEditPrice ? Number(form.sellingPriceKgs) : 0,
-          minStockLevel: Number(form.minStockLevel),
-          initialQuantity: Number(form.initialQuantity),
+          defaultSupplierId: form.defaultSupplierId || undefined,
+          defaultFactoryId: form.defaultFactoryId || undefined,
+          isActive: form.isActive,
         }),
       });
       window.localStorage.setItem(
         'emotors_product_success',
         product.restored ? t('inventory.productRestored') : t('inventory.productCreated'),
       );
-      router.push('/products');
+      router.push('/product-master');
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
       if (message.toLowerCase().includes('sku')) {
         setSkuError(t('inventory.activeSkuExists'));
-      } else if (message.toLowerCase().includes('inactive warehouse')) {
-        setError(t('inventory.cannotAssignInactiveWarehouse'));
       } else {
         setError(message);
       }
@@ -136,75 +113,79 @@ export default function NewProductPage() {
     }
   }
 
-  function setField(key: keyof typeof form, value: string) {
+  function setField(key: keyof typeof form, value: string | boolean) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
   return (
     <ProtectedShell>
-      <form onSubmit={submit} className="space-y-6">
+      <form onSubmit={submit} className="mx-auto max-w-4xl space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('inventory.products')}</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('productMaster.title')}</p>
           <h2 className="text-3xl font-bold text-slate-950">{t('inventory.createProduct')}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-          <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-            <div className="md:col-span-2">
-              <ProductImageUploader
-                photoUrl={form.photoUrl}
-                onChange={(value) => setField('photoUrl', value)}
-              />
-            </div>
-            <Input label={t('inventory.name')} value={form.name} onChange={(value) => setField('name', value)} required />
-            <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => { setField('sku', value); setSkuError(''); }} error={skuError} required />
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
-              <select value={form.categoryId} onChange={(event) => setField('categoryId', event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                <option value="">{t('inventory.selectCategory')}</option>
-                {categories.map((category) => <option key={category.id} value={category.id}>{categoryName(category, language)}</option>)}
-              </select>
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('inventory.warehouse')}</span>
-              <select value={form.warehouseId} onChange={(event) => setField('warehouseId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                {warehouses.map((warehouse) => <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>)}
-              </select>
-            </label>
-            <Input label={t('inventory.weightPerUnitKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} min="0.001" step="0.001" />
+        <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+          <div className="md:col-span-2">
+            <ProductImageUploader photoUrl={form.photoUrl} onChange={(value) => setField('photoUrl', value)} />
+          </div>
+          <Input label={t('inventory.name')} value={form.name} onChange={(value) => setField('name', value)} required />
+          <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => { setField('sku', value); setSkuError(''); }} error={skuError} required />
+          <Input label="Barcode" value={form.barcode} onChange={(value) => setField('barcode', value)} />
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
+            <select value={form.categoryId} onChange={(event) => setField('categoryId', event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
+              <option value="">{t('inventory.selectCategory')}</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>{categoryName(category, language)}</option>
+              ))}
+            </select>
+          </label>
+          <Input label={t('inventory.unit')} value={form.unit} onChange={(value) => setField('unit', value)} />
+          <Input label={t('inventory.weightPerUnitKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} min="0.001" step="0.001" required />
+          {canEditPurchase ? (
             <Input label={t('inventory.purchasePriceYuan')} type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
-            <Input label={t('inventory.latestYuanRate')} type="number" value={form.latestYuanRate} onChange={(value) => setField('latestYuanRate', value)} />
-            <Input label={t('inventory.transportCost')} type="number" value={form.transportCostPerKg} onChange={(value) => setField('transportCostPerKg', value)} />
-            {canEditPrice ? (
-              <Input label={t('inventory.sellingPriceKgs')} type="number" value={form.sellingPriceKgs} onChange={(value) => setField('sellingPriceKgs', value)} />
-            ) : null}
-            <Input label={t('inventory.minStockLevel')} type="number" value={form.minStockLevel} onChange={(value) => setField('minStockLevel', value)} />
-            <Input label={t('inventory.initialQuantity')} type="number" value={form.initialQuantity} onChange={(value) => setField('initialQuantity', value)} />
-            <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">{t('inventory.description')}</span>
-              <textarea value={form.description} onChange={(event) => setField('description', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" />
-            </label>
-            <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">{t('inventory.characteristics')}</span>
-              <textarea value={form.characteristics} onChange={(event) => setField('characteristics', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" placeholder='{"voltage":"60V"}' />
-            </label>
-          </section>
-          <aside className="h-fit rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">{t('inventory.costPreview')}</h3>
-            <Preview label={t('inventory.purchaseCostKgs')} value={formatKgs(preview.purchaseCostKgs)} />
-            <Preview label={t('inventory.transportCostKgs')} value={formatKgs(preview.transportCostKgs)} />
-            <Preview label={t('inventory.finalCostKgs')} value={formatKgs(preview.finalCostKgs)} />
-            {canEditPrice ? (
-              <>
-                <Preview label={t('inventory.marginAmount')} value={formatKgs(preview.marginAmount)} />
-                <Preview label={t('inventory.marginPercent')} value={`${preview.marginPercent.toFixed(2)}%`} />
-              </>
-            ) : null}
-            <button disabled={saving} className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300" type="submit">
-              {saving ? t('common.loading') : t('inventory.createProduct')}
-            </button>
-          </aside>
-        </div>
+          ) : null}
+          {canEditPrice ? (
+            <Input label={t('inventory.sellingPriceKgs')} type="number" value={form.sellingPriceKgs} onChange={(value) => setField('sellingPriceKgs', value)} />
+          ) : null}
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">{t('procurement.orders.supplier')}</span>
+            <select value={form.defaultSupplierId} onChange={(event) => setField('defaultSupplierId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
+              <option value="">{t('common.all')}</option>
+              {suppliers.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">{t('procurement.orders.factory')}</span>
+            <select value={form.defaultFactoryId} onChange={(event) => setField('defaultFactoryId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
+              <option value="">{t('common.all')}</option>
+              {factories.map((factory) => (
+                <option key={factory.id} value={factory.id}>{factory.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
+            <select
+              value={form.isActive ? 'ACTIVE' : 'INACTIVE'}
+              onChange={(event) => setField('isActive', event.target.value === 'ACTIVE')}
+              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+            >
+              <option value="ACTIVE">{t('warehouse.active')}</option>
+              <option value="INACTIVE">{t('warehouse.inactive')}</option>
+            </select>
+          </label>
+          <label className="block md:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">{t('inventory.description')}</span>
+            <textarea value={form.description} onChange={(event) => setField('description', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" />
+          </label>
+          <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-2" type="submit">
+            {saving ? t('common.loading') : t('inventory.createProduct')}
+          </button>
+        </section>
       </form>
     </ProtectedShell>
   );
@@ -218,14 +199,6 @@ function Input({ label, value, onChange, type = 'text', required, error, min, st
       {error ? <span className="mt-1 block text-xs font-semibold text-red-600">{error}</span> : null}
     </label>
   );
-}
-
-function Preview({ label, value }: { label: string; value: string }) {
-  return <div className="mt-4 rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase text-slate-400">{label}</p><p className="font-bold text-slate-950">{value}</p></div>;
-}
-
-function formatKgs(value: number | string | null | undefined) {
-  return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
 }
 
 function categoryName(category: ProductCategory, language: string) {

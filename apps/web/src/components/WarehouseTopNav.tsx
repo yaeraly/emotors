@@ -17,6 +17,8 @@ export function WarehouseTopNav() {
     apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
   }, []);
 
+  if (pathname.includes('/new')) return null;
+
   const tabs = visibleWarehouseTabs(user);
   if (!tabs.length) return null;
 

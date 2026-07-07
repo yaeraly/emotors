@@ -41,6 +41,7 @@ import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assig
 import {
   buildChinaReceivingValidation,
   isChinaReceivingTaskVisible,
+  isGoodsLeftYiwuStatus,
   resolveChinaReceivingListStatus,
 } from './china-receiving.util';
 
@@ -608,6 +609,7 @@ export class OperationsService {
     const attachmentCountMap = new Map(attachmentCounts.map((row) => [row.entityId, row._count._all]));
 
     const tasks = [];
+    let goodsLeftYiwuVisibleCount = 0;
     for (const order of orders) {
       const enriched = { ...order, cargoAttachmentCount: attachmentCountMap.get(order.id) ?? 0 };
       if (!isChinaReceivingTaskVisible(enriched)) continue;
@@ -616,6 +618,9 @@ export class OperationsService {
           await this.assignmentService.assertAssignedToWarehouse(user.id, order.hqWarehouseId);
         } catch {
           continue;
+        }
+        if (isGoodsLeftYiwuStatus(order.status)) {
+          goodsLeftYiwuVisibleCount += 1;
         }
       }
 
@@ -637,7 +642,10 @@ export class OperationsService {
         receivedQuantity,
         arrivalDate: order.actualArrivalDate ?? order.estimatedArrivalDate ?? order.svhToHqTransport?.arrivalDate,
         canReceive: validation.canReceiveToHq && !order.hqStockMovementCreatedAt && isWm && !isScm,
+        canMarkArrival:
+          !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
         canViewOnly: isScm && !isCeo,
+        arrivalMarked: Boolean(order.actualArrivalDate),
         validation,
       });
     }
@@ -654,10 +662,30 @@ export class OperationsService {
           roles: user.roles ?? [user.role],
           warehouseIds,
           count: tasks.length,
+          goodsLeftYiwuVisibleCount,
           timestamp: new Date().toISOString(),
         },
       },
     });
+
+    if (isWm && !isCeo && goodsLeftYiwuVisibleCount > 0) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'CHINA_RECEIVING_VISIBLE_TO_WAREHOUSE_MANAGER',
+          entity: 'ProcurementOrder',
+          entityId: 'list',
+          metadata: {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseIds,
+            count: goodsLeftYiwuVisibleCount,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
 
     return tasks;
   }
@@ -697,12 +725,35 @@ export class OperationsService {
       },
     });
 
+    if (isScm && (order.differenceReports?.length ?? 0) > 0) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'SUPPLY_MANAGER_VIEWED_DIFFERENCE_ACT',
+          entity: 'ProcurementOrder',
+          entityId: order.id,
+          metadata: {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseId: order.hqWarehouseId,
+            procurementOrderId: order.id,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
+
     return {
       ...order,
       receivingStatus: resolveChinaReceivingListStatus(enriched),
       validation,
       canReceive: validation.canReceiveToHq && !order.hqStockMovementCreatedAt && isWm && !isScm,
+      canMarkArrival:
+        !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
       canCreateAct: isWm && !isScm && !order.hqStockMovementCreatedAt,
+      canViewActs: isScm || hasAnyFullAccessRole(roles) || isWm,
+      arrivalMarked: Boolean(order.actualArrivalDate),
       differenceReports: order.differenceReports,
       lineItems: order.items.map((item) => ({
         id: item.id,
@@ -809,6 +860,107 @@ export class OperationsService {
 
       return created;
     });
+  }
+
+  async markChinaReceivingArrival(user: AuthUser, orderId: string, dto: any) {
+    const roles = resolveUserRoles(user);
+    if (roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      throw new ForbiddenException('Supply Chain Manager cannot mark arrival');
+    }
+    if (!canReceiveProcurementToHq(user) && !hasAnyFullAccessRole(roles)) {
+      throw new ForbiddenException('Only assigned HQ Warehouse Manager can mark arrival');
+    }
+
+    const order = await this.loadChinaReceivingOrder(orderId);
+    await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
+    if (order.hqStockMovementCreatedAt) {
+      throw new BadRequestException('Goods have already been received for this procurement order');
+    }
+
+    const items = Array.isArray(dto.items) ? dto.items : [];
+    if (!items.length) throw new BadRequestException('At least one line item is required');
+
+    return this.prisma.$transaction(async (tx) => {
+      for (const item of items) {
+        const orderItem = order.items.find(
+          (row) => row.id === item.procurementItemId || row.productId === item.productId,
+        );
+        if (!orderItem) continue;
+
+        const actualQty = Number(item.actualQuantity ?? item.receivedQuantity ?? orderItem.quantity);
+        await tx.procurementOrderItem.update({
+          where: { id: orderItem.id },
+          data: { receivedQuantity: actualQty },
+        });
+
+        await this.auditInTx(tx, user, 'HQ', 'RECEIVING_COUNT_UPDATED', 'ProcurementOrderItem', orderItem.id, {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          warehouseId: order.hqWarehouseId,
+          procurementOrderId: order.id,
+          productId: orderItem.productId,
+          oldValue: orderItem.receivedQuantity,
+          newValue: actualQty,
+        });
+      }
+
+      const updated = await tx.procurementOrder.update({
+        where: { id: order.id },
+        data: { actualArrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date() },
+      });
+
+      await this.auditInTx(tx, user, 'HQ', 'ARRIVAL_MARKED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        roles: user.roles ?? [user.role],
+        warehouseId: order.hqWarehouseId,
+        procurementOrderId: order.id,
+        newValue: { actualArrivalDate: updated.actualArrivalDate },
+      });
+
+      return updated;
+    });
+  }
+
+  async listChinaReceivingDifferenceActs(user: AuthUser, orderId?: string) {
+    const roles = resolveUserRoles(user);
+    const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles);
+    if (!isScm && !hasAnyFullAccessRole(roles) && !canReceiveProcurementToHq(user)) {
+      throw new ForbiddenException('You do not have access to difference acts');
+    }
+
+    const reports = await this.prisma.procurementDifferenceReport.findMany({
+      where: {
+        deletedAt: null,
+        ...(orderId ? { procurementOrderId: orderId } : {}),
+      },
+      include: {
+        procurementOrder: { select: { id: true, orderNumber: true, hqWarehouseId: true, status: true } },
+        warehouse: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, fullName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (isScm) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'SUPPLY_MANAGER_VIEWED_DIFFERENCE_ACT',
+          entity: 'ProcurementDifferenceReport',
+          entityId: orderId ?? 'list',
+          metadata: {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            procurementOrderId: orderId,
+            count: reports.length,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
+
+    return reports;
   }
 
   private async loadChinaReceivingOrder(orderId: string) {

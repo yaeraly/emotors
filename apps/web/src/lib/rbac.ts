@@ -256,7 +256,6 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
 ];
 
 const SUPPLY_CHAIN_MANAGER_FORBIDDEN_PREFIXES = [
-  '/hq-warehouses/china-receiving',
   '/china-receiving',
   '/procurement/receiving',
   '/distribution',
@@ -503,6 +502,10 @@ export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissio
   return hasFullAccess(user);
 }
 
+export function canDeleteCategory(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
 export function canEditSellingPrice(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return hasFullAccess(user);
@@ -626,6 +629,11 @@ export function canReceiveProcurementToHq(user: Pick<User, 'role' | 'roles' | 'p
 export function canViewChinaReceiving(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return canReceiveProcurementToHq(user);
+}
+
+export function canViewChinaReceivingActs(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return canReceiveProcurementToHq(user) || isSupplyChainManagerUser(user) || hasFullAccess(user);
 }
 
 export function canViewChinaReceivingMenu(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

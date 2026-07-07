@@ -1651,7 +1651,18 @@ export class ProcurementService {
         data.approvedAt = new Date();
       }
       if (status === ProcurementOrderStatus.PAID) data.paidAt = new Date();
-      if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU) data.shippedAt = new Date();
+      if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU) {
+        data.shippedAt = new Date();
+        await this.auditProcurement(
+          tx,
+          user,
+          'PROCUREMENT_GOODS_LEFT_YIWU',
+          id,
+          { status: existing.status },
+          { status },
+          reason,
+        );
+      }
       if (triggersSentToSupplierWindow(status) && !existing.sentToSupplierAt) {
         const timestamps = computeSentToSupplierTimestamps();
         data.sentToSupplierAt = timestamps.sentToSupplierAt;

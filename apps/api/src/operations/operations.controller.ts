@@ -58,6 +58,13 @@ export class OperationsController {
     return this.service.listChinaReceivingTasks(user);
   }
 
+  @Get('procurement/china-receiving/difference-acts')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
+  listChinaReceivingDifferenceActs(@CurrentUser() user: AuthUser, @Query('orderId') orderId?: string) {
+    return this.service.listChinaReceivingDifferenceActs(user, orderId);
+  }
+
   @Get('procurement/china-receiving/:orderId')
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
@@ -74,6 +81,24 @@ export class OperationsController {
     @Body() dto: any,
   ) {
     return this.service.createReceivingDifferenceActs(user, orderId, dto);
+  }
+
+  @Post('procurement/china-receiving/:orderId/mark-arrival')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive')
+  markChinaReceivingArrival(
+    @CurrentUser() user: AuthUser,
+    @Param('orderId') orderId: string,
+    @Body() dto: any,
+  ) {
+    return this.service.markChinaReceivingArrival(user, orderId, dto);
+  }
+
+  @Get('procurement/china-receiving/:orderId/difference-acts')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
+  listOrderChinaReceivingDifferenceActs(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
+    return this.service.listChinaReceivingDifferenceActs(user, orderId);
   }
 
   @Post('procurement/orders/:id/receive-to-hq')

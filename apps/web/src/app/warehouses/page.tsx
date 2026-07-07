@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Branch, User, Warehouse } from '@/lib/types';
@@ -8,6 +9,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 export default function WarehousesPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -69,6 +71,9 @@ export default function WarehousesPage() {
             ...(requiresBranchSelection ? { branchId: form.branchId } : {}),
           }),
         });
+        window.localStorage.setItem('emotors_warehouse_success', t('warehouse.createdSuccess'));
+        router.push('/branch-warehouses');
+        return;
       }
       setEditing(null);
       setForm({

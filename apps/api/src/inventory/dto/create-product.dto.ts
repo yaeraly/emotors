@@ -22,9 +22,9 @@ export class CreateProductDto {
   @MinLength(1)
   categoryId!: string;
 
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  warehouseId!: string;
+  warehouseId?: string;
 
   @IsOptional()
   @IsString()
@@ -40,6 +40,10 @@ export class CreateProductDto {
 
   @IsOptional()
   characteristics?: unknown;
+
+  @IsOptional()
+  @IsString()
+  barcode?: string;
 
   @IsOptional()
   @IsString()
@@ -62,10 +66,11 @@ export class CreateProductDto {
   @Min(0)
   purchasePriceYuan!: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  latestYuanRate!: number;
+  latestYuanRate?: number;
 
   @IsOptional()
   @Type(() => Number)

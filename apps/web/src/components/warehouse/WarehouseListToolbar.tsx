@@ -33,8 +33,8 @@ export function WarehouseListToolbar({
   const { t } = useTranslation();
 
   return (
-    <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-4">
-      <label className="block xl:col-span-2">
+    <div className="flex flex-wrap items-end gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-nowrap">
+      <label className="block min-w-[140px] flex-[1.2] lg:max-w-[220px]">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('common.search')}</span>
         <input
           value={search}
@@ -43,7 +43,7 @@ export function WarehouseListToolbar({
           className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
         />
       </label>
-      <label className="block">
+      <label className="block min-w-[120px] flex-1 lg:max-w-[180px]">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('warehouse.region')}</span>
         <select
           value={region}
@@ -58,7 +58,7 @@ export function WarehouseListToolbar({
           ))}
         </select>
       </label>
-      <label className="block">
+      <label className="block min-w-[120px] flex-1 lg:max-w-[180px]">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('hqWarehouse.city')}</span>
         <select
           value={city}
@@ -73,7 +73,7 @@ export function WarehouseListToolbar({
           ))}
         </select>
       </label>
-      <label className="block md:col-span-2 xl:col-span-1">
+      <label className="block min-w-[120px] flex-1 lg:max-w-[160px]">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('common.status')}</span>
         <select
           value={status}

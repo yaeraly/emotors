@@ -40,6 +40,7 @@ export default function BranchWarehousesPage() {
   const { t } = useTranslation();
   const [warehouses, setWarehouses] = useState<BranchWarehouseMetrics[]>([]);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
@@ -49,6 +50,11 @@ export default function BranchWarehousesPage() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
+    const successMessage = window.localStorage.getItem('emotors_warehouse_success');
+    if (successMessage) {
+      setSuccess(successMessage);
+      window.localStorage.removeItem('emotors_warehouse_success');
+    }
     apiFetch<BranchWarehouseMetrics[]>('/branch-warehouses')
       .then((list) =>
         setWarehouses(
@@ -129,6 +135,7 @@ export default function BranchWarehousesPage() {
           </div>
         </div>
 
+        {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">

@@ -20,6 +20,7 @@ type ChinaReceivingTask = {
   receivedQuantity: number;
   arrivalDate?: string | null;
   canReceive?: boolean;
+  canMarkArrival?: boolean;
   canViewOnly?: boolean;
 };
 
@@ -87,7 +88,11 @@ export default function ChinaReceivingListPage() {
                       href={`/hq-warehouses/china-receiving/${task.id}`}
                       className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
                     >
-                      {task.canReceive && canReceive ? t('chinaReceiving.receive') : t('common.open')}
+                      {task.canMarkArrival && canReceive
+                        ? t('chinaReceiving.markArrival')
+                        : task.canReceive && canReceive
+                          ? t('chinaReceiving.receive')
+                          : t('common.open')}
                     </Link>
                   </td>
                 </tr>

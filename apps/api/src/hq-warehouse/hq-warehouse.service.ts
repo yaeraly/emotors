@@ -232,6 +232,11 @@ export class HqWarehouseService {
       },
     });
     await this.audit(user, 'HQ_WAREHOUSE_CREATED', warehouse.id, { warehouse });
+    await this.audit(user, 'WAREHOUSE_CREATED', warehouse.id, {
+      warehouseId: warehouse.id,
+      warehouseType: WarehouseType.HQ,
+      newValue: warehouse,
+    });
     return warehouse;
   }
 

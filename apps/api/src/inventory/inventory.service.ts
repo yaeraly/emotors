@@ -211,7 +211,13 @@ export class InventoryService {
   }
 
   async deleteCategory(user: AuthUser, id: string) {
-    this.assertCanArchiveProduct(user);
+    const roles = user.roles?.length ? user.roles : [user.role];
+    if (!hasAnyFullAccessRole(roles)) {
+      await this.auditCategory(user, 'CATEGORY_DELETE_DENIED', id, {
+        reason: 'Only CEO can delete or archive categories',
+      });
+      throw new ForbiddenException('Only CEO can delete or archive categories');
+    }
     const category = await this.category(id);
 
     if (category.productCount > 0) {
@@ -237,8 +243,20 @@ export class InventoryService {
         if (!dto.name?.trim()) throw new BadRequestException('Product name is required');
         if (!dto.sku?.trim()) throw new BadRequestException('SKU is required');
         if (!dto.categoryId) throw new BadRequestException('Category is required');
-        if (!dto.warehouseId) throw new BadRequestException('Warehouse is required');
-        const warehouse = await this.getWarehouseForCatalogWrite(tx, user, dto.warehouseId);
+
+        let warehouseId = dto.warehouseId?.trim();
+        if (!warehouseId) {
+          const defaultWarehouse = await tx.warehouse.findFirst({
+            where: activeHqWarehouseWhere,
+            orderBy: { createdAt: 'asc' },
+          });
+          if (!defaultWarehouse) {
+            throw new BadRequestException('No active HQ warehouse found for product catalog');
+          }
+          warehouseId = defaultWarehouse.id;
+        }
+
+        const warehouse = await this.getWarehouseForCatalogWrite(tx, user, warehouseId);
         let branchId: string;
         if (isHqWarehouse(warehouse)) {
           branchId = dto.branchId?.trim() || (await this.resolveHqCatalogBranchId(tx));
@@ -252,13 +270,13 @@ export class InventoryService {
 
         const category = await this.getActiveCategory(tx, dto.categoryId);
         this.assertPositiveProductWeight(dto.weightKg);
+        const latestRateRow = await tx.yuanRateHistory.findFirst({ orderBy: { effectiveFrom: 'desc' } });
+        const yuanRate = dto.latestYuanRate ?? Number(latestRateRow?.rate ?? 0);
         const costs = this.calculateCosts({
           weightKg: dto.weightKg,
           purchasePriceYuan: dto.purchasePriceYuan,
-          yuanRate: dto.latestYuanRate,
-          transportCostKgs:
-            dto.transportCostKgs ??
-            dto.weightKg * Number(dto.transportCostPerKg ?? 0),
+          yuanRate,
+          transportCostKgs: 0,
           sellingPriceKgs: dto.sellingPriceKgs,
         });
         const existingProduct = await tx.product.findFirst({
@@ -288,13 +306,14 @@ export class InventoryService {
               defaultFactoryId: dto.defaultFactoryId,
               weightKg: dto.weightKg,
               purchasePriceYuan: dto.purchasePriceYuan,
-              latestYuanRate: dto.latestYuanRate,
+              latestYuanRate: yuanRate,
               ...costs,
-              minStockLevel: dto.minStockLevel ?? 0,
+              minStockLevel: 0,
+              barcode: dto.barcode?.trim() || null,
               priceHistory: {
                 create: {
                   purchasePriceYuan: dto.purchasePriceYuan,
-                  yuanRate: dto.latestYuanRate,
+                  yuanRate,
                   ...costs,
                   effectiveFrom: new Date(),
                   createdById: user.id,
@@ -302,19 +321,6 @@ export class InventoryService {
               },
             },
           });
-
-          if (dto.initialQuantity && dto.initialQuantity > 0) {
-            await this.createStockMovementInTx(tx, user, {
-              productId: existingProduct.id,
-              warehouseId: warehouse.id,
-              type: StockMovementType.IN,
-              quantity: dto.initialQuantity,
-              unitCostKgs: costs.finalCostKgs,
-              note: 'Restored product initial stock',
-              referenceType: 'PRODUCT_RESTORE',
-              referenceId: existingProduct.id,
-            });
-          }
 
           return {
             ...(await this.getProductResponseInTx(tx, user, existingProduct.id)),
@@ -328,6 +334,7 @@ export class InventoryService {
             warehouseId: warehouse.id,
             name: dto.name,
             sku: dto.sku,
+            barcode: dto.barcode?.trim() || null,
             categoryId: category.id,
             category: category.nameEn,
             photoUrl: dto.photoUrl,
@@ -338,14 +345,14 @@ export class InventoryService {
             defaultFactoryId: dto.defaultFactoryId,
             weightKg: dto.weightKg,
             purchasePriceYuan: dto.purchasePriceYuan,
-            latestYuanRate: dto.latestYuanRate,
+            latestYuanRate: yuanRate,
             ...costs,
-            minStockLevel: dto.minStockLevel ?? 0,
+            minStockLevel: 0,
             isActive: dto.isActive ?? true,
             priceHistory: {
               create: {
                 purchasePriceYuan: dto.purchasePriceYuan,
-                yuanRate: dto.latestYuanRate,
+                yuanRate,
                 ...costs,
                 effectiveFrom: new Date(),
                 createdById: user.id,
@@ -355,23 +362,14 @@ export class InventoryService {
           include: this.productInclude(),
         });
 
-        if (dto.initialQuantity && dto.initialQuantity > 0) {
-          await this.createStockMovementInTx(tx, user, {
-            productId: product.id,
-            warehouseId: product.warehouseId,
-            type: StockMovementType.IN,
-            quantity: dto.initialQuantity,
-            unitCostKgs: Number(product.finalCostKgs),
-            note: 'Initial stock',
-            referenceType: 'PRODUCT_CREATE',
-            referenceId: product.id,
-          });
-        }
-
         await this.auditInTx(tx, user, branchId, 'PRODUCT_CREATED', 'Product', product.id, {
           module: 'inventory',
           sku: product.sku,
           newValue: { name: product.name, sku: product.sku, weightKg: Number(product.weightKg) },
+        });
+        await this.auditInTx(tx, user, branchId, 'PRODUCT_CREATE_FORM_UPDATED', 'Product', product.id, {
+          catalogOnly: true,
+          fields: ['name', 'sku', 'barcode', 'category', 'unit', 'weight', 'supplier', 'factory', 'purchasePriceYuan', 'image', 'status'],
         });
 
         return {
@@ -1002,6 +1000,25 @@ export class InventoryService {
         address: dto.address,
         isActive: dto.isActive ?? true,
       },
+    }).then(async (warehouse) => {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'WAREHOUSE_CREATED',
+          entity: 'Warehouse',
+          entityId: warehouse.id,
+          metadata: {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseId: warehouse.id,
+            warehouseType: WarehouseType.BRANCH,
+            newValue: warehouse,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      return warehouse;
     });
   }
 
