@@ -98,8 +98,10 @@ export default function CustomersPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const isBranchPanel = isBranchPanelUser(currentUser);
+  const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -194,6 +196,7 @@ export default function CustomersPage() {
         }),
       });
       setForm(initialCreateState);
+      setShowCreateModal(false);
       await loadCustomers();
       showSuccess(t('crm.customerCreated'));
     } catch (err) {
@@ -408,6 +411,72 @@ export default function CustomersPage() {
             </p>
           </div>
 
+          {branchSalesManagerView ? (
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
+            >
+              + {t('crm.createCustomer')}
+            </button>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t('crm.searchPlaceholder')}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+              />
+              {!isBranchPanel ? (
+                <select
+                  value={branchId}
+                  onChange={(event) => setBranchId(event.target.value)}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+                >
+                  <option value="">{t('common.all')} {t('crm.branch')}</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              <select
+                value={status}
+                onChange={(event) => setStatus(event.target.value)}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+              >
+                <option value="">{t('common.all')} {t('common.status')}</option>
+                {businessStatuses.map((item) => (
+                  <option key={item} value={item}>
+                    {t(`status.${item}`)}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => setShowArchived(event.target.checked)}
+                />
+                {t('crm.showArchived')}
+              </label>
+              <select
+                value={pageSize}
+                onChange={(event) => setPageSize(Number(event.target.value))}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+              >
+                {pageSizeOptions.map((size) => (
+                  <option key={size} value={size}>
+                    {size} per page
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {branchSalesManagerView ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <input
               value={search}
@@ -415,20 +484,6 @@ export default function CustomersPage() {
               placeholder={t('crm.searchPlaceholder')}
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             />
-            {!isBranchPanel ? (
-              <select
-                value={branchId}
-                onChange={(event) => setBranchId(event.target.value)}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-              >
-                <option value="">{t('common.all')} {t('crm.branch')}</option>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value)}
@@ -461,7 +516,7 @@ export default function CustomersPage() {
               ))}
             </select>
           </div>
-        </div>
+        ) : null}
 
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -475,7 +530,8 @@ export default function CustomersPage() {
           </p>
         ) : null}
 
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]">
+        <div className={branchSalesManagerView ? 'space-y-6' : 'grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]'}>
+          {!branchSalesManagerView ? (
           <form
             onSubmit={createCustomer}
             className="h-fit max-h-[calc(100vh-180px)] shrink-0 self-start overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:w-[380px]"
@@ -550,8 +606,9 @@ export default function CustomersPage() {
               {saving ? t('common.loading') : t('crm.addCustomer')}
             </button>
           </form>
+          ) : null}
 
-          <div className="h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className={branchSalesManagerView ? 'overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm' : 'h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm'}>
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white p-5">
               <div>
                 <h3 className="text-lg font-bold text-slate-950">
@@ -775,6 +832,65 @@ export default function CustomersPage() {
             customer={selectedCustomer}
             onClose={() => setSelectedCustomer(null)}
           />
+        ) : null}
+
+        {showCreateModal && branchSalesManagerView ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+            <form
+              onSubmit={createCustomer}
+              className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                    {t('crm.createCustomer')}
+                  </p>
+                  <h3 className="mt-1 text-2xl font-bold text-slate-950">
+                    {t('crm.addCustomer')}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-sm font-bold text-slate-500 hover:bg-slate-50"
+                  type="button"
+                  aria-label="Close create form"
+                >
+                  x
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                <CustomerForm
+                  form={form}
+                  onChange={(updates) => setForm({ ...form, ...updates })}
+                />
+              </div>
+
+              {error ? (
+                <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </p>
+              ) : null}
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+                  type="button"
+                  disabled={saving}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  disabled={saving || !form.fullName.trim() || !form.phone.trim()}
+                  className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                  type="submit"
+                >
+                  {saving ? t('common.loading') : t('crm.addCustomer')}
+                </button>
+              </div>
+            </form>
+          </div>
         ) : null}
 
         {editingCustomer ? (
