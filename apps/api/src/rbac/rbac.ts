@@ -349,9 +349,14 @@ export function canManageDistributionOrders(user: Pick<AuthUser, 'role' | 'roles
 }
 
 export function canViewDistribution(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
   return (
     canManageDistributionOrders(user) ||
     canDispatchFromHq(user) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.MANAGER) ||
+    roles.includes(Role.FRANCHISE_OWNER) ||
+    roles.includes(Role.WAREHOUSE_OPERATOR) ||
     userHasAnyPermission(user, ['distribution.manage', 'distribution.view'])
   );
 }
@@ -372,6 +377,20 @@ export function canRecordDistributionPayment(user: Pick<AuthUser, 'role' | 'role
 
 export function canManageBranchPurchaseRequests(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return canManageDistributionOrders(user);
+}
+
+/** Only Branch Manager (MANAGER) creates routine HQ orders; CEO/OWNER for exceptional cases. */
+export function canCreateBranchHqOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  return roles.includes(Role.MANAGER);
+}
+
+/** Branch Warehouse Operator receives HQ shipments at branch. */
+export function canReceiveBranchDistribution(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  if (hasAnyFullAccessRole(roles)) return true;
+  return roles.includes(Role.WAREHOUSE_OPERATOR);
 }
 
 export function canDispatchFromHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

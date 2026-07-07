@@ -22,7 +22,7 @@ export class OperationsController {
   }
 
   @Post('branch-purchase-requests')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
   createBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Body() dto: any) {
     return this.service.createBranchPurchaseRequest(user, dto);
   }

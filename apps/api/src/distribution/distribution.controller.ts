@@ -19,6 +19,8 @@ import { DistributionService } from './distribution.service';
 const DISTRIBUTION_VIEW_ROLES = [
   Role.OWNER,
   Role.CEO,
+  Role.FRANCHISE_OWNER,
+  Role.MANAGER,
   Role.SUPPLY_CHAIN_MANAGER,
   Role.HQ_SALES_MANAGER,
   Role.HQ_CASHIER,
@@ -154,7 +156,7 @@ export class DistributionController {
   }
 
   @Post('orders/:id/receive')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR)
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_OPERATOR)
   receive(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

@@ -6,7 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { distributionHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
-import { canManageBranchPurchaseRequests } from '@/lib/rbac';
+import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canViewBranchPurchaseRequests } from '@/lib/rbac';
 import type { Branch, Product, ProductListResponse, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -115,6 +115,16 @@ export default function BranchPurchaseRequestsPage() {
   }
 
   const canManage = canManageBranchPurchaseRequests(user);
+  const canCreate = canCreateBranchHqOrder(user);
+  const canView = canViewBranchPurchaseRequests(user);
+
+  if (user && !canView) {
+    return (
+      <ProtectedShell>
+        <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t('common.forbiddenMessage')}</p>
+      </ProtectedShell>
+    );
+  }
 
   return (
     <ProtectedShell>
@@ -124,9 +134,11 @@ export default function BranchPurchaseRequestsPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('distribution.title')}</p>
             <h2 className="text-3xl font-bold text-slate-950">{t('operations.branchPurchaseRequests')}</h2>
           </div>
-          <button type="button" onClick={() => setShowForm(true)} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
-            {t('distribution.newBranchOrder')}
-          </button>
+          {canCreate ? (
+            <button type="button" onClick={() => setShowForm(true)} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
+              {t('distribution.newBranchOrder')}
+            </button>
+          ) : null}
         </div>
 
         <ModuleSectionNav sections={distributionHubSections} />

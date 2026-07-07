@@ -7,5 +7,6 @@ import { DistributionService } from './distribution.service';
   imports: [InventoryModule],
   controllers: [DistributionController],
   providers: [DistributionService],
+  exports: [DistributionService],
 })
 export class DistributionModule {}

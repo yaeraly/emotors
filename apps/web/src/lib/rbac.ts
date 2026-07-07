@@ -415,7 +415,7 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (pathname.startsWith('/procurement')) return canViewProcurement(user);
   if (pathname.startsWith('/branch-purchase-requests')) {
-    return canManageBranchPurchaseRequests(user) || hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage') || hasPermission(user, 'distribution.view');
+    return canViewBranchPurchaseRequests(user);
   }
   if (pathname.startsWith('/reservations')) return hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/warehouse-release')) return hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
@@ -786,6 +786,9 @@ export function canViewDistribution(user: Pick<User, 'role' | 'roles' | 'permiss
   return (
     canManageDistributionOrders(user) ||
     canDispatchFromHq(user) ||
+    isSupplyChainManagerUser(user) ||
+    hasRole(user, 'MANAGER') ||
+    hasRole(user, 'FRANCHISE_OWNER') ||
     hasPermission(user, 'distribution.manage') ||
     hasPermission(user, 'distribution.view')
   );
@@ -808,6 +811,28 @@ export function canRecordDistributionPayment(user: Pick<User, 'role' | 'roles' |
 
 export function canManageBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return canManageDistributionOrders(user);
+}
+
+/** Only Branch Manager (MANAGER) creates routine HQ orders. */
+export function canCreateBranchHqOrder(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  return hasRole(user, 'MANAGER');
+}
+
+/** Branch Warehouse Operator receives HQ shipments at branch. */
+export function canReceiveBranchDistribution(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  return hasRole(user, 'WAREHOUSE_OPERATOR');
+}
+
+/** Branch roles that can view branch purchase requests (not create). */
+export function canViewBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  if (canManageBranchPurchaseRequests(user)) return true;
+  return hasAnyRole(user, ['MANAGER', 'FRANCHISE_OWNER', 'WAREHOUSE_OPERATOR', 'ACCOUNTANT', 'CASHIER', 'MASTER']);
 }
 
 export function canDispatchFromHq(user: Pick<User, 'role' | 'roles'> | null | undefined) {

@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import {
   canDispatchFromHq,
   canManageDistributionOrders,
+  canReceiveBranchDistribution,
   canRecordDistributionPayment,
 } from '@/lib/rbac';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
@@ -135,13 +136,7 @@ export default function DistributionOrderDetailPage() {
 
   const canApprove = canManageDistributionOrders(currentUser);
   const canDispatch = canDispatchFromHq(currentUser);
-  const canReceiveAtBranch =
-    currentUser?.role === 'WAREHOUSE_OPERATOR' ||
-    currentUser?.roles?.includes('WAREHOUSE_OPERATOR') ||
-    currentUser?.role === 'FRANCHISE_OWNER' ||
-    currentUser?.roles?.includes('FRANCHISE_OWNER') ||
-    currentUser?.role === 'MANAGER' ||
-    currentUser?.roles?.includes('MANAGER');
+  const canReceiveAtBranch = canReceiveBranchDistribution(currentUser);
   const canPay = canRecordDistributionPayment(currentUser);
 
   const invoiceSent = Boolean(order?.branchInvoice?.sentToBranchAt);

@@ -9,7 +9,7 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   INVENTORY_SUBMITTED: { module: NotificationModule.INVENTORY, roles: [Role.CEO, Role.OWNER] },
   INVENTORY_APPROVED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER] },
   INVENTORY_REJECTED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER] },
-  BRANCH_ORDER_SUBMITTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.SUPPLY_CHAIN_MANAGER] },
+  BRANCH_ORDER_SUBMITTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER, Role.SUPPLY_CHAIN_MANAGER] },
   PROCUREMENT_CREATED: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER, Role.SUPPLY_CHAIN_MANAGER] },
   PROCUREMENT_WAITING_APPROVAL: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER] },
   PROCUREMENT_STATUS_CHANGED: { module: NotificationModule.PROCUREMENT, roles: [Role.SUPPLY_CHAIN_MANAGER] },

@@ -24,6 +24,7 @@ import {
   canCreateDistributionOrder,
   canDispatchFromHq,
   canManageDistributionOrders,
+  canReceiveBranchDistribution,
   canRecordDistributionPayment,
   canRecordHqDistributionPayment,
   canViewDistribution,
@@ -391,6 +392,7 @@ export class DistributionService {
         data: { status: HqWarehousePickingTaskStatus.PICKING, pickedAt: new Date() },
       });
       await this.auditTransfer(tx, user, 'GOODS_PICKED', updated);
+      await this.auditTransfer(tx, user, 'GOODS_PREPARED', updated);
       return this.toResponse(updated);
     });
   }
@@ -523,6 +525,7 @@ export class DistributionService {
         data: { status: HqWarehousePickingTaskStatus.SHIPPED, shippedAt: new Date() },
       });
       await this.auditTransfer(tx, user, 'INVENTORY_SHIPPED', updated);
+      await this.auditTransfer(tx, user, 'GOODS_SHIPPED', updated);
       await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.GOODS_SHIPPED,
@@ -596,6 +599,9 @@ export class DistributionService {
   }
 
   async receive(user: AuthUser, id: string, dto: ReceiveDistributionOrderDto) {
+    if (!canReceiveBranchDistribution(user)) {
+      throw new ForbiddenException('Only Branch Warehouse Operator can receive goods at branch');
+    }
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: {
@@ -762,6 +768,7 @@ export class DistributionService {
         await this.auditTransfer(tx, user, 'DIFFERENCE_ACT_CREATED', order);
       }
       await this.auditTransfer(tx, user, 'BRANCH_RECEIVED_GOODS', order);
+      await this.auditTransfer(tx, user, 'GOODS_RECEIVED', order);
 
       return {
         receiving: await this.receivingInTx(tx, user, receiving.id),

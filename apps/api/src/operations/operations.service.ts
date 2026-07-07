@@ -22,7 +22,8 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_WAREHOUSE_ACCESS_DENIED } from '../hq-warehouse/hq-warehouse-assignment.constants';
-import { canManageBranchPurchaseRequests, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { DistributionService } from '../distribution/distribution.service';
 import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
@@ -54,6 +55,7 @@ export class OperationsService {
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
     private readonly assignmentService: HqWarehouseAssignmentService,
+    private readonly distributionService: DistributionService,
   ) {}
 
   branchPurchaseRequests(user: AuthUser) {
@@ -68,6 +70,10 @@ export class OperationsService {
   }
 
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
+    if (!canCreateBranchHqOrder(user)) {
+      await this.audit(user, user.branchId, 'BRANCH_ORDER_CREATE_DENIED', 'BranchPurchaseRequest', 'create');
+      throw new ForbiddenException('Only Branch Manager can create HQ orders');
+    }
     const branchId = this.resolveBranchId(user, dto.branchId);
     const items = await this.resolveItems(dto.items ?? []);
     const request = await this.prisma.branchPurchaseRequest.create({
@@ -81,8 +87,10 @@ export class OperationsService {
       },
       include: { items: true },
     });
+    await this.audit(user, branchId, 'BRANCH_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
     await this.audit(user, branchId, 'BRANCH_PURCHASE_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
     if (request.status === BranchPurchaseRequestStatus.SUBMITTED) {
+      await this.audit(user, branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
       await this.notificationsService.notify(user, {
         type: AlertType.BRANCH_ORDER_SUBMITTED,
         branchId,
@@ -105,8 +113,67 @@ export class OperationsService {
       data: { status, reviewedById: user.id, reviewedAt: new Date() },
       include: { items: true },
     });
+    const auditAction =
+      status === BranchPurchaseRequestStatus.APPROVED ? 'HQ_ORDER_APPROVED' : `BRANCH_PURCHASE_REQUEST_${status}`;
+    await this.audit(user, updated.branchId, auditAction, 'BranchPurchaseRequest', id);
     await this.audit(user, updated.branchId, `BRANCH_PURCHASE_REQUEST_${status}`, 'BranchPurchaseRequest', id);
+
+    if (status === BranchPurchaseRequestStatus.APPROVED) {
+      await this.autoFulfillApprovedBranchOrder(user, updated);
+    }
     return updated;
+  }
+
+  private async autoFulfillApprovedBranchOrder(user: AuthUser, request: { id: string; branchId: string; items: any[]; note?: string | null }) {
+    const { sourceWarehouseId, destinationWarehouseId, assignedWarehouseManagerId } =
+      await this.resolveDistributionWarehouses(request.branchId);
+
+    const order = await this.convertBranchPurchaseRequest(user, request.id, {
+      sourceWarehouseId,
+      destinationWarehouseId,
+    });
+
+    await this.audit(user, request.branchId, 'DISTRIBUTION_CREATED', 'BranchDistributionOrder', order.id);
+
+    await this.distributionService.approve(user, order.id);
+    await this.distributionService.sendInvoice(user, order.id);
+    await this.distributionService.sendToWarehouse(user, order.id, {
+      assignedWarehouseManagerId,
+    });
+
+    await this.audit(user, request.branchId, 'WAREHOUSE_TASK_ASSIGNED', 'BranchDistributionOrder', order.id);
+  }
+
+  private async resolveDistributionWarehouses(branchId: string) {
+    const sourceWarehouse = await this.prisma.warehouse.findFirst({
+      where: { deletedAt: null, isActive: true, warehouseType: 'HQ' },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!sourceWarehouse) {
+      throw new BadRequestException('No active HQ warehouse found for distribution');
+    }
+
+    const destinationWarehouse = await this.prisma.warehouse.findFirst({
+      where: { deletedAt: null, isActive: true, warehouseType: 'BRANCH', branchId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!destinationWarehouse) {
+      throw new BadRequestException('No active branch warehouse found for this branch');
+    }
+
+    const assignment = await this.prisma.hqWarehouseManagerAssignment.findFirst({
+      where: {
+        warehouseId: sourceWarehouse.id,
+        status: 'ACTIVE',
+      },
+      orderBy: { assignedAt: 'asc' },
+    });
+
+    return {
+      sourceWarehouseId: sourceWarehouse.id,
+      destinationWarehouseId: destinationWarehouse.id,
+      assignedWarehouseManagerId: assignment?.userId,
+    };
   }
 
   async convertBranchPurchaseRequest(user: AuthUser, id: string, dto: any) {
@@ -177,6 +244,7 @@ export class OperationsService {
         },
       });
       await this.auditInTx(tx, user, request.branchId, 'BRANCH_PURCHASE_REQUEST_CONVERTED', 'BranchPurchaseRequest', request.id);
+      await this.auditInTx(tx, user, request.branchId, 'DISTRIBUTION_CREATED', 'BranchDistributionOrder', order.id);
       return order;
     });
   }
