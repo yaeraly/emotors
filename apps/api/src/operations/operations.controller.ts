@@ -65,6 +65,20 @@ export class OperationsController {
     return this.service.listChinaReceivingDifferenceActs(user, orderId);
   }
 
+  @Get('procurement/difference-acts')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
+  listProcurementDifferenceActs(@CurrentUser() user: AuthUser, @Query('orderId') orderId?: string) {
+    return this.service.listChinaReceivingDifferenceActs(user, orderId);
+  }
+
+  @Post('procurement/difference-acts/:id/archive')
+  @Roles(Role.OWNER, Role.CEO)
+  @RequirePermissions('procurement.manage')
+  archiveDifferenceAct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.archiveDifferenceAct(user, id);
+  }
+
   @Get('procurement/china-receiving/:orderId')
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')

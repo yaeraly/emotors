@@ -5,12 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import {
-  canReceiveProcurementToHq,
-  canViewChinaReceivingActs,
-  isSupplyChainManagerUser,
-  isWarehouseManagerUser,
-} from '@/lib/rbac';
+import { canReceiveProcurementToHq, isWarehouseManagerUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -26,18 +21,6 @@ type LineItem = {
   difference: number;
 };
 
-type DifferenceReport = {
-  id: string;
-  reportNumber: string;
-  type: string;
-  status: string;
-  expectedQuantity: number;
-  receivedQuantity: number;
-  differenceQuantity: number;
-  shortageReason?: string | null;
-  note?: string | null;
-};
-
 type ChinaReceivingDetail = {
   id: string;
   orderNumber: string;
@@ -47,7 +30,6 @@ type ChinaReceivingDetail = {
   factory?: { name: string };
   receivingStatus: string;
   canReceive: boolean;
-  canViewActs?: boolean;
   hqStockMovementCreatedAt?: string | null;
   cargoTotalWeightKg?: number | string;
   cargoRateUsdPerKg?: number | string;
@@ -60,7 +42,6 @@ type ChinaReceivingDetail = {
   otherExpenseKgs?: number | string;
   packagingCostKgs?: number | string;
   lineItems: LineItem[];
-  differenceReports?: DifferenceReport[];
 };
 
 export default function ChinaReceivingDetailPage() {
@@ -97,10 +78,8 @@ export default function ChinaReceivingDetailPage() {
   }
 
   const wmView = isWarehouseManagerUser(user);
-  const scmViewOnly = isSupplyChainManagerUser(user);
   const canEditQuantities =
     wmView && canReceiveProcurementToHq(user) && task && !task.hqStockMovementCreatedAt && task.canReceive;
-  const canViewActs = canViewChinaReceivingActs(user) && task?.canViewActs && scmViewOnly;
 
   const hasDifference = useMemo(() => {
     if (!task) return false;
@@ -166,9 +145,6 @@ export default function ChinaReceivingDetailPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {scmViewOnly ? (
-          <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{t('productMaster.readOnlyNotice')}</p>
-        ) : null}
         {hasDifference && canEditQuantities ? (
           <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
             {t('chinaReceiving.differenceAutoWarning')}
@@ -193,7 +169,6 @@ export default function ChinaReceivingDetailPage() {
                     <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
                     <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
-                    {!wmView ? <th className="px-4 py-3">{t('chinaReceiving.differenceType')}</th> : null}
                     <th className="px-4 py-3">{t('inventoryCount.notes')}</th>
                   </tr>
                 </thead>
@@ -201,7 +176,6 @@ export default function ChinaReceivingDetailPage() {
                   {task.lineItems.map((item) => {
                     const actual = Number(quantities[item.id] ?? item.expectedQuantity);
                     const diff = actual - item.expectedQuantity;
-                    const diffType = diff < 0 ? 'SHORTAGE' : diff > 0 ? 'OVERAGE' : '-';
                     return (
                       <tr key={item.id}>
                         <td className="px-4 py-3">{item.productName}</td>
@@ -209,7 +183,7 @@ export default function ChinaReceivingDetailPage() {
                         <td className="px-4 py-3">{item.orderedQuantity}</td>
                         <td className="px-4 py-3">{item.expectedQuantity}</td>
                         <td className="px-4 py-3">
-                          {task.hqStockMovementCreatedAt || scmViewOnly ? (
+                          {task.hqStockMovementCreatedAt ? (
                             actual
                           ) : (
                             <input
@@ -223,9 +197,6 @@ export default function ChinaReceivingDetailPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">{diff}</td>
-                        {!wmView ? (
-                          <td className="px-4 py-3">{diffType === '-' ? '-' : translateStatus(t, diffType)}</td>
-                        ) : null}
                         <td className="px-4 py-3">
                           {!task.hqStockMovementCreatedAt && canEditQuantities ? (
                             <input
@@ -245,36 +216,6 @@ export default function ChinaReceivingDetailPage() {
               </table>
             </div>
 
-            {canViewActs && (task.differenceReports?.length ?? 0) > 0 ? (
-              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.differenceActs')}</h3>
-                <div className="mt-4 overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-sm">
-                    <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="px-4 py-3">#</th>
-                        <th className="px-4 py-3">{t('chinaReceiving.differenceType')}</th>
-                        <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
-                        <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
-                        <th className="px-4 py-3">{t('common.status')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {task.differenceReports?.map((report) => (
-                        <tr key={report.id}>
-                          <td className="px-4 py-3 font-semibold">{report.reportNumber}</td>
-                          <td className="px-4 py-3">{translateStatus(t, report.type)}</td>
-                          <td className="px-4 py-3">{report.expectedQuantity}</td>
-                          <td className="px-4 py-3">{report.receivedQuantity}</td>
-                          <td className="px-4 py-3">{translateStatus(t, report.status)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : null}
-
             {wmView && task.canReceive && !task.hqStockMovementCreatedAt ? (
               <div className="flex flex-wrap gap-3">
                 <button
@@ -285,14 +226,6 @@ export default function ChinaReceivingDetailPage() {
                 >
                   {t('procurement.orders.receiveToHq')}
                 </button>
-              </div>
-            ) : null}
-
-            {scmViewOnly ? (
-              <div className="flex flex-wrap gap-3">
-                <Link href={`/procurement/orders/${task.id}`} className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold">
-                  {t('common.open')}
-                </Link>
               </div>
             ) : null}
           </>

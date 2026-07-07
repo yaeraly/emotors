@@ -255,6 +255,14 @@ export class OperationsService {
         throw new BadRequestException(message ?? SVH_TRANSPORT_INCOMPLETE_MESSAGE);
       }
 
+      await this.auditInTx(tx, user, 'HQ', 'GOODS_RECEIVING_STARTED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        roles: user.roles ?? [user.role],
+        warehouseId: order.hqWarehouseId,
+        procurementOrderId: order.id,
+        timestamp: new Date().toISOString(),
+      });
+
       await this.auditInTx(tx, user, 'HQ', 'CARGO_RECEIPT_VALIDATED', 'ProcurementOrder', order.id, {
         userId: user.id,
         procurementOrderId: order.id,
@@ -304,19 +312,6 @@ export class OperationsService {
           shortageReason: received.shortageReason,
         };
       });
-
-      for (const item of receivedItems) {
-        await this.auditInTx(tx, user, 'HQ', 'RECEIVING_QUANTITY_ENTERED', 'ProcurementOrderItem', item.id, {
-          userId: user.id,
-          roles: user.roles ?? [user.role],
-          warehouseId: order.hqWarehouseId,
-          procurementOrderId: order.id,
-          productId: item.productId,
-          oldValue: item.quantity,
-          newValue: item.receivedQuantity,
-          timestamp: new Date().toISOString(),
-        });
-      }
 
       const mergedOrder = {
         ...order,
@@ -417,7 +412,7 @@ export class OperationsService {
           },
         });
         if (item.receivedQuantity > 0) {
-          await this.inventoryService.createStockMovementInTx(tx, user, {
+          const movement = await this.inventoryService.createStockMovementInTx(tx, user, {
             productId: item.productId,
             warehouseId: hqWarehouseId,
             type: StockMovementType.IN,
@@ -426,6 +421,26 @@ export class OperationsService {
             referenceType: 'PROCUREMENT_GOODS_RECEIVING',
             referenceId: receiving.id,
             note: `Procurement receiving ${receiving.receivingNumber}`,
+          });
+          await this.auditInTx(tx, user, 'HQ', 'STOCK_MOVEMENT_CREATED', 'StockMovement', movement.id, {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseId: hqWarehouseId,
+            procurementOrderId: order.id,
+            receivingId: receiving.id,
+            productId: item.productId,
+            newValue: { type: StockMovementType.IN, quantity: item.receivedQuantity },
+            timestamp: new Date().toISOString(),
+          });
+          await this.auditInTx(tx, user, 'HQ', 'INVENTORY_UPDATED', 'Product', item.productId, {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseId: hqWarehouseId,
+            procurementOrderId: order.id,
+            receivingId: receiving.id,
+            productId: item.productId,
+            newValue: { quantityAdded: item.receivedQuantity },
+            timestamp: new Date().toISOString(),
           });
           const product = await tx.product.findUnique({ where: { id: item.productId } });
           if (product) {
@@ -491,7 +506,32 @@ export class OperationsService {
             tx,
             user,
             'HQ',
-            'RECEIVING_DIFFERENCE_ACT_AUTO_CREATED',
+            differenceType === ShortageReportItemType.SHORTAGE
+              ? 'SHORTAGE_DETECTED'
+              : differenceType === ShortageReportItemType.OVERAGE
+                ? 'OVERAGE_DETECTED'
+                : 'DAMAGED_DETECTED',
+            'ProcurementDifferenceReport',
+            report.id,
+            {
+              userId: user.id,
+              roles: user.roles ?? [user.role],
+              warehouseId: hqWarehouseId,
+              procurementOrderId: order.id,
+              receivingId: receiving.id,
+              productId: item.productId,
+              expectedQty: item.quantity,
+              actualQty: item.receivedQuantity,
+              differenceQty: Math.abs(item.difference),
+              differenceType,
+              timestamp: new Date().toISOString(),
+            },
+          );
+          await this.auditInTx(
+            tx,
+            user,
+            'HQ',
+            'DIFFERENCE_ACT_AUTO_CREATED',
             'ProcurementDifferenceReport',
             report.id,
             {
@@ -973,7 +1013,8 @@ export class OperationsService {
   async listChinaReceivingDifferenceActs(user: AuthUser, orderId?: string) {
     const roles = resolveUserRoles(user);
     const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles);
-    if (!isScm && !hasAnyFullAccessRole(roles) && !canReceiveProcurementToHq(user)) {
+    const isCeo = hasAnyFullAccessRole(roles);
+    if (!isScm && !isCeo && !canReceiveProcurementToHq(user)) {
       throw new ForbiddenException('You do not have access to difference acts');
     }
 
@@ -983,8 +1024,17 @@ export class OperationsService {
         ...(orderId ? { procurementOrderId: orderId } : {}),
       },
       include: {
-        procurementOrder: { select: { id: true, orderNumber: true, hqWarehouseId: true, status: true } },
-        warehouse: { select: { id: true, name: true } },
+        procurementOrder: {
+          select: {
+            id: true,
+            orderNumber: true,
+            hqWarehouseId: true,
+            status: true,
+            supplier: { select: { id: true, name: true } },
+            factory: { select: { id: true, name: true } },
+          },
+        },
+        warehouse: { select: { id: true, name: true, code: true } },
         createdBy: { select: { id: true, fullName: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -1009,7 +1059,75 @@ export class OperationsService {
       });
     }
 
-    return reports;
+    return reports.map((report) => ({
+      id: report.id,
+      reportNumber: report.reportNumber,
+      procurementOrderId: report.procurementOrderId,
+      procurementOrder: report.procurementOrder,
+      orderNumber: report.procurementOrder.orderNumber,
+      supplier: report.procurementOrder.supplier,
+      factory: report.procurementOrder.factory,
+      warehouse: report.warehouse,
+      hqWarehouse: report.warehouse,
+      productId: report.productId,
+      productName: report.productName,
+      sku: report.sku,
+      type: report.type,
+      differenceType: report.type,
+      status: report.status,
+      expectedQuantity: report.expectedQuantity,
+      actualQuantity: report.receivedQuantity,
+      receivedQuantity: report.receivedQuantity,
+      differenceQuantity: report.differenceQuantity,
+      difference: report.differenceQuantity,
+      note: report.note,
+      shortageReason: report.shortageReason,
+      warehouseManager: report.createdBy,
+      createdBy: report.createdBy,
+      receivingId: report.receivingId,
+      createdAt: report.createdAt,
+    }));
+  }
+
+  async archiveDifferenceAct(user: AuthUser, actId: string) {
+    if (!hasAnyFullAccessRole(resolveUserRoles(user))) {
+      throw new ForbiddenException('Only CEO can archive difference acts');
+    }
+
+    const report = await this.prisma.procurementDifferenceReport.findFirst({
+      where: { id: actId, deletedAt: null },
+    });
+    if (!report) throw new NotFoundException('Difference act not found');
+
+    const updated = await this.prisma.procurementDifferenceReport.update({
+      where: { id: actId },
+      data: {
+        status: 'CLOSED',
+        deletedAt: new Date(),
+      },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'DIFFERENCE_ACT_ARCHIVED',
+        entity: 'ProcurementDifferenceReport',
+        entityId: actId,
+        metadata: {
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          warehouseId: report.warehouseId,
+          procurementOrderId: report.procurementOrderId,
+          productId: report.productId,
+          oldValue: { status: report.status },
+          newValue: { status: 'CLOSED', archived: true },
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    return updated;
   }
 
   private async loadChinaReceivingOrder(orderId: string) {

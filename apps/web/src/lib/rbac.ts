@@ -636,6 +636,10 @@ export function canViewChinaReceivingActs(user: Pick<User, 'role' | 'roles' | 'p
   return canReceiveProcurementToHq(user) || isSupplyChainManagerUser(user) || hasFullAccess(user);
 }
 
+export function canArchiveDifferenceAct(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
 export function canViewChinaReceivingMenu(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return canViewChinaReceiving(user);
 }

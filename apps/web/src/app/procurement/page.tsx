@@ -13,11 +13,11 @@ import {
   useProcurementCreateAction,
 } from '@/components/procurement/ProcurementListPanels';
 import { apiFetch } from '@/lib/api';
-import { canViewProcurement, canViewTransportCompany } from '@/lib/rbac';
+import { canViewProcurement, canViewTransportCompany, canViewChinaReceivingActs, isSupplyChainManagerUser, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
-type ProcurementTab = 'suppliers' | 'factories' | 'transport' | 'orders';
+type ProcurementTab = 'suppliers' | 'factories' | 'transport' | 'orders' | 'difference-acts';
 
 export default function ProcurementPage() {
   return (
@@ -41,7 +41,9 @@ function ProcurementPageContent() {
 
   const tabParam = searchParams.get('tab');
   const activeTab: ProcurementTab = useMemo(() => {
-    if (tabParam === 'factories' || tabParam === 'transport' || tabParam === 'orders') return tabParam;
+    if (tabParam === 'factories' || tabParam === 'transport' || tabParam === 'orders' || tabParam === 'difference-acts') {
+      return tabParam;
+    }
     return 'suppliers';
   }, [tabParam]);
 
@@ -52,6 +54,9 @@ function ProcurementPageContent() {
   const canView = canViewProcurement(user);
   const canViewTransport = canViewTransportCompany(user);
 
+  const canViewDifferenceActs =
+    canViewChinaReceivingActs(user) && (isSupplyChainManagerUser(user) || hasFullAccess(user));
+
   const tabs = useMemo(() => {
     const items = [
       { id: 'suppliers', label: t('procurement.suppliers.title') },
@@ -61,12 +66,19 @@ function ProcurementPageContent() {
       items.push({ id: 'transport', label: t('procurement.transportCompanies.title') });
     }
     items.push({ id: 'orders', label: t('procurement.orders.title') });
+    if (canViewDifferenceActs) {
+      items.push({ id: 'difference-acts', label: t('chinaReceiving.differenceActs') });
+    }
     return items;
-  }, [canViewTransport, t]);
+  }, [canViewDifferenceActs, canViewTransport, t]);
 
   const createAction = useProcurementCreateAction(activeTab, user, t);
 
   function setTab(tabId: string) {
+    if (tabId === 'difference-acts') {
+      router.push('/procurement/difference-acts');
+      return;
+    }
     router.replace(`/procurement?tab=${tabId}`);
   }
 
