@@ -27,6 +27,7 @@ type BranchWarehouseMetrics = {
   city?: string | null;
   country?: string | null;
   branchName?: string | null;
+  branchOwnerName?: string | null;
   totalSkuCount: number;
   totalProductQuantity: number;
   totalStockValueKgs: number;
@@ -84,8 +85,8 @@ export default function BranchWarehousesPage() {
         sortDirection,
         {
           branchName: (row) => row.branchName ?? '',
+          branchOwnerName: (row) => row.branchOwnerName ?? '',
           name: (row) => row.name,
-          code: (row) => row.code,
           city: (row) => row.city ?? '',
           totalSkuCount: (row) => row.totalSkuCount,
           totalProductQuantity: (row) => row.totalProductQuantity,
@@ -188,10 +189,10 @@ export default function BranchWarehousesPage() {
               render: (row) => <span className="font-bold">{row.name}</span>,
             },
             {
-              key: 'code',
-              label: t('warehouse.code'),
+              key: 'branchOwnerName',
+              label: t('users.branchOwnerDetails'),
               sortable: true,
-              render: (row) => row.code,
+              render: (row) => row.branchOwnerName?.trim() || t('branchWarehouse.ownerNotAssigned'),
             },
             {
               key: 'city',

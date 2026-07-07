@@ -28,7 +28,7 @@ export class BranchWarehouseService {
     const where = this.buildListWhere(user);
     const warehouses = await this.prisma.warehouse.findMany({
       where,
-      include: { branch: { select: { id: true, name: true, code: true, city: true } } },
+      include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
     return Promise.all(warehouses.map((warehouse) => this.buildMetrics(warehouse)));
@@ -145,7 +145,7 @@ export class BranchWarehouseService {
     branchId: string | null;
     isActive: boolean;
     warehouseType: import('@prisma/client').WarehouseType;
-    branch?: { id: string; name: string; code?: string; city?: string | null } | null;
+    branch?: { id: string; name: string; code?: string; city?: string | null; ownerName?: string | null } | null;
   }) {
     const balances = await this.prisma.inventoryBalance.findMany({
       where: { warehouseId: warehouse.id },
@@ -170,6 +170,7 @@ export class BranchWarehouseService {
       branchId: warehouse.branchId,
       branchName: warehouse.branch?.name ?? null,
       branchCode: warehouse.branch?.code ?? null,
+      branchOwnerName: warehouse.branch?.ownerName ?? null,
       isActive: warehouse.isActive,
       totalSkuCount: productIds.size,
       totalProductQuantity: totalQuantity,
@@ -224,7 +225,7 @@ export class BranchWarehouseService {
   private async getWarehouse(user: AuthUser, id: string) {
     const warehouse = await this.prisma.warehouse.findFirst({
       where: { id, ...branchWarehouseWhere },
-      include: { branch: { select: { id: true, name: true, code: true, city: true } } },
+      include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
     });
     if (!warehouse || !isBranchWarehouse(warehouse)) {
       throw new NotFoundException('Branch warehouse not found');
