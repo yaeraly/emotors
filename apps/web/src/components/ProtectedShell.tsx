@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceiving, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canViewDistribution, canManageBranchPurchaseRequests, canCreateServiceOrder, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canCreateServiceOrder, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -80,7 +80,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeMarketing = hasPermission(user, 'marketing.manage');
   const canSeeProcurement = canViewProcurement(user);
   const canManageProcurementOrders = hasPermission(user, 'procurement.manage');
-  const canSeeDistribution = canViewDistribution(user);
+  const canSeeDistribution = canViewDistributionMenu(user);
   const canManageDistribution = hasPermission(user, 'distribution.manage');
   const canSeeFinance = hasPermission(user, 'finance.view');
   const canSeeInvestment = hasFullAccess(user);
@@ -173,9 +173,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
                 ) : null}
-                {canViewChinaReceiving(user) ? (
-                  <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
-                ) : null}
                 {canSeeBranchWarehouses ? (
                   <Link href="/branch-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.branchWarehouses')}</Link>
                 ) : null}
@@ -232,7 +229,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
                 ) : null}
-                {canViewChinaReceiving(user) ? (
+                {canViewChinaReceivingMenu(user) ? (
                   <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
                 ) : null}
                 <Link href="/stock-movements" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventory.stockMovements')}</Link>

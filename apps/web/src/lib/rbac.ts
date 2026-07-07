@@ -247,7 +247,6 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
   '/branch-warehouses',
   '/stock-movements',
   '/hq-warehouses',
-  '/distribution',
   '/procurement',
   '/supply-chain',
   '/alerts',
@@ -256,8 +255,22 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
   '/supplier-claims',
 ];
 
+const SUPPLY_CHAIN_MANAGER_FORBIDDEN_PREFIXES = [
+  '/hq-warehouses/china-receiving',
+  '/china-receiving',
+  '/procurement/receiving',
+  '/distribution',
+];
+
 function canSupplyChainManagerAccessPath(pathname: string) {
   if (pathname === '/') return false;
+  if (
+    SUPPLY_CHAIN_MANAGER_FORBIDDEN_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    )
+  ) {
+    return false;
+  }
   if (pathname.startsWith('/distribution/orders/new')) return false;
   return SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
@@ -612,7 +625,17 @@ export function canReceiveProcurementToHq(user: Pick<User, 'role' | 'roles' | 'p
 
 export function canViewChinaReceiving(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
-  return hasFullAccess(user) || canViewProcurement(user) || canReceiveProcurementToHq(user);
+  return canReceiveProcurementToHq(user);
+}
+
+export function canViewChinaReceivingMenu(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canViewChinaReceiving(user);
+}
+
+export function canViewDistributionMenu(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  if (isSupplyChainManagerUser(user)) return false;
+  return canViewDistribution(user);
 }
 
 export function canDeleteInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
