@@ -1,4 +1,4 @@
--- Expand service workflow enums before applying DRAFT defaults.
+-- Expand service workflow enums (defaults applied in the following migration).
 
 ALTER TYPE "PaymentMethod" ADD VALUE IF NOT EXISTS 'MIXED';
 
@@ -13,6 +13,3 @@ ALTER TYPE "PartsRequestStatus" ADD VALUE IF NOT EXISTS 'ISSUED';
 ALTER TYPE "PartsRequestStatus" ADD VALUE IF NOT EXISTS 'PARTIALLY_ISSUED';
 ALTER TYPE "PartsRequestStatus" ADD VALUE IF NOT EXISTS 'WAITING_STOCK';
 ALTER TYPE "PartsRequestStatus" ADD VALUE IF NOT EXISTS 'REJECTED';
-
-ALTER TABLE "PartsRequest" ALTER COLUMN "status" SET DEFAULT 'DRAFT';
-ALTER TABLE "ServiceOrder" ALTER COLUMN "status" SET DEFAULT 'DRAFT';
