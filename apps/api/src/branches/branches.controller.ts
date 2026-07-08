@@ -18,8 +18,8 @@ export class BranchesController {
 
   @Post()
   @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_DIRECTOR)
-  create(@Body() dto: CreateBranchDto) {
-    return this.branchesService.create(dto);
+  create(@CurrentUser() user: AuthUser, @Body() dto: CreateBranchDto) {
+    return this.branchesService.create(user, dto);
   }
 
   @Get()
@@ -34,8 +34,8 @@ export class BranchesController {
 
   @Put(':id')
   @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_DIRECTOR)
-  update(@Param('id') id: string, @Body() dto: UpdateBranchDto) {
-    return this.branchesService.update(id, dto);
+  update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateBranchDto) {
+    return this.branchesService.update(user, id, dto);
   }
 
   @Delete(':id')
@@ -45,7 +45,7 @@ export class BranchesController {
   }
 
   @Put(':id/assigned-hq-warehouse')
-  @Roles(Role.OWNER, Role.CEO, Role.HQ_SALES_MANAGER)
+  @Roles(Role.OWNER, Role.CEO)
   assignHqWarehouse(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

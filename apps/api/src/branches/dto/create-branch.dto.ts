@@ -35,4 +35,8 @@ export class CreateBranchDto {
   @Type(() => Date)
   @IsDate()
   openedAt?: Date;
+
+  @IsOptional()
+  @IsString()
+  assignedHqWarehouseId?: string | null;
 }

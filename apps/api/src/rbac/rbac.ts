@@ -406,8 +406,7 @@ export function canManageBranchPurchaseRequests(user: Pick<AuthUser, 'role' | 'r
 }
 
 export function canAssignBranchHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  const roles = resolveUserRoles(user);
-  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_SALES_MANAGER);
+  return hasAnyFullAccessRole(resolveUserRoles(user));
 }
 
 /** Only Branch Manager (MANAGER) creates routine HQ orders; CEO/OWNER for exceptional cases. */

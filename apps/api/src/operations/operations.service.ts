@@ -710,6 +710,7 @@ export class OperationsService {
       request.assignedHqWarehouseId ?? (await this.getBranchAssignedHqWarehouseId(request.branchId));
     if (!assignedHqWarehouseId) {
       await this.auditBranchRequest(user, request.branchId, 'ROUTING_DENIED_NO_HQ_WAREHOUSE', 'BranchPurchaseRequest', id);
+      await this.auditBranchRequest(user, request.branchId, 'ROUTING_DENIED_NO_ASSIGNED_WAREHOUSE', 'BranchPurchaseRequest', id);
       throw new BadRequestException(NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH);
     }
 
@@ -812,6 +813,11 @@ export class OperationsService {
       });
 
       await this.auditInTx(tx, user, request.branchId, 'BRANCH_REQUEST_ROUTED_TO_HQ_WAREHOUSE', 'BranchPurchaseRequest', request.id, {
+        hqWarehouseId: assignedHqWarehouseId,
+        distributionOrderId: createdOrder.id,
+        requestId: request.id,
+      });
+      await this.auditInTx(tx, user, request.branchId, 'REQUEST_ROUTED_TO_HQ_WAREHOUSE', 'BranchPurchaseRequest', request.id, {
         hqWarehouseId: assignedHqWarehouseId,
         distributionOrderId: createdOrder.id,
         requestId: request.id,
@@ -2424,6 +2430,7 @@ export class OperationsService {
     const assignedHqWarehouseId = await this.getBranchAssignedHqWarehouseId(branchId);
     if (!assignedHqWarehouseId) {
       await this.auditBranchRequest(user, branchId, 'ROUTING_DENIED_NO_HQ_WAREHOUSE', 'Branch', branchId);
+      await this.auditBranchRequest(user, branchId, 'ROUTING_DENIED_NO_ASSIGNED_WAREHOUSE', 'Branch', branchId);
       throw new BadRequestException(NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH);
     }
     const warehouse = await this.prisma.warehouse.findFirst({

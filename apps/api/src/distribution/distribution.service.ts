@@ -115,6 +115,17 @@ export class DistributionService {
       };
     }
 
+    const roles = resolveUserRoles(user);
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      const assignments = await this.prisma.hqWarehouseManagerAssignment.findMany({
+        where: { userId: user.id, status: 'ACTIVE' },
+        select: { warehouseId: true },
+      });
+      const warehouseIds = assignments.map((row) => row.warehouseId);
+      if (!warehouseIds.length) return [];
+      where.sourceWarehouseId = { in: warehouseIds };
+    }
+
     const orders = await this.prisma.branchDistributionOrder.findMany({
       where,
       include: this.include(),
@@ -1519,6 +1530,7 @@ export class DistributionService {
       include: this.include(),
     });
     if (!order) throw new NotFoundException('Distribution order not found');
+    await this.assertWarehouseManagerOrderAccess(user, order.sourceWarehouseId);
     return order;
   }
 
@@ -1531,7 +1543,21 @@ export class DistributionService {
       },
     });
     if (!order) throw new NotFoundException('Distribution order not found');
+    await this.assertWarehouseManagerOrderAccess(user, order.sourceWarehouseId);
     return order;
+  }
+
+  private async assertWarehouseManagerOrderAccess(user: AuthUser, sourceWarehouseId: string) {
+    const roles = resolveUserRoles(user);
+    if (!roles.includes(Role.WAREHOUSE_MANAGER) || hasAnyFullAccessRole(roles)) return;
+    const assignments = await this.prisma.hqWarehouseManagerAssignment.findMany({
+      where: { userId: user.id, status: 'ACTIVE' },
+      select: { warehouseId: true },
+    });
+    const warehouseIds = assignments.map((row) => row.warehouseId);
+    if (!warehouseIds.includes(sourceWarehouseId)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра заказа распределения');
+    }
   }
 
   private canAccessAllDistributionBranches(user: AuthUser) {

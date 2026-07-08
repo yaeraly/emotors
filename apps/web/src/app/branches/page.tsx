@@ -6,10 +6,10 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { API_URL, clearToken, getToken } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
-import type { Branch, User } from '@/lib/types';
+import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
-import { canAssignBranchHqWarehouse, canManageBranches } from '@/lib/rbac';
+import { canAssignBranchHqWarehouse, canManageBranches, hasFullAccess } from '@/lib/rbac';
 
 type BranchForm = {
   name: string;
@@ -19,6 +19,7 @@ type BranchForm = {
   phone: string;
   ownerName: string;
   status: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
+  assignedHqWarehouseId: string;
 };
 
 const emptyForm: BranchForm = {
@@ -29,6 +30,7 @@ const emptyForm: BranchForm = {
   phone: '',
   ownerName: '',
   status: 'ACTIVE',
+  assignedHqWarehouseId: '',
 };
 
 export default function BranchesPage() {
@@ -49,6 +51,7 @@ export default function BranchesPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [user, setUser] = useState<User | null>(null);
+  const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (filters.search.trim()) params.set('search', filters.search.trim());
@@ -79,14 +82,16 @@ export default function BranchesPage() {
 
   async function loadBranches() {
     try {
-      const [filtered, all, me] = await Promise.all([
+      const [filtered, all, me, warehouses] = await Promise.all([
         apiFetch<Branch[]>(`/branches${query}`),
         apiFetch<Branch[]>('/branches'),
         apiFetch<User>('/auth/me'),
+        apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       ]);
       setBranches(filtered);
       setAllBranches(all);
       setUser(me);
+      setHqWarehouses(warehouses);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -107,6 +112,7 @@ export default function BranchesPage() {
       phone: branch.phone ?? '',
       ownerName: branch.ownerName ?? '',
       status: branch.status ?? 'ACTIVE',
+      assignedHqWarehouseId: branch.assignedHqWarehouseId ?? '',
     });
   }
 
@@ -185,6 +191,11 @@ export default function BranchesPage() {
 
   const canManage = canManageBranches(user);
   const canAssignHq = canAssignBranchHqWarehouse(user);
+  const ceoView = hasFullAccess(user);
+
+  function resolveBranchHqManager(branch: Branch) {
+    return branch.assignedHqWarehouse?.hqManagerAssignments?.[0]?.user?.fullName ?? '—';
+  }
 
   return (
     <ProtectedShell>
@@ -262,14 +273,16 @@ export default function BranchesPage() {
                   <th className="px-4 py-3">Phone</th>
                   <th className="px-4 py-3">Owner</th>
                   <th className="px-4 py-3">{t('branchHqRouting.assignedHqWarehouse')}</th>
+                  {ceoView ? <th className="px-4 py-3">{t('branchHqRouting.hqWarehouseManager')}</th> : null}
                   <th className="px-4 py-3">{t('common.status')}</th>
+                  {ceoView ? <th className="px-4 py-3">{t('common.lastUpdated')}</th> : null}
                   <th className="px-4 py-3">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {branches.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={ceoView ? 9 : 7} className="px-4 py-8 text-center text-slate-500">
                       {t('branches.noBranchesFound')}
                     </td>
                   </tr>
@@ -281,11 +294,17 @@ export default function BranchesPage() {
                     <td className="px-4 py-3">{branch.phone ?? '-'}</td>
                     <td className="px-4 py-3">{branch.ownerName ?? '-'}</td>
                     <td className="px-4 py-3">{branch.assignedHqWarehouse?.name ?? '—'}</td>
+                    {ceoView ? <td className="px-4 py-3">{resolveBranchHqManager(branch)}</td> : null}
                     <td className="px-4 py-3">{branch.status ?? 'ACTIVE'}</td>
+                    {ceoView ? (
+                      <td className="px-4 py-3">
+                        {branch.updatedAt ? new Date(branch.updatedAt).toLocaleString() : '—'}
+                      </td>
+                    ) : null}
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <Link href={`/branches/${branch.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
-                          {canAssignHq && !canManage ? t('branchHqRouting.assignHqWarehouse') : t('common.open')}
+                          {t('common.open')}
                         </Link>
                         {canManage ? (
                           <>
@@ -329,6 +348,23 @@ export default function BranchesPage() {
                     {['ACTIVE', 'INACTIVE', 'PENDING', 'SUSPENDED'].map((status) => <option key={status} value={status}>{translateStatus(t, status, 'branch')}</option>)}
                   </select>
                 </label>
+                {canAssignHq ? (
+                  <label className="block md:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchHqRouting.assignedHqWarehouse')}</span>
+                    <select
+                      value={form.assignedHqWarehouseId}
+                      onChange={(event) => setForm({ ...form, assignedHqWarehouseId: event.target.value })}
+                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                    >
+                      <option value="">{t('branchHqRouting.noWarehouseSelected')}</option>
+                      {hqWarehouses.map((warehouse) => (
+                        <option key={warehouse.id} value={warehouse.id}>
+                          {warehouse.name} ({warehouse.code})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
               </div>
               <div className="mt-6 flex justify-end gap-3">
                 <button onClick={() => setEditingBranch(null)} type="button" className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700">{t('common.cancel')}</button>

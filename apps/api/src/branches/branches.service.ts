@@ -15,12 +15,43 @@ import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { AssignBranchHqWarehouseDto } from './dto/assign-branch-hq-warehouse.dto';
 
+const branchInclude = {
+  assignedHqWarehouse: {
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      city: true,
+      isActive: true,
+      hqManagerAssignments: {
+        where: { status: 'ACTIVE' as const },
+        orderBy: { assignedAt: 'asc' as const },
+        take: 1,
+        select: {
+          user: { select: { id: true, fullName: true } },
+        },
+      },
+    },
+  },
+};
+
 @Injectable()
 export class BranchesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(dto: CreateBranchDto) {
-    return this.prisma.branch.create({
+  async create(user: AuthUser, dto: CreateBranchDto) {
+    if (dto.assignedHqWarehouseId && !canAssignBranchHqWarehouse(user)) {
+      throw new ForbiddenException('Only CEO can assign HQ warehouse to branch');
+    }
+
+    const assignedHqWarehouseId = canAssignBranchHqWarehouse(user)
+      ? (dto.assignedHqWarehouseId ?? null)
+      : null;
+    if (assignedHqWarehouseId) {
+      await this.assertActiveHqWarehouse(assignedHqWarehouseId);
+    }
+
+    const branch = await this.prisma.branch.create({
       data: {
         name: dto.name,
         code: dto.code,
@@ -30,8 +61,16 @@ export class BranchesService {
         ownerName: dto.ownerName,
         status: dto.status,
         openedAt: dto.openedAt,
+        assignedHqWarehouseId,
       },
+      include: branchInclude,
     });
+
+    if (assignedHqWarehouseId) {
+      await this.auditHqWarehouseAssignment(user, branch.id, null, assignedHqWarehouseId);
+    }
+
+    return branch;
   }
 
   findAll(user: AuthUser, query: BranchQueryDto = {}) {
@@ -65,11 +104,7 @@ export class BranchesService {
 
     return this.prisma.branch.findMany({
       where,
-      include: {
-        assignedHqWarehouse: {
-          select: { id: true, name: true, code: true, city: true, isActive: true },
-        },
-      },
+      include: branchInclude,
       orderBy: { name: 'asc' },
     });
   }
@@ -78,21 +113,21 @@ export class BranchesService {
     this.ensureBranchAccess(user, id);
     const branch = await this.prisma.branch.findFirst({
       where: { id, deletedAt: null },
-      include: {
-        assignedHqWarehouse: {
-          select: { id: true, name: true, code: true, city: true, isActive: true },
-        },
-      },
+      include: branchInclude,
     });
     if (!branch) throw new NotFoundException('Branch not found');
     return branch;
   }
 
-  async update(id: string, dto: UpdateBranchDto) {
+  async update(user: AuthUser, id: string, dto: UpdateBranchDto) {
     const branch = await this.prisma.branch.findFirst({
       where: { id, deletedAt: null },
     });
     if (!branch) throw new NotFoundException('Branch not found');
+
+    if (dto.assignedHqWarehouseId !== undefined && !canAssignBranchHqWarehouse(user)) {
+      throw new ForbiddenException('Only CEO can assign HQ warehouse to branch');
+    }
 
     if (dto.code && dto.code !== branch.code) {
       const duplicate = await this.prisma.branch.findUnique({
@@ -101,7 +136,35 @@ export class BranchesService {
       if (duplicate) throw new ConflictException('Branch code already exists');
     }
 
-    return this.prisma.branch.update({ where: { id }, data: dto });
+    const nextWarehouseId =
+      dto.assignedHqWarehouseId !== undefined ? dto.assignedHqWarehouseId : branch.assignedHqWarehouseId;
+    if (dto.assignedHqWarehouseId !== undefined && nextWarehouseId) {
+      await this.assertActiveHqWarehouse(nextWarehouseId);
+    }
+
+    const updated = await this.prisma.branch.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        code: dto.code,
+        city: dto.city,
+        address: dto.address,
+        phone: dto.phone,
+        ownerName: dto.ownerName,
+        status: dto.status,
+        openedAt: dto.openedAt,
+        ...(dto.assignedHqWarehouseId !== undefined
+          ? { assignedHqWarehouseId: dto.assignedHqWarehouseId }
+          : {}),
+      },
+      include: branchInclude,
+    });
+
+    if (dto.assignedHqWarehouseId !== undefined && dto.assignedHqWarehouseId !== branch.assignedHqWarehouseId) {
+      await this.auditHqWarehouseAssignment(user, id, branch.assignedHqWarehouseId, dto.assignedHqWarehouseId);
+    }
+
+    return updated;
   }
 
   async delete(id: string) {
@@ -147,7 +210,7 @@ export class BranchesService {
 
   async assignHqWarehouse(user: AuthUser, id: string, dto: AssignBranchHqWarehouseDto) {
     if (!canAssignBranchHqWarehouse(user)) {
-      throw new ForbiddenException('Only HQ Sales Manager can assign HQ warehouse to branch');
+      throw new ForbiddenException('Only CEO can assign HQ warehouse to branch');
     }
 
     const branch = await this.prisma.branch.findFirst({
@@ -157,47 +220,18 @@ export class BranchesService {
 
     const nextWarehouseId = dto.assignedHqWarehouseId ?? null;
     if (nextWarehouseId) {
-      const warehouse = await this.prisma.warehouse.findFirst({
-        where: { id: nextWarehouseId, ...activeHqWarehouseWhere },
-      });
-      if (!warehouse || !isHqWarehouse(warehouse)) {
-        throw new BadRequestException('Assigned HQ warehouse must be an active HQ warehouse');
-      }
+      await this.assertActiveHqWarehouse(nextWarehouseId);
     }
 
     const updated = await this.prisma.branch.update({
       where: { id },
       data: { assignedHqWarehouseId: nextWarehouseId },
-      include: {
-        assignedHqWarehouse: {
-          select: { id: true, name: true, code: true, city: true, isActive: true },
-        },
-      },
+      include: branchInclude,
     });
 
-    const action =
-      branch.assignedHqWarehouseId && nextWarehouseId && branch.assignedHqWarehouseId !== nextWarehouseId
-        ? 'BRANCH_HQ_WAREHOUSE_CHANGED'
-        : 'BRANCH_HQ_WAREHOUSE_ASSIGNED';
-
-    await this.prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        role: user.role,
-        action,
-        entity: 'Branch',
-        entityId: id,
-        metadata: {
-          userId: user.id,
-          role: user.role,
-          branchId: id,
-          hqWarehouseId: nextWarehouseId,
-          oldValue: branch.assignedHqWarehouseId,
-          newValue: nextWarehouseId,
-          timestamp: new Date().toISOString(),
-        },
-      },
-    });
+    if (nextWarehouseId !== branch.assignedHqWarehouseId) {
+      await this.auditHqWarehouseAssignment(user, id, branch.assignedHqWarehouseId, nextWarehouseId);
+    }
 
     return updated;
   }
@@ -230,6 +264,52 @@ export class BranchesService {
       inventoryValue: inventoryBalances.reduce((sum, item) => sum + Number(item.totalValueKgs), 0),
       lowStockCount,
     };
+  }
+
+  private async assertActiveHqWarehouse(warehouseId: string) {
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { id: warehouseId, ...activeHqWarehouseWhere },
+    });
+    if (!warehouse || !isHqWarehouse(warehouse)) {
+      throw new BadRequestException('Assigned HQ warehouse must be an active HQ warehouse');
+    }
+    return warehouse;
+  }
+
+  private async auditHqWarehouseAssignment(
+    user: AuthUser,
+    branchId: string,
+    oldWarehouseId: string | null | undefined,
+    newWarehouseId: string | null | undefined,
+  ) {
+    const action = !oldWarehouseId && newWarehouseId
+      ? 'BRANCH_HQ_WAREHOUSE_ASSIGNED'
+      : oldWarehouseId && !newWarehouseId
+        ? 'BRANCH_HQ_WAREHOUSE_REMOVED'
+        : oldWarehouseId && newWarehouseId && oldWarehouseId !== newWarehouseId
+          ? 'BRANCH_HQ_WAREHOUSE_CHANGED'
+          : null;
+
+    if (!action) return;
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'Branch',
+        entityId: branchId,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          branchId,
+          hqWarehouseId: newWarehouseId,
+          oldValue: oldWarehouseId ?? null,
+          newValue: newWarehouseId ?? null,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
   }
 
   private canViewAllBranches(user: AuthUser) {

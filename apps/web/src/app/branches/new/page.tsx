@@ -1,9 +1,12 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import Link from 'next/link';
+import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { canAssignBranchHqWarehouse } from '@/lib/rbac';
+import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function NewBranchPage() {
@@ -12,6 +15,8 @@ export default function NewBranchPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
   const [form, setForm] = useState({
     name: '',
     code: '',
@@ -19,7 +24,20 @@ export default function NewBranchPage() {
     address: '',
     phone: '',
     ownerName: '',
+    assignedHqWarehouseId: '',
   });
+
+  useEffect(() => {
+    void Promise.all([
+      apiFetch<User>('/auth/me'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
+    ])
+      .then(([me, warehouses]) => {
+        setUser(me);
+        setHqWarehouses(warehouses);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+  }, [t]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -29,7 +47,10 @@ export default function NewBranchPage() {
     try {
       await apiFetch('/branches', {
         method: 'POST',
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          assignedHqWarehouseId: form.assignedHqWarehouseId || null,
+        }),
       });
       setSuccess(t('branches.created'));
       window.localStorage.setItem('emotors-branch-created', '1');
@@ -46,11 +67,14 @@ export default function NewBranchPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  const canAssign = canAssignBranchHqWarehouse(user);
+
   return (
     <ProtectedShell>
       <form onSubmit={submit} className="space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+          <Link href="/branches" className="text-sm font-semibold text-blue-600">← {t('nav.branches')}</Link>
+          <p className="mt-2 text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
             {t('phase2.title')}
           </p>
           <h2 className="text-3xl font-bold text-slate-950">{t('branches.new')}</h2>
@@ -58,17 +82,34 @@ export default function NewBranchPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-          {Object.keys(form).map((key) => (
+          {(['name', 'code', 'city', 'address', 'phone', 'ownerName'] as const).map((key) => (
             <label key={key} className="block">
               <span className="text-sm font-semibold text-slate-700">{key}</span>
               <input
-                value={form[key as keyof typeof form]}
-                onChange={(event) => setField(key as keyof typeof form, event.target.value)}
+                value={form[key]}
+                onChange={(event) => setField(key, event.target.value)}
                 required={key === 'name' || key === 'code'}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
           ))}
+          {canAssign ? (
+            <label className="block md:col-span-2">
+              <span className="text-sm font-semibold text-slate-700">{t('branchHqRouting.assignedHqWarehouse')}</span>
+              <select
+                value={form.assignedHqWarehouseId}
+                onChange={(event) => setField('assignedHqWarehouseId', event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              >
+                <option value="">{t('branchHqRouting.noWarehouseSelected')}</option>
+                {hqWarehouses.map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.name} ({warehouse.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-2" type="submit">
             {saving ? t('common.loading') : t('common.create')}
           </button>

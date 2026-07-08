@@ -37,4 +37,8 @@ export class UpdateBranchDto {
   @Type(() => Date)
   @IsDate()
   openedAt?: Date;
+
+  @IsOptional()
+  @IsString()
+  assignedHqWarehouseId?: string | null;
 }

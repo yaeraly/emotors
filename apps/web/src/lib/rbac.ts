@@ -937,8 +937,7 @@ export function canManageBranchPurchaseRequests(user: Pick<User, 'role' | 'roles
 
 export function canAssignBranchHqWarehouse(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
-  if (hasFullAccess(user)) return true;
-  return hasRole(user, 'HQ_SALES_MANAGER');
+  return hasFullAccess(user);
 }
 
 export function canManageBranches(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

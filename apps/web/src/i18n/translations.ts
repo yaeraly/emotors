@@ -45,6 +45,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'common.all': 'Баары',
     'common.branch': 'Филиал',
     'common.createdDate': 'Түзүлгөн күнү',
+    'common.lastUpdated': 'Акыркы жаңылоо',
     'common.date': 'Күн',
 
     'auth.login': 'Кирүү',
@@ -249,6 +250,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchHqRouting.assignHqWarehouse': 'HQ склад дайындоо',
     'branchHqRouting.assignHqWarehouseHint': 'Бул филиалга товар сурамдарын жөнөтүү үчүн HQ склад тандаңыз.',
     'branchHqRouting.assignedHqWarehouse': 'Байланган HQ склад',
+    'branchHqRouting.hqWarehouseManager': 'HQ кампа менеджери',
     'branchHqRouting.noWarehouseSelected': 'HQ склад тандалган жок',
     'branchHqRouting.assignmentSaved': 'HQ склад дайындоосу сакталды',
     'branchHqRouting.sendToWarehouseManager': 'HQ склад менеджерине жөнөтүү',
@@ -1484,6 +1486,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'common.all': 'Все',
     'common.branch': 'Филиал',
     'common.createdDate': 'Дата создания',
+    'common.lastUpdated': 'Последнее обновление',
     'common.date': 'Дата',
 
     'auth.login': 'Вход',
@@ -1688,6 +1691,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchHqRouting.assignHqWarehouse': 'Назначить HQ склад',
     'branchHqRouting.assignHqWarehouseHint': 'Выберите HQ склад, который будет обслуживать заявки этого филиала.',
     'branchHqRouting.assignedHqWarehouse': 'Закрепленный HQ склад',
+    'branchHqRouting.hqWarehouseManager': 'Менеджер HQ склада',
     'branchHqRouting.noWarehouseSelected': 'HQ склад не выбран',
     'branchHqRouting.assignmentSaved': 'Назначение HQ склада сохранено',
     'branchHqRouting.sendToWarehouseManager': 'Отправить HQ склад-менеджеру',
@@ -2923,6 +2927,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'common.all': 'All',
     'common.branch': 'Branch',
     'common.createdDate': 'Created Date',
+    'common.lastUpdated': 'Last Updated',
     'common.date': 'Date',
 
     'auth.login': 'Login',
@@ -3127,6 +3132,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchHqRouting.assignHqWarehouse': 'Assign HQ Warehouse',
     'branchHqRouting.assignHqWarehouseHint': 'Select the HQ warehouse that will fulfill this branch product requests.',
     'branchHqRouting.assignedHqWarehouse': 'Assigned HQ Warehouse',
+    'branchHqRouting.hqWarehouseManager': 'HQ Warehouse Manager',
     'branchHqRouting.noWarehouseSelected': 'No HQ warehouse selected',
     'branchHqRouting.assignmentSaved': 'HQ warehouse assignment saved',
     'branchHqRouting.sendToWarehouseManager': 'Send to HQ Warehouse Manager',

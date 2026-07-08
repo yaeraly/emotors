@@ -216,7 +216,11 @@ export type Branch = {
     code: string;
     city?: string | null;
     isActive?: boolean;
+    hqManagerAssignments?: Array<{
+      user?: { id: string; fullName: string };
+    }>;
   } | null;
+  updatedAt?: string;
   deletedAt?: string | null;
 };
 

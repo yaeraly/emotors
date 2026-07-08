@@ -106,6 +106,11 @@ export default function BranchDetailPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <p className="text-xs font-bold uppercase text-slate-400">{t('branchHqRouting.assignedHqWarehouse')}</p>
             <p className="mt-1 font-semibold text-slate-900">{branch.assignedHqWarehouse.name}</p>
+            {branch.assignedHqWarehouse.hqManagerAssignments?.[0]?.user?.fullName ? (
+              <p className="mt-2 text-sm text-slate-600">
+                {t('branchHqRouting.hqWarehouseManager')}: {branch.assignedHqWarehouse.hqManagerAssignments[0].user.fullName}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
