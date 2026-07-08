@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { BranchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE, activeHqWarehouseWhere } from '../warehouse/warehouse.util';
 
@@ -12,20 +12,46 @@ export type HqCatalogSeedResult = {
 };
 
 export async function ensureHqCatalogBranch(prisma: PrismaLike) {
-  const existing = await prisma.branch.findFirst({
-    where: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null },
-    select: { id: true },
+  const existing = await prisma.branch.findUnique({
+    where: { code: HQ_CATALOG_BRANCH_CODE },
+    select: { id: true, deletedAt: true, status: true },
   });
-  if (existing) return existing;
 
-  return prisma.branch.create({
-    data: {
-      code: HQ_CATALOG_BRANCH_CODE,
-      name: 'EMOTORS HQ Catalog',
-      city: 'Bishkek',
-    },
-    select: { id: true },
-  });
+  if (existing) {
+    if (existing.deletedAt || existing.status !== BranchStatus.ACTIVE) {
+      return prisma.branch.update({
+        where: { id: existing.id },
+        data: {
+          deletedAt: null,
+          status: BranchStatus.ACTIVE,
+          name: 'EMOTORS HQ Catalog',
+          city: 'Bishkek',
+        },
+        select: { id: true },
+      });
+    }
+    return { id: existing.id };
+  }
+
+  try {
+    return await prisma.branch.create({
+      data: {
+        code: HQ_CATALOG_BRANCH_CODE,
+        name: 'EMOTORS HQ Catalog',
+        city: 'Bishkek',
+      },
+      select: { id: true },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      const raced = await prisma.branch.findUnique({
+        where: { code: HQ_CATALOG_BRANCH_CODE },
+        select: { id: true },
+      });
+      if (raced) return raced;
+    }
+    throw error;
+  }
 }
 
 function catalogDedupeKey(product: { sku: string; barcode: string | null; name: string }) {

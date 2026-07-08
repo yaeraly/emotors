@@ -25,6 +25,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { ensureHqCatalogBranch } from '../product-catalog/hq-product-catalog.util';
 import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
@@ -1408,23 +1409,8 @@ export class InventoryService {
   }
 
   private async resolveHqCatalogBranchId(tx: PrismaTx) {
-    const existing = await tx.branch.findFirst({
-      where: { code: HQ_CATALOG_BRANCH_CODE },
-      select: { id: true },
-    });
-    if (existing) {
-      return existing.id;
-    }
-
-    const created = await tx.branch.create({
-      data: {
-        code: HQ_CATALOG_BRANCH_CODE,
-        name: 'EMOTORS HQ Catalog',
-        city: 'Bishkek',
-      },
-      select: { id: true },
-    });
-    return created.id;
+    const branch = await ensureHqCatalogBranch(tx);
+    return branch.id;
   }
 
   private async ensureSkuAvailable(

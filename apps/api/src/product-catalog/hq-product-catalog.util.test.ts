@@ -1,10 +1,33 @@
-import { seedHqProductCatalogFromWarehouseInventory } from './hq-product-catalog.util';
+import { BranchStatus } from '@prisma/client';
+import { ensureHqCatalogBranch, seedHqProductCatalogFromWarehouseInventory } from './hq-product-catalog.util';
+
+describe('ensureHqCatalogBranch', () => {
+  it('restores a soft-deleted EMOTORS-HQ branch instead of creating a duplicate', async () => {
+    const prisma = {
+      branch: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'hq-branch',
+          deletedAt: new Date('2026-01-01'),
+          status: BranchStatus.INACTIVE,
+        }),
+        update: jest.fn().mockResolvedValue({ id: 'hq-branch' }),
+        create: jest.fn(),
+      },
+    };
+
+    const result = await ensureHqCatalogBranch(prisma as any);
+    expect(result).toEqual({ id: 'hq-branch' });
+    expect(prisma.branch.update).toHaveBeenCalled();
+    expect(prisma.branch.create).not.toHaveBeenCalled();
+  });
+});
 
 describe('seedHqProductCatalogFromWarehouseInventory', () => {
   it('skips seeding when catalog already has active products', async () => {
     const prisma = {
       branch: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'hq-branch' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'hq-branch', deletedAt: null, status: BranchStatus.ACTIVE }),
+        update: jest.fn(),
         create: jest.fn(),
       },
       warehouse: { findMany: jest.fn() },
@@ -53,7 +76,8 @@ describe('seedHqProductCatalogFromWarehouseInventory', () => {
 
     const prisma = {
       branch: {
-        findFirst: jest.fn().mockResolvedValue({ id: 'hq-branch' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'hq-branch', deletedAt: null, status: BranchStatus.ACTIVE }),
+        update: jest.fn(),
         create: jest.fn(),
       },
       warehouse: {
