@@ -18,6 +18,7 @@ type BranchForm = {
   phone: string;
   ownerName: string;
   status: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
+  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
   assignedHqWarehouseId: string;
 };
 
@@ -39,6 +40,7 @@ export default function BranchDetailPage() {
     phone: '',
     ownerName: '',
     status: 'ACTIVE',
+    branchType: 'FRANCHISE_BRANCH',
     assignedHqWarehouseId: '',
   });
   const [error, setError] = useState('');
@@ -66,6 +68,7 @@ export default function BranchDetailPage() {
       phone: branchData.phone ?? '',
       ownerName: branchData.ownerName ?? '',
       status: branchData.status ?? 'ACTIVE',
+      branchType: branchData.branchType ?? 'FRANCHISE_BRANCH',
       assignedHqWarehouseId: branchData.assignedHqWarehouseId ?? '',
     });
   }
@@ -208,6 +211,31 @@ export default function BranchDetailPage() {
             <BranchInput label={t('warehouse.address')} value={form.address} onChange={(value) => setForm({ ...form, address: value })} />
             <BranchInput label={t('users.phone')} value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} />
             <BranchInput label={t('branches.ownerName')} value={form.ownerName} onChange={(value) => setForm({ ...form, ownerName: value })} />
+            <label className="block md:col-span-2">
+              <span className="text-sm font-semibold text-slate-700">{t('pricing.colBranchType')}</span>
+              <div className="mt-2 flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="branchType"
+                    value="HQ_BRANCH"
+                    checked={form.branchType === 'HQ_BRANCH'}
+                    onChange={() => setForm({ ...form, branchType: 'HQ_BRANCH' })}
+                  />
+                  {t('pricing.branchTypeHq')}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="branchType"
+                    value="FRANCHISE_BRANCH"
+                    checked={form.branchType === 'FRANCHISE_BRANCH'}
+                    onChange={() => setForm({ ...form, branchType: 'FRANCHISE_BRANCH' })}
+                  />
+                  {t('pricing.branchTypeFranchise')}
+                </label>
+              </div>
+            </label>
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
               <select
@@ -281,6 +309,15 @@ export default function BranchDetailPage() {
                 {t('branchHqRouting.hqWarehouseManager')}: {branch.assignedHqWarehouse.hqManagerAssignments[0].user.fullName}
               </p>
             ) : null}
+          </div>
+        ) : null}
+
+        {branch && !editing ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-xs font-bold uppercase text-slate-400">{t('pricing.colBranchType')}</p>
+            <p className="mt-1 font-semibold text-slate-900">
+              {branch.branchType === 'HQ_BRANCH' ? t('pricing.branchTypeHq') : t('pricing.branchTypeFranchise')}
+            </p>
           </div>
         ) : null}
 

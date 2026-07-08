@@ -90,11 +90,13 @@ async function main() {
     update: {
       name: 'EMOTORS HQ Catalog',
       city: 'Bishkek',
+      branchType: 'HQ_BRANCH',
     },
     create: {
       name: 'EMOTORS HQ Catalog',
       code: 'EMOTORS-HQ',
       city: 'Bishkek',
+      branchType: 'HQ_BRANCH',
     },
   });
 

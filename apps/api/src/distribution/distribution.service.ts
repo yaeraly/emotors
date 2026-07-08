@@ -562,14 +562,23 @@ export class DistributionService {
 
         const branch = await tx.branch.findUnique({
           where: { id: order.branchId },
-          select: { code: true },
+          select: { code: true, branchType: true, hqToBranchMarkupPercent: true },
         });
-        const isHqOwnedBranch = this.pricingFifoService.isHqOwnedBranch(branch?.code);
+        const branchPricing = branch
+          ? {
+              branchType: branch.branchType,
+              hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent),
+            }
+          : undefined;
+        const isHqOwnedBranch = branch
+          ? this.pricingFifoService.isHqBranchType(branch.branchType)
+          : false;
         await this.pricingFifoService.consumeFifoForDistribution(tx, {
           productId: inventoryProduct.productId,
           warehouseId: order.sourceWarehouseId,
           quantity: item.quantity,
           isHqOwnedBranch,
+          branchPricing,
           distributionOrderId: order.id,
           distributionOrderItemId: item.id,
           userId: user.id,
@@ -1340,9 +1349,15 @@ export class DistributionService {
     const userRoles = user ? (user.roles?.length ? user.roles : [user.role]) : [];
     const branch = await tx.branch.findUnique({
       where: { id: dto.branchId },
-      select: { code: true },
+      select: { code: true, branchType: true, hqToBranchMarkupPercent: true },
     });
-    const isHqOwnedBranch = this.pricingFifoService.isHqOwnedBranch(branch?.code);
+    const branchPricing = branch
+      ? {
+          branchType: branch.branchType,
+          hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent),
+        }
+      : undefined;
+    const isHqOwnedBranch = branch ? this.pricingFifoService.isHqBranchType(branch.branchType) : false;
 
     for (const item of dto.items) {
       const product = await tx.product.findFirst({
@@ -1351,15 +1366,20 @@ export class DistributionService {
       if (!product) throw new NotFoundException('Product not found');
 
       const fallbackUnitCost = Number(product.finalCostKgs);
-      const fallbackUnitPrice = isHqOwnedBranch
-        ? Number(product.hqBranchWholesalePriceKgs)
-        : Number(product.sellingPriceKgs);
+      const fallbackUnitPrice = branchPricing
+        ? this.pricingFifoService.isHqBranchType(branchPricing.branchType)
+          ? fallbackUnitCost
+          : Number(product.hqBranchWholesalePriceKgs)
+        : isHqOwnedBranch
+          ? Number(product.hqBranchWholesalePriceKgs)
+          : Number(product.sellingPriceKgs);
 
       const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
         productId: item.productId,
         warehouseId: dto.sourceWarehouseId,
         quantity: Number(item.quantity),
         isHqOwnedBranch,
+        branchPricing,
         fallbackUnitCost,
         fallbackUnitPrice,
       });

@@ -243,11 +243,11 @@ export function canManagePricingPolicy(user: Pick<AuthUser, 'role' | 'roles' | '
 export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   const roles = resolveUserRoles(user);
   if (isBranchWarehouseOperator(user)) return false;
+  if (roles.includes(Role.SUPPLY_CHAIN_MANAGER)) return false;
   if (hasAnyFullAccessRole(roles)) return true;
   if (roles.includes(Role.ACADEMY_DIRECTOR)) return false;
   return [
     Role.HQ_SALES_MANAGER,
-    Role.SUPPLY_CHAIN_MANAGER,
     Role.WAREHOUSE_MANAGER,
     Role.FINANCE_MANAGER,
     Role.HQ_ACCOUNTANT,

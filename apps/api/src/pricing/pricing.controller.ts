@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.types';
@@ -7,8 +7,32 @@ import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { UpsertPricingPolicyDto } from './dto/upsert-pricing-policy.dto';
 import { UpdateCategoryMarkupDto, UpdateProductPricingDto } from './dto/pricing-catalog.dto';
+import {
+  PricingHistoryQueryDto,
+  UpdateBranchPricingDto,
+  UpdateRetailPricingDto,
+  UpdateWholesalePricingDto,
+} from './dto/pricing-branch.dto';
 import { PricingCatalogService } from './pricing-catalog.service';
 import { PricingService } from './pricing.service';
+
+const PRICING_VIEW_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.HQ_SALES_MANAGER,
+  Role.WAREHOUSE_MANAGER,
+  Role.FINANCE_MANAGER,
+  Role.HQ_ACCOUNTANT,
+  Role.ACCOUNTANT,
+  Role.MARKETING_MANAGER,
+  Role.CONTENT_CREATOR,
+  Role.SYSTEM_ADMINISTRATOR,
+  Role.HQ_CASHIER,
+  Role.FRANCHISE_OWNER,
+  Role.MANAGER,
+  Role.WAREHOUSE_OPERATOR,
+  Role.CASHIER,
+] as const;
 
 @Controller('pricing')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -19,7 +43,7 @@ export class PricingController {
   ) {}
 
   @Get('categories')
-  @Roles(Role.CEO, Role.OWNER, Role.HQ_SALES_MANAGER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT, Role.ACCOUNTANT, Role.MARKETING_MANAGER, Role.CONTENT_CREATOR, Role.SYSTEM_ADMINISTRATOR, Role.HQ_CASHIER, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR, Role.CASHIER)
+  @Roles(...PRICING_VIEW_ROLES)
   listCategories(@CurrentUser() user: AuthUser) {
     return this.pricingCatalogService.listCategories(user);
   }
@@ -30,8 +54,50 @@ export class PricingController {
     return this.pricingCatalogService.updateCategoryMarkup(user, id, dto);
   }
 
+  @Get('branches')
+  @Roles(...PRICING_VIEW_ROLES)
+  listBranches(@CurrentUser() user: AuthUser) {
+    return this.pricingCatalogService.listBranches(user);
+  }
+
+  @Put('branches/:id')
+  @Roles(Role.CEO)
+  updateBranchPricing(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateBranchPricingDto) {
+    return this.pricingCatalogService.updateBranchPricing(user, id, dto);
+  }
+
+  @Get('retail')
+  @Roles(...PRICING_VIEW_ROLES)
+  listRetail(@CurrentUser() user: AuthUser) {
+    return this.pricingCatalogService.listRetailProducts(user);
+  }
+
+  @Put('retail/:id')
+  @Roles(Role.CEO)
+  updateRetail(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateRetailPricingDto) {
+    return this.pricingCatalogService.updateRetailPricing(user, id, dto);
+  }
+
+  @Get('wholesale')
+  @Roles(...PRICING_VIEW_ROLES)
+  listWholesale(@CurrentUser() user: AuthUser) {
+    return this.pricingCatalogService.listWholesaleProducts(user);
+  }
+
+  @Put('wholesale/:id')
+  @Roles(Role.CEO)
+  updateWholesale(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateWholesalePricingDto) {
+    return this.pricingCatalogService.updateWholesalePricing(user, id, dto);
+  }
+
+  @Get('history')
+  @Roles(...PRICING_VIEW_ROLES)
+  listHistory(@CurrentUser() user: AuthUser, @Query() query: PricingHistoryQueryDto) {
+    return this.pricingCatalogService.listPricingHistory(user, query);
+  }
+
   @Get('products')
-  @Roles(Role.CEO, Role.OWNER, Role.HQ_SALES_MANAGER, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT, Role.ACCOUNTANT, Role.MARKETING_MANAGER, Role.CONTENT_CREATOR, Role.SYSTEM_ADMINISTRATOR, Role.HQ_CASHIER, Role.FRANCHISE_OWNER, Role.MANAGER, Role.WAREHOUSE_OPERATOR, Role.CASHIER)
+  @Roles(...PRICING_VIEW_ROLES)
   listProducts(@CurrentUser() user: AuthUser) {
     return this.pricingCatalogService.listProducts(user);
   }
@@ -55,93 +121,25 @@ export class PricingController {
   }
 
   @Get('policies')
-  @Roles(
-    Role.OWNER,
-    Role.CEO,
-    Role.HQ_SALES_MANAGER,
-    Role.SUPPLY_CHAIN_MANAGER,
-    Role.WAREHOUSE_MANAGER,
-    Role.FINANCE_MANAGER,
-    Role.HQ_ACCOUNTANT,
-    Role.ACCOUNTANT,
-    Role.MARKETING_MANAGER,
-    Role.CONTENT_CREATOR,
-    Role.SYSTEM_ADMINISTRATOR,
-    Role.HQ_CASHIER,
-    Role.FRANCHISE_OWNER,
-    Role.MANAGER,
-    Role.WAREHOUSE_OPERATOR,
-    Role.CASHIER,
-  )
+  @Roles(...PRICING_VIEW_ROLES)
   list(@CurrentUser() user: AuthUser) {
     return this.pricingService.list(user);
   }
 
   @Get('policies/sku/:sku')
-  @Roles(
-    Role.OWNER,
-    Role.CEO,
-    Role.HQ_SALES_MANAGER,
-    Role.SUPPLY_CHAIN_MANAGER,
-    Role.WAREHOUSE_MANAGER,
-    Role.FINANCE_MANAGER,
-    Role.HQ_ACCOUNTANT,
-    Role.ACCOUNTANT,
-    Role.MARKETING_MANAGER,
-    Role.CONTENT_CREATOR,
-    Role.SYSTEM_ADMINISTRATOR,
-    Role.HQ_CASHIER,
-    Role.FRANCHISE_OWNER,
-    Role.MANAGER,
-    Role.WAREHOUSE_OPERATOR,
-    Role.CASHIER,
-  )
+  @Roles(...PRICING_VIEW_ROLES)
   findBySku(@CurrentUser() user: AuthUser, @Param('sku') sku: string) {
     return this.pricingService.findBySku(user, sku);
   }
 
   @Get('policies/:id/history')
-  @Roles(
-    Role.OWNER,
-    Role.CEO,
-    Role.HQ_SALES_MANAGER,
-    Role.SUPPLY_CHAIN_MANAGER,
-    Role.WAREHOUSE_MANAGER,
-    Role.FINANCE_MANAGER,
-    Role.HQ_ACCOUNTANT,
-    Role.ACCOUNTANT,
-    Role.MARKETING_MANAGER,
-    Role.CONTENT_CREATOR,
-    Role.SYSTEM_ADMINISTRATOR,
-    Role.HQ_CASHIER,
-    Role.FRANCHISE_OWNER,
-    Role.MANAGER,
-    Role.WAREHOUSE_OPERATOR,
-    Role.CASHIER,
-  )
+  @Roles(...PRICING_VIEW_ROLES)
   history(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.pricingService.history(user, id);
   }
 
   @Get('policies/:id')
-  @Roles(
-    Role.OWNER,
-    Role.CEO,
-    Role.HQ_SALES_MANAGER,
-    Role.SUPPLY_CHAIN_MANAGER,
-    Role.WAREHOUSE_MANAGER,
-    Role.FINANCE_MANAGER,
-    Role.HQ_ACCOUNTANT,
-    Role.ACCOUNTANT,
-    Role.MARKETING_MANAGER,
-    Role.CONTENT_CREATOR,
-    Role.SYSTEM_ADMINISTRATOR,
-    Role.HQ_CASHIER,
-    Role.FRANCHISE_OWNER,
-    Role.MANAGER,
-    Role.WAREHOUSE_OPERATOR,
-    Role.CASHIER,
-  )
+  @Roles(...PRICING_VIEW_ROLES)
   findOne(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.pricingService.findOne(user, id);
   }

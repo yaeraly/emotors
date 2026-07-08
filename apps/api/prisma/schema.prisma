@@ -46,6 +46,11 @@ enum BranchStatus {
   SUSPENDED
 }
 
+enum BranchType {
+  HQ_BRANCH
+  FRANCHISE_BRANCH
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -687,6 +692,10 @@ model Branch {
   kpiRecommendations KpiRecommendation[]
   assignedHqWarehouseId String?
   assignedHqWarehouse   Warehouse? @relation("BranchAssignedHqWarehouse", fields: [assignedHqWarehouseId], references: [id])
+  branchType             BranchType @default(FRANCHISE_BRANCH)
+  hqToBranchMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  hqToBranchMarkupUpdatedAt DateTime?
+  pricingChangeHistory   ProductPricingChangeHistory[] @relation("PricingChangeHistoryBranch")
   branchPurchaseRequests BranchPurchaseRequest[]
   branchRequestShortages BranchRequestShortage[]
   createdAt      DateTime        @default(now())
@@ -1201,6 +1210,7 @@ model Product {
   maximumDiscountPercent Decimal @default(0) @db.Decimal(8, 2)
   pricingMode       ProductPricingMode @default(AUTO)
   wholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  minimumWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   hqBranchWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   recommendedRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   minimumSellingMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
@@ -1286,6 +1296,8 @@ model ProductPricingChangeHistory {
   policy      ProductPricingPolicy? @relation(fields: [policyId], references: [id])
   productId   String?
   product     Product?              @relation(fields: [productId], references: [id])
+  branchId    String?
+  branch      Branch?               @relation("PricingChangeHistoryBranch", fields: [branchId], references: [id])
   sku         String
   fieldName   String
   oldValue    String?
@@ -1300,6 +1312,7 @@ model ProductPricingChangeHistory {
 
   @@index([policyId])
   @@index([productId])
+  @@index([branchId])
   @@index([sku])
   @@index([changedById])
   @@index([createdAt])
@@ -1389,6 +1402,7 @@ model ProductCategory {
   nameEn      String
   description String?
   wholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  minimumWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   hqBranchWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   recommendedRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   minimumSellingMarkupPercent Decimal @default(0) @db.Decimal(8, 2)

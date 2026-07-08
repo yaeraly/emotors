@@ -4,13 +4,25 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ProductPricingMode, Prisma } from '@prisma/client';
+import { BranchType, ProductPricingMode, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { UpdateCategoryMarkupDto, UpdateProductPricingDto } from './dto/pricing-catalog.dto';
-import { pricesFromMarkups, validateMarkups } from './pricing-calculator.util';
+import {
+  PricingHistoryQueryDto,
+  UpdateBranchPricingDto,
+  UpdateRetailPricingDto,
+  UpdateWholesalePricingDto,
+} from './dto/pricing-branch.dto';
+import {
+  pricesFromMarkups,
+  resolveHqToBranchPrice,
+  validateMarkups,
+  validateRetailCurrentPrice,
+  validateWholesaleCurrentPrice,
+} from './pricing-calculator.util';
 import { PricingFifoService } from './pricing-fifo.service';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -95,6 +107,317 @@ export class PricingCatalogService {
     );
   }
 
+  async listBranches(user: AuthUser) {
+    this.assertCanView(user);
+    await this.fifoService.syncFifoBatchesFromHqStockMovements();
+
+    const hqBranch = await this.prisma.branch.findFirst({
+      where: { code: HQ_CATALOG_BRANCH_CODE },
+      select: { id: true },
+    });
+    const avgCost = hqBranch
+      ? await this.resolveAverageCatalogCost(hqBranch.id)
+      : 0;
+
+    const branches = await this.prisma.branch.findMany({
+      where: { deletedAt: null, code: { not: HQ_CATALOG_BRANCH_CODE } },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        ownerName: true,
+        branchType: true,
+        hqToBranchMarkupPercent: true,
+        hqToBranchMarkupUpdatedAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return branches.map((branch) => ({
+      id: branch.id,
+      name: branch.name,
+      ownerName: branch.ownerName,
+      branchType: branch.branchType,
+      hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent),
+      calculatedPriceKgs:
+        branch.branchType === BranchType.HQ_BRANCH
+          ? avgCost
+          : resolveHqToBranchPrice(avgCost, branch.branchType, Number(branch.hqToBranchMarkupPercent)),
+      referenceCostKgs: avgCost,
+      lastUpdated: branch.hqToBranchMarkupUpdatedAt ?? branch.updatedAt,
+    }));
+  }
+
+  async updateBranchPricing(user: AuthUser, branchId: string, dto: UpdateBranchPricingDto) {
+    this.assertCanManage(user);
+
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+    });
+    if (!branch) throw new NotFoundException('Branch not found');
+    if (branch.code === HQ_CATALOG_BRANCH_CODE) {
+      throw new BadRequestException('HQ catalog branch pricing is fixed at cost');
+    }
+    if (branch.branchType === BranchType.HQ_BRANCH) {
+      throw new BadRequestException('HQ branch type does not use markup');
+    }
+
+    const oldMarkup = Number(branch.hqToBranchMarkupPercent);
+    const nextMarkup = dto.hqToBranchMarkupPercent ?? oldMarkup;
+    if (nextMarkup < 0) throw new BadRequestException('Markup must be >= 0');
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.branch.update({
+        where: { id: branchId },
+        data: {
+          hqToBranchMarkupPercent: nextMarkup,
+          hqToBranchMarkupUpdatedAt: new Date(),
+        },
+      });
+
+      await tx.productPricingChangeHistory.create({
+        data: {
+          branchId,
+          sku: branch.code,
+          fieldName: 'hqToBranchMarkupPercent',
+          oldMarkup: String(oldMarkup),
+          newMarkup: String(nextMarkup),
+          reason: dto.reason,
+          changedById: user.id,
+        },
+      });
+
+      await this.auditInTx(tx, user, 'BRANCH_MARKUP_UPDATED', 'Branch', branchId, {
+        oldValue: oldMarkup,
+        newValue: nextMarkup,
+        reason: dto.reason,
+      });
+      await this.auditInTx(tx, user, 'PRICE_POLICY_UPDATED', 'Branch', branchId, {
+        branchType: branch.branchType,
+        oldValue: oldMarkup,
+        newValue: nextMarkup,
+        reason: dto.reason,
+      });
+
+      return next;
+    });
+
+    const avgCost = await this.resolveAverageCatalogCost();
+    return {
+      id: updated.id,
+      name: updated.name,
+      ownerName: updated.ownerName,
+      branchType: updated.branchType,
+      hqToBranchMarkupPercent: Number(updated.hqToBranchMarkupPercent),
+      calculatedPriceKgs: resolveHqToBranchPrice(
+        avgCost,
+        updated.branchType,
+        Number(updated.hqToBranchMarkupPercent),
+      ),
+      referenceCostKgs: avgCost,
+      lastUpdated: updated.hqToBranchMarkupUpdatedAt ?? updated.updatedAt,
+    };
+  }
+
+  async listRetailProducts(user: AuthUser) {
+    const rows = await this.listProducts(user);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      sku: row.sku,
+      categoryId: row.categoryId,
+      categoryName: row.categoryName,
+      isActive: row.isActive,
+      costPriceKgs: row.costPriceKgs,
+      minimumSellingMarkupPercent: row.minimumSellingMarkupPercent,
+      recommendedRetailMarkupPercent: row.recommendedRetailMarkupPercent,
+      retailPriceKgs: row.recommendedRetailPriceKgs,
+      minimumRetailPriceKgs: row.minimumSellingPriceKgs,
+      currentPriceKgs: row.recommendedRetailPriceKgs,
+    }));
+  }
+
+  async listWholesaleProducts(user: AuthUser) {
+    const rows = await this.listProducts(user);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      sku: row.sku,
+      categoryId: row.categoryId,
+      categoryName: row.categoryName,
+      isActive: row.isActive,
+      costPriceKgs: row.costPriceKgs,
+      minimumWholesaleMarkupPercent: row.minimumWholesaleMarkupPercent,
+      recommendedWholesaleMarkupPercent: row.wholesaleMarkupPercent,
+      wholesalePriceKgs: row.wholesalePriceKgs,
+      minimumWholesalePriceKgs: row.minimumWholesalePriceKgs,
+      currentPriceKgs: row.wholesalePriceKgs,
+    }));
+  }
+
+  async updateRetailPricing(user: AuthUser, productId: string, dto: UpdateRetailPricingDto) {
+    this.assertCanManage(user);
+
+    const product = await this.prisma.product.findFirst({ where: { id: productId, deletedAt: null } });
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (dto.minimumSellingMarkupPercent > dto.recommendedRetailMarkupPercent + 0.01) {
+      throw new BadRequestException('Minimum retail markup cannot exceed recommended retail markup');
+    }
+
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const prices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
+      minimumSellingMarkupPercent: dto.minimumSellingMarkupPercent,
+    });
+
+    const currentPrice = Number(product.recommendedRetailPriceKgs);
+    const retailValidation = validateRetailCurrentPrice(
+      cost.costPriceKgs,
+      dto.minimumSellingMarkupPercent,
+      dto.recommendedRetailMarkupPercent,
+      currentPrice,
+    );
+    if (retailValidation) throw new BadRequestException(retailValidation);
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await this.persistProductPricing(tx, user, product, {
+        costPriceKgs: cost.costPriceKgs,
+        wholesalePriceKgs: prices.wholesalePriceKgs,
+        hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
+        recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
+        minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
+        wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+        minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+        hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+        recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
+        minimumSellingMarkupPercent: dto.minimumSellingMarkupPercent,
+        reason: dto.reason,
+        historyFieldName: 'retailMarkup',
+        auditAction: 'RETAIL_MARKUP_UPDATED',
+      });
+      await this.syncSkuProducts(tx, user, updated, dto.reason);
+      await this.auditInTx(tx, user, 'PRICE_RECALCULATED', 'Product', product.id, {
+        sku: product.sku,
+        reason: dto.reason ?? 'Retail markup update',
+      });
+      return this.toRetailRow(updated, cost);
+    });
+  }
+
+  async updateWholesalePricing(user: AuthUser, productId: string, dto: UpdateWholesalePricingDto) {
+    this.assertCanManage(user);
+
+    const product = await this.prisma.product.findFirst({ where: { id: productId, deletedAt: null } });
+    if (!product) throw new NotFoundException('Product not found');
+
+    if (dto.minimumWholesaleMarkupPercent > dto.recommendedWholesaleMarkupPercent + 0.01) {
+      throw new BadRequestException('Minimum wholesale markup cannot exceed recommended wholesale markup');
+    }
+
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const prices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: dto.recommendedWholesaleMarkupPercent,
+      minimumWholesaleMarkupPercent: dto.minimumWholesaleMarkupPercent,
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+    });
+
+    const currentPrice = Number(product.wholesalePriceKgs);
+    const wholesaleValidation = validateWholesaleCurrentPrice(
+      cost.costPriceKgs,
+      dto.minimumWholesaleMarkupPercent,
+      dto.recommendedWholesaleMarkupPercent,
+      currentPrice,
+    );
+    if (wholesaleValidation) throw new BadRequestException(wholesaleValidation);
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await this.persistProductPricing(tx, user, product, {
+        costPriceKgs: cost.costPriceKgs,
+        wholesalePriceKgs: prices.wholesalePriceKgs,
+        hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
+        recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
+        minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
+        wholesaleMarkupPercent: dto.recommendedWholesaleMarkupPercent,
+        minimumWholesaleMarkupPercent: dto.minimumWholesaleMarkupPercent,
+        hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+        recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+        minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+        reason: dto.reason,
+        historyFieldName: 'wholesaleMarkup',
+        auditAction: 'WHOLESALE_MARKUP_UPDATED',
+      });
+      await this.syncSkuProducts(tx, user, updated, dto.reason);
+      await this.auditInTx(tx, user, 'PRICE_RECALCULATED', 'Product', product.id, {
+        sku: product.sku,
+        reason: dto.reason ?? 'Wholesale markup update',
+      });
+      return this.toWholesaleRow(updated, cost);
+    });
+  }
+
+  async listPricingHistory(user: AuthUser, query: PricingHistoryQueryDto = {}) {
+    this.assertCanView(user);
+
+    const where: Prisma.ProductPricingChangeHistoryWhereInput = {};
+    if (query.productId) where.productId = query.productId;
+    if (query.branchId) where.branchId = query.branchId;
+    if (query.changedById) where.changedById = query.changedById;
+    if (query.dateFrom || query.dateTo) {
+      where.createdAt = {};
+      if (query.dateFrom) where.createdAt.gte = new Date(query.dateFrom);
+      if (query.dateTo) where.createdAt.lte = new Date(query.dateTo);
+    }
+
+    const rows = await this.prisma.productPricingChangeHistory.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      include: {
+        product: { select: { id: true, name: true, sku: true } },
+        branch: { select: { id: true, name: true, code: true } },
+        changedBy: { select: { id: true, fullName: true } },
+      },
+    });
+
+    return rows.map((row) => {
+      let oldPrice: number | null = null;
+      let newPrice: number | null = null;
+      try {
+        const oldParsed = row.oldValue ? JSON.parse(row.oldValue) : null;
+        const newParsed = row.newValue ? JSON.parse(row.newValue) : null;
+        oldPrice = oldParsed?.recommendedRetailPriceKgs ?? oldParsed?.wholesalePriceKgs ?? null;
+        newPrice = newParsed?.recommendedRetailPriceKgs ?? newParsed?.wholesalePriceKgs ?? null;
+      } catch {
+        oldPrice = row.oldValue ? Number(row.oldValue) : null;
+        newPrice = row.newValue ? Number(row.newValue) : null;
+      }
+
+      return {
+        id: row.id,
+        createdAt: row.createdAt,
+        productId: row.productId,
+        productName: row.product?.name ?? row.sku,
+        productSku: row.product?.sku ?? row.sku,
+        branchId: row.branchId,
+        branchName: row.branch?.name ?? null,
+        oldMarkup: row.oldMarkup,
+        newMarkup: row.newMarkup,
+        oldPriceKgs: oldPrice,
+        newPriceKgs: newPrice,
+        changedById: row.changedById,
+        changedByName: row.changedBy.fullName,
+        reason: row.reason,
+        fieldName: row.fieldName,
+      };
+    });
+  }
+
   async updateProductPricing(user: AuthUser, productId: string, dto: UpdateProductPricingDto) {
     this.assertCanManage(user);
 
@@ -154,6 +477,7 @@ export class PricingCatalogService {
         const cost = await this.fifoService.getLatestHqCostPrice(product.id, tx);
         const markups = {
           wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+          minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
           hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
           recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
           minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
@@ -240,6 +564,7 @@ export class PricingCatalogService {
       recommendedRetailPriceKgs: Prisma.Decimal;
       minimumSellingPriceKgs: Prisma.Decimal;
       wholesaleMarkupPercent: Prisma.Decimal;
+      minimumWholesaleMarkupPercent: Prisma.Decimal;
       hqBranchWholesaleMarkupPercent: Prisma.Decimal;
       recommendedRetailMarkupPercent: Prisma.Decimal;
       minimumSellingMarkupPercent: Prisma.Decimal;
@@ -251,15 +576,20 @@ export class PricingCatalogService {
       recommendedRetailPriceKgs: number;
       minimumSellingPriceKgs: number;
       wholesaleMarkupPercent: number;
+      minimumWholesaleMarkupPercent?: number;
       hqBranchWholesaleMarkupPercent: number;
       recommendedRetailMarkupPercent: number;
       minimumSellingMarkupPercent: number;
       reason?: string;
       skipMarkupAudit?: boolean;
+      historyFieldName?: string;
+      auditAction?: string;
+      branchId?: string;
     },
   ) {
     const oldMarkups = {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
       recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
       minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
@@ -272,6 +602,8 @@ export class PricingCatalogService {
     };
     const newMarkups = {
       wholesaleMarkupPercent: input.wholesaleMarkupPercent,
+      minimumWholesaleMarkupPercent:
+        input.minimumWholesaleMarkupPercent ?? Number(product.minimumWholesaleMarkupPercent),
       hqBranchWholesaleMarkupPercent: input.hqBranchWholesaleMarkupPercent,
       recommendedRetailMarkupPercent: input.recommendedRetailMarkupPercent,
       minimumSellingMarkupPercent: input.minimumSellingMarkupPercent,
@@ -294,6 +626,8 @@ export class PricingCatalogService {
         recommendedRetailPriceKgs: input.recommendedRetailPriceKgs,
         minimumSellingPriceKgs: input.minimumSellingPriceKgs,
         wholesaleMarkupPercent: input.wholesaleMarkupPercent,
+        minimumWholesaleMarkupPercent:
+          input.minimumWholesaleMarkupPercent ?? Number(product.minimumWholesaleMarkupPercent),
         hqBranchWholesaleMarkupPercent: input.hqBranchWholesaleMarkupPercent,
         recommendedRetailMarkupPercent: input.recommendedRetailMarkupPercent,
         minimumSellingMarkupPercent: input.minimumSellingMarkupPercent,
@@ -313,8 +647,9 @@ export class PricingCatalogService {
       await tx.productPricingChangeHistory.create({
         data: {
           productId: product.id,
+          branchId: input.branchId,
           sku: product.sku,
-          fieldName: 'markupBundle',
+          fieldName: input.historyFieldName ?? 'markupBundle',
           oldValue: JSON.stringify(oldPrices),
           newValue: JSON.stringify(newPrices),
           oldMarkup: JSON.stringify(oldMarkups),
@@ -325,7 +660,7 @@ export class PricingCatalogService {
         },
       });
 
-      await this.auditInTx(tx, user, 'PRODUCT_MARKUP_UPDATED', 'Product', product.id, {
+      await this.auditInTx(tx, user, input.auditAction ?? 'PRICE_POLICY_UPDATED', 'Product', product.id, {
         sku: product.sku,
         oldValue: oldMarkups,
         newValue: newMarkups,
@@ -333,7 +668,7 @@ export class PricingCatalogService {
       });
     }
 
-    await this.auditInTx(tx, user, 'PRODUCT_PRICE_AUTO_CALCULATED', 'Product', product.id, {
+    await this.auditInTx(tx, user, 'PRICE_RECALCULATED', 'Product', product.id, {
       sku: product.sku,
       costPriceKgs: input.costPriceKgs,
       oldValue: oldPrices,
@@ -359,6 +694,7 @@ export class PricingCatalogService {
       recommendedRetailPriceKgs: Prisma.Decimal;
       minimumSellingPriceKgs: Prisma.Decimal;
       wholesaleMarkupPercent: Prisma.Decimal;
+      minimumWholesaleMarkupPercent: Prisma.Decimal;
       hqBranchWholesaleMarkupPercent: Prisma.Decimal;
       recommendedRetailMarkupPercent: Prisma.Decimal;
       minimumSellingMarkupPercent: Prisma.Decimal;
@@ -386,6 +722,7 @@ export class PricingCatalogService {
           recommendedRetailPriceKgs: source.recommendedRetailPriceKgs,
           minimumSellingPriceKgs: source.minimumSellingPriceKgs,
           wholesaleMarkupPercent: source.wholesaleMarkupPercent,
+          minimumWholesaleMarkupPercent: source.minimumWholesaleMarkupPercent,
           hqBranchWholesaleMarkupPercent: source.hqBranchWholesaleMarkupPercent,
           recommendedRetailMarkupPercent: source.recommendedRetailMarkupPercent,
           minimumSellingMarkupPercent: source.minimumSellingMarkupPercent,
@@ -393,6 +730,104 @@ export class PricingCatalogService {
         },
       });
     }
+  }
+
+  private async resolveAverageCatalogCost(hqBranchId?: string) {
+    const branchId =
+      hqBranchId ??
+      (
+        await this.prisma.branch.findFirst({
+          where: { code: HQ_CATALOG_BRANCH_CODE },
+          select: { id: true },
+        })
+      )?.id;
+    if (!branchId) return 0;
+
+    const products = await this.prisma.product.findMany({
+      where: { branchId, deletedAt: null, isActive: true },
+      select: { id: true },
+      take: 50,
+    });
+    if (!products.length) return 0;
+
+    let total = 0;
+    let count = 0;
+    for (const product of products) {
+      const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+      if (cost.costPriceKgs > 0) {
+        total += cost.costPriceKgs;
+        count += 1;
+      }
+    }
+    return count > 0 ? Math.round((total / count + Number.EPSILON) * 100) / 100 : 0;
+  }
+
+  private toRetailRow(
+    product: {
+      id: string;
+      name: string;
+      sku: string;
+      isActive: boolean;
+      categoryId: string;
+      minimumSellingMarkupPercent: Prisma.Decimal;
+      recommendedRetailMarkupPercent: Prisma.Decimal;
+      recommendedRetailPriceKgs: Prisma.Decimal;
+      minimumSellingPriceKgs: Prisma.Decimal;
+      productCategory?: { id: string; nameRu: string; nameKy: string; nameEn: string; code: string } | null;
+    },
+    cost: { costPriceKgs: number },
+  ) {
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      categoryId: product.categoryId,
+      categoryName: product.productCategory?.nameRu ?? product.productCategory?.nameEn ?? '-',
+      isActive: product.isActive,
+      costPriceKgs: cost.costPriceKgs,
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      retailPriceKgs: Number(product.recommendedRetailPriceKgs),
+      minimumRetailPriceKgs: Number(product.minimumSellingPriceKgs),
+      currentPriceKgs: Number(product.recommendedRetailPriceKgs),
+    };
+  }
+
+  private toWholesaleRow(
+    product: {
+      id: string;
+      name: string;
+      sku: string;
+      isActive: boolean;
+      categoryId: string;
+      wholesaleMarkupPercent: Prisma.Decimal;
+      minimumWholesaleMarkupPercent: Prisma.Decimal;
+      wholesalePriceKgs: Prisma.Decimal;
+      productCategory?: { id: string; nameRu: string; nameKy: string; nameEn: string; code: string } | null;
+    },
+    cost: { costPriceKgs: number },
+  ) {
+    const prices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: 0,
+      recommendedRetailMarkupPercent: 0,
+      minimumSellingMarkupPercent: 0,
+    });
+    return {
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      categoryId: product.categoryId,
+      categoryName: product.productCategory?.nameRu ?? product.productCategory?.nameEn ?? '-',
+      isActive: product.isActive,
+      costPriceKgs: cost.costPriceKgs,
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      recommendedWholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      wholesalePriceKgs: Number(product.wholesalePriceKgs),
+      minimumWholesalePriceKgs: prices.minimumWholesalePriceKgs,
+      currentPriceKgs: Number(product.wholesalePriceKgs),
+    };
   }
 
   private toProductPricingRow(
@@ -403,15 +838,20 @@ export class PricingCatalogService {
       isActive: boolean;
       categoryId: string;
       wholesaleMarkupPercent: Prisma.Decimal;
+      minimumWholesaleMarkupPercent: Prisma.Decimal;
       hqBranchWholesaleMarkupPercent: Prisma.Decimal;
       recommendedRetailMarkupPercent: Prisma.Decimal;
       minimumSellingMarkupPercent: Prisma.Decimal;
+      wholesalePriceKgs?: Prisma.Decimal;
+      recommendedRetailPriceKgs?: Prisma.Decimal;
+      sellingPriceKgs?: Prisma.Decimal;
       productCategory?: { id: string; nameRu: string; nameKy: string; nameEn: string; code: string } | null;
     },
     cost: { costPriceKgs: number; source: string; batchId: string | null; receivedAt: Date | null },
   ) {
     const markups = {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
       recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
       minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
@@ -431,6 +871,8 @@ export class PricingCatalogService {
       costReceivedAt: cost.receivedAt,
       ...prices,
       ...markups,
+      currentRetailPriceKgs: Number(product.recommendedRetailPriceKgs ?? prices.recommendedRetailPriceKgs),
+      currentWholesalePriceKgs: Number(product.wholesalePriceKgs ?? prices.wholesalePriceKgs),
     };
   }
 

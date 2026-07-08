@@ -5,7 +5,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { BranchStatus, Prisma, SaleStatus } from '@prisma/client';
+import { BranchStatus, BranchType, Prisma, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertBranchAccountantRestrictedRoute, canAssignBranchHqWarehouse, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
@@ -60,6 +60,7 @@ export class BranchesService {
         phone: dto.phone,
         ownerName: dto.ownerName,
         status: dto.status,
+        branchType: dto.branchType ?? BranchType.FRANCHISE_BRANCH,
         openedAt: dto.openedAt,
         assignedHqWarehouseId,
       },
@@ -154,6 +155,7 @@ export class BranchesService {
         phone: dto.phone,
         ownerName: dto.ownerName,
         status: dto.status,
+        branchType: dto.branchType,
         openedAt: dto.openedAt,
         ...(dto.assignedHqWarehouseId !== undefined
           ? { assignedHqWarehouseId: dto.assignedHqWarehouseId }

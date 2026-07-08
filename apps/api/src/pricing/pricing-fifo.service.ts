@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, StockMovementType, WarehouseType } from '@prisma/client';
+import { BranchType, Prisma, StockMovementType, WarehouseType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
-import { pricesFromMarkups } from './pricing-calculator.util';
+import { pricesFromMarkups, resolveHqToBranchPrice } from './pricing-calculator.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -13,7 +13,26 @@ export type BatchMarkups = {
   minimumSellingMarkupPercent: number;
 };
 
-export type FifoPreviewLine = {
+export type BranchPricingConfig = {
+  branchType: BranchType;
+  hqToBranchMarkupPercent: number;
+};
+
+function resolveDistributionUnitPrice(
+  unitCostKgs: number,
+  wholesalePriceKgs: number,
+  hqBranchWholesalePriceKgs: number,
+  branchPricing?: BranchPricingConfig,
+  legacyIsHqOwnedBranch?: boolean,
+) {
+  if (branchPricing) {
+    return resolveHqToBranchPrice(unitCostKgs, branchPricing.branchType, branchPricing.hqToBranchMarkupPercent);
+  }
+  if (legacyIsHqOwnedBranch) return hqBranchWholesalePriceKgs;
+  return wholesalePriceKgs;
+}
+
+type FifoPreviewLine = {
   batchId: string;
   quantity: number;
   unitCostKgs: number;
@@ -182,6 +201,7 @@ export class PricingFifoService {
       warehouseId: string;
       quantity: number;
       isHqOwnedBranch: boolean;
+      branchPricing?: BranchPricingConfig;
       fallbackUnitCost?: number;
       fallbackUnitPrice?: number;
     },
@@ -208,7 +228,13 @@ export class PricingFifoService {
       const unitCostKgs = Number(batch.unitCostKgs);
       const wholesalePriceKgs = Number(batch.wholesalePriceKgs);
       const hqBranchWholesalePriceKgs = Number(batch.hqBranchWholesalePriceKgs);
-      const unitPriceKgs = input.isHqOwnedBranch ? hqBranchWholesalePriceKgs : wholesalePriceKgs;
+      const unitPriceKgs = resolveDistributionUnitPrice(
+        unitCostKgs,
+        wholesalePriceKgs,
+        hqBranchWholesalePriceKgs,
+        input.branchPricing,
+        input.isHqOwnedBranch,
+      );
       const lineCost = unitCostKgs * take;
       const linePrice = unitPriceKgs * take;
 
@@ -253,6 +279,7 @@ export class PricingFifoService {
       warehouseId: string;
       quantity: number;
       isHqOwnedBranch: boolean;
+      branchPricing?: BranchPricingConfig;
       distributionOrderId: string;
       distributionOrderItemId: string;
       userId: string;
@@ -264,6 +291,7 @@ export class PricingFifoService {
       warehouseId: input.warehouseId,
       quantity: input.quantity,
       isHqOwnedBranch: input.isHqOwnedBranch,
+      branchPricing: input.branchPricing,
     });
 
     for (const line of preview.lines) {
@@ -386,6 +414,10 @@ export class PricingFifoService {
       consumedQty > 0 ? Math.round((totalCost / consumedQty + Number.EPSILON) * 100) / 100 : 0;
 
     return { unitCost, consumedQty, totalCost: Math.round((totalCost + Number.EPSILON) * 100) / 100 };
+  }
+
+  isHqBranchType(branchType: BranchType | null | undefined) {
+    return branchType === BranchType.HQ_BRANCH;
   }
 
   isHqOwnedBranch(branchCode: string | null | undefined) {

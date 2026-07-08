@@ -204,6 +204,8 @@ export type BranchPaymentMethod =
   | 'INSTALLMENT'
   | 'BALANCE';
 
+export type BranchType = 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
+
 export type Branch = {
   id: string;
   name: string;
@@ -213,6 +215,8 @@ export type Branch = {
   phone?: string | null;
   ownerName?: string | null;
   status?: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
+  branchType?: BranchType;
+  hqToBranchMarkupPercent?: number;
   openedAt?: string | null;
   assignedHqWarehouseId?: string | null;
   assignedHqWarehouse?: {

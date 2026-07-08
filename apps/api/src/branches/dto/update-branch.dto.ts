@@ -1,4 +1,4 @@
-import { BranchStatus } from '@prisma/client';
+import { BranchStatus, BranchType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { IsDate, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 
@@ -32,6 +32,10 @@ export class UpdateBranchDto {
   @IsOptional()
   @IsEnum(BranchStatus)
   status?: BranchStatus;
+
+  @IsOptional()
+  @IsEnum(BranchType)
+  branchType?: BranchType;
 
   @IsOptional()
   @Type(() => Date)

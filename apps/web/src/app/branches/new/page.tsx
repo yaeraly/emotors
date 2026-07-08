@@ -24,6 +24,7 @@ export default function NewBranchPage() {
     address: '',
     phone: '',
     ownerName: '',
+    branchType: 'FRANCHISE_BRANCH' as 'HQ_BRANCH' | 'FRANCHISE_BRANCH',
     assignedHqWarehouseId: '',
   });
 
@@ -93,6 +94,31 @@ export default function NewBranchPage() {
               />
             </label>
           ))}
+          <label className="block md:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">{t('pricing.colBranchType')}</span>
+            <div className="mt-2 flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="branchType"
+                  value="HQ_BRANCH"
+                  checked={form.branchType === 'HQ_BRANCH'}
+                  onChange={() => setField('branchType', 'HQ_BRANCH')}
+                />
+                {t('pricing.branchTypeHq')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="branchType"
+                  value="FRANCHISE_BRANCH"
+                  checked={form.branchType === 'FRANCHISE_BRANCH'}
+                  onChange={() => setField('branchType', 'FRANCHISE_BRANCH')}
+                />
+                {t('pricing.branchTypeFranchise')}
+              </label>
+            </div>
+          </label>
           {canAssign ? (
             <label className="block md:col-span-2">
               <span className="text-sm font-semibold text-slate-700">{t('branchHqRouting.assignedHqWarehouse')}</span>
