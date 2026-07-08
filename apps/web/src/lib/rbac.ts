@@ -867,7 +867,7 @@ export function isBranchOwnerUser(user: Pick<User, 'role' | 'roles' | 'branchId'
     isHqCashierUser(user) ||
     isBranchSalesManagerUser(user) ||
     isBranchWarehouseOperator(user) ||
-    isBranchMasterUser(user) ||
+    hasRole(user, 'MASTER') ||
     isBranchCashierUser(user) ||
     isBranchAccountantUser(user)
   ) {
@@ -886,7 +886,7 @@ export function isBranchMasterUser(user: Pick<User, 'role' | 'roles' | 'branchId
     isHqCashierUser(user) ||
     isBranchSalesManagerUser(user) ||
     isBranchWarehouseOperator(user) ||
-    isBranchOwnerUser(user) ||
+    hasRole(user, 'FRANCHISE_OWNER') ||
     isBranchCashierUser(user) ||
     isBranchAccountantUser(user)
   ) {
