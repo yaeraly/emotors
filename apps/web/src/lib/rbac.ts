@@ -760,7 +760,6 @@ export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'
   if (hasRole(user, 'ACADEMY_DIRECTOR')) return false;
   return hasAnyRole(user, [
     'HQ_SALES_MANAGER',
-    'SUPPLY_CHAIN_MANAGER',
     'WAREHOUSE_MANAGER',
     'FINANCE_MANAGER',
     'HQ_ACCOUNTANT',
