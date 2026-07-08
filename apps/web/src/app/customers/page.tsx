@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canArchiveCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
 import type { Branch, Customer, CustomerStatus, User } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -70,7 +70,16 @@ const initialCreateState: CreateCustomerState = {
 const pageSizeOptions = [10, 25, 50];
 
 export default function CustomersPage() {
+  return (
+    <Suspense fallback={null}>
+      <CustomersPageContent />
+    </Suspense>
+  );
+}
+
+function CustomersPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useTranslation();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -102,6 +111,24 @@ export default function CustomersPage() {
 
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
+  const branchOwnerView = isBranchOwnerUser(currentUser);
+
+  useEffect(() => {
+    setShowArchived(searchParams.get('archived') === '1');
+  }, [searchParams]);
+
+  function setArchivedView(archived: boolean) {
+    setShowArchived(archived);
+    if (!branchOwnerView) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (archived) {
+      params.set('archived', '1');
+    } else {
+      params.delete('archived');
+    }
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `/customers?${nextQuery}` : '/customers');
+  }
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -453,14 +480,16 @@ export default function CustomersPage() {
                   </option>
                 ))}
               </select>
-              <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={showArchived}
-                  onChange={(event) => setShowArchived(event.target.checked)}
-                />
-                {t('crm.showArchived')}
-              </label>
+              {!branchOwnerView ? (
+                <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={showArchived}
+                    onChange={(event) => setArchivedView(event.target.checked)}
+                  />
+                  {t('crm.showArchived')}
+                </label>
+              ) : null}
               <select
                 value={pageSize}
                 onChange={(event) => setPageSize(Number(event.target.value))}
@@ -496,14 +525,16 @@ export default function CustomersPage() {
                 </option>
               ))}
             </select>
-            <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-              <input
-                type="checkbox"
-                checked={showArchived}
-                onChange={(event) => setShowArchived(event.target.checked)}
-              />
-              {t('crm.showArchived')}
-            </label>
+            {!branchOwnerView ? (
+              <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => setArchivedView(event.target.checked)}
+                />
+                {t('crm.showArchived')}
+              </label>
+            ) : null}
             <select
               value={pageSize}
               onChange={(event) => setPageSize(Number(event.target.value))}

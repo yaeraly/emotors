@@ -12,6 +12,7 @@ import {
   canManageOwnBranchProductRequest,
   canSeeHqStockInBranchRequests,
   canViewBranchPurchaseRequests,
+  isBranchOwnerUser,
   isBranchSalesManagerUser,
   isBranchWarehouseOperator,
   isHqSalesManagerUser,
@@ -287,6 +288,7 @@ export default function BranchPurchaseRequestsPage() {
   const branchOnlyView = !canSeeHqStock;
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const branchWarehouseView = isBranchWarehouseOperator(user);
+  const branchOwnerView = isBranchOwnerUser(user);
   const hqSalesView = isHqSalesManagerUser(user);
 
   if (user && !canView) {
@@ -314,7 +316,7 @@ export default function BranchPurchaseRequestsPage() {
           ) : null}
         </div>
 
-        {!branchSalesManagerView && !branchWarehouseView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
+        {!branchSalesManagerView && !branchWarehouseView && !branchOwnerView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}

@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog, canManageYuanRate, isBranchSalesManagerUser, isBranchWarehouseOperator, isWarehouseManagerUser } from '@/lib/rbac';
+import { canManageProductCatalog, canManageYuanRate, isBranchOwnerUser, isBranchSalesManagerUser, isBranchWarehouseOperator, isWarehouseManagerUser } from '@/lib/rbac';
 import type { InventoryBalance, ProductListResponse, StockValueReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { BranchSalesManagerWarehousePanel } from '@/components/branch-sales-manager/BranchSalesManagerWarehousePanel';
@@ -57,7 +57,7 @@ export default function InventoryPage() {
   const canManageYuan = canManageYuanRate(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchWarehouseOperatorView = isBranchWarehouseOperator(currentUser);
-  const hideWarehouseNav = isWarehouseManagerUser(currentUser) || branchSalesManagerView || branchWarehouseOperatorView;
+  const hideWarehouseNav = isWarehouseManagerUser(currentUser) || branchSalesManagerView || branchWarehouseOperatorView || isBranchOwnerUser(currentUser);
 
   if (branchSalesManagerView) {
     return (

@@ -857,6 +857,25 @@ export function isBranchWarehouseOperator(user: Pick<User, 'role' | 'roles' | 'b
   return hasRole(user, 'WAREHOUSE_OPERATOR');
 }
 
+/** Branch Owner (Branch CEO) = branch-scoped FRANCHISE_OWNER. */
+export function isBranchOwnerUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user?.branchId || hasFullAccess(user)) return false;
+  if (
+    isSupplyChainManagerUser(user) ||
+    isWarehouseManagerUser(user) ||
+    isHqSalesManagerUser(user) ||
+    isHqCashierUser(user) ||
+    isBranchSalesManagerUser(user) ||
+    isBranchWarehouseOperator(user) ||
+    isBranchMasterUser(user) ||
+    isBranchCashierUser(user) ||
+    isBranchAccountantUser(user)
+  ) {
+    return false;
+  }
+  return hasRole(user, 'FRANCHISE_OWNER');
+}
+
 /** Branch Master = branch-scoped MASTER role (service/repair work). */
 export function isBranchMasterUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   if (!user?.branchId || hasFullAccess(user)) return false;
@@ -867,6 +886,7 @@ export function isBranchMasterUser(user: Pick<User, 'role' | 'roles' | 'branchId
     isHqCashierUser(user) ||
     isBranchSalesManagerUser(user) ||
     isBranchWarehouseOperator(user) ||
+    isBranchOwnerUser(user) ||
     isBranchCashierUser(user) ||
     isBranchAccountantUser(user)
   ) {

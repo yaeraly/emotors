@@ -5,7 +5,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, roleCodesForUser } from '@/lib/rbac';
+import { isUnifiedNavModuleActive, sidebarHrefForModule, visibleBranchOwnerSidebarModules } from '@/lib/unified-nav';
+import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -152,6 +154,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const branchCashierView = isBranchCashierUser(user);
   const branchAccountantView = isBranchAccountantUser(user);
   const branchWarehouseOperatorView = isBranchWarehouseOperator(user);
+  const branchOwnerView = isBranchOwnerUser(user);
+  const branchOwnerSidebarModules = visibleBranchOwnerSidebarModules(user);
   const canSeeBranchWarehouses = canViewBranchWarehouses(user);
   const canSeeProductMaster = canViewProductMaster(user);
   const canSeePricing = canViewPricing(user);
@@ -363,6 +367,26 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
                 <Link href="/follow-ups" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.followUps')}</Link>
               </>
+            ) : branchOwnerView ? (
+              <>
+                {branchOwnerSidebarModules.map((module) => {
+                  const active = isUnifiedNavModuleActive(pathname, module);
+                  const href = sidebarHrefForModule(module, user!);
+                  return (
+                    <Link
+                      key={module.id}
+                      href={href}
+                      className={
+                        active
+                          ? 'block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700'
+                          : 'block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                      }
+                    >
+                      {t(module.labelKey)}
+                    </Link>
+                  );
+                })}
+              </>
             ) : (
               <>
             {canSeeCrm ? (
@@ -502,7 +526,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           </nav>
         </aside>
 
-        <main>{children}</main>
+        <main>
+          {branchOwnerView ? <UnifiedModuleTopNav user={user} /> : null}
+          {children}
+        </main>
       </div>
     </div>
   );
