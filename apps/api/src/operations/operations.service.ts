@@ -2290,11 +2290,7 @@ export class OperationsService {
     });
     if (direct) return direct;
 
-    const hqBranch = await this.prisma.branch.findFirst({
-      where: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null },
-      select: { id: true },
-    });
-    if (!hqBranch) throw new NotFoundException('HQ product catalog not found');
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
 
     const catalogProduct = await this.prisma.product.findFirst({
       where: {
@@ -2308,10 +2304,31 @@ export class OperationsService {
       throw new NotFoundException(`Product not found: ${catalogOrBranchProductId}`);
     }
 
-    const existing = await this.prisma.product.findFirst({
-      where: { branchId, sku: catalogProduct.sku, deletedAt: null },
-    });
-    if (existing) return existing;
+    const sku = catalogProduct.sku?.trim();
+    if (sku) {
+      const existingBySku = await this.prisma.product.findFirst({
+        where: { branchId, sku },
+        orderBy: [{ deletedAt: 'asc' }, { updatedAt: 'desc' }],
+      });
+      if (existingBySku) {
+        if (existingBySku.deletedAt || !existingBySku.isActive) {
+          return this.prisma.product.update({
+            where: { id: existingBySku.id },
+            data: {
+              deletedAt: null,
+              isActive: true,
+              name: catalogProduct.name,
+              barcode: catalogProduct.barcode,
+              category: catalogProduct.category,
+              categoryId: catalogProduct.categoryId,
+              unit: catalogProduct.unit,
+              weightKg: catalogProduct.weightKg,
+            },
+          });
+        }
+        return existingBySku;
+      }
+    }
 
     const branchWarehouse = await this.prisma.warehouse.findFirst({
       where: { branchId, warehouseType: 'BRANCH', isActive: true, deletedAt: null },
@@ -2321,32 +2338,54 @@ export class OperationsService {
       throw new BadRequestException('No active branch warehouse found for product provisioning');
     }
 
-    return this.prisma.product.create({
-      data: {
-        branchId,
-        warehouseId: branchWarehouse.id,
-        categoryId: catalogProduct.categoryId,
-        name: catalogProduct.name,
-        sku: catalogProduct.sku,
-        barcode: catalogProduct.barcode,
-        category: catalogProduct.category,
-        unit: catalogProduct.unit,
-        weightKg: catalogProduct.weightKg,
-        purchasePriceYuan: 0,
-        latestYuanRate: 0,
-        purchaseCostKgs: 0,
-        transportCostKgs: 0,
-        finalCostKgs: catalogProduct.wholesalePriceKgs,
-        costPriceKgs: catalogProduct.wholesalePriceKgs,
-        sellingPriceKgs: catalogProduct.sellingPriceKgs,
-        wholesalePriceKgs: catalogProduct.sellingPriceKgs,
-        hqBranchWholesalePriceKgs: catalogProduct.wholesalePriceKgs,
-        recommendedRetailPriceKgs: catalogProduct.recommendedRetailPriceKgs,
-        minimumSellingPriceKgs: catalogProduct.minimumSellingPriceKgs,
-        pricingMode: catalogProduct.pricingMode,
-        isActive: true,
-      },
-    });
+    try {
+      return await this.prisma.product.create({
+        data: {
+          branchId,
+          warehouseId: branchWarehouse.id,
+          categoryId: catalogProduct.categoryId,
+          name: catalogProduct.name,
+          sku: catalogProduct.sku,
+          barcode: catalogProduct.barcode,
+          category: catalogProduct.category,
+          unit: catalogProduct.unit,
+          weightKg: catalogProduct.weightKg,
+          purchasePriceYuan: 0,
+          latestYuanRate: 0,
+          purchaseCostKgs: 0,
+          transportCostKgs: 0,
+          finalCostKgs: catalogProduct.wholesalePriceKgs,
+          costPriceKgs: catalogProduct.wholesalePriceKgs,
+          sellingPriceKgs: catalogProduct.sellingPriceKgs,
+          wholesalePriceKgs: catalogProduct.sellingPriceKgs,
+          hqBranchWholesalePriceKgs: catalogProduct.wholesalePriceKgs,
+          recommendedRetailPriceKgs: catalogProduct.recommendedRetailPriceKgs,
+          minimumSellingPriceKgs: catalogProduct.minimumSellingPriceKgs,
+          pricingMode: catalogProduct.pricingMode,
+          isActive: true,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002' &&
+        sku
+      ) {
+        const raced = await this.prisma.product.findFirst({
+          where: { branchId, sku },
+        });
+        if (raced) {
+          if (raced.deletedAt || !raced.isActive) {
+            return this.prisma.product.update({
+              where: { id: raced.id },
+              data: { deletedAt: null, isActive: true },
+            });
+          }
+          return raced;
+        }
+      }
+      throw error;
+    }
   }
 
   private async getAssignedHqStockMap(warehouseId: string, productIds: string[]) {
