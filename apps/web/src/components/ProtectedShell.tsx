@@ -279,6 +279,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/distribution/orders?status=SHIPPED" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.receiveGoods')}</Link>
                 <Link href="/distribution/receivings" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.orders.receivingHistory')}</Link>
                 <Link href="/stock-movements" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventory.stockMovements')}</Link>
+                <Link href="/service/parts-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.partsRequests')}</Link>
               </>
             ) : branchMasterView ? (
               <>
@@ -289,6 +290,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 ) : null}
                 <Link href="/service" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
                   {t('service.title')}
+                </Link>
+                <Link href="/service/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  KPI
                 </Link>
                 {canSeeInventory ? (
                   <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
@@ -420,6 +424,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeeFinance ? <Link href="/finance" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
               {canSeeTax ? <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('tax.title')}</Link> : null}
               {canSeePayments ? <Link href="/payments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.payments')}</Link> : null}
+              {canSeePayments && !canSeeService ? <Link href="/service/cashier" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Сервис — оплата</Link> : null}
               {canSeeAi ? <Link href="/ai" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('ai.title')}</Link> : null}
               {canSeePayroll ? <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('compensation.rules')}</Link> : null}
               {canSeePayroll ? <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('commissions.title')}</Link> : null}

@@ -376,6 +376,7 @@ const BRANCH_WAREHOUSE_OPERATOR_ALLOWED_PREFIXES = [
   '/stock-movements',
   '/distribution/orders',
   '/distribution/receivings',
+  '/service/parts-requests',
   '/alerts',
   '/notifications',
 ];
@@ -538,6 +539,15 @@ export function canAccessPath(user: User, pathname: string) {
     pathname.startsWith('/warehouses')
   ) {
     return hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view');
+  }
+  if (pathname.startsWith('/service/cashier')) {
+    return hasPermission(user, 'payments.manage');
+  }
+  if (/^\/service\/[^/]+$/.test(pathname) && pathname !== '/service/new') {
+    return hasPermission(user, 'service.manage') || hasPermission(user, 'payments.manage');
+  }
+  if (pathname.startsWith('/service/parts-requests') || pathname.startsWith('/service/kpi')) {
+    return hasPermission(user, 'service.manage') || isBranchWarehouseOperator(user);
   }
   if (pathname.startsWith('/service')) return hasPermission(user, 'service.manage');
   if (pathname.startsWith('/users')) return hasPermission(user, 'users.manage');

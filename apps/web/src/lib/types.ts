@@ -45,9 +45,13 @@ export type CustomerEventType =
 export type FollowUpStatus = 'OPEN' | 'DONE' | 'CANCELLED';
 export type ServiceOrderStatus =
   | 'NEW'
+  | 'DRAFT'
   | 'DIAGNOSIS'
   | 'IN_REPAIR'
+  | 'IN_PROGRESS'
   | 'WAITING_PARTS'
+  | 'READY_FOR_PAYMENT'
+  | 'PAID'
   | 'COMPLETED'
   | 'CANCELLED';
 export type RepairStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
@@ -62,7 +66,8 @@ export type PaymentMethod =
   | 'BANK_TRANSFER'
   | 'MBANK'
   | 'ELCART'
-  | 'BALANCE';
+  | 'BALANCE'
+  | 'MIXED';
 export type InstallmentStatus = 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE';
 export type StockMovementType =
   | 'IN'
@@ -285,21 +290,151 @@ export type ServiceOrder = {
   master?: Pick<User, 'id' | 'fullName' | 'role'>;
   status: ServiceOrderStatus;
   problemDescription: string;
+  vehicle?: string | null;
+  licensePlate?: string | null;
+  mileage?: number | null;
+  complaint?: string | null;
+  repairDescription?: string | null;
   diagnosisResult?: string | null;
   laborCost: number;
   partsCost: number;
   totalAmount: number;
   paidAmount: number;
   debtAmount: number;
+  warrantyDays?: number | null;
   warrantyUntil?: string | null;
+  notes?: string | null;
+  oldPartReturned?: boolean;
+  customerSignature?: string | null;
+  checklistDiagnostics?: boolean;
+  checklistPartsInstalled?: boolean;
+  checklistTestDrive?: boolean;
+  checklistFinalInspection?: boolean;
+  checklistCustomerInformed?: boolean;
   diagnoses?: Diagnosis[];
   repairs?: Repair[];
   parts?: PartsConsumption[];
+  partsRequests?: PartsRequest[];
+  photos?: ServiceOrderPhoto[];
+  payments?: ServiceOrderPayment[];
   warranties?: Warranty[];
+  receipt?: ServiceReceipt;
   createdAt: string;
   updatedAt: string;
   completedAt?: string | null;
   cancelledAt?: string | null;
+  readyForPaymentAt?: string | null;
+  paidAt?: string | null;
+};
+
+export type PartsRequestStatus =
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'ISSUED'
+  | 'PARTIALLY_ISSUED'
+  | 'WAITING_STOCK'
+  | 'REJECTED'
+  | 'PENDING'
+  | 'APPROVED'
+  | 'RELEASED'
+  | 'CANCELLED';
+
+export type PartsRequest = {
+  id: string;
+  requestNumber: string;
+  serviceOrderId: string;
+  branchId: string;
+  status: PartsRequestStatus;
+  note?: string | null;
+  items: PartsRequestItem[];
+  serviceOrder?: ServiceOrder;
+  createdAt: string;
+};
+
+export type PartsRequestItem = {
+  id: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  quantity: number;
+  issuedQuantity: number;
+  unitPrice?: number | null;
+  notes?: string | null;
+};
+
+export type ServiceOrderPhoto = {
+  id: string;
+  type: 'BEFORE' | 'AFTER' | 'DAMAGED_PART';
+  fileName: string;
+  fileUrl: string;
+  mimeType: string;
+  createdAt: string;
+};
+
+export type ServiceOrderPayment = {
+  id: string;
+  amount: number;
+  method: PaymentMethod;
+  paidAt: string;
+  note?: string | null;
+};
+
+export type ServiceReceipt = {
+  orderNumber: string;
+  laborLines: Array<{ description: string; amount: number }>;
+  partsLines: Array<{ description: string; amount: number; quantity: number }>;
+  laborTotal: number;
+  partsTotal: number;
+  total: number;
+  paidAmount: number;
+  debtAmount: number;
+  text: string;
+};
+
+export type ServiceCustomerOption = {
+  id: string;
+  fullName: string;
+  phone: string;
+  customerCode: string;
+  vipStatus: boolean;
+  status: CustomerStatus;
+  outstandingDebt: number;
+  lastVisit?: string | null;
+};
+
+export type ServiceProductOption = {
+  id: string;
+  name: string;
+  sku: string;
+  barcode?: string | null;
+  category?: string | null;
+  unitPrice: number;
+  unit: string;
+};
+
+export type ServiceHistoryEntry = {
+  id: string;
+  date: string;
+  vehicle?: string | null;
+  licensePlate?: string | null;
+  complaint?: string | null;
+  diagnosis?: string | null;
+  repair?: string | null;
+  partsUsed: Array<{ name?: string; quantity: number; totalPrice: number }>;
+  laborCost: number;
+  total: number;
+  warrantyUntil?: string | null;
+  warrantyStatus: WarrantyStatus;
+};
+
+export type MasterKpi = {
+  masterId: string;
+  completedRepairs: number;
+  laborRevenue: number;
+  averageRepairTimeHours: number;
+  warrantyReturns: number;
+  partsUsed: number;
+  customerRating: number | null;
 };
 
 export type Diagnosis = {
