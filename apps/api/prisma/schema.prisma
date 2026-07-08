@@ -155,6 +155,7 @@ enum BranchPurchaseRequestStatus {
   SUBMITTED_TO_HQ
   REVIEWED_BY_HQ_SALES
   APPROVED
+  PARTIALLY_APPROVED
   REJECTED
   CONVERTED_TO_DISTRIBUTION_ORDER
   SENT_TO_HQ_WAREHOUSE
@@ -162,6 +163,14 @@ enum BranchPurchaseRequestStatus {
   RECEIVED
   RECEIVED_WITH_DIFFERENCE
   COMPLETED
+  CANCELLED
+}
+
+enum BranchRequestShortageStatus {
+  OPEN
+  WAITING_STOCK
+  PARTIALLY_FULFILLED
+  FULFILLED
   CANCELLED
 }
 
@@ -661,6 +670,7 @@ model Branch {
   assignedHqWarehouseId String?
   assignedHqWarehouse   Warehouse? @relation("BranchAssignedHqWarehouse", fields: [assignedHqWarehouseId], references: [id])
   branchPurchaseRequests BranchPurchaseRequest[]
+  branchRequestShortages BranchRequestShortage[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -754,6 +764,7 @@ model User {
   pricingChangeHistory ProductPricingChangeHistory[] @relation("PricingChangeHistoryChanger")
   createdBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestCreator")
   reviewedBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestReviewer")
+  reviewedBranchRequestShortages BranchRequestShortage[] @relation("BranchRequestShortageReviewer")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1074,6 +1085,7 @@ model Warehouse {
   hqManagerAssignments HqWarehouseManagerAssignment[]
   assignedBranches Branch[] @relation("BranchAssignedHqWarehouse")
   assignedBranchRequests BranchPurchaseRequest[] @relation("BranchRequestAssignedHqWarehouse")
+  branchRequestShortages BranchRequestShortage[] @relation("BranchRequestShortageWarehouse")
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -1158,6 +1170,7 @@ model Product {
   fifoBatches       FifoInventoryBatch[]
   saleFifoAllocations SaleFifoAllocation[]
   distributionFifoAllocations DistributionFifoAllocation[]
+  branchRequestShortages BranchRequestShortage[]
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
@@ -3164,6 +3177,7 @@ model BranchPurchaseRequest {
   totalQuantity      Int      @default(0)
   totalEstimatedAmount Decimal @default(0) @db.Decimal(14, 2)
   items              BranchPurchaseRequestItem[]
+  shortages          BranchRequestShortage[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   deletedAt          DateTime?
@@ -3194,11 +3208,45 @@ model BranchPurchaseRequestItem {
   totalAmount               Decimal  @default(0) @db.Decimal(14, 2)
   weightKg                  Decimal  @default(0) @db.Decimal(14, 3)
   note                      String?
+  shortages                 BranchRequestShortage[]
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
   @@index([requestId])
   @@index([productId])
+}
+
+model BranchRequestShortage {
+  id                      String                    @id @default(cuid())
+  branchRequestId         String
+  branchRequest           BranchPurchaseRequest     @relation(fields: [branchRequestId], references: [id])
+  branchRequestItemId     String?
+  branchRequestItem       BranchPurchaseRequestItem? @relation(fields: [branchRequestItemId], references: [id])
+  branchId                String
+  branch                  Branch                    @relation(fields: [branchId], references: [id])
+  productId               String
+  product                 Product                   @relation(fields: [productId], references: [id])
+  requestedQty            Int
+  availableQty            Int
+  approvedQty             Int
+  missingQty              Int
+  assignedHqWarehouseId   String
+  assignedHqWarehouse     Warehouse                 @relation("BranchRequestShortageWarehouse", fields: [assignedHqWarehouseId], references: [id])
+  status                  BranchRequestShortageStatus @default(OPEN)
+  procurementOrderId      String?
+  reviewedAt              DateTime?
+  reviewedById            String?
+  reviewedBy              User?                     @relation("BranchRequestShortageReviewer", fields: [reviewedById], references: [id])
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+
+  @@index([branchRequestId])
+  @@index([branchRequestItemId])
+  @@index([branchId])
+  @@index([productId])
+  @@index([assignedHqWarehouseId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model ReplacementShipment {

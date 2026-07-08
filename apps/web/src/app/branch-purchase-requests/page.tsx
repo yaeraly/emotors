@@ -10,6 +10,7 @@ import { apiFetch } from '@/lib/api';
 import {
   canManageBranchPurchaseRequests,
   canManageOwnBranchProductRequest,
+  canSeeHqStockInBranchRequests,
   canViewBranchPurchaseRequests,
   isBranchSalesManagerUser,
   isBranchWarehouseOperator,
@@ -49,6 +50,8 @@ type BranchPurchaseRequest = {
     assignedHqWarehouse?: { id: string; name: string; code?: string } | null;
   };
   status: string;
+  branchDisplayStatus?: string;
+  partialFulfillmentMessage?: string | null;
   note?: string | null;
   transportCompany?: string | null;
   transportCostKgs?: number;
@@ -72,7 +75,7 @@ type DraftLine = {
   unit: string;
   weightKg: number;
   wholesalePriceKgs: number;
-  branchStock: number;
+  branchStock: number | null;
   hqStock: number | null;
   quantity: string;
   note: string;
@@ -96,6 +99,17 @@ function emptyLine(): DraftLine {
 
 function isSubmittedStatus(status: string) {
   return status === 'SUBMITTED' || status === 'SUBMITTED_TO_HQ';
+}
+
+function resolveRequestStatusLabel(
+  t: (key: string) => string,
+  request: Pick<BranchPurchaseRequest, 'status' | 'branchDisplayStatus'>,
+  branchOnly: boolean,
+) {
+  if (branchOnly && request.branchDisplayStatus) {
+    return translateStatus(t, request.branchDisplayStatus, 'branchRequest');
+  }
+  return translateStatus(t, request.status);
 }
 
 export default function BranchPurchaseRequestsPage() {
@@ -164,7 +178,7 @@ export default function BranchPurchaseRequestsPage() {
         unit: product.unit,
         weightKg: product.weightKg,
         wholesalePriceKgs: product.wholesalePriceKgs,
-        branchStock: product.branchStock,
+        branchStock: product.branchStock ?? 0,
         hqStock: product.hqStock,
         quantity: '1',
         note: '',
@@ -245,11 +259,11 @@ export default function BranchPurchaseRequestsPage() {
     }
   }
 
-  async function review(id: string, action: 'approve' | 'reject') {
+  async function review(id: string, action: 'reject') {
     setError('');
     try {
       await apiFetch(`/branch-purchase-requests/${id}/${action}`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(action === 'approve' ? t('distribution.orderApproved') : t('distribution.orderRejected'));
+      setSuccess(t('distribution.orderRejected'));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -281,6 +295,8 @@ export default function BranchPurchaseRequestsPage() {
   const canManage = canManageBranchPurchaseRequests(user);
   const canCreate = canManageOwnBranchProductRequest(user);
   const canView = canViewBranchPurchaseRequests(user);
+  const canSeeHqStock = canSeeHqStockInBranchRequests(user);
+  const branchOnlyView = !canSeeHqStock;
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const branchWarehouseView = isBranchWarehouseOperator(user);
   const hqSalesView = isHqSalesManagerUser(user);
@@ -355,6 +371,7 @@ export default function BranchPurchaseRequestsPage() {
             <BranchProductSearch
               inputRef={productSearchRef}
               branchWarehouseId={form.branchWarehouseId}
+              showStock={canSeeHqStock}
               onSelect={addProductFromSearch}
             />
 
@@ -365,7 +382,7 @@ export default function BranchPurchaseRequestsPage() {
                     <th className="px-3 py-2">{t('sales.product')}</th>
                     <th className="px-3 py-2">{t('distribution.quantity')}</th>
                     <th className="px-3 py-2">{t('branchProductRequest.unit')}</th>
-                    <th className="px-3 py-2">{t('branchProductRequest.branchStock')}</th>
+                    {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.branchStock')}</th> : null}
                     <th className="px-3 py-2">{t('branchProductRequest.wholesalePrice')}</th>
                     <th className="px-3 py-2">{t('crm.notes')}</th>
                     <th className="px-3 py-2" />
@@ -399,7 +416,7 @@ export default function BranchPurchaseRequestsPage() {
                         />
                       </td>
                       <td className="px-3 py-2">{line.unit}</td>
-                      <td className="px-3 py-2">{line.branchStock}</td>
+                      {!branchOnlyView ? <td className="px-3 py-2">{line.branchStock}</td> : null}
                       <td className="px-3 py-2">{line.wholesalePriceKgs.toFixed(2)}</td>
                       <td className="px-3 py-2">
                         <input
@@ -506,7 +523,7 @@ export default function BranchPurchaseRequestsPage() {
                         '—'}
                     </td>
                   ) : null}
-                  <td className="px-4 py-3">{translateStatus(t, request.status)}</td>
+                  <td className="px-4 py-3">{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
                   <td className="px-4 py-3">{request.items.length}</td>
                   {hqSalesView ? (
                     <>
@@ -531,11 +548,13 @@ export default function BranchPurchaseRequestsPage() {
                       ) : null}
                       {canManage && isSubmittedStatus(request.status) ? (
                         <>
-                          <button type="button" onClick={() => void review(request.id, 'approve')} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">{t('distribution.approve')}</button>
+                          <Link href={`/branch-purchase-requests/${request.id}`} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+                            {t('branchProductRequest.reviewRequest')}
+                          </Link>
                           <button type="button" onClick={() => void review(request.id, 'reject')} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('distribution.reject')}</button>
                         </>
                       ) : null}
-                      {canManage && (request.status === 'APPROVED' || request.status === 'CONFIRMED') ? (
+                      {canManage && (request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED' || request.status === 'CONFIRMED') ? (
                         <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('branchHqRouting.sendToWarehouseManager')}</button>
                       ) : null}
                       {request.convertedOrderId && !branchSalesManagerView ? (

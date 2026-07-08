@@ -83,6 +83,35 @@ export class OperationsController {
     return this.service.reviewBranchPurchaseRequest(user, id, BranchPurchaseRequestStatus.REJECTED);
   }
 
+  @Get('branch-product-shortages')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  branchProductShortages(
+    @CurrentUser() user: AuthUser,
+    @Query('branchId') branchId?: string,
+    @Query('productId') productId?: string,
+    @Query('assignedHqWarehouseId') assignedHqWarehouseId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.service.branchProductShortages(user, {
+      branchId,
+      productId,
+      assignedHqWarehouseId,
+      ...(status ? { status: status as any } : {}),
+    });
+  }
+
+  @Post('branch-product-shortages/:id/review')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  reviewBranchProductShortage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.reviewBranchProductShortage(user, id, dto);
+  }
+
+  @Post('branch-product-shortages/:id/link-procurement')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  linkBranchShortageToProcurement(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.linkBranchShortageToProcurement(user, id, dto);
+  }
+
   @Post('branch-purchase-requests/:id/send-to-hq-warehouse')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
   sendBranchRequestToHqWarehouse(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {

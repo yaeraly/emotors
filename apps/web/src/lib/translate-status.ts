@@ -5,6 +5,8 @@ export type StatusDomain =
   | 'warehouse'
   | 'employee'
   | 'branch'
+  | 'branchRequest'
+  | 'branchShortage'
   | 'service'
   | 'inventory'
   | 'general';

@@ -508,6 +508,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/branch-purchase-requests')) {
     return canViewBranchPurchaseRequests(user);
   }
+  if (pathname.startsWith('/branch-product-shortages')) {
+    return canViewBranchProductShortages(user);
+  }
   if (pathname.startsWith('/reservations')) return hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/warehouse-release')) return hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/returns')) return hasPermission(user, 'sales.manage') || hasPermission(user, 'payments.manage');
@@ -975,6 +978,16 @@ export function canViewBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' 
   if (hasFullAccess(user)) return true;
   if (canManageBranchPurchaseRequests(user)) return true;
   return hasAnyRole(user, ['MANAGER', 'FRANCHISE_OWNER', 'WAREHOUSE_OPERATOR', 'ACCOUNTANT', 'CASHIER', 'MASTER']);
+}
+
+export function canSeeHqStockInBranchRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || canManageBranchPurchaseRequests(user);
+}
+
+export function canViewBranchProductShortages(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'SYSTEM_ADMINISTRATOR');
 }
 
 export function canDispatchFromHq(user: Pick<User, 'role' | 'roles'> | null | undefined) {

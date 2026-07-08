@@ -15,20 +15,27 @@ export type BranchProductOption = {
   unit: string;
   weightKg: number;
   wholesalePriceKgs: number;
-  branchStock: number;
+  branchStock: number | null;
   hqStock: number | null;
 };
 
 type Props = {
   disabled?: boolean;
   branchWarehouseId?: string;
+  showStock?: boolean;
   onSelect: (product: BranchProductOption) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
 };
 
 const DEBOUNCE_MS = 200;
 
-export function BranchProductSearch({ disabled = false, branchWarehouseId, onSelect, inputRef }: Props) {
+export function BranchProductSearch({
+  disabled = false,
+  branchWarehouseId,
+  showStock = false,
+  onSelect,
+  inputRef,
+}: Props) {
   const { t } = useTranslation();
   const listboxId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -181,16 +188,15 @@ export function BranchProductSearch({ disabled = false, branchWarehouseId, onSel
                 <p className="mt-1 text-xs text-slate-500">
                   {t('branchProductRequest.productSearch.sku')}: {product.sku}
                   {product.category ? ` · ${product.category}` : ''}
+                  {product.productCode ? ` · ${product.productCode}` : ''}
                 </p>
                 <p className="mt-1 text-xs text-slate-600">
-                  {t('branchProductRequest.productSearch.branchStock')}: {product.branchStock} {product.unit}
-                  {product.hqStock !== null ? (
+                  {showStock && product.hqStock !== null ? (
                     <>
-                      {' · '}
                       {t('branchProductRequest.productSearch.hqStock')}: {product.hqStock} {product.unit}
+                      {' · '}
                     </>
                   ) : null}
-                  {' · '}
                   {t('branchProductRequest.productSearch.wholesalePrice')}: {Number(product.wholesalePriceKgs).toFixed(2)} KGS
                 </p>
               </button>
