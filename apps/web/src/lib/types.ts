@@ -675,6 +675,8 @@ export type GoodsReceivingItem = {
   differenceQuantity: number;
   unitCost: number | string;
   unitPrice: number | string;
+  transportExpenseAllocation?: number | string;
+  transportCostPerUnit?: number | string;
   note?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -694,6 +696,12 @@ export type GoodsReceiving = {
   receivedBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   receivedAt: string;
   note?: string | null;
+  transportCompany?: string | null;
+  transportCostKgs?: number;
+  driverName?: string | null;
+  vehicleNumber?: string | null;
+  arrivalDate?: string | null;
+  transportNotes?: string | null;
   items?: GoodsReceivingItem[];
   shortageReport?: ShortageReport | null;
   branchInvoice?: BranchInvoice | null;

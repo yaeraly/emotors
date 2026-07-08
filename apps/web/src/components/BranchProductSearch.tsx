@@ -7,6 +7,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 export type BranchProductOption = {
   id: string;
+  catalogProductId?: string;
   name: string;
   sku: string;
   barcode?: string | null;

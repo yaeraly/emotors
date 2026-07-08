@@ -127,12 +127,6 @@ export default function BranchPurchaseRequestsPage() {
     branchId: '',
     branchWarehouseId: '',
     note: '',
-    transportCompany: '',
-    transportCostKgs: '0',
-    driverName: '',
-    vehicleNumber: '',
-    dispatchDate: '',
-    transportNotes: '',
   });
   async function load() {
     const [list, me, branchList, bwList] = await Promise.all([
@@ -204,12 +198,6 @@ export default function BranchPurchaseRequestsPage() {
       branchWarehouseId: form.branchWarehouseId,
       note: form.note,
       status: asDraft ? 'DRAFT' : 'SUBMITTED_TO_HQ',
-      transportCompany: form.transportCompany || undefined,
-      transportCostKgs: Number(form.transportCostKgs || 0),
-      driverName: form.driverName || undefined,
-      vehicleNumber: form.vehicleNumber || undefined,
-      dispatchDate: form.dispatchDate || undefined,
-      transportNotes: form.transportNotes || undefined,
       items: validLines.map((line) => ({
         productId: line.productId,
         quantity: Number(line.quantity),
@@ -449,37 +437,10 @@ export default function BranchPurchaseRequestsPage() {
               {t('branchProductRequest.addRow')}
             </button>
 
-            <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
-              <p className="md:col-span-2 text-sm font-bold text-slate-800">{t('branchProductRequest.transportSection')}</p>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
-                <input value={form.transportCompany} onChange={(e) => setForm({ ...form, transportCompany: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCostKgs')}</span>
-                <input type="number" min="0" step="0.01" value={form.transportCostKgs} onChange={(e) => setForm({ ...form, transportCostKgs: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
-                <input value={form.driverName} onChange={(e) => setForm({ ...form, driverName: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.vehicleNumber')}</span>
-                <input value={form.vehicleNumber} onChange={(e) => setForm({ ...form, vehicleNumber: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.dispatchDate')}</span>
-                <input type="date" value={form.dispatchDate} onChange={(e) => setForm({ ...form, dispatchDate: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-              </label>
-              <label className="block md:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
-                <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={2} />
-              </label>
-              <label className="block md:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportNotes')}</span>
-                <textarea value={form.transportNotes} onChange={(e) => setForm({ ...form, transportNotes: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={2} />
-              </label>
-            </div>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
+              <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={2} />
+            </label>
 
             <div className="flex flex-wrap gap-2">
               <button type="submit" className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('distribution.submitOrder')}</button>

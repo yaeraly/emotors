@@ -1,0 +1,9 @@
+ALTER TABLE "GoodsReceiving" ADD COLUMN IF NOT EXISTS "transportCompany" TEXT;
+ALTER TABLE "GoodsReceiving" ADD COLUMN IF NOT EXISTS "transportCostKgs" DECIMAL(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE "GoodsReceiving" ADD COLUMN IF NOT EXISTS "driverName" TEXT;
+ALTER TABLE "GoodsReceiving" ADD COLUMN IF NOT EXISTS "vehicleNumber" TEXT;
+ALTER TABLE "GoodsReceiving" ADD COLUMN IF NOT EXISTS "arrivalDate" TIMESTAMP(3);
+ALTER TABLE "GoodsReceiving" ADD COLUMN IF NOT EXISTS "transportNotes" TEXT;
+
+ALTER TABLE "GoodsReceivingItem" ADD COLUMN IF NOT EXISTS "transportExpenseAllocation" DECIMAL(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE "GoodsReceivingItem" ADD COLUMN IF NOT EXISTS "transportCostPerUnit" DECIMAL(14,2) NOT NULL DEFAULT 0;

@@ -354,21 +354,6 @@ export default function BranchPurchaseRequestDetailPage() {
           </table>
         </div>
 
-        {(request.transportCompany || Number(request.transportCostKgs) > 0) && canCreate ? (
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">{t('branchProductRequest.transportSection')}</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <p><span className="font-semibold">{t('branchProductRequest.transportCompany')}:</span> {request.transportCompany ?? '-'}</p>
-              <p><span className="font-semibold">{t('branchProductRequest.transportCostKgs')}:</span> {Number(request.transportCostKgs ?? 0).toFixed(2)}</p>
-              <p><span className="font-semibold">{t('branchProductRequest.driverName')}:</span> {request.driverName ?? '-'}</p>
-              <p><span className="font-semibold">{t('branchProductRequest.vehicleNumber')}:</span> {request.vehicleNumber ?? '-'}</p>
-              <p><span className="font-semibold">{t('branchProductRequest.dispatchDate')}:</span> {request.dispatchDate ? new Date(request.dispatchDate).toLocaleDateString() : '-'}</p>
-              {request.transportNotes ? (
-                <p className="md:col-span-2"><span className="font-semibold">{t('branchProductRequest.transportNotes')}:</span> {request.transportNotes}</p>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
       </section>
     </ProtectedShell>
   );

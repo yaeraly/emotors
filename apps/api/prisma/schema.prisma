@@ -2363,6 +2363,12 @@ model GoodsReceiving {
   receivedBy          User                       @relation("GoodsReceivingReceiver", fields: [receivedById], references: [id])
   receivedAt          DateTime                   @default(now())
   note                String?
+  transportCompany    String?
+  transportCostKgs    Decimal                    @default(0) @db.Decimal(14, 2)
+  driverName          String?
+  vehicleNumber       String?
+  arrivalDate         DateTime?
+  transportNotes      String?
   items               GoodsReceivingItem[]
   shortageReport      ShortageReport?
   branchInvoice       BranchInvoice?
@@ -2392,6 +2398,8 @@ model GoodsReceivingItem {
   differenceQuantity      Int
   unitCost                Decimal                     @db.Decimal(14, 2)
   unitPrice               Decimal                     @db.Decimal(14, 2)
+  transportExpenseAllocation Decimal                  @default(0) @db.Decimal(14, 2)
+  transportCostPerUnit    Decimal                     @default(0) @db.Decimal(14, 2)
   note                    String?
   createdAt               DateTime                    @default(now())
   updatedAt               DateTime                    @updatedAt

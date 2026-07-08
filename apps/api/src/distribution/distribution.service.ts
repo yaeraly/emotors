@@ -46,6 +46,7 @@ import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
 import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
+import { allocateBranchReceivingTransportCost } from './branch-receiving-transport.util';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 
@@ -690,6 +691,26 @@ export class DistributionService {
         }
       }
 
+      const transportCostKgs = Math.max(Number(dto.transportCostKgs ?? 0), 0);
+      const transportLines = [];
+      for (const orderItem of order.items) {
+        const received = receivedMap.get(orderItem.id)!;
+        const receivedQuantity = Number(received.receivedQuantity);
+        if (receivedQuantity <= 0) continue;
+        const product = await tx.product.findFirst({
+          where: { id: orderItem.productId, deletedAt: null },
+          select: { weightKg: true },
+        });
+        transportLines.push({
+          productId: orderItem.productId,
+          receivedQuantity,
+          weightKg: Number(product?.weightKg ?? 0),
+          unitCostKgs: Number(orderItem.unitCost),
+        });
+      }
+      const transportAllocations = allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
+      const transportByProductId = new Map(transportAllocations.map((row) => [row.productId, row]));
+
       const receiving = await tx.goodsReceiving.create({
         data: {
           receivingNumber: await this.generateReceivingNumber(tx),
@@ -699,6 +720,12 @@ export class DistributionService {
           receivedById: user.id,
           receivedAt: new Date(),
           note: dto.note,
+          transportCompany: dto.transportCompany,
+          transportCostKgs,
+          driverName: dto.driverName,
+          vehicleNumber: dto.vehicleNumber,
+          arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date(),
+          transportNotes: dto.transportNotes,
         },
       });
 
@@ -710,6 +737,8 @@ export class DistributionService {
         const receivedQuantity = Number(received.receivedQuantity);
         const sentQuantity = Number(orderItem.quantity);
         const difference = receivedQuantity - sentQuantity;
+        const transportCost = transportByProductId.get(orderItem.productId);
+        const unitCostWithTransport = transportCost?.finalUnitCostKgs ?? Number(orderItem.unitCost);
 
         if (receivedQuantity > 0) {
           await this.inventoryService.createStockMovementInTx(tx, user, {
@@ -717,7 +746,7 @@ export class DistributionService {
             warehouseId: warehouse.id,
             type: StockMovementType.IN,
             quantity: receivedQuantity,
-            unitCostKgs: Number(orderItem.unitCost),
+            unitCostKgs: unitCostWithTransport,
             referenceType: 'GOODS_RECEIVING',
             referenceId: receiving.id,
             note: `Receiving ${receiving.receivingNumber}`,
@@ -733,8 +762,10 @@ export class DistributionService {
           sentQuantity,
           receivedQuantity,
           differenceQuantity: difference,
-          unitCost: orderItem.unitCost,
+          unitCost: unitCostWithTransport,
           unitPrice: orderItem.unitPrice,
+          transportExpenseAllocation: transportCost?.transportExpenseAllocation ?? 0,
+          transportCostPerUnit: transportCost?.transportCostPerUnit ?? 0,
           note: received.note,
         });
 
@@ -824,6 +855,12 @@ export class DistributionService {
       }
       await this.auditTransfer(tx, user, 'BRANCH_RECEIVED_GOODS', order);
       await this.auditTransfer(tx, user, 'GOODS_RECEIVED', order);
+      if (transportCostKgs > 0) {
+        await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_TRANSPORT_ALLOCATED', order, {
+          transportCostKgs,
+          allocations: transportAllocations,
+        });
+      }
 
       return {
         receiving: await this.receivingInTx(tx, user, receiving.id),
@@ -1194,6 +1231,7 @@ export class DistributionService {
     user: AuthUser,
     action: string,
     order: { id: string; orderNumber: string; sourceWarehouseId: string },
+    extra?: Record<string, unknown>,
   ) {
     return tx.auditLog.create({
       data: {
@@ -1206,6 +1244,7 @@ export class DistributionService {
           warehouseId: order.sourceWarehouseId,
           orderNumber: order.orderNumber,
           roles: user.roles ?? [user.role],
+          ...extra,
         },
       },
     });

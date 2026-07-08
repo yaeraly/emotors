@@ -47,7 +47,6 @@ import { buildProcurementLandedCostInputs } from '../procurement/transport-logis
 import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import {
-  allocateBranchRequestTransportCost,
   isSubmittedBranchPurchaseStatus,
 } from './branch-product-request.util';
 import {
@@ -129,7 +128,7 @@ export class OperationsService {
     return sanitizeBranchPurchaseRequest(enriched, hideSensitive);
   }
 
-  async branchProductOptions(user: AuthUser, search?: string, branchWarehouseId?: string) {
+  async branchProductOptions(user: AuthUser, search?: string, branchWarehouseId?: string, includeStock?: string) {
     if (!canManageOwnBranchProductRequest(user) && !this.canViewAllBranchPurchaseRequests(user)) {
       throw new ForbiddenException('Forbidden resource');
     }
@@ -138,8 +137,12 @@ export class OperationsService {
       throw new ForbiddenException('Branch context required');
     }
 
-    const canSeeHqStock = canSeeHqStockInBranchRequests(user, this.canViewAllBranchPurchaseRequests(user));
-    const isBranchOnly = isBranchOnlyRequestUser(user, this.canViewAllBranchPurchaseRequests(user));
+    const canViewAll = this.canViewAllBranchPurchaseRequests(user);
+    const canSeeHqStock = canSeeHqStockInBranchRequests(user, canViewAll);
+    const isBranchOnly = isBranchOnlyRequestUser(user, canViewAll);
+    if (isBranchOnly && includeStock) {
+      throw new ForbiddenException('Branch users cannot access HQ stock details');
+    }
     if (isBranchOnly && branchId) {
       await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_SEARCH_OPENED', 'BranchPurchaseRequest', 'search');
       await this.auditBranchRequest(user, branchId, 'BRANCH_STOCK_VISIBILITY_BLOCKED', 'BranchPurchaseRequest', 'search');
@@ -177,20 +180,13 @@ export class OperationsService {
     });
 
     const skuList = catalogProducts.map((product) => product.sku);
-    const branchProducts = branchId
-      ? await this.prisma.product.findMany({
-          where: { branchId, deletedAt: null, isActive: true, sku: { in: skuList } },
-        })
-      : [];
-    const branchProductBySku = new Map(branchProducts.map((product) => [product.sku, product]));
-
     const assignedHqWarehouseId = branchId ? await this.getBranchAssignedHqWarehouseId(branchId) : null;
     const hqStockBySku = new Map<string, number>();
     if (canSeeHqStock && skuList.length && assignedHqWarehouseId) {
       const hqBalances = await this.prisma.inventoryBalance.findMany({
         where: {
           warehouseId: assignedHqWarehouseId,
-          product: { sku: { in: skuList }, deletedAt: null },
+          product: { sku: { in: skuList }, deletedAt: null, branchId: hqBranch.id },
         },
         select: { quantity: true, reservedQuantity: true, product: { select: { sku: true } } },
       });
@@ -200,25 +196,20 @@ export class OperationsService {
       }
     }
 
-    return catalogProducts
-      .map((catalogProduct) => {
-        const branchProduct = branchProductBySku.get(catalogProduct.sku);
-        if (branchId && !branchProduct) return null;
-        return {
-          id: branchProduct?.id ?? catalogProduct.id,
-          name: catalogProduct.name,
-          sku: catalogProduct.sku,
-          barcode: catalogProduct.barcode,
-          category: catalogProduct.category,
-          productCode: catalogProduct.productCategory?.code ?? null,
-          unit: catalogProduct.unit,
-          weightKg: Number(branchProduct?.weightKg ?? catalogProduct.weightKg),
-          wholesalePriceKgs: Number(branchProduct?.sellingPriceKgs ?? catalogProduct.wholesalePriceKgs),
-          branchStock: null,
-          hqStock: canSeeHqStock ? (hqStockBySku.get(catalogProduct.sku) ?? 0) : null,
-        };
-      })
-      .filter((row): row is NonNullable<typeof row> => Boolean(row));
+    return catalogProducts.map((catalogProduct) => ({
+      id: catalogProduct.id,
+      catalogProductId: catalogProduct.id,
+      name: catalogProduct.name,
+      sku: catalogProduct.sku,
+      barcode: catalogProduct.barcode,
+      category: catalogProduct.category,
+      productCode: catalogProduct.productCategory?.code ?? null,
+      unit: catalogProduct.unit,
+      weightKg: Number(catalogProduct.weightKg),
+      wholesalePriceKgs: Number(catalogProduct.wholesalePriceKgs ?? catalogProduct.sellingPriceKgs),
+      branchStock: null,
+      hqStock: canSeeHqStock ? (hqStockBySku.get(catalogProduct.sku) ?? 0) : null,
+    }));
   }
 
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
@@ -231,8 +222,7 @@ export class OperationsService {
       throw new BadRequestException(MANUAL_HQ_WAREHOUSE_SELECTION_FORBIDDEN);
     }
     const branchWarehouseId = dto.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(branchId));
-    const transportCostKgs = Number(dto.transportCostKgs ?? 0);
-    const resolvedItems = await this.resolveBranchPurchaseItems(branchId, branchWarehouseId, dto.items ?? [], transportCostKgs);
+    const resolvedItems = await this.resolveBranchPurchaseItems(branchId, branchWarehouseId, dto.items ?? []);
     const status =
       dto.status === BranchPurchaseRequestStatus.DRAFT
         ? BranchPurchaseRequestStatus.DRAFT
@@ -253,12 +243,12 @@ export class OperationsService {
         status,
         createdById: user.id,
         note: dto.note,
-        transportCompany: dto.transportCompany,
-        transportCostKgs,
-        driverName: dto.driverName,
-        vehicleNumber: dto.vehicleNumber,
-        dispatchDate: dto.dispatchDate ? new Date(dto.dispatchDate) : undefined,
-        transportNotes: dto.transportNotes,
+        transportCompany: null,
+        transportCostKgs: 0,
+        driverName: null,
+        vehicleNumber: null,
+        dispatchDate: undefined,
+        transportNotes: null,
         totalQuantity,
         totalEstimatedAmount,
         items: { create: resolvedItems },
@@ -268,17 +258,6 @@ export class OperationsService {
 
     await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
     await this.auditBranchRequest(user, branchId, 'BRANCH_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
-    if (transportCostKgs > 0) {
-      await this.auditBranchRequest(user, branchId, 'TRANSPORT_COST_ADDED', 'BranchPurchaseRequest', request.id, {
-        transportCostKgs,
-      });
-      await this.auditBranchRequest(user, branchId, 'TRANSPORT_COST_ALLOCATED', 'BranchPurchaseRequest', request.id, {
-        items: request.items.map((item) => ({
-          productId: item.productId,
-          transportExpenseAllocation: Number(item.transportExpenseAllocation),
-        })),
-      });
-    }
     for (const item of request.items) {
       await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_ITEM_ADDED', 'BranchPurchaseRequest', request.id, {
         productId: item.productId,
@@ -327,9 +306,8 @@ export class OperationsService {
     }
 
     const branchWarehouseId = dto.branchWarehouseId ?? existing.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(existing.branchId));
-    const transportCostKgs = dto.transportCostKgs !== undefined ? Number(dto.transportCostKgs) : Number(existing.transportCostKgs);
     const resolvedItems = dto.items
-      ? await this.resolveBranchPurchaseItems(existing.branchId, branchWarehouseId, dto.items, transportCostKgs)
+      ? await this.resolveBranchPurchaseItems(existing.branchId, branchWarehouseId, dto.items)
       : undefined;
     const totalQuantity = resolvedItems?.reduce((sum, item) => sum + item.quantity, 0);
     const totalEstimatedAmount = resolvedItems?.reduce((sum, item) => sum + Number(item.totalAmount), 0);
@@ -339,12 +317,12 @@ export class OperationsService {
       data: {
         note: dto.note ?? existing.note,
         branchWarehouseId,
-        transportCompany: dto.transportCompany ?? existing.transportCompany,
-        transportCostKgs,
-        driverName: dto.driverName ?? existing.driverName,
-        vehicleNumber: dto.vehicleNumber ?? existing.vehicleNumber,
-        dispatchDate: dto.dispatchDate ? new Date(dto.dispatchDate) : existing.dispatchDate,
-        transportNotes: dto.transportNotes ?? existing.transportNotes,
+        transportCompany: null,
+        transportCostKgs: 0,
+        driverName: null,
+        vehicleNumber: null,
+        dispatchDate: null,
+        transportNotes: null,
         ...(resolvedItems
           ? {
               totalQuantity,
@@ -360,18 +338,6 @@ export class OperationsService {
     });
 
     await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_UPDATED', 'BranchPurchaseRequest', id);
-    if (dto.transportCostKgs !== undefined && transportCostKgs > 0) {
-      await this.auditBranchRequest(user, updated.branchId, 'TRANSPORT_COST_ADDED', 'BranchPurchaseRequest', id, {
-        oldValue: Number(existing.transportCostKgs),
-        newValue: transportCostKgs,
-      });
-      await this.auditBranchRequest(user, updated.branchId, 'TRANSPORT_COST_ALLOCATED', 'BranchPurchaseRequest', id, {
-        items: updated.items.map((item) => ({
-          productId: item.productId,
-          transportExpenseAllocation: Number(item.transportExpenseAllocation),
-        })),
-      });
-    }
     return updated;
   }
 
@@ -2283,16 +2249,16 @@ export class OperationsService {
     branchId: string,
     branchWarehouseId: string | null,
     items: any[],
-    transportCostKgs: number,
   ) {
     if (!items.length) throw new BadRequestException('At least one product line is required');
 
-    const productIds = items.map((item) => item.productId);
-    const products = await this.prisma.product.findMany({
-      where: { id: { in: productIds }, branchId, deletedAt: null },
-    });
-    const productMap = new Map(products.map((product) => [product.id, product]));
+    const resolvedProducts = [];
+    for (const item of items) {
+      const product = await this.ensureBranchProductFromCatalog(branchId, item.productId);
+      resolvedProducts.push({ item, product });
+    }
 
+    const productIds = resolvedProducts.map(({ product }) => product.id);
     const branchBalances = branchWarehouseId
       ? await this.prisma.inventoryBalance.findMany({
           where: { warehouseId: branchWarehouseId, productId: { in: productIds } },
@@ -2305,26 +2271,9 @@ export class OperationsService {
       ? await this.getAssignedHqStockMap(assignedHqWarehouseId, productIds)
       : new Map<string, number>();
 
-    const lineInputs = items.map((item) => {
-      const product = productMap.get(item.productId);
-      if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
-      return {
-        productId: product.id,
-        quantity: Number(item.quantity ?? 0),
-        weightKg: Number(product.weightKg),
-      };
-    });
-
-    const wholesalePrices = new Map(
-      products.map((product) => [product.id, Number(product.sellingPriceKgs)]),
-    );
-    const costRows = allocateBranchRequestTransportCost(lineInputs, wholesalePrices, transportCostKgs);
-    const costMap = new Map(costRows.map((row) => [row.productId, row]));
-
-    return items.map((item) => {
-      const product = productMap.get(item.productId)!;
+    return resolvedProducts.map(({ item, product }) => {
       const quantity = Number(item.quantity ?? 0);
-      const costs = costMap.get(product.id)!;
+      const wholesalePriceKgs = Number(product.sellingPriceKgs);
       return {
         productId: product.id,
         sku: product.sku,
@@ -2333,13 +2282,78 @@ export class OperationsService {
         unit: product.unit,
         currentBranchStock: branchStockMap.get(product.id) ?? 0,
         hqAvailableStock: hqStockMap.get(product.id) ?? 0,
-        wholesalePriceKgs: Number(product.sellingPriceKgs),
+        wholesalePriceKgs,
         weightKg: Number(product.weightKg),
-        transportExpenseAllocation: costs.transportExpenseAllocation,
-        estimatedUnitCost: costs.estimatedUnitCost,
-        totalAmount: costs.totalAmount,
+        transportExpenseAllocation: 0,
+        estimatedUnitCost: wholesalePriceKgs,
+        totalAmount: Math.round((wholesalePriceKgs * quantity + Number.EPSILON) * 100) / 100,
         note: item.note,
       };
+    });
+  }
+
+  private async ensureBranchProductFromCatalog(branchId: string, catalogOrBranchProductId: string) {
+    const direct = await this.prisma.product.findFirst({
+      where: { id: catalogOrBranchProductId, branchId, deletedAt: null },
+    });
+    if (direct) return direct;
+
+    const hqBranch = await this.prisma.branch.findFirst({
+      where: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null },
+      select: { id: true },
+    });
+    if (!hqBranch) throw new NotFoundException('HQ product catalog not found');
+
+    const catalogProduct = await this.prisma.product.findFirst({
+      where: {
+        id: catalogOrBranchProductId,
+        branchId: hqBranch.id,
+        deletedAt: null,
+        isActive: true,
+      },
+    });
+    if (!catalogProduct) {
+      throw new NotFoundException(`Product not found: ${catalogOrBranchProductId}`);
+    }
+
+    const existing = await this.prisma.product.findFirst({
+      where: { branchId, sku: catalogProduct.sku, deletedAt: null },
+    });
+    if (existing) return existing;
+
+    const branchWarehouse = await this.prisma.warehouse.findFirst({
+      where: { branchId, warehouseType: 'BRANCH', isActive: true, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!branchWarehouse) {
+      throw new BadRequestException('No active branch warehouse found for product provisioning');
+    }
+
+    return this.prisma.product.create({
+      data: {
+        branchId,
+        warehouseId: branchWarehouse.id,
+        categoryId: catalogProduct.categoryId,
+        name: catalogProduct.name,
+        sku: catalogProduct.sku,
+        barcode: catalogProduct.barcode,
+        category: catalogProduct.category,
+        unit: catalogProduct.unit,
+        weightKg: catalogProduct.weightKg,
+        purchasePriceYuan: 0,
+        latestYuanRate: 0,
+        purchaseCostKgs: 0,
+        transportCostKgs: 0,
+        finalCostKgs: catalogProduct.wholesalePriceKgs,
+        costPriceKgs: catalogProduct.wholesalePriceKgs,
+        sellingPriceKgs: catalogProduct.sellingPriceKgs,
+        wholesalePriceKgs: catalogProduct.sellingPriceKgs,
+        hqBranchWholesalePriceKgs: catalogProduct.wholesalePriceKgs,
+        recommendedRetailPriceKgs: catalogProduct.recommendedRetailPriceKgs,
+        minimumSellingPriceKgs: catalogProduct.minimumSellingPriceKgs,
+        pricingMode: catalogProduct.pricingMode,
+        isActive: true,
+      },
     });
   }
 

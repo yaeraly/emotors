@@ -27,8 +27,9 @@ export class OperationsController {
     @CurrentUser() user: AuthUser,
     @Query('search') search?: string,
     @Query('branchWarehouseId') branchWarehouseId?: string,
+    @Query('includeStock') includeStock?: string,
   ) {
-    return this.service.branchProductOptions(user, search, branchWarehouseId);
+    return this.service.branchProductOptions(user, search, branchWarehouseId, includeStock);
   }
 
   @Get('branch-purchase-requests/:id')

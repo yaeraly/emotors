@@ -27,6 +27,14 @@ export default function DistributionOrderDetailPage() {
   const [order, setOrder] = useState<BranchDistributionOrder | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [receiveItems, setReceiveItems] = useState<ReceiveItemForm[]>([]);
+  const [transportForm, setTransportForm] = useState({
+    transportCompany: '',
+    transportCostKgs: '0',
+    driverName: '',
+    vehicleNumber: '',
+    arrivalDate: new Date().toISOString().slice(0, 10),
+    transportNotes: '',
+  });
   const [receiving, setReceiving] = useState<GoodsReceiving | null>(null);
   const [shortageReport, setShortageReport] = useState<ShortageReport | null>(null);
   const [error, setError] = useState('');
@@ -112,6 +120,12 @@ export default function DistributionOrderDetailPage() {
         body: JSON.stringify({
           warehouseId: order.destinationWarehouseId,
           note: '',
+          transportCompany: transportForm.transportCompany || undefined,
+          transportCostKgs: Number(transportForm.transportCostKgs || 0),
+          driverName: transportForm.driverName || undefined,
+          vehicleNumber: transportForm.vehicleNumber || undefined,
+          arrivalDate: transportForm.arrivalDate || undefined,
+          transportNotes: transportForm.transportNotes || undefined,
           items: receiveItems.map((item) => ({
             distributionOrderItemId: item.distributionOrderItemId,
             receivedQuantity: Number(item.receivedQuantity || 0),
@@ -240,9 +254,36 @@ export default function DistributionOrderDetailPage() {
               </div>
             </section>
             {canReceive && canReceiveAtBranch ? (
-              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
                 <h3 className="text-lg font-bold">{t('distribution.receiveGoods')}</h3>
-                <div className="mt-4 overflow-x-auto">
+                <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
+                  <p className="md:col-span-2 text-sm font-bold text-slate-800">{t('distribution.receivingTransportSection')}</p>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
+                    <input value={transportForm.transportCompany} onChange={(event) => setTransportForm((current) => ({ ...current, transportCompany: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCostKgs')}</span>
+                    <input type="number" min="0" step="0.01" value={transportForm.transportCostKgs} onChange={(event) => setTransportForm((current) => ({ ...current, transportCostKgs: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
+                    <input value={transportForm.driverName} onChange={(event) => setTransportForm((current) => ({ ...current, driverName: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.vehicleNumber')}</span>
+                    <input value={transportForm.vehicleNumber} onChange={(event) => setTransportForm((current) => ({ ...current, vehicleNumber: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('distribution.arrivalDate')}</span>
+                    <input type="date" value={transportForm.arrivalDate} onChange={(event) => setTransportForm((current) => ({ ...current, arrivalDate: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block md:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
+                    <textarea value={transportForm.transportNotes} onChange={(event) => setTransportForm((current) => ({ ...current, transportNotes: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={2} />
+                  </label>
+                </div>
+                <div className="overflow-x-auto">
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                       <tr>
