@@ -38,4 +38,9 @@ export class UpdateBranchWarehouseDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  branchId?: string;
 }

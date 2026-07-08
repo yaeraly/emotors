@@ -18,6 +18,7 @@ type WarehouseDetail = {
   city?: string | null;
   country?: string | null;
   address?: string | null;
+  branchId?: string | null;
   branchName?: string | null;
   contactPerson?: string | null;
   phone?: string | null;
@@ -28,6 +29,12 @@ type WarehouseDetail = {
   totalStockValueKgs: number;
   reservedQuantity: number;
   availableQuantity: number;
+};
+
+type BranchOption = {
+  id: string;
+  name: string;
+  code: string;
 };
 
 type ProductRow = {
@@ -98,6 +105,7 @@ export default function BranchWarehouseDetailPage() {
   const [form, setForm] = useState({
     name: '',
     code: '',
+    branchId: '',
     country: '',
     city: '',
     address: '',
@@ -106,6 +114,7 @@ export default function BranchWarehouseDetailPage() {
     notes: '',
     isActive: true,
   });
+  const [branches, setBranches] = useState<BranchOption[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [stock, setStock] = useState<StockRow[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
@@ -138,6 +147,7 @@ export default function BranchWarehouseDetailPage() {
       setForm({
         name: detail.name,
         code: detail.code,
+        branchId: detail.branchId ?? '',
         country: detail.country ?? '',
         city: detail.city ?? '',
         address: detail.address ?? '',
@@ -157,6 +167,18 @@ export default function BranchWarehouseDetailPage() {
     }
   }
 
+  async function openEdit() {
+    setEditing(true);
+    if (branches.length === 0) {
+      try {
+        const branchList = await apiFetch<BranchOption[]>('/branches');
+        setBranches(branchList);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('common.error'));
+      }
+    }
+  }
+
   async function save(event: FormEvent) {
     event.preventDefault();
     setError('');
@@ -165,7 +187,7 @@ export default function BranchWarehouseDetailPage() {
         method: 'PUT',
         body: JSON.stringify(form),
       });
-      window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.infoUpdatedSuccess'));
+      window.localStorage.setItem('emotors_warehouse_success', t('branchWarehouse.updatedSuccess'));
       router.push('/branch-warehouses');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -200,10 +222,10 @@ export default function BranchWarehouseDetailPage() {
             {canEdit && !editing ? (
               <button
                 type="button"
-                onClick={() => setEditing(true)}
+                onClick={() => void openEdit()}
                 className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
               >
-                {t('hqWarehouse.editWarehouse')}
+                {t('branchWarehouse.editWarehouse')}
               </button>
             ) : null}
           </div>
@@ -223,7 +245,21 @@ export default function BranchWarehouseDetailPage() {
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
           {editing ? (
             <form onSubmit={save} className="contents">
-              <ReadOnlyField label={t('branchWarehouse.branchName')} value={warehouse.branchName ?? '—'} />
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('branchWarehouse.branchName')}</span>
+                <select
+                  value={form.branchId}
+                  onChange={(e) => setForm({ ...form, branchId: e.target.value })}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  required
+                >
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>
+                      {branch.name} ({branch.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
               <EditableField label={t('warehouse.name')} value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
               <EditableField label={t('warehouse.code')} value={form.code} onChange={(value) => setForm({ ...form, code: value })} />
               <EditableField label={t('hqWarehouse.city')} value={form.city} onChange={(value) => setForm({ ...form, city: value })} />
@@ -260,6 +296,7 @@ export default function BranchWarehouseDetailPage() {
                     setForm({
                       name: warehouse.name,
                       code: warehouse.code,
+                      branchId: warehouse.branchId ?? '',
                       country: warehouse.country ?? '',
                       city: warehouse.city ?? '',
                       address: warehouse.address ?? '',

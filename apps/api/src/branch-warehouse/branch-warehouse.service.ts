@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -63,11 +63,37 @@ export class BranchWarehouseService {
       throw new ForbiddenException('Only CEO can update warehouse information');
     }
     const existing = await this.getWarehouse(user, id);
+    if (dto.branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: dto.branchId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!branch) {
+        throw new NotFoundException('Branch not found');
+      }
+    }
+    const nextBranchId = dto.branchId ?? existing.branchId;
+    const nextCode = dto.code ? dto.code.trim().toUpperCase() : existing.code;
+    if (nextBranchId) {
+      const duplicate = await this.prisma.warehouse.findFirst({
+        where: {
+          id: { not: id },
+          branchId: nextBranchId,
+          code: nextCode,
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        throw new BadRequestException('Warehouse code already exists for this branch');
+      }
+    }
     const warehouse = await this.prisma.warehouse.update({
       where: { id },
       data: {
         ...(dto.name ? { name: dto.name.trim() } : {}),
         ...(dto.code ? { code: dto.code.trim().toUpperCase() } : {}),
+        ...(dto.branchId ? { branchId: dto.branchId } : {}),
         ...(dto.country !== undefined ? { country: dto.country.trim() } : {}),
         ...(dto.city !== undefined ? { city: dto.city?.trim() } : {}),
         ...(dto.address !== undefined ? { address: dto.address?.trim() } : {}),
@@ -78,14 +104,10 @@ export class BranchWarehouseService {
       },
       include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
     });
-    await this.audit(user, 'WAREHOUSE_INFO_UPDATED', warehouse.id, {
-      userId: user.id,
-      role: user.role,
-      warehouseId: id,
+    await this.audit(user, 'BRANCH_WAREHOUSE_INFO_UPDATED', warehouse.id, {
       branchId: warehouse.branchId,
-      oldValue: existing,
-      newValue: warehouse,
-      timestamp: new Date().toISOString(),
+      oldValue: this.snapshotWarehouseInfo(existing),
+      newValue: this.snapshotWarehouseInfo(warehouse),
     });
     const metrics = await this.buildMetrics(warehouse, user);
     return { ...warehouse, ...metrics };
@@ -332,6 +354,32 @@ export class BranchWarehouseService {
         } as Prisma.InputJsonValue,
       },
     });
+  }
+
+  private snapshotWarehouseInfo(warehouse: {
+    name: string;
+    code: string;
+    branchId: string | null;
+    country: string;
+    city: string | null;
+    address: string | null;
+    contactPerson: string | null;
+    phone: string | null;
+    notes: string | null;
+    isActive: boolean;
+  }) {
+    return {
+      name: warehouse.name,
+      code: warehouse.code,
+      branchId: warehouse.branchId,
+      country: warehouse.country,
+      city: warehouse.city,
+      address: warehouse.address,
+      contactPerson: warehouse.contactPerson,
+      phone: warehouse.phone,
+      notes: warehouse.notes,
+      isActive: warehouse.isActive,
+    };
   }
 
   private auditAccessDenied(user: AuthUser, warehouseId: string, branchId: string | null) {
