@@ -7,7 +7,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canApproveInventoryCount, canDeleteInventoryCount, canManageInventoryCountForWarehouse } from '@/lib/rbac';
+import { canApproveInventoryCount, canDeleteInventoryCount, canManageInventoryCountForWarehouse, isBranchOwnerUser, isBranchWarehouseOperator } from '@/lib/rbac';
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
@@ -44,6 +44,10 @@ export default function InventoryCountDetailPage() {
   const canManage = canManageInventoryCountForWarehouse(currentUser, session?.warehouseId);
   const canApprove = canApproveInventoryCount(currentUser);
   const canDelete = canDeleteInventoryCount(currentUser);
+  const branchScopedView =
+    currentUser &&
+    (isBranchWarehouseOperator(currentUser) || isBranchOwnerUser(currentUser));
+  const inventoryListHref = branchScopedView ? '/inventory/count' : '/hq-warehouses?tab=inventory';
 
   async function confirmDelete(reason?: string) {
     if (!session) return;
@@ -247,7 +251,7 @@ export default function InventoryCountDetailPage() {
       <section className="space-y-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
-            <Link href="/inventory/count" className="text-sm font-semibold text-blue-600">
+            <Link href={inventoryListHref} className="text-sm font-semibold text-blue-600">
               ← {t('inventoryCount.title')}
             </Link>
             <h2 className="mt-2 text-3xl font-bold text-slate-950">{session.sessionNumber}</h2>
@@ -311,7 +315,7 @@ export default function InventoryCountDetailPage() {
           onConfirm={confirmDelete}
         />
 
-        <WarehouseTopNav />
+        {!branchScopedView ? <WarehouseTopNav /> : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}

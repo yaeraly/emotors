@@ -4,6 +4,7 @@ import {
   canManageUsers,
   canViewBranchPurchaseRequests,
   canViewDistribution,
+  canViewInventoryCount,
   hasPermission,
   isBranchOwnerUser,
 } from './rbac';
@@ -108,9 +109,16 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     id: 'warehouse',
     labelKey: 'nav.inventory',
     defaultHref: '/inventory',
-    pathPrefixes: ['/inventory', '/products', '/warehouses', '/stock-movements', '/warehouse-release'],
+    pathPrefixes: ['/inventory', '/inventory/count', '/products', '/warehouses', '/stock-movements', '/warehouse-release'],
     sidebarVisible: inventoryVisible,
-    pages: [{ href: '/inventory', labelKey: 'nav.inventory', isVisible: inventoryVisible }],
+    pages: [
+      { href: '/inventory', labelKey: 'nav.inventory', isVisible: inventoryVisible },
+      {
+        href: '/inventory/count',
+        labelKey: 'inventoryCount.title',
+        isVisible: (user) => isBranchOwnerUser(user) && canViewInventoryCount(user),
+      },
+    ],
   },
   {
     id: 'distribution',

@@ -24,7 +24,7 @@ export const warehouseNavTabs: WarehouseNavTab[] = [
 export function canAccessWarehouseTab(user: User | null | undefined, href: string): boolean {
   if (!user) return false;
   if (isBranchWarehouseOperator(user)) {
-    return href === '/inventory/count' || href === '/stock-movements';
+    return false;
   }
   if (href === '/hq-warehouses') return canViewHqWarehouse(user);
   if (href === '/branch-warehouses') return canViewBranchWarehouses(user);

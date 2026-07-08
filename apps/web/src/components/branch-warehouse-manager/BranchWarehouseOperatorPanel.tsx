@@ -12,8 +12,10 @@ type BranchWarehouseSummary = {
   branchName?: string | null;
   totalSkuCount: number;
   totalProductQuantity: number;
+  totalStockValueKgs?: number;
   reservedQuantity: number;
   availableQuantity: number;
+  lastInventoryDate?: string | null;
 };
 
 type StockRow = {
@@ -109,12 +111,6 @@ export function BranchWarehouseOperatorPanel() {
           >
             {t('distribution.receiveGoods')}
           </Link>
-          <Link
-            href="/stock-movements"
-            className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
-          >
-            {t('inventory.stockMovements')}
-          </Link>
         </div>
       </div>
 
@@ -122,11 +118,19 @@ export function BranchWarehouseOperatorPanel() {
         <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <SummaryCard label={t('branchWarehouse.skuCount')} value={String(warehouse.totalSkuCount)} />
         <SummaryCard label={t('hqWarehouse.totalStock')} value={String(warehouse.totalProductQuantity)} />
-        <SummaryCard label={t('branchWarehouse.reserved')} value={String(warehouse.reservedQuantity)} />
+        <SummaryCard
+          label={t('inventory.totalStockValue')}
+          value={formatKgs(warehouse.totalStockValueKgs)}
+        />
         <SummaryCard label={t('branchWarehouse.available')} value={String(warehouse.availableQuantity)} />
+        <SummaryCard label={t('branchWarehouse.reserved')} value={String(warehouse.reservedQuantity)} />
+        <SummaryCard
+          label={t('branchWarehouse.lastInventory')}
+          value={formatDate(warehouse.lastInventoryDate)}
+        />
       </div>
 
       {pendingOrders.length > 0 ? (
@@ -191,4 +195,16 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
       <p className="mt-2 text-2xl font-bold text-slate-950">{value}</p>
     </div>
   );
+}
+
+function formatKgs(value: number | string | null | undefined) {
+  return `${Number(value ?? 0).toLocaleString('ru-RU', {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+  })} сом`;
+}
+
+function formatDate(value: string | null | undefined) {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString();
 }

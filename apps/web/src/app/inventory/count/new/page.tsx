@@ -158,7 +158,9 @@ export default function NewInventoryCountPage() {
           <h2 className="mt-2 text-3xl font-bold text-slate-950">{t('inventoryCount.newInventory')}</h2>
         </div>
 
-        {currentUser && !isWarehouseManagerUser(currentUser) ? <WarehouseTopNav /> : null}
+        {currentUser && !isWarehouseManagerUser(currentUser) && !isBranchWarehouseOperator(currentUser) ? (
+          <WarehouseTopNav />
+        ) : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 

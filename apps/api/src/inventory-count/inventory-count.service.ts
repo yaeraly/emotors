@@ -222,8 +222,9 @@ export class InventoryCountService {
       },
     });
 
-    await this.audit(this.prisma, user, 'PRODUCT_COUNT_UPDATED', sessionId, {
+    await this.audit(this.prisma, user, this.inventoryCountUpdatedAction(session.warehouse), sessionId, {
       warehouseId: session.warehouseId,
+      branchId: session.warehouse.branchId ?? undefined,
       productId: item.productId,
       oldValue: item.actualQuantity,
       newValue: actualQuantity,
@@ -261,8 +262,9 @@ export class InventoryCountService {
       });
     }
 
-    await this.audit(this.prisma, user, 'PRODUCT_COUNT_UPDATED', sessionId, {
+    await this.audit(this.prisma, user, this.inventoryCountUpdatedAction(session.warehouse), sessionId, {
       warehouseId: session.warehouseId,
+      branchId: session.warehouse.branchId ?? undefined,
       newValue: { bulkCount: dto.items.length },
     });
 
@@ -358,6 +360,19 @@ export class InventoryCountService {
           note: `Inventory count ${session.sessionNumber} adjustment for SKU ${item.sku}`,
         });
 
+        if (isBranchWarehouse(session.warehouse)) {
+          await this.audit(tx, user, 'BRANCH_STOCK_MOVEMENT_CREATED', session.id, {
+            warehouseId: session.warehouseId,
+            branchId: session.warehouse.branchId ?? undefined,
+            productId: item.productId,
+            newValue: {
+              type: movementType,
+              quantity: Math.abs(delta),
+              sku: item.sku,
+            },
+          });
+        }
+
         await this.audit(tx, user, this.stockAdjustedAction(session.warehouse), session.id, {
           warehouseId: session.warehouseId,
           productId: item.productId,
@@ -375,7 +390,9 @@ export class InventoryCountService {
       const updated = await tx.inventoryCountSession.update({
         where: { id },
         data: {
-          status: InventoryCountStatus.COMPLETED,
+          status: isBranchWarehouse(session.warehouse)
+            ? InventoryCountStatus.APPROVED
+            : InventoryCountStatus.COMPLETED,
           approvedById: user.id,
           approvedAt: new Date(),
           completedAt: new Date(),
@@ -409,14 +426,21 @@ export class InventoryCountService {
 
       const updated = await tx.inventoryCountSession.update({
         where: { id },
-        data: {
-          status: InventoryCountStatus.COUNTING,
-          rejectedById: user.id,
-          rejectedAt: new Date(),
-          rejectionReason: dto.reason,
-          submittedAt: null,
-          finishDate: null,
-        },
+        data: isBranchWarehouse(session.warehouse)
+          ? {
+              status: InventoryCountStatus.REJECTED,
+              rejectedById: user.id,
+              rejectedAt: new Date(),
+              rejectionReason: dto.reason,
+            }
+          : {
+              status: InventoryCountStatus.COUNTING,
+              rejectedById: user.id,
+              rejectedAt: new Date(),
+              rejectionReason: dto.reason,
+              submittedAt: null,
+              finishDate: null,
+            },
         include: this.sessionInclude(),
       });
 
@@ -424,7 +448,9 @@ export class InventoryCountService {
         warehouseId: session.warehouseId,
         branchId: session.warehouse.branchId ?? undefined,
         oldValue: InventoryCountStatus.SUBMITTED,
-        newValue: InventoryCountStatus.COUNTING,
+        newValue: isBranchWarehouse(session.warehouse)
+          ? InventoryCountStatus.REJECTED
+          : InventoryCountStatus.COUNTING,
         extra: { reason: dto.reason },
       });
       await this.notificationsService.notifyInTx(tx, user, {
@@ -758,6 +784,10 @@ export class InventoryCountService {
 
   private inventoryRejectedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
     return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_REJECTED' : 'INVENTORY_REJECTED';
+  }
+
+  private inventoryCountUpdatedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_COUNT_UPDATED' : 'PRODUCT_COUNT_UPDATED';
   }
 
   private stockAdjustedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {

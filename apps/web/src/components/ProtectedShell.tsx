@@ -299,10 +299,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             ) : branchWarehouseOperatorView ? (
               <>
                 <Link href="/inventory" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{t('nav.inventory')}</Link>
-                <Link href="/inventory/count" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventoryCount.title')}</Link>
                 <Link href="/distribution/orders?status=SHIPPED" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.receiveGoods')}</Link>
                 <Link href="/distribution/receivings" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.orders.receivingHistory')}</Link>
-                <Link href="/stock-movements" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventory.stockMovements')}</Link>
                 <Link href="/service/parts-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.partsRequests')}</Link>
               </>
             ) : branchCashierView ? (

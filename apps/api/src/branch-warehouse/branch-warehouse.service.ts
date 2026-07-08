@@ -33,26 +33,24 @@ export class BranchWarehouseService {
       include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
-    return Promise.all(
+    const result = await Promise.all(
       warehouses.map(async (warehouse) => {
         const metrics = await this.buildMetrics(warehouse, user);
-        if (this.shouldHideCosts(user)) {
-          const { totalStockValueKgs: _hidden, ...rest } = metrics;
-          return rest;
-        }
         return metrics;
       }),
     );
+    if (isBranchWarehouseOperator(user) && result[0]) {
+      await this.audit(user, 'BRANCH_WAREHOUSE_SUMMARY_VIEWED', result[0].id, {
+        branchId: user.branchId ?? undefined,
+      });
+    }
+    return result;
   }
 
   async detail(user: AuthUser, id: string) {
     const warehouse = await this.getWarehouse(user, id);
     await this.audit(user, 'BRANCH_WAREHOUSE_VIEWED', id, { branchId: warehouse.branchId });
     const metrics = await this.buildMetrics(warehouse, user);
-    if (this.shouldHideCosts(user)) {
-      const { totalStockValueKgs: _hidden, ...rest } = metrics;
-      return { ...warehouse, ...rest };
-    }
     return {
       ...warehouse,
       ...metrics,
@@ -87,7 +85,7 @@ export class BranchWarehouseService {
       ...this.mapBalance(balance, user),
       categoryName: balance.product.productCategory?.nameRu ?? balance.product.category,
       supplierName: balance.product.defaultSupplier?.name ?? null,
-      ...(this.shouldHideCosts(user)
+      ...(this.shouldHideLineItemCosts(user)
         ? {}
         : {
             sellingPriceKgs: Number(balance.product.sellingPriceKgs),
@@ -235,14 +233,14 @@ export class BranchWarehouseService {
       lastReceivingAt: balance.lastReceivingAt,
       updatedAt: balance.updatedAt,
     };
-    if (user && this.shouldHideCosts(user)) {
+    if (user && this.shouldHideLineItemCosts(user)) {
       const { averageCostKgs, landedCostKgs, totalValueKgs, ...rest } = response;
       return rest;
     }
     return response;
   }
 
-  private shouldHideCosts(user: AuthUser) {
+  private shouldHideLineItemCosts(user: AuthUser) {
     return isBranchWarehouseOperator(user);
   }
 
@@ -265,6 +263,7 @@ export class BranchWarehouseService {
       throw new NotFoundException('Branch warehouse not found');
     }
     if (!this.canViewAll(user) && warehouse.branchId !== user.branchId) {
+      await this.auditAccessDenied(user, id, warehouse.branchId);
       throw new ForbiddenException('You can only access your own branch warehouse');
     }
     return warehouse;
@@ -296,6 +295,27 @@ export class BranchWarehouseService {
           roles: user.roles ?? [user.role],
           timestamp: new Date().toISOString(),
           ...metadata,
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private auditAccessDenied(user: AuthUser, warehouseId: string, branchId: string | null) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'BRANCH_WAREHOUSE_ACCESS_DENIED',
+        entity: 'Warehouse',
+        entityId: warehouseId,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          branchId: user.branchId ?? undefined,
+          warehouseId,
+          requestedBranchId: branchId ?? undefined,
+          roles: user.roles ?? [user.role],
+          timestamp: new Date().toISOString(),
         } as Prisma.InputJsonValue,
       },
     });
