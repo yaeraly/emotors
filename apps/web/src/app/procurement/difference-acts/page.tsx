@@ -180,34 +180,38 @@ function ProcurementDifferenceActsContent() {
         {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
-        <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3 xl:grid-cols-6">
+        <div className="flex min-w-0 flex-wrap items-end gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:gap-3 sm:p-4 lg:flex-nowrap">
           <FilterSelect
             label={t('chinaReceiving.orderNumber')}
             value={filters.orderId}
             onChange={(value) => setFilters({ ...filters, orderId: value })}
             options={orders}
+            className="min-w-0 w-full flex-1 sm:min-w-[8rem] lg:max-w-[11rem]"
           />
           <FilterSelect
             label={t('procurement.orders.supplier')}
             value={filters.supplierId}
             onChange={(value) => setFilters({ ...filters, supplierId: value })}
             options={suppliers}
+            className="min-w-0 w-[calc(50%-0.25rem)] flex-1 sm:w-auto sm:min-w-[7rem] lg:max-w-[10rem]"
           />
           <FilterSelect
             label={t('procurement.orders.factory')}
             value={filters.factoryId}
             onChange={(value) => setFilters({ ...filters, factoryId: value })}
             options={factories}
+            className="min-w-0 w-[calc(50%-0.25rem)] flex-1 sm:w-auto sm:min-w-[7rem] lg:max-w-[10rem]"
           />
           <FilterSelect
             label={t('chinaReceiving.differenceType')}
             value={filters.type}
             onChange={(value) => setFilters({ ...filters, type: value })}
             options={[
-              { id: 'SHORTAGE', name: translateStatus(t, 'SHORTAGE') },
-              { id: 'OVERAGE', name: translateStatus(t, 'OVERAGE') },
-              { id: 'DAMAGED', name: translateStatus(t, 'DAMAGED') },
+              { id: 'SHORTAGE', name: translateStatus(t, 'SHORTAGE', 'procurement') },
+              { id: 'OVERAGE', name: translateStatus(t, 'OVERAGE', 'procurement') },
+              { id: 'DAMAGED', name: translateStatus(t, 'DAMAGED', 'procurement') },
             ]}
+            className="min-w-0 w-[calc(50%-0.25rem)] flex-1 sm:w-auto sm:min-w-[7rem] lg:max-w-[9rem]"
           />
           <FilterSelect
             label={t('common.status')}
@@ -215,26 +219,16 @@ function ProcurementDifferenceActsContent() {
             onChange={(value) => setFilters({ ...filters, status: value })}
             options={['OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'CLOSED'].map((status) => ({
               id: status,
-              name: translateStatus(t, status),
+              name: translateStatus(t, status, 'procurement'),
             }))}
+            className="min-w-0 w-[calc(50%-0.25rem)] flex-1 sm:w-auto sm:min-w-[6.5rem] lg:max-w-[9rem]"
           />
-          <label className="block">
-            <span className="text-xs font-semibold uppercase text-slate-500">{t('common.date')}</span>
-            <div className="mt-2 flex gap-2">
-              <input
-                type="date"
-                value={filters.dateFrom}
-                onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })}
-                className="w-full rounded-xl border border-slate-300 px-2 py-2 text-sm"
-              />
-              <input
-                type="date"
-                value={filters.dateTo}
-                onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })}
-                className="w-full rounded-xl border border-slate-300 px-2 py-2 text-sm"
-              />
-            </div>
-          </label>
+          <PeriodFilter
+            dateFrom={filters.dateFrom}
+            dateTo={filters.dateTo}
+            onDateFromChange={(value) => setFilters({ ...filters, dateFrom: value })}
+            onDateToChange={(value) => setFilters({ ...filters, dateTo: value })}
+          />
         </div>
 
         <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -366,25 +360,66 @@ function DifferenceTypeBadge({ type }: { type: string }) {
   );
 }
 
+function PeriodFilter({
+  dateFrom,
+  dateTo,
+  onDateFromChange,
+  onDateToChange,
+}: {
+  dateFrom: string;
+  dateTo: string;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="min-w-0 w-full flex-[1.5_1_14rem] lg:max-w-[15rem]">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {t('chinaReceiving.filterPeriod')}
+      </span>
+      <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => onDateFromChange(e.target.value)}
+          aria-label={t('chinaReceiving.dateFrom')}
+          className="min-w-0 flex-1 rounded-xl border border-slate-300 px-1.5 py-2 text-sm"
+        />
+        <span className="shrink-0 text-xs text-slate-400">—</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => onDateToChange(e.target.value)}
+          aria-label={t('chinaReceiving.dateTo')}
+          className="min-w-0 flex-1 rounded-xl border border-slate-300 px-1.5 py-2 text-sm"
+        />
+      </div>
+    </div>
+  );
+}
+
 function FilterSelect({
   label,
   value,
   onChange,
   options,
+  className = '',
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: FilterOption[];
+  className?: string;
 }) {
   const { t } = useTranslation();
   return (
-    <label className="block">
-      <span className="text-xs font-semibold uppercase text-slate-500">{label}</span>
+    <label className={`block ${className}`}>
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+        className="mt-1.5 w-full min-w-0 rounded-xl border border-slate-300 px-2 py-2 text-sm"
       >
         <option value="">{t('common.all')}</option>
         {options.map((option) => (
