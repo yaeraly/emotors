@@ -237,59 +237,69 @@ function ProcurementDifferenceActsContent() {
           </label>
         </div>
 
-        <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
+            <thead className="bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3">{t('chinaReceiving.actNumber')}</th>
-                <th className="px-4 py-3">{t('chinaReceiving.orderNumber')}</th>
-                <th className="px-4 py-3">{t('procurement.orders.supplier')}</th>
-                <th className="px-4 py-3">{t('procurement.orders.factory')}</th>
-                <th className="px-4 py-3">{t('procurement.orders.product')}</th>
-                <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
-                <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
-                <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
-                <th className="px-4 py-3">{t('chinaReceiving.differenceType')}</th>
-                <th className="px-4 py-3">{t('chinaReceiving.targetWarehouse')}</th>
-                <th className="px-4 py-3">{t('common.status')}</th>
-                <th className="px-4 py-3">{t('chinaReceiving.actDate')}</th>
-                <th className="px-4 py-3">{t('common.actions')}</th>
+                <th className="w-[7%] px-2 py-2">{t('chinaReceiving.actNumber')}</th>
+                <th className="w-[8%] px-2 py-2">{t('chinaReceiving.col.order')}</th>
+                <th className="w-[18%] px-2 py-2">{t('chinaReceiving.col.product')}</th>
+                <th className="w-[9%] px-2 py-2">{t('chinaReceiving.col.type')}</th>
+                <th className="w-[6%] px-2 py-2">{t('chinaReceiving.col.expected')}</th>
+                <th className="w-[6%] px-2 py-2">{t('chinaReceiving.col.actual')}</th>
+                <th className="w-[6%] px-2 py-2">{t('chinaReceiving.col.diff')}</th>
+                <th className="w-[12%] px-2 py-2">{t('chinaReceiving.col.warehouse')}</th>
+                <th className="w-[9%] px-2 py-2">{t('common.status')}</th>
+                <th className="w-[8%] px-2 py-2">{t('common.date')}</th>
+                <th className="w-[15%] px-2 py-2">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedActs.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={11} className="px-2 py-6 text-center text-slate-500">
                     {t('chinaReceiving.noActsForType')}
                   </td>
                 </tr>
               ) : (
                 sortedActs.map((act) => (
-                  <tr key={act.id}>
-                    <td className="px-4 py-3 font-bold">{act.actNumber}</td>
-                    <td className="px-4 py-3">{act.orderNumber}</td>
-                    <td className="px-4 py-3">{act.supplier?.name ?? '—'}</td>
-                    <td className="px-4 py-3">{act.factory?.name ?? '—'}</td>
-                    <td className="px-4 py-3">{act.productName}</td>
-                    <td className="px-4 py-3">{act.expectedQuantity}</td>
-                    <td className="px-4 py-3">{act.actualQuantity}</td>
-                    <td className="px-4 py-3">{act.differenceQuantity}</td>
-                    <td className="px-4 py-3">{translateStatus(t, act.type)}</td>
-                    <td className="px-4 py-3">{act.hqWarehouse?.name ?? '—'}</td>
-                    <td className="px-4 py-3">{translateStatus(t, act.status)}</td>
-                    <td className="px-4 py-3">{new Date(act.createdAt).toLocaleDateString()}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
+                  <tr key={act.id} className="align-middle">
+                    <td className="truncate px-2 py-2 font-semibold" title={act.actNumber}>
+                      {act.actNumber}
+                    </td>
+                    <td className="truncate px-2 py-2" title={act.orderNumber}>
+                      {act.orderNumber}
+                    </td>
+                    <td className="truncate px-2 py-2" title={act.productName}>
+                      {act.productName}
+                    </td>
+                    <td className="px-2 py-2">
+                      <DifferenceTypeBadge type={act.type} />
+                    </td>
+                    <td className="px-2 py-2 text-center">{act.expectedQuantity}</td>
+                    <td className="px-2 py-2 text-center">{act.actualQuantity}</td>
+                    <td className="px-2 py-2 text-center font-semibold">{act.differenceQuantity}</td>
+                    <td className="truncate px-2 py-2" title={act.hqWarehouse?.name ?? '—'}>
+                      {act.hqWarehouse?.name ?? '—'}
+                    </td>
+                    <td className="truncate px-2 py-2">
+                      {translateStatus(t, act.status, 'procurement')}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-2">
+                      {new Date(act.createdAt).toLocaleDateString()}
+                    </td>
+                    <td className="px-2 py-2">
+                      <div className="flex flex-wrap gap-1">
                         <Link
                           href={`/procurement/difference-acts/${act.id}`}
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
+                          className="rounded border border-slate-300 px-2 py-1 text-[11px] font-semibold"
                         >
                           {t('common.open')}
                         </Link>
                         <button
                           type="button"
                           onClick={() => printAct(act)}
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
+                          className="rounded border border-slate-300 px-2 py-1 text-[11px] font-semibold"
                         >
                           {t('chinaReceiving.printAct')}
                         </button>
@@ -298,7 +308,7 @@ function ProcurementDifferenceActsContent() {
                             type="button"
                             disabled={loadingId === act.id}
                             onClick={() => void archiveAct(act)}
-                            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 disabled:opacity-50"
+                            className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 disabled:opacity-50"
                           >
                             {t('chinaReceiving.archiveAct')}
                           </button>
@@ -334,6 +344,25 @@ function ProcurementDifferenceActsContent() {
         ) : null}
       </section>
     </ProtectedShell>
+  );
+}
+
+function DifferenceTypeBadge({ type }: { type: string }) {
+  const { t } = useTranslation();
+  const label = translateStatus(t, type, 'procurement');
+  const styles =
+    type === 'SHORTAGE'
+      ? 'bg-amber-50 text-amber-800 border-amber-200'
+      : type === 'OVERAGE'
+        ? 'bg-sky-50 text-sky-800 border-sky-200'
+        : type === 'DAMAGED'
+          ? 'bg-rose-50 text-rose-800 border-rose-200'
+          : 'bg-slate-50 text-slate-700 border-slate-200';
+
+  return (
+    <span className={`inline-block max-w-full truncate rounded border px-1.5 py-0.5 text-[10px] font-semibold ${styles}`}>
+      {label}
+    </span>
   );
 }
 

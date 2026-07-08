@@ -1,24 +1,36 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { EntityCombobox } from '@/components/EntityCombobox';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
+import {
+  collectInventoryUnits,
+  getCategoryPrefix,
+  nextProductCodes,
+} from '@/lib/product-code-utils';
 import { canEditPurchasePriceYuan, canEditSellingPrice } from '@/lib/rbac';
-import type { Product, ProductCategory, User } from '@/lib/types';
+import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+
+type SupplierOption = { id: string; name: string; isActive?: boolean };
+type FactoryOption = { id: string; name: string; isActive?: boolean };
 
 export default function NewProductPage() {
   const router = useRouter();
   const { t, language } = useTranslation();
   const [categories, setCategories] = useState<ProductCategory[]>([]);
-  const [suppliers, setSuppliers] = useState<Array<{ id: string; name: string }>>([]);
-  const [factories, setFactories] = useState<Array<{ id: string; name: string }>>([]);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
+  const [factories, setFactories] = useState<FactoryOption[]>([]);
+  const [units, setUnits] = useState<string[]>(['pcs']);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [skuError, setSkuError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [generatingCodes, setGeneratingCodes] = useState(false);
+  const lastCategoryIdRef = useRef('');
   const [form, setForm] = useState({
     name: '',
     sku: '',
@@ -38,25 +50,69 @@ export default function NewProductPage() {
   useEffect(() => {
     Promise.all([
       apiFetch<ProductCategory[]>('/inventory/categories'),
-      apiFetch<Array<{ id: string; name: string }>>('/procurement/suppliers'),
-      apiFetch<Array<{ id: string; name: string }>>('/procurement/factories'),
+      apiFetch<SupplierOption[]>('/procurement/suppliers'),
+      apiFetch<FactoryOption[]>('/procurement/factories'),
+      apiFetch<ProductListResponse>('/inventory/products?pageSize=500'),
       apiFetch<User>('/auth/me'),
     ])
-      .then(([categoryResult, supplierResult, factoryResult, userResult]) => {
+      .then(([categoryResult, supplierResult, factoryResult, productsResult, userResult]) => {
         setCategories(categoryResult);
-        setSuppliers(supplierResult);
-        setFactories(factoryResult);
+        setSuppliers(supplierResult.filter((row) => row.isActive !== false));
+        setFactories(factoryResult.filter((row) => row.isActive !== false));
+        setUnits(collectInventoryUnits(productsResult.items.map((product) => product.unit)));
         setCurrentUser(userResult);
-        setForm((current) => ({
-          ...current,
-          categoryId: categoryResult[0]?.id ?? '',
-        }));
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
+  useEffect(() => {
+    if (!form.categoryId || categories.length === 0) return;
+    if (lastCategoryIdRef.current === form.categoryId) return;
+
+    const category = categories.find((row) => row.id === form.categoryId);
+    if (!category) return;
+
+    lastCategoryIdRef.current = form.categoryId;
+    setGeneratingCodes(true);
+
+    void apiFetch<ProductListResponse>(
+      `/inventory/products?categoryId=${encodeURIComponent(form.categoryId)}&pageSize=500`,
+    )
+      .then((response) => {
+        const prefix = getCategoryPrefix(category, language);
+        const codes = nextProductCodes(
+          prefix,
+          response.items.map((product) => product.sku),
+          response.items.map((product) => product.barcode),
+        );
+        setForm((current) => ({
+          ...current,
+          sku: codes.sku,
+          barcode: codes.barcode,
+        }));
+        setSkuError('');
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : t('common.error'));
+      })
+      .finally(() => setGeneratingCodes(false));
+  }, [categories, form.categoryId, language, t]);
+
   const canEditPrice = canEditSellingPrice(currentUser);
   const canEditPurchase = canEditPurchasePriceYuan(currentUser);
+
+  const unitOptions = useMemo(
+    () => units.map((unit) => ({ value: unit, label: unit })),
+    [units],
+  );
+  const supplierOptions = useMemo(
+    () => suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name })),
+    [suppliers],
+  );
+  const factoryOptions = useMemo(
+    () => factories.map((factory) => ({ value: factory.id, label: factory.name })),
+    [factories],
+  );
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -117,6 +173,11 @@ export default function NewProductPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function handleCategoryChange(categoryId: string) {
+    lastCategoryIdRef.current = '';
+    setField('categoryId', categoryId);
+  }
+
   return (
     <ProtectedShell>
       <form onSubmit={submit} className="mx-auto max-w-4xl space-y-6">
@@ -130,43 +191,84 @@ export default function NewProductPage() {
             <ProductImageUploader photoUrl={form.photoUrl} onChange={(value) => setField('photoUrl', value)} />
           </div>
           <Input label={t('inventory.name')} value={form.name} onChange={(value) => setField('name', value)} required />
-          <Input label={t('inventory.sku')} value={form.sku} onChange={(value) => { setField('sku', value); setSkuError(''); }} error={skuError} required />
-          <Input label="Barcode" value={form.barcode} onChange={(value) => setField('barcode', value)} />
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
-            <select value={form.categoryId} onChange={(event) => setField('categoryId', event.target.value)} required className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
+            <select
+              value={form.categoryId}
+              onChange={(event) => handleCategoryChange(event.target.value)}
+              required
+              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+            >
               <option value="">{t('inventory.selectCategory')}</option>
               {categories.map((category) => (
-                <option key={category.id} value={category.id}>{categoryName(category, language)}</option>
+                <option key={category.id} value={category.id}>
+                  {categoryName(category, language)}
+                </option>
               ))}
             </select>
           </label>
-          <Input label={t('inventory.unit')} value={form.unit} onChange={(value) => setField('unit', value)} />
-          <Input label={t('inventory.weightPerUnitKg')} type="number" value={form.weightKg} onChange={(value) => setField('weightKg', value)} min="0.001" step="0.001" required />
+          <Input
+            label={t('inventory.sku')}
+            value={form.sku}
+            onChange={(value) => {
+              setField('sku', value);
+              setSkuError('');
+            }}
+            error={skuError}
+            hint={generatingCodes ? t('inventory.generatingCodes') : undefined}
+            required
+          />
+          <Input
+            label="Barcode"
+            value={form.barcode}
+            onChange={(value) => setField('barcode', value)}
+            hint={generatingCodes ? t('inventory.generatingCodes') : undefined}
+          />
+          <EntityCombobox
+            label={t('inventory.unit')}
+            value={form.unit}
+            options={unitOptions}
+            onChange={(value) => setField('unit', value || 'pcs')}
+            allowClear={false}
+            required
+          />
+          <EntityCombobox
+            label={t('procurement.orders.supplier')}
+            value={form.defaultSupplierId}
+            options={supplierOptions}
+            onChange={(value) => setField('defaultSupplierId', value)}
+          />
+          <EntityCombobox
+            label={t('procurement.orders.factory')}
+            value={form.defaultFactoryId}
+            options={factoryOptions}
+            onChange={(value) => setField('defaultFactoryId', value)}
+          />
+          <Input
+            label={t('inventory.weightPerUnitKg')}
+            type="number"
+            value={form.weightKg}
+            onChange={(value) => setField('weightKg', value)}
+            min="0.001"
+            step="0.001"
+            required
+          />
           {canEditPurchase ? (
-            <Input label={t('inventory.purchasePriceYuan')} type="number" value={form.purchasePriceYuan} onChange={(value) => setField('purchasePriceYuan', value)} />
+            <Input
+              label={t('inventory.purchasePriceYuan')}
+              type="number"
+              value={form.purchasePriceYuan}
+              onChange={(value) => setField('purchasePriceYuan', value)}
+            />
           ) : null}
           {canEditPrice ? (
-            <Input label={t('inventory.sellingPriceKgs')} type="number" value={form.sellingPriceKgs} onChange={(value) => setField('sellingPriceKgs', value)} />
+            <Input
+              label={t('inventory.sellingPriceKgs')}
+              type="number"
+              value={form.sellingPriceKgs}
+              onChange={(value) => setField('sellingPriceKgs', value)}
+            />
           ) : null}
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">{t('procurement.orders.supplier')}</span>
-            <select value={form.defaultSupplierId} onChange={(event) => setField('defaultSupplierId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-              <option value="">{t('common.all')}</option>
-              {suppliers.map((supplier) => (
-                <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">{t('procurement.orders.factory')}</span>
-            <select value={form.defaultFactoryId} onChange={(event) => setField('defaultFactoryId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-              <option value="">{t('common.all')}</option>
-              {factories.map((factory) => (
-                <option key={factory.id} value={factory.id}>{factory.name}</option>
-              ))}
-            </select>
-          </label>
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
             <select
@@ -180,9 +282,17 @@ export default function NewProductPage() {
           </label>
           <label className="block md:col-span-2">
             <span className="text-sm font-semibold text-slate-700">{t('inventory.description')}</span>
-            <textarea value={form.description} onChange={(event) => setField('description', event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" />
+            <textarea
+              value={form.description}
+              onChange={(event) => setField('description', event.target.value)}
+              className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2"
+            />
           </label>
-          <button disabled={saving} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-2" type="submit">
+          <button
+            disabled={saving || generatingCodes}
+            className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-2"
+            type="submit"
+          >
             {saving ? t('common.loading') : t('inventory.createProduct')}
           </button>
         </section>
@@ -191,11 +301,40 @@ export default function NewProductPage() {
   );
 }
 
-function Input({ label, value, onChange, type = 'text', required, error, min, step }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean; error?: string; min?: string; step?: string }) {
+function Input({
+  label,
+  value,
+  onChange,
+  type = 'text',
+  required,
+  error,
+  hint,
+  min,
+  step,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  required?: boolean;
+  error?: string;
+  hint?: string;
+  min?: string;
+  step?: string;
+}) {
   return (
     <label className="block">
       <span className="text-sm font-semibold text-slate-700">{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} required={required} type={type} min={min ?? (type === 'number' ? 0 : undefined)} step={step ?? (type === 'number' ? '0.01' : undefined)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        type={type}
+        min={min ?? (type === 'number' ? 0 : undefined)}
+        step={step ?? (type === 'number' ? '0.01' : undefined)}
+        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+      />
+      {hint ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null}
       {error ? <span className="mt-1 block text-xs font-semibold text-red-600">{error}</span> : null}
     </label>
   );

@@ -248,16 +248,17 @@ function HqWarehousesPageContent() {
           <InventoryCountListContent />
         ) : (
           <>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-          <WarehouseSummaryCard label={t('hqWarehouse.totalWarehouses')} value={String(summary.totalHqWarehouses)} />
-          <WarehouseSummaryCard label={t('hqWarehouse.totalProducts')} value={String(summary.totalProducts)} />
-          <WarehouseSummaryCard label={t('hqWarehouse.totalStock')} value={String(summary.totalStock)} />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalWarehouses')} value={String(summary.totalHqWarehouses)} />
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalProducts')} value={String(summary.totalProducts)} />
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalStock')} value={String(summary.totalStock)} />
           <WarehouseSummaryCard
+            compact
             label={t('hqWarehouse.totalValue')}
             value={`${summary.totalInventoryValueKgs.toLocaleString()} KGS`}
           />
-          <WarehouseSummaryCard label={t('branchWarehouse.totalReserved')} value={String(summary.totalReserved)} />
-          <WarehouseSummaryCard label={t('branchWarehouse.totalAvailable')} value={String(summary.totalAvailable)} />
+          <WarehouseSummaryCard compact label={t('branchWarehouse.totalReserved')} value={String(summary.totalReserved)} />
+          <WarehouseSummaryCard compact label={t('branchWarehouse.totalAvailable')} value={String(summary.totalAvailable)} />
         </div>
 
         {dashboard ? (

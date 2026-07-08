@@ -30,6 +30,7 @@ export function CategoriesListContent({
   const [editing, setEditing] = useState<ProductCategory | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -38,6 +39,11 @@ export function CategoriesListContent({
   }, [search]);
 
   useEffect(() => {
+    const message = window.localStorage.getItem('emotors_category_success');
+    if (message) {
+      setSuccess(message);
+      window.localStorage.removeItem('emotors_category_success');
+    }
     apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => setCurrentUser(null));
     void loadCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -74,6 +80,8 @@ export function CategoriesListContent({
           method: 'POST',
           body: JSON.stringify(form),
         });
+        window.localStorage.setItem('emotors_category_success', t('inventory.categoryCreated'));
+        setSuccess(t('inventory.categoryCreated'));
       }
       setEditing(null);
       setForm(emptyForm);
@@ -117,6 +125,9 @@ export function CategoriesListContent({
 
   return (
     <div className="space-y-6">
+      {success ? (
+        <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p>
+      ) : null}
       {error ? (
         <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}

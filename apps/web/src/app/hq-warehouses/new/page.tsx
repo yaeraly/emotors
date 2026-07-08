@@ -30,7 +30,7 @@ export default function NewHqWarehousePage() {
         method: 'POST',
         body: JSON.stringify(form),
       });
-      window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.savedSuccess'));
+      window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.createdSuccess'));
       router.push('/hq-warehouses');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));

@@ -139,13 +139,13 @@ export default function BranchWarehousesPage() {
         {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-          <WarehouseSummaryCard label={t('branchWarehouse.totalWarehouses')} value={String(summary.totalBranchWarehouses)} />
-          <WarehouseSummaryCard label={t('branchWarehouse.skuCount')} value={String(summary.totalSku)} />
-          <WarehouseSummaryCard label={t('hqWarehouse.totalStock')} value={String(summary.totalQuantity)} />
-          <WarehouseSummaryCard label={t('hqWarehouse.totalValue')} value={`${summary.totalInventoryValueKgs.toLocaleString()} KGS`} />
-          <WarehouseSummaryCard label={t('branchWarehouse.totalReserved')} value={String(summary.totalReserved)} />
-          <WarehouseSummaryCard label={t('branchWarehouse.totalAvailable')} value={String(summary.totalAvailable)} />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
+          <WarehouseSummaryCard compact label={t('branchWarehouse.totalWarehouses')} value={String(summary.totalBranchWarehouses)} />
+          <WarehouseSummaryCard compact label={t('branchWarehouse.skuCount')} value={String(summary.totalSku)} />
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalStock')} value={String(summary.totalQuantity)} />
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalValue')} value={`${summary.totalInventoryValueKgs.toLocaleString()} KGS`} />
+          <WarehouseSummaryCard compact label={t('branchWarehouse.totalReserved')} value={String(summary.totalReserved)} />
+          <WarehouseSummaryCard compact label={t('branchWarehouse.totalAvailable')} value={String(summary.totalAvailable)} />
         </div>
 
         <WarehouseListToolbar
