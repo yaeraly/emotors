@@ -6,9 +6,9 @@ export type NotificationRouting = {
 };
 
 export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting>> = {
-  INVENTORY_SUBMITTED: { module: NotificationModule.INVENTORY, roles: [Role.CEO, Role.OWNER] },
-  INVENTORY_APPROVED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER] },
-  INVENTORY_REJECTED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER] },
+  INVENTORY_SUBMITTED: { module: NotificationModule.INVENTORY, roles: [Role.CEO, Role.OWNER, Role.FRANCHISE_OWNER] },
+  INVENTORY_APPROVED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR] },
+  INVENTORY_REJECTED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR] },
   BRANCH_ORDER_SUBMITTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER, Role.SUPPLY_CHAIN_MANAGER] },
   PROCUREMENT_CREATED: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER, Role.SUPPLY_CHAIN_MANAGER] },
   PROCUREMENT_WAITING_APPROVAL: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER] },
@@ -19,7 +19,7 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   PICKING_TASK_ASSIGNED: { module: NotificationModule.WAREHOUSE, roles: [Role.WAREHOUSE_MANAGER] },
   GOODS_SHIPPED: { module: NotificationModule.DISTRIBUTION, roles: [Role.WAREHOUSE_OPERATOR] },
   BRANCH_GOODS_RECEIVED: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER] },
-  DIFFERENCE_ACT_CREATED: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER] },
+  DIFFERENCE_ACT_CREATED: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER, Role.HQ_SALES_MANAGER] },
   SHORTAGE_NEEDS_RESOLUTION: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER] },
   REPLACEMENT_GOODS_SHIPPED: { module: NotificationModule.DISTRIBUTION, roles: [Role.WAREHOUSE_OPERATOR] },
   LOW_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER] },

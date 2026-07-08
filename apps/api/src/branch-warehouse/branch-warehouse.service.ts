@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { hasAnyFullAccessRole, hasAnyHqRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { activeBranchWarehouseWhere, branchWarehouseWhere, isBranchWarehouse } from '../warehouse/warehouse.util';
 
 @Injectable()
@@ -15,12 +15,14 @@ export class BranchWarehouseService {
       where: activeBranchWarehouseWhere,
       include: { branch: { select: { id: true, name: true } } },
     });
-    const metrics = await Promise.all(warehouses.map((warehouse) => this.buildMetrics(warehouse)));
+    const metrics = await Promise.all(warehouses.map((warehouse) => this.buildMetrics(warehouse, user)));
     return {
       totalBranchWarehouses: warehouses.length,
       totalSku: metrics.reduce((sum, item) => sum + item.totalSkuCount, 0),
       totalQuantity: metrics.reduce((sum, item) => sum + item.totalProductQuantity, 0),
-      totalInventoryValueKgs: Math.round(metrics.reduce((sum, item) => sum + item.totalStockValueKgs, 0) * 100) / 100,
+      totalInventoryValueKgs: Math.round(
+        metrics.reduce((sum, item) => sum + Number(item.totalStockValueKgs ?? 0), 0) * 100,
+      ) / 100,
     };
   }
 
@@ -31,13 +33,26 @@ export class BranchWarehouseService {
       include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
       orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
     });
-    return Promise.all(warehouses.map((warehouse) => this.buildMetrics(warehouse)));
+    return Promise.all(
+      warehouses.map(async (warehouse) => {
+        const metrics = await this.buildMetrics(warehouse, user);
+        if (this.shouldHideCosts(user)) {
+          const { totalStockValueKgs: _hidden, ...rest } = metrics;
+          return rest;
+        }
+        return metrics;
+      }),
+    );
   }
 
   async detail(user: AuthUser, id: string) {
     const warehouse = await this.getWarehouse(user, id);
     await this.audit(user, 'BRANCH_WAREHOUSE_VIEWED', id, { branchId: warehouse.branchId });
-    const metrics = await this.buildMetrics(warehouse);
+    const metrics = await this.buildMetrics(warehouse, user);
+    if (this.shouldHideCosts(user)) {
+      const { totalStockValueKgs: _hidden, ...rest } = metrics;
+      return { ...warehouse, ...rest };
+    }
     return {
       ...warehouse,
       ...metrics,
@@ -51,7 +66,7 @@ export class BranchWarehouseService {
       include: { product: { select: { id: true, name: true, sku: true, unit: true, isActive: true } } },
       orderBy: { product: { sku: 'asc' } },
     });
-    return balances.map((balance) => this.mapBalance(balance));
+    return balances.map((balance) => this.mapBalance(balance, user));
   }
 
   async products(user: AuthUser, id: string) {
@@ -69,11 +84,15 @@ export class BranchWarehouseService {
       orderBy: { product: { sku: 'asc' } },
     });
     return balances.map((balance) => ({
-      ...this.mapBalance(balance),
+      ...this.mapBalance(balance, user),
       categoryName: balance.product.productCategory?.nameRu ?? balance.product.category,
       supplierName: balance.product.defaultSupplier?.name ?? null,
-      sellingPriceKgs: Number(balance.product.sellingPriceKgs),
-      finalCostKgs: Number(balance.product.finalCostKgs),
+      ...(this.shouldHideCosts(user)
+        ? {}
+        : {
+            sellingPriceKgs: Number(balance.product.sellingPriceKgs),
+            finalCostKgs: Number(balance.product.finalCostKgs),
+          }),
       status: balance.product.isActive ? 'ACTIVE' : 'INACTIVE',
     }));
   }
@@ -136,7 +155,8 @@ export class BranchWarehouseService {
     });
   }
 
-  private async buildMetrics(warehouse: {
+  private async buildMetrics(
+    warehouse: {
     id: string;
     name: string;
     code: string;
@@ -146,7 +166,9 @@ export class BranchWarehouseService {
     isActive: boolean;
     warehouseType: import('@prisma/client').WarehouseType;
     branch?: { id: string; name: string; code?: string; city?: string | null; ownerName?: string | null } | null;
-  }) {
+  },
+    user?: AuthUser,
+  ) {
     const balances = await this.prisma.inventoryBalance.findMany({
       where: { warehouseId: warehouse.id },
     });
@@ -182,7 +204,8 @@ export class BranchWarehouseService {
     };
   }
 
-  private mapBalance(balance: {
+  private mapBalance(
+    balance: {
     id: string;
     warehouseId: string;
     productId: string;
@@ -194,8 +217,10 @@ export class BranchWarehouseService {
     lastReceivingAt: Date | null;
     updatedAt: Date;
     product: { id: string; name: string; sku: string; unit: string; isActive: boolean };
-  }) {
-    return {
+  },
+    user?: AuthUser,
+  ) {
+    const response = {
       id: balance.id,
       warehouseId: balance.warehouseId,
       productId: balance.productId,
@@ -210,6 +235,15 @@ export class BranchWarehouseService {
       lastReceivingAt: balance.lastReceivingAt,
       updatedAt: balance.updatedAt,
     };
+    if (user && this.shouldHideCosts(user)) {
+      const { averageCostKgs, landedCostKgs, totalValueKgs, ...rest } = response;
+      return rest;
+    }
+    return response;
+  }
+
+  private shouldHideCosts(user: AuthUser) {
+    return isBranchWarehouseOperator(user);
   }
 
   private buildListWhere(user: AuthUser): Prisma.WarehouseWhereInput {

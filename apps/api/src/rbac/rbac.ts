@@ -116,7 +116,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   ],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
   MASTER: ['service.manage', 'kpi.view', 'products.view'],
-  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage', 'products.view'],
+  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
@@ -239,8 +239,9 @@ export function canManagePricingPolicy(user: Pick<AuthUser, 'role' | 'roles' | '
   return resolveUserRoles(user).includes(Role.CEO);
 }
 
-export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   const roles = resolveUserRoles(user);
+  if (isBranchWarehouseOperator(user)) return false;
   if (hasAnyFullAccessRole(roles)) return true;
   if (roles.includes(Role.ACADEMY_DIRECTOR)) return false;
   return [
@@ -256,12 +257,21 @@ export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissi
     Role.HQ_CASHIER,
     Role.FRANCHISE_OWNER,
     Role.MANAGER,
-    Role.WAREHOUSE_OPERATOR,
     Role.CASHIER,
   ].some((role) => roles.includes(role));
 }
 
-export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+export function isBranchWarehouseOperator(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return !!user.branchId && roles.includes(Role.WAREHOUSE_OPERATOR) && !hasAnyFullAccessRole(roles);
+}
+
+export function canViewProductCost(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  return !isBranchWarehouseOperator(user);
+}
+
+export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  if (isBranchWarehouseOperator(user)) return false;
   return userHasAnyPermission(user, [
     'products.view',
     'products.manage',
@@ -416,11 +426,11 @@ export function canCreateBranchHqOrder(user: Pick<AuthUser, 'role' | 'roles' | '
   return roles.includes(Role.MANAGER);
 }
 
-/** Branch Warehouse Manager creates product requests to HQ. */
+/** Branch Sales Manager creates product requests to HQ (not warehouse operator). */
 export function canCreateBranchProductRequest(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
   if (hasAnyFullAccessRole(roles)) return true;
-  return roles.includes(Role.WAREHOUSE_OPERATOR);
+  return false;
 }
 
 export function canManageOwnBranchProductRequest(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
@@ -456,6 +466,15 @@ export function canReceiveBranchDistribution(user: Pick<AuthUser, 'role' | 'role
   const roles = resolveUserRoles(user);
   if (hasAnyFullAccessRole(roles)) return true;
   return roles.includes(Role.WAREHOUSE_OPERATOR);
+}
+
+export function canViewBranchDiscrepancyReports(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.HQ_SALES_MANAGER) ||
+    isBranchWarehouseOperator(user)
+  );
 }
 
 export function canDispatchFromHq(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

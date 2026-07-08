@@ -28,6 +28,7 @@ import {
   canRecordDistributionPayment,
   canRecordHqDistributionPayment,
   canViewDistribution,
+  canViewBranchDiscrepancyReports,
   hasAnyFullAccessRole,
   resolveUserRoles,
 } from '../rbac/rbac';
@@ -863,8 +864,13 @@ export class DistributionService {
           entityId: shortageReport.id,
         });
         await this.auditTransfer(tx, user, 'DIFFERENCE_ACT_CREATED', order);
+        await this.auditTransfer(tx, user, 'BRANCH_DISCREPANCY_CREATED', order, {
+          shortageReportId: shortageReport.id,
+          reportNumber: shortageReport.reportNumber,
+        });
       }
       await this.auditTransfer(tx, user, 'BRANCH_RECEIVED_GOODS', order);
+      await this.auditTransfer(tx, user, 'BRANCH_GOODS_RECEIVED', order);
       await this.auditTransfer(tx, user, 'GOODS_RECEIVED', order);
       if (transportCostKgs > 0) {
         await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_TRANSPORT_ALLOCATED', order, {
@@ -908,6 +914,9 @@ export class DistributionService {
   }
 
   shortageReports(user: AuthUser, query: DistributionReportQueryDto) {
+    if (!canViewBranchDiscrepancyReports(user) && !this.canAccessAllDistributionBranches(user)) {
+      throw new ForbiddenException('You do not have permission to view discrepancy reports');
+    }
     this.assertQueryBranchAccess(user, query.branchId);
     return this.prisma.shortageReport.findMany({
       where: {
@@ -921,6 +930,9 @@ export class DistributionService {
   }
 
   async shortageReport(user: AuthUser, id: string) {
+    if (!canViewBranchDiscrepancyReports(user) && !this.canAccessAllDistributionBranches(user)) {
+      throw new ForbiddenException('You do not have permission to view discrepancy reports');
+    }
     const report = await this.prisma.shortageReport.findFirst({
       where: {
         id,

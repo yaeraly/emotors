@@ -5,6 +5,7 @@ import {
   canViewInventoryCount,
   canViewProductMaster,
   hasPermission,
+  isBranchWarehouseOperator,
 } from '@/lib/rbac';
 
 export type WarehouseNavTab = {
@@ -22,6 +23,9 @@ export const warehouseNavTabs: WarehouseNavTab[] = [
 
 export function canAccessWarehouseTab(user: User | null | undefined, href: string): boolean {
   if (!user) return false;
+  if (isBranchWarehouseOperator(user)) {
+    return href === '/inventory/count' || href === '/stock-movements';
+  }
   if (href === '/hq-warehouses') return canViewHqWarehouse(user);
   if (href === '/branch-warehouses') return canViewBranchWarehouses(user);
   if (href === '/product-master') return canViewProductMaster(user);

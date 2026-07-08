@@ -78,7 +78,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   ],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
   MASTER: ['service.manage', 'kpi.view', 'products.view'],
-  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage', 'products.view'],
+  WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage', 'sales.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
@@ -369,6 +369,36 @@ const BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES = [
   '/warehouse/list',
 ];
 
+const BRANCH_WAREHOUSE_OPERATOR_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/inventory',
+  '/inventory/count',
+  '/stock-movements',
+  '/distribution/orders',
+  '/distribution/receivings',
+  '/alerts',
+  '/notifications',
+];
+
+const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
+  '/products',
+  '/product-master',
+  '/pricing',
+  '/branch-purchase-requests',
+  '/branch-warehouses',
+  '/warehouses',
+  '/branch-product-shortages',
+  '/sales',
+  '/customers',
+  '/crm',
+  '/procurement',
+  '/hq-warehouses',
+  '/dashboard',
+  '/finance',
+  '/users',
+  '/branches',
+];
+
 const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/change-password',
   '/customers',
@@ -382,6 +412,20 @@ const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/alerts',
   '/notifications',
 ];
+
+export function isBranchWarehouseOperatorForbiddenPath(pathname: string) {
+  return BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function canBranchWarehouseOperatorAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  if (isBranchWarehouseOperatorForbiddenPath(pathname)) return false;
+  return BRANCH_WAREHOUSE_OPERATOR_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
 
 export function isBranchSalesManagerForbiddenPath(pathname: string) {
   return BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES.some(
@@ -465,6 +509,9 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (isBranchSalesManagerUser(user)) {
     return canBranchSalesManagerAccessPath(pathname);
+  }
+  if (isBranchWarehouseOperator(user)) {
+    return canBranchWarehouseOperatorAccessPath(pathname);
   }
   if (pathname === '/dashboard') return true;
   if (pathname === '/branch-dashboard') {
@@ -568,7 +615,7 @@ export function canManageProductCatalog(user: Pick<User, 'role' | 'roles' | 'per
   return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }
 
-export function canViewProductMaster(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+export function canViewProductMaster(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
   if (isWarehouseManagerUser(user)) return false;
   return canViewProductCatalog(user);
@@ -577,12 +624,12 @@ export function canViewProductMaster(user: Pick<User, 'role' | 'roles' | 'permis
 export function canViewBranchWarehouses(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
   if (isWarehouseManagerUser(user)) return false;
+  if (isBranchWarehouseOperator(user)) return false;
   return (
     hasFullAccess(user) ||
     hasRole(user, 'SUPPLY_CHAIN_MANAGER') ||
     hasRole(user, 'HQ_SALES_MANAGER') ||
     hasRole(user, 'FRANCHISE_OWNER') ||
-    hasRole(user, 'WAREHOUSE_OPERATOR') ||
     hasRole(user, 'MANAGER')
   );
 }
@@ -610,8 +657,9 @@ export function canManagePricingPolicy(user: Pick<User, 'role' | 'roles' | 'perm
   return hasRole(user, 'CEO');
 }
 
-export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
+  if (isBranchWarehouseOperator(user)) return false;
   if (hasFullAccess(user)) return true;
   if (hasRole(user, 'ACADEMY_DIRECTOR')) return false;
   return hasAnyRole(user, [
@@ -627,12 +675,17 @@ export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'
     'HQ_CASHIER',
     'FRANCHISE_OWNER',
     'MANAGER',
-    'WAREHOUSE_OPERATOR',
     'CASHIER',
   ]);
 }
 
-export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+export function canViewProductCost(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  return !isBranchWarehouseOperator(user);
+}
+
+export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (isBranchWarehouseOperator(user)) return false;
   return (
     hasPermission(user, 'products.view') ||
     hasPermission(user, 'products.manage') ||
@@ -953,11 +1006,11 @@ export function canCreateBranchHqOrder(user: Pick<User, 'role' | 'roles' | 'perm
   return hasRole(user, 'MANAGER');
 }
 
-/** Branch Warehouse Manager creates product requests to HQ. */
+/** Branch Sales Manager creates product requests to HQ (not warehouse operator). */
 export function canCreateBranchProductRequest(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   if (hasFullAccess(user)) return true;
-  return hasRole(user, 'WAREHOUSE_OPERATOR');
+  return false;
 }
 
 export function canManageOwnBranchProductRequest(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
@@ -972,11 +1025,17 @@ export function canReceiveBranchDistribution(user: Pick<User, 'role' | 'roles' |
 }
 
 /** Branch roles that can view branch purchase requests (not create). */
-export function canViewBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+export function canViewBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
+  if (isBranchWarehouseOperator(user)) return false;
   if (hasFullAccess(user)) return true;
   if (canManageBranchPurchaseRequests(user)) return true;
-  return hasAnyRole(user, ['MANAGER', 'FRANCHISE_OWNER', 'WAREHOUSE_OPERATOR', 'ACCOUNTANT', 'CASHIER', 'MASTER']);
+  return hasAnyRole(user, ['MANAGER', 'FRANCHISE_OWNER', 'ACCOUNTANT', 'CASHIER', 'MASTER']);
+}
+
+export function canViewBranchDiscrepancyReports(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'HQ_SALES_MANAGER') || isBranchWarehouseOperator(user);
 }
 
 export function canSeeHqStockInBranchRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

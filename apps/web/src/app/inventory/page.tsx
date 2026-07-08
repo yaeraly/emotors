@@ -5,10 +5,11 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog, canManageYuanRate, isBranchSalesManagerUser, isWarehouseManagerUser } from '@/lib/rbac';
+import { canManageProductCatalog, canManageYuanRate, isBranchSalesManagerUser, isBranchWarehouseOperator, isWarehouseManagerUser } from '@/lib/rbac';
 import type { InventoryBalance, ProductListResponse, StockValueReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { BranchSalesManagerWarehousePanel } from '@/components/branch-sales-manager/BranchSalesManagerWarehousePanel';
+import { BranchWarehouseOperatorPanel } from '@/components/branch-warehouse-manager/BranchWarehouseOperatorPanel';
 
 export default function InventoryPage() {
   const { t } = useTranslation();
@@ -55,12 +56,21 @@ export default function InventoryPage() {
   const canManageProducts = canManageProductCatalog(currentUser);
   const canManageYuan = canManageYuanRate(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
-  const hideWarehouseNav = isWarehouseManagerUser(currentUser) || branchSalesManagerView;
+  const branchWarehouseOperatorView = isBranchWarehouseOperator(currentUser);
+  const hideWarehouseNav = isWarehouseManagerUser(currentUser) || branchSalesManagerView || branchWarehouseOperatorView;
 
   if (branchSalesManagerView) {
     return (
       <ProtectedShell>
         <BranchSalesManagerWarehousePanel />
+      </ProtectedShell>
+    );
+  }
+
+  if (branchWarehouseOperatorView) {
+    return (
+      <ProtectedShell>
+        <BranchWarehouseOperatorPanel />
       </ProtectedShell>
     );
   }

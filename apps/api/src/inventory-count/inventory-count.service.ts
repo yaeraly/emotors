@@ -167,8 +167,9 @@ export class InventoryCountService {
         },
       });
 
-      await this.audit(tx, user, 'INVENTORY_STARTED', session.id, {
+      await this.audit(tx, user, this.inventoryStartedAction(warehouse), session.id, {
         warehouseId: warehouse.id,
+        branchId: warehouse.branchId ?? undefined,
         newValue: { status: InventoryCountStatus.COUNTING },
       });
 
@@ -293,16 +294,20 @@ export class InventoryCountService {
         include: this.sessionInclude(),
       });
 
-      await this.audit(tx, user, 'INVENTORY_SUBMITTED', id, {
+      await this.audit(tx, user, this.inventorySubmittedAction(session.warehouse), id, {
         warehouseId: session.warehouseId,
+        branchId: session.warehouse.branchId ?? undefined,
         newValue: this.buildSummary(updated),
       });
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.INVENTORY_SUBMITTED,
+        branchId: session.warehouse.branchId ?? undefined,
         entityType: 'InventoryCountSession',
         entityId: id,
         referenceNumber: updated.sessionNumber,
-        message: `Warehouse Manager submitted inventory ${updated.sessionNumber} for approval.`,
+        message: isBranchWarehouse(session.warehouse)
+          ? `Branch warehouse submitted inventory ${updated.sessionNumber} for approval.`
+          : `Warehouse Manager submitted inventory ${updated.sessionNumber} for approval.`,
       });
       return this.toSessionResponse(updated);
     });
@@ -353,7 +358,7 @@ export class InventoryCountService {
           note: `Inventory count ${session.sessionNumber} adjustment for SKU ${item.sku}`,
         });
 
-        await this.audit(tx, user, 'STOCK_ADJUSTED', session.id, {
+        await this.audit(tx, user, this.stockAdjustedAction(session.warehouse), session.id, {
           warehouseId: session.warehouseId,
           productId: item.productId,
           oldValue: currentQuantity,
@@ -415,8 +420,9 @@ export class InventoryCountService {
         include: this.sessionInclude(),
       });
 
-      await this.audit(tx, user, 'INVENTORY_REJECTED', id, {
+      await this.audit(tx, user, this.inventoryRejectedAction(session.warehouse), id, {
         warehouseId: session.warehouseId,
+        branchId: session.warehouse.branchId ?? undefined,
         oldValue: InventoryCountStatus.SUBMITTED,
         newValue: InventoryCountStatus.COUNTING,
         extra: { reason: dto.reason },
@@ -740,6 +746,22 @@ export class InventoryCountService {
 
   private inventoryApprovedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
     return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_APPROVED' : 'INVENTORY_APPROVED';
+  }
+
+  private inventoryStartedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_STARTED' : 'INVENTORY_STARTED';
+  }
+
+  private inventorySubmittedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_SUBMITTED' : 'INVENTORY_SUBMITTED';
+  }
+
+  private inventoryRejectedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_REJECTED' : 'INVENTORY_REJECTED';
+  }
+
+  private stockAdjustedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_STOCK_ADJUSTED' : 'STOCK_ADJUSTED';
   }
 
   private audit(

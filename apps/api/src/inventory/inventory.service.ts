@@ -27,7 +27,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ensureHqCatalogBranch } from '../product-catalog/hq-product-catalog.util';
 import { HQ_WAREHOUSE_ACCESS_DENIED, HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES } from '../hq-warehouse/hq-warehouse-assignment.constants';
-import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole, resolveUserRoles } from '../rbac/rbac';
+import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -389,6 +389,7 @@ export class InventoryService {
   }
 
   async products(user: AuthUser, query: ProductQueryDto) {
+    this.assertCanViewProductCatalog(user);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 25;
     const where: Prisma.ProductWhereInput = {
@@ -432,6 +433,7 @@ export class InventoryService {
   }
 
   async product(user: AuthUser, id: string) {
+    this.assertCanViewProductCatalog(user);
     const product = await this.prisma.product.findFirst({
       where: {
         id,
@@ -755,6 +757,7 @@ export class InventoryService {
   }
 
   async priceHistory(user: AuthUser, productId: string) {
+    this.assertCanViewProductCost(user);
     await this.getProductForRead(user, productId);
     return this.prisma.productPriceHistory.findMany({
       where: { productId },
@@ -764,6 +767,7 @@ export class InventoryService {
   }
 
   async purchasePriceHistoryForProduct(user: AuthUser, productId: string) {
+    this.assertCanViewProductCost(user);
     await this.getProductForRead(user, productId);
     return this.queryPurchasePriceHistory({ productId });
   }
@@ -772,6 +776,7 @@ export class InventoryService {
     user: AuthUser,
     query: PurchasePriceHistoryQueryDto,
   ) {
+    this.assertCanViewProductCost(user);
     if (!canViewProductCatalog(user) && !this.canAccessAllInventory(user)) {
       throw new ForbiddenException('You do not have permission to view purchase price history');
     }
@@ -1118,10 +1123,11 @@ export class InventoryService {
       orderBy: { updatedAt: 'desc' },
     });
 
-    return balances.map((balance) => this.toBalanceResponse(balance));
+    return balances.map((balance) => this.toBalanceResponse(balance, user));
   }
 
   async stockValue(user: AuthUser, branchId?: string) {
+    this.assertCanViewProductCost(user);
     const balances = await this.prisma.inventoryBalance.findMany({
       where: this.buildInventoryBalanceWhere(user, branchId),
       include: { product: { include: { productCategory: true } }, warehouse: true },
@@ -1975,10 +1981,10 @@ export class InventoryService {
     };
   }
 
-  private toBalanceResponse(balance: any) {
+  private toBalanceResponse(balance: any, user?: AuthUser) {
     const quantity = balance.quantity;
     const reservedQuantity = balance.reservedQuantity ?? 0;
-    return {
+    const response = {
       id: balance.id,
       branchId: balance.branchId,
       warehouseId: balance.warehouseId,
@@ -1997,6 +2003,47 @@ export class InventoryService {
       lowStock: quantity <= balance.product.minStockLevel,
       updatedAt: balance.updatedAt,
     };
+    return user && isBranchWarehouseOperator(user) ? this.stripCostFields(response) : response;
+  }
+
+  private assertCanViewProductCatalog(user: AuthUser) {
+    if (!canViewProductCatalog(user)) {
+      throw new ForbiddenException('You do not have permission to view product catalog');
+    }
+  }
+
+  private assertCanViewProductCost(user: AuthUser) {
+    if (isBranchWarehouseOperator(user)) {
+      throw new ForbiddenException('You do not have permission to view product cost');
+    }
+  }
+
+  private stripCostFields<T extends Record<string, unknown>>(payload: T): T {
+    const hidden = [
+      'purchasePriceYuan',
+      'purchaseCostKgs',
+      'transportCostKgs',
+      'finalCostKgs',
+      'sellingPriceKgs',
+      'marginAmount',
+      'marginPercent',
+      'averageCostKgs',
+      'landedCostKgs',
+      'totalValueKgs',
+      'totalStockValueKgs',
+      'wholesalePriceKgs',
+      'latestYuanRate',
+      'priceHistory',
+      'purchasePriceHistory',
+    ];
+    const next: Record<string, unknown> = { ...payload };
+    for (const key of hidden) {
+      delete next[key];
+    }
+    if (next.product && typeof next.product === 'object') {
+      next.product = this.stripCostFields(next.product as Record<string, unknown>);
+    }
+    return next as T;
   }
 
   private groupStockValue<T extends { quantity: number; totalValueKgs: Prisma.Decimal }>(

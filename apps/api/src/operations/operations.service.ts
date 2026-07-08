@@ -217,7 +217,7 @@ export class OperationsService {
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
     if (!canManageOwnBranchProductRequest(user)) {
       await this.auditBranchRequest(user, user.branchId, 'BRANCH_ORDER_CREATE_DENIED', 'BranchPurchaseRequest', 'create');
-      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can create HQ product requests');
+      throw new ForbiddenException('Only Branch Manager can create HQ product requests');
     }
     const branchId = this.resolveBranchId(user, dto.branchId);
     if (dto.assignedHqWarehouseId || dto.sourceWarehouseId) {
@@ -287,7 +287,7 @@ export class OperationsService {
 
   async updateBranchPurchaseRequest(user: AuthUser, id: string, dto: any) {
     if (!canManageOwnBranchProductRequest(user)) {
-      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can update HQ product requests');
+      throw new ForbiddenException('Only Branch Manager can update HQ product requests');
     }
 
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
@@ -345,7 +345,7 @@ export class OperationsService {
 
   async submitBranchPurchaseRequest(user: AuthUser, id: string) {
     if (!canManageOwnBranchProductRequest(user)) {
-      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can submit HQ product requests');
+      throw new ForbiddenException('Only Branch Manager can submit HQ product requests');
     }
 
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
@@ -394,7 +394,7 @@ export class OperationsService {
 
   async cancelBranchPurchaseRequest(user: AuthUser, id: string) {
     if (!canManageOwnBranchProductRequest(user)) {
-      throw new ForbiddenException('Only Branch Manager or Warehouse Manager can cancel HQ product requests');
+      throw new ForbiddenException('Only Branch Manager can cancel HQ product requests');
     }
 
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
