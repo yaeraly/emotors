@@ -81,13 +81,15 @@ export function sanitizeBranchPurchaseRequest<T extends {
       approvedQuantity: undefined,
       unit: (item as { unit?: string }).unit,
       note: (item as { note?: string | null }).note,
+      branchPurchasePriceKgs: item.wholesalePriceKgs,
+      totalAmount: item.totalAmount,
       weightKg: undefined,
       hqAvailableStock: undefined,
       missingQty: undefined,
       currentBranchStock: undefined,
       transportExpenseAllocation: undefined,
       estimatedUnitCost: undefined,
-      totalAmount: undefined,
+      wholesalePriceKgs: undefined,
     })),
   };
 }

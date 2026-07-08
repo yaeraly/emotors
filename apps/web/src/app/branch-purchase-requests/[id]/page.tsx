@@ -26,7 +26,8 @@ type RequestItem = {
   currentBranchStock?: number;
   hqAvailableStock?: number | null;
   missingQty?: number | null;
-  wholesalePriceKgs: number;
+  branchPurchasePriceKgs?: number;
+  wholesalePriceKgs?: number;
   transportExpenseAllocation?: number;
   estimatedUnitCost?: number;
   totalAmount?: number;
@@ -268,7 +269,12 @@ export default function BranchPurchaseRequestDetailPage() {
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.estimatedAmount')}</p>
               <p className="mt-1 font-semibold text-slate-900">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)} KGS</p>
             </div>
-          ) : null}
+          ) : (
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalAmount')}</p>
+              <p className="mt-1 font-semibold text-slate-900">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)} KGS</p>
+            </div>
+          )}
           {request.note ? (
             <div className="md:col-span-3">
               <p className="text-xs font-bold uppercase text-slate-400">{t('crm.notes')}</p>
@@ -294,10 +300,19 @@ export default function BranchPurchaseRequestDetailPage() {
                 )}
                 <th className="px-4 py-3">{t('branchProductRequest.unit')}</th>
                 {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.branchStock')}</th> : null}
-                {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.wholesalePrice')}</th> : null}
-                {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.transportAllocation')}</th> : null}
-                {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.estimatedUnitCost')}</th> : null}
-                {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th> : null}
+                {branchOnlyView ? (
+                  <>
+                    <th className="px-4 py-3">{t('branchProductRequest.branchPurchasePrice')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="px-4 py-3">{t('branchProductRequest.wholesalePrice')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.transportAllocation')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.estimatedUnitCost')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -343,10 +358,19 @@ export default function BranchPurchaseRequestDetailPage() {
                     )}
                     <td className="px-4 py-3">{item.unit}</td>
                     {!branchOnlyView ? <td className="px-4 py-3">{item.currentBranchStock ?? '-'}</td> : null}
-                    {!branchOnlyView ? <td className="px-4 py-3">{Number(item.wholesalePriceKgs).toFixed(2)}</td> : null}
-                    {!branchOnlyView ? <td className="px-4 py-3">{Number(item.transportExpenseAllocation ?? 0).toFixed(2)}</td> : null}
-                    {!branchOnlyView ? <td className="px-4 py-3">{Number(item.estimatedUnitCost ?? 0).toFixed(2)}</td> : null}
-                    {!branchOnlyView ? <td className="px-4 py-3">{Number(item.totalAmount ?? 0).toFixed(2)}</td> : null}
+                    {branchOnlyView ? (
+                      <>
+                        <td className="px-4 py-3">{Number(item.branchPurchasePriceKgs ?? 0).toFixed(2)}</td>
+                        <td className="px-4 py-3">{Number(item.totalAmount ?? 0).toFixed(2)}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-4 py-3">{Number(item.wholesalePriceKgs ?? 0).toFixed(2)}</td>
+                        <td className="px-4 py-3">{Number(item.transportExpenseAllocation ?? 0).toFixed(2)}</td>
+                        <td className="px-4 py-3">{Number(item.estimatedUnitCost ?? 0).toFixed(2)}</td>
+                        <td className="px-4 py-3">{Number(item.totalAmount ?? 0).toFixed(2)}</td>
+                      </>
+                    )}
                   </tr>
                 );
               })}

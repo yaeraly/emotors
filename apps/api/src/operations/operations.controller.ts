@@ -28,8 +28,20 @@ export class OperationsController {
     @Query('search') search?: string,
     @Query('branchWarehouseId') branchWarehouseId?: string,
     @Query('includeStock') includeStock?: string,
+    @Query('branchId') branchId?: string,
   ) {
-    return this.service.branchProductOptions(user, search, branchWarehouseId, includeStock);
+    return this.service.branchProductOptions(user, search, branchWarehouseId, includeStock, branchId);
+  }
+
+  @Get('branch-purchase-requests/product-prices')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER)
+  branchProductPrices(
+    @CurrentUser() user: AuthUser,
+    @Query('branchId') branchId: string,
+    @Query('productIds') productIds?: string,
+  ) {
+    const ids = productIds?.split(',').map((id) => id.trim()).filter(Boolean) ?? [];
+    return this.service.branchProductPrices(user, branchId, ids);
   }
 
   @Get('branch-purchase-requests/:id')

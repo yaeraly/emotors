@@ -57,6 +57,7 @@ import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assig
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import {
   isSubmittedBranchPurchaseStatus,
+  resolveBranchPurchasePriceKgs,
 } from './branch-product-request.util';
 import {
   buildChinaReceivingValidation,
@@ -148,12 +149,18 @@ export class OperationsService {
     return sanitizeBranchPurchaseRequest(enriched, hideSensitive);
   }
 
-  async branchProductOptions(user: AuthUser, search?: string, branchWarehouseId?: string, includeStock?: string) {
+  async branchProductOptions(
+    user: AuthUser,
+    search?: string,
+    branchWarehouseId?: string,
+    includeStock?: string,
+    branchId?: string,
+  ) {
     if (!canManageOwnBranchProductRequest(user) && !this.canViewAllBranchPurchaseRequests(user)) {
       throw new ForbiddenException('Forbidden resource');
     }
-    const branchId = user.branchId;
-    if (!branchId && !this.canViewAllBranchPurchaseRequests(user)) {
+    const resolvedBranchId = branchId ?? user.branchId;
+    if (!resolvedBranchId && !this.canViewAllBranchPurchaseRequests(user)) {
       throw new ForbiddenException('Branch context required');
     }
 
@@ -162,15 +169,22 @@ export class OperationsService {
     if (isBranchOnly && includeStock) {
       throw new ForbiddenException('Branch users cannot access HQ stock details');
     }
-    if (isBranchOnly && branchId) {
-      await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_SEARCH_OPENED', 'BranchPurchaseRequest', 'search');
-      await this.auditBranchRequest(user, branchId, 'BRANCH_STOCK_VISIBILITY_BLOCKED', 'BranchPurchaseRequest', 'search');
+    if (isBranchOnly && resolvedBranchId) {
+      await this.auditBranchRequest(user, resolvedBranchId, 'BRANCH_PRODUCT_SEARCH_OPENED', 'BranchPurchaseRequest', 'search');
+      await this.auditBranchRequest(user, resolvedBranchId, 'BRANCH_STOCK_VISIBILITY_BLOCKED', 'BranchPurchaseRequest', 'search');
     }
+
+    const branch = resolvedBranchId
+      ? await this.prisma.branch.findUnique({
+          where: { id: resolvedBranchId },
+          select: { code: true },
+        })
+      : null;
 
     const hqBranch = await ensureHqCatalogBranch(this.prisma);
     const seedResult = await seedHqProductCatalogFromWarehouseInventory(this.prisma);
-    if (seedResult.seeded && branchId) {
-      await this.auditBranchRequest(user, branchId, 'HQ_PRODUCT_CATALOG_SEEDED_FROM_WAREHOUSE', 'Product', hqBranch.id, {
+    if (seedResult.seeded && resolvedBranchId) {
+      await this.auditBranchRequest(user, resolvedBranchId, 'HQ_PRODUCT_CATALOG_SEEDED_FROM_WAREHOUSE', 'Product', hqBranch.id, {
         catalogCount: seedResult.catalogCount,
         adoptedCount: seedResult.adoptedCount,
         createdCount: seedResult.createdCount,
@@ -211,7 +225,52 @@ export class OperationsService {
       category: catalogProduct.category,
       productCode: catalogProduct.productCategory?.code ?? null,
       unit: catalogProduct.unit,
+      branchPurchasePriceKgs: resolveBranchPurchasePriceKgs(catalogProduct, branch?.code),
     }));
+  }
+
+  async branchProductPrices(user: AuthUser, branchId: string, productIds: string[]) {
+    if (!canManageOwnBranchProductRequest(user) && !this.canViewAllBranchPurchaseRequests(user)) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    const resolvedBranchId = branchId || user.branchId;
+    if (!resolvedBranchId) {
+      throw new BadRequestException('Branch context required');
+    }
+    if (!this.canViewAllBranchPurchaseRequests(user) && user.branchId !== resolvedBranchId) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+
+    const uniqueIds = Array.from(new Set(productIds.filter(Boolean)));
+    if (!uniqueIds.length) {
+      return {};
+    }
+
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: resolvedBranchId },
+      select: { code: true },
+    });
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
+    const catalogProducts = await this.prisma.product.findMany({
+      where: {
+        id: { in: uniqueIds },
+        branchId: hqBranch.id,
+        deletedAt: null,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        wholesalePriceKgs: true,
+        hqBranchWholesalePriceKgs: true,
+      },
+    });
+
+    return Object.fromEntries(
+      catalogProducts.map((product) => [
+        product.id,
+        resolveBranchPurchasePriceKgs(product, branch?.code),
+      ]),
+    );
   }
 
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
@@ -2312,25 +2371,47 @@ export class OperationsService {
         )
       : new Map<string, number>();
 
-    return resolvedProducts.map(({ item, product }) => {
-      const quantity = Number(item.quantity ?? 0);
-      const wholesalePriceKgs = Number(product.sellingPriceKgs);
-      return {
-        productId: product.id,
-        sku: product.sku,
-        productName: product.name,
-        quantity,
-        unit: product.unit,
-        currentBranchStock: branchStockMap.get(product.id) ?? 0,
-        hqAvailableStock: hqStockMap.get(product.id) ?? 0,
-        wholesalePriceKgs,
-        weightKg: Number(product.weightKg),
-        transportExpenseAllocation: 0,
-        estimatedUnitCost: wholesalePriceKgs,
-        totalAmount: Math.round((wholesalePriceKgs * quantity + Number.EPSILON) * 100) / 100,
-        note: item.note,
-      };
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { code: true },
     });
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
+
+    return Promise.all(
+      resolvedProducts.map(async ({ item, product }) => {
+        const quantity = Number(item.quantity ?? 0);
+        const catalogProduct = await this.prisma.product.findFirst({
+          where: {
+            sku: product.sku,
+            branchId: hqBranch.id,
+            deletedAt: null,
+            isActive: true,
+          },
+          select: {
+            wholesalePriceKgs: true,
+            hqBranchWholesalePriceKgs: true,
+          },
+        });
+        const priceSource = catalogProduct ?? product;
+        const branchPurchasePriceKgs = resolveBranchPurchasePriceKgs(priceSource, branch?.code);
+
+        return {
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+          quantity,
+          unit: product.unit,
+          currentBranchStock: branchStockMap.get(product.id) ?? 0,
+          hqAvailableStock: hqStockMap.get(product.id) ?? 0,
+          wholesalePriceKgs: branchPurchasePriceKgs,
+          weightKg: Number(product.weightKg),
+          transportExpenseAllocation: 0,
+          estimatedUnitCost: branchPurchasePriceKgs,
+          totalAmount: Math.round((branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100,
+          note: item.note,
+        };
+      }),
+    );
   }
 
   private async ensureBranchProductFromCatalog(branchId: string, catalogOrBranchProductId: string) {

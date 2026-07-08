@@ -14,10 +14,12 @@ export type BranchProductOption = {
   category: string;
   productCode?: string | null;
   unit: string;
+  branchPurchasePriceKgs?: number;
 };
 
 type Props = {
   disabled?: boolean;
+  branchId?: string;
   onSelect: (product: BranchProductOption) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
 };
@@ -26,6 +28,7 @@ const DEBOUNCE_MS = 200;
 
 export function BranchProductSearch({
   disabled = false,
+  branchId,
   onSelect,
   inputRef,
 }: Props) {
@@ -54,6 +57,9 @@ export function BranchProductSearch({
     const timer = window.setTimeout(() => {
       const search = query.trim();
       const params = new URLSearchParams({ search });
+      if (branchId) {
+        params.set('branchId', branchId);
+      }
       void apiFetch<BranchProductOption[]>(`/branch-purchase-requests/product-options?${params.toString()}`)
         .then((items) => {
           const searchable = items.map((item) => ({
@@ -81,7 +87,7 @@ export function BranchProductSearch({
     }, DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [query, t]);
+  }, [branchId, query, t]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {

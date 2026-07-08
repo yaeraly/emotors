@@ -1,3 +1,21 @@
+import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
+
+export function isHqOwnedBranch(branchCode: string | null | undefined) {
+  return branchCode === HQ_CATALOG_BRANCH_CODE;
+}
+
+export function resolveBranchPurchasePriceKgs(
+  product: {
+    wholesalePriceKgs: { toString(): string } | number;
+    hqBranchWholesalePriceKgs: { toString(): string } | number;
+  },
+  branchCode: string | null | undefined,
+) {
+  return isHqOwnedBranch(branchCode)
+    ? Number(product.hqBranchWholesalePriceKgs)
+    : Number(product.wholesalePriceKgs);
+}
+
 export type BranchProductRequestLineInput = {
   productId: string;
   quantity: number;

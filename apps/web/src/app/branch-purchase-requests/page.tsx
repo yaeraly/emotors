@@ -75,12 +75,19 @@ type DraftLine = {
   sku: string;
   unit: string;
   weightKg: number;
+  branchPurchasePriceKgs: number;
   wholesalePriceKgs: number;
   branchStock: number | null;
   hqStock: number | null;
   quantity: string;
   note: string;
 };
+
+function lineTotal(line: DraftLine) {
+  const quantity = Number(line.quantity) || 0;
+  const price = line.branchPurchasePriceKgs || 0;
+  return Math.round((price * quantity + Number.EPSILON) * 100) / 100;
+}
 
 function emptyLine(): DraftLine {
   return {
@@ -90,6 +97,7 @@ function emptyLine(): DraftLine {
     sku: '',
     unit: 'pcs',
     weightKg: 0,
+    branchPurchasePriceKgs: 0,
     wholesalePriceKgs: 0,
     branchStock: 0,
     hqStock: null,
@@ -160,7 +168,12 @@ export default function BranchPurchaseRequestsPage() {
       if (existing) {
         return current.map((line) =>
           line.productId === product.id
-            ? { ...line, quantity: String(Number(line.quantity) + 1) }
+            ? {
+                ...line,
+                quantity: String(Number(line.quantity) + 1),
+                branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
+                wholesalePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
+              }
             : line,
         );
       }
@@ -172,7 +185,8 @@ export default function BranchPurchaseRequestsPage() {
         sku: product.sku,
         unit: product.unit,
         weightKg: 0,
-        wholesalePriceKgs: 0,
+        branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? 0,
+        wholesalePriceKgs: product.branchPurchasePriceKgs ?? 0,
         branchStock: 0,
         hqStock: null,
         quantity: '1',
@@ -290,6 +304,33 @@ export default function BranchPurchaseRequestsPage() {
   const branchWarehouseView = isBranchWarehouseOperator(user);
   const branchOwnerView = isBranchOwnerUser(user);
   const hqSalesView = isHqSalesManagerUser(user);
+  const draftProductIds = lines
+    .map((line) => line.productId)
+    .filter(Boolean)
+    .join(',');
+
+  useEffect(() => {
+    if (!showForm || !branchOnlyView || !form.branchId || !draftProductIds) return;
+
+    const params = new URLSearchParams({ branchId: form.branchId, productIds: draftProductIds });
+    void apiFetch<Record<string, number>>(`/branch-purchase-requests/product-prices?${params.toString()}`)
+      .then((prices) => {
+        setLines((current) =>
+          current.map((line) =>
+            line.productId && prices[line.productId] !== undefined
+              ? {
+                  ...line,
+                  branchPurchasePriceKgs: prices[line.productId],
+                  wholesalePriceKgs: prices[line.productId],
+                }
+              : line,
+          ),
+        );
+      })
+      .catch(() => null);
+  }, [branchOnlyView, draftProductIds, form.branchId, showForm]);
+
+  const draftTotalAmount = lines.reduce((sum, line) => sum + lineTotal(line), 0);
 
   if (user && !canView) {
     return (
@@ -358,18 +399,24 @@ export default function BranchPurchaseRequestsPage() {
               </label>
             </div>
 
-            <BranchProductSearch inputRef={productSearchRef} onSelect={addProductFromSearch} />
+            <BranchProductSearch inputRef={productSearchRef} branchId={form.branchId} onSelect={addProductFromSearch} />
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-3 py-2">{t('sales.product')}</th>
+                    {branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.productSearch.sku')}</th> : null}
                     <th className="px-3 py-2">{t('distribution.quantity')}</th>
-                    <th className="px-3 py-2">{t('branchProductRequest.unit')}</th>
+                    {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.unit')}</th> : null}
                     {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.branchStock')}</th> : null}
-                    {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.wholesalePrice')}</th> : null}
-                    <th className="px-3 py-2">{t('crm.notes')}</th>
+                    {branchOnlyView ? (
+                      <th className="px-3 py-2">{t('branchProductRequest.branchPurchasePrice')}</th>
+                    ) : (
+                      <th className="px-3 py-2">{t('branchProductRequest.wholesalePrice')}</th>
+                    )}
+                    {branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.totalAmount')}</th> : null}
+                    {!branchOnlyView ? <th className="px-3 py-2">{t('crm.notes')}</th> : null}
                     <th className="px-3 py-2" />
                   </tr>
                 </thead>
@@ -378,14 +425,19 @@ export default function BranchPurchaseRequestsPage() {
                     <tr key={line.key}>
                       <td className="px-3 py-2">
                         {line.productId ? (
-                          <div>
+                          branchOnlyView ? (
                             <p className="font-semibold text-slate-900">{line.productName}</p>
-                            <p className="text-xs text-slate-500">{line.sku}</p>
-                          </div>
+                          ) : (
+                            <div>
+                              <p className="font-semibold text-slate-900">{line.productName}</p>
+                              <p className="text-xs text-slate-500">{line.sku}</p>
+                            </div>
+                          )
                         ) : (
                           <span className="text-slate-400">{t('branchProductRequest.selectProductHint')}</span>
                         )}
                       </td>
+                      {branchOnlyView ? <td className="px-3 py-2 text-slate-700">{line.sku || '—'}</td> : null}
                       <td className="px-3 py-2">
                         <input
                           type="number"
@@ -400,21 +452,28 @@ export default function BranchPurchaseRequestsPage() {
                           className="w-24 rounded-lg border border-slate-300 px-2 py-1"
                         />
                       </td>
-                      <td className="px-3 py-2">{line.unit}</td>
+                      {!branchOnlyView ? <td className="px-3 py-2">{line.unit}</td> : null}
                       {!branchOnlyView ? <td className="px-3 py-2">{line.branchStock}</td> : null}
-                      {!branchOnlyView ? <td className="px-3 py-2">{line.wholesalePriceKgs.toFixed(2)}</td> : null}
                       <td className="px-3 py-2">
-                        <input
-                          value={line.note}
-                          disabled={!line.productId}
-                          onChange={(e) =>
-                            setLines((current) =>
-                              current.map((row) => (row.key === line.key ? { ...row, note: e.target.value } : row)),
-                            )
-                          }
-                          className="w-full min-w-[8rem] rounded-lg border border-slate-300 px-2 py-1"
-                        />
+                        {line.productId ? line.branchPurchasePriceKgs.toFixed(2) : '—'}
                       </td>
+                      {branchOnlyView ? (
+                        <td className="px-3 py-2 font-semibold text-slate-900">{lineTotal(line).toFixed(2)}</td>
+                      ) : null}
+                      {!branchOnlyView ? (
+                        <td className="px-3 py-2">
+                          <input
+                            value={line.note}
+                            disabled={!line.productId}
+                            onChange={(e) =>
+                              setLines((current) =>
+                                current.map((row) => (row.key === line.key ? { ...row, note: e.target.value } : row)),
+                              )
+                            }
+                            className="w-full min-w-[8rem] rounded-lg border border-slate-300 px-2 py-1"
+                          />
+                        </td>
+                      ) : null}
                       <td className="px-3 py-2">
                         <button type="button" onClick={() => removeLine(line.key)} className="text-xs font-semibold text-red-600">
                           {t('common.delete')}
@@ -425,6 +484,13 @@ export default function BranchPurchaseRequestsPage() {
                 </tbody>
               </table>
             </div>
+
+            {branchOnlyView ? (
+              <div className="flex justify-end rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <span className="font-semibold text-slate-700">{t('branchProductRequest.totalAmount')}:</span>
+                <span className="ml-3 text-lg font-bold text-slate-950">{draftTotalAmount.toFixed(2)} KGS</span>
+              </div>
+            ) : null}
 
             <button
               type="button"
@@ -462,6 +528,8 @@ export default function BranchPurchaseRequestsPage() {
                     <th className="px-4 py-3">{t('branchProductRequest.totalQuantity')}</th>
                     <th className="px-4 py-3">{t('branchProductRequest.estimatedAmount')}</th>
                   </>
+                ) : branchOnlyView ? (
+                  <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th>
                 ) : null}
                 <th className="px-4 py-3">{t('common.createdDate')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
@@ -488,6 +556,8 @@ export default function BranchPurchaseRequestsPage() {
                       <td className="px-4 py-3">{request.totalQuantity ?? request.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
                       <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                     </>
+                  ) : branchOnlyView ? (
+                    <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                   ) : null}
                   <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3">
