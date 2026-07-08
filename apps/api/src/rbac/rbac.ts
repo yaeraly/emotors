@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 
@@ -117,7 +118,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
   MASTER: ['service.manage', 'kpi.view', 'products.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
-  CASHIER: ['payments.manage', 'sales.manage'],
+  CASHIER: ['payments.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
@@ -264,6 +265,32 @@ export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissi
 export function isBranchWarehouseOperator(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
   const roles = resolveUserRoles(user);
   return !!user.branchId && roles.includes(Role.WAREHOUSE_OPERATOR) && !hasAnyFullAccessRole(roles);
+}
+
+export function isBranchCashierUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  if (roles.includes(Role.HQ_CASHIER)) return false;
+  return roles.includes(Role.CASHIER);
+}
+
+export function isBranchAccountantUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  if (roles.includes(Role.HQ_ACCOUNTANT)) return false;
+  return roles.includes(Role.ACCOUNTANT);
+}
+
+export function assertBranchCashierCannotManageSales(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  if (isBranchCashierUser(user)) {
+    throw new ForbiddenException('Branch cashier cannot create or edit sales');
+  }
+}
+
+export function assertBranchAccountantRestrictedRoute(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  if (isBranchAccountantUser(user)) {
+    throw new ForbiddenException('Forbidden resource');
+  }
 }
 
 export function canViewProductCost(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {

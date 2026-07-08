@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -51,6 +51,24 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             return;
           }
           if (isBranchWarehouseOperator(currentUser) && isBranchWarehouseOperatorForbiddenPath(pathname)) {
+            void apiFetch('/audit/forbidden-route', {
+              method: 'POST',
+              body: JSON.stringify({ pathname }),
+            }).catch(() => null);
+            setUser(currentUser);
+            setForbidden(true);
+            return;
+          }
+          if (isBranchCashierUser(currentUser) && isBranchCashierForbiddenPath(pathname)) {
+            void apiFetch('/audit/forbidden-route', {
+              method: 'POST',
+              body: JSON.stringify({ pathname }),
+            }).catch(() => null);
+            setUser(currentUser);
+            setForbidden(true);
+            return;
+          }
+          if (isBranchAccountantUser(currentUser) && isBranchAccountantForbiddenPath(pathname)) {
             void apiFetch('/audit/forbidden-route', {
               method: 'POST',
               body: JSON.stringify({ pathname }),
@@ -131,6 +149,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const hqCashierView = isHqCashierUser(user);
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const branchMasterView = isBranchMasterUser(user);
+  const branchCashierView = isBranchCashierUser(user);
+  const branchAccountantView = isBranchAccountantUser(user);
   const branchWarehouseOperatorView = isBranchWarehouseOperator(user);
   const canSeeBranchWarehouses = canViewBranchWarehouses(user);
   const canSeeProductMaster = canViewProductMaster(user);
@@ -281,6 +301,39 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/stock-movements" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventory.stockMovements')}</Link>
                 <Link href="/service/parts-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.partsRequests')}</Link>
               </>
+            ) : branchCashierView ? (
+              <>
+                <Link href="/payments" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                  {t('nav.payments')}
+                </Link>
+                <Link href="/sales" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('sales.salesAndPayments')}
+                </Link>
+                <Link href="/service/cashier" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  Сервис — оплата
+                </Link>
+                <Link href="/returns" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('operations.returns')}
+                </Link>
+              </>
+            ) : branchAccountantView ? (
+              <>
+                <Link href="/payments" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                  {t('nav.payments')}
+                </Link>
+                <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('tax.title')}
+                </Link>
+                <Link href="/payroll" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('payroll.title')}
+                </Link>
+                <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('commissions.title')}
+                </Link>
+                <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('compensation.rules')}
+                </Link>
+              </>
             ) : branchMasterView ? (
               <>
                 {canSeeCrm ? (
@@ -424,7 +477,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeeFinance ? <Link href="/finance" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
               {canSeeTax ? <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('tax.title')}</Link> : null}
               {canSeePayments ? <Link href="/payments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.payments')}</Link> : null}
-              {canSeePayments && !canSeeService ? <Link href="/service/cashier" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Сервис — оплата</Link> : null}
               {canSeeAi ? <Link href="/ai" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('ai.title')}</Link> : null}
               {canSeePayroll ? <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('compensation.rules')}</Link> : null}
               {canSeePayroll ? <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('commissions.title')}</Link> : null}

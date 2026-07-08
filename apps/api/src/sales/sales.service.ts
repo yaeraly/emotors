@@ -22,7 +22,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { PricingCatalogService } from '../pricing/pricing-catalog.service';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { assertBranchCashierCannotManageSales, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -46,6 +46,7 @@ export class SalesService {
   }
 
   async createDraft(user: AuthUser, dto: CreateSaleDto) {
+    assertBranchCashierCannotManageSales(user);
     return this.prisma.$transaction(async (tx) => {
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
       await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
@@ -308,6 +309,7 @@ export class SalesService {
   }
 
   async updateDraft(user: AuthUser, id: string, dto: CreateSaleDto) {
+    assertBranchCashierCannotManageSales(user);
     return this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
 
@@ -448,6 +450,7 @@ export class SalesService {
   }
 
   async sendWhatsApp(user: AuthUser, id: string) {
+    assertBranchCashierCannotManageSales(user);
     const sale = await this.getAccessibleSale(user, id);
 
     if (sale.status === SaleStatus.FINALIZED || sale.status === SaleStatus.CANCELLED) {
@@ -482,6 +485,7 @@ export class SalesService {
   }
 
   async approve(user: AuthUser, id: string) {
+    assertBranchCashierCannotManageSales(user);
     const sale = await this.getAccessibleSale(user, id);
 
     if (sale.status === SaleStatus.CANCELLED || sale.status === SaleStatus.FINALIZED) {
@@ -565,6 +569,7 @@ export class SalesService {
   }
 
   async finalize(user: AuthUser, id: string) {
+    assertBranchCashierCannotManageSales(user);
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
 
@@ -655,6 +660,7 @@ export class SalesService {
   }
 
   async cancel(user: AuthUser, id: string) {
+    assertBranchCashierCannotManageSales(user);
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
 

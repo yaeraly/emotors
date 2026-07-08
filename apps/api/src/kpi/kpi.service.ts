@@ -2,13 +2,14 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma, Role, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { canAccessAllBranches as roleCanAccessAllBranches, hasAnyHqRole } from '../rbac/rbac';
+import { assertBranchAccountantRestrictedRoute, canAccessAllBranches as roleCanAccessAllBranches, hasAnyHqRole } from '../rbac/rbac';
 
 @Injectable()
 export class KpiService {
   constructor(private readonly prisma: PrismaService) {}
 
   async dashboard(user: AuthUser) {
+    assertBranchAccountantRestrictedRoute(user);
     const branches = await this.accessibleBranches(user);
     const comparison = await this.branchComparison(user);
     return { branches, comparison };

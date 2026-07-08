@@ -4,13 +4,15 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { DailySalesReport, PaymentStatus, Sale, SaleStatus } from '@/lib/types';
+import { canCreateSale } from '@/lib/rbac';
+import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIAL', 'DEBT'];
 
 export default function SalesPage() {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [sales, setSales] = useState<Sale[]>([]);
   const [report, setReport] = useState<DailySalesReport | null>(null);
   const [search, setSearch] = useState('');
@@ -29,6 +31,10 @@ export default function SalesPage() {
     const value = params.toString();
     return value ? `?${value}` : '';
   }, [paymentStatus, search]);
+
+  useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
+  }, []);
 
   useEffect(() => {
     void loadSales();
@@ -68,12 +74,14 @@ export default function SalesPage() {
               {t('sales.payments')}
             </p>
           </div>
-          <Link
-            href="/sales/new"
-            className="rounded-xl bg-blue-600 px-5 py-3 text-center font-semibold text-white hover:bg-blue-700"
-          >
-            {t('sales.newSale')}
-          </Link>
+          {canCreateSale(user) ? (
+            <Link
+              href="/sales/new"
+              className="rounded-xl bg-blue-600 px-5 py-3 text-center font-semibold text-white hover:bg-blue-700"
+            >
+              {t('sales.newSale')}
+            </Link>
+          ) : null}
         </div>
 
         {error ? (

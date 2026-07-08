@@ -8,7 +8,7 @@ import {
 import { BranchStatus, Prisma, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { canAssignBranchHqWarehouse, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { assertBranchAccountantRestrictedRoute, canAssignBranchHqWarehouse, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { BranchQueryDto } from './dto/branch-query.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
@@ -74,6 +74,7 @@ export class BranchesService {
   }
 
   findAll(user: AuthUser, query: BranchQueryDto = {}) {
+    assertBranchAccountantRestrictedRoute(user);
     const where: Prisma.BranchWhereInput = {
       deletedAt: null,
       ...(this.canViewAllBranches(user) ? {} : { id: user.branchId }),
@@ -110,6 +111,7 @@ export class BranchesService {
   }
 
   async findOne(user: AuthUser, id: string) {
+    assertBranchAccountantRestrictedRoute(user);
     this.ensureBranchAccess(user, id);
     const branch = await this.prisma.branch.findFirst({
       where: { id, deletedAt: null },

@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCancelSale, canVoidPayment } from '@/lib/rbac';
+import { canCancelSale, canManageSaleWorkflow, canVoidPayment } from '@/lib/rbac';
 import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -179,6 +179,8 @@ export default function SaleDetailPage() {
                   <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
                 </div>
                 <div className="mt-6 flex flex-wrap gap-2 print:hidden">
+                  {canManageSaleWorkflow(currentUser) ? (
+                    <>
                   <button
                     onClick={() => void runSaleAction('send-whatsapp')}
                     disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
@@ -212,6 +214,8 @@ export default function SaleDetailPage() {
                     >
                       Cancel
                     </button>
+                  ) : null}
+                    </>
                   ) : null}
                 </div>
               </article>

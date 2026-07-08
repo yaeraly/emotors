@@ -79,7 +79,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
   MASTER: ['service.manage', 'kpi.view', 'products.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
-  CASHIER: ['payments.manage', 'sales.manage'],
+  CASHIER: ['payments.manage'],
   ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
@@ -400,6 +400,84 @@ const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
   '/branches',
 ];
 
+const BRANCH_CASHIER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/payments',
+  '/sales',
+  '/service/cashier',
+  '/returns',
+  '/alerts',
+  '/notifications',
+];
+
+const BRANCH_CASHIER_FORBIDDEN_PREFIXES = [
+  '/dashboard',
+  '/branch-dashboard',
+  '/finance',
+  '/analytics',
+  '/kpi',
+  '/ai',
+  '/users',
+  '/branches',
+  '/settings',
+  '/customers',
+  '/crm',
+  '/branch-purchase-requests',
+  '/inventory',
+  '/products',
+  '/procurement',
+  '/distribution',
+  '/service/new',
+  '/service/kpi',
+  '/service/parts-requests',
+  '/sales/new',
+  '/reservations',
+  '/warehouse-release',
+  '/installments',
+  '/follow-ups',
+  '/tax',
+  '/payroll',
+  '/commissions',
+  '/compensation',
+];
+
+const BRANCH_ACCOUNTANT_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/payments',
+  '/tax',
+  '/payroll',
+  '/commissions',
+  '/compensation',
+  '/returns',
+  '/alerts',
+  '/notifications',
+];
+
+const BRANCH_ACCOUNTANT_FORBIDDEN_PREFIXES = [
+  '/dashboard',
+  '/branch-dashboard',
+  '/finance',
+  '/analytics',
+  '/kpi',
+  '/ai',
+  '/users',
+  '/branches',
+  '/settings',
+  '/customers',
+  '/crm',
+  '/sales',
+  '/service',
+  '/inventory',
+  '/products',
+  '/procurement',
+  '/distribution',
+  '/branch-purchase-requests',
+  '/reservations',
+  '/warehouse-release',
+  '/installments',
+  '/follow-ups',
+];
+
 const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/change-password',
   '/customers',
@@ -480,9 +558,11 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
-  if (hasRole(user, 'WAREHOUSE_OPERATOR')) return '/inventory';
+  if (isBranchWarehouseOperator(user)) return '/inventory';
+  if (isBranchCashierUser(user)) return '/payments';
+  if (isBranchAccountantUser(user)) return '/payments';
   if (hasPermission(user, 'payments.manage')) return '/payments';
-  if (hasPermission(user, 'finance.view')) return '/finance';
+  if (hasPermission(user, 'finance.view') && !isBranchAccountantUser(user)) return '/finance';
   if (hasPermission(user, 'users.manage') && !user.branchId) return '/users';
   if (hasPermission(user, 'crm.manage')) return '/customers';
   if (hasPermission(user, 'sales.manage')) return '/sales';
@@ -514,6 +594,12 @@ export function canAccessPath(user: User, pathname: string) {
   if (isBranchWarehouseOperator(user)) {
     return canBranchWarehouseOperatorAccessPath(pathname);
   }
+  if (isBranchCashierUser(user)) {
+    return canBranchCashierAccessPath(pathname);
+  }
+  if (isBranchAccountantUser(user)) {
+    return canBranchAccountantAccessPath(pathname);
+  }
   if (pathname === '/dashboard') return true;
   if (pathname === '/branch-dashboard') {
     return hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
@@ -521,7 +607,7 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/finance') return hasPermission(user, 'finance.view');
   if (pathname === '/payments') return hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/customers')) return hasPermission(user, 'crm.manage');
-  if (pathname.startsWith('/sales')) return hasPermission(user, 'sales.manage');
+  if (pathname.startsWith('/sales')) return canViewSalesForPayment(user) || canCreateSale(user);
   if (pathname.startsWith('/products/new') || pathname.startsWith('/inventory/categories')) {
     return canManageProductCatalog(user);
   }
@@ -780,11 +866,72 @@ export function isBranchMasterUser(user: Pick<User, 'role' | 'roles' | 'branchId
     isHqSalesManagerUser(user) ||
     isHqCashierUser(user) ||
     isBranchSalesManagerUser(user) ||
-    isBranchWarehouseOperator(user)
+    isBranchWarehouseOperator(user) ||
+    isBranchCashierUser(user) ||
+    isBranchAccountantUser(user)
   ) {
     return false;
   }
   return hasRole(user, 'MASTER');
+}
+
+/** Branch Cashier = branch-scoped CASHIER (payment only, no sale creation). */
+export function isBranchCashierUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user?.branchId || hasFullAccess(user)) return false;
+  if (isHqCashierUser(user)) return false;
+  return hasRole(user, 'CASHIER');
+}
+
+/** Branch Accountant = branch-scoped ACCOUNTANT (not HQ). */
+export function isBranchAccountantUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user?.branchId || hasFullAccess(user)) return false;
+  if (hasRole(user, 'HQ_ACCOUNTANT')) return false;
+  return hasRole(user, 'ACCOUNTANT');
+}
+
+export function canCreateSale(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  if (isBranchCashierUser(user)) return false;
+  return hasPermission(user, 'sales.manage');
+}
+
+export function canViewSalesForPayment(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  if (hasPermission(user, 'sales.manage')) return true;
+  return isBranchCashierUser(user);
+}
+
+export function canManageSaleWorkflow(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  return canCreateSale(user);
+}
+
+export function isBranchCashierForbiddenPath(pathname: string) {
+  return BRANCH_CASHIER_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+export function isBranchAccountantForbiddenPath(pathname: string) {
+  return BRANCH_ACCOUNTANT_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function canBranchCashierAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  if (isBranchCashierForbiddenPath(pathname)) return false;
+  if (/^\/service\/[^/]+$/.test(pathname)) return true;
+  return BRANCH_CASHIER_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function canBranchAccountantAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  if (isBranchAccountantForbiddenPath(pathname)) return false;
+  return BRANCH_ACCOUNTANT_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
 }
 
 export function canCreateBranchOwner(user: Pick<User, 'role' | 'roles'> | null | undefined) {
@@ -1056,7 +1203,7 @@ export function canViewBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' 
   if (isBranchWarehouseOperator(user)) return false;
   if (hasFullAccess(user)) return true;
   if (canManageBranchPurchaseRequests(user)) return true;
-  return hasAnyRole(user, ['MANAGER', 'FRANCHISE_OWNER', 'ACCOUNTANT', 'CASHIER', 'MASTER']);
+  return hasAnyRole(user, ['MANAGER', 'FRANCHISE_OWNER', 'MASTER']);
 }
 
 export function canViewBranchDiscrepancyReports(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
