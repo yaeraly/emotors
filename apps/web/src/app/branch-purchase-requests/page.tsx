@@ -170,8 +170,8 @@ export default function BranchPurchaseRequestsPage() {
         productName: product.name,
         sku: product.sku,
         unit: product.unit,
-        weightKg: product.weightKg,
-        wholesalePriceKgs: product.wholesalePriceKgs,
+        weightKg: product.weightKg ?? 0,
+        wholesalePriceKgs: product.wholesalePriceKgs ?? 0,
         branchStock: product.branchStock ?? 0,
         hqStock: product.hqStock,
         quantity: '1',
@@ -360,6 +360,7 @@ export default function BranchPurchaseRequestsPage() {
               inputRef={productSearchRef}
               branchWarehouseId={form.branchWarehouseId}
               showStock={canSeeHqStock}
+              hidePricing={branchOnlyView}
               onSelect={addProductFromSearch}
             />
 
@@ -371,7 +372,7 @@ export default function BranchPurchaseRequestsPage() {
                     <th className="px-3 py-2">{t('distribution.quantity')}</th>
                     <th className="px-3 py-2">{t('branchProductRequest.unit')}</th>
                     {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.branchStock')}</th> : null}
-                    <th className="px-3 py-2">{t('branchProductRequest.wholesalePrice')}</th>
+                    {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.wholesalePrice')}</th> : null}
                     <th className="px-3 py-2">{t('crm.notes')}</th>
                     <th className="px-3 py-2" />
                   </tr>
@@ -405,7 +406,7 @@ export default function BranchPurchaseRequestsPage() {
                       </td>
                       <td className="px-3 py-2">{line.unit}</td>
                       {!branchOnlyView ? <td className="px-3 py-2">{line.branchStock}</td> : null}
-                      <td className="px-3 py-2">{line.wholesalePriceKgs.toFixed(2)}</td>
+                      {!branchOnlyView ? <td className="px-3 py-2">{line.wholesalePriceKgs.toFixed(2)}</td> : null}
                       <td className="px-3 py-2">
                         <input
                           value={line.note}

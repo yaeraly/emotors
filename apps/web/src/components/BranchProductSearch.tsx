@@ -14,8 +14,8 @@ export type BranchProductOption = {
   category: string;
   productCode?: string | null;
   unit: string;
-  weightKg: number;
-  wholesalePriceKgs: number;
+  weightKg?: number;
+  wholesalePriceKgs?: number;
   branchStock: number | null;
   hqStock: number | null;
 };
@@ -24,6 +24,7 @@ type Props = {
   disabled?: boolean;
   branchWarehouseId?: string;
   showStock?: boolean;
+  hidePricing?: boolean;
   onSelect: (product: BranchProductOption) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
 };
@@ -34,6 +35,7 @@ export function BranchProductSearch({
   disabled = false,
   branchWarehouseId,
   showStock = false,
+  hidePricing = false,
   onSelect,
   inputRef,
 }: Props) {
@@ -190,16 +192,23 @@ export function BranchProductSearch({
                   {t('branchProductRequest.productSearch.sku')}: {product.sku}
                   {product.category ? ` · ${product.category}` : ''}
                   {product.productCode ? ` · ${product.productCode}` : ''}
+                  {hidePricing && product.unit ? ` · ${product.unit}` : ''}
                 </p>
-                <p className="mt-1 text-xs text-slate-600">
-                  {showStock && product.hqStock !== null ? (
-                    <>
-                      {t('branchProductRequest.productSearch.hqStock')}: {product.hqStock} {product.unit}
-                      {' · '}
-                    </>
-                  ) : null}
-                  {t('branchProductRequest.productSearch.wholesalePrice')}: {Number(product.wholesalePriceKgs).toFixed(2)} KGS
-                </p>
+                {!hidePricing ? (
+                  <p className="mt-1 text-xs text-slate-600">
+                    {showStock && product.hqStock !== null ? (
+                      <>
+                        {t('branchProductRequest.productSearch.hqStock')}: {product.hqStock} {product.unit}
+                        {' · '}
+                      </>
+                    ) : null}
+                    {product.wholesalePriceKgs !== undefined ? (
+                      <>
+                        {t('branchProductRequest.productSearch.wholesalePrice')}: {Number(product.wholesalePriceKgs).toFixed(2)} KGS
+                      </>
+                    ) : null}
+                  </p>
+                ) : null}
               </button>
             </li>
           ))}

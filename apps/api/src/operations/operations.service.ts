@@ -160,6 +160,11 @@ export class OperationsService {
         deletedAt: null,
         isActive: true,
         branchId: hqBranch.id,
+        inventoryBalances: {
+          some: {
+            warehouse: activeHqWarehouseWhere,
+          },
+        },
         ...(trimmed
           ? {
               OR: [
@@ -175,6 +180,7 @@ export class OperationsService {
       include: {
         productCategory: { select: { id: true, code: true, nameRu: true, nameEn: true, nameKy: true } },
       },
+      distinct: ['id'],
       take: 60,
       orderBy: { name: 'asc' },
     });
@@ -196,20 +202,28 @@ export class OperationsService {
       }
     }
 
-    return catalogProducts.map((catalogProduct) => ({
-      id: catalogProduct.id,
-      catalogProductId: catalogProduct.id,
-      name: catalogProduct.name,
-      sku: catalogProduct.sku,
-      barcode: catalogProduct.barcode,
-      category: catalogProduct.category,
-      productCode: catalogProduct.productCategory?.code ?? null,
-      unit: catalogProduct.unit,
-      weightKg: Number(catalogProduct.weightKg),
-      wholesalePriceKgs: Number(catalogProduct.wholesalePriceKgs ?? catalogProduct.sellingPriceKgs),
-      branchStock: null,
-      hqStock: canSeeHqStock ? (hqStockBySku.get(catalogProduct.sku) ?? 0) : null,
-    }));
+    return catalogProducts.map((catalogProduct) => {
+      const base = {
+        id: catalogProduct.id,
+        catalogProductId: catalogProduct.id,
+        name: catalogProduct.name,
+        sku: catalogProduct.sku,
+        barcode: catalogProduct.barcode,
+        category: catalogProduct.category,
+        productCode: catalogProduct.productCategory?.code ?? null,
+        unit: catalogProduct.unit,
+      };
+      if (isBranchOnly) {
+        return { ...base, branchStock: null, hqStock: null };
+      }
+      return {
+        ...base,
+        weightKg: Number(catalogProduct.weightKg),
+        wholesalePriceKgs: Number(catalogProduct.wholesalePriceKgs ?? catalogProduct.sellingPriceKgs),
+        branchStock: null,
+        hqStock: canSeeHqStock ? (hqStockBySku.get(catalogProduct.sku) ?? 0) : null,
+      };
+    });
   }
 
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
