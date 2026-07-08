@@ -33,6 +33,10 @@ import {
 } from '../branches/branch-hq-warehouse.util';
 import { DistributionService } from '../distribution/distribution.service';
 import {
+  ensureHqCatalogBranch,
+  seedHqProductCatalogFromWarehouseInventory,
+} from '../product-catalog/hq-product-catalog.util';
+import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
   CARGO_WEIGHT_LESS_THAN_NET,
@@ -147,11 +151,15 @@ export class OperationsService {
       await this.auditBranchRequest(user, branchId, 'BRANCH_STOCK_VISIBILITY_BLOCKED', 'BranchPurchaseRequest', 'search');
     }
 
-    const hqBranch = await this.prisma.branch.findFirst({
-      where: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null },
-      select: { id: true },
-    });
-    if (!hqBranch) return [];
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
+    const seedResult = await seedHqProductCatalogFromWarehouseInventory(this.prisma);
+    if (seedResult.seeded && branchId) {
+      await this.auditBranchRequest(user, branchId, 'HQ_PRODUCT_CATALOG_SEEDED_FROM_WAREHOUSE', 'Product', hqBranch.id, {
+        catalogCount: seedResult.catalogCount,
+        adoptedCount: seedResult.adoptedCount,
+        createdCount: seedResult.createdCount,
+      });
+    }
 
     const trimmed = search?.trim();
     const catalogProducts = await this.prisma.product.findMany({
