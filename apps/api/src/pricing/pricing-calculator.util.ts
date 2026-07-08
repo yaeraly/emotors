@@ -2,14 +2,50 @@ export function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-export function applyMarkup(costPrice: number, markupPercent: number) {
+/** Google Sheets style: ROUNDUP(cost * markup% + cost, -1) → nearest 10 */
+export function applyMarkupRoundUp(costPrice: number, markupPercent: number) {
   if (costPrice <= 0) return 0;
-  return roundMoney(costPrice * (1 + markupPercent / 100));
+  const raw = costPrice * (markupPercent / 100) + costPrice;
+  return Math.ceil(raw / 10) * 10;
+}
+
+export function applyMarkup(costPrice: number, markupPercent: number) {
+  return applyMarkupRoundUp(costPrice, markupPercent);
 }
 
 export function deriveMarkupPercent(costPrice: number, sellingPrice: number) {
   if (costPrice <= 0) return 0;
   return roundMoney(((sellingPrice - costPrice) / costPrice) * 100);
+}
+
+export function pricesFromMarkups(
+  costPriceKgs: number,
+  markups: {
+    wholesaleMarkupPercent: number;
+    hqBranchWholesaleMarkupPercent: number;
+    recommendedRetailMarkupPercent: number;
+    minimumSellingMarkupPercent: number;
+  },
+) {
+  return {
+    wholesalePriceKgs: applyMarkupRoundUp(costPriceKgs, markups.wholesaleMarkupPercent),
+    hqBranchWholesalePriceKgs: applyMarkupRoundUp(costPriceKgs, markups.hqBranchWholesaleMarkupPercent),
+    recommendedRetailPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.recommendedRetailMarkupPercent),
+    minimumSellingPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.minimumSellingMarkupPercent),
+  };
+}
+
+export function validateMarkupInput(markups: {
+  wholesaleMarkupPercent: number;
+  hqBranchWholesaleMarkupPercent: number;
+  recommendedRetailMarkupPercent: number;
+  minimumSellingMarkupPercent: number;
+}) {
+  if (markups.wholesaleMarkupPercent < 0) return 'Wholesale markup must be >= 0';
+  if (markups.hqBranchWholesaleMarkupPercent < 0) return 'HQ wholesale markup must be >= 0';
+  if (markups.recommendedRetailMarkupPercent < 0) return 'Retail markup must be >= 0';
+  if (markups.minimumSellingMarkupPercent < 0) return 'Minimum markup must be >= 0';
+  return null;
 }
 
 export function validatePricingTiers(input: {
@@ -18,6 +54,10 @@ export function validatePricingTiers(input: {
   recommendedRetailPriceKgs: number;
   minimumSellingPriceKgs: number;
 }) {
+  if (input.wholesalePriceKgs <= 0) return 'Wholesale price must be greater than 0';
+  if (input.hqBranchWholesalePriceKgs <= 0) return 'HQ wholesale price must be greater than 0';
+  if (input.recommendedRetailPriceKgs <= 0) return 'Retail price must be greater than 0';
+  if (input.minimumSellingPriceKgs <= 0) return 'Minimum price must be greater than 0';
   if (input.minimumSellingPriceKgs > input.recommendedRetailPriceKgs + 0.01) {
     return 'Minimum selling price cannot exceed recommended retail price';
   }
@@ -28,4 +68,16 @@ export function validatePricingTiers(input: {
     return 'HQ branch wholesale price cannot exceed wholesale price';
   }
   return null;
+}
+
+export function validateMarkups(costPriceKgs: number, markups: {
+  wholesaleMarkupPercent: number;
+  hqBranchWholesaleMarkupPercent: number;
+  recommendedRetailMarkupPercent: number;
+  minimumSellingMarkupPercent: number;
+}) {
+  const markupError = validateMarkupInput(markups);
+  if (markupError) return markupError;
+  if (costPriceKgs <= 0) return 'Cost price must be greater than 0 to calculate prices';
+  return validatePricingTiers(pricesFromMarkups(costPriceKgs, markups));
 }

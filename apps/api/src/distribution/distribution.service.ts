@@ -38,6 +38,7 @@ import {
   isBranchWarehouse,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
+import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
@@ -56,6 +57,7 @@ export class DistributionService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
+    private readonly pricingFifoService: PricingFifoService,
   ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
@@ -536,6 +538,23 @@ export class DistributionService {
           referenceId: order.id,
           note: `Distribution order ${order.orderNumber}`,
         });
+
+        const branch = await tx.branch.findUnique({
+          where: { id: order.branchId },
+          select: { code: true },
+        });
+        const isHqOwnedBranch = this.pricingFifoService.isHqOwnedBranch(branch?.code);
+        await this.pricingFifoService.consumeFifoForDistribution(tx, {
+          productId: item.productId,
+          warehouseId: order.sourceWarehouseId,
+          quantity: item.quantity,
+          isHqOwnedBranch,
+          distributionOrderId: order.id,
+          distributionOrderItemId: item.id,
+          userId: user.id,
+          userRole: user.role,
+        });
+
         await tx.inventoryBalance.update({
           where: {
             branchId_warehouseId_productId: {
@@ -1193,15 +1212,37 @@ export class DistributionService {
   }
 
   private async calculateItems(tx: PrismaTx, dto: CreateDistributionOrderDto, user?: AuthUser) {
+    await this.pricingFifoService.syncFifoBatchesFromHqStockMovements(tx);
     const items = [];
     const userRoles = user ? (user.roles?.length ? user.roles : [user.role]) : [];
+    const branch = await tx.branch.findUnique({
+      where: { id: dto.branchId },
+      select: { code: true },
+    });
+    const isHqOwnedBranch = this.pricingFifoService.isHqOwnedBranch(branch?.code);
+
     for (const item of dto.items) {
       const product = await tx.product.findFirst({
         where: { id: item.productId, deletedAt: null },
       });
       if (!product) throw new NotFoundException('Product not found');
-      const unitCost = Number(product.finalCostKgs);
-      const wholesalePrice = Number(product.sellingPriceKgs);
+
+      const fallbackUnitCost = Number(product.finalCostKgs);
+      const fallbackUnitPrice = isHqOwnedBranch
+        ? Number(product.hqBranchWholesalePriceKgs)
+        : Number(product.sellingPriceKgs);
+
+      const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
+        productId: item.productId,
+        warehouseId: dto.sourceWarehouseId,
+        quantity: Number(item.quantity),
+        isHqOwnedBranch,
+        fallbackUnitCost,
+        fallbackUnitPrice,
+      });
+
+      const unitCost = fifoPreview.allocatedQty > 0 ? fifoPreview.unitCost : fallbackUnitCost;
+      const wholesalePrice = fifoPreview.allocatedQty > 0 ? fifoPreview.unitPrice : fallbackUnitPrice;
       const requestedPrice = Number(item.unitPrice);
       if (Math.abs(requestedPrice - wholesalePrice) > 0.01) {
         await tx.auditLog.create({

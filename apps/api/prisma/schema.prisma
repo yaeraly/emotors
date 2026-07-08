@@ -1157,6 +1157,7 @@ model Product {
   pricingChangeHistory ProductPricingChangeHistory[]
   fifoBatches       FifoInventoryBatch[]
   saleFifoAllocations SaleFifoAllocation[]
+  distributionFifoAllocations DistributionFifoAllocation[]
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
@@ -1248,21 +1249,30 @@ model ProductPricingChangeHistory {
 }
 
 model FifoInventoryBatch {
-  id                 String    @id @default(cuid())
-  productId          String
-  product            Product   @relation(fields: [productId], references: [id])
-  warehouseId        String
-  warehouse          Warehouse @relation(fields: [warehouseId], references: [id])
-  stockMovementId    String?   @unique
-  receivedAt         DateTime  @default(now())
-  unitCostKgs        Decimal   @default(0) @db.Decimal(14, 2)
-  initialQuantity    Int
-  remainingQuantity  Int
-  referenceType      String?
-  referenceId        String?
-  allocations        SaleFifoAllocation[]
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                             String    @id @default(cuid())
+  productId                      String
+  product                        Product   @relation(fields: [productId], references: [id])
+  warehouseId                    String
+  warehouse                      Warehouse @relation(fields: [warehouseId], references: [id])
+  stockMovementId                String?   @unique
+  receivedAt                     DateTime  @default(now())
+  unitCostKgs                    Decimal   @default(0) @db.Decimal(14, 2)
+  wholesaleMarkupPercent         Decimal   @default(0) @db.Decimal(8, 2)
+  wholesalePriceKgs              Decimal   @default(0) @db.Decimal(14, 2)
+  hqBranchWholesaleMarkupPercent Decimal   @default(0) @db.Decimal(8, 2)
+  hqBranchWholesalePriceKgs      Decimal   @default(0) @db.Decimal(14, 2)
+  recommendedRetailMarkupPercent Decimal   @default(0) @db.Decimal(8, 2)
+  recommendedRetailPriceKgs      Decimal   @default(0) @db.Decimal(14, 2)
+  minimumSellingMarkupPercent    Decimal   @default(0) @db.Decimal(8, 2)
+  minimumSellingPriceKgs         Decimal   @default(0) @db.Decimal(14, 2)
+  initialQuantity                Int
+  remainingQuantity              Int
+  referenceType                  String?
+  referenceId                    String?
+  saleAllocations                SaleFifoAllocation[]
+  distributionAllocations        DistributionFifoAllocation[]
+  createdAt                      DateTime  @default(now())
+  updatedAt                      DateTime  @updatedAt
 
   @@index([productId])
   @@index([warehouseId])
@@ -1271,20 +1281,45 @@ model FifoInventoryBatch {
 }
 
 model SaleFifoAllocation {
-  id            String   @id @default(cuid())
+  id            String             @id @default(cuid())
   saleId        String?
   saleItemId    String?
   fifoBatchId   String
   fifoBatch     FifoInventoryBatch @relation(fields: [fifoBatchId], references: [id])
   productId     String
-  product       Product  @relation(fields: [productId], references: [id])
+  product       Product            @relation(fields: [productId], references: [id])
   quantity      Int
-  unitCostKgs   Decimal  @db.Decimal(14, 2)
-  totalCostKgs  Decimal  @db.Decimal(14, 2)
-  createdAt     DateTime @default(now())
+  unitCostKgs   Decimal            @db.Decimal(14, 2)
+  totalCostKgs  Decimal            @db.Decimal(14, 2)
+  createdAt     DateTime           @default(now())
 
   @@index([saleId])
   @@index([saleItemId])
+  @@index([fifoBatchId])
+  @@index([productId])
+}
+
+model DistributionFifoAllocation {
+  id                        String                      @id @default(cuid())
+  distributionOrderId       String
+  distributionOrder         BranchDistributionOrder     @relation(fields: [distributionOrderId], references: [id])
+  distributionOrderItemId   String
+  distributionOrderItem     BranchDistributionOrderItem @relation(fields: [distributionOrderItemId], references: [id])
+  fifoBatchId               String
+  fifoBatch                 FifoInventoryBatch          @relation(fields: [fifoBatchId], references: [id])
+  productId                 String
+  product                   Product                     @relation(fields: [productId], references: [id])
+  quantity                  Int
+  unitCostKgs               Decimal                     @db.Decimal(14, 2)
+  unitPriceKgs              Decimal                     @db.Decimal(14, 2)
+  wholesalePriceKgs         Decimal                     @db.Decimal(14, 2)
+  hqBranchWholesalePriceKgs Decimal                     @db.Decimal(14, 2)
+  totalCostKgs              Decimal                     @db.Decimal(14, 2)
+  totalPriceKgs             Decimal                     @db.Decimal(14, 2)
+  createdAt                 DateTime                    @default(now())
+
+  @@index([distributionOrderId])
+  @@index([distributionOrderItemId])
   @@index([fifoBatchId])
   @@index([productId])
 }
@@ -2240,6 +2275,7 @@ model BranchDistributionOrder {
   sentAt                 DateTime?
   cancelledAt            DateTime?
   items                  BranchDistributionOrderItem[]
+  distributionFifoAllocations DistributionFifoAllocation[]
   goodsReceivings        GoodsReceiving[]
   shortageReports        ShortageReport[]
   branchInvoice          BranchInvoice?
@@ -2292,6 +2328,7 @@ model BranchDistributionOrderItem {
   totalPrice  Decimal                 @db.Decimal(14, 2)
   profit      Decimal                 @db.Decimal(14, 2)
   goodsReceivingItems GoodsReceivingItem[]
+  distributionFifoAllocations DistributionFifoAllocation[]
   createdAt   DateTime                @default(now())
   updatedAt   DateTime                @updatedAt
 
