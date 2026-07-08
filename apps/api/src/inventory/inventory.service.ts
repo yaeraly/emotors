@@ -22,6 +22,7 @@ import {
   branchWarehouseWhere,
   HQ_CATALOG_BRANCH_CODE,
   hqWarehouseWhere,
+  inventoryBranchIdForWarehouse,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -1180,6 +1181,60 @@ export class InventoryService {
       { branchId: options?.branchId, skipAccessCheck: options?.skipAccessCheck },
     );
     return map.get(productId) ?? 0;
+  }
+
+  /**
+   * Resolves the inventory balance product for a warehouse.
+   * Branch catalog products are mapped to their HQ catalog counterpart by SKU when
+   * stock is held in an HQ warehouse.
+   */
+  async resolveWarehouseInventoryProductInTx(
+    tx: Prisma.TransactionClient,
+    warehouseId: string,
+    productId: string,
+    sku?: string | null,
+  ): Promise<{ productId: string; branchId: string }> {
+    const [warehouse, product] = await Promise.all([
+      tx.warehouse.findFirst({
+        where: { id: warehouseId, deletedAt: null },
+        select: { id: true, warehouseType: true, branchId: true },
+      }),
+      tx.product.findFirst({
+        where: { id: productId, deletedAt: null },
+        select: { id: true, sku: true, branchId: true, warehouseId: true },
+      }),
+    ]);
+    if (!warehouse) {
+      throw new NotFoundException('Warehouse not found');
+    }
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    if (product.warehouseId === warehouseId) {
+      return { productId: product.id, branchId: product.branchId };
+    }
+
+    const normalizedSku = (sku ?? product.sku)?.trim();
+    if (isHqWarehouse(warehouse) && normalizedSku) {
+      const hqProduct = await tx.product.findFirst({
+        where: {
+          warehouseId,
+          sku: normalizedSku,
+          deletedAt: null,
+          isActive: true,
+        },
+        select: { id: true, branchId: true },
+      });
+      if (hqProduct) {
+        return { productId: hqProduct.id, branchId: hqProduct.branchId };
+      }
+    }
+
+    return {
+      productId: product.id,
+      branchId: inventoryBranchIdForWarehouse(warehouse, product.branchId),
+    };
   }
 
   async getAvailableQuantityMap(

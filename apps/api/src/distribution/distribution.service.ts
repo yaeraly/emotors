@@ -35,7 +35,6 @@ import {
 import {
   activeHqWarehouseWhere,
   hqWarehouseWhere,
-  inventoryBranchIdForWarehouse,
   isBranchWarehouse,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
@@ -193,17 +192,18 @@ export class DistributionService {
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
       for (const item of order.items) {
-        const inventoryBranchId = await this.inventoryBranchIdForItem(
+        const inventoryProduct = await this.resolveSourceInventoryProduct(
           tx,
-          order.sourceWarehouse,
+          order.sourceWarehouseId,
           item.productId,
+          item.sku,
         );
         const balance = await tx.inventoryBalance.findUnique({
           where: {
             branchId_warehouseId_productId: {
-              branchId: inventoryBranchId,
+              branchId: inventoryProduct.branchId,
               warehouseId: order.sourceWarehouseId,
-              productId: item.productId,
+              productId: inventoryProduct.productId,
             },
           },
         });
@@ -216,9 +216,9 @@ export class DistributionService {
         await tx.inventoryBalance.update({
           where: {
             branchId_warehouseId_productId: {
-              branchId: inventoryBranchId,
+              branchId: inventoryProduct.branchId,
               warehouseId: order.sourceWarehouseId,
-              productId: item.productId,
+              productId: inventoryProduct.productId,
             },
           },
           data: { reservedQuantity: { increment: item.quantity } },
@@ -513,22 +513,23 @@ export class DistributionService {
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
       for (const item of order.items) {
-        const inventoryBranchId = await this.inventoryBranchIdForItem(
+        const inventoryProduct = await this.resolveSourceInventoryProduct(
           tx,
-          order.sourceWarehouse,
+          order.sourceWarehouseId,
           item.productId,
+          item.sku,
         );
         const balance = await tx.inventoryBalance.findUnique({
           where: {
             branchId_warehouseId_productId: {
-              branchId: inventoryBranchId,
+              branchId: inventoryProduct.branchId,
               warehouseId: order.sourceWarehouseId,
-              productId: item.productId,
+              productId: inventoryProduct.productId,
             },
           },
         });
         const availableQuantity = (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0);
-        if ((balance?.quantity ?? 0) < item.quantity) {
+        if (availableQuantity < item.quantity) {
           throw new BadRequestException(
             `Insufficient stock for SKU ${item.sku}. Requested: ${item.quantity} Available: ${availableQuantity}`,
           );
@@ -536,13 +537,14 @@ export class DistributionService {
       }
 
       for (const item of order.items) {
-        const inventoryBranchId = await this.inventoryBranchIdForItem(
+        const inventoryProduct = await this.resolveSourceInventoryProduct(
           tx,
-          order.sourceWarehouse,
+          order.sourceWarehouseId,
           item.productId,
+          item.sku,
         );
         await this.inventoryService.createStockMovementInTx(tx, user, {
-          productId: item.productId,
+          productId: inventoryProduct.productId,
           warehouseId: order.sourceWarehouseId,
           type: StockMovementType.OUT,
           quantity: item.quantity,
@@ -558,7 +560,7 @@ export class DistributionService {
         });
         const isHqOwnedBranch = this.pricingFifoService.isHqOwnedBranch(branch?.code);
         await this.pricingFifoService.consumeFifoForDistribution(tx, {
-          productId: item.productId,
+          productId: inventoryProduct.productId,
           warehouseId: order.sourceWarehouseId,
           quantity: item.quantity,
           isHqOwnedBranch,
@@ -571,9 +573,9 @@ export class DistributionService {
         await tx.inventoryBalance.update({
           where: {
             branchId_warehouseId_productId: {
-              branchId: inventoryBranchId,
+              branchId: inventoryProduct.branchId,
               warehouseId: order.sourceWarehouseId,
-              productId: item.productId,
+              productId: inventoryProduct.productId,
             },
           },
           data: { reservedQuantity: { decrement: item.quantity } },
@@ -637,16 +639,17 @@ export class DistributionService {
         });
         if (fullOrder) {
           for (const item of fullOrder.items) {
-            const inventoryBranchId = await this.inventoryBranchIdForItem(
+            const inventoryProduct = await this.resolveSourceInventoryProduct(
               tx,
-              fullOrder.sourceWarehouse,
+              fullOrder.sourceWarehouseId,
               item.productId,
+              item.sku,
             );
             await tx.inventoryBalance.updateMany({
               where: {
-                branchId: inventoryBranchId,
+                branchId: inventoryProduct.branchId,
                 warehouseId: fullOrder.sourceWarehouseId,
-                productId: item.productId,
+                productId: inventoryProduct.productId,
                 reservedQuantity: { gte: item.quantity },
               },
               data: { reservedQuantity: { decrement: item.quantity } },
@@ -1236,17 +1239,13 @@ export class DistributionService {
     }
   }
 
-  private async inventoryBranchIdForItem(
+  private resolveSourceInventoryProduct(
     tx: PrismaTx,
-    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+    warehouseId: string,
     productId: string,
+    sku: string,
   ) {
-    const product = await tx.product.findUnique({
-      where: { id: productId },
-      select: { branchId: true },
-    });
-    if (!product) throw new NotFoundException('Product not found');
-    return inventoryBranchIdForWarehouse(warehouse, product.branchId);
+    return this.inventoryService.resolveWarehouseInventoryProductInTx(tx, warehouseId, productId, sku);
   }
 
   private auditTransfer(
