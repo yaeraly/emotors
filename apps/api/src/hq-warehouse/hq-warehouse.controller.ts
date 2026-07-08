@@ -43,7 +43,7 @@ export class HqWarehouseController {
   }
 
   @Put(':id')
-  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(Role.CEO, Role.OWNER)
   update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateHqWarehouseDto) {
     return this.service.update(user, id, dto);
   }

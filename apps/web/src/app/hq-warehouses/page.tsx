@@ -12,7 +12,7 @@ import { WarehousePagination } from '@/components/warehouse/WarehousePagination'
 import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canManageHqWarehouse, canDeleteHqWarehouse, canCreateHqInventoryCount, hasFullAccess, isWarehouseManagerUser } from '@/lib/rbac';
+import { canManageHqWarehouse, canDeleteHqWarehouse, canCreateHqInventoryCount, canEditWarehouseInfo, hasFullAccess, isWarehouseManagerUser } from '@/lib/rbac';
 import { formatHqWarehouseContactPerson } from '@/lib/hq-warehouse';
 import {
   filterWarehouseRows,
@@ -123,6 +123,7 @@ function HqWarehousesPageContent() {
   }
 
   const canDelete = canDeleteHqWarehouse(user);
+  const canEdit = canEditWarehouseInfo(user);
   const isWmScopedView = isWarehouseManagerUser(user) && !hasFullAccess(user);
 
   async function confirmDelete(reason?: string) {
@@ -364,6 +365,11 @@ function HqWarehousesPageContent() {
                   <Link href={`/hq-warehouses/${row.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
                     {t('common.open')}
                   </Link>
+                  {canEdit ? (
+                    <Link href={`/hq-warehouses/${row.id}`} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
+                      {t('common.edit')}
+                    </Link>
+                  ) : null}
                   {canDelete ? (
                     <button
                       type="button"

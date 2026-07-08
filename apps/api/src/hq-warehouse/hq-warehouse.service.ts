@@ -13,7 +13,7 @@ import {
   hqWarehouseWhere,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
-import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse } from '../rbac/rbac';
+import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo } from '../rbac/rbac';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 import { hasHqReceivingDownstreamUsage, HQ_RECEIVING_ARCHIVED_MESSAGE } from './hq-receiving-delete.util';
@@ -241,7 +241,7 @@ export class HqWarehouseService {
   }
 
   async update(user: AuthUser, id: string, dto: UpdateHqWarehouseDto) {
-    this.assertCanManage(user);
+    this.assertCanEditWarehouseInfo(user);
     const existing = await this.getHqWarehouse(user, id);
     if (dto.name || dto.code) {
       await this.assertUniqueHqFields(dto.name ?? existing.name, dto.code ?? existing.code, id);
@@ -261,6 +261,14 @@ export class HqWarehouseService {
         branchId: null,
         warehouseType: WarehouseType.HQ,
       },
+    });
+    await this.audit(user, 'WAREHOUSE_INFO_UPDATED', warehouse.id, {
+      userId: user.id,
+      role: user.role,
+      warehouseId: id,
+      oldValue: existing,
+      newValue: warehouse,
+      timestamp: new Date().toISOString(),
     });
     await this.audit(user, 'HQ_WAREHOUSE_UPDATED', warehouse.id, { before: existing, after: warehouse });
     return warehouse;
@@ -683,6 +691,12 @@ export class HqWarehouseService {
   private assertCanView(user: AuthUser) {
     if (!this.hasViewRole(user)) {
       throw new ForbiddenException('You do not have access to HQ warehouses');
+    }
+  }
+
+  private assertCanEditWarehouseInfo(user: AuthUser) {
+    if (!canEditWarehouseInfo(user)) {
+      throw new ForbiddenException('Only CEO can update warehouse information');
     }
   }
 

@@ -7,7 +7,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { formatHqWarehouseContactPerson } from '@/lib/hq-warehouse';
-import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canManageHqWarehouse } from '@/lib/rbac';
+import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, canManageHqWarehouse } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -52,7 +52,8 @@ export default function HqWarehouseDetailPage() {
   const [deleteWarehouseRequireReason, setDeleteWarehouseRequireReason] = useState(false);
   const [deletingWarehouse, setDeletingWarehouse] = useState(false);
   const [deletingReceiving, setDeletingReceiving] = useState(false);
-  const [form, setForm] = useState({ name: '', code: '', country: '', city: '', address: '', contactPerson: '', phone: '', notes: '' });
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ name: '', code: '', country: '', city: '', address: '', contactPerson: '', phone: '', notes: '', isActive: true });
 
   useEffect(() => {
     void load();
@@ -73,6 +74,7 @@ export default function HqWarehouseDetailPage() {
         contactPerson: (detail as any).contactPerson ?? '',
         phone: (detail as any).phone ?? '',
         notes: (detail as any).notes ?? '',
+        isActive: detail.isActive,
       });
       if (tab === 'inventory') setInventory(await apiFetch(`/hq-warehouses/${params.id}/inventory`));
       if (tab === 'receivings') setReceivings(await apiFetch(`/hq-warehouses/${params.id}/receivings`));
@@ -87,12 +89,40 @@ export default function HqWarehouseDetailPage() {
     event.preventDefault();
     setError('');
     try {
-      await apiFetch(`/hq-warehouses/${params.id}`, { method: 'PUT', body: JSON.stringify(form) });
-      window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.savedSuccess'));
+      await apiFetch(`/hq-warehouses/${params.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: form.name,
+          code: form.code,
+          country: form.country,
+          city: form.city,
+          address: form.address,
+          contactPerson: form.contactPerson,
+          phone: form.phone,
+          notes: form.notes,
+          isActive: form.isActive,
+        }),
+      });
+      window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.infoUpdatedSuccess'));
       router.push('/hq-warehouses');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
+  }
+
+  function resetFormFromWarehouse() {
+    if (!warehouse) return;
+    setForm({
+      name: warehouse.name,
+      code: warehouse.code,
+      country: (warehouse as any).country ?? '',
+      city: (warehouse as any).city ?? '',
+      address: warehouse.address ?? '',
+      contactPerson: (warehouse as any).contactPerson ?? '',
+      phone: (warehouse as any).phone ?? '',
+      notes: (warehouse as any).notes ?? '',
+      isActive: warehouse.isActive,
+    });
   }
 
   async function deactivate() {
@@ -160,6 +190,8 @@ export default function HqWarehouseDetailPage() {
 
   const canDeleteReceiving = canDeleteHqGoodsReceiving(user);
   const canDeleteWarehouse = canDeleteHqWarehouse(user);
+  const canEditInfo = canEditWarehouseInfo(user);
+  const canManageWarehouse = canManageHqWarehouse(user);
 
   if (!warehouse) {
     return <ProtectedShell><p className="p-6">{t('common.loading')}</p></ProtectedShell>;
@@ -180,6 +212,15 @@ export default function HqWarehouseDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/hq-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">{t('common.back')}</Link>
+            {canEditInfo && tab === 'details' && !editing ? (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+              >
+                {t('hqWarehouse.editWarehouse')}
+              </button>
+            ) : null}
             {canDeleteWarehouse ? (
               <button
                 type="button"
@@ -208,25 +249,62 @@ export default function HqWarehouseDetailPage() {
         </div>
 
         {tab === 'details' ? (
-          <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-            <Field label={t('warehouse.name')} value={form.name} onChange={(v) => setForm({ ...form, name: v })} disabled={!canManageHqWarehouse(user)} />
-            <Field label={t('warehouse.code')} value={form.code} onChange={(v) => setForm({ ...form, code: v })} disabled={!canManageHqWarehouse(user)} />
-            <Field label={t('hqWarehouse.country')} value={form.country} onChange={(v) => setForm({ ...form, country: v })} disabled={!canManageHqWarehouse(user)} />
-            <Field label={t('hqWarehouse.city')} value={form.city} onChange={(v) => setForm({ ...form, city: v })} disabled={!canManageHqWarehouse(user)} />
-            <Field label={t('warehouse.address')} value={form.address} onChange={(v) => setForm({ ...form, address: v })} disabled={!canManageHqWarehouse(user)} className="md:col-span-2" />
-            <Field label={t('hqWarehouse.contactPerson')} value={form.contactPerson} onChange={(v) => setForm({ ...form, contactPerson: v })} disabled={!canManageHqWarehouse(user)} />
-            <Field label={t('hqWarehouse.phone')} value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} disabled={!canManageHqWarehouse(user)} />
-            <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.notes')}</span>
-              <textarea value={form.notes} disabled={!canManageHqWarehouse(user)} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={3} />
-            </label>
-            {canManageHqWarehouse(user) ? (
+          editing ? (
+            <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+              <Field label={t('warehouse.name')} value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
+              <Field label={t('warehouse.code')} value={form.code} onChange={(v) => setForm({ ...form, code: v })} />
+              <Field label={t('hqWarehouse.country')} value={form.country} onChange={(v) => setForm({ ...form, country: v })} />
+              <Field label={t('hqWarehouse.city')} value={form.city} onChange={(v) => setForm({ ...form, city: v })} />
+              <Field label={t('warehouse.address')} value={form.address} onChange={(v) => setForm({ ...form, address: v })} className="md:col-span-2" />
+              <Field label={t('hqWarehouse.contactPerson')} value={form.contactPerson} onChange={(v) => setForm({ ...form, contactPerson: v })} />
+              <Field label={t('hqWarehouse.phone')} value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
+                <select
+                  value={form.isActive ? 'ACTIVE' : 'INACTIVE'}
+                  onChange={(e) => setForm({ ...form, isActive: e.target.value === 'ACTIVE' })}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                >
+                  <option value="ACTIVE">{t('warehouse.active')}</option>
+                  <option value="INACTIVE">{t('warehouse.inactive')}</option>
+                </select>
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.notes')}</span>
+                <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={3} />
+              </label>
               <div className="flex gap-3 md:col-span-2">
                 <button type="submit" className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white">{t('common.save')}</button>
-                {warehouse.isActive ? <button type="button" onClick={() => void deactivate()} className="rounded-xl border border-red-300 px-4 py-3 font-semibold text-red-700">{t('hqWarehouse.deactivate')}</button> : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFormFromWarehouse();
+                    setEditing(false);
+                  }}
+                  className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
+                >
+                  {t('common.cancel')}
+                </button>
               </div>
-            ) : null}
-          </form>
+            </form>
+          ) : (
+            <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+              <ReadOnlyField label={t('warehouse.name')} value={warehouse.name} />
+              <ReadOnlyField label={t('warehouse.code')} value={warehouse.code} />
+              <ReadOnlyField label={t('hqWarehouse.country')} value={(warehouse as any).country ?? '—'} />
+              <ReadOnlyField label={t('hqWarehouse.city')} value={(warehouse as any).city ?? '—'} />
+              <ReadOnlyField label={t('warehouse.address')} value={warehouse.address ?? '—'} className="md:col-span-2" />
+              <ReadOnlyField label={t('hqWarehouse.contactPerson')} value={(warehouse as any).contactPerson ?? '—'} />
+              <ReadOnlyField label={t('hqWarehouse.phone')} value={(warehouse as any).phone ?? '—'} />
+              <ReadOnlyField label={t('common.status')} value={warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')} />
+              <ReadOnlyField label={t('hqWarehouse.notes')} value={(warehouse as any).notes ?? '—'} className="md:col-span-2" />
+              {canManageWarehouse && warehouse.isActive ? (
+                <div className="md:col-span-2">
+                  <button type="button" onClick={() => void deactivate()} className="rounded-xl border border-red-300 px-4 py-3 font-semibold text-red-700">{t('hqWarehouse.deactivate')}</button>
+                </div>
+              ) : null}
+            </div>
+          )
         ) : null}
 
         {tab === 'inventory' ? <SimpleTable headers={[t('inventory.products'), 'SKU', t('hqWarehouse.quantity'), t('hqWarehouse.reserved'), t('hqWarehouse.available'), t('hqWarehouse.landedCost'), t('hqWarehouse.lastReceiving')]} rows={inventory.map((row) => [row.product.name, row.sku, row.quantity, row.reservedQuantity, row.availableQuantity, row.landedCostKgs, row.lastReceivingAt ? new Date(row.lastReceivingAt).toLocaleDateString() : '—'])} /> : null}
@@ -308,6 +386,15 @@ export default function HqWarehouseDetailPage() {
 
 function Field({ label, value, onChange, disabled, className = '' }: { label: string; value: string; onChange: (value: string) => void; disabled?: boolean; className?: string }) {
   return <label className={`block ${className}`}><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-50" /></label>;
+}
+
+function ReadOnlyField({ label, value, className = '' }: { label: string; value: string; className?: string }) {
+  return (
+    <div className={className}>
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 font-semibold text-slate-950">{value}</p>
+    </div>
+  );
 }
 
 function SimpleTable({ headers, rows }: { headers: string[]; rows: (string | number)[][] }) {

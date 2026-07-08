@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { BranchWarehouseService } from './branch-warehouse.service';
+import { UpdateBranchWarehouseDto } from './dto/update-branch-warehouse.dto';
 
 const BRANCH_WAREHOUSE_VIEW_ROLES = [
   Role.OWNER,
@@ -37,6 +38,16 @@ export class BranchWarehouseController {
   @Roles(...BRANCH_WAREHOUSE_VIEW_ROLES)
   detail(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.detail(user, id);
+  }
+
+  @Put(':id')
+  @Roles(Role.CEO, Role.OWNER)
+  update(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateBranchWarehouseDto,
+  ) {
+    return this.service.update(user, id, dto);
   }
 
   @Get(':id/inventory')

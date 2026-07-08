@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { FormEvent, useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { canEditWarehouseInfo } from '@/lib/rbac';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type Tab = 'products' | 'stock' | 'movements' | 'inventory' | 'receiving' | 'distribution';
@@ -87,9 +89,23 @@ type DistributionRow = {
 
 export default function BranchWarehouseDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [warehouse, setWarehouse] = useState<WarehouseDetail | null>(null);
   const [tab, setTab] = useState<Tab>('products');
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    name: '',
+    code: '',
+    country: '',
+    city: '',
+    address: '',
+    contactPerson: '',
+    phone: '',
+    notes: '',
+    isActive: true,
+  });
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [stock, setStock] = useState<StockRow[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
@@ -113,8 +129,23 @@ export default function BranchWarehouseDetailPage() {
 
   async function load() {
     try {
-      const detail = await apiFetch<WarehouseDetail>(`/branch-warehouses/${params.id}`);
+      const [me, detail] = await Promise.all([
+        apiFetch<User>('/auth/me'),
+        apiFetch<WarehouseDetail>(`/branch-warehouses/${params.id}`),
+      ]);
+      setUser(me);
       setWarehouse(detail);
+      setForm({
+        name: detail.name,
+        code: detail.code,
+        country: detail.country ?? '',
+        city: detail.city ?? '',
+        address: detail.address ?? '',
+        contactPerson: detail.contactPerson ?? '',
+        phone: detail.phone ?? '',
+        notes: detail.notes ?? '',
+        isActive: detail.isActive,
+      });
       if (tab === 'products') setProducts(await apiFetch(`/branch-warehouses/${params.id}/products`));
       if (tab === 'stock') setStock(await apiFetch(`/branch-warehouses/${params.id}/inventory`));
       if (tab === 'movements') setMovements(await apiFetch(`/branch-warehouses/${params.id}/movements`));
@@ -125,6 +156,23 @@ export default function BranchWarehouseDetailPage() {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    setError('');
+    try {
+      await apiFetch(`/branch-warehouses/${params.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(form),
+      });
+      window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.infoUpdatedSuccess'));
+      router.push('/branch-warehouses');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  const canEdit = canEditWarehouseInfo(user);
 
   if (!warehouse) {
     return (
@@ -145,9 +193,20 @@ export default function BranchWarehouseDetailPage() {
               {warehouse.name} · {warehouse.code} · {warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')}
             </p>
           </div>
-          <Link href="/branch-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
-            {t('common.back')}
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/branch-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
+              {t('common.back')}
+            </Link>
+            {canEdit && !editing ? (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+              >
+                {t('hqWarehouse.editWarehouse')}
+              </button>
+            ) : null}
+          </div>
         </div>
 
 
@@ -162,14 +221,74 @@ export default function BranchWarehouseDetailPage() {
         </div>
 
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-          <ReadOnlyField label={t('branchWarehouse.branchName')} value={warehouse.branchName ?? '—'} />
-          <ReadOnlyField label={t('warehouse.name')} value={warehouse.name} />
-          <ReadOnlyField label={t('warehouse.code')} value={warehouse.code} />
-          <ReadOnlyField label={t('hqWarehouse.city')} value={warehouse.city ?? '—'} />
-          <ReadOnlyField label={t('warehouse.region')} value={warehouse.country ?? 'Kyrgyzstan'} />
-          <ReadOnlyField label={t('warehouse.address')} value={warehouse.address ?? '—'} />
-          <ReadOnlyField label={t('hqWarehouse.contactPerson')} value={warehouse.contactPerson ?? '—'} />
-          <ReadOnlyField label={t('hqWarehouse.phone')} value={warehouse.phone ?? '—'} />
+          {editing ? (
+            <form onSubmit={save} className="contents">
+              <ReadOnlyField label={t('branchWarehouse.branchName')} value={warehouse.branchName ?? '—'} />
+              <EditableField label={t('warehouse.name')} value={form.name} onChange={(value) => setForm({ ...form, name: value })} />
+              <EditableField label={t('warehouse.code')} value={form.code} onChange={(value) => setForm({ ...form, code: value })} />
+              <EditableField label={t('hqWarehouse.city')} value={form.city} onChange={(value) => setForm({ ...form, city: value })} />
+              <EditableField label={t('warehouse.region')} value={form.country} onChange={(value) => setForm({ ...form, country: value })} />
+              <EditableField label={t('warehouse.address')} value={form.address} onChange={(value) => setForm({ ...form, address: value })} />
+              <EditableField label={t('hqWarehouse.contactPerson')} value={form.contactPerson} onChange={(value) => setForm({ ...form, contactPerson: value })} />
+              <EditableField label={t('hqWarehouse.phone')} value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} />
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
+                <select
+                  value={form.isActive ? 'ACTIVE' : 'INACTIVE'}
+                  onChange={(e) => setForm({ ...form, isActive: e.target.value === 'ACTIVE' })}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                >
+                  <option value="ACTIVE">{t('warehouse.active')}</option>
+                  <option value="INACTIVE">{t('warehouse.inactive')}</option>
+                </select>
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.notes')}</span>
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  rows={3}
+                />
+              </label>
+              <div className="flex gap-3 md:col-span-2">
+                <button type="submit" className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white">{t('common.save')}</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(false);
+                    setForm({
+                      name: warehouse.name,
+                      code: warehouse.code,
+                      country: warehouse.country ?? '',
+                      city: warehouse.city ?? '',
+                      address: warehouse.address ?? '',
+                      contactPerson: warehouse.contactPerson ?? '',
+                      phone: warehouse.phone ?? '',
+                      notes: warehouse.notes ?? '',
+                      isActive: warehouse.isActive,
+                    });
+                  }}
+                  className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
+                >
+                  {t('common.cancel')}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <ReadOnlyField label={t('branchWarehouse.branchName')} value={warehouse.branchName ?? '—'} />
+              <ReadOnlyField label={t('warehouse.name')} value={warehouse.name} />
+              <ReadOnlyField label={t('warehouse.code')} value={warehouse.code} />
+              <ReadOnlyField label={t('hqWarehouse.city')} value={warehouse.city ?? '—'} />
+              <ReadOnlyField label={t('warehouse.region')} value={warehouse.country ?? 'Kyrgyzstan'} />
+              <ReadOnlyField label={t('warehouse.address')} value={warehouse.address ?? '—'} />
+              <ReadOnlyField label={t('hqWarehouse.contactPerson')} value={warehouse.contactPerson ?? '—'} />
+              <ReadOnlyField label={t('hqWarehouse.phone')} value={warehouse.phone ?? '—'} />
+              <ReadOnlyField label={t('common.status')} value={warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')} />
+              <ReadOnlyField label={t('hqWarehouse.notes')} value={warehouse.notes ?? '—'} className="md:col-span-2" />
+            </>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -313,11 +432,34 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
+function ReadOnlyField({ label, value, className = '' }: { label: string; value: string; className?: string }) {
   return (
-    <label className="block">
+    <div className={className}>
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 font-semibold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function EditableField({
+  label,
+  value,
+  onChange,
+  className = '',
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  return (
+    <label className={`block ${className}`}>
       <span className="text-sm font-semibold text-slate-700">{label}</span>
-      <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{value}</div>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+      />
     </label>
   );
 }

@@ -842,6 +842,10 @@ export function canManageHqWarehouse(user: Pick<User, 'role' | 'roles'> | null |
   return hasFullAccess(user) || hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER']);
 }
 
+export function canEditWarehouseInfo(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  return hasFullAccess(user);
+}
+
 export function canCreateHqEmployee(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return hasFullAccess(user) || hasRole(user, 'SYSTEM_ADMINISTRATOR');
 }

@@ -2,8 +2,9 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, hasAnyHqRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
+import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { activeBranchWarehouseWhere, branchWarehouseWhere, isBranchWarehouse } from '../warehouse/warehouse.util';
+import { UpdateBranchWarehouseDto } from './dto/update-branch-warehouse.dto';
 
 @Injectable()
 export class BranchWarehouseService {
@@ -55,6 +56,39 @@ export class BranchWarehouseService {
       ...warehouse,
       ...metrics,
     };
+  }
+
+  async update(user: AuthUser, id: string, dto: UpdateBranchWarehouseDto) {
+    if (!canEditWarehouseInfo(user)) {
+      throw new ForbiddenException('Only CEO can update warehouse information');
+    }
+    const existing = await this.getWarehouse(user, id);
+    const warehouse = await this.prisma.warehouse.update({
+      where: { id },
+      data: {
+        ...(dto.name ? { name: dto.name.trim() } : {}),
+        ...(dto.code ? { code: dto.code.trim().toUpperCase() } : {}),
+        ...(dto.country !== undefined ? { country: dto.country.trim() } : {}),
+        ...(dto.city !== undefined ? { city: dto.city?.trim() } : {}),
+        ...(dto.address !== undefined ? { address: dto.address?.trim() } : {}),
+        ...(dto.contactPerson !== undefined ? { contactPerson: dto.contactPerson?.trim() } : {}),
+        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() } : {}),
+        ...(dto.notes !== undefined ? { notes: dto.notes?.trim() } : {}),
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+      },
+      include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
+    });
+    await this.audit(user, 'WAREHOUSE_INFO_UPDATED', warehouse.id, {
+      userId: user.id,
+      role: user.role,
+      warehouseId: id,
+      branchId: warehouse.branchId,
+      oldValue: existing,
+      newValue: warehouse,
+      timestamp: new Date().toISOString(),
+    });
+    const metrics = await this.buildMetrics(warehouse, user);
+    return { ...warehouse, ...metrics };
   }
 
   async inventory(user: AuthUser, id: string) {

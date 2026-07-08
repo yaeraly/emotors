@@ -402,6 +402,10 @@ export function canDeleteHqGoodsReceiving(user: Pick<AuthUser, 'role' | 'roles' 
   return canUnlockProcurementOrder(user);
 }
 
+export function canEditWarehouseInfo(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
 export function canCreateDistributionOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return canManageDistributionOrders(user);
 }
