@@ -30,7 +30,7 @@ export default function NewHqWarehousePage() {
         method: 'POST',
         body: JSON.stringify(form),
       });
-      window.localStorage.setItem('emotors_warehouse_success', t('warehouse.createdSuccess'));
+      window.localStorage.setItem('emotors_warehouse_success', t('hqWarehouse.savedSuccess'));
       router.push('/hq-warehouses');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -69,7 +69,7 @@ export default function NewHqWarehousePage() {
             <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.notes')}</span>
             <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={3} />
           </label>
-          <button type="submit" className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2">{t('hqWarehouse.create')}</button>
+          <button type="submit" className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2">{t('common.save')}</button>
         </form>
       </section>
     </ProtectedShell>

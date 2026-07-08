@@ -13,6 +13,7 @@ import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCar
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { canManageHqWarehouse, canDeleteHqWarehouse, canCreateHqInventoryCount, hasFullAccess, isWarehouseManagerUser } from '@/lib/rbac';
+import { formatHqWarehouseContactPerson } from '@/lib/hq-warehouse';
 import {
   filterWarehouseRows,
   paginateRows,
@@ -39,7 +40,8 @@ type Dashboard = {
 type WarehouseMetrics = Warehouse & {
   country?: string | null;
   city?: string | null;
-  managers?: Array<{ id: string; fullName: string }>;
+  contactPerson?: string | null;
+  phone?: string | null;
   totalSkuCount?: number;
   totalProductQuantity?: number;
   totalStockValueKgs?: number;
@@ -312,14 +314,11 @@ function HqWarehousesPageContent() {
               render: (row) => row.code,
             },
             {
-              key: 'managers',
-              label: t('hqWarehouse.managers'),
-              render: (row) =>
-                row.managers?.length ? (
-                  <span className="text-sm text-slate-700">{row.managers.map((manager) => manager.fullName).join(', ')}</span>
-                ) : (
-                  <span className="text-sm text-slate-400">—</span>
-                ),
+              key: 'contactPerson',
+              label: t('hqWarehouse.contactPerson'),
+              render: (row) => (
+                <span className="text-sm text-slate-700">{formatHqWarehouseContactPerson(row, t)}</span>
+              ),
             },
             {
               key: 'totalSkuCount',
