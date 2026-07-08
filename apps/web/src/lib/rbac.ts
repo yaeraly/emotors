@@ -761,6 +761,22 @@ export function isBranchWarehouseOperator(user: Pick<User, 'role' | 'roles' | 'b
   return hasRole(user, 'WAREHOUSE_OPERATOR');
 }
 
+/** Branch Master = branch-scoped MASTER role (service/repair work). */
+export function isBranchMasterUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user?.branchId || hasFullAccess(user)) return false;
+  if (
+    isSupplyChainManagerUser(user) ||
+    isWarehouseManagerUser(user) ||
+    isHqSalesManagerUser(user) ||
+    isHqCashierUser(user) ||
+    isBranchSalesManagerUser(user) ||
+    isBranchWarehouseOperator(user)
+  ) {
+    return false;
+  }
+  return hasRole(user, 'MASTER');
+}
+
 export function canCreateBranchOwner(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return hasFullAccess(user);
 }
