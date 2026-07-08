@@ -16,6 +16,7 @@ import { translateStatus } from '@/lib/translate-status';
 type DifferenceAct = {
   id: string;
   reportNumber: string;
+  actNumber?: string;
   orderNumber: string;
   procurementOrderId: string;
   supplier?: { name: string } | null;
@@ -34,6 +35,10 @@ type DifferenceAct = {
   note?: string | null;
   warehouseManager?: { id: string; fullName: string } | null;
   createdAt: string;
+  receivingId?: string | null;
+  batchId?: string | null;
+  batchNumber?: string | null;
+  receivingNumber?: string | null;
 };
 
 export default function ProcurementDifferenceActsPage() {
@@ -67,6 +72,21 @@ export default function ProcurementDifferenceActsPage() {
       if (key in groups) groups[key].push(act);
     }
     return groups;
+  }, [acts]);
+
+  const groupedByBatch = useMemo(() => {
+    const batches = new Map<string, { batchKey: string; batchNumber: string; acts: DifferenceAct[] }>();
+    for (const act of acts) {
+      const batchKey = act.batchId ?? act.receivingId ?? `order-${act.procurementOrderId}`;
+      const batchNumber = act.batchNumber ?? act.receivingNumber ?? act.orderNumber;
+      const existing = batches.get(batchKey);
+      if (existing) {
+        existing.acts.push(act);
+      } else {
+        batches.set(batchKey, { batchKey, batchNumber, acts: [act] });
+      }
+    }
+    return [...batches.values()];
   }, [acts]);
 
   async function archiveAct(act: DifferenceAct) {
@@ -117,6 +137,45 @@ export default function ProcurementDifferenceActsPage() {
         {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
+        <div className="space-y-3">
+          <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.shipmentBatch')}</h3>
+          {groupedByBatch.map((batch) => (
+            <div key={batch.batchKey} className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+                <p className="text-sm font-bold text-slate-900">
+                  {t('chinaReceiving.batchNumber')}: {batch.batchNumber}
+                </p>
+                <p className="text-xs text-slate-500">{batch.acts.length} {t('chinaReceiving.differenceActs').toLowerCase()}</p>
+              </div>
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-white text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">{t('chinaReceiving.orderNumber')}</th>
+                    <th className="px-4 py-3">{t('procurement.orders.product')}</th>
+                    <th className="px-4 py-3">{t('chinaReceiving.differenceType')}</th>
+                    <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
+                    <th className="px-4 py-3">{t('common.status')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {batch.acts.map((act) => (
+                    <tr key={act.id}>
+                      <td className="px-4 py-3 font-bold">{act.orderNumber}</td>
+                      <td className="px-4 py-3">{act.productName}</td>
+                      <td className="px-4 py-3">{translateStatus(t, act.type)}</td>
+                      <td className="px-4 py-3">{act.differenceQuantity}</td>
+                      <td className="px-4 py-3">{translateStatus(t, act.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+          {groupedByBatch.length === 0 ? (
+            <p className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500">{t('chinaReceiving.noActsForType')}</p>
+          ) : null}
+        </div>
+
         {(['SHORTAGE', 'OVERAGE', 'DAMAGED'] as const).map((type) => (
           <div key={type} className="space-y-3">
             <h3 className="text-lg font-bold text-slate-950">{translateStatus(t, type)}</h3>
@@ -125,6 +184,7 @@ export default function ProcurementDifferenceActsPage() {
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-4 py-3">{t('chinaReceiving.orderNumber')}</th>
+                    <th className="px-4 py-3">{t('chinaReceiving.batchNumber')}</th>
                     <th className="px-4 py-3">{t('procurement.orders.product')}</th>
                     <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.targetWarehouse')}</th>
@@ -137,6 +197,7 @@ export default function ProcurementDifferenceActsPage() {
                   {groupedActs[type].map((act) => (
                     <tr key={act.id}>
                       <td className="px-4 py-3 font-bold">{act.orderNumber}</td>
+                      <td className="px-4 py-3">{act.batchNumber ?? act.receivingNumber ?? '-'}</td>
                       <td className="px-4 py-3">{act.productName}</td>
                       <td className="px-4 py-3">{act.differenceQuantity}</td>
                       <td className="px-4 py-3">{act.hqWarehouse?.name ?? '-'}</td>

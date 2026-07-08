@@ -70,6 +70,13 @@ import {
   isBranchOnlyRequestUser,
   sanitizeBranchPurchaseRequest,
 } from './branch-purchase-request.presenter';
+import {
+  buildBatchDiscrepancyAuditMetadata,
+  buildDiscrepancyActAuditMetadata,
+  differenceAuditAction,
+  generateProcurementActNumber,
+  resolveDifferenceType,
+} from './discrepancy-act.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -1141,6 +1148,7 @@ export class OperationsService {
         cargoTotalWeightKg,
         cargo,
       );
+      const batchDiscrepancyActIds: string[] = [];
 
       for (const [index, item] of receivedItems.entries()) {
         const next = recalculated.items[index];
@@ -1239,84 +1247,41 @@ export class OperationsService {
             });
           }
         }
-        if (item.difference !== 0) {
-          const shortageReason = item.shortageReason;
-          let differenceType: ShortageReportItemType;
-          if (shortageReason === 'DAMAGED_GOODS' || shortageReason === 'DAMAGED') {
-            differenceType = ShortageReportItemType.DAMAGED;
-          } else if (item.difference < 0) {
-            differenceType = ShortageReportItemType.SHORTAGE;
-          } else {
-            differenceType = ShortageReportItemType.OVERAGE;
-          }
-          const report = await tx.procurementDifferenceReport.create({
-            data: {
-              reportNumber: `PDR-${Date.now()}-${item.id.slice(-4)}`,
-              receivingId: receiving.id,
-              procurementOrderId: order.id,
-              warehouseId: hqWarehouseId,
-              createdById: user.id,
-              type: differenceType,
-              productId: item.productId,
-              sku: item.sku,
-              productName: item.productName,
-              expectedQuantity: item.quantity,
-              receivedQuantity: item.receivedQuantity,
-              differenceQuantity: Math.abs(item.difference),
-              shortageReason: item.shortageReason,
-              note: item.receivedNote,
-            },
-          });
-          await this.auditInTx(
-            tx,
-            user,
-            'HQ',
-            differenceType === ShortageReportItemType.SHORTAGE
-              ? 'SHORTAGE_DETECTED'
-              : differenceType === ShortageReportItemType.OVERAGE
-                ? 'OVERAGE_DETECTED'
-                : 'DAMAGED_DETECTED',
-            'ProcurementDifferenceReport',
-            report.id,
-            {
-              userId: user.id,
-              roles: user.roles ?? [user.role],
-              warehouseId: hqWarehouseId,
-              procurementOrderId: order.id,
-              receivingId: receiving.id,
-              productId: item.productId,
-              expectedQty: item.quantity,
-              actualQty: item.receivedQuantity,
-              differenceQty: Math.abs(item.difference),
-              differenceType,
-              timestamp: new Date().toISOString(),
-            },
-          );
-          await this.auditInTx(
-            tx,
-            user,
-            'HQ',
-            'DIFFERENCE_ACT_AUTO_CREATED',
-            'ProcurementDifferenceReport',
-            report.id,
-            {
-              userId: user.id,
-              roles: user.roles ?? [user.role],
-              warehouseId: hqWarehouseId,
-              procurementOrderId: order.id,
-              receivingId: receiving.id,
-              productId: item.productId,
-              expectedQty: item.quantity,
-              actualQty: item.receivedQuantity,
-              differenceQty: Math.abs(item.difference),
-              differenceType,
-              reason: item.shortageReason ?? item.receivedNote,
-              oldValue: item.quantity,
-              newValue: item.receivedQuantity,
-              timestamp: new Date().toISOString(),
-            },
-          );
+        const batchAct = await this.createProcurementDiscrepancyActInTx(tx, user, {
+          batchId: receiving.id,
+          procurementOrderId: order.id,
+          destinationWarehouseId: hqWarehouseId,
+          productId: item.productId,
+          sku: item.sku,
+          productName: item.productName,
+          expectedQty: item.quantity,
+          actualQty: item.receivedQuantity,
+          reason: item.shortageReason ?? item.receivedNote,
+          note: item.receivedNote,
+          shortageReason: item.shortageReason,
+        });
+        if (batchAct) {
+          batchDiscrepancyActIds.push(batchAct.id);
         }
+      }
+
+      if (batchDiscrepancyActIds.length > 0) {
+        await this.auditInTx(
+          tx,
+          user,
+          'HQ',
+          'DISCREPANCY_ACT_CREATED_PER_BATCH',
+          'ProcurementGoodsReceiving',
+          receiving.id,
+          buildBatchDiscrepancyAuditMetadata(receiving.id, batchDiscrepancyActIds, {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseId: hqWarehouseId,
+            procurementOrderId: order.id,
+            receivingId: receiving.id,
+            timestamp: new Date().toISOString(),
+          }),
+        );
       }
 
       await tx.procurementOrder.update({
@@ -1609,6 +1574,44 @@ export class OperationsService {
       canViewActs: isScm || hasAnyFullAccessRole(roles) || isWm,
       arrivalMarked: Boolean(order.actualArrivalDate),
       differenceReports: order.differenceReports,
+      shipmentBatches: (order.receivings ?? []).map((batch) => ({
+        id: batch.id,
+        batchId: batch.id,
+        shipmentBatchId: batch.id,
+        receivingNumber: batch.receivingNumber,
+        receivedAt: batch.receivedAt,
+        items: batch.items.map((row) => ({
+          id: row.id,
+          productId: row.productId,
+          sku: row.sku,
+          productName: row.productName,
+          expectedQuantity: row.expectedQuantity,
+          actualQuantity: row.receivedQuantity,
+          receivedQuantity: row.receivedQuantity,
+          differenceQuantity: row.differenceQuantity,
+          difference: row.receivedQuantity - row.expectedQuantity,
+        })),
+        discrepancyActs: (order.differenceReports ?? [])
+          .filter((act) => act.receivingId === batch.id)
+          .map((act) => ({
+            id: act.id,
+            actNumber: act.reportNumber,
+            reportNumber: act.reportNumber,
+            batchId: batch.id,
+            shipmentBatchId: batch.id,
+            procurementOrderId: act.procurementOrderId,
+            productId: act.productId,
+            productName: act.productName,
+            sku: act.sku,
+            expectedQty: act.expectedQuantity,
+            actualQty: act.receivedQuantity,
+            differenceQty: act.differenceQuantity,
+            differenceType: act.type,
+            status: act.status,
+            reason: act.shortageReason ?? act.note,
+            createdAt: act.createdAt,
+          })),
+      })),
       lineItems: order.items.map((item) => ({
         id: item.id,
         productId: item.productId,
@@ -1642,6 +1645,13 @@ export class OperationsService {
     if (!items.length) throw new BadRequestException('At least one difference act item is required');
 
     return this.prisma.$transaction(async (tx) => {
+      const batchId = await this.resolveProcurementShipmentBatchId(
+        tx,
+        order.id,
+        order.hqWarehouseId,
+        user.id,
+        dto.receivingId ?? dto.shipmentBatchId,
+      );
       const created = [];
       for (const item of items) {
         const orderItem = order.items.find(
@@ -1654,61 +1664,70 @@ export class OperationsService {
         const differenceQty = Math.abs(actualQty - expectedQty);
         if (differenceQty === 0) continue;
 
-        let differenceType = item.differenceType as ShortageReportItemType;
-        if (!differenceType) {
-          differenceType = actualQty < expectedQty ? ShortageReportItemType.SHORTAGE : ShortageReportItemType.OVERAGE;
-        }
+        let differenceType =
+          (item.differenceType as ShortageReportItemType | undefined) ??
+          resolveDifferenceType(expectedQty, actualQty, item.reason ?? item.shortageReason);
+        if (!differenceType) continue;
 
-        const report = await tx.procurementDifferenceReport.create({
-          data: {
-            reportNumber: `PDR-${Date.now()}-${orderItem.id.slice(-4)}`,
-            procurementOrderId: order.id,
-            warehouseId,
-            createdById: user.id,
-            type: differenceType,
+        const existingAct = await tx.procurementDifferenceReport.findFirst({
+          where: {
+            deletedAt: null,
+            receivingId: batchId,
             productId: orderItem.productId,
-            sku: orderItem.sku,
-            productName: orderItem.productName,
-            expectedQuantity: expectedQty,
-            receivedQuantity: actualQty,
-            differenceQuantity: differenceQty,
-            shortageReason: item.reason ?? item.shortageReason,
-            note: item.note,
           },
         });
-        created.push(report);
+        if (existingAct) continue;
 
-        const auditAction =
-          differenceType === ShortageReportItemType.SHORTAGE
-            ? 'RECEIVING_SHORTAGE_CREATED'
-            : differenceType === ShortageReportItemType.OVERAGE
-              ? 'RECEIVING_OVERAGE_CREATED'
-              : 'RECEIVING_DIFFERENCE_ACT_CREATED';
-
-        await this.auditInTx(tx, user, 'HQ', auditAction, 'ProcurementDifferenceReport', report.id, {
-          userId: user.id,
-          roles: user.roles ?? [user.role],
-          warehouseId,
+        const report = await this.createProcurementDiscrepancyActInTx(tx, user, {
+          batchId,
           procurementOrderId: order.id,
-          receivingId: null,
+          destinationWarehouseId: warehouseId,
           productId: orderItem.productId,
+          sku: orderItem.sku,
+          productName: orderItem.productName,
           expectedQty,
           actualQty,
-          differenceQty,
+          reason: item.reason ?? item.shortageReason ?? item.note,
+          note: item.note,
+          shortageReason: item.reason ?? item.shortageReason,
           differenceType,
-          reason: item.reason ?? item.note,
         });
+        if (report) {
+          created.push(report);
+        }
       }
 
       if (!created.length) {
         throw new BadRequestException('No quantity differences found for act creation');
       }
 
+      await this.auditInTx(
+        tx,
+        user,
+        'HQ',
+        'DISCREPANCY_ACT_CREATED_PER_BATCH',
+        'ProcurementGoodsReceiving',
+        batchId,
+        buildBatchDiscrepancyAuditMetadata(
+          batchId,
+          created.map((row) => row.id),
+          {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseId,
+            procurementOrderId: order.id,
+            receivingId: batchId,
+            timestamp: new Date().toISOString(),
+          },
+        ),
+      );
+
       await this.auditInTx(tx, user, 'HQ', 'RECEIVING_DIFFERENCE_ACT_CREATED', 'ProcurementOrder', order.id, {
         userId: user.id,
         roles: user.roles ?? [user.role],
         warehouseId,
         procurementOrderId: order.id,
+        receivingId: batchId,
         createdActIds: created.map((row) => row.id),
       });
 
@@ -1802,8 +1821,17 @@ export class OperationsService {
         warehouse: { select: { id: true, name: true, code: true } },
         createdBy: { select: { id: true, fullName: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ receivingId: 'asc' }, { createdAt: 'desc' }],
     });
+
+    const receivingIds = [...new Set(reports.map((report) => report.receivingId).filter(Boolean))] as string[];
+    const receivings = receivingIds.length
+      ? await this.prisma.procurementGoodsReceiving.findMany({
+          where: { id: { in: receivingIds }, deletedAt: null },
+          select: { id: true, receivingNumber: true, receivedAt: true },
+        })
+      : [];
+    const receivingMap = new Map(receivings.map((row) => [row.id, row]));
 
     if (isScm) {
       await this.prisma.auditLog.create({
@@ -1827,6 +1855,7 @@ export class OperationsService {
     return reports.map((report) => ({
       id: report.id,
       reportNumber: report.reportNumber,
+      actNumber: report.reportNumber,
       procurementOrderId: report.procurementOrderId,
       procurementOrder: report.procurementOrder,
       orderNumber: report.procurementOrder.orderNumber,
@@ -1847,9 +1876,15 @@ export class OperationsService {
       difference: report.differenceQuantity,
       note: report.note,
       shortageReason: report.shortageReason,
+      reason: report.shortageReason ?? report.note,
       warehouseManager: report.createdBy,
       createdBy: report.createdBy,
       receivingId: report.receivingId,
+      batchId: report.receivingId,
+      shipmentBatchId: report.receivingId,
+      batchNumber: report.receivingId ? receivingMap.get(report.receivingId)?.receivingNumber ?? null : null,
+      receivingNumber: report.receivingId ? receivingMap.get(report.receivingId)?.receivingNumber ?? null : null,
+      batchReceivedAt: report.receivingId ? receivingMap.get(report.receivingId)?.receivedAt ?? null : null,
       createdAt: report.createdAt,
     }));
   }
@@ -1910,6 +1945,126 @@ export class OperationsService {
     });
     if (!order) throw new NotFoundException('Procurement order not found');
     return order;
+  }
+
+  private async resolveProcurementShipmentBatchId(
+    tx: PrismaTx,
+    procurementOrderId: string,
+    hqWarehouseId: string,
+    receivedById: string,
+    requestedBatchId?: string,
+  ) {
+    if (requestedBatchId) {
+      const existing = await tx.procurementGoodsReceiving.findFirst({
+        where: {
+          id: requestedBatchId,
+          procurementOrderId,
+          deletedAt: null,
+        },
+      });
+      if (!existing) {
+        throw new BadRequestException('Shipment batch not found for this procurement order');
+      }
+      return existing.id;
+    }
+
+    const openBatch = await tx.procurementGoodsReceiving.findFirst({
+      where: {
+        procurementOrderId,
+        deletedAt: null,
+        items: { none: {} },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (openBatch) return openBatch.id;
+
+    const created = await tx.procurementGoodsReceiving.create({
+      data: {
+        receivingNumber: `PGR-BATCH-${Date.now()}`,
+        procurementOrderId,
+        hqWarehouseId,
+        receivedById,
+      },
+    });
+    return created.id;
+  }
+
+  private async createProcurementDiscrepancyActInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    input: {
+      batchId: string;
+      procurementOrderId: string;
+      destinationWarehouseId?: string;
+      productId: string;
+      sku: string;
+      productName: string;
+      expectedQty: number;
+      actualQty: number;
+      reason?: string | null;
+      note?: string | null;
+      shortageReason?: string | null;
+      differenceType?: ShortageReportItemType;
+    },
+  ) {
+    const differenceQty = Math.abs(input.actualQty - input.expectedQty);
+    if (differenceQty === 0) return null;
+
+    const differenceType =
+      input.differenceType ?? resolveDifferenceType(input.expectedQty, input.actualQty, input.reason);
+    if (!differenceType) return null;
+
+    const report = await tx.procurementDifferenceReport.create({
+      data: {
+        reportNumber: generateProcurementActNumber('PDR', input.productId, input.batchId),
+        receivingId: input.batchId,
+        procurementOrderId: input.procurementOrderId,
+        warehouseId: input.destinationWarehouseId,
+        createdById: user.id,
+        type: differenceType,
+        productId: input.productId,
+        sku: input.sku,
+        productName: input.productName,
+        expectedQuantity: input.expectedQty,
+        receivedQuantity: input.actualQty,
+        differenceQuantity: differenceQty,
+        shortageReason: input.shortageReason as any,
+        note: input.note,
+      },
+    });
+
+    const auditContext = {
+      batchId: input.batchId,
+      procurementOrderId: input.procurementOrderId,
+      destinationWarehouseId: input.destinationWarehouseId,
+      productId: input.productId,
+      expectedQty: input.expectedQty,
+      actualQty: input.actualQty,
+      differenceQty,
+      differenceType,
+      reason: input.reason ?? input.note,
+      createdById: user.id,
+    };
+
+    await this.auditInTx(
+      tx,
+      user,
+      'HQ',
+      differenceAuditAction(differenceType),
+      'ProcurementDifferenceReport',
+      report.id,
+      buildDiscrepancyActAuditMetadata(auditContext, {
+        userId: user.id,
+        roles: user.roles ?? [user.role],
+        warehouseId: input.destinationWarehouseId,
+        receivingId: input.batchId,
+        actNumber: report.reportNumber,
+        status: report.status,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+
+    return report;
   }
 
   private async assertChinaReceivingAccess(user: AuthUser, warehouseId: string) {

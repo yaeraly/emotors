@@ -21,6 +21,37 @@ type LineItem = {
   difference: number;
 };
 
+type DiscrepancyAct = {
+  id: string;
+  actNumber: string;
+  reportNumber: string;
+  batchId: string;
+  productName: string;
+  sku: string;
+  expectedQty: number;
+  actualQty: number;
+  differenceQty: number;
+  differenceType: string;
+  status: string;
+};
+
+type ShipmentBatch = {
+  id: string;
+  batchId: string;
+  receivingNumber: string;
+  receivedAt: string;
+  items: Array<{
+    id: string;
+    productName: string;
+    sku: string;
+    expectedQuantity: number;
+    actualQuantity: number;
+    differenceQuantity: number;
+    difference: number;
+  }>;
+  discrepancyActs: DiscrepancyAct[];
+};
+
 type ChinaReceivingDetail = {
   id: string;
   orderNumber: string;
@@ -42,6 +73,7 @@ type ChinaReceivingDetail = {
   otherExpenseKgs?: number | string;
   packagingCostKgs?: number | string;
   lineItems: LineItem[];
+  shipmentBatches?: ShipmentBatch[];
 };
 
 export default function ChinaReceivingDetailPage() {
@@ -228,6 +260,67 @@ export default function ChinaReceivingDetailPage() {
                   {t('procurement.orders.receiveToHq')}
                 </button>
               </div>
+            ) : null}
+
+            {(task.shipmentBatches?.length ?? 0) > 0 ? (
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.shipmentBatch')}</h3>
+                {task.shipmentBatches?.map((batch) => (
+                  <div key={batch.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase text-slate-400">{t('chinaReceiving.batchNumber')}</p>
+                        <p className="text-lg font-bold text-slate-950">{batch.receivingNumber}</p>
+                      </div>
+                      <p className="text-sm text-slate-500">{new Date(batch.receivedAt).toLocaleString()}</p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-slate-200 text-sm">
+                        <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                          <tr>
+                            <th className="px-4 py-3">{t('procurement.orders.product')}</th>
+                            <th className="px-4 py-3">SKU</th>
+                            <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
+                            <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
+                            <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
+                            <th className="px-4 py-3">{t('chinaReceiving.actStatus')}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {batch.items.map((item) => {
+                            const act = batch.discrepancyActs.find((row) => row.sku === item.sku);
+                            return (
+                              <tr key={item.id}>
+                                <td className="px-4 py-3">{item.productName}</td>
+                                <td className="px-4 py-3">{item.sku}</td>
+                                <td className="px-4 py-3">{item.expectedQuantity}</td>
+                                <td className="px-4 py-3">{item.actualQuantity}</td>
+                                <td className="px-4 py-3">{item.difference}</td>
+                                <td className="px-4 py-3">
+                                  {act ? translateStatus(t, act.status) : '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    {batch.discrepancyActs.length > 0 ? (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {batch.discrepancyActs.map((act) => (
+                          <Link
+                            key={act.id}
+                            href="/procurement/difference-acts"
+                            className="inline-flex rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800"
+                          >
+                            {t('chinaReceiving.openDiscrepancyAct')} ({act.actNumber})
+                          </Link>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </section>
             ) : null}
           </>
         ) : null}

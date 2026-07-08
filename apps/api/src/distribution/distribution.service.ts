@@ -49,6 +49,12 @@ import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dt
 import { allocateBranchReceivingTransportCost } from './branch-receiving-transport.util';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
+import {
+  buildBatchDiscrepancyAuditMetadata,
+  buildDiscrepancyActAuditMetadata,
+  differenceAuditAction,
+  resolveDifferenceType,
+} from '../operations/discrepancy-act.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -785,6 +791,8 @@ export class DistributionService {
         });
 
         if (difference !== 0) {
+          const differenceType = resolveDifferenceType(sentQuantity, receivedQuantity, received.note);
+          if (!differenceType) continue;
           shortageItems.push({
             productId: orderItem.productId,
             sku: orderItem.sku,
@@ -792,10 +800,7 @@ export class DistributionService {
             expectedQuantity: sentQuantity,
             receivedQuantity,
             differenceQuantity: Math.abs(difference),
-            type:
-              difference < 0
-                ? ShortageReportItemType.SHORTAGE
-                : ShortageReportItemType.OVERAGE,
+            type: differenceType,
             note: received.note,
           });
         }
@@ -866,10 +871,67 @@ export class DistributionService {
           entityType: 'ShortageReport',
           entityId: shortageReport.id,
         });
+        for (const item of shortageReport.items) {
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              role: user.role,
+              action: differenceAuditAction(item.type),
+              entity: 'ShortageReport',
+              entityId: shortageReport.id,
+              metadata: buildDiscrepancyActAuditMetadata(
+                {
+                  batchId: receiving.id,
+                  distributionOrderId: order.id,
+                  sourceWarehouseId: order.sourceWarehouseId,
+                  destinationWarehouseId: warehouse.id,
+                  productId: item.productId,
+                  expectedQty: item.expectedQuantity,
+                  actualQty: item.receivedQuantity,
+                  differenceQty: item.differenceQuantity,
+                  differenceType: item.type,
+                  reason: item.note,
+                  createdById: user.id,
+                },
+                {
+                  actNumber: shortageReport.reportNumber,
+                  reportNumber: shortageReport.reportNumber,
+                  goodsReceivingId: receiving.id,
+                  shipmentBatchId: receiving.id,
+                  receivingNumber: receiving.receivingNumber,
+                  status: shortageReport.status,
+                  roles: user.roles ?? [user.role],
+                },
+              ),
+            },
+          });
+        }
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'DISCREPANCY_ACT_CREATED_PER_BATCH',
+            entity: 'GoodsReceiving',
+            entityId: receiving.id,
+            metadata: buildBatchDiscrepancyAuditMetadata(receiving.id, [shortageReport.id], {
+              actNumber: shortageReport.reportNumber,
+              reportNumber: shortageReport.reportNumber,
+              distributionOrderId: order.id,
+              sourceWarehouseId: order.sourceWarehouseId,
+              destinationWarehouseId: warehouse.id,
+              goodsReceivingId: receiving.id,
+              receivingNumber: receiving.receivingNumber,
+              status: shortageReport.status,
+              roles: user.roles ?? [user.role],
+            }),
+          },
+        });
         await this.auditTransfer(tx, user, 'DIFFERENCE_ACT_CREATED', order);
         await this.auditTransfer(tx, user, 'BRANCH_DISCREPANCY_CREATED', order, {
           shortageReportId: shortageReport.id,
           reportNumber: shortageReport.reportNumber,
+          goodsReceivingId: receiving.id,
+          shipmentBatchId: receiving.id,
         });
       }
       await this.auditTransfer(tx, user, 'BRANCH_RECEIVED_GOODS', order);
