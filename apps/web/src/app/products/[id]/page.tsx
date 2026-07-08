@@ -7,7 +7,7 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import { canEditProductCatalog, canEditPurchasePriceYuan, canEditSellingPrice } from '@/lib/rbac';
+import { canEditProductCatalog, canEditPurchasePriceYuan } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -25,7 +25,6 @@ export default function ProductDetailPage() {
     photoUrl: '',
     warehouseId: '',
     weightKg: '0',
-    sellingPriceKgs: '0',
     minStockLevel: '0',
   });
   const [saving, setSaving] = useState(false);
@@ -60,7 +59,6 @@ export default function ProductDetailPage() {
           photoUrl: productResult.photoUrl ?? '',
           warehouseId: currentWarehouseActive ? productResult.warehouseId : '',
           weightKg: String(productResult.weightKg),
-          sellingPriceKgs: String(productResult.sellingPriceKgs),
           minStockLevel: String(productResult.minStockLevel),
         });
         setPurchasePriceForm({
@@ -76,7 +74,6 @@ export default function ProductDetailPage() {
 
   const currentWarehouseInactive = Boolean(product?.warehouse && product.warehouse.isActive === false);
   const canSaveWarehouse = !currentWarehouseInactive || Boolean(editForm.warehouseId);
-  const canEditPrice = canEditSellingPrice(currentUser);
 
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -112,7 +109,6 @@ export default function ProductDetailPage() {
           ...(canEditProductCatalog(currentUser)
             ? { weightKg: nextWeight, warehouseId: editForm.warehouseId }
             : {}),
-          ...(canEditPrice ? { sellingPriceKgs: Number(editForm.sellingPriceKgs) } : {}),
           minStockLevel: Number(editForm.minStockLevel),
         }),
       });
@@ -229,9 +225,7 @@ export default function ProductDetailPage() {
                     ))}
                   </select>
                 </label>
-                {canEditPrice ? (
-                  <Input label={t('inventory.sellingPriceKgs')} type="number" value={editForm.sellingPriceKgs} onChange={(value) => setEditForm({ ...editForm, sellingPriceKgs: value })} />
-                ) : null}
+                <ReadOnlyField label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} hint={t('inventory.sellingPriceFromPolicy')} />
                 <Input label={t('inventory.weightPerUnitKg')} type="number" value={editForm.weightKg} onChange={(value) => setEditForm({ ...editForm, weightKg: value })} min="0.001" step="0.001" />
                 <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
                 <button disabled={saving || !canSaveWarehouse} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
@@ -346,6 +340,16 @@ function Info({ label, value }: { label: string; value: string }) {
 
 function Input({ label, value, onChange, type = 'text', min, step }: { label: string; value: string; onChange: (value: string) => void; type?: string; min?: string; step?: string }) {
   return <label className="block"><span className="text-sm font-semibold text-slate-700">{label}</span><input value={value} onChange={(event) => onChange(event.target.value)} type={type} min={min ?? (type === 'number' ? 0 : undefined)} step={step ?? (type === 'number' ? '0.01' : undefined)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" /></label>;
+}
+
+function ReadOnlyField({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <p className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800">{value}</p>
+      {hint ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null}
+    </label>
+  );
 }
 
 const PURCHASE_PRICE_REASONS: PurchasePriceChangeReason[] = [

@@ -29,17 +29,28 @@ export function Phase2DataPage({
 }: Phase2DataPageProps) {
   const { t } = useTranslation();
   const [data, setData] = useState<unknown>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [payload, setPayload] = useState(
     JSON.stringify(defaultPayload, null, 2),
   );
   const [error, setError] = useState('');
 
-  async function load() {
+  async function load(options?: { refresh?: boolean }) {
+    const isRefresh = Boolean(options?.refresh);
+    if (isRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError('');
     try {
       setData(await apiFetch(endpoint));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   }
 
@@ -86,11 +97,12 @@ export function Phase2DataPage({
               </Link>
             ) : null}
             <button
-              onClick={() => void load()}
-              className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              onClick={() => void load({ refresh: true })}
+              disabled={refreshing}
+              className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               type="button"
             >
-              {t('phase2.refresh')}
+              {refreshing ? t('common.loading') : t('phase2.refresh')}
             </button>
           </div>
         </div>
@@ -99,11 +111,12 @@ export function Phase2DataPage({
         {embedded ? (
           <div className="flex justify-end">
             <button
-              onClick={() => void load()}
-              className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              onClick={() => void load({ refresh: true })}
+              disabled={refreshing}
+              className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               type="button"
             >
-              {t('phase2.refresh')}
+              {refreshing ? t('common.loading') : t('phase2.refresh')}
             </button>
           </div>
         ) : null}
@@ -138,7 +151,7 @@ export function Phase2DataPage({
           </form>
         ) : null}
 
-        <DataView data={data} />
+        <DataView data={data} loading={loading || refreshing} />
     </>
   );
 
@@ -155,7 +168,15 @@ export function Phase2DataPage({
   );
 }
 
-function DataView({ data }: { data: unknown }) {
+function DataView({ data, loading }: { data: unknown; loading?: boolean }) {
+  if (loading && !data) {
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-white p-8 text-slate-500 shadow-sm">
+        Loading...
+      </div>
+    );
+  }
+
   if (!data) {
     return (
       <div className="rounded-3xl border border-slate-200 bg-white p-8 text-slate-500 shadow-sm">

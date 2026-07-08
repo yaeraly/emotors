@@ -87,7 +87,7 @@ export default function UsersPage() {
     };
   }, [users]);
 
-  const roleFilterOptions = isHqUser(currentUser) ? allFilterRoles : branchRoles;
+  const roleFilterOptions = isBranchPanelUser(currentUser) ? branchRoles : allFilterRoles;
 
   const filteredUsers = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();

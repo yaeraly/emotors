@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { SaleStatus } from '@prisma/client';
+import { BranchStatus, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canAccessAllBranches } from '../rbac/rbac';
@@ -8,13 +8,20 @@ import { canAccessAllBranches } from '../rbac/rbac';
 export class AnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private activeBranchWhere(user: AuthUser) {
+    const activeOnly = { status: BranchStatus.ACTIVE, deletedAt: null };
+    return canAccessAllBranches(user.role)
+      ? activeOnly
+      : { ...activeOnly, id: user.branchId };
+  }
+
   hqDashboard(user: AuthUser) {
     return this.branchComparison(user);
   }
 
   async branchComparison(user: AuthUser) {
     const branches = await this.prisma.branch.findMany({
-      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
+      where: this.activeBranchWhere(user),
       orderBy: { name: 'asc' },
     });
     return Promise.all(branches.map((branch) => this.branchMetrics(branch)));
@@ -30,7 +37,7 @@ export class AnalyticsService {
 
   async customers(user: AuthUser) {
     const branches = await this.prisma.branch.findMany({
-      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
+      where: this.activeBranchWhere(user),
     });
     return Promise.all(branches.map(async (branch) => ({
       branch,
@@ -40,7 +47,7 @@ export class AnalyticsService {
 
   async inventory(user: AuthUser) {
     const branches = await this.prisma.branch.findMany({
-      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
+      where: this.activeBranchWhere(user),
     });
     return Promise.all(branches.map(async (branch) => {
       const balances = await this.prisma.inventoryBalance.findMany({ where: { branchId: branch.id } });
@@ -54,7 +61,7 @@ export class AnalyticsService {
 
   private async metric(user: AuthUser, field: 'totalAmount' | 'profitAmount') {
     const branches = await this.prisma.branch.findMany({
-      where: canAccessAllBranches(user.role) ? {} : { id: user.branchId },
+      where: this.activeBranchWhere(user),
     });
     return Promise.all(branches.map(async (branch) => {
       const sales = await this.prisma.sale.findMany({

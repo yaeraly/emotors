@@ -9,6 +9,13 @@ export function applyMarkupRoundUp(costPrice: number, markupPercent: number) {
   return Math.ceil(raw / 10) * 10;
 }
 
+/** HQ wholesale: when markup is 0, return exact cost without ROUNDUP. */
+export function applyHqBranchWholesaleMarkup(costPrice: number, markupPercent: number) {
+  if (costPrice <= 0) return 0;
+  if (markupPercent === 0) return roundMoney(costPrice);
+  return applyMarkupRoundUp(costPrice, markupPercent);
+}
+
 export function applyMarkup(costPrice: number, markupPercent: number) {
   return applyMarkupRoundUp(costPrice, markupPercent);
 }
@@ -29,7 +36,7 @@ export function pricesFromMarkups(
 ) {
   return {
     wholesalePriceKgs: applyMarkupRoundUp(costPriceKgs, markups.wholesaleMarkupPercent),
-    hqBranchWholesalePriceKgs: applyMarkupRoundUp(costPriceKgs, markups.hqBranchWholesaleMarkupPercent),
+    hqBranchWholesalePriceKgs: applyHqBranchWholesaleMarkup(costPriceKgs, markups.hqBranchWholesaleMarkupPercent),
     recommendedRetailPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.recommendedRetailMarkupPercent),
     minimumSellingPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.minimumSellingMarkupPercent),
   };

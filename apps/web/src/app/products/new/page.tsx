@@ -11,7 +11,7 @@ import {
   getCategoryPrefix,
   nextProductCodes,
 } from '@/lib/product-code-utils';
-import { canEditPurchasePriceYuan, canEditSellingPrice } from '@/lib/rbac';
+import { canEditPurchasePriceYuan } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -44,7 +44,6 @@ export default function NewProductPage() {
     defaultSupplierId: '',
     defaultFactoryId: '',
     isActive: true,
-    sellingPriceKgs: '0',
   });
 
   useEffect(() => {
@@ -98,7 +97,6 @@ export default function NewProductPage() {
       .finally(() => setGeneratingCodes(false));
   }, [categories, form.categoryId, language, t]);
 
-  const canEditPrice = canEditSellingPrice(currentUser);
   const canEditPurchase = canEditPurchasePriceYuan(currentUser);
 
   const unitOptions = useMemo(
@@ -146,7 +144,6 @@ export default function NewProductPage() {
           description: form.description || undefined,
           weightKg,
           purchasePriceYuan: canEditPurchase ? Number(form.purchasePriceYuan) : 0,
-          sellingPriceKgs: canEditPrice ? Number(form.sellingPriceKgs) : 0,
           defaultSupplierId: form.defaultSupplierId || undefined,
           defaultFactoryId: form.defaultFactoryId || undefined,
           isActive: form.isActive,
@@ -259,14 +256,6 @@ export default function NewProductPage() {
               type="number"
               value={form.purchasePriceYuan}
               onChange={(value) => setField('purchasePriceYuan', value)}
-            />
-          ) : null}
-          {canEditPrice ? (
-            <Input
-              label={t('inventory.sellingPriceKgs')}
-              type="number"
-              value={form.sellingPriceKgs}
-              onChange={(value) => setField('sellingPriceKgs', value)}
             />
           ) : null}
           <label className="block">
