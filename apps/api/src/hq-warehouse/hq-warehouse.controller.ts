@@ -32,7 +32,7 @@ export class HqWarehouseController {
   }
 
   @Post()
-  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(Role.CEO, Role.OWNER)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateHqWarehouseDto) {
     return this.service.create(user, dto);
   }
@@ -49,12 +49,13 @@ export class HqWarehouseController {
   }
 
   @Post(':id/deactivate')
-  @Roles(Role.CEO, Role.SUPPLY_CHAIN_MANAGER)
+  @Roles(Role.CEO, Role.OWNER)
   deactivate(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.deactivate(user, id);
   }
 
   @Delete(':id')
+  @Roles(Role.CEO, Role.OWNER)
   remove(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

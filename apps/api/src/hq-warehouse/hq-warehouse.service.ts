@@ -13,7 +13,7 @@ import {
   hqWarehouseWhere,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
-import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo } from '../rbac/rbac';
+import { canCreateHqWarehouse, canDeactivateHqWarehouse, canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 import { hasHqReceivingDownstreamUsage, HQ_RECEIVING_ARCHIVED_MESSAGE } from './hq-receiving-delete.util';
@@ -201,16 +201,15 @@ export class HqWarehouseService {
   }
 
   async create(user: AuthUser, dto: CreateHqWarehouseDto) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    if (roles.includes(Role.WAREHOUSE_MANAGER) && !roles.some((role) => role === Role.CEO || role === Role.OWNER)) {
-      await this.audit(user, 'HQ_WAREHOUSE_CREATE_DENIED', 'denied', {
-        attemptedName: dto.name,
-        attemptedCode: dto.code,
-        reason: 'HQ Warehouse Manager cannot create HQ warehouses',
-      });
+    const roles = resolveUserRoles(user);
+    if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      await this.auditDenied(user, 'HQ_WAREHOUSE_CREATE_DENIED', 'denied', 'CREATE');
       throw new ForbiddenException('HQ Warehouse Manager cannot create HQ warehouses');
     }
-    this.assertCanManage(user);
+    if (!canCreateHqWarehouse(user)) {
+      await this.auditDenied(user, 'HQ_WAREHOUSE_CREATE_DENIED', 'denied', 'CREATE');
+      throw new ForbiddenException('Only CEO can create HQ warehouses');
+    }
     if (dto.branchId?.trim()) {
       throw new BadRequestException('HQ warehouse cannot be linked to a branch.');
     }
@@ -275,7 +274,10 @@ export class HqWarehouseService {
   }
 
   async deactivate(user: AuthUser, id: string) {
-    this.assertCanManage(user);
+    if (!canDeactivateHqWarehouse(user)) {
+      await this.auditDenied(user, 'HQ_WAREHOUSE_DEACTIVATE_DENIED', id, 'DEACTIVATE');
+      throw new ForbiddenException('Only CEO can deactivate HQ warehouses');
+    }
     const existing = await this.getHqWarehouse(user, id);
     const hasStock = await this.prisma.inventoryBalance.findFirst({
       where: { warehouseId: id, quantity: { gt: 0 } },
@@ -293,6 +295,13 @@ export class HqWarehouseService {
 
   async remove(user: AuthUser, id: string, reason?: string) {
     if (!canDeleteHqWarehouse(user)) {
+      const hasHistory = await this.prisma.$transaction((tx) => this.warehouseHasDeleteHistory(tx, id));
+      await this.auditDenied(
+        user,
+        hasHistory ? 'HQ_WAREHOUSE_ARCHIVE_DENIED' : 'HQ_WAREHOUSE_DELETE_DENIED',
+        id,
+        hasHistory ? 'ARCHIVE' : 'DELETE',
+      );
       throw new ForbiddenException('Only CEO can delete HQ warehouses');
     }
 
@@ -700,21 +709,19 @@ export class HqWarehouseService {
     }
   }
 
-  private assertCanManage(user: AuthUser) {
-    if (!this.hasManageRole(user)) {
-      throw new ForbiddenException('Only CEO and Supply Chain Manager can manage HQ warehouses');
-    }
+  private auditDenied(user: AuthUser, action: string, entityId: string, attemptedAction: string) {
+    return this.audit(user, action, entityId, {
+      userId: user.id,
+      role: user.role,
+      warehouseId: entityId !== 'denied' ? entityId : undefined,
+      attemptedAction,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   private hasViewRole(user: AuthUser) {
     const roles = user.roles?.length ? user.roles : [user.role];
     const allowed: Role[] = [Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER];
-    return roles.some((role) => allowed.includes(role));
-  }
-
-  private hasManageRole(user: AuthUser) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    const allowed: Role[] = [Role.CEO, Role.SUPPLY_CHAIN_MANAGER];
     return roles.some((role) => allowed.includes(role));
   }
 

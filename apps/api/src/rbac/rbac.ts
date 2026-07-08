@@ -398,6 +398,14 @@ export function canDeleteHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'pe
   return canUnlockProcurementOrder(user);
 }
 
+export function canCreateHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
+export function canDeactivateHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
 export function canDeleteHqGoodsReceiving(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return canUnlockProcurementOrder(user);
 }

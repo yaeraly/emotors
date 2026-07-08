@@ -259,6 +259,7 @@ const SUPPLY_CHAIN_MANAGER_FORBIDDEN_PREFIXES = [
   '/china-receiving',
   '/procurement/receiving',
   '/distribution',
+  '/hq-warehouses/new',
 ];
 
 function canSupplyChainManagerAccessPath(pathname: string) {
@@ -842,7 +843,7 @@ export function canViewHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | u
 }
 
 export function canManageHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasFullAccess(user) || hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER']);
+  return hasFullAccess(user);
 }
 
 export function canEditWarehouseInfo(user: Pick<User, 'role' | 'roles'> | null | undefined) {
