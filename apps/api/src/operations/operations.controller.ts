@@ -9,6 +9,7 @@ import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { OperationsService } from './operations.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
+import { ProcurementDifferenceActQueryDto } from './dto/procurement-difference-act-query.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller()
@@ -153,15 +154,22 @@ export class OperationsController {
   @Get('procurement/china-receiving/difference-acts')
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
-  listChinaReceivingDifferenceActs(@CurrentUser() user: AuthUser, @Query('orderId') orderId?: string) {
-    return this.service.listChinaReceivingDifferenceActs(user, orderId);
+  listChinaReceivingDifferenceActs(@CurrentUser() user: AuthUser, @Query() query: ProcurementDifferenceActQueryDto) {
+    return this.service.listChinaReceivingDifferenceActs(user, query);
   }
 
   @Get('procurement/difference-acts')
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
-  listProcurementDifferenceActs(@CurrentUser() user: AuthUser, @Query('orderId') orderId?: string) {
-    return this.service.listChinaReceivingDifferenceActs(user, orderId);
+  listProcurementDifferenceActs(@CurrentUser() user: AuthUser, @Query() query: ProcurementDifferenceActQueryDto) {
+    return this.service.listChinaReceivingDifferenceActs(user, query);
+  }
+
+  @Get('procurement/difference-acts/:id')
+  @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
+  getProcurementDifferenceAct(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.getProcurementDifferenceAct(user, id);
   }
 
   @Post('procurement/difference-acts/:id/archive')
@@ -203,8 +211,11 @@ export class OperationsController {
   @Get('procurement/china-receiving/:orderId/difference-acts')
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
-  listOrderChinaReceivingDifferenceActs(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
-    return this.service.listChinaReceivingDifferenceActs(user, orderId);
+  listOrderChinaReceivingDifferenceActs(
+    @CurrentUser() user: AuthUser,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.service.listChinaReceivingDifferenceActs(user, { orderId });
   }
 
   @Post('procurement/orders/:id/receive-to-hq')

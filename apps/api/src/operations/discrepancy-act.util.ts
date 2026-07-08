@@ -48,6 +48,37 @@ export function differenceAuditAction(type: ShortageReportItemType): string {
   }
 }
 
+export function procurementDifferenceAuditAction(type: ShortageReportItemType): string {
+  switch (type) {
+    case ShortageReportItemType.SHORTAGE:
+      return 'PROCUREMENT_SHORTAGE_ACT_CREATED';
+    case ShortageReportItemType.OVERAGE:
+      return 'PROCUREMENT_OVERAGE_ACT_CREATED';
+    case ShortageReportItemType.DAMAGED:
+      return 'PROCUREMENT_DAMAGED_ACT_CREATED';
+    default:
+      return 'PROCUREMENT_DISCREPANCY_ACT_CREATED';
+  }
+}
+
+export function resolveProcurementDiscrepancyActs(
+  expectedQty: number,
+  actualQty: number,
+  damagedQty = 0,
+): Array<{ type: ShortageReportItemType; differenceQty: number }> {
+  const acts: Array<{ type: ShortageReportItemType; differenceQty: number }> = [];
+  const qtyDiff = actualQty - expectedQty;
+  if (qtyDiff < 0) {
+    acts.push({ type: ShortageReportItemType.SHORTAGE, differenceQty: Math.abs(qtyDiff) });
+  } else if (qtyDiff > 0) {
+    acts.push({ type: ShortageReportItemType.OVERAGE, differenceQty: qtyDiff });
+  }
+  if (damagedQty > 0) {
+    acts.push({ type: ShortageReportItemType.DAMAGED, differenceQty: damagedQty });
+  }
+  return acts;
+}
+
 export function buildDiscrepancyActAuditMetadata(
   context: DiscrepancyActContext,
   extra?: Record<string, unknown>,

@@ -1,19 +1,17 @@
 'use client';
 
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { SectionTopNav } from '@/components/SectionTopNav';
+import { ProcurementHubNav } from '@/components/procurement/ProcurementHubNav';
 import {
   FactoriesListPanel,
   ProcurementOrdersListPanel,
   SuppliersListPanel,
   TransportCompaniesListPanel,
-  useProcurementCreateAction,
 } from '@/components/procurement/ProcurementListPanels';
 import { apiFetch } from '@/lib/api';
-import { canViewProcurement, canViewTransportCompany, canViewChinaReceivingActs, isSupplyChainManagerUser, hasFullAccess } from '@/lib/rbac';
+import { canViewProcurement, canViewTransportCompany } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -35,7 +33,6 @@ export default function ProcurementPage() {
 
 function ProcurementPageContent() {
   const { t } = useTranslation();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
 
@@ -54,34 +51,6 @@ function ProcurementPageContent() {
   const canView = canViewProcurement(user);
   const canViewTransport = canViewTransportCompany(user);
 
-  const canViewDifferenceActs =
-    canViewChinaReceivingActs(user) && (isSupplyChainManagerUser(user) || hasFullAccess(user));
-
-  const tabs = useMemo(() => {
-    const items = [
-      { id: 'suppliers', label: t('procurement.suppliers.title') },
-      { id: 'factories', label: t('procurement.factories.title') },
-    ];
-    if (canViewTransport) {
-      items.push({ id: 'transport', label: t('procurement.transportCompanies.title') });
-    }
-    items.push({ id: 'orders', label: t('procurement.orders.title') });
-    if (canViewDifferenceActs) {
-      items.push({ id: 'difference-acts', label: t('chinaReceiving.differenceActs') });
-    }
-    return items;
-  }, [canViewDifferenceActs, canViewTransport, t]);
-
-  const createAction = useProcurementCreateAction(activeTab, user, t);
-
-  function setTab(tabId: string) {
-    if (tabId === 'difference-acts') {
-      router.push('/procurement/difference-acts');
-      return;
-    }
-    router.replace(`/procurement?tab=${tabId}`);
-  }
-
   if (!canView) {
     return (
       <ProtectedShell>
@@ -98,18 +67,7 @@ function ProcurementPageContent() {
           <h2 className="text-3xl font-bold text-slate-950">{t('procurement.title')}</h2>
         </div>
 
-        <SectionTopNav
-          tabs={tabs}
-          activeTab={activeTab}
-          onTabChange={setTab}
-          action={
-            createAction ? (
-              <Link href={createAction.href} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">
-                {createAction.label}
-              </Link>
-            ) : null
-          }
-        />
+        <ProcurementHubNav activeTab={activeTab} />
 
         {activeTab === 'suppliers' ? <SuppliersListPanel /> : null}
         {activeTab === 'factories' ? <FactoriesListPanel /> : null}

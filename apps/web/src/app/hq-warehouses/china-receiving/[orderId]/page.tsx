@@ -83,6 +83,7 @@ export default function ChinaReceivingDetailPage() {
   const [user, setUser] = useState<User | null>(null);
   const [task, setTask] = useState<ChinaReceivingDetail | null>(null);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [damagedQuantities, setDamagedQuantities] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -104,6 +105,7 @@ export default function ChinaReceivingDetailPage() {
         initialQty[item.id] = String(item.actualReceivedQuantity ?? item.expectedQuantity);
       });
       setQuantities(initialQty);
+      setDamagedQuantities({});
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -118,9 +120,10 @@ export default function ChinaReceivingDetailPage() {
     if (!task) return false;
     return task.lineItems.some((item) => {
       const actual = Number(quantities[item.id] ?? item.expectedQuantity);
-      return actual !== item.expectedQuantity;
+      const damaged = Number(damagedQuantities[item.id] ?? 0);
+      return actual !== item.expectedQuantity || damaged > 0;
     });
-  }, [task, quantities]);
+  }, [task, quantities, damagedQuantities]);
 
   async function receiveToHq() {
     if (!task || !canSubmitReceive) return;
@@ -144,11 +147,14 @@ export default function ChinaReceivingDetailPage() {
           items: task.lineItems.map((item) => ({
             procurementItemId: item.id,
             receivedQuantity: Number(quantities[item.id] ?? item.expectedQuantity),
+            damagedQuantity: Number(damagedQuantities[item.id] ?? 0),
             note: notes[item.id] || undefined,
             shortageReason:
               Number(quantities[item.id] ?? item.expectedQuantity) !== item.expectedQuantity
                 ? 'OTHER'
-                : undefined,
+                : Number(damagedQuantities[item.id] ?? 0) > 0
+                  ? 'DAMAGED_GOODS'
+                  : undefined,
           })),
         }),
       });
@@ -201,6 +207,7 @@ export default function ChinaReceivingDetailPage() {
                     <th className="px-4 py-3">{t('chinaReceiving.orderedQty')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
+                    <th className="px-4 py-3">{t('chinaReceiving.damagedQty')}</th>
                     <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
                     <th className="px-4 py-3">{t('inventoryCount.notes')}</th>
                   </tr>
@@ -224,6 +231,20 @@ export default function ChinaReceivingDetailPage() {
                               min={0}
                               value={quantities[item.id] ?? ''}
                               onChange={(e) => setQuantities((c) => ({ ...c, [item.id]: e.target.value }))}
+                              className="w-24 rounded-lg border border-slate-300 px-2 py-1"
+                              disabled={!canEditQuantities}
+                            />
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {task.hqStockMovementCreatedAt ? (
+                            Number(damagedQuantities[item.id] ?? 0)
+                          ) : (
+                            <input
+                              type="number"
+                              min={0}
+                              value={damagedQuantities[item.id] ?? ''}
+                              onChange={(e) => setDamagedQuantities((c) => ({ ...c, [item.id]: e.target.value }))}
                               className="w-24 rounded-lg border border-slate-300 px-2 py-1"
                               disabled={!canEditQuantities}
                             />
@@ -310,7 +331,7 @@ export default function ChinaReceivingDetailPage() {
                         {batch.discrepancyActs.map((act) => (
                           <Link
                             key={act.id}
-                            href="/procurement/difference-acts"
+                            href={`/procurement/difference-acts?orderId=${task.id}`}
                             className="inline-flex rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800"
                           >
                             {t('chinaReceiving.openDiscrepancyAct')} ({act.actNumber})

@@ -3221,6 +3221,7 @@ model ProcurementGoodsReceivingItem {
   expectedQuantity   Int
   receivedQuantity   Int
   differenceQuantity Int
+  damagedQuantity  Int      @default(0)
   note               String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -3247,6 +3248,7 @@ model ProcurementDifferenceReport {
   expectedQuantity   Int
   receivedQuantity   Int
   differenceQuantity Int
+  damagedQuantity    Int                    @default(0)
   shortageReason     ProcurementShortageReason?
   note               String?
   createdAt          DateTime               @default(now())

@@ -647,6 +647,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/procurement/orders/')) {
     return canViewProcurement(user) || canViewSupplierPayments(user);
   }
+  if (pathname.startsWith('/procurement/difference-acts')) {
+    return canViewChinaReceivingActs(user);
+  }
   if (pathname.startsWith('/procurement')) return canViewProcurement(user);
   if (pathname.startsWith('/branch-purchase-requests')) {
     return canViewBranchPurchaseRequests(user);

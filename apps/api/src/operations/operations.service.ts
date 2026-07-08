@@ -8,10 +8,12 @@ import {
   HqWarrantyDecision,
   Prisma,
   ProcurementOrderStatus,
+  ProcurementShortageReason,
   ReturnOrderStatus,
   ReturnResolution,
   Role,
   ShortageReportItemType,
+  ShortageReportStatus,
   StockMovementType,
   SupplierClaimStatus,
   WarehouseReleaseOrderStatus,
@@ -75,8 +77,11 @@ import {
   buildDiscrepancyActAuditMetadata,
   differenceAuditAction,
   generateProcurementActNumber,
+  procurementDifferenceAuditAction,
   resolveDifferenceType,
+  resolveProcurementDiscrepancyActs,
 } from './discrepancy-act.util';
+import { ProcurementDifferenceActQueryDto } from './dto/procurement-difference-act-query.dto';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -1079,6 +1084,7 @@ export class OperationsService {
         return {
           ...item,
           receivedQuantity,
+          damagedQuantity: Number(received.damagedQuantity ?? 0),
           difference: receivedQuantity - item.quantity,
           receivedNote: received.note,
           shortageReason: received.shortageReason,
@@ -1181,6 +1187,7 @@ export class OperationsService {
             expectedQuantity: item.quantity,
             receivedQuantity: item.receivedQuantity,
             differenceQuantity: Math.abs(item.difference),
+            damagedQuantity: item.damagedQuantity,
             note: receivedMap.get(item.id)?.note ?? receivedMap.get(item.productId)?.note,
           },
         });
@@ -1247,7 +1254,7 @@ export class OperationsService {
             });
           }
         }
-        const batchAct = await this.createProcurementDiscrepancyActInTx(tx, user, {
+        const lineActs = await this.createProcurementDiscrepancyActsForLineInTx(tx, user, {
           batchId: receiving.id,
           procurementOrderId: order.id,
           destinationWarehouseId: hqWarehouseId,
@@ -1256,13 +1263,12 @@ export class OperationsService {
           productName: item.productName,
           expectedQty: item.quantity,
           actualQty: item.receivedQuantity,
+          damagedQty: item.damagedQuantity,
           reason: item.shortageReason ?? item.receivedNote,
           note: item.receivedNote,
           shortageReason: item.shortageReason,
         });
-        if (batchAct) {
-          batchDiscrepancyActIds.push(batchAct.id);
-        }
+        batchDiscrepancyActIds.push(...lineActs.map((act) => act.id));
       }
 
       if (batchDiscrepancyActIds.length > 0) {
@@ -1661,39 +1667,43 @@ export class OperationsService {
 
         const expectedQty = Number(item.expectedQuantity ?? orderItem.quantity);
         const actualQty = Number(item.actualQuantity ?? orderItem.quantity);
-        const differenceQty = Math.abs(actualQty - expectedQty);
-        if (differenceQty === 0) continue;
+        const damagedQty = Number(item.damagedQuantity ?? 0);
+        const discrepancyActs = resolveProcurementDiscrepancyActs(expectedQty, actualQty, damagedQty);
+        if (!discrepancyActs.length) continue;
 
-        let differenceType =
-          (item.differenceType as ShortageReportItemType | undefined) ??
-          resolveDifferenceType(expectedQty, actualQty, item.reason ?? item.shortageReason);
-        if (!differenceType) continue;
+        for (const discrepancy of discrepancyActs) {
+          const differenceType =
+            (item.differenceType as ShortageReportItemType | undefined) ?? discrepancy.type;
 
-        const existingAct = await tx.procurementDifferenceReport.findFirst({
-          where: {
-            deletedAt: null,
-            receivingId: batchId,
+          const existingAct = await tx.procurementDifferenceReport.findFirst({
+            where: {
+              deletedAt: null,
+              receivingId: batchId,
+              productId: orderItem.productId,
+              type: differenceType,
+            },
+          });
+          if (existingAct) continue;
+
+          const report = await this.createProcurementDiscrepancyActInTx(tx, user, {
+            batchId,
+            procurementOrderId: order.id,
+            destinationWarehouseId: warehouseId,
             productId: orderItem.productId,
-          },
-        });
-        if (existingAct) continue;
-
-        const report = await this.createProcurementDiscrepancyActInTx(tx, user, {
-          batchId,
-          procurementOrderId: order.id,
-          destinationWarehouseId: warehouseId,
-          productId: orderItem.productId,
-          sku: orderItem.sku,
-          productName: orderItem.productName,
-          expectedQty,
-          actualQty,
-          reason: item.reason ?? item.shortageReason ?? item.note,
-          note: item.note,
-          shortageReason: item.reason ?? item.shortageReason,
-          differenceType,
-        });
-        if (report) {
-          created.push(report);
+            sku: orderItem.sku,
+            productName: orderItem.productName,
+            expectedQty,
+            actualQty,
+            damagedQty,
+            reason: item.reason ?? item.shortageReason ?? item.note,
+            note: item.note,
+            shortageReason: item.reason ?? item.shortageReason,
+            differenceType,
+            differenceQty: discrepancy.differenceQty,
+          });
+          if (report) {
+            created.push(report);
+          }
         }
       }
 
@@ -1794,7 +1804,7 @@ export class OperationsService {
     });
   }
 
-  async listChinaReceivingDifferenceActs(user: AuthUser, orderId?: string) {
+  async listChinaReceivingDifferenceActs(user: AuthUser, query: ProcurementDifferenceActQueryDto = {}) {
     const roles = resolveUserRoles(user);
     const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles);
     const isCeo = hasAnyFullAccessRole(roles);
@@ -1802,10 +1812,29 @@ export class OperationsService {
       throw new ForbiddenException('You do not have access to difference acts');
     }
 
+    const createdAtFilter =
+      query.dateFrom || query.dateTo
+        ? {
+            ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
+            ...(query.dateTo ? { lte: new Date(`${query.dateTo}T23:59:59.999Z`) } : {}),
+          }
+        : undefined;
+
     const reports = await this.prisma.procurementDifferenceReport.findMany({
       where: {
         deletedAt: null,
-        ...(orderId ? { procurementOrderId: orderId } : {}),
+        ...(query.orderId ? { procurementOrderId: query.orderId } : {}),
+        ...(query.type ? { type: query.type } : {}),
+        ...(query.status ? { status: query.status } : {}),
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+        ...(query.supplierId || query.factoryId
+          ? {
+              procurementOrder: {
+                ...(query.supplierId ? { supplierId: query.supplierId } : {}),
+                ...(query.factoryId ? { factoryId: query.factoryId } : {}),
+              },
+            }
+          : {}),
       },
       include: {
         procurementOrder: {
@@ -1814,6 +1843,8 @@ export class OperationsService {
             orderNumber: true,
             hqWarehouseId: true,
             status: true,
+            supplierId: true,
+            factoryId: true,
             supplier: { select: { id: true, name: true } },
             factory: { select: { id: true, name: true } },
           },
@@ -1821,7 +1852,7 @@ export class OperationsService {
         warehouse: { select: { id: true, name: true, code: true } },
         createdBy: { select: { id: true, fullName: true } },
       },
-      orderBy: [{ receivingId: 'asc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }],
     });
 
     const receivingIds = [...new Set(reports.map((report) => report.receivingId).filter(Boolean))] as string[];
@@ -1838,55 +1869,98 @@ export class OperationsService {
         data: {
           userId: user.id,
           role: user.role,
-          action: 'SUPPLY_MANAGER_VIEWED_DIFFERENCE_ACT',
+          action: 'PROCUREMENT_DISCREPANCY_ACT_VIEWED',
           entity: 'ProcurementDifferenceReport',
-          entityId: orderId ?? 'list',
+          entityId: query.orderId ?? 'list',
           metadata: {
             userId: user.id,
+            role: user.role,
             roles: user.roles ?? [user.role],
-            procurementOrderId: orderId,
+            procurementOrderId: query.orderId,
+            filters: { ...query } as Prisma.InputJsonValue,
             count: reports.length,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'PROCUREMENT_DISCREPANCY_NAVIGATION_FIXED',
+          entity: 'ProcurementDifferenceReport',
+          entityId: 'navigation',
+          metadata: {
+            userId: user.id,
+            role: user.role,
+            roles: user.roles ?? [user.role],
             timestamp: new Date().toISOString(),
           },
         },
       });
     }
 
-    return reports.map((report) => ({
-      id: report.id,
-      reportNumber: report.reportNumber,
-      actNumber: report.reportNumber,
-      procurementOrderId: report.procurementOrderId,
-      procurementOrder: report.procurementOrder,
-      orderNumber: report.procurementOrder.orderNumber,
-      supplier: report.procurementOrder.supplier,
-      factory: report.procurementOrder.factory,
-      warehouse: report.warehouse,
-      hqWarehouse: report.warehouse,
-      productId: report.productId,
-      productName: report.productName,
-      sku: report.sku,
-      type: report.type,
-      differenceType: report.type,
-      status: report.status,
-      expectedQuantity: report.expectedQuantity,
-      actualQuantity: report.receivedQuantity,
-      receivedQuantity: report.receivedQuantity,
-      differenceQuantity: report.differenceQuantity,
-      difference: report.differenceQuantity,
-      note: report.note,
-      shortageReason: report.shortageReason,
-      reason: report.shortageReason ?? report.note,
-      warehouseManager: report.createdBy,
-      createdBy: report.createdBy,
-      receivingId: report.receivingId,
-      batchId: report.receivingId,
-      shipmentBatchId: report.receivingId,
-      batchNumber: report.receivingId ? receivingMap.get(report.receivingId)?.receivingNumber ?? null : null,
-      receivingNumber: report.receivingId ? receivingMap.get(report.receivingId)?.receivingNumber ?? null : null,
-      batchReceivedAt: report.receivingId ? receivingMap.get(report.receivingId)?.receivedAt ?? null : null,
-      createdAt: report.createdAt,
-    }));
+    return reports.map((report) => this.mapProcurementDifferenceAct(report, receivingMap));
+  }
+
+  async getProcurementDifferenceAct(user: AuthUser, actId: string) {
+    const roles = resolveUserRoles(user);
+    const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles);
+    const isCeo = hasAnyFullAccessRole(roles);
+    if (!isScm && !isCeo && !canReceiveProcurementToHq(user)) {
+      throw new ForbiddenException('You do not have access to difference acts');
+    }
+
+    const report = await this.prisma.procurementDifferenceReport.findFirst({
+      where: { id: actId, deletedAt: null },
+      include: {
+        procurementOrder: {
+          select: {
+            id: true,
+            orderNumber: true,
+            hqWarehouseId: true,
+            status: true,
+            supplierId: true,
+            factoryId: true,
+            supplier: { select: { id: true, name: true } },
+            factory: { select: { id: true, name: true } },
+          },
+        },
+        warehouse: { select: { id: true, name: true, code: true } },
+        createdBy: { select: { id: true, fullName: true } },
+      },
+    });
+    if (!report) {
+      throw new NotFoundException('Difference act not found');
+    }
+
+    const receiving = report.receivingId
+      ? await this.prisma.procurementGoodsReceiving.findFirst({
+          where: { id: report.receivingId, deletedAt: null },
+          select: { id: true, receivingNumber: true, receivedAt: true },
+        })
+      : null;
+    const receivingMap = new Map(receiving ? [[receiving.id, receiving]] : []);
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'PROCUREMENT_DISCREPANCY_ACT_VIEWED',
+        entity: 'ProcurementDifferenceReport',
+        entityId: report.id,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          roles: user.roles ?? [user.role],
+          procurementOrderId: report.procurementOrderId,
+          warehouseId: report.warehouseId,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    return this.mapProcurementDifferenceAct(report, receivingMap);
   }
 
   async archiveDifferenceAct(user: AuthUser, actId: string) {
@@ -1989,6 +2063,123 @@ export class OperationsService {
     return created.id;
   }
 
+  private mapProcurementDifferenceAct(
+    report: {
+      id: string;
+      reportNumber: string;
+      procurementOrderId: string;
+      receivingId: string | null;
+      warehouseId: string | null;
+      productId: string;
+      productName: string;
+      sku: string;
+      type: ShortageReportItemType;
+      status: ShortageReportStatus;
+      expectedQuantity: number;
+      receivedQuantity: number;
+      differenceQuantity: number;
+      damagedQuantity: number;
+      shortageReason: ProcurementShortageReason | null;
+      note: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+      procurementOrder: {
+        id: string;
+        orderNumber: string;
+        hqWarehouseId: string;
+        status: ProcurementOrderStatus;
+        supplierId: string;
+        factoryId: string | null;
+        supplier: { id: string; name: string };
+        factory: { id: string; name: string } | null;
+      };
+      warehouse: { id: string; name: string; code: string } | null;
+      createdBy: { id: string; fullName: string } | null;
+    },
+    receivingMap: Map<string, { id: string; receivingNumber: string; receivedAt: Date }>,
+  ) {
+    return {
+      id: report.id,
+      reportNumber: report.reportNumber,
+      actNumber: report.reportNumber,
+      procurementOrderId: report.procurementOrderId,
+      procurementOrder: report.procurementOrder,
+      orderNumber: report.procurementOrder.orderNumber,
+      supplierId: report.procurementOrder.supplierId,
+      factoryId: report.procurementOrder.factoryId,
+      supplier: report.procurementOrder.supplier,
+      factory: report.procurementOrder.factory,
+      warehouse: report.warehouse,
+      warehouseId: report.warehouseId,
+      hqWarehouse: report.warehouse,
+      productId: report.productId,
+      productName: report.productName,
+      sku: report.sku,
+      type: report.type,
+      differenceType: report.type,
+      status: report.status,
+      expectedQuantity: report.expectedQuantity,
+      expectedQty: report.expectedQuantity,
+      actualQuantity: report.receivedQuantity,
+      actualQty: report.receivedQuantity,
+      receivedQuantity: report.receivedQuantity,
+      damagedQuantity: report.damagedQuantity,
+      damagedQty: report.damagedQuantity,
+      differenceQuantity: report.differenceQuantity,
+      differenceQty: report.differenceQuantity,
+      difference: report.differenceQuantity,
+      note: report.note,
+      shortageReason: report.shortageReason,
+      reason: report.shortageReason ?? report.note,
+      warehouseManager: report.createdBy,
+      createdBy: report.createdBy,
+      createdById: report.createdBy?.id ?? null,
+      receivingId: report.receivingId,
+      batchId: report.receivingId,
+      shipmentBatchId: report.receivingId,
+      batchNumber: report.receivingId ? receivingMap.get(report.receivingId)?.receivingNumber ?? null : null,
+      receivingNumber: report.receivingId ? receivingMap.get(report.receivingId)?.receivingNumber ?? null : null,
+      batchReceivedAt: report.receivingId ? receivingMap.get(report.receivingId)?.receivedAt ?? null : null,
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
+    };
+  }
+
+  private async createProcurementDiscrepancyActsForLineInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    input: {
+      batchId: string;
+      procurementOrderId: string;
+      destinationWarehouseId?: string;
+      productId: string;
+      sku: string;
+      productName: string;
+      expectedQty: number;
+      actualQty: number;
+      damagedQty?: number;
+      reason?: string | null;
+      note?: string | null;
+      shortageReason?: string | null;
+    },
+  ) {
+    const damagedQty = Number(input.damagedQty ?? 0);
+    const actsToCreate = resolveProcurementDiscrepancyActs(input.expectedQty, input.actualQty, damagedQty);
+    const created = [];
+    for (const discrepancy of actsToCreate) {
+      const report = await this.createProcurementDiscrepancyActInTx(tx, user, {
+        ...input,
+        differenceType: discrepancy.type,
+        differenceQty: discrepancy.differenceQty,
+        damagedQty,
+      });
+      if (report) {
+        created.push(report);
+      }
+    }
+    return created;
+  }
+
   private async createProcurementDiscrepancyActInTx(
     tx: PrismaTx,
     user: AuthUser,
@@ -2001,22 +2192,41 @@ export class OperationsService {
       productName: string;
       expectedQty: number;
       actualQty: number;
+      damagedQty?: number;
       reason?: string | null;
       note?: string | null;
       shortageReason?: string | null;
       differenceType?: ShortageReportItemType;
+      differenceQty?: number;
     },
   ) {
-    const differenceQty = Math.abs(input.actualQty - input.expectedQty);
-    if (differenceQty === 0) return null;
-
     const differenceType =
-      input.differenceType ?? resolveDifferenceType(input.expectedQty, input.actualQty, input.reason);
-    if (!differenceType) return null;
+      input.differenceType ??
+      resolveDifferenceType(input.expectedQty, input.actualQty, input.reason);
+    const differenceQty =
+      input.differenceQty ?? Math.abs(input.actualQty - input.expectedQty);
+    if (!differenceType || differenceQty === 0) return null;
 
+    const existing = await tx.procurementDifferenceReport.findFirst({
+      where: {
+        deletedAt: null,
+        receivingId: input.batchId,
+        productId: input.productId,
+        type: differenceType,
+      },
+      select: { id: true },
+    });
+    if (existing) return null;
+
+    const typePrefix =
+      differenceType === ShortageReportItemType.SHORTAGE
+        ? 'PSH'
+        : differenceType === ShortageReportItemType.OVERAGE
+          ? 'POV'
+          : 'PDM';
     const report = await tx.procurementDifferenceReport.create({
       data: {
-        reportNumber: generateProcurementActNumber('PDR', input.productId, input.batchId),
+        reportNumber: generateProcurementActNumber(typePrefix, input.productId, input.batchId),
         receivingId: input.batchId,
         procurementOrderId: input.procurementOrderId,
         warehouseId: input.destinationWarehouseId,
@@ -2028,6 +2238,7 @@ export class OperationsService {
         expectedQuantity: input.expectedQty,
         receivedQuantity: input.actualQty,
         differenceQuantity: differenceQty,
+        damagedQuantity: input.damagedQty ?? 0,
         shortageReason: input.shortageReason as any,
         note: input.note,
       },
@@ -2050,15 +2261,18 @@ export class OperationsService {
       tx,
       user,
       'HQ',
-      differenceAuditAction(differenceType),
+      procurementDifferenceAuditAction(differenceType),
       'ProcurementDifferenceReport',
       report.id,
       buildDiscrepancyActAuditMetadata(auditContext, {
         userId: user.id,
+        role: user.role,
         roles: user.roles ?? [user.role],
         warehouseId: input.destinationWarehouseId,
         receivingId: input.batchId,
+        shipmentBatchId: input.batchId,
         actNumber: report.reportNumber,
+        damagedQty: input.damagedQty ?? 0,
         status: report.status,
         timestamp: new Date().toISOString(),
       }),
