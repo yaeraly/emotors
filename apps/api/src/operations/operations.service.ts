@@ -144,7 +144,7 @@ export class OperationsService {
     const hideSensitive = isBranchOnlyRequestUser(user, canViewAll);
     const enriched = hideSensitive
       ? request
-      : await this.enrichBranchPurchaseRequestWithHqStock(request);
+      : await this.enrichBranchPurchaseRequestWithHqStock(user, request);
     return sanitizeBranchPurchaseRequest(enriched, hideSensitive);
   }
 
@@ -478,9 +478,11 @@ export class OperationsService {
       throw new BadRequestException(NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH);
     }
 
-    const stockMap = await this.getAssignedHqStockMap(
+    const stockMap = await this.inventoryService.getAvailableQuantityMap(
+      user,
       assignedHqWarehouseId,
-      existing.items.map((item) => item.productId),
+      existing.items.map((item) => ({ productId: item.productId, sku: item.sku })),
+      { branchId: existing.branchId },
     );
     const approvedMap = new Map<string, number>(
       ((dto?.items as Array<{ id?: string; productId?: string; approvedQuantity: number }>) ?? []).map((item) => [
@@ -566,6 +568,11 @@ export class OperationsService {
       newValue: updated.status,
     });
     await this.auditBranchRequest(user, updated.branchId, 'HQ_SALES_REQUEST_APPROVED', 'BranchPurchaseRequest', id);
+    await this.auditBranchRequest(user, updated.branchId, 'HQ_REQUEST_APPROVED', 'BranchPurchaseRequest', id, {
+      hqWarehouseId: assignedHqWarehouseId,
+      requestId: id,
+      branchId: updated.branchId,
+    });
     await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_APPROVED', 'BranchPurchaseRequest', id);
     await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_APPROVED', 'BranchPurchaseRequest', id);
     if (anyPartial) {
@@ -574,6 +581,11 @@ export class OperationsService {
     if (anyShortage) {
       await this.auditBranchRequest(user, updated.branchId, 'REQUEST_SHORTAGE_CREATED', 'BranchPurchaseRequest', id);
       await this.auditBranchRequest(user, updated.branchId, 'SHORTAGE_CREATED', 'BranchPurchaseRequest', id);
+      await this.auditBranchRequest(user, updated.branchId, 'HQ_SHORTAGE_CREATED', 'BranchPurchaseRequest', id, {
+        hqWarehouseId: assignedHqWarehouseId,
+        requestId: id,
+        branchId: updated.branchId,
+      });
     }
 
     return updated;
@@ -2292,7 +2304,12 @@ export class OperationsService {
 
     const assignedHqWarehouseId = await this.getBranchAssignedHqWarehouseId(branchId);
     const hqStockMap = assignedHqWarehouseId
-      ? await this.getAssignedHqStockMap(assignedHqWarehouseId, productIds)
+      ? await this.inventoryService.getAvailableQuantityMap(
+          null,
+          assignedHqWarehouseId,
+          resolvedProducts.map(({ product }) => ({ productId: product.id, sku: product.sku })),
+          { branchId, skipAccessCheck: true },
+        )
       : new Map<string, number>();
 
     return resolvedProducts.map(({ item, product }) => {
@@ -2420,20 +2437,6 @@ export class OperationsService {
     }
   }
 
-  private async getAssignedHqStockMap(warehouseId: string, productIds: string[]) {
-    if (!productIds.length) return new Map<string, number>();
-    const balances = await this.prisma.inventoryBalance.findMany({
-      where: { warehouseId, productId: { in: productIds } },
-      select: { productId: true, quantity: true, reservedQuantity: true },
-    });
-    return new Map(
-      balances.map((balance) => [
-        balance.productId,
-        Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0),
-      ]),
-    );
-  }
-
   private async enrichBranchPurchaseRequestWithHqStock<
     T extends {
       branchId: string;
@@ -2442,21 +2445,24 @@ export class OperationsService {
       items: Array<{
         id: string;
         productId: string;
+        sku: string;
         quantity: number;
         approvedQuantity?: number | null;
         hqAvailableStock?: number | null;
       }>;
     },
-  >(request: T) {
+  >(user: AuthUser, request: T) {
     const assignedHqWarehouseId =
       request.assignedHqWarehouseId ??
       request.branch?.assignedHqWarehouseId ??
       (await this.getBranchAssignedHqWarehouseId(request.branchId));
     if (!assignedHqWarehouseId) return request;
 
-    const stockMap = await this.getAssignedHqStockMap(
+    const stockMap = await this.inventoryService.getAvailableQuantityMap(
+      user,
       assignedHqWarehouseId,
-      request.items.map((item) => item.productId),
+      request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
+      { branchId: request.branchId },
     );
 
     return {

@@ -6,7 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { AlertType, Prisma, ProcurementOrderStatus, PurchasePriceChangeReason, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
+import { AlertType, HqWarehouseAssignmentStatus, Prisma, ProcurementOrderStatus, PurchasePriceChangeReason, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { MultipartFile } from '@fastify/multipart';
 import { FastifyRequest } from 'fastify';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -26,7 +26,8 @@ import {
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { ensureHqCatalogBranch } from '../product-catalog/hq-product-catalog.util';
-import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole } from '../rbac/rbac';
+import { HQ_WAREHOUSE_ACCESS_DENIED, HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES } from '../hq-warehouse/hq-warehouse-assignment.constants';
+import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -1152,6 +1153,121 @@ export class InventoryService {
     return balances.filter((balance) => balance.lowStock);
   }
 
+  /**
+   * Single source of truth for warehouse available quantity (quantity - reservedQuantity).
+   * Resolves branch-local product IDs to HQ warehouse products by SKU when needed.
+   */
+  async getAvailableQuantity(
+    user: AuthUser | null,
+    warehouseId: string,
+    productId: string,
+    options?: {
+      sku?: string;
+      branchId?: string;
+      skipAccessCheck?: boolean;
+    },
+  ): Promise<number> {
+    const map = await this.getAvailableQuantityMap(
+      user,
+      warehouseId,
+      [{ productId, sku: options?.sku }],
+      { branchId: options?.branchId, skipAccessCheck: options?.skipAccessCheck },
+    );
+    return map.get(productId) ?? 0;
+  }
+
+  async getAvailableQuantityMap(
+    user: AuthUser | null,
+    warehouseId: string,
+    items: Array<{ productId: string; sku?: string }>,
+    options?: { branchId?: string; skipAccessCheck?: boolean },
+  ): Promise<Map<string, number>> {
+    if (!items.length) {
+      return new Map();
+    }
+
+    if (!options?.skipAccessCheck) {
+      await this.assertHqWarehouseStockAccess(user, warehouseId, options?.branchId);
+    }
+
+    const productIds = items.map((item) => item.productId);
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, sku: true, warehouseId: true },
+    });
+    const productById = new Map(products.map((product) => [product.id, product]));
+
+    const resolvedProductIdBySource = new Map<string, string>();
+    const skusToResolve = new Set<string>();
+
+    for (const item of items) {
+      const product = productById.get(item.productId);
+      const sku = (item.sku ?? product?.sku)?.trim();
+      if (product?.warehouseId === warehouseId) {
+        resolvedProductIdBySource.set(item.productId, item.productId);
+        continue;
+      }
+      if (sku) {
+        skusToResolve.add(sku);
+        resolvedProductIdBySource.set(item.productId, item.productId);
+      } else {
+        resolvedProductIdBySource.set(item.productId, item.productId);
+      }
+    }
+
+    const hqProductsBySku = new Map<string, string>();
+    if (skusToResolve.size) {
+      const hqProducts = await this.prisma.product.findMany({
+        where: {
+          warehouseId,
+          sku: { in: Array.from(skusToResolve) },
+          deletedAt: null,
+          isActive: true,
+        },
+        select: { id: true, sku: true },
+      });
+      for (const hqProduct of hqProducts) {
+        hqProductsBySku.set(hqProduct.sku, hqProduct.id);
+      }
+    }
+
+    for (const item of items) {
+      const product = productById.get(item.productId);
+      if (product?.warehouseId === warehouseId) {
+        continue;
+      }
+      const sku = (item.sku ?? product?.sku)?.trim();
+      const hqProductId = sku ? hqProductsBySku.get(sku) : undefined;
+      if (hqProductId) {
+        resolvedProductIdBySource.set(item.productId, hqProductId);
+      }
+    }
+
+    const resolvedIds = Array.from(new Set(resolvedProductIdBySource.values()));
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: { warehouseId, productId: { in: resolvedIds } },
+      select: { productId: true, quantity: true, reservedQuantity: true },
+    });
+    const availableByProductId = new Map(
+      balances.map((balance) => [
+        balance.productId,
+        Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0),
+      ]),
+    );
+
+    const result = new Map<string, number>();
+    for (const item of items) {
+      const resolvedId = resolvedProductIdBySource.get(item.productId) ?? item.productId;
+      result.set(item.productId, availableByProductId.get(resolvedId) ?? 0);
+    }
+
+    if (user && this.isHqSalesManagerScoped(user)) {
+      await this.auditHqStockLookup(user, warehouseId, options?.branchId, items, result);
+    }
+
+    return result;
+  }
+
   async createStockMovementInTx(
     tx: PrismaTx,
     user: AuthUser,
@@ -1907,5 +2023,96 @@ export class InventoryService {
 
   private roundMoney(value: number) {
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  private isHqSalesManagerScoped(user: AuthUser) {
+    const roles = resolveUserRoles(user);
+    return roles.includes(Role.HQ_SALES_MANAGER) && !hasAnyFullAccessRole(roles);
+  }
+
+  private async assertHqWarehouseStockAccess(
+    user: AuthUser | null | undefined,
+    warehouseId: string,
+    branchId?: string,
+  ) {
+    if (!user) {
+      return;
+    }
+
+    const roles = resolveUserRoles(user);
+    if (hasAnyFullAccessRole(roles)) {
+      return;
+    }
+    if (roles.includes(Role.WAREHOUSE_MANAGER) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
+      return;
+    }
+
+    if (!this.isHqSalesManagerScoped(user)) {
+      return;
+    }
+
+    const assignedIds = (
+      await this.prisma.hqSalesManagerWarehouseAssignment.findMany({
+        where: { userId: user.id, status: HqWarehouseAssignmentStatus.ACTIVE },
+        select: { warehouseId: true },
+      })
+    ).map((row) => row.warehouseId);
+
+    if (!assignedIds.includes(warehouseId)) {
+      await this.auditHqStockLookupDenied(user, warehouseId, branchId);
+      throw new ForbiddenException({
+        message: HQ_WAREHOUSE_ACCESS_DENIED,
+        messages: HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES,
+      });
+    }
+  }
+
+  private auditHqStockLookup(
+    user: AuthUser,
+    warehouseId: string,
+    branchId: string | undefined,
+    items: Array<{ productId: string; sku?: string }>,
+    quantities: Map<string, number>,
+  ) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'HQ_STOCK_LOOKUP',
+        entity: 'Warehouse',
+        entityId: warehouseId,
+        metadata: {
+          userId: user.id,
+          warehouseId,
+          branchId: branchId ?? null,
+          productId: items.length === 1 ? items[0].productId : null,
+          availableQty: items.length === 1 ? quantities.get(items[0].productId) ?? 0 : null,
+          items: items.map((item) => ({
+            productId: item.productId,
+            sku: item.sku ?? null,
+            availableQty: quantities.get(item.productId) ?? 0,
+          })),
+          timestamp: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
+
+  private auditHqStockLookupDenied(user: AuthUser, warehouseId: string, branchId?: string) {
+    return this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'HQ_STOCK_LOOKUP_DENIED',
+        entity: 'Warehouse',
+        entityId: warehouseId,
+        metadata: {
+          userId: user.id,
+          warehouseId,
+          branchId: branchId ?? null,
+          timestamp: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 }
