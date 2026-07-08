@@ -14,17 +14,10 @@ export type BranchProductOption = {
   category: string;
   productCode?: string | null;
   unit: string;
-  weightKg?: number;
-  wholesalePriceKgs?: number;
-  branchStock: number | null;
-  hqStock: number | null;
 };
 
 type Props = {
   disabled?: boolean;
-  branchWarehouseId?: string;
-  showStock?: boolean;
-  hidePricing?: boolean;
   onSelect: (product: BranchProductOption) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
 };
@@ -33,9 +26,6 @@ const DEBOUNCE_MS = 200;
 
 export function BranchProductSearch({
   disabled = false,
-  branchWarehouseId,
-  showStock = false,
-  hidePricing = false,
   onSelect,
   inputRef,
 }: Props) {
@@ -64,7 +54,6 @@ export function BranchProductSearch({
     const timer = window.setTimeout(() => {
       const search = query.trim();
       const params = new URLSearchParams({ search });
-      if (branchWarehouseId) params.set('branchWarehouseId', branchWarehouseId);
       void apiFetch<BranchProductOption[]>(`/branch-purchase-requests/product-options?${params.toString()}`)
         .then((items) => {
           const searchable = items.map((item) => ({
@@ -92,7 +81,7 @@ export function BranchProductSearch({
     }, DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [branchWarehouseId, query, t]);
+  }, [query, t]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -129,7 +118,8 @@ export function BranchProductSearch({
       return;
     }
 
-    if (event.key === 'Enter') {
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      if (!open || !results.length) return;
       event.preventDefault();
       const product = results[highlightedIndex];
       if (product) selectProduct(product);
@@ -191,24 +181,8 @@ export function BranchProductSearch({
                 <p className="mt-1 text-xs text-slate-500">
                   {t('branchProductRequest.productSearch.sku')}: {product.sku}
                   {product.category ? ` · ${product.category}` : ''}
-                  {product.productCode ? ` · ${product.productCode}` : ''}
-                  {hidePricing && product.unit ? ` · ${product.unit}` : ''}
+                  {product.unit ? ` · ${product.unit}` : ''}
                 </p>
-                {!hidePricing ? (
-                  <p className="mt-1 text-xs text-slate-600">
-                    {showStock && product.hqStock !== null ? (
-                      <>
-                        {t('branchProductRequest.productSearch.hqStock')}: {product.hqStock} {product.unit}
-                        {' · '}
-                      </>
-                    ) : null}
-                    {product.wholesalePriceKgs !== undefined ? (
-                      <>
-                        {t('branchProductRequest.productSearch.wholesalePrice')}: {Number(product.wholesalePriceKgs).toFixed(2)} KGS
-                      </>
-                    ) : null}
-                  </p>
-                ) : null}
               </button>
             </li>
           ))}

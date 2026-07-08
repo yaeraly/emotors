@@ -170,10 +170,10 @@ export default function BranchPurchaseRequestsPage() {
         productName: product.name,
         sku: product.sku,
         unit: product.unit,
-        weightKg: product.weightKg ?? 0,
-        wholesalePriceKgs: product.wholesalePriceKgs ?? 0,
-        branchStock: product.branchStock ?? 0,
-        hqStock: product.hqStock,
+        weightKg: 0,
+        wholesalePriceKgs: 0,
+        branchStock: 0,
+        hqStock: null,
         quantity: '1',
         note: '',
       };
@@ -356,13 +356,7 @@ export default function BranchPurchaseRequestsPage() {
               </label>
             </div>
 
-            <BranchProductSearch
-              inputRef={productSearchRef}
-              branchWarehouseId={form.branchWarehouseId}
-              showStock={canSeeHqStock}
-              hidePricing={branchOnlyView}
-              onSelect={addProductFromSearch}
-            />
+            <BranchProductSearch inputRef={productSearchRef} onSelect={addProductFromSearch} />
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <table className="min-w-full divide-y divide-slate-200 text-sm">

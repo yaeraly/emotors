@@ -138,7 +138,6 @@ export class OperationsService {
     }
 
     const canViewAll = this.canViewAllBranchPurchaseRequests(user);
-    const canSeeHqStock = canSeeHqStockInBranchRequests(user, canViewAll);
     const isBranchOnly = isBranchOnlyRequestUser(user, canViewAll);
     if (isBranchOnly && includeStock) {
       throw new ForbiddenException('Branch users cannot access HQ stock details');
@@ -160,11 +159,6 @@ export class OperationsService {
         deletedAt: null,
         isActive: true,
         branchId: hqBranch.id,
-        inventoryBalances: {
-          some: {
-            warehouse: activeHqWarehouseWhere,
-          },
-        },
         ...(trimmed
           ? {
               OR: [
@@ -180,50 +174,20 @@ export class OperationsService {
       include: {
         productCategory: { select: { id: true, code: true, nameRu: true, nameEn: true, nameKy: true } },
       },
-      distinct: ['id'],
       take: 60,
       orderBy: { name: 'asc' },
     });
 
-    const skuList = catalogProducts.map((product) => product.sku);
-    const assignedHqWarehouseId = branchId ? await this.getBranchAssignedHqWarehouseId(branchId) : null;
-    const hqStockBySku = new Map<string, number>();
-    if (canSeeHqStock && skuList.length && assignedHqWarehouseId) {
-      const hqBalances = await this.prisma.inventoryBalance.findMany({
-        where: {
-          warehouseId: assignedHqWarehouseId,
-          product: { sku: { in: skuList }, deletedAt: null, branchId: hqBranch.id },
-        },
-        select: { quantity: true, reservedQuantity: true, product: { select: { sku: true } } },
-      });
-      for (const balance of hqBalances) {
-        const available = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
-        hqStockBySku.set(balance.product.sku, available);
-      }
-    }
-
-    return catalogProducts.map((catalogProduct) => {
-      const base = {
-        id: catalogProduct.id,
-        catalogProductId: catalogProduct.id,
-        name: catalogProduct.name,
-        sku: catalogProduct.sku,
-        barcode: catalogProduct.barcode,
-        category: catalogProduct.category,
-        productCode: catalogProduct.productCategory?.code ?? null,
-        unit: catalogProduct.unit,
-      };
-      if (isBranchOnly) {
-        return { ...base, branchStock: null, hqStock: null };
-      }
-      return {
-        ...base,
-        weightKg: Number(catalogProduct.weightKg),
-        wholesalePriceKgs: Number(catalogProduct.wholesalePriceKgs ?? catalogProduct.sellingPriceKgs),
-        branchStock: null,
-        hqStock: canSeeHqStock ? (hqStockBySku.get(catalogProduct.sku) ?? 0) : null,
-      };
-    });
+    return catalogProducts.map((catalogProduct) => ({
+      id: catalogProduct.id,
+      catalogProductId: catalogProduct.id,
+      name: catalogProduct.name,
+      sku: catalogProduct.sku,
+      barcode: catalogProduct.barcode,
+      category: catalogProduct.category,
+      productCode: catalogProduct.productCategory?.code ?? null,
+      unit: catalogProduct.unit,
+    }));
   }
 
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
