@@ -248,7 +248,6 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
   '/stock-movements',
   '/hq-warehouses',
   '/procurement',
-  '/supply-chain',
   '/alerts',
   '/notifications',
   '/branch-purchase-requests',
@@ -260,6 +259,7 @@ const SUPPLY_CHAIN_MANAGER_FORBIDDEN_PREFIXES = [
   '/procurement/receiving',
   '/distribution',
   '/hq-warehouses/new',
+  '/supply-chain',
 ];
 
 function canSupplyChainManagerAccessPath(pathname: string) {
@@ -552,7 +552,7 @@ export function getDefaultRoute(role: Role) {
 
 export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasFullAccess(user)) return '/dashboard';
-  if (isSupplyChainManagerUser(user)) return '/supply-chain';
+  if (isSupplyChainManagerUser(user)) return '/procurement';
   if (isHqSalesManagerUser(user)) return '/distribution';
   if (isHqCashierUser(user)) return '/distribution/invoices';
   if (isWarehouseManagerUser(user)) return '/inventory';
