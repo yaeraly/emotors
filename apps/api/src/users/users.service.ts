@@ -9,6 +9,7 @@ import { BranchStatus, Prisma, Role, UserStatus, WarehouseType } from '@prisma/c
 import * as bcrypt from 'bcryptjs';
 import { AuthUser } from '../auth/auth.types';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
+import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   anyRoleRequiresBranch,
@@ -78,6 +79,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly hqWarehouseAssignmentService: HqWarehouseAssignmentService,
+    private readonly hqSalesManagerAssignmentService: HqSalesManagerAssignmentService,
   ) {}
 
   list(user: AuthUser, roleFilter?: string) {
@@ -163,6 +165,9 @@ export class UsersService {
     if (roles.includes(Role.WAREHOUSE_MANAGER) && Array.isArray(dto.hqWarehouseIds)) {
       await this.hqWarehouseAssignmentService.syncUserAssignments(user, created.id, dto.hqWarehouseIds);
     }
+    if (roles.includes(Role.HQ_SALES_MANAGER) && Array.isArray(dto.hqWarehouseIds)) {
+      await this.hqSalesManagerAssignmentService.syncUserAssignments(user, created.id, dto.hqWarehouseIds);
+    }
     const auditAction =
       userType === 'HQ'
         ? 'HQ_EMPLOYEE_REGISTERED'
@@ -200,9 +205,7 @@ export class UsersService {
         roles,
       });
     }
-    const assignments = roles.includes(Role.WAREHOUSE_MANAGER)
-      ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(created.id)
-      : [];
+    const assignments = await this.loadWarehouseAssignments(created.id, roles);
     return {
       ...this.enrichUser({ ...created, userRoles: synced }, assignments),
       temporaryPassword: hasLogin && !dto.password?.trim() ? TEMP_PASSWORD : undefined,
@@ -558,9 +561,7 @@ export class UsersService {
       },
     });
     if (!found) throw new NotFoundException('User not found');
-    const assignments = found.role === Role.WAREHOUSE_MANAGER || this.extractRoles(found).includes(Role.WAREHOUSE_MANAGER)
-      ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(found.id)
-      : [];
+    const assignments = await this.loadWarehouseAssignments(found.id, this.extractRoles(found));
     return this.enrichUser(found, assignments);
   }
 
@@ -601,13 +602,17 @@ export class UsersService {
       const currentIds = await this.hqWarehouseAssignmentService.getActiveAssignedWarehouseIds(id);
       await this.hqWarehouseAssignmentService.syncUserAssignments(user, id, []);
     }
+    if (roles.includes(Role.HQ_SALES_MANAGER) && Array.isArray(dto.hqWarehouseIds)) {
+      await this.hqSalesManagerAssignmentService.syncUserAssignments(user, id, dto.hqWarehouseIds);
+    } else if (!roles.includes(Role.HQ_SALES_MANAGER) && existingRoles.includes(Role.HQ_SALES_MANAGER)) {
+      const currentIds = await this.hqSalesManagerAssignmentService.getActiveAssignedWarehouseIds(id);
+      await this.hqSalesManagerAssignmentService.syncUserAssignments(user, id, []);
+    }
     await this.audit(user, 'user_updated', 'User', id, {
       rolesBefore: existingRoles,
       rolesAfter: roles,
     });
-    const assignments = roles.includes(Role.WAREHOUSE_MANAGER)
-      ? await this.hqWarehouseAssignmentService.listAssignmentsForUser(id)
-      : [];
+    const assignments = await this.loadWarehouseAssignments(id, roles);
     return this.enrichUser({ ...updated, userRoles: synced }, assignments);
   }
 
@@ -907,6 +912,16 @@ export class UsersService {
     const { passwordHash, ...rest } = user;
     const roles = rest.userRoles?.map((userRole: any) => userRole.role.code) ?? [rest.role];
     return { ...rest, roles };
+  }
+
+  private async loadWarehouseAssignments(userId: string, roles: Role[]) {
+    if (roles.includes(Role.WAREHOUSE_MANAGER)) {
+      return this.hqWarehouseAssignmentService.listAssignmentsForUser(userId);
+    }
+    if (roles.includes(Role.HQ_SALES_MANAGER)) {
+      return this.hqSalesManagerAssignmentService.listAssignmentsForUser(userId);
+    }
+    return [];
   }
 
   private enrichUser(user: any, assignments: Array<{ warehouseId: string; warehouse: { id: string; name: string; code: string } }>) {

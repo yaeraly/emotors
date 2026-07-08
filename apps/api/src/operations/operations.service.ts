@@ -22,7 +22,11 @@ import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { HQ_WAREHOUSE_ACCESS_DENIED } from '../hq-warehouse/hq-warehouse-assignment.constants';
+import {
+  HQ_SALES_MANAGER_ACCESS_DENIED,
+  HQ_SALES_MANAGER_ACCESS_DENIED_MESSAGES,
+  HQ_WAREHOUSE_ACCESS_DENIED,
+} from '../hq-warehouse/hq-warehouse-assignment.constants';
 import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
 import { activeHqWarehouseWhere, HQ_CATALOG_BRANCH_CODE, isHqWarehouse } from '../warehouse/warehouse.util';
 import {
@@ -50,6 +54,7 @@ import {
 import { buildProcurementLandedCostInputs } from '../procurement/transport-logistics.util';
 import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
+import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import {
   isSubmittedBranchPurchaseStatus,
 } from './branch-product-request.util';
@@ -74,14 +79,16 @@ export class OperationsService {
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
     private readonly assignmentService: HqWarehouseAssignmentService,
+    private readonly salesManagerAssignmentService: HqSalesManagerAssignmentService,
     private readonly distributionService: DistributionService,
   ) {}
 
   async branchPurchaseRequests(user: AuthUser) {
+    const visibilityWhere = await this.buildBranchPurchaseRequestVisibilityWhere(user);
     const rows = await this.prisma.branchPurchaseRequest.findMany({
       where: {
         deletedAt: null,
-        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
+        ...visibilityWhere,
       },
       include: {
         items: true,
@@ -124,6 +131,15 @@ export class OperationsService {
       },
     });
     if (!request) throw new NotFoundException('Branch purchase request not found');
+    await this.assertBranchPurchaseRequestAccess(user, request);
+    if (this.salesManagerAssignmentService.isHqSalesManagerScoped(user)) {
+      const hqWarehouseId = await this.resolveRequestAssignedHqWarehouseId(request);
+      await this.auditBranchRequest(user, request.branchId, 'HQ_SALES_REQUEST_OPENED', 'BranchPurchaseRequest', request.id, {
+        hqWarehouseId,
+        requestId: request.id,
+        branchId: request.branchId,
+      });
+    }
     const canViewAll = this.canViewAllBranchPurchaseRequests(user);
     const hideSensitive = isBranchOnlyRequestUser(user, canViewAll);
     const enriched = hideSensitive
@@ -426,9 +442,13 @@ export class OperationsService {
 
     const existing = await this.prisma.branchPurchaseRequest.findFirst({
       where: { id, deletedAt: null },
-      include: { items: true },
+      include: {
+        items: true,
+        branch: { select: { assignedHqWarehouseId: true } },
+      },
     });
     if (!existing) throw new NotFoundException('Branch purchase request not found');
+    await this.assertBranchPurchaseRequestAccess(user, existing);
     if (!isSubmittedBranchPurchaseStatus(existing.status)) {
       throw new BadRequestException('Only submitted requests can be reviewed');
     }
@@ -545,6 +565,7 @@ export class OperationsService {
       oldValue: existing.status,
       newValue: updated.status,
     });
+    await this.auditBranchRequest(user, updated.branchId, 'HQ_SALES_REQUEST_APPROVED', 'BranchPurchaseRequest', id);
     await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_APPROVED', 'BranchPurchaseRequest', id);
     await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_APPROVED', 'BranchPurchaseRequest', id);
     if (anyPartial) {
@@ -552,6 +573,7 @@ export class OperationsService {
     }
     if (anyShortage) {
       await this.auditBranchRequest(user, updated.branchId, 'REQUEST_SHORTAGE_CREATED', 'BranchPurchaseRequest', id);
+      await this.auditBranchRequest(user, updated.branchId, 'SHORTAGE_CREATED', 'BranchPurchaseRequest', id);
     }
 
     return updated;
@@ -674,9 +696,13 @@ export class OperationsService {
 
     const request = await this.prisma.branchPurchaseRequest.findFirst({
       where: { id, deletedAt: null },
-      include: { items: true },
+      include: {
+        items: true,
+        branch: { select: { assignedHqWarehouseId: true } },
+      },
     });
     if (!request) throw new NotFoundException('Branch purchase request not found');
+    await this.assertBranchPurchaseRequestAccess(user, request);
     if (
       request.status !== BranchPurchaseRequestStatus.APPROVED &&
       request.status !== BranchPurchaseRequestStatus.PARTIALLY_APPROVED
@@ -807,6 +833,12 @@ export class OperationsService {
         hqWarehouseId: assignedHqWarehouseId,
         distributionOrderId: createdOrder.id,
         requestId: request.id,
+      });
+      await this.auditInTx(tx, user, request.branchId, 'REQUEST_ROUTED_TO_ASSIGNED_HQ_WAREHOUSE', 'BranchPurchaseRequest', request.id, {
+        hqWarehouseId: assignedHqWarehouseId,
+        distributionOrderId: createdOrder.id,
+        requestId: request.id,
+        branchId: request.branchId,
       });
       await this.auditInTx(tx, user, request.branchId, 'DISTRIBUTION_ORDER_CREATED', 'BranchDistributionOrder', createdOrder.id, {
         requestId: request.id,
@@ -2449,6 +2481,62 @@ export class OperationsService {
       select: { assignedHqWarehouseId: true },
     });
     return branch?.assignedHqWarehouseId ?? null;
+  }
+
+  private async buildBranchPurchaseRequestVisibilityWhere(
+    user: AuthUser,
+  ): Promise<Prisma.BranchPurchaseRequestWhereInput> {
+    if (!this.canViewAllBranchPurchaseRequests(user)) {
+      return { branchId: user.branchId! };
+    }
+
+    if (!this.salesManagerAssignmentService.isHqSalesManagerScoped(user)) {
+      return {};
+    }
+
+    const warehouseIds = await this.salesManagerAssignmentService.getActiveAssignedWarehouseIds(user.id);
+    return this.salesManagerAssignmentService.buildAssignedRequestScope(warehouseIds) ?? { id: '__none__' };
+  }
+
+  private async resolveRequestAssignedHqWarehouseId(request: {
+    assignedHqWarehouseId?: string | null;
+    branchId: string;
+    branch?: { assignedHqWarehouseId?: string | null } | null;
+  }) {
+    return (
+      request.assignedHqWarehouseId ??
+      request.branch?.assignedHqWarehouseId ??
+      (await this.getBranchAssignedHqWarehouseId(request.branchId))
+    );
+  }
+
+  private async assertBranchPurchaseRequestAccess(
+    user: AuthUser,
+    request: {
+      id: string;
+      branchId: string;
+      assignedHqWarehouseId?: string | null;
+      branch?: { assignedHqWarehouseId?: string | null } | null;
+    },
+  ) {
+    if (!this.salesManagerAssignmentService.isHqSalesManagerScoped(user)) {
+      return;
+    }
+
+    const warehouseId = await this.resolveRequestAssignedHqWarehouseId(request);
+    const assignedIds = await this.salesManagerAssignmentService.getActiveAssignedWarehouseIds(user.id);
+    if (!warehouseId || !assignedIds.includes(warehouseId)) {
+      await this.auditBranchRequest(user, request.branchId, 'HQ_SALES_REQUEST_ACCESS_DENIED', 'BranchPurchaseRequest', request.id, {
+        hqWarehouseId: warehouseId,
+        requestId: request.id,
+        branchId: request.branchId,
+        assignedWarehouseIds: assignedIds,
+      });
+      throw new ForbiddenException({
+        message: HQ_SALES_MANAGER_ACCESS_DENIED,
+        messages: HQ_SALES_MANAGER_ACCESS_DENIED_MESSAGES,
+      });
+    }
   }
 
   private async requireBranchAssignedHqWarehouse(user: AuthUser, branchId: string) {

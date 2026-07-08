@@ -729,6 +729,8 @@ model User {
   assignedPickingTasks HqWarehousePickingTask[] @relation("PickingTaskAssignee")
   hqWarehouseManagerAssignments HqWarehouseManagerAssignment[] @relation("HqWarehouseManagerAssignments")
   assignedHqWarehouseManagerAssignments HqWarehouseManagerAssignment[] @relation("HqWarehouseAssignmentAssigner")
+  hqSalesManagerWarehouseAssignments HqSalesManagerWarehouseAssignment[] @relation("HqSalesManagerWarehouseAssignments")
+  assignedHqSalesManagerWarehouseAssignments HqSalesManagerWarehouseAssignment[] @relation("HqSalesManagerWarehouseAssignmentAssigner")
   branchInvoices BranchInvoice[] @relation("BranchInvoiceCreator")
   branchPayments BranchPayment[] @relation("BranchPaymentCreator")
   createdProcurementOrders ProcurementOrder[] @relation("ProcurementOrderCreator")
@@ -1083,6 +1085,7 @@ model Warehouse {
   inventoryCountSessions InventoryCountSession[]
   fifoBatches FifoInventoryBatch[]
   hqManagerAssignments HqWarehouseManagerAssignment[]
+  hqSalesManagerAssignments HqSalesManagerWarehouseAssignment[]
   assignedBranches Branch[] @relation("BranchAssignedHqWarehouse")
   assignedBranchRequests BranchPurchaseRequest[] @relation("BranchRequestAssignedHqWarehouse")
   branchRequestShortages BranchRequestShortage[] @relation("BranchRequestShortageWarehouse")
@@ -1109,6 +1112,26 @@ model HqWarehouseManagerAssignment {
   warehouse    Warehouse                   @relation(fields: [warehouseId], references: [id])
   assignedById String?
   assignedBy   User?                       @relation("HqWarehouseAssignmentAssigner", fields: [assignedById], references: [id])
+  assignedAt   DateTime                    @default(now())
+  status       HqWarehouseAssignmentStatus @default(ACTIVE)
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+
+  @@unique([userId, warehouseId])
+  @@index([userId])
+  @@index([warehouseId])
+  @@index([status])
+  @@index([assignedById])
+}
+
+model HqSalesManagerWarehouseAssignment {
+  id           String                      @id @default(cuid())
+  userId       String
+  user         User                        @relation("HqSalesManagerWarehouseAssignments", fields: [userId], references: [id])
+  warehouseId  String
+  warehouse    Warehouse                   @relation(fields: [warehouseId], references: [id])
+  assignedById String?
+  assignedBy   User?                       @relation("HqSalesManagerWarehouseAssignmentAssigner", fields: [assignedById], references: [id])
   assignedAt   DateTime                    @default(now())
   status       HqWarehouseAssignmentStatus @default(ACTIVE)
   createdAt    DateTime                    @default(now())

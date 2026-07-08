@@ -155,13 +155,22 @@ export default function UserDetailPage() {
   }
 
   function setRoles(roles: Role[]) {
-    setForm((current) => ({ ...current, roles }));
+    setForm((current) => ({
+      ...current,
+      roles,
+      hqWarehouseIds:
+        roles.includes('WAREHOUSE_MANAGER') || roles.includes('HQ_SALES_MANAGER')
+          ? current.hqWarehouseIds
+          : [],
+    }));
   }
 
   const canResetPassword = canResetUserPassword(currentUser, user) && user?.hasLogin !== false;
   const isHqEmployee = user?.branchId === null;
   const isWarehouseManagerRole = form.roles.includes('WAREHOUSE_MANAGER');
-  const canEditAssignments = canAssignHqWarehouseManager(currentUser) && isHqEmployee && isWarehouseManagerRole;
+  const isHqSalesManagerRole = form.roles.includes('HQ_SALES_MANAGER');
+  const canAssignWarehousesRole = isWarehouseManagerRole || isHqSalesManagerRole;
+  const canEditAssignments = canAssignHqWarehouseManager(currentUser) && isHqEmployee && canAssignWarehousesRole;
   const canDelete = canDeleteEmployee(currentUser) && currentUser?.id !== user?.id;
 
   return (
@@ -217,7 +226,7 @@ export default function UserDetailPage() {
               onChange={(hqWarehouseIds) => setForm((current) => ({ ...current, hqWarehouseIds }))}
             />
           ) : null}
-          {!canEditAssignments && isWarehouseManagerRole && user?.assignedHqWarehouses?.length ? (
+          {!canEditAssignments && canAssignWarehousesRole && user?.assignedHqWarehouses?.length ? (
             <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
               <p className="text-sm font-semibold text-slate-700">{t('users.assignedHqWarehouses')}</p>
               <ul className="mt-3 space-y-2 text-sm text-slate-600">

@@ -136,16 +136,32 @@ export class AuthService {
 
     const roles = this.roleCodes(currentUser);
     const permissions = await this.permissionsForUser(user.id, currentUser.role);
-    const assignedHqWarehouseIds = await this.prisma.hqWarehouseManagerAssignment.findMany({
-      where: { userId: user.id, status: 'ACTIVE' },
-      select: { warehouseId: true },
-    });
+    const [managerAssignments, salesManagerAssignments] = await Promise.all([
+      this.prisma.hqWarehouseManagerAssignment.findMany({
+        where: { userId: user.id, status: 'ACTIVE' },
+        select: { warehouseId: true },
+      }),
+      this.prisma.hqSalesManagerWarehouseAssignment.findMany({
+        where: { userId: user.id, status: 'ACTIVE' },
+        select: { warehouseId: true },
+      }),
+    ]);
+    const assignedHqWarehouseIds = roles.includes(Role.HQ_SALES_MANAGER)
+      ? salesManagerAssignments.map((row) => row.warehouseId)
+      : roles.includes(Role.WAREHOUSE_MANAGER)
+        ? managerAssignments.map((row) => row.warehouseId)
+        : Array.from(
+            new Set([
+              ...managerAssignments.map((row) => row.warehouseId),
+              ...salesManagerAssignments.map((row) => row.warehouseId),
+            ]),
+          );
 
     return {
       ...currentUser,
       roles,
       permissions,
-      assignedHqWarehouseIds: assignedHqWarehouseIds.map((row) => row.warehouseId),
+      assignedHqWarehouseIds,
     };
   }
 

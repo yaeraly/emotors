@@ -84,7 +84,10 @@ export default function NewUserPage() {
           password: form.hasLogin ? form.password || undefined : undefined,
           salary: form.salary ? Number(form.salary) : undefined,
           startDate: form.startDate || undefined,
-          hqWarehouseIds: form.roles.includes('WAREHOUSE_MANAGER') ? form.hqWarehouseIds : undefined,
+          hqWarehouseIds:
+            form.roles.includes('WAREHOUSE_MANAGER') || form.roles.includes('HQ_SALES_MANAGER')
+              ? form.hqWarehouseIds
+              : undefined,
         }),
       });
       if (created.temporaryPassword) {
@@ -110,14 +113,17 @@ export default function NewUserPage() {
     setForm((current) => ({
       ...current,
       roles,
-      hqWarehouseIds: roles.includes('WAREHOUSE_MANAGER') ? current.hqWarehouseIds : [],
+      hqWarehouseIds:
+        roles.includes('WAREHOUSE_MANAGER') || roles.includes('HQ_SALES_MANAGER')
+          ? current.hqWarehouseIds
+          : [],
     }));
   }
 
   const canEditAssignments =
     canAssignHqWarehouseManager(currentUser) &&
     isHqCreator &&
-    form.roles.includes('WAREHOUSE_MANAGER');
+    (form.roles.includes('WAREHOUSE_MANAGER') || form.roles.includes('HQ_SALES_MANAGER'));
 
   return (
     <ProtectedShell>
