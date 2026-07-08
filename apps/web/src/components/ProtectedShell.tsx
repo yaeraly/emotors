@@ -245,9 +245,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeProductMaster ? (
                   <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
                 ) : null}
-                {canSeePricing ? (
-                  <Link href="/pricing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('pricing.title')}</Link>
-                ) : null}
               </>
             ) : hqCashierView ? (
               <>

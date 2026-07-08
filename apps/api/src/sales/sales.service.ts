@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   CustomerEventType,
+  CustomerStatus,
   InstallmentStatus,
   PaymentMethod,
   PaymentRecordStatus,
@@ -21,10 +22,12 @@ import { InventoryService } from '../inventory/inventory.service';
 import { PricingCatalogService } from '../pricing/pricing-catalog.service';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { hasAnyFullAccessRole, hasAnyHqRole } from '../rbac/rbac';
+import { hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
+import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -45,6 +48,8 @@ export class SalesService {
   async createDraft(user: AuthUser, dto: CreateSaleDto) {
     return this.prisma.$transaction(async (tx) => {
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
+      await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
+      await this.validateSaleStock(user, customer.branchId, dto.items);
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? new Date();
       const receiptNumber = await this.generateReceiptNumber(tx, saleDate);
@@ -132,6 +137,176 @@ export class SalesService {
     }));
   }
 
+  async searchCustomerOptions(user: AuthUser, query: SaleCustomerSearchQueryDto) {
+    if (!user.branchId && !this.canAccessAllBranches(user)) {
+      throw new ForbiddenException('You can only access your own branch');
+    }
+
+    const where: Prisma.CustomerWhereInput = {
+      deletedAt: null,
+      ...this.buildBranchWhere(user),
+    };
+
+    if (query.includeArchived) {
+      where.status = { not: CustomerStatus.INACTIVE };
+    } else {
+      where.status = { notIn: [CustomerStatus.ARCHIVED, CustomerStatus.INACTIVE] };
+    }
+
+    if (query.search?.trim()) {
+      const search = query.search.trim();
+      const terms = search.split(/\s+/).filter(Boolean);
+      where.OR = [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { whatsappPhone: { contains: search, mode: 'insensitive' } },
+        { id: { contains: search, mode: 'insensitive' } },
+        { notes: { contains: search, mode: 'insensitive' } },
+        ...terms.map((term) => ({
+          fullName: { contains: term, mode: 'insensitive' as const },
+        })),
+      ];
+    }
+
+    const customers = await this.prisma.customer.findMany({
+      where,
+      select: {
+        id: true,
+        fullName: true,
+        phone: true,
+        whatsappPhone: true,
+        status: true,
+        totalDebtAmount: true,
+        sales: {
+          where: { deletedAt: null, status: SaleStatus.FINALIZED },
+          select: { saleDate: true },
+          orderBy: { saleDate: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 20,
+    });
+
+    const customerIds = customers.map((customer) => customer.id);
+    const overdueInstallments = customerIds.length
+      ? await this.prisma.installmentSchedule.findMany({
+          where: {
+            customerId: { in: customerIds },
+            ...this.buildBranchWhere(user),
+            OR: [
+              { status: InstallmentStatus.OVERDUE },
+              {
+                status: { in: [InstallmentStatus.PENDING, InstallmentStatus.PARTIAL] },
+                dueDate: { lt: new Date() },
+              },
+            ],
+          },
+          select: { customerId: true },
+        })
+      : [];
+    const overdueCustomerIds = new Set(overdueInstallments.map((row) => row.customerId));
+
+    return customers.map((customer) => ({
+      id: customer.id,
+      fullName: customer.fullName,
+      phone: customer.phone,
+      whatsappPhone: customer.whatsappPhone,
+      status: customer.status,
+      lastPurchaseDate: customer.sales[0]?.saleDate ?? null,
+      totalDebtAmount: Number(customer.totalDebtAmount),
+      hasOverdueInstallment: overdueCustomerIds.has(customer.id),
+    }));
+  }
+
+  async searchProductOptions(user: AuthUser, query: SaleProductSearchQueryDto) {
+    const branchWhere = this.buildBranchWhere(user);
+    const branchId =
+      'branchId' in branchWhere && branchWhere.branchId
+        ? branchWhere.branchId
+        : user.branchId;
+
+    if (!branchId) {
+      throw new ForbiddenException('You can only access your own branch');
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { ...activeBranchWarehouseWhere, branchId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!warehouse) {
+      return [];
+    }
+
+    const search = query.search?.trim();
+    const productFilter: Prisma.ProductWhereInput = {
+      branchId,
+      deletedAt: null,
+      isActive: true,
+      warehouseId: warehouse.id,
+    };
+
+    if (search) {
+      productFilter.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { sku: { contains: search, mode: 'insensitive' } },
+        { barcode: { contains: search, mode: 'insensitive' } },
+        { category: { contains: search, mode: 'insensitive' } },
+        { productCategory: { code: { contains: search, mode: 'insensitive' } } },
+        { productCategory: { nameRu: { contains: search, mode: 'insensitive' } } },
+        { productCategory: { nameKy: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: {
+        warehouseId: warehouse.id,
+        branchId,
+        product: productFilter,
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            unit: true,
+            category: true,
+            sellingPriceKgs: true,
+            recommendedRetailPriceKgs: true,
+            minimumSellingPriceKgs: true,
+            maximumDiscountPercent: true,
+            productCategory: { select: { code: true } },
+          },
+        },
+      },
+      orderBy: { product: { name: 'asc' } },
+      take: 40,
+    });
+
+    return balances
+      .map((balance) => {
+        const availableQty = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
+        const sellingPriceKgs = Number(
+          balance.product.recommendedRetailPriceKgs || balance.product.sellingPriceKgs,
+        );
+        return {
+          id: balance.product.id,
+          name: balance.product.name,
+          sku: balance.product.sku,
+          unit: balance.product.unit,
+          category: balance.product.category,
+          productCode: balance.product.productCategory?.code ?? null,
+          availableQty,
+          sellingPriceKgs,
+          minimumSellingPriceKgs: Number(balance.product.minimumSellingPriceKgs || 0),
+          maximumDiscountPercent: Number(balance.product.maximumDiscountPercent || 0),
+        };
+      })
+      .filter((product) => product.availableQty > 0)
+      .slice(0, 20);
+  }
+
   async updateDraft(user: AuthUser, id: string, dto: CreateSaleDto) {
     return this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
@@ -144,6 +319,8 @@ export class SalesService {
       }
 
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
+      await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
+      await this.validateSaleStock(user, customer.branchId, dto.items);
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? sale.saleDate;
       const totals = this.calculateSale(dto);
@@ -984,6 +1161,104 @@ export class SalesService {
         paidAmount: Number(installment.paidAmount),
       })),
     };
+  }
+
+  private async enrichSaleItemsFromProducts(
+    user: AuthUser,
+    branchId: string,
+    dto: CreateSaleDto,
+  ) {
+    if (hasAnyFullAccessRole(resolveUserRoles(user))) {
+      return;
+    }
+
+    for (const item of dto.items) {
+      if (!item.productId) {
+        continue;
+      }
+
+      const product = await this.prisma.product.findFirst({
+        where: {
+          id: item.productId,
+          branchId,
+          deletedAt: null,
+          isActive: true,
+          warehouse: activeBranchWarehouseWhere,
+        },
+        select: {
+          name: true,
+          sku: true,
+          finalCostKgs: true,
+          sellingPriceKgs: true,
+          recommendedRetailPriceKgs: true,
+        },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product not found: ${item.productId}`);
+      }
+
+      item.productName = product.name;
+      item.productSku = product.sku;
+      item.unitCost = Number(product.finalCostKgs || 0);
+    }
+  }
+
+  private async validateSaleStock(
+    user: AuthUser,
+    branchId: string,
+    items: CreateSaleDto['items'],
+  ) {
+    if (hasAnyFullAccessRole(resolveUserRoles(user))) {
+      return;
+    }
+
+    for (const item of items) {
+      if (!item.productId) {
+        continue;
+      }
+
+      const product = await this.prisma.product.findFirst({
+        where: {
+          id: item.productId,
+          branchId,
+          deletedAt: null,
+          warehouse: activeBranchWarehouseWhere,
+        },
+        select: {
+          id: true,
+          name: true,
+          branchId: true,
+          warehouseId: true,
+        },
+      });
+
+      if (!product) {
+        throw new NotFoundException(`Product not found: ${item.productId}`);
+      }
+
+      if (user.branchId && product.branchId !== user.branchId) {
+        throw new ForbiddenException('You can only access your own branch');
+      }
+
+      const balance = await this.prisma.inventoryBalance.findFirst({
+        where: {
+          warehouseId: product.warehouseId,
+          productId: product.id,
+          branchId: product.branchId,
+        },
+      });
+      const availableQty = Math.max(
+        (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0),
+        0,
+      );
+
+      if (item.quantity > availableQty) {
+        throw new BadRequestException(
+          `Insufficient stock for ${product.name}. Available: ${availableQty}`,
+        );
+      }
+    }
   }
 
   private audit(user: AuthUser, branchId: string, action: string, entity: string, entityId: string) {

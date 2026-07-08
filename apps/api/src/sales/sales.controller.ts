@@ -17,6 +17,7 @@ import { RolesGuard } from '../roles/roles.guard';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
+import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
 import { SalesService } from './sales.service';
 
 @Controller('sales')
@@ -54,6 +55,24 @@ export class SalesController {
   @Get('installments')
   listInstallments(@CurrentUser() user: AuthUser) {
     return this.salesService.listInstallments(user);
+  }
+
+  @Get('customer-options')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
+  searchCustomers(
+    @CurrentUser() user: AuthUser,
+    @Query() query: SaleCustomerSearchQueryDto,
+  ) {
+    return this.salesService.searchCustomerOptions(user, query);
+  }
+
+  @Get('product-options')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
+  searchProducts(
+    @CurrentUser() user: AuthUser,
+    @Query() query: SaleProductSearchQueryDto,
+  ) {
+    return this.salesService.searchProductOptions(user, query);
   }
 
   @Get('reports/daily')
