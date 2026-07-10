@@ -6,6 +6,7 @@ import { extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   AlertType,
+  DomesticTransportDocumentType,
   FileAttachmentEntityType,
   ProcurementOrderItemStatus,
   ProcurementOrderStatus,
@@ -45,6 +46,11 @@ import { UpdateImportCostsDto } from './dto/update-import-costs.dto';
 import { UpdateLocalTransportDto } from './dto/update-local-transport.dto';
 import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
+import {
+  assertDomesticReceiptFieldsComplete,
+  buildDomesticTransportTimeline,
+  mapDomesticTransportAttachment,
+} from './domestic-transport.util';
 import {
   buildLogisticsWithCargo,
   calculateLandedCosts,
@@ -457,29 +463,41 @@ export class ProcurementService {
 
   async svhToHqTransport(user: AuthUser, orderId: string) {
     this.assertCanViewSvhToHqTransport(user);
-    await this.getProcurementOrderForRead(orderId);
-    const [transport, receipt] = await Promise.all([
-      this.prisma.procurementSvhToHqTransport.findUnique({
-        where: { procurementOrderId: orderId },
-        include: {
-          transportCompany: true,
-          createdBy: { select: { id: true, fullName: true, role: true } },
+    const order = await this.prisma.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+      include: {
+        supplierPayments: {
+          include: { createdBy: { select: { id: true, fullName: true } } },
         },
-      }),
-      this.prisma.fileAttachment.findFirst({
-        where: {
-          entityId: orderId,
-          entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
-          deletedAt: null,
+        svhToHqTransport: {
+          include: {
+            transportCompany: true,
+            createdBy: { select: { id: true, fullName: true, role: true } },
+          },
         },
-        include: { uploadedBy: { select: { id: true, fullName: true } } },
-        orderBy: { createdAt: 'desc' },
-      }),
-    ]);
-    if (!transport) return null;
+        receivings: {
+          where: { deletedAt: null },
+          orderBy: { receivedAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+    if (!order) throw new NotFoundException('Procurement order not found');
+
+    const attachments = await this.loadDomesticTransportAttachments(orderId);
+    const transport = order.svhToHqTransport;
+    if (!transport) {
+      return {
+        transport: null,
+        attachments,
+        receiptHistory: attachments.history,
+        timeline: buildDomesticTransportTimeline(order),
+      };
+    }
+
     return {
-      ...this.toSvhToHqTransportResponse(transport),
-      receipt: receipt ? this.toFileAttachmentResponse(receipt) : null,
+      ...this.toDomesticTransportResponse(transport, attachments),
+      timeline: buildDomesticTransportTimeline(order),
     };
   }
 
@@ -495,8 +513,8 @@ export class ProcurementService {
       }
 
       const existing = order.svhToHqTransport;
-      if (!existing && !canManageSvhToHqTransport(user)) {
-        throw new ForbiddenException('You do not have permission to create SVH to HQ transport');
+      if (!existing && !canManageSvhToHqTransport(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+        throw new ForbiddenException('You do not have permission to create domestic transport');
       }
       if (existing) {
         this.assertSvhTransportUpdateAllowed(user, dto, order);
@@ -506,7 +524,7 @@ export class ProcurementService {
         ? normalizeSvhTransportCostKgs(dto.transportCostKgs)
         : normalizeSvhTransportCostKgs(existing?.transportCostKgs ?? 0);
       if (dto.transportCostKgs !== undefined && Number(dto.transportCostKgs) < 0) {
-        throw new BadRequestException('SVH to HQ transport cost must be greater than or equal to zero');
+        throw new BadRequestException('Domestic transport cost must be greater than or equal to zero');
       }
 
       const transportCompanyId = dto.transportCompanyId !== undefined
@@ -514,6 +532,42 @@ export class ProcurementService {
         : existing?.transportCompanyId ?? null;
       if (transportCompanyId) {
         await this.assertSelectableTransportCompanies(tx, { svhToHqTransportCompanyId: transportCompanyId });
+      }
+
+      const receiptNumber = dto.receiptNumber !== undefined
+        ? dto.receiptNumber?.trim() || null
+        : existing?.receiptNumber ?? null;
+      const receiptDate = dto.receiptDate !== undefined
+        ? dto.receiptDate ? new Date(dto.receiptDate) : null
+        : existing?.receiptDate ?? null;
+      const receiptAmountKgs = dto.receiptAmountKgs !== undefined
+        ? Number(dto.receiptAmountKgs)
+        : Number(existing?.receiptAmountKgs ?? 0);
+
+      const currentReceiptCount = await tx.fileAttachment.count({
+        where: {
+          entityId: order.id,
+          deletedAt: null,
+          OR: [
+            { entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT },
+            {
+              entityType: FileAttachmentEntityType.DOMESTIC_TRANSPORT_ATTACHMENT,
+              documentType: DomesticTransportDocumentType.RECEIPT,
+              isCurrent: true,
+            },
+          ],
+        },
+      });
+      if (currentReceiptCount > 0) {
+        const missing = assertDomesticReceiptFieldsComplete({
+          transportCompanyId,
+          receiptNumber,
+          receiptDate,
+          receiptAmountKgs,
+        });
+        if (missing.length) {
+          throw new BadRequestException('Carrier, receipt number, receipt date, and receipt amount are required when a receipt is uploaded');
+        }
       }
 
       const nextStatus = dto.status ?? existing?.status ?? SvhToHqTransportStatus.WAITING;
@@ -552,6 +606,9 @@ export class ProcurementService {
           : undefined,
         status: nextStatus,
         notes: dto.notes !== undefined ? dto.notes?.trim() || null : undefined,
+        receiptNumber,
+        receiptDate,
+        receiptAmountKgs,
       };
 
       const transport = existing
@@ -575,6 +632,9 @@ export class ProcurementService {
               arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : null,
               status: nextStatus,
               notes: dto.notes?.trim() || null,
+              receiptNumber,
+              receiptDate,
+              receiptAmountKgs,
               createdById: user.id,
             },
             include: {
@@ -608,15 +668,19 @@ export class ProcurementService {
         !existing,
         dto.changeReason,
       );
-
+      await this.auditProcurement(tx, user, 'DOMESTIC_TRANSPORT_UPDATED', order.id, oldValue, this.pickSvhTransportAuditFields(transport), dto.changeReason);
+      if (oldValue?.status !== transport.status) {
+        await this.auditProcurement(tx, user, 'DOMESTIC_TRANSPORT_STATUS_UPDATED', order.id, { status: oldValue?.status }, { status: transport.status }, dto.changeReason);
+      }
       if (isSvhTransportCompleted(transport.status) && !isSvhTransportCompleted(oldValue?.status)) {
         await this.auditProcurement(tx, user, 'HQ_RECEIVING_ENABLED', order.id, oldValue, this.pickSvhTransportAuditFields(transport), undefined, {
           transportCompanyId: transport.transportCompanyId,
         });
       }
 
+      const attachments = await this.loadDomesticTransportAttachments(order.id, tx);
       return {
-        transport: this.toSvhToHqTransportResponse(transport),
+        ...this.toDomesticTransportResponse(transport, attachments),
         order: updatedOrder,
       };
     });
@@ -1350,18 +1414,45 @@ export class ProcurementService {
   }
 
   async uploadSvhToHqReceipt(user: AuthUser, orderId: string, request: FastifyRequest) {
-    this.assertCanManageSvhToHqReceipt(user);
+    return this.uploadDomesticTransportAttachment(user, orderId, request, DomesticTransportDocumentType.RECEIPT);
+  }
+
+  async uploadDomesticTransportAttachment(
+    user: AuthUser,
+    orderId: string,
+    request: FastifyRequest,
+    defaultDocumentType: DomesticTransportDocumentType = DomesticTransportDocumentType.RECEIPT,
+  ) {
+    this.assertCanManageDomesticTransportDocuments(user);
     const order = await this.getProcurementOrderForRead(orderId);
     if (!isSvhEligibleProcurementStatus(order.status)) {
-      throw new BadRequestException('SVH to HQ receipt can only be uploaded after cargo arrives in Kyrgyzstan');
+      throw new BadRequestException('Domestic transport documents can only be uploaded after cargo arrives in Kyrgyzstan');
     }
 
     let file: MultipartFile | undefined;
-    try {
-      file = await request.file();
-    } catch {
-      throw new BadRequestException('File is too large');
+    let documentType = defaultDocumentType;
+    let transportCompanyId: string | null = null;
+    let receiptNumber: string | null = null;
+    let receiptDate: string | null = null;
+    let receiptAmountKgs: number | null = null;
+
+    const parts = request.parts();
+    for await (const part of parts) {
+      if (part.type === 'file' && part.fieldname === 'file') {
+        file = part;
+        continue;
+      }
+      if (part.type !== 'field') continue;
+      const value = part.value?.toString() ?? '';
+      if (part.fieldname === 'documentType' && value) {
+        documentType = value as DomesticTransportDocumentType;
+      }
+      if (part.fieldname === 'transportCompanyId') transportCompanyId = value || null;
+      if (part.fieldname === 'receiptNumber') receiptNumber = value || null;
+      if (part.fieldname === 'receiptDate') receiptDate = value || null;
+      if (part.fieldname === 'receiptAmountKgs' && value) receiptAmountKgs = Number(value);
     }
+
     if (!file) throw new BadRequestException('File is required');
 
     const allowedMimeTypes = new Map<string, string>([
@@ -1382,13 +1473,17 @@ export class ProcurementService {
       throw new BadRequestException('File is too large');
     }
 
-    const existing = await this.prisma.fileAttachment.findFirst({
-      where: {
-        entityId: order.id,
-        entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
-        deletedAt: null,
-      },
-    });
+    if (documentType === DomesticTransportDocumentType.RECEIPT) {
+      const missing = assertDomesticReceiptFieldsComplete({
+        transportCompanyId,
+        receiptNumber,
+        receiptDate,
+        receiptAmountKgs,
+      });
+      if (missing.length) {
+        throw new BadRequestException('Carrier, receipt number, receipt date, and receipt amount are required for receipt upload');
+      }
+    }
 
     const uploadDirectory = join(process.cwd(), 'uploads', 'procurement');
     await mkdir(uploadDirectory, { recursive: true });
@@ -1398,49 +1493,92 @@ export class ProcurementService {
     const fileUrl = `/uploads/procurement/${storedName}`;
 
     const attachment = await this.prisma.$transaction(async (tx) => {
-      if (existing) {
-        await tx.fileAttachment.update({
-          where: { id: existing.id },
-          data: { deletedAt: new Date() },
+      let replacedAttachment: any = null;
+      if (documentType === DomesticTransportDocumentType.RECEIPT) {
+        replacedAttachment = await tx.fileAttachment.findFirst({
+          where: {
+            entityId: order.id,
+            deletedAt: null,
+            isCurrent: true,
+            OR: [
+              { entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT },
+              {
+                entityType: FileAttachmentEntityType.DOMESTIC_TRANSPORT_ATTACHMENT,
+                documentType: DomesticTransportDocumentType.RECEIPT,
+              },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
         });
+        if (replacedAttachment) {
+          await tx.fileAttachment.update({
+            where: { id: replacedAttachment.id },
+            data: {
+              isCurrent: false,
+              replacedAt: new Date(),
+              replacedById: user.id,
+            },
+          });
+        }
       }
-      return tx.fileAttachment.create({
-        data: {
-          entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
-          entityId: order.id,
-          fileName: file.filename,
-          fileUrl,
-          mimeType: file.mimetype,
-          size: buffer.length,
-          uploadedById: user.id,
-        },
-        include: { uploadedBy: { select: { id: true, fullName: true } } },
-      });
+
+      return {
+        attachment: await tx.fileAttachment.create({
+          data: {
+            entityType: FileAttachmentEntityType.DOMESTIC_TRANSPORT_ATTACHMENT,
+            entityId: order.id,
+            fileName: file.filename,
+            fileUrl,
+            mimeType: file.mimetype,
+            size: buffer.length,
+            uploadedById: user.id,
+            documentType,
+            transportCompanyId,
+            receiptNumber,
+            receiptDate: receiptDate ? new Date(receiptDate) : null,
+            receiptAmountKgs,
+            isCurrent: true,
+          },
+          include: {
+            uploadedBy: { select: { id: true, fullName: true } },
+            replacedBy: { select: { id: true, fullName: true } },
+          },
+        }),
+        replacedAttachment,
+      };
     });
 
-    const action = existing ? 'SVH_TO_HQ_RECEIPT_REPLACED' : 'SVH_TO_HQ_RECEIPT_UPLOADED';
-    await this.auditProcurement(this.prisma, user, action, order.id, existing ? {
-      attachmentId: existing.id,
-      fileName: existing.fileName,
-      fileUrl: existing.fileUrl,
-      mimeType: existing.mimeType,
-      size: existing.size,
+    const action = documentType === DomesticTransportDocumentType.RECEIPT
+      ? (attachment.replacedAttachment ? 'DOMESTIC_RECEIPT_REPLACED' : 'DOMESTIC_RECEIPT_UPLOADED')
+      : 'DOMESTIC_ATTACHMENT_UPLOADED';
+
+    await this.auditProcurement(this.prisma, user, action, order.id, attachment.replacedAttachment ? {
+      attachmentId: attachment.replacedAttachment.id,
+      fileName: attachment.replacedAttachment.fileName,
+      documentType: attachment.replacedAttachment.documentType,
+      receiptNumber: attachment.replacedAttachment.receiptNumber,
+      receiptAmountKgs: attachment.replacedAttachment.receiptAmountKgs,
+      replacedAt: new Date().toISOString(),
     } : null, {
       userId: user.id,
       role: user.role,
       procurementOrderId: order.id,
-      attachmentId: attachment.id,
-      entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
-      fileName: attachment.fileName,
-      fileUrl: attachment.fileUrl,
-      mimeType: attachment.mimeType,
-      size: attachment.size,
+      attachmentId: attachment.attachment.id,
+      documentType,
+      transportCompanyId,
+      receiptNumber,
+      receiptDate,
+      receiptAmountKgs,
+      fileName: attachment.attachment.fileName,
+      fileUrl: attachment.attachment.fileUrl,
+      mimeType: attachment.attachment.mimeType,
+      size: attachment.attachment.size,
       uploadedById: user.id,
-      uploadedAt: attachment.createdAt.toISOString(),
+      uploadedAt: attachment.attachment.createdAt.toISOString(),
       timestamp: new Date().toISOString(),
     });
 
-    return this.toFileAttachmentResponse(attachment);
+    return this.toFileAttachmentResponse(attachment.attachment);
   }
 
   async deleteProcurementAttachment(user: AuthUser, orderId: string, attachmentId: string) {
@@ -1449,8 +1587,11 @@ export class ProcurementService {
       where: { id: attachmentId, entityId: orderId, deletedAt: null },
     });
     if (!attachment) throw new NotFoundException('Attachment not found');
-    if (attachment.entityType === FileAttachmentEntityType.SVH_TO_HQ_RECEIPT) {
-      this.assertCanManageSvhToHqReceipt(user);
+    if (
+      attachment.entityType === FileAttachmentEntityType.SVH_TO_HQ_RECEIPT
+      || attachment.entityType === FileAttachmentEntityType.DOMESTIC_TRANSPORT_ATTACHMENT
+    ) {
+      this.assertCanManageDomesticTransportDocuments(user, true);
     } else {
       this.assertCanEditSupplierPayment(user);
     }
@@ -2139,7 +2280,10 @@ export class ProcurementService {
       unlockedBy: { select: { id: true, fullName: true, role: true } },
       chinaDomesticTransportUnlockedBy: { select: { id: true, fullName: true, role: true } },
       items: { include: { product: true, supplier: true, factory: true }, orderBy: { createdAt: 'asc' as const } },
-      receivings: { include: { items: true }, orderBy: { createdAt: 'desc' as const } },
+      receivings: {
+        include: { items: true },
+        orderBy: { createdAt: 'desc' as const },
+      },
       differenceReports: { orderBy: { createdAt: 'desc' as const } },
       supplierPayments: {
         include: {
@@ -3452,6 +3596,20 @@ export class ProcurementService {
       },
       reason,
     );
+    const wasPaid = oldValue.supplierPaymentStatus === 'PAID' || oldValue.supplierPaymentStatus === 'OVERPAID';
+    const isPaid = summary.supplierPaymentStatus === 'PAID' || summary.supplierPaymentStatus === 'OVERPAID';
+    if (!wasPaid && isPaid) {
+      await this.auditProcurement(tx, user, 'SUPPLIER_PAYMENT_COMPLETED', order.id, {
+        supplierPaymentStatus: oldValue.supplierPaymentStatus,
+        totalPaidYuan: oldValue.totalPaidYuan,
+        totalPaidKgs: oldValue.totalPaidKgs,
+      }, {
+        supplierPaymentStatus: summary.supplierPaymentStatus,
+        totalPaidYuan: summary.totalPaidYuan,
+        totalPaidKgs: summary.totalPaidKgs,
+        timestamp: new Date().toISOString(),
+      }, reason);
+    }
     await this.auditProcurement(
       tx,
       user,
@@ -3475,9 +3633,13 @@ export class ProcurementService {
   }
 
   private async toProcurementOrderResponse(order: any) {
+    const domesticAttachments = await this.loadDomesticTransportAttachments(order.id);
     const attachments = await this.prisma.fileAttachment.findMany({
       where: { entityId: order.id, deletedAt: null },
-      include: { uploadedBy: { select: { id: true, fullName: true } } },
+      include: {
+        uploadedBy: { select: { id: true, fullName: true } },
+        replacedBy: { select: { id: true, fullName: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
     const activePaymentCount = order.supplierPayments
@@ -3531,15 +3693,13 @@ export class ProcurementService {
       cargoAttachments: attachments.filter(
         (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
       ),
-      svhToHqReceipt: (() => {
-        const receipt = attachments.find(
-          (attachment) => attachment.entityType === FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
-        );
-        return receipt ? this.toFileAttachmentResponse(receipt) : null;
-      })(),
+      domesticTransportAttachments: domesticAttachments.current,
+      domesticTransportReceiptHistory: domesticAttachments.history,
+      svhToHqReceipt: domesticAttachments.currentReceipt,
       svhToHqTransport: order.svhToHqTransport
         ? this.toSvhToHqTransportResponse(order.svhToHqTransport)
         : null,
+      domesticTransportTimeline: buildDomesticTransportTimeline(order),
       ...(() => {
         const cargoAttachments = attachments.filter(
           (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
@@ -3577,29 +3737,81 @@ export class ProcurementService {
     return {
       ...transport,
       transportCostKgs: Number(transport.transportCostKgs ?? 0),
+      receiptAmountKgs: Number(transport.receiptAmountKgs ?? 0),
     };
   }
 
-  private toFileAttachmentResponse(attachment: any) {
+  private toDomesticTransportResponse(transport: any, attachments: Awaited<ReturnType<ProcurementService['loadDomesticTransportAttachments']>>) {
     return {
+      transport: this.toSvhToHqTransportResponse(transport),
+      transportCompany: transport.transportCompany ?? null,
+      createdBy: transport.createdBy ?? null,
+      attachments: attachments.current,
+      receiptHistory: attachments.history,
+      currentReceipt: attachments.currentReceipt,
+      receipt: attachments.currentReceipt,
+    };
+  }
+
+  private async loadDomesticTransportAttachments(orderId: string, tx: any = this.prisma) {
+    const rows = await tx.fileAttachment.findMany({
+      where: {
+        entityId: orderId,
+        deletedAt: null,
+        OR: [
+          { entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT },
+          { entityType: FileAttachmentEntityType.DOMESTIC_TRANSPORT_ATTACHMENT },
+        ],
+      },
+      include: {
+        uploadedBy: { select: { id: true, fullName: true } },
+        replacedBy: { select: { id: true, fullName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const mapped = rows.map((row: any) => this.toFileAttachmentResponse(row));
+    const current = mapped.filter((row: any) => row.isCurrent !== false);
+    const history = mapped.filter((row: any) => row.isCurrent === false || row.replacedAt);
+    const currentReceipt = current.find((row: any) =>
+      row.documentType === DomesticTransportDocumentType.RECEIPT
+      || row.entityType === FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
+    ) ?? null;
+    return { all: mapped, current, history, currentReceipt };
+  }
+
+  private toFileAttachmentResponse(attachment: any) {
+    return mapDomesticTransportAttachment({
       id: attachment.id,
-      entityType: attachment.entityType,
-      entityId: attachment.entityId,
+      documentType: attachment.documentType ?? (
+        attachment.entityType === FileAttachmentEntityType.SVH_TO_HQ_RECEIPT
+          ? DomesticTransportDocumentType.RECEIPT
+          : null
+      ),
       fileName: attachment.fileName,
       fileUrl: attachment.fileUrl,
       mimeType: attachment.mimeType,
       size: attachment.size,
-      uploadedById: attachment.uploadedById,
-      uploadedAt: attachment.createdAt,
-      createdAt: attachment.createdAt,
+      uploadedAt: attachment.createdAt?.toISOString?.() ?? attachment.createdAt,
       uploadedBy: attachment.uploadedBy ?? null,
-    };
+      transportCompanyId: attachment.transportCompanyId ?? null,
+      receiptNumber: attachment.receiptNumber ?? null,
+      receiptDate: attachment.receiptDate?.toISOString?.() ?? attachment.receiptDate ?? null,
+      receiptAmountKgs: attachment.receiptAmountKgs !== undefined && attachment.receiptAmountKgs !== null
+        ? Number(attachment.receiptAmountKgs)
+        : null,
+      isCurrent: attachment.isCurrent ?? true,
+      replacedAt: attachment.replacedAt?.toISOString?.() ?? attachment.replacedAt ?? null,
+      replacedBy: attachment.replacedBy ?? null,
+      entityType: attachment.entityType,
+    } as any);
   }
 
-  private assertCanManageSvhToHqReceipt(user: AuthUser) {
+  private assertCanManageDomesticTransportDocuments(user: AuthUser, allowDelete = false) {
     const roles = resolveUserRoles(user);
-    if (canManageSvhToHqTransport(user) || hasAnyFullAccessRole(roles)) return;
-    throw new ForbiddenException('You do not have permission to manage SVH to HQ receipt');
+    if (canManageSvhToHqTransport(user)) return;
+    if (hasAnyFullAccessRole(roles)) return;
+    if (allowDelete && hasAnyFullAccessRole(roles)) return;
+    throw new ForbiddenException('You do not have permission to manage domestic transport documents');
   }
 
   private pickSvhTransportAuditFields(transport: any) {
@@ -3613,6 +3825,9 @@ export class ProcurementService {
       driverPhone: transport.driverPhone,
       dispatchDate: transport.dispatchDate,
       arrivalDate: transport.arrivalDate,
+      receiptNumber: transport.receiptNumber,
+      receiptDate: transport.receiptDate,
+      receiptAmountKgs: transport.receiptAmountKgs?.toString?.() ?? transport.receiptAmountKgs,
       status: transport.status,
       notes: transport.notes,
     };
@@ -3620,33 +3835,13 @@ export class ProcurementService {
 
   private assertCanViewSvhToHqTransport(user: AuthUser) {
     if (canViewSvhToHqTransport(user)) return;
-    throw new ForbiddenException('You do not have permission to view SVH to HQ transport');
+    throw new ForbiddenException('You do not have permission to view domestic transport');
   }
 
   private assertSvhTransportUpdateAllowed(user: AuthUser, dto: any, order: any) {
-    if (canManageSvhToHqTransport(user)) return;
-    if (!canConfirmSvhToHqArrival(user)) {
-      throw new ForbiddenException('You do not have permission to update SVH to HQ transport');
-    }
-    const restrictedFields = [
-      'transportCostKgs',
-      'transportCompanyId',
-      'vehicleNumber',
-      'driverName',
-      'driverPhone',
-      'dispatchDate',
-      'notes',
-    ];
-    const touchedRestricted = restrictedFields.some((field) => dto[field] !== undefined);
-    if (touchedRestricted) {
-      throw new ForbiddenException('Warehouse managers can only confirm SVH arrival and completion status');
-    }
-    if (dto.status !== undefined && dto.status !== SvhToHqTransportStatus.COMPLETED) {
-      throw new ForbiddenException('Warehouse managers can only mark SVH to HQ transport as completed');
-    }
-    if (order.hqStockMovementCreatedAt) {
-      throw new BadRequestException('Procurement stock has already been received');
-    }
+    const roles = resolveUserRoles(user);
+    if (canManageSvhToHqTransport(user) || hasAnyFullAccessRole(roles)) return;
+    throw new ForbiddenException('You do not have permission to update domestic transport');
   }
 
   private auditSvhTransportChanges(

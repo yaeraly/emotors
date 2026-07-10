@@ -413,19 +413,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
           ) : null}
           <LockedFieldHint locked={chinaDomesticLocked} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
-            <Field label={t('procurement.transportCompanies.select')}>
-              <select
-                disabled={chinaDomesticLocked}
-                value={form.chinaDomesticTransportCompanyId}
-                onChange={(e) => setField('chinaDomesticTransportCompanyId', e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
-              >
-                <option value="">-</option>
-                {transportCompanies.map((company) => <option key={company.id} value={company.id}>{company.name}</option>)}
-              </select>
-            </Field>
-          </LockedFieldHint>
-          <LockedFieldHint locked={chinaDomesticLocked} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
             <Field label={t('procurement.orders.costInYuan')}>
               <input
                 type="number"

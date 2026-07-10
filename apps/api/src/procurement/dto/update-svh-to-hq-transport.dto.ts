@@ -41,5 +41,18 @@ export class UpdateSvhToHqTransportDto {
 
   @IsOptional()
   @IsString()
+  receiptNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  receiptDate?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  receiptAmountKgs?: number;
+
+  @IsOptional()
+  @IsString()
   changeReason?: string;
 }

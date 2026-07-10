@@ -253,6 +253,16 @@ export class ProcurementController {
     return this.service.uploadSvhToHqReceipt(user, id, request);
   }
 
+  @Post('orders/:id/domestic-transport/attachments')
+  @RequirePermissions('procurement.manage', 'finance.view')
+  uploadDomesticTransportAttachment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.service.uploadDomesticTransportAttachment(user, id, request);
+  }
+
   @Post('orders/:id/supplier-payments/:paymentId/attachments')
   @RequirePermissions('procurement.manage', 'finance.view')
   uploadSupplierPaymentReceipt(

@@ -320,6 +320,14 @@ enum FileAttachmentEntityType {
   SUPPLIER_PAYMENT
   CARGO_RECEIPT
   SVH_TO_HQ_RECEIPT
+  DOMESTIC_TRANSPORT_ATTACHMENT
+}
+
+enum DomesticTransportDocumentType {
+  RECEIPT
+  INVOICE
+  CARGO_PHOTO
+  DELIVERY_NOTE
 }
 
 enum SupplierClaimOutcome {
@@ -782,6 +790,7 @@ model User {
   procurementSupplierPayments ProcurementSupplierPayment[] @relation("ProcurementSupplierPaymentCreator")
   voidedProcurementSupplierPayments ProcurementSupplierPayment[] @relation("ProcurementSupplierPaymentVoider")
   fileAttachments FileAttachment[] @relation("FileAttachmentUploader")
+  replacedDomesticTransportAttachments FileAttachment[] @relation("DomesticTransportAttachmentReplacer")
   procurementCostAdjustments ProcurementCostAdjustment[] @relation("ProcurementCostAdjustmentCreator")
   unlockedProcurementOrders ProcurementOrder[] @relation("ProcurementOrderUnlocker")
   chinaDomesticTransportUnlockedProcurementOrders ProcurementOrder[] @relation("ProcurementChinaDomesticTransportUnlocker")
@@ -2088,6 +2097,9 @@ model ProcurementSvhToHqTransport {
   driverPhone        String?
   dispatchDate       DateTime?
   arrivalDate        DateTime?
+  receiptNumber      String?
+  receiptDate        DateTime?
+  receiptAmountKgs   Decimal                @default(0) @db.Decimal(14, 2)
   status             SvhToHqTransportStatus @default(WAITING)
   notes              String?
   createdById        String
@@ -2160,12 +2172,23 @@ model FileAttachment {
   uploadedBy   User                     @relation("FileAttachmentUploader", fields: [uploadedById], references: [id])
   supplierPaymentId String?
   supplierPayment   ProcurementSupplierPayment? @relation(fields: [supplierPaymentId], references: [id], onDelete: SetNull)
+  documentType       DomesticTransportDocumentType?
+  transportCompanyId String?
+  receiptNumber      String?
+  receiptDate        DateTime?
+  receiptAmountKgs   Decimal?                 @db.Decimal(14, 2)
+  isCurrent          Boolean                  @default(true)
+  replacedAt         DateTime?
+  replacedById       String?
+  replacedBy         User?                    @relation("DomesticTransportAttachmentReplacer", fields: [replacedById], references: [id])
   createdAt    DateTime                 @default(now())
   deletedAt    DateTime?
 
   @@index([entityType, entityId])
   @@index([uploadedById])
   @@index([supplierPaymentId])
+  @@index([documentType])
+  @@index([isCurrent])
 }
 
 model ProcurementOrderItem {
