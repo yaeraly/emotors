@@ -1,0 +1,1 @@
+ALTER TYPE "FileAttachmentEntityType" ADD VALUE IF NOT EXISTS 'SVH_TO_HQ_RECEIPT';

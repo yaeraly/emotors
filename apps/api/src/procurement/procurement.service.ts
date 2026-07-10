@@ -32,7 +32,9 @@ import {
   canConfirmSvhToHqArrival,
   canApproveSvhTransportCostAdjustment,
   canDeleteProcurementOrder,
+  hasAnyFullAccessRole,
   isFullAccessRole,
+  resolveUserRoles,
 } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
@@ -456,14 +458,29 @@ export class ProcurementService {
   async svhToHqTransport(user: AuthUser, orderId: string) {
     this.assertCanViewSvhToHqTransport(user);
     await this.getProcurementOrderForRead(orderId);
-    const transport = await this.prisma.procurementSvhToHqTransport.findUnique({
-      where: { procurementOrderId: orderId },
-      include: {
-        transportCompany: true,
-        createdBy: { select: { id: true, fullName: true, role: true } },
-      },
-    });
-    return transport ? this.toSvhToHqTransportResponse(transport) : null;
+    const [transport, receipt] = await Promise.all([
+      this.prisma.procurementSvhToHqTransport.findUnique({
+        where: { procurementOrderId: orderId },
+        include: {
+          transportCompany: true,
+          createdBy: { select: { id: true, fullName: true, role: true } },
+        },
+      }),
+      this.prisma.fileAttachment.findFirst({
+        where: {
+          entityId: orderId,
+          entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
+          deletedAt: null,
+        },
+        include: { uploadedBy: { select: { id: true, fullName: true } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+    if (!transport) return null;
+    return {
+      ...this.toSvhToHqTransportResponse(transport),
+      receipt: receipt ? this.toFileAttachmentResponse(receipt) : null,
+    };
   }
 
   upsertSvhToHqTransport(user: AuthUser, orderId: string, dto: UpdateSvhToHqTransportDto) {
@@ -1332,13 +1349,111 @@ export class ProcurementService {
     return attachment;
   }
 
+  async uploadSvhToHqReceipt(user: AuthUser, orderId: string, request: FastifyRequest) {
+    this.assertCanManageSvhToHqReceipt(user);
+    const order = await this.getProcurementOrderForRead(orderId);
+    if (!isSvhEligibleProcurementStatus(order.status)) {
+      throw new BadRequestException('SVH to HQ receipt can only be uploaded after cargo arrives in Kyrgyzstan');
+    }
+
+    let file: MultipartFile | undefined;
+    try {
+      file = await request.file();
+    } catch {
+      throw new BadRequestException('File is too large');
+    }
+    if (!file) throw new BadRequestException('File is required');
+
+    const allowedMimeTypes = new Map<string, string>([
+      ['application/pdf', '.pdf'],
+      ['image/jpeg', '.jpg'],
+      ['image/png', '.png'],
+      ['image/webp', '.webp'],
+    ]);
+    const extensionFromMime = allowedMimeTypes.get(file.mimetype);
+    const originalExtension = extname(file.filename).toLowerCase();
+    const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.webp'];
+    if (!extensionFromMime || !allowedExtensions.includes(originalExtension)) {
+      throw new BadRequestException('Invalid file format');
+    }
+
+    const buffer = await file.toBuffer();
+    if (buffer.length > 5 * 1024 * 1024) {
+      throw new BadRequestException('File is too large');
+    }
+
+    const existing = await this.prisma.fileAttachment.findFirst({
+      where: {
+        entityId: order.id,
+        entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
+        deletedAt: null,
+      },
+    });
+
+    const uploadDirectory = join(process.cwd(), 'uploads', 'procurement');
+    await mkdir(uploadDirectory, { recursive: true });
+    const extension = originalExtension === '.jpeg' ? '.jpg' : extensionFromMime;
+    const storedName = `${randomUUID()}${extension}`;
+    await writeFile(join(uploadDirectory, storedName), buffer);
+    const fileUrl = `/uploads/procurement/${storedName}`;
+
+    const attachment = await this.prisma.$transaction(async (tx) => {
+      if (existing) {
+        await tx.fileAttachment.update({
+          where: { id: existing.id },
+          data: { deletedAt: new Date() },
+        });
+      }
+      return tx.fileAttachment.create({
+        data: {
+          entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
+          entityId: order.id,
+          fileName: file.filename,
+          fileUrl,
+          mimeType: file.mimetype,
+          size: buffer.length,
+          uploadedById: user.id,
+        },
+        include: { uploadedBy: { select: { id: true, fullName: true } } },
+      });
+    });
+
+    const action = existing ? 'SVH_TO_HQ_RECEIPT_REPLACED' : 'SVH_TO_HQ_RECEIPT_UPLOADED';
+    await this.auditProcurement(this.prisma, user, action, order.id, existing ? {
+      attachmentId: existing.id,
+      fileName: existing.fileName,
+      fileUrl: existing.fileUrl,
+      mimeType: existing.mimeType,
+      size: existing.size,
+    } : null, {
+      userId: user.id,
+      role: user.role,
+      procurementOrderId: order.id,
+      attachmentId: attachment.id,
+      entityType: FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
+      fileName: attachment.fileName,
+      fileUrl: attachment.fileUrl,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      uploadedById: user.id,
+      uploadedAt: attachment.createdAt.toISOString(),
+      timestamp: new Date().toISOString(),
+    });
+
+    return this.toFileAttachmentResponse(attachment);
+  }
+
   async deleteProcurementAttachment(user: AuthUser, orderId: string, attachmentId: string) {
-    this.assertCanEditSupplierPayment(user);
     await this.getProcurementOrderForRead(orderId);
     const attachment = await this.prisma.fileAttachment.findFirst({
       where: { id: attachmentId, entityId: orderId, deletedAt: null },
     });
     if (!attachment) throw new NotFoundException('Attachment not found');
+    if (attachment.entityType === FileAttachmentEntityType.SVH_TO_HQ_RECEIPT) {
+      this.assertCanManageSvhToHqReceipt(user);
+    } else {
+      this.assertCanEditSupplierPayment(user);
+    }
     const deleted = await this.prisma.fileAttachment.update({
       where: { id: attachment.id },
       data: { deletedAt: new Date() },
@@ -3416,6 +3531,12 @@ export class ProcurementService {
       cargoAttachments: attachments.filter(
         (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
       ),
+      svhToHqReceipt: (() => {
+        const receipt = attachments.find(
+          (attachment) => attachment.entityType === FileAttachmentEntityType.SVH_TO_HQ_RECEIPT,
+        );
+        return receipt ? this.toFileAttachmentResponse(receipt) : null;
+      })(),
       svhToHqTransport: order.svhToHqTransport
         ? this.toSvhToHqTransportResponse(order.svhToHqTransport)
         : null,
@@ -3457,6 +3578,28 @@ export class ProcurementService {
       ...transport,
       transportCostKgs: Number(transport.transportCostKgs ?? 0),
     };
+  }
+
+  private toFileAttachmentResponse(attachment: any) {
+    return {
+      id: attachment.id,
+      entityType: attachment.entityType,
+      entityId: attachment.entityId,
+      fileName: attachment.fileName,
+      fileUrl: attachment.fileUrl,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      uploadedById: attachment.uploadedById,
+      uploadedAt: attachment.createdAt,
+      createdAt: attachment.createdAt,
+      uploadedBy: attachment.uploadedBy ?? null,
+    };
+  }
+
+  private assertCanManageSvhToHqReceipt(user: AuthUser) {
+    const roles = resolveUserRoles(user);
+    if (canManageSvhToHqTransport(user) || hasAnyFullAccessRole(roles)) return;
+    throw new ForbiddenException('You do not have permission to manage SVH to HQ receipt');
   }
 
   private pickSvhTransportAuditFields(transport: any) {

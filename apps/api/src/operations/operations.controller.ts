@@ -10,6 +10,7 @@ import { RolesGuard } from '../roles/roles.guard';
 import { OperationsService } from './operations.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { ProcurementDifferenceActQueryDto } from './dto/procurement-difference-act-query.dto';
+import { ChinaReceivingQueryDto } from './dto/china-receiving-query.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller()
@@ -147,8 +148,8 @@ export class OperationsController {
   @Get('procurement/china-receiving')
   @Roles(Role.OWNER, Role.CEO, Role.SUPPLY_CHAIN_MANAGER, Role.WAREHOUSE_MANAGER)
   @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
-  listChinaReceivingTasks(@CurrentUser() user: AuthUser) {
-    return this.service.listChinaReceivingTasks(user);
+  listChinaReceivingTasks(@CurrentUser() user: AuthUser, @Query() query: ChinaReceivingQueryDto) {
+    return this.service.listChinaReceivingTasks(user, query);
   }
 
   @Get('procurement/china-receiving/difference-acts')

@@ -15,7 +15,6 @@ type LineItem = {
   productId: string;
   sku: string;
   productName: string;
-  orderedQuantity: number;
   expectedQuantity: number;
   actualReceivedQuantity?: number | null;
   difference: number;
@@ -55,26 +54,21 @@ type ShipmentBatch = {
 type ChinaReceivingDetail = {
   id: string;
   orderNumber: string;
+  purchaseDate?: string | null;
+  supplyManager?: { id: string; fullName: string } | null;
   hqWarehouseId: string;
   hqWarehouse?: { id: string; name: string; isActive: boolean };
-  supplier?: { name: string };
-  factory?: { name: string };
   receivingStatus: string;
   canReceive: boolean;
   hqStockMovementCreatedAt?: string | null;
-  cargoTotalWeightKg?: number | string;
-  cargoRateUsdPerKg?: number | string;
-  defaultUsdRate?: number | string;
-  cargoReceiptNumber?: string | null;
-  cargoReceiptDate?: string | null;
-  customsCostKgs?: number | string;
-  insuranceCostKgs?: number | string;
-  bankFeeCostKgs?: number | string;
-  otherExpenseKgs?: number | string;
-  packagingCostKgs?: number | string;
   lineItems: LineItem[];
   shipmentBatches?: ShipmentBatch[];
 };
+
+function formatOrderDate(value?: string | null) {
+  if (!value) return '-';
+  return new Date(value).toLocaleDateString('ru-RU');
+}
 
 export default function ChinaReceivingDetailPage() {
   const { t } = useTranslation();
@@ -134,16 +128,6 @@ export default function ChinaReceivingDetailPage() {
         method: 'POST',
         body: JSON.stringify({
           hqWarehouseId: task.hqWarehouseId,
-          cargoTotalWeightKg: Number(task.cargoTotalWeightKg ?? 0),
-          cargoRateUsdPerKg: Number(task.cargoRateUsdPerKg ?? 0),
-          defaultUsdRate: Number(task.defaultUsdRate ?? 0),
-          cargoReceiptNumber: task.cargoReceiptNumber ?? undefined,
-          cargoReceiptDate: task.cargoReceiptDate ?? undefined,
-          customsCostKgs: Number(task.customsCostKgs ?? 0),
-          insuranceCostKgs: Number(task.insuranceCostKgs ?? 0),
-          bankFeeCostKgs: Number(task.bankFeeCostKgs ?? 0),
-          otherExpenseKgs: Number(task.otherExpenseKgs ?? 0),
-          packagingCostKgs: Number(task.packagingCostKgs ?? 0),
           items: task.lineItems.map((item) => ({
             procurementItemId: item.id,
             receivedQuantity: Number(quantities[item.id] ?? item.expectedQuantity),
@@ -192,9 +176,13 @@ export default function ChinaReceivingDetailPage() {
 
         {task ? (
           <>
-            <div className="grid gap-4 md:grid-cols-3">
-              <Info label={t('procurement.orders.supplier')} value={task.supplier?.name ?? '-'} />
-              <Info label={t('procurement.orders.factory')} value={task.factory?.name ?? '-'} />
+            <div className="grid gap-4 md:grid-cols-4">
+              <Info label={t('chinaReceiving.purchaseDate')} value={formatOrderDate(task.purchaseDate)} />
+              <Info label={t('chinaReceiving.orderNumber')} value={task.orderNumber} />
+              <Info
+                label={t('chinaReceiving.supplyManager')}
+                value={task.supplyManager?.fullName ?? t('chinaReceiving.supplyManagerNotAssigned')}
+              />
               <Info label={t('chinaReceiving.targetWarehouse')} value={task.hqWarehouse?.name ?? '-'} />
             </div>
 
@@ -202,14 +190,13 @@ export default function ChinaReceivingDetailPage() {
               <table className="min-w-full divide-y divide-slate-200 text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-4 py-3">{t('procurement.orders.product')}</th>
                     <th className="px-4 py-3">SKU</th>
-                    <th className="px-4 py-3">{t('chinaReceiving.orderedQty')}</th>
+                    <th className="px-4 py-3">{t('chinaReceiving.col.product')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
                     <th className="px-4 py-3">{t('chinaReceiving.damagedQty')}</th>
-                    <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
-                    <th className="px-4 py-3">{t('inventoryCount.notes')}</th>
+                    <th className="px-4 py-3">{t('chinaReceiving.difference')}</th>
+                    <th className="px-4 py-3">{t('chinaReceiving.notes')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -218,9 +205,8 @@ export default function ChinaReceivingDetailPage() {
                     const diff = actual - item.expectedQuantity;
                     return (
                       <tr key={item.id}>
-                        <td className="px-4 py-3">{item.productName}</td>
                         <td className="px-4 py-3">{item.sku}</td>
-                        <td className="px-4 py-3">{item.orderedQuantity}</td>
+                        <td className="px-4 py-3">{item.productName}</td>
                         <td className="px-4 py-3">{item.expectedQuantity}</td>
                         <td className="px-4 py-3">
                           {task.hqStockMovementCreatedAt ? (
@@ -257,7 +243,7 @@ export default function ChinaReceivingDetailPage() {
                               value={notes[item.id] ?? ''}
                               onChange={(e) => setNotes((c) => ({ ...c, [item.id]: e.target.value }))}
                               className="w-full min-w-[120px] rounded-lg border border-slate-300 px-2 py-1"
-                              placeholder={t('inventoryCount.notes')}
+                              placeholder={t('chinaReceiving.notes')}
                             />
                           ) : (
                             notes[item.id] ?? '-'
@@ -299,11 +285,11 @@ export default function ChinaReceivingDetailPage() {
                       <table className="min-w-full divide-y divide-slate-200 text-sm">
                         <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                           <tr>
-                            <th className="px-4 py-3">{t('procurement.orders.product')}</th>
                             <th className="px-4 py-3">SKU</th>
+                            <th className="px-4 py-3">{t('chinaReceiving.col.product')}</th>
                             <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
                             <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
-                            <th className="px-4 py-3">{t('procurement.orders.difference')}</th>
+                            <th className="px-4 py-3">{t('chinaReceiving.difference')}</th>
                             <th className="px-4 py-3">{t('chinaReceiving.actStatus')}</th>
                           </tr>
                         </thead>
@@ -312,8 +298,8 @@ export default function ChinaReceivingDetailPage() {
                             const act = batch.discrepancyActs.find((row) => row.sku === item.sku);
                             return (
                               <tr key={item.id}>
-                                <td className="px-4 py-3">{item.productName}</td>
                                 <td className="px-4 py-3">{item.sku}</td>
+                                <td className="px-4 py-3">{item.productName}</td>
                                 <td className="px-4 py-3">{item.expectedQuantity}</td>
                                 <td className="px-4 py-3">{item.actualQuantity}</td>
                                 <td className="px-4 py-3">{item.difference}</td>
@@ -326,19 +312,6 @@ export default function ChinaReceivingDetailPage() {
                         </tbody>
                       </table>
                     </div>
-                    {batch.discrepancyActs.length > 0 ? (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {batch.discrepancyActs.map((act) => (
-                          <Link
-                            key={act.id}
-                            href={`/procurement/difference-acts?orderId=${task.id}`}
-                            className="inline-flex rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800"
-                          >
-                            {t('chinaReceiving.openDiscrepancyAct')} ({act.actNumber})
-                          </Link>
-                        ))}
-                      </div>
-                    ) : null}
                   </div>
                 ))}
               </section>

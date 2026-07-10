@@ -124,6 +124,7 @@ type ProcurementOrder = {
     attachments?: Array<{ id: string; fileName: string; fileUrl: string }>;
   }>;
   cargoAttachments?: Array<{ id: string; fileName: string; fileUrl: string; mimeType: string }>;
+  svhToHqReceipt?: { id: string; fileName: string; fileUrl: string; mimeType: string } | null;
   sentToSupplierAt?: string | null;
   editableUntil?: string | null;
   unlockedAt?: string | null;
@@ -343,24 +344,12 @@ export default function ProcurementOrderDetailPage() {
   const svhDirty = useMemo(() => {
     const svh = order?.svhToHqTransport;
     if (!svh) {
-      return svhForm.transportCompanyId !== ''
-        || svhForm.transportCostKgs !== '0'
-        || svhForm.vehicleNumber !== ''
-        || svhForm.driverName !== ''
-        || svhForm.driverPhone !== ''
+      return svhForm.transportCostKgs !== '0'
         || svhForm.dispatchDate !== ''
-        || svhForm.arrivalDate !== ''
-        || svhForm.status !== 'WAITING'
         || svhForm.notes !== '';
     }
-    return svhForm.transportCompanyId !== (svh.transportCompanyId ?? '')
-      || svhForm.transportCostKgs !== String(svh.transportCostKgs ?? 0)
-      || svhForm.vehicleNumber !== (svh.vehicleNumber ?? '')
-      || svhForm.driverName !== (svh.driverName ?? '')
-      || svhForm.driverPhone !== (svh.driverPhone ?? '')
+    return svhForm.transportCostKgs !== String(svh.transportCostKgs ?? 0)
       || svhForm.dispatchDate !== (svh.dispatchDate ? svh.dispatchDate.slice(0, 10) : '')
-      || svhForm.arrivalDate !== (svh.arrivalDate ? svh.arrivalDate.slice(0, 10) : '')
-      || svhForm.status !== svh.status
       || svhForm.notes !== (svh.notes ?? '');
   }, [order?.svhToHqTransport, svhForm]);
 
@@ -616,19 +605,15 @@ export default function ProcurementOrderDetailPage() {
       await apiFetch(`/procurement/orders/${id}/svh-to-hq-transport`, {
         method: 'PUT',
         body: JSON.stringify({
-          transportCompanyId: svhForm.transportCompanyId || null,
           transportCostKgs: Number(svhForm.transportCostKgs || 0),
-          vehicleNumber: svhForm.vehicleNumber || undefined,
-          driverName: svhForm.driverName || undefined,
-          driverPhone: svhForm.driverPhone || undefined,
           dispatchDate: svhForm.dispatchDate || undefined,
-          arrivalDate: svhForm.arrivalDate || undefined,
-          status: svhForm.status,
+          arrivalDate: svhForm.dispatchDate || undefined,
+          status: 'COMPLETED',
           notes: svhForm.notes || undefined,
           changeReason: svhChangeReason.trim() || undefined,
         }),
       });
-      setSuccess(t('procurement.transport.saved'));
+      setSuccess(t('procurement.svhTransport.saved'));
       setSvhChangeReason('');
       await load();
     } catch (err) {
@@ -658,6 +643,48 @@ export default function ProcurementOrderDetailPage() {
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.message || t('common.error'));
       }
+      setSuccess(t('common.success'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function uploadSvhReceipt(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const token = getToken();
+    if (!token) return;
+    setError('');
+    setSuccess('');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const response = await fetch(`${API_URL}/procurement/orders/${id}/attachments/svh-to-hq-receipt`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || t('common.error'));
+      }
+      setSuccess(t('common.success'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function deleteSvhReceipt() {
+    if (!order?.svhToHqReceipt?.id) return;
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/attachments/${order.svhToHqReceipt.id}`, {
+        method: 'DELETE',
+      });
       setSuccess(t('common.success'));
       await load();
     } catch (err) {
@@ -952,23 +979,11 @@ export default function ProcurementOrderDetailPage() {
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-lg font-bold">{t('procurement.orders.svhToHqTransport')}</h3>
-              {order.svhToHqTransport ? (
-                <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase ${svhStatusBadgeClass(svhForm.status)}`}>
-                  {t(`procurement.svhTransport.status.${svhForm.status}`)}
-                </span>
-              ) : null}
             </div>
             {!canEditSvh ? (
               <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.svhTransport.notEligible')}</p>
             ) : null}
-            <div className="grid gap-4 md:grid-cols-3">
-              <TransportCompanySelect
-                label={t('procurement.transportCompanies.select')}
-                value={svhForm.transportCompanyId}
-                companies={transportCompanies}
-                onChange={(value) => setSvhField('transportCompanyId', value)}
-                disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh}
-              />
+            <div className="grid gap-4 md:grid-cols-2">
               <EditableField
                 label={t('procurement.svhTransport.costKgs')}
                 value={svhForm.transportCostKgs}
@@ -976,25 +991,66 @@ export default function ProcurementOrderDetailPage() {
                 type="number"
                 disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh}
               />
-              <EditableField label={t('procurement.svhTransport.vehicleNumber')} value={svhForm.vehicleNumber} onChange={(v) => setSvhField('vehicleNumber', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
-              <EditableField label={t('procurement.svhTransport.driverName')} value={svhForm.driverName} onChange={(v) => setSvhField('driverName', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
-              <EditableField label={t('procurement.svhTransport.driverPhone')} value={svhForm.driverPhone} onChange={(v) => setSvhField('driverPhone', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
-              <EditableField label={t('procurement.svhTransport.dispatchDate')} value={svhForm.dispatchDate} onChange={(v) => setSvhField('dispatchDate', v)} type="date" disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
-              <EditableField label={t('procurement.svhTransport.arrivalDate')} value={svhForm.arrivalDate} onChange={(v) => setSvhField('arrivalDate', v)} type="date" disabled={finalized || readOnlyFinance || !canEditSvh || (!canManageSvh && !canConfirmSvh)} />
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('procurement.svhTransport.statusLabel')}</span>
-                <select
-                  value={svhForm.status}
-                  onChange={(e) => setSvhField('status', e.target.value as SvhToHqTransport['status'])}
-                  disabled={finalized || readOnlyFinance || !canEditSvh || (!canManageSvh && !canConfirmSvh)}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
-                >
-                  {svhStatusOptions.map((status) => (
-                    <option key={status} value={status}>{t(`procurement.svhTransport.status.${status}`)}</option>
-                  ))}
-                </select>
-              </label>
-              <EditableField label={t('procurement.svhTransport.notes')} value={svhForm.notes} onChange={(v) => setSvhField('notes', v)} disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh} />
+              <EditableField
+                label={t('procurement.svhTransport.date')}
+                value={svhForm.dispatchDate}
+                onChange={(v) => setSvhField('dispatchDate', v)}
+                type="date"
+                disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh}
+              />
+              <EditableField
+                label={t('procurement.svhTransport.notes')}
+                value={svhForm.notes}
+                onChange={(v) => setSvhField('notes', v)}
+                disabled={finalized || readOnlyFinance || !canEditSvh || !canManageSvh}
+              />
+              <div className="space-y-3">
+                <p className="text-sm font-semibold text-slate-700">{t('procurement.svhTransport.receipt')}</p>
+                {order.svhToHqReceipt ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a
+                      href={`${API_URL}${order.svhToHqReceipt.fileUrl}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-semibold text-blue-700"
+                    >
+                      {order.svhToHqReceipt.fileName}
+                    </a>
+                    {canManageSvh && !finalized && !readOnlyFinance ? (
+                      <label className="cursor-pointer rounded-xl border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700">
+                        {t('procurement.svhTransport.replaceReceipt')}
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept=".pdf,.jpg,.jpeg,.png,.webp"
+                          onChange={(e) => void uploadSvhReceipt(e)}
+                        />
+                      </label>
+                    ) : null}
+                    {isCeoUser && !finalized ? (
+                      <button
+                        type="button"
+                        onClick={() => void deleteSvhReceipt()}
+                        className="rounded-xl border border-red-200 px-3 py-1 text-xs font-semibold text-red-700"
+                      >
+                        {t('common.delete')}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : canManageSvh && !finalized && !readOnlyFinance ? (
+                  <label className="inline-flex cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">
+                    {t('procurement.svhTransport.uploadReceipt')}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      onChange={(e) => void uploadSvhReceipt(e)}
+                    />
+                  </label>
+                ) : (
+                  <p className="text-sm text-slate-500">-</p>
+                )}
+              </div>
             </div>
             {finalized && isCeoUser && order.svhToHqTransport ? (
               <div className="mt-4">

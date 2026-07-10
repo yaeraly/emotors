@@ -319,6 +319,7 @@ enum FileAttachmentEntityType {
   PROCUREMENT_ORDER
   SUPPLIER_PAYMENT
   CARGO_RECEIPT
+  SVH_TO_HQ_RECEIPT
 }
 
 enum SupplierClaimOutcome {

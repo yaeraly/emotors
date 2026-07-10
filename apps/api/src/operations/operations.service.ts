@@ -68,6 +68,12 @@ import {
   resolveChinaReceivingListStatus,
 } from './china-receiving.util';
 import {
+  isWarehouseManagerOnlyView,
+  sanitizeChinaReceivingDetail,
+  sanitizeChinaReceivingListTask,
+} from './china-receiving-privacy.util';
+import { ChinaReceivingQueryDto } from './dto/china-receiving-query.dto';
+import {
   canSeeHqStockInBranchRequests,
   isBranchOnlyRequestUser,
   sanitizeBranchPurchaseRequest,
@@ -1157,6 +1163,33 @@ export class OperationsService {
       const batchDiscrepancyActIds: string[] = [];
 
       for (const [index, item] of receivedItems.entries()) {
+        const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
+        const receivedQuantity = Number(received.receivedQuantity ?? item.quantity);
+        const damagedQuantity = Number(received.damagedQuantity ?? 0);
+        if (received.receivedQuantity !== undefined) {
+          await this.auditInTx(tx, user, 'HQ', 'RECEIVING_QUANTITY_UPDATED', 'ProcurementOrderItem', item.id, {
+            userId: user.id,
+            role: user.role,
+            procurementOrderId: order.id,
+            warehouseId: hqWarehouseId,
+            productId: item.productId,
+            oldValue: item.quantity,
+            newValue: receivedQuantity,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        if (damagedQuantity > 0) {
+          await this.auditInTx(tx, user, 'HQ', 'RECEIVING_DAMAGED_QTY_UPDATED', 'ProcurementOrderItem', item.id, {
+            userId: user.id,
+            role: user.role,
+            procurementOrderId: order.id,
+            warehouseId: hqWarehouseId,
+            productId: item.productId,
+            oldValue: 0,
+            newValue: damagedQuantity,
+            timestamp: new Date().toISOString(),
+          });
+        }
         const next = recalculated.items[index];
         await tx.procurementOrderItem.update({
           where: { id: item.id },
@@ -1267,6 +1300,7 @@ export class OperationsService {
           reason: item.shortageReason ?? item.receivedNote,
           note: item.receivedNote,
           shortageReason: item.shortageReason,
+          autoCreated: true,
         });
         batchDiscrepancyActIds.push(...lineActs.map((act) => act.id));
       }
@@ -1366,7 +1400,7 @@ export class OperationsService {
     });
   }
 
-  async listChinaReceivingTasks(user: AuthUser) {
+  async listChinaReceivingTasks(user: AuthUser, query: ChinaReceivingQueryDto = {}) {
     const roles = resolveUserRoles(user);
     const isCeo = hasAnyFullAccessRole(roles);
     const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER);
@@ -1375,6 +1409,8 @@ export class OperationsService {
     if (!isCeo && !isScm && !canReceiveProcurementToHq(user)) {
       throw new ForbiddenException('You do not have access to China goods receiving');
     }
+
+    const wmOnlyView = isWarehouseManagerOnlyView(user);
 
     let warehouseIds: string[] | null = null;
     if (isWm && !isCeo) {
@@ -1389,8 +1425,9 @@ export class OperationsService {
         ...(warehouseIds ? { hqWarehouseId: { in: warehouseIds } } : {}),
       },
       include: {
-        supplier: { select: { id: true, name: true } },
-        factory: { select: { id: true, name: true } },
+        supplier: wmOnlyView ? false : { select: { id: true, name: true } },
+        factory: wmOnlyView ? false : { select: { id: true, name: true } },
+        createdBy: { select: { id: true, fullName: true, role: true } },
         hqWarehouse: { select: { id: true, name: true, code: true, isActive: true } },
         items: true,
         svhToHqTransport: { include: { transportCompany: true } },
@@ -1439,8 +1476,13 @@ export class OperationsService {
       tasks.push({
         id: order.id,
         orderNumber: order.orderNumber,
-        supplier: order.supplier,
-        factory: order.factory,
+        purchaseDate: order.purchaseDate ?? order.createdAt,
+        supplyManager: order.createdBy
+          ? { id: order.createdBy.id, fullName: order.createdBy.fullName }
+          : null,
+        supplyManagerName: order.createdBy?.fullName ?? null,
+        supplier: wmOnlyView ? undefined : order.supplier,
+        factory: wmOnlyView ? undefined : order.factory,
         hqWarehouse: order.hqWarehouse,
         status: resolveChinaReceivingListStatus(enriched),
         procurementStatus: order.status,
@@ -1452,7 +1494,36 @@ export class OperationsService {
           !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
         canViewOnly: isScm && !isCeo,
         arrivalMarked: Boolean(order.actualArrivalDate),
-        validation,
+        validation: wmOnlyView ? { canReceiveToHq: validation.canReceiveToHq } : validation,
+      });
+    }
+
+    const filtered = this.applyChinaReceivingFilters(tasks, query);
+
+    const hasFilters = Boolean(
+      query.search?.trim()
+      || query.purchaseDate?.trim()
+      || query.orderNumber?.trim()
+      || query.supplyManagerId?.trim()
+      || query.hqWarehouseId?.trim()
+      || query.status?.trim(),
+    );
+    if (hasFilters) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'CHINA_RECEIVING_FILTERED',
+          entity: 'ProcurementOrder',
+          entityId: 'list',
+          metadata: {
+            userId: user.id,
+            role: user.role,
+            filters: { ...query },
+            resultCount: filtered.length,
+            timestamp: new Date().toISOString(),
+          },
+        },
       });
     }
 
@@ -1467,7 +1538,7 @@ export class OperationsService {
           userId: user.id,
           roles: user.roles ?? [user.role],
           warehouseIds,
-          count: tasks.length,
+          count: filtered.length,
           goodsLeftYiwuVisibleCount,
           timestamp: new Date().toISOString(),
         },
@@ -1512,11 +1583,57 @@ export class OperationsService {
       });
     }
 
-    return tasks;
+    return filtered.map((task) => sanitizeChinaReceivingListTask(task, wmOnlyView));
+  }
+
+  private applyChinaReceivingFilters(
+    tasks: Array<{
+      id: string;
+      orderNumber: string;
+      purchaseDate?: Date | string | null;
+      supplyManager?: { id: string; fullName: string } | null;
+      supplyManagerName?: string | null;
+      hqWarehouse?: { id: string; name: string } | null;
+      status: string;
+    }>,
+    query: ChinaReceivingQueryDto,
+  ) {
+    let result = tasks;
+    const search = query.search?.trim().toLowerCase();
+    if (search) {
+      result = result.filter((task) => {
+        const orderNumber = task.orderNumber.toLowerCase();
+        const managerName = task.supplyManagerName?.toLowerCase() ?? '';
+        const warehouseName = task.hqWarehouse?.name?.toLowerCase() ?? '';
+        return orderNumber.includes(search) || managerName.includes(search) || warehouseName.includes(search);
+      });
+    }
+    if (query.purchaseDate?.trim()) {
+      const target = query.purchaseDate.trim();
+      result = result.filter((task) => {
+        const value = task.purchaseDate ? new Date(task.purchaseDate).toISOString().slice(0, 10) : '';
+        return value === target;
+      });
+    }
+    if (query.orderNumber?.trim()) {
+      const needle = query.orderNumber.trim().toLowerCase();
+      result = result.filter((task) => task.orderNumber.toLowerCase().includes(needle));
+    }
+    if (query.supplyManagerId?.trim()) {
+      result = result.filter((task) => task.supplyManager?.id === query.supplyManagerId);
+    }
+    if (query.hqWarehouseId?.trim()) {
+      result = result.filter((task) => task.hqWarehouse?.id === query.hqWarehouseId);
+    }
+    if (query.status?.trim()) {
+      result = result.filter((task) => task.status === query.status);
+    }
+    return result;
   }
 
   async getChinaReceivingTask(user: AuthUser, orderId: string) {
-    const order = await this.loadChinaReceivingOrder(orderId);
+    const wmOnlyView = isWarehouseManagerOnlyView(user);
+    const order = await this.loadChinaReceivingOrder(orderId, wmOnlyView);
     await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
 
     const attachmentCount = await this.prisma.fileAttachment.count({
@@ -1569,17 +1686,27 @@ export class OperationsService {
       });
     }
 
-    return {
-      ...order,
+    return sanitizeChinaReceivingDetail({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      purchaseDate: order.purchaseDate ?? order.createdAt,
+      supplyManager: order.createdBy
+        ? { id: order.createdBy.id, fullName: order.createdBy.fullName }
+        : null,
+      hqWarehouseId: order.hqWarehouseId,
+      hqWarehouse: order.hqWarehouse,
       receivingStatus: resolveChinaReceivingListStatus(enriched),
-      validation,
+      validation: wmOnlyView ? { canReceiveToHq: validation.canReceiveToHq } : validation,
       canReceive: !order.hqStockMovementCreatedAt && isWm && !isScm,
       canMarkArrival:
         !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
       canCreateAct: isWm && !isScm && !order.hqStockMovementCreatedAt,
       canViewActs: isScm || hasAnyFullAccessRole(roles) || isWm,
       arrivalMarked: Boolean(order.actualArrivalDate),
-      differenceReports: order.differenceReports,
+      hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
+      supplier: wmOnlyView ? undefined : order.supplier,
+      factory: wmOnlyView ? undefined : order.factory,
+      differenceReports: wmOnlyView ? undefined : order.differenceReports,
       shipmentBatches: (order.receivings ?? []).map((batch) => ({
         id: batch.id,
         batchId: batch.id,
@@ -1623,12 +1750,12 @@ export class OperationsService {
         productId: item.productId,
         sku: item.sku,
         productName: item.productName,
-        orderedQuantity: item.quantity,
+        orderedQuantity: wmOnlyView ? undefined : item.quantity,
         expectedQuantity: item.quantity,
         actualReceivedQuantity: item.receivedQuantity,
         difference: (item.receivedQuantity ?? item.quantity) - item.quantity,
       })),
-    };
+    }, wmOnlyView);
   }
 
   async createReceivingDifferenceActs(user: AuthUser, orderId: string, dto: any) {
@@ -2004,16 +2131,17 @@ export class OperationsService {
     return updated;
   }
 
-  private async loadChinaReceivingOrder(orderId: string) {
+  private async loadChinaReceivingOrder(orderId: string, wmView = false) {
     const order = await this.prisma.procurementOrder.findFirst({
       where: { id: orderId, deletedAt: null },
       include: {
-        supplier: true,
-        factory: true,
+        supplier: wmView ? false : true,
+        factory: wmView ? false : true,
+        createdBy: { select: { id: true, fullName: true, role: true } },
         hqWarehouse: true,
         items: true,
-        svhToHqTransport: { include: { transportCompany: true } },
-        differenceReports: { where: { deletedAt: null } },
+        svhToHqTransport: wmView ? false : { include: { transportCompany: true } },
+        differenceReports: wmView ? false : { where: { deletedAt: null } },
         receivings: { where: { deletedAt: null }, include: { items: true } },
       },
     });
@@ -2161,6 +2289,7 @@ export class OperationsService {
       reason?: string | null;
       note?: string | null;
       shortageReason?: string | null;
+      autoCreated?: boolean;
     },
   ) {
     const damagedQty = Number(input.damagedQty ?? 0);
@@ -2172,6 +2301,7 @@ export class OperationsService {
         differenceType: discrepancy.type,
         differenceQty: discrepancy.differenceQty,
         damagedQty,
+        autoCreated: input.autoCreated,
       });
       if (report) {
         created.push(report);
@@ -2198,6 +2328,7 @@ export class OperationsService {
       shortageReason?: string | null;
       differenceType?: ShortageReportItemType;
       differenceQty?: number;
+      autoCreated?: boolean;
     },
   ) {
     const differenceType =
@@ -2261,7 +2392,7 @@ export class OperationsService {
       tx,
       user,
       'HQ',
-      procurementDifferenceAuditAction(differenceType),
+      input.autoCreated ? 'DISCREPANCY_ACT_AUTO_CREATED' : procurementDifferenceAuditAction(differenceType),
       'ProcurementDifferenceReport',
       report.id,
       buildDiscrepancyActAuditMetadata(auditContext, {
