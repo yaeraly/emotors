@@ -17,6 +17,7 @@ type SaveRowPayload = {
   actualQuantity: number;
   damagedQuantity: number;
   note?: string;
+  unitWeightKg?: number;
   autoSave?: boolean;
   networkRecovery?: boolean;
   expectedUpdatedAt?: string;
@@ -46,6 +47,10 @@ type SavedDraftResponse = {
   actualQuantity: number;
   damagedQuantity: number;
   note: string | null;
+  unitWeightKg?: number | null;
+  weightStatus?: string;
+  productMasterWeightUpdated?: boolean;
+  productMasterWeightMismatch?: boolean;
   isSaved: boolean;
   lastSavedAt: string | null;
   updatedAt: string;
@@ -70,12 +75,15 @@ function initRowsFromItems(lineItems: ChinaReceivingLineItem[]): Record<string, 
     rows[item.id] = {
       actualQuantity: String(actual),
       damagedQuantity: String(damaged),
+      unitWeightKg: item.unitWeightKg != null ? String(item.unitWeightKg) : '',
       note: item.note ?? '',
       saveState: isSaved ? 'saved' : 'unsaved',
       lastSavedAt: item.lastSavedAt ?? null,
       updatedAt: item.updatedAt ?? null,
       isDirty: false,
       serverIsSaved: isSaved,
+      needsWeightEntry: Boolean(item.needsWeightEntry ?? item.weightStatus === 'NOT_SET'),
+      weightStatus: item.weightStatus,
       rowStatus: item.rowStatus ?? resolveRowStatus(actual, item.expectedQuantity, damaged, isSaved),
     };
   }
@@ -145,12 +153,15 @@ export function useChinaReceivingDraft({
         [itemId]: {
           actualQuantity: String(saved.actualQuantity),
           damagedQuantity: String(saved.damagedQuantity),
+          unitWeightKg: saved.unitWeightKg != null ? String(saved.unitWeightKg) : current[itemId]?.unitWeightKg ?? '',
           note: saved.note ?? '',
           saveState: 'saved',
           isDirty: false,
           serverIsSaved: true,
           lastSavedAt: saved.lastSavedAt,
           updatedAt: saved.updatedAt,
+          needsWeightEntry: saved.weightStatus === 'NOT_SET',
+          weightStatus: (saved.weightStatus as LocalRowState['weightStatus']) ?? current[itemId]?.weightStatus,
           rowStatus: resolveRowStatus(
             saved.actualQuantity,
             item.expectedQuantity,
@@ -228,6 +239,7 @@ export function useChinaReceivingDraft({
         actualQuantity: Number(row.actualQuantity) || 0,
         damagedQuantity: Number(row.damagedQuantity) || 0,
         note: row.note || undefined,
+        unitWeightKg: row.unitWeightKg ? Number(row.unitWeightKg) : undefined,
         autoSave,
         expectedUpdatedAt: row.updatedAt ?? undefined,
       };
@@ -285,7 +297,7 @@ export function useChinaReceivingDraft({
   );
 
   const updateRow = useCallback(
-    (itemId: string, field: 'actualQuantity' | 'damagedQuantity' | 'note', value: string) => {
+    (itemId: string, field: 'actualQuantity' | 'damagedQuantity' | 'unitWeightKg' | 'note', value: string) => {
       if (readOnly) return;
       const item = lineItems.find((line) => line.id === itemId);
       if (!item) return;
@@ -328,6 +340,7 @@ export function useChinaReceivingDraft({
             actualQuantity: Number(row.actualQuantity) || 0,
             damagedQuantity: Number(row.damagedQuantity) || 0,
             note: row.note || undefined,
+            unitWeightKg: row.unitWeightKg ? Number(row.unitWeightKg) : undefined,
           })),
         }),
       });

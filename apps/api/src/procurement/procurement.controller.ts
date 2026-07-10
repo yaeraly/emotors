@@ -124,6 +124,12 @@ export class ProcurementController {
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
   procurementOrder(@Param('id') id: string) { return this.service.procurementOrder(id); }
 
+  @Get('orders/:id/landed-cost')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  procurementLandedCostDetail(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.getProcurementLandedCostDetail(user, id);
+  }
+
   @Get('orders/:id/svh-to-hq-transport')
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'procurement.receive')
   svhToHqTransport(@CurrentUser() user: AuthUser, @Param('id') id: string) {

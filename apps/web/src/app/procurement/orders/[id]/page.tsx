@@ -39,6 +39,8 @@ type ProcurementOrderItem = {
   purchasePriceYuan: string | number;
   yuanRate: string | number;
   weightKg: string | number;
+  unitWeightKg?: string | number | null;
+  weightStatus?: 'NOT_SET' | 'PRELIMINARY' | 'CONFIRMED';
   netWeightKg?: string | number;
   packagingWeightKg?: string | number;
   totalWeightKg: string | number;
@@ -89,6 +91,9 @@ type ProcurementOrder = {
   status: string;
   totalYuan: string | number;
   totalCostKgs: string | number;
+  landedCostStatus?: 'PENDING_WEIGHT' | 'READY_TO_CALCULATE' | 'CALCULATED' | 'FINALIZED';
+  landedCostCalculationVersion?: number;
+  landedCostCalculatedAt?: string | null;
   totalWeightKg: string | number;
   totalNetWeightKg?: string | number;
   totalPackagingWeightKg?: string | number;
@@ -419,15 +424,33 @@ export default function ProcurementOrderDetailPage() {
     };
   }, [previewTotals, previewChinaDomesticTransportKgs, previewSvhTransportKgs, logisticsForm]);
 
-  const landedCostCalculated = useMemo(
-    () => (previewTotals?.totalCostKgs ?? Number(order?.totalCostKgs ?? 0)) > 0,
-    [previewTotals, order?.totalCostKgs],
-  );
+  const landedCostCalculated = useMemo(() => {
+    if (order?.landedCostStatus === 'CALCULATED' || order?.landedCostStatus === 'FINALIZED') return true;
+    if (order?.landedCostStatus === 'PENDING_WEIGHT') return false;
+    return (previewTotals?.totalCostKgs ?? Number(order?.totalCostKgs ?? 0)) > 0;
+  }, [previewTotals, order?.landedCostStatus, order?.totalCostKgs]);
+
+  const landedCostPendingWeight = order?.landedCostStatus === 'PENDING_WEIGHT';
 
   const cargoValidationError = useMemo(() => {
     if (!previewTotals) return t('procurement.orders.cargoWeightLessThanNet');
     return null;
   }, [previewTotals, t]);
+
+  async function recalculateLandedCost() {
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/procurement/orders/${id}/recalculate`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'Manual recalculation from landed cost tab' }),
+      });
+      setSuccess(t('common.success'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
 
   async function load() {
     try {
@@ -1063,6 +1086,53 @@ export default function ProcurementOrderDetailPage() {
       {activeTab === 'landedCost' ? (
       <>
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-bold">{t('procurement.orders.landedCostSummary')}</h3>
+          {!finalized && (isCeoUser || canCreateProcurementOrder(user)) ? (
+            <button
+              type="button"
+              onClick={() => void recalculateLandedCost()}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold"
+            >
+              {t('procurement.orders.recalculateLandedCost')}
+            </button>
+          ) : null}
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Info
+            label={t('procurement.orders.landedCostStatus')}
+            value={t(`procurement.orders.landedCostStatus.${order.landedCostStatus ?? 'PENDING_WEIGHT'}`)}
+          />
+          {order.landedCostCalculatedAt ? (
+            <Info label={t('procurement.orders.lastCalculationDate')} value={new Date(order.landedCostCalculatedAt).toLocaleString('ru-RU')} />
+          ) : null}
+          {order.landedCostCalculationVersion != null ? (
+            <Info label={t('procurement.orders.calculationVersion')} value={String(order.landedCostCalculationVersion)} />
+          ) : null}
+        </div>
+        {landedCostPendingWeight ? (
+          <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {t('procurement.orders.landedCostPendingWeight')}
+          </p>
+        ) : null}
+        {landedCostPendingWeight ? (
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-700">{t('procurement.orders.missingWeightProducts')}</p>
+            <ul className="mt-2 list-disc pl-5 text-sm text-slate-600">
+              {(order.items ?? [])
+                .filter((item) => item.weightStatus === 'NOT_SET' || !Number(item.unitWeightKg ?? item.weightKg))
+                .map((item) => (
+                  <li key={item.id}>{item.sku} · {item.productName}</li>
+                ))}
+            </ul>
+          </div>
+        ) : null}
+        {landedCostPendingWeight && importCostBreakdown ? (
+          <p className="mt-4 text-sm font-medium text-amber-700">{t('procurement.orders.landedCostProvisional')}</p>
+        ) : null}
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.importCostBreakdown')}</h3>
         {importCostBreakdown ? (
           <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
@@ -1100,6 +1170,15 @@ export default function ProcurementOrderDetailPage() {
                   <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.netWeightKg')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.unitWeight')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.totalWeight')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedCargo')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedChinaTransport')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedKyrgyzstanTransport')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedInsurance')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedCustoms')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedTransportExpenses')}</th>
+                  <th className="px-4 py-3">{t('procurement.orders.col.unitLandedCost')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
                   <th className="px-4 py-3">{t('inventory.finalCostKgs')}</th>
@@ -1114,8 +1193,15 @@ export default function ProcurementOrderDetailPage() {
                       <td className="px-4 py-3">{row.productName}</td>
                       <td className="px-4 py-3">{row.quantity}</td>
                       <td className="px-4 py-3">{row.receivedQuantity ?? '-'}</td>
-                      <td className="px-4 py-3">{item.netWeightKg.toFixed(3)}</td>
+                      <td className="px-4 py-3">{row.unitWeightKg != null ? Number(row.unitWeightKg).toFixed(3) : item.netWeightKg.toFixed(3)}</td>
                       <td className="px-4 py-3">{item.lineNetWeightKg.toFixed(3)}</td>
+                      <td className="px-4 py-3">{formatKgs(item.chinaExportAllocKgs)}</td>
+                      <td className="px-4 py-3">{formatKgs(item.chinaDomesticAllocKgs)}</td>
+                      <td className="px-4 py-3">{formatKgs(item.localTransportAllocKgs)}</td>
+                      <td className="px-4 py-3">{formatKgs(item.insuranceAllocKgs)}</td>
+                      <td className="px-4 py-3">{formatKgs(item.customsAllocKgs)}</td>
+                      <td className="px-4 py-3">{formatKgs(item.bankFeeAllocKgs + item.otherAllocKgs)}</td>
+                      <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>
                       <td className="px-4 py-3">¥{Number(row.purchasePriceYuan).toFixed(2)}</td>
                       <td className="px-4 py-3">¥{item.totalYuan.toFixed(2)}</td>
                       <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>

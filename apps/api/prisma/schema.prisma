@@ -315,6 +315,19 @@ enum ProcurementOrderItemStatus {
   CANCELLED
 }
 
+enum ProcurementItemWeightStatus {
+  NOT_SET
+  PRELIMINARY
+  CONFIRMED
+}
+
+enum ProcurementLandedCostStatus {
+  PENDING_WEIGHT
+  READY_TO_CALCULATE
+  CALCULATED
+  FINALIZED
+}
+
 enum FileAttachmentEntityType {
   PROCUREMENT_ORDER
   SUPPLIER_PAYMENT
@@ -2055,6 +2068,9 @@ model ProcurementOrder {
   insuranceCostKgs         Decimal                @default(0) @db.Decimal(14, 2)
   bankFeeCostKgs           Decimal                @default(0) @db.Decimal(14, 2)
   otherExpenseKgs          Decimal                @default(0) @db.Decimal(14, 2)
+  landedCostStatus         ProcurementLandedCostStatus @default(PENDING_WEIGHT)
+  landedCostCalculationVersion Int                @default(0)
+  landedCostCalculatedAt   DateTime?
   estimatedArrivalDate     DateTime?
   actualArrivalDate        DateTime?
   createdById              String
@@ -2089,6 +2105,7 @@ model ProcurementOrder {
   svhToHqTransport         ProcurementSvhToHqTransport?
   chinaReceivingDraftRows  ChinaReceivingDraftRow[]
   chinaReceivingEditSession ChinaReceivingEditSession?
+  landedCostSnapshots      ProcurementLandedCostSnapshot[]
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
@@ -2231,6 +2248,8 @@ model ProcurementOrderItem {
   yuanRate               Decimal          @db.Decimal(14, 4)
   costKgs                Decimal          @db.Decimal(14, 2)
   weightKg               Decimal          @db.Decimal(14, 3)
+  unitWeightKg           Decimal?         @db.Decimal(14, 3)
+  weightStatus           ProcurementItemWeightStatus @default(NOT_SET)
   netWeightKg            Decimal          @default(0) @db.Decimal(14, 3)
   packagingWeightKg      Decimal          @default(0) @db.Decimal(14, 3)
   packagingType          String?
@@ -2249,6 +2268,7 @@ model ProcurementOrderItem {
   totalYuan              Decimal          @db.Decimal(14, 2)
   totalCostKgs           Decimal          @db.Decimal(14, 2)
   note                   String?
+  landedCostSnapshots    ProcurementLandedCostSnapshot[]
   createdAt              DateTime         @default(now())
   updatedAt              DateTime         @updatedAt
 
@@ -2257,6 +2277,7 @@ model ProcurementOrderItem {
   @@index([supplierId])
   @@index([factoryId])
   @@index([status])
+  @@index([weightStatus])
 }
 
 model PurchaseOrder {
@@ -3297,6 +3318,8 @@ model ChinaReceivingDraftRow {
   hqWarehouseId      String?
   actualQuantity     Int
   damagedQuantity    Int              @default(0)
+  unitWeightKg       Decimal?         @db.Decimal(14, 3)
+  weightStatus       ProcurementItemWeightStatus @default(NOT_SET)
   note               String?
   isSaved            Boolean          @default(false)
   isChecked          Boolean          @default(false)
@@ -3326,6 +3349,39 @@ model ChinaReceivingEditSession {
   lastHeartbeatAt    DateTime         @default(now())
 
   @@index([lockedByUserId])
+}
+
+model ProcurementLandedCostSnapshot {
+  id                            String           @id @default(cuid())
+  procurementOrderId            String
+  procurementOrder              ProcurementOrder @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  procurementOrderItemId        String           @unique
+  procurementOrderItem          ProcurementOrderItem @relation(fields: [procurementOrderItemId], references: [id], onDelete: Cascade)
+  productId                     String
+  actualQty                     Int              @default(0)
+  unitWeightKg                  Decimal?         @db.Decimal(14, 3)
+  totalWeightKg                 Decimal          @default(0) @db.Decimal(14, 3)
+  basePurchaseCostKgs           Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedChinaTransportKgs    Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedCargoKgs             Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedKyrgyzstanTransportKgs Decimal        @default(0) @db.Decimal(14, 2)
+  allocatedInsuranceKgs         Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedCustomsKgs           Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedTransportExpensesKgs Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedPackagingKgs         Decimal          @default(0) @db.Decimal(14, 2)
+  allocatedOtherExpensesKgs     Decimal          @default(0) @db.Decimal(14, 2)
+  totalLandedCostKgs            Decimal          @default(0) @db.Decimal(14, 2)
+  unitLandedCostKgs             Decimal          @default(0) @db.Decimal(14, 2)
+  calculationVersion            Int              @default(1)
+  isFinalized                   Boolean          @default(false)
+  isProvisional                 Boolean          @default(false)
+  calculatedAt                  DateTime         @default(now())
+  createdAt                     DateTime         @default(now())
+  updatedAt                     DateTime         @updatedAt
+
+  @@index([procurementOrderId])
+  @@index([productId])
+  @@index([isFinalized])
 }
 
 model ProcurementDifferenceReport {

@@ -10,6 +10,7 @@ export type RowSaveState = 'saved' | 'saving' | 'unsaved' | 'error';
 export type LocalRowState = {
   actualQuantity: string;
   damagedQuantity: string;
+  unitWeightKg: string;
   note: string;
   saveState: RowSaveState;
   lastSavedAt: string | null;
@@ -17,6 +18,8 @@ export type LocalRowState = {
   isDirty: boolean;
   serverIsSaved: boolean;
   rowStatus: ChinaReceivingRowStatus;
+  needsWeightEntry: boolean;
+  weightStatus?: 'NOT_SET' | 'PRELIMINARY' | 'CONFIRMED';
 };
 
 export type ChinaReceivingProgress = {
@@ -41,6 +44,9 @@ export type ChinaReceivingLineItem = {
   expectedQuantity: number;
   actualReceivedQuantity?: number | null;
   damagedQuantity?: number;
+  unitWeightKg?: number | null;
+  weightStatus?: 'NOT_SET' | 'PRELIMINARY' | 'CONFIRMED';
+  needsWeightEntry?: boolean;
   note?: string | null;
   isSaved?: boolean;
   isChecked?: boolean;
@@ -54,7 +60,7 @@ export function buildServerDraftFingerprint(lineItems: ChinaReceivingLineItem[])
   return lineItems
     .map(
       (item) =>
-        `${item.id}:${item.isSaved ? 1 : 0}:${item.actualReceivedQuantity ?? ''}:${item.damagedQuantity ?? ''}:${item.note ?? ''}:${item.updatedAt ?? ''}`,
+        `${item.id}:${item.isSaved ? 1 : 0}:${item.actualReceivedQuantity ?? ''}:${item.damagedQuantity ?? ''}:${item.unitWeightKg ?? ''}:${item.note ?? ''}:${item.updatedAt ?? ''}`,
     )
     .join('|');
 }
@@ -129,6 +135,7 @@ export function persistLocalDraft(orderId: string, rows: Record<string, LocalRow
           {
             actualQuantity: row.actualQuantity,
             damagedQuantity: row.damagedQuantity,
+            unitWeightKg: row.unitWeightKg,
             note: row.note,
           },
         ]),
@@ -137,12 +144,12 @@ export function persistLocalDraft(orderId: string, rows: Record<string, LocalRow
   );
 }
 
-export function loadLocalDraft(orderId: string): Record<string, { actualQuantity: string; damagedQuantity: string; note: string }> | null {
+export function loadLocalDraft(orderId: string): Record<string, { actualQuantity: string; damagedQuantity: string; unitWeightKg?: string; note: string }> | null {
   if (typeof window === 'undefined') return null;
   const raw = window.localStorage.getItem(localStorageDraftKey(orderId));
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { rows?: Record<string, { actualQuantity: string; damagedQuantity: string; note: string }> };
+    const parsed = JSON.parse(raw) as { rows?: Record<string, { actualQuantity: string; damagedQuantity: string; unitWeightKg?: string; note: string }> };
     return parsed.rows ?? null;
   } catch {
     return null;

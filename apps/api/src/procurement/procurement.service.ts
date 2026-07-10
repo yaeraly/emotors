@@ -8,6 +8,7 @@ import {
   AlertType,
   DomesticTransportDocumentType,
   FileAttachmentEntityType,
+  ProcurementItemWeightStatus,
   ProcurementOrderItemStatus,
   ProcurementOrderStatus,
   ProcurementSupplierPaymentStatus,
@@ -59,8 +60,10 @@ import {
   extractLogisticsCosts,
   LandedCostItemResult,
   LandedCostOrderResult,
+  LandedCostItemInput,
   mapStoredProcurementItemToLandedCostInput,
 } from './landed-cost.util';
+import { LandedCostService } from './landed-cost.service';
 import {
   calculateAmountKgs,
   summarizeSupplierPayments,
@@ -106,6 +109,8 @@ type PreparedProcurementItem = {
   purchasePriceYuan: number;
   yuanRate: number;
   weightKg: number;
+  unitWeightKg?: number | null;
+  weightStatus?: ProcurementItemWeightStatus;
   note?: string;
 };
 
@@ -115,6 +120,7 @@ export class ProcurementService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
+    private readonly landedCostService: LandedCostService,
   ) {}
 
   createSupplier(dto: any) {
@@ -1833,50 +1839,39 @@ export class ProcurementService {
   recalculateProcurementOrder(user: AuthUser, id: string, reason?: string) {
     this.assertCanManageProcurement(user);
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.procurementOrder.findFirst({
-        where: { id, deletedAt: null },
-        include: { items: true, svhToHqTransport: true },
-      });
-      if (!order) throw new NotFoundException('Procurement order not found');
-      const oldValue = this.pickProcurementAuditFields(order);
-      const exchangeRate = await this.resolveEffectiveYuanRate(tx, order);
-      const resolved = this.resolveProcurementLogistics(order, undefined, exchangeRate);
-      const { logistics, cargo, ...transportResolved } = resolved;
-      const activeItems = this.activeProcurementItems(order.items);
-      const calculated = this.calculateProcurementLandedCosts(
-        activeItems.map((item) => mapStoredProcurementItemToLandedCostInput({
-          ...item,
-          yuanRate: exchangeRate,
-        })),
-        logistics,
-        cargo,
-      );
-      const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
-      for (const [index, item] of activeItems.entries()) {
-        const next = calculated.items[index];
-        await tx.procurementOrderItem.update({
-          where: { id: item.id },
-          data: this.mapRecalculatedItemFields(next, exchangeRate),
-        });
-      }
-      const updated = await tx.procurementOrder.update({
-        where: { id },
-        data: {
-          ...orderTotals,
-          ...this.buildProcurementTransportFields(order, order, transportResolved),
-          localTransportKgs: transportResolved.localTransportKgs,
+      const result = await this.landedCostService.recalculateProcurementOrder(
+        id,
+        {
+          user,
+          reason: reason ?? 'Manual recalculation',
+          triggerReason: reason ?? 'manual_recalculate',
         },
-        include: this.procurementOrderInclude(),
-      });
-      await this.auditProcurement(tx, user, 'RECALCULATE_PROCUREMENT_LANDED_COST', id, oldValue, this.pickProcurementAuditFields(updated), reason);
-      const paymentCount = await tx.procurementSupplierPayment.count({
-        where: { procurementOrderId: id, status: ProcurementSupplierPaymentStatus.ACTIVE },
-      });
-      if (paymentCount > 0) {
-        return this.syncSupplierPaymentSummaryAndRecalculate(tx, user, id, reason ?? 'Procurement landed cost recalculated');
+        tx,
+      );
+      if (result.skipped) {
+        const order = await tx.procurementOrder.findFirst({
+          where: { id, deletedAt: null },
+          include: this.procurementOrderInclude(),
+        });
+        if (!order) throw new NotFoundException('Procurement order not found');
+        return this.toProcurementOrderResponse(order);
       }
-      return this.toProcurementOrderResponse(updated);
+      await this.auditProcurement(
+        tx,
+        user,
+        'RECALCULATE_PROCUREMENT_LANDED_COST',
+        id,
+        null,
+        { calculationVersion: result.order.landedCostCalculationVersion },
+        reason,
+      );
+      return this.toProcurementOrderResponse(result.order);
     });
+  }
+
+  getProcurementLandedCostDetail(user: AuthUser, id: string) {
+    this.assertCanViewProcurement(user);
+    return this.landedCostService.getLandedCostDetail(id);
   }
 
   procurementOrderAuditLogs(id: string) {
@@ -2734,12 +2729,8 @@ export class ProcurementService {
   ): Promise<PreparedProcurementItem> {
     const product = await tx.product.findFirst({ where: { id: item.productId, deletedAt: null } });
     if (!product) throw new NotFoundException('Product not found');
-    const weightKg = Number(product.weightKg);
-    if (!weightKg || weightKg <= 0) {
-      throw new BadRequestException(
-        `Product weight is not configured for ${product.sku} (${product.name}). Please configure weight in Product Management.`,
-      );
-    }
+    const productWeight = Number(product.weightKg);
+    const hasWeight = productWeight > 0;
     const quantity = Number(item.quantity ?? 0);
     if (quantity <= 0) {
       throw new BadRequestException(`Quantity must be greater than zero for ${product.sku}`);
@@ -2754,7 +2745,9 @@ export class ProcurementService {
       quantity,
       purchasePriceYuan: Number(item.purchasePriceYuan ?? product.purchasePriceYuan ?? 0),
       yuanRate: exchangeRate,
-      weightKg,
+      weightKg: hasWeight ? productWeight : 0,
+      unitWeightKg: hasWeight ? productWeight : null,
+      weightStatus: hasWeight ? ProcurementItemWeightStatus.CONFIRMED : ProcurementItemWeightStatus.NOT_SET,
       note: item.note,
     };
   }
@@ -3012,13 +3005,7 @@ export class ProcurementService {
   }
 
   private calculateProcurementLandedCosts(
-    items: Array<{
-      quantity: number;
-      receivedQuantity?: number | null;
-      purchasePriceYuan: number;
-      yuanRate: number;
-      weightKg: number;
-    }>,
+    items: LandedCostItemInput[],
     logistics: ReturnType<typeof extractLogisticsCosts>,
     cargo: ReturnType<typeof extractCargoConfig>,
   ) {
@@ -3078,6 +3065,10 @@ export class ProcurementService {
       yuanRate: exchangeRate,
       costKgs: item.costKgs,
       weightKg: item.netWeightKg,
+      unitWeightKg: prepared.unitWeightKg ?? (item.netWeightKg > 0 ? item.netWeightKg : null),
+      weightStatus:
+        prepared.weightStatus ??
+        (item.hasKnownWeight ? ProcurementItemWeightStatus.CONFIRMED : ProcurementItemWeightStatus.NOT_SET),
       netWeightKg: item.netWeightKg,
       packagingWeightKg: item.packagingWeightKg ?? 0,
       packagingType: null,
@@ -3907,7 +3898,7 @@ export class ProcurementService {
     user: AuthUser,
     orderId: string,
     reason: string,
-    _section?: string,
+    triggerReason?: string,
   ) {
     const order = await tx.procurementOrder.findFirst({
       where: { id: orderId, deletedAt: null },
@@ -3916,51 +3907,37 @@ export class ProcurementService {
     if (!order) throw new NotFoundException('Procurement order not found');
 
     const oldValue = this.pickProcurementAuditFields(order);
-    const summary = summarizeSupplierPayments(order.supplierPayments, Number(order.totalYuan));
-    const effectiveRate =
-      summary.weightedAverageYuanRate && summary.totalPaidYuan > 0
-        ? summary.weightedAverageYuanRate
-        : Number(order.defaultYuanRate);
-    const resolved = this.resolveProcurementLogistics(order, undefined, effectiveRate);
-    const { logistics, cargo, ...transportResolved } = resolved;
-    const calculated = this.calculateProcurementLandedCosts(
-      order.items.map((item: any) => mapStoredProcurementItemToLandedCostInput({
-        ...item,
-        yuanRate: effectiveRate,
-      })),
-      logistics,
-      cargo,
+    const result = await this.landedCostService.recalculateProcurementOrder(
+      orderId,
+      {
+        user,
+        reason,
+        triggerReason: triggerReason ?? reason,
+      },
+      tx,
     );
-    const orderTotals = this.buildProcurementOrderTotals(calculated, logistics, cargo);
-
-    for (const [index, item] of order.items.entries()) {
-      const next = calculated.items[index];
-      await tx.procurementOrderItem.update({
-        where: { id: item.id },
-        data: this.mapRecalculatedItemFields(next, effectiveRate),
-      });
+    if (result.skipped) {
+      return this.toProcurementOrderResponse(order);
     }
 
-    const updated = await tx.procurementOrder.update({
-      where: { id: order.id },
-      data: {
-        ...orderTotals,
-        ...this.buildProcurementTransportFields(order, order, transportResolved),
-        localTransportKgs: transportResolved.localTransportKgs,
-        svhToHqTransportCompanyId: order.svhToHqTransport?.transportCompanyId ?? order.svhToHqTransportCompanyId,
-        totalPaidYuan: summary.totalPaidYuan,
-        totalPaidKgs: summary.totalPaidKgs,
-        remainingYuan: summary.remainingYuan,
-        weightedAverageYuanRate: summary.weightedAverageYuanRate,
-        supplierPaymentStatus: summary.supplierPaymentStatus,
-      },
+    const updated = await tx.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
       include: this.procurementOrderInclude(),
     });
+    if (!updated) throw new NotFoundException('Procurement order not found');
 
     if (
       order.hqStockMovementCreatedAt &&
       Number(oldValue.totalCostKgs) !== Number(updated.totalCostKgs)
     ) {
+      const summary = summarizeSupplierPayments(
+        (order.supplierPayments ?? []).map((payment: any) => ({
+          amountYuan: Number(payment.amountYuan),
+          exchangeRate: Number(payment.exchangeRate),
+          status: payment.status,
+        })),
+        Number(order.totalYuan),
+      );
       await tx.procurementCostAdjustment.create({
         data: {
           procurementOrderId: order.id,

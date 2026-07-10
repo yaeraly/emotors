@@ -33,6 +33,8 @@ export type ChinaReceivingDetail = {
   receivingStatus: string;
   draftState?: 'DRAFT' | 'COMPLETED';
   canReceive: boolean;
+  landedCostStatus?: string;
+  landedCostPendingWeight?: boolean;
   hqStockMovementCreatedAt?: string | null;
   lineItems: ChinaReceivingLineItem[];
   progress?: ChinaReceivingProgress;
@@ -316,6 +318,10 @@ export function ChinaReceivingWorkspace({
         </div>
       ) : null}
 
+      {task.landedCostPendingWeight ? (
+        <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('chinaReceiving.landedCostPendingWeight')}</p>
+      ) : null}
+
       <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
           <thead className="bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500">
@@ -324,6 +330,7 @@ export function ChinaReceivingWorkspace({
               <th className="w-14 px-2 py-2" title={t('chinaReceiving.expectedQty')}>{t('chinaReceiving.col.expectedShort')}</th>
               <th className="w-16 px-2 py-2" title={t('chinaReceiving.actualQty')}>{t('chinaReceiving.col.actualShort')}</th>
               <th className="w-14 px-2 py-2" title={t('chinaReceiving.damagedQty')}>{t('chinaReceiving.col.damagedShort')}</th>
+              <th className="w-16 px-2 py-2" title={t('chinaReceiving.unitWeightKg')}>{t('chinaReceiving.col.weightShort')}</th>
               <th className="w-14 px-2 py-2" title={t('chinaReceiving.difference')}>{t('chinaReceiving.col.diffShort')}</th>
               <th className="w-28 px-2 py-2" title={t('chinaReceiving.notes')}>{t('chinaReceiving.col.notesShort')}</th>
               {canEdit ? (
@@ -341,6 +348,8 @@ export function ChinaReceivingWorkspace({
               const rowStatus = row?.rowStatus ?? 'IN_PROGRESS';
               const bg = row ? rowBackgroundClass(rowStatus, row.saveState, row.isDirty) : '';
               const noteValue = row?.note ?? '';
+              const needsWeight = row?.needsWeightEntry ?? item.needsWeightEntry;
+              const unitWeight = row?.unitWeightKg ?? (item.unitWeightKg != null ? String(item.unitWeightKg) : '');
               return (
                 <tr key={item.id} className={bg}>
                   <td className="px-2 py-2">
@@ -375,6 +384,22 @@ export function ChinaReceivingWorkspace({
                       />
                     ) : (
                       <span className={`block text-center ${damaged > 0 ? 'font-semibold text-orange-700' : ''}`}>{damaged}</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
+                    {canEdit && needsWeight ? (
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.001"
+                        value={unitWeight}
+                        onChange={(e) => updateRow(item.id, 'unitWeightKg', e.target.value)}
+                        className="w-full rounded border border-amber-300 bg-amber-50 px-1.5 py-1 text-center"
+                        title={t('chinaReceiving.unitWeightKg')}
+                        placeholder="кг"
+                      />
+                    ) : (
+                      <span className="block text-center">{unitWeight || '-'}</span>
                     )}
                   </td>
                   <td className={`px-2 py-2 text-center font-semibold ${diffUi.color}`} title={t('chinaReceiving.difference')}>

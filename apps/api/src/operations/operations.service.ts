@@ -8,6 +8,8 @@ import {
   HqWarrantyDecision,
   Prisma,
   ProcurementOrderStatus,
+  ProcurementItemWeightStatus,
+  ProcurementLandedCostStatus,
   ProcurementShortageReason,
   ReturnOrderStatus,
   ReturnResolution,
@@ -54,6 +56,7 @@ import {
   SVH_TRANSPORT_INCOMPLETE_MESSAGE,
 } from '../procurement/hq-receiving-validation.util';
 import { buildProcurementLandedCostInputs } from '../procurement/transport-logistics.util';
+import { LandedCostService } from '../procurement/landed-cost.service';
 import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
@@ -107,6 +110,7 @@ export class OperationsService {
     private readonly assignmentService: HqWarehouseAssignmentService,
     private readonly salesManagerAssignmentService: HqSalesManagerAssignmentService,
     private readonly distributionService: DistributionService,
+    private readonly landedCostService: LandedCostService,
   ) {}
 
   async branchPurchaseRequests(user: AuthUser) {
@@ -988,11 +992,26 @@ export class OperationsService {
           items: true,
           supplierPayments: true,
           svhToHqTransport: { include: { transportCompany: true } },
+          landedCostSnapshots: { where: { isFinalized: false } },
         },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       if (order.hqStockMovementCreatedAt) {
         throw new BadRequestException('Procurement stock has already been received');
+      }
+
+      const activeItems = order.items.filter((item) => item.status === 'ACTIVE');
+      const readiness = this.landedCostService.validateFinalReceivingReadiness({
+        id: order.id,
+        landedCostStatus: order.landedCostStatus,
+        hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
+        items: activeItems,
+      });
+      if (!readiness.ready) {
+        if (readiness.errors.includes('LANDED_COST_PENDING_WEIGHT')) {
+          throw new BadRequestException('LANDED_COST_PENDING_WEIGHT');
+        }
+        throw new BadRequestException(readiness.errors.join('; '));
       }
 
       const draftRows = await tx.chinaReceivingDraftRow.findMany({
@@ -1107,21 +1126,34 @@ export class OperationsService {
       const draftMap = new Map(
         draftRows.filter((row) => row.isSaved).map((row) => [row.procurementItemId, row]),
       );
+      const snapshotMap = new Map(
+        (order.landedCostSnapshots ?? []).map((snapshot) => [snapshot.procurementOrderItemId, snapshot]),
+      );
       const receivedItems = order.items.map((item) => {
         const draft = draftMap.get(item.id);
+        const snapshot = snapshotMap.get(item.id);
         const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
         const receivedQuantity = draft
           ? draft.actualQuantity
           : Number(received.receivedQuantity ?? item.quantity);
         const damagedQuantity = draft ? draft.damagedQuantity : Number(received.damagedQuantity ?? 0);
         const note = draft?.note ?? received.note;
+        const unitWeightKg =
+          draft?.unitWeightKg != null
+            ? Number(draft.unitWeightKg)
+            : item.unitWeightKg != null
+              ? Number(item.unitWeightKg)
+              : Number(item.weightKg);
         return {
           ...item,
+          unitWeightKg,
+          weightStatus: draft?.weightStatus ?? item.weightStatus,
           receivedQuantity,
           damagedQuantity,
           difference: receivedQuantity - item.quantity,
           receivedNote: note,
           shortageReason: received.shortageReason,
+          snapshotUnitLandedCostKgs: snapshot ? Number(snapshot.unitLandedCostKgs) : null,
         };
       });
 
@@ -1159,7 +1191,15 @@ export class OperationsService {
       let recalculated;
       try {
         recalculated = calculateLandedCosts(
-          receivedItems.map((item) => mapStoredProcurementItemToLandedCostInput(item)),
+          receivedItems.map((item) => mapStoredProcurementItemToLandedCostInput({
+            quantity: item.quantity,
+            receivedQuantity: item.receivedQuantity,
+            purchasePriceYuan: item.purchasePriceYuan,
+            yuanRate: effectiveYuanRate,
+            unitWeightKg: item.unitWeightKg,
+            weightKg: item.unitWeightKg,
+            weightStatus: item.weightStatus,
+          })),
           logistics,
           { cargo },
         );
@@ -1253,12 +1293,13 @@ export class OperationsService {
           },
         });
         if (item.receivedQuantity > 0) {
+          const unitCostKgs = item.snapshotUnitLandedCostKgs ?? next.finalCostKgs;
           const movement = await this.inventoryService.createStockMovementInTx(tx, user, {
             productId: item.productId,
             warehouseId: hqWarehouseId,
             type: StockMovementType.IN,
             quantity: item.receivedQuantity,
-            unitCostKgs: next.finalCostKgs,
+            unitCostKgs,
             referenceType: 'PROCUREMENT_GOODS_RECEIVING',
             referenceId: receiving.id,
             note: `Procurement receiving ${receiving.receivingNumber}`,
@@ -1421,6 +1462,14 @@ export class OperationsService {
         data: { isArchived: true },
       });
       await tx.chinaReceivingEditSession.deleteMany({ where: { procurementOrderId: order.id } });
+      await this.landedCostService.finalizeSnapshots(order.id, tx);
+      await this.auditInTx(tx, user, 'HQ', 'LANDED_COST_FINALIZED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        procurementOrderId: order.id,
+        receivingId: receiving.id,
+        calculationVersion: order.landedCostCalculationVersion,
+        timestamp: new Date().toISOString(),
+      });
       await this.auditInTx(tx, user, 'HQ', 'CHINA_RECEIVING_FINALIZED_FROM_DRAFT', 'ProcurementOrder', order.id, {
         userId: user.id,
         procurementOrderId: order.id,
@@ -1785,6 +1834,16 @@ export class OperationsService {
         : (draft?.actualQuantity ?? item.receivedQuantity ?? item.quantity);
       const damagedQuantity = hasSavedDraft ? draft!.damagedQuantity : (draft?.damagedQuantity ?? 0);
       const isSaved = hasSavedDraft;
+      const unitWeightKg =
+        draft?.unitWeightKg != null
+          ? Number(draft.unitWeightKg)
+          : item.unitWeightKg != null
+            ? Number(item.unitWeightKg)
+            : Number(item.weightKg) > 0
+              ? Number(item.weightKg)
+              : null;
+      const weightStatus = draft?.weightStatus ?? item.weightStatus;
+      const needsWeightEntry = weightStatus === ProcurementItemWeightStatus.NOT_SET;
       return {
         id: item.id,
         productId: item.productId,
@@ -1794,6 +1853,9 @@ export class OperationsService {
         expectedQuantity: item.quantity,
         actualReceivedQuantity: actualQuantity,
         damagedQuantity,
+        unitWeightKg,
+        weightStatus,
+        needsWeightEntry,
         note: hasSavedDraft ? (draft!.note ?? '') : (draft?.note ?? null),
         isSaved,
         isChecked: draft?.isChecked ?? isSaved,
@@ -1851,6 +1913,8 @@ export class OperationsService {
       hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
       progress,
       editSession: activeSession,
+      landedCostStatus: order.landedCostStatus,
+      landedCostPendingWeight: order.landedCostStatus === ProcurementLandedCostStatus.PENDING_WEIGHT,
       draftRows: draftRows.map((row) => ({
         id: row.id,
         procurementItemId: row.procurementItemId,
@@ -1858,6 +1922,8 @@ export class OperationsService {
         hqWarehouseId: row.hqWarehouseId,
         actualQuantity: row.actualQuantity,
         damagedQuantity: row.damagedQuantity,
+        unitWeightKg: row.unitWeightKg != null ? Number(row.unitWeightKg) : null,
+        weightStatus: row.weightStatus,
         note: row.note,
         isSaved: row.isSaved,
         isChecked: row.isChecked,
@@ -1989,6 +2055,11 @@ export class OperationsService {
       : 'CHINA_RECEIVING_DRAFT_CREATED';
     const legacyAction = dto.autoSave ? 'ROW_AUTOSAVED' : existing ? 'ROW_UPDATED' : 'ROW_SAVED';
 
+    const weightProvided = dto.unitWeightKg != null && Number(dto.unitWeightKg) > 0;
+    const nextWeightStatus = weightProvided
+      ? ProcurementItemWeightStatus.CONFIRMED
+      : existing?.weightStatus ?? orderItem.weightStatus;
+
     const saved = await this.prisma.chinaReceivingDraftRow.upsert({
       where: {
         procurementOrderId_procurementItemId: {
@@ -2003,6 +2074,8 @@ export class OperationsService {
         hqWarehouseId: order.hqWarehouseId,
         actualQuantity: dto.actualQuantity,
         damagedQuantity: dto.damagedQuantity,
+        unitWeightKg: weightProvided ? dto.unitWeightKg : null,
+        weightStatus: nextWeightStatus,
         note: dto.note ?? null,
         isSaved: true,
         isChecked: true,
@@ -2015,6 +2088,8 @@ export class OperationsService {
         hqWarehouseId: order.hqWarehouseId,
         actualQuantity: dto.actualQuantity,
         damagedQuantity: dto.damagedQuantity,
+        unitWeightKg: weightProvided ? dto.unitWeightKg : undefined,
+        weightStatus: weightProvided ? ProcurementItemWeightStatus.CONFIRMED : undefined,
         note: dto.note ?? null,
         isSaved: true,
         isChecked: true,
@@ -2023,6 +2098,91 @@ export class OperationsService {
       },
       include: { lastSavedBy: { select: { id: true, fullName: true } } },
     });
+
+    let productMasterWeightUpdated = false;
+    let productMasterWeightMismatch = false;
+    if (weightProvided) {
+      const product = await this.prisma.product.findUnique({ where: { id: orderItem.productId } });
+      const oldItemWeight = orderItem.unitWeightKg != null ? Number(orderItem.unitWeightKg) : null;
+      await this.prisma.procurementOrderItem.update({
+        where: { id: orderItem.id },
+        data: {
+          unitWeightKg: dto.unitWeightKg,
+          weightKg: dto.unitWeightKg,
+          netWeightKg: dto.unitWeightKg,
+          weightStatus: ProcurementItemWeightStatus.CONFIRMED,
+        },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'PRODUCT_WEIGHT_ENTERED_DURING_RECEIVING',
+          entity: 'ProcurementOrderItem',
+          entityId: orderItem.id,
+          metadata: {
+            userId: user.id,
+            procurementOrderId: orderId,
+            procurementOrderItemId: itemId,
+            productId: orderItem.productId,
+            oldWeight: oldItemWeight,
+            newWeight: dto.unitWeightKg,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'PRODUCT_WEIGHT_CONFIRMED',
+          entity: 'ProcurementOrderItem',
+          entityId: orderItem.id,
+          metadata: {
+            userId: user.id,
+            procurementOrderId: orderId,
+            productId: orderItem.productId,
+            newWeight: dto.unitWeightKg,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      if (product) {
+        const masterWeight = Number(product.weightKg ?? 0);
+        if (masterWeight <= 0) {
+          await this.prisma.product.update({
+            where: { id: product.id },
+            data: { weightKg: dto.unitWeightKg },
+          });
+          productMasterWeightUpdated = true;
+          await this.prisma.auditLog.create({
+            data: {
+              userId: user.id,
+              role: user.role,
+              action: 'PRODUCT_MASTER_WEIGHT_UPDATED',
+              entity: 'Product',
+              entityId: product.id,
+              metadata: {
+                userId: user.id,
+                productId: product.id,
+                oldWeight: masterWeight,
+                newWeight: dto.unitWeightKg,
+                procurementOrderId: orderId,
+                timestamp: new Date().toISOString(),
+              },
+            },
+          });
+        } else if (Math.abs(masterWeight - Number(dto.unitWeightKg)) > 0.001) {
+          productMasterWeightMismatch = true;
+        }
+      }
+      await this.landedCostService.recalculateProcurementOrder(orderId, {
+        user,
+        reason: 'Unit weight entered during China receiving',
+        triggerReason: 'china_receiving_weight_saved',
+        useDraftQuantities: true,
+      });
+    }
 
     const auditMetadata = {
       userId: user.id,
@@ -2086,6 +2246,10 @@ export class OperationsService {
       ...saved,
       updatedAt: saved.updatedAt.toISOString(),
       lastSavedAt: saved.lastSavedAt?.toISOString() ?? null,
+      unitWeightKg: saved.unitWeightKg != null ? Number(saved.unitWeightKg) : null,
+      weightStatus: saved.weightStatus,
+      productMasterWeightUpdated,
+      productMasterWeightMismatch,
       rowStatus: resolveRowStatus(
         saved.actualQuantity,
         orderItem.quantity,
