@@ -23,7 +23,9 @@ import {
   canReceiveProcurementToHq,
   canUnlockProcurementOrder,
   canViewSupplierPayments,
+  hasFullAccess,
   hasRole,
+  isSupplyChainManagerUser,
 } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -31,6 +33,8 @@ import { translateStatus } from '@/lib/translate-status';
 
 type ProcurementOrderItem = {
   id: string;
+  productId: string;
+  product?: { id: string; purchasePriceYuan?: number | string | null };
   sku: string;
   productName: string;
   status?: string;
@@ -434,6 +438,41 @@ export default function ProcurementOrderDetailPage() {
     if (order?.landedCostStatus === 'PENDING_WEIGHT') return false;
     return (previewTotals?.totalCostKgs ?? Number(order?.totalCostKgs ?? 0)) > 0;
   }, [previewTotals, order?.landedCostStatus, order?.totalCostKgs]);
+
+  const isScmOnlyProcurementView = useMemo(
+    () => isSupplyChainManagerUser(user) && !hasFullAccess(user),
+    [user],
+  );
+
+  const activeOrderItems = useMemo(
+    () => (order?.items ?? []).filter((item) => item.status !== 'CANCELLED'),
+    [order?.items],
+  );
+
+  const scmProductTableTotals = useMemo(() => {
+    let totalQuantity = 0;
+    let totalNetWeightKg = 0;
+    let allWeightsKnown = activeOrderItems.length > 0;
+    let totalYuan = 0;
+
+    for (const item of activeOrderItems) {
+      totalQuantity += item.quantity;
+      const purchasePriceYuan = Number(item.purchasePriceYuan ?? 0);
+      totalYuan += item.quantity * purchasePriceYuan;
+      const unitWeightKg = resolveUnitWeightKg(item);
+      if (unitWeightKg == null) {
+        allWeightsKnown = false;
+      } else {
+        totalNetWeightKg += unitWeightKg * item.quantity;
+      }
+    }
+
+    return {
+      totalQuantity,
+      totalNetWeightKg: allWeightsKnown ? totalNetWeightKg : null,
+      totalYuan,
+    };
+  }, [activeOrderItems]);
 
   const landedCostPendingWeight = order?.landedCostStatus === 'PENDING_WEIGHT';
 
@@ -1090,6 +1129,7 @@ export default function ProcurementOrderDetailPage() {
 
       {activeTab === 'landedCost' ? (
       <>
+      {!isScmOnlyProcurementView ? (
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-bold">{t('procurement.orders.landedCostSummary')}</h3>
@@ -1136,6 +1176,7 @@ export default function ProcurementOrderDetailPage() {
           <p className="mt-4 text-sm font-medium text-amber-700">{t('procurement.orders.landedCostProvisional')}</p>
         ) : null}
       </section>
+      ) : null}
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <CostBlock title={t('procurement.orders.productPurchase')}>
@@ -1195,36 +1236,97 @@ export default function ProcurementOrderDetailPage() {
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.productsTable')}</h3>
             <div className="overflow-x-auto">
-              <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="w-[40%] px-4 py-3">{t('procurement.orders.product')}</th>
-                    <th className="w-[12%] px-4 py-3 text-right">{t('procurement.orders.quantity')}</th>
-                    <th className="w-[16%] px-4 py-3 text-right">{t('inventory.purchaseCostKgs')}</th>
-                    <th className="w-[16%] px-4 py-3 text-right">{t('stockMovement.unitCost')}</th>
-                    <th className="w-[16%] px-4 py-3 text-right">{t('procurement.orders.col.lineTotalLandedCost')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {(previewTotals?.items ?? []).map((item, index) => {
-                    const row = (order.items ?? []).filter((entry) => entry.status !== 'CANCELLED')[index];
-                    if (!row) return null;
-                    return (
-                      <tr key={row.id}>
-                        <td className="px-4 py-3">
-                          <p className="truncate font-medium text-slate-900" title={row.productName}>
-                            {row.productName}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">{row.quantity}</td>
-                        <td className="px-4 py-3 text-right tabular-nums">{formatKgs(item.costKgs)}</td>
-                        <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatKgs(item.finalCostKgs)}</td>
-                        <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatKgs(item.totalCostKgs)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              {isScmOnlyProcurementView ? (
+                <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-2 py-2" title={t('procurement.orders.product')}>{t('procurement.orders.product')}</th>
+                      <th className="w-14 px-2 py-2 text-right" title={t('procurement.orders.quantity')}>{t('procurement.orders.col.quantityShort')}</th>
+                      <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.purchasePriceYuan')}>{t('procurement.orders.col.purchasePriceShort')}</th>
+                      <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.priceDifferenceYuan')}>{t('procurement.orders.col.priceDifferenceShort')}</th>
+                      <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.productWeight')}>{t('procurement.orders.col.weightShort')}</th>
+                      <th className="w-24 px-2 py-2 text-right" title={t('procurement.orders.lineTotalNetWeightKg')}>{t('procurement.orders.col.totalWeightShort')}</th>
+                      <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.totalYuan')}>{t('procurement.orders.col.totalYuanShort')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activeOrderItems.map((row) => {
+                      const purchasePriceYuan = Number(row.purchasePriceYuan ?? 0);
+                      const referencePriceYuan = getReferencePriceYuan(row);
+                      const priceDifferenceYuan = referencePriceYuan != null ? purchasePriceYuan - referencePriceYuan : null;
+                      const unitWeightKg = resolveUnitWeightKg(row);
+                      const lineTotalYuan = row.quantity * purchasePriceYuan;
+                      const lineTotalNetWeightKg = unitWeightKg != null ? unitWeightKg * row.quantity : null;
+
+                      return (
+                        <tr key={row.id}>
+                          <td className="px-2 py-1.5">
+                            <p className="truncate font-medium text-slate-900" title={row.productName}>
+                              {row.productName}
+                            </p>
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{row.quantity}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">{formatYuan(purchasePriceYuan)}</td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {priceDifferenceYuan != null ? formatPriceDifferenceYuan(priceDifferenceYuan) : '—'}
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {unitWeightKg != null ? formatWeightKg(unitWeightKg) : t('procurement.orders.weightNotSpecified')}
+                          </td>
+                          <td className="px-2 py-1.5 text-right tabular-nums">
+                            {lineTotalNetWeightKg != null ? formatWeightKg(lineTotalNetWeightKg) : t('procurement.orders.weightNotCalculated')}
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatYuan(lineTotalYuan)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-700">
+                    <tr>
+                      <td className="px-2 py-2">{t('procurement.orders.tableTotals')}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{scmProductTableTotals.totalQuantity}</td>
+                      <td className="px-2 py-2" colSpan={3} />
+                      <td className="px-2 py-2 text-right tabular-nums">
+                        {scmProductTableTotals.totalNetWeightKg != null
+                          ? formatWeightKg(scmProductTableTotals.totalNetWeightKg)
+                          : t('procurement.orders.weightNotCalculated')}
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums">{formatYuan(scmProductTableTotals.totalYuan)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              ) : (
+                <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="w-[40%] px-4 py-3">{t('procurement.orders.product')}</th>
+                      <th className="w-[12%] px-4 py-3 text-right">{t('procurement.orders.quantity')}</th>
+                      <th className="w-[16%] px-4 py-3 text-right">{t('inventory.purchaseCostKgs')}</th>
+                      <th className="w-[16%] px-4 py-3 text-right">{t('stockMovement.unitCost')}</th>
+                      <th className="w-[16%] px-4 py-3 text-right">{t('procurement.orders.col.lineTotalLandedCost')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(previewTotals?.items ?? []).map((item, index) => {
+                      const row = (order.items ?? []).filter((entry) => entry.status !== 'CANCELLED')[index];
+                      if (!row) return null;
+                      return (
+                        <tr key={row.id}>
+                          <td className="px-4 py-3">
+                            <p className="truncate font-medium text-slate-900" title={row.productName}>
+                              {row.productName}
+                            </p>
+                          </td>
+                          <td className="px-4 py-3 text-right tabular-nums">{row.quantity}</td>
+                          <td className="px-4 py-3 text-right tabular-nums">{formatKgs(item.costKgs)}</td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatKgs(item.finalCostKgs)}</td>
+                          <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatKgs(item.totalCostKgs)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </section>
           </>
@@ -1417,4 +1519,35 @@ function formHasDomesticData(form: DomesticTransportForm) {
 
 function formatKgs(value: number | string | null | undefined) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
+}
+
+function resolveUnitWeightKg(item: ProcurementOrderItem): number | null {
+  if (item.weightStatus === 'NOT_SET') return null;
+  const raw = item.unitWeightKg ?? item.weightKg;
+  if (raw == null || raw === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function getReferencePriceYuan(item: ProcurementOrderItem): number | null {
+  const raw = item.product?.purchasePriceYuan;
+  if (raw == null || raw === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+}
+
+function formatYuan(value: number) {
+  return `${value.toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} ¥`;
+}
+
+function formatWeightKg(value: number) {
+  return `${value.toLocaleString('ru-RU', { maximumFractionDigits: 3, minimumFractionDigits: 0 })} кг`;
+}
+
+function formatPriceDifferenceYuan(value: number) {
+  if (value === 0) return '0.00 ¥';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)} ¥`;
 }
