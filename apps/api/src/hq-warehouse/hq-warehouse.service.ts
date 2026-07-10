@@ -29,22 +29,25 @@ export class HqWarehouseService {
 
   dashboard(user: AuthUser) {
     this.assertCanView(user);
+    const assignmentScope = this.assignmentService.buildAssignedWarehouseScope(user);
+    const warehouseWhere = assignmentScope ?? hqWarehouseWhere;
     return this.prisma.$transaction(async (tx) => {
-      const warehouses = await tx.warehouse.count({ where: hqWarehouseWhere });
+      const warehouses = await tx.warehouse.count({ where: warehouseWhere });
       const balances = await tx.inventoryBalance.findMany({
-        where: { warehouse: activeHqWarehouseWhere },
+        where: { warehouse: warehouseWhere },
         include: { product: true },
       });
       const pendingTransfers = await tx.branchDistributionOrder.count({
         where: {
           deletedAt: null,
-          sourceWarehouse: hqWarehouseWhere,
+          sourceWarehouse: warehouseWhere,
           status: {
             in: ['DRAFT', 'APPROVED', 'PICKING', 'PACKED', 'SHIPPED', 'SENT'],
           },
         },
       });
       const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
+      const totalReserved = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
       const totalStockValueKgs = balances.reduce(
         (sum, item) => sum + Number(item.totalValueKgs),
         0,
@@ -56,6 +59,8 @@ export class HqWarehouseService {
         totalProducts: productIds.size,
         totalStock: totalQuantity,
         totalInventoryValueKgs: Math.round(totalStockValueKgs * 100) / 100,
+        totalReserved,
+        totalAvailable: Math.max(totalQuantity - totalReserved, 0),
         pendingTransfers,
       };
     });

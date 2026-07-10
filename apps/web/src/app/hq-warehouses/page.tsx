@@ -33,6 +33,8 @@ type Dashboard = {
   totalProducts: number;
   totalStock: number;
   totalInventoryValueKgs: number;
+  totalReserved: number;
+  totalAvailable: number;
   pendingTransfers: number;
 };
 
@@ -72,6 +74,7 @@ function HqWarehousesPageContent() {
   const [user, setUser] = useState<User | null>(null);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [warehouses, setWarehouses] = useState<WarehouseMetrics[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
@@ -92,11 +95,11 @@ function HqWarehousesPageContent() {
   }, []);
 
   async function load() {
+    setLoading(true);
     try {
       const me = await apiFetch<User>('/auth/me');
-      const wmScoped = isWarehouseManagerUser(me) && !hasFullAccess(me);
       const [stats, list] = await Promise.all([
-        wmScoped ? Promise.resolve(null) : apiFetch<Dashboard>('/hq-warehouses/dashboard'),
+        apiFetch<Dashboard>('/hq-warehouses/dashboard'),
         apiFetch<WarehouseMetrics[]>('/hq-warehouses'),
       ]);
       setUser(me);
@@ -106,16 +109,11 @@ function HqWarehousesPageContent() {
         country: warehouse.country ?? 'Kyrgyzstan',
       }));
       setWarehouses(normalized);
-
-      if (isWarehouseManagerUser(me) && !hasFullAccess(me) && tabParam !== 'inventory') {
-        const assignedIds = me.assignedHqWarehouseIds ?? [];
-        if (assignedIds.length === 1) {
-          router.replace(`/hq-warehouses/${assignedIds[0]}`);
-          return;
-        }
-      }
+      setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -167,6 +165,22 @@ function HqWarehousesPageContent() {
     }),
     [filteredWarehouses],
   );
+
+  const displaySummary = useMemo(() => {
+    if (isWmScopedView && dashboard) {
+      return {
+        totalHqWarehouses: dashboard.totalHqWarehouses,
+        totalProducts: dashboard.totalProducts,
+        totalStock: dashboard.totalStock,
+        totalInventoryValueKgs: dashboard.totalInventoryValueKgs,
+        totalReserved: dashboard.totalReserved,
+        totalAvailable: dashboard.totalAvailable,
+      };
+    }
+    return summary;
+  }, [dashboard, isWmScopedView, summary]);
+
+  const wmHasNoAssignment = isWmScopedView && !loading && warehouses.length === 0;
 
   function handleSort(nextKey: string) {
     if (sortKey === nextKey) {
@@ -220,20 +234,33 @@ function HqWarehousesPageContent() {
           <InventoryCountListContent />
         ) : (
           <>
-        {!isWmScopedView ? (
+        {loading ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="animate-pulse rounded-xl border border-slate-200 bg-white px-2.5 py-2 sm:px-3 sm:py-2.5">
+                <div className="h-3 w-16 rounded bg-slate-200" />
+                <div className="mt-2 h-6 w-12 rounded bg-slate-200" />
+              </div>
+            ))}
+          </div>
+        ) : wmHasNoAssignment ? (
+          <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-600">
+            {t('hqWarehouse.noWarehouseAssigned')}
+          </p>
+        ) : (
+          <>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
-          <WarehouseSummaryCard compact label={t('hqWarehouse.totalWarehouses')} value={String(summary.totalHqWarehouses)} />
-          <WarehouseSummaryCard compact label={t('hqWarehouse.totalProducts')} value={String(summary.totalProducts)} />
-          <WarehouseSummaryCard compact label={t('hqWarehouse.totalStock')} value={String(summary.totalStock)} />
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalWarehouses')} value={String(displaySummary.totalHqWarehouses)} />
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalProducts')} value={String(displaySummary.totalProducts)} />
+          <WarehouseSummaryCard compact label={t('hqWarehouse.totalStock')} value={String(displaySummary.totalStock)} />
           <WarehouseSummaryCard
             compact
             label={t('hqWarehouse.totalValue')}
-            value={`${summary.totalInventoryValueKgs.toLocaleString()} KGS`}
+            value={`${displaySummary.totalInventoryValueKgs.toLocaleString()} KGS`}
           />
-          <WarehouseSummaryCard compact label={t('branchWarehouse.totalReserved')} value={String(summary.totalReserved)} />
-          <WarehouseSummaryCard compact label={t('branchWarehouse.totalAvailable')} value={String(summary.totalAvailable)} />
+          <WarehouseSummaryCard compact label={t('branchWarehouse.totalReserved')} value={String(displaySummary.totalReserved)} />
+          <WarehouseSummaryCard compact label={t('branchWarehouse.totalAvailable')} value={String(displaySummary.totalAvailable)} />
         </div>
-        ) : null}
 
         {!isWmScopedView && dashboard ? (
           <p className="text-sm text-slate-500">
@@ -283,12 +310,18 @@ function HqWarehousesPageContent() {
               sortable: true,
               render: (row) => row.city ?? '—',
             },
-            {
-              key: 'code',
-              label: t('warehouse.code'),
-              sortable: true,
-              render: (row) => row.code,
-            },
+            ...(isWmScopedView
+              ? [{
+                  key: 'address',
+                  label: t('warehouse.address'),
+                  render: (row: WarehouseMetrics) => row.address ?? '—',
+                }]
+              : [{
+                  key: 'code',
+                  label: t('warehouse.code'),
+                  sortable: true,
+                  render: (row: WarehouseMetrics) => row.code,
+                }]),
             {
               key: 'contactPerson',
               label: t('hqWarehouse.contactPerson'),
@@ -326,12 +359,14 @@ function HqWarehousesPageContent() {
               sortable: true,
               render: (row) => row.availableQuantity ?? 0,
             },
-            {
-              key: 'isActive',
-              label: t('common.status'),
-              sortable: true,
-              render: (row) => (row.isActive ? t('warehouse.active') : t('warehouse.inactive')),
-            },
+            ...(!isWmScopedView
+              ? [{
+                  key: 'isActive',
+                  label: t('common.status'),
+                  sortable: true,
+                  render: (row: WarehouseMetrics) => (row.isActive ? t('warehouse.active') : t('warehouse.inactive')),
+                }]
+              : []),
             {
               key: 'actions',
               label: t('common.actions'),
@@ -347,9 +382,10 @@ function HqWarehousesPageContent() {
           sortKey={sortKey}
           sortDirection={sortDirection}
           onSort={handleSort}
-          emptyLabel={t('warehouse.list')}
+          emptyLabel={wmHasNoAssignment ? t('hqWarehouse.noWarehouseAssigned') : t('warehouse.list')}
         />
 
+        {!wmHasNoAssignment ? (
         <WarehousePagination
           currentPage={pagination.currentPage}
           totalPages={pagination.totalPages}
@@ -357,6 +393,9 @@ function HqWarehousesPageContent() {
           pageSize={PAGE_SIZE}
           onPageChange={setPage}
         />
+        ) : null}
+          </>
+        )}
           </>
         )}
       </section>
