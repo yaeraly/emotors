@@ -18,8 +18,6 @@ import {
 import {
   ALL_CATEGORIES,
   buildCategoryOptions,
-  buildCategoryProgress,
-  buildCategorySummary,
   loadStoredFilters,
   matchesFilters,
   persistFilters,
@@ -418,16 +416,6 @@ function ChinaReceivingEditableView({
     [task.lineItems, rows, filters],
   );
 
-  const categoryProgress = useMemo(
-    () => buildCategoryProgress(task.lineItems, rows, language, uncategorizedLabel),
-    [task.lineItems, rows, language, uncategorizedLabel],
-  );
-
-  const selectedCategorySummary = useMemo(
-    () => buildCategorySummary(task.lineItems, rows, filters.categoryId, language, uncategorizedLabel),
-    [task.lineItems, rows, filters.categoryId, language, uncategorizedLabel],
-  );
-
   const statusFilterOptions = useMemo(
     () => [
       { value: 'all', label: t('chinaReceiving.verificationStatus.all') },
@@ -584,7 +572,6 @@ function ChinaReceivingEditableView({
             </p>
           </div>
           <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-            <span>{t('chinaReceiving.summary.products')}: {displayProgress.products}</span>
             <span>{t('chinaReceiving.progressChecked')}: {displayProgress.checked}</span>
             <span>{t('chinaReceiving.progressRemaining')}: {displayProgress.remaining}</span>
           </div>
@@ -596,39 +583,6 @@ function ChinaReceivingEditableView({
           />
         </div>
       </div>
-
-      {categoryProgress.length > 0 ? (
-        <section className="space-y-3">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">{t('chinaReceiving.categoryProgressTitle')}</h3>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {categoryProgress.map((card) => (
-              <button
-                key={card.categoryId}
-                type="button"
-                onClick={() => updateFilters({ categoryId: card.categoryId })}
-                className={`rounded-2xl border p-4 text-left shadow-sm transition ${
-                  filters.categoryId === card.categoryId
-                    ? 'border-blue-400 bg-blue-50'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              >
-                <p className="truncate font-semibold text-slate-900" title={card.categoryName}>
-                  {card.categoryName}
-                </p>
-                <p className="mt-2 text-2xl font-bold text-slate-950">
-                  {card.checked} / {card.total}
-                </p>
-                <div className="mt-2 flex items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-                    <div className="h-full rounded-full bg-emerald-500" style={{ width: `${card.percent}%` }} />
-                  </div>
-                  <span className="text-xs font-semibold text-slate-600">{card.percent}%</span>
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -681,20 +635,6 @@ function ChinaReceivingEditableView({
           </div>
         ) : null}
       </section>
-
-      {selectedCategorySummary ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-950">{selectedCategorySummary.categoryName}</h3>
-          <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <SummaryRow label={t('chinaReceiving.summary.products')} value={String(selectedCategorySummary.products)} />
-            <SummaryRow label={t('chinaReceiving.summary.expectedQty')} value={String(selectedCategorySummary.expectedQty)} />
-            <SummaryRow label={t('chinaReceiving.summary.receivedQty')} value={String(selectedCategorySummary.receivedQty)} />
-            <SummaryRow label={t('chinaReceiving.summary.shortage')} value={String(selectedCategorySummary.shortage)} tone="red" />
-            <SummaryRow label={t('chinaReceiving.summary.overage')} value={String(selectedCategorySummary.overage)} tone="green" />
-            <SummaryRow label={t('chinaReceiving.summary.damaged')} value={String(selectedCategorySummary.damaged)} tone="orange" />
-          </dl>
-        </div>
-      ) : null}
 
       <div className="grid gap-4 md:grid-cols-4">
         <Info label={t('chinaReceiving.purchaseDate')} value={formatOrderDate(task.purchaseDate)} />

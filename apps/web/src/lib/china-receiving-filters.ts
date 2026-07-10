@@ -11,25 +11,6 @@ export type ChinaReceivingFilters = {
   status: VerificationFilterStatus;
 };
 
-export type CategoryProgress = {
-  categoryId: string;
-  categoryName: string;
-  checked: number;
-  total: number;
-  percent: number;
-};
-
-export type CategorySummary = {
-  categoryId: string;
-  categoryName: string;
-  products: number;
-  expectedQty: number;
-  receivedQty: number;
-  shortage: number;
-  overage: number;
-  damaged: number;
-};
-
 export function filtersStorageKey(orderId: string) {
   return `emotors_china_receiving_filters_${orderId}`;
 }
@@ -135,88 +116,4 @@ export function buildCategoryOptions(
       .sort((a, b) => a[1].localeCompare(b[1], language === 'ky' ? 'ky' : language === 'ru' ? 'ru' : 'en'))
       .map(([value, label]) => ({ value, label })),
   ];
-}
-
-export function buildCategoryProgress(
-  lineItems: ChinaReceivingLineItem[],
-  rows: Record<string, LocalRowState>,
-  language: string,
-  uncategorizedLabel: string,
-): CategoryProgress[] {
-  const buckets = new Map<string, CategoryProgress>();
-
-  for (const item of lineItems) {
-    const categoryId = resolveLineItemCategoryId(item);
-    const categoryName =
-      categoryId === UNCATEGORIZED_CATEGORY
-        ? uncategorizedLabel
-        : resolveCategoryName(item, language) || uncategorizedLabel;
-    const bucket =
-      buckets.get(categoryId) ??
-      ({
-        categoryId,
-        categoryName,
-        checked: 0,
-        total: 0,
-        percent: 0,
-      } satisfies CategoryProgress);
-    bucket.total += 1;
-    if (isRowChecked(rows[item.id])) bucket.checked += 1;
-    buckets.set(categoryId, bucket);
-  }
-
-  return Array.from(buckets.values())
-    .map((bucket) => ({
-      ...bucket,
-      percent: bucket.total > 0 ? Math.round((bucket.checked / bucket.total) * 100) : 0,
-    }))
-    .sort((a, b) => a.categoryName.localeCompare(b.categoryName, language === 'ky' ? 'ky' : language === 'ru' ? 'ru' : 'en'));
-}
-
-export function buildCategorySummary(
-  lineItems: ChinaReceivingLineItem[],
-  rows: Record<string, LocalRowState>,
-  categoryId: string,
-  language: string,
-  uncategorizedLabel: string,
-): CategorySummary | null {
-  if (!categoryId || categoryId === ALL_CATEGORIES) return null;
-
-  const items = lineItems.filter((item) => resolveLineItemCategoryId(item) === categoryId);
-  if (!items.length) return null;
-
-  let expectedQty = 0;
-  let receivedQty = 0;
-  let shortage = 0;
-  let overage = 0;
-  let damaged = 0;
-
-  for (const item of items) {
-    expectedQty += item.expectedQuantity;
-    const row = rows[item.id];
-    const actual = Number(row?.actualQuantity ?? item.expectedQuantity) || 0;
-    const dmg = Number(row?.damagedQuantity) || 0;
-    receivedQty += actual;
-    const diff = computeDifference(actual, item.expectedQuantity);
-    if (diff < 0) shortage += Math.abs(diff);
-    if (diff > 0) overage += diff;
-    if (dmg > 0) damaged += dmg;
-  }
-
-  const first = items[0];
-  const categoryName =
-    categoryId === UNCATEGORIZED_CATEGORY
-      ? uncategorizedLabel
-      : resolveCategoryName(first, language) || uncategorizedLabel;
-
-  return {
-    categoryId,
-    categoryName,
-    products: items.length,
-    expectedQty,
-    receivedQty,
-    shortage,
-    overage,
-    damaged,
-  };
 }
