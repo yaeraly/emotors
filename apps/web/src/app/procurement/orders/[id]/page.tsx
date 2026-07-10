@@ -1160,56 +1160,40 @@ export default function ProcurementOrderDetailPage() {
             <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(previewTotals?.totalCostKgs ?? order.totalCostKgs)} />
           </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm overflow-x-auto">
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.productsTable')}</h3>
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">{t('procurement.orders.product')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.quantity')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.netWeightKg')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.unitWeight')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.totalWeight')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedCargo')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedChinaTransport')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedKyrgyzstanTransport')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedInsurance')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedCustoms')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.allocatedTransportExpenses')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.col.unitLandedCost')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
-                  <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
-                  <th className="px-4 py-3">{t('inventory.finalCostKgs')}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(previewTotals?.items ?? []).map((item, index) => {
-                  const row = (order.items ?? []).filter((entry) => entry.status !== 'CANCELLED')[index];
-                  if (!row) return null;
-                  return (
-                    <tr key={row.id}>
-                      <td className="px-4 py-3">{row.productName}</td>
-                      <td className="px-4 py-3">{row.quantity}</td>
-                      <td className="px-4 py-3">{row.receivedQuantity ?? '-'}</td>
-                      <td className="px-4 py-3">{row.unitWeightKg != null ? Number(row.unitWeightKg).toFixed(3) : item.netWeightKg.toFixed(3)}</td>
-                      <td className="px-4 py-3">{item.lineNetWeightKg.toFixed(3)}</td>
-                      <td className="px-4 py-3">{formatKgs(item.chinaExportAllocKgs)}</td>
-                      <td className="px-4 py-3">{formatKgs(item.chinaDomesticAllocKgs)}</td>
-                      <td className="px-4 py-3">{formatKgs(item.localTransportAllocKgs)}</td>
-                      <td className="px-4 py-3">{formatKgs(item.insuranceAllocKgs)}</td>
-                      <td className="px-4 py-3">{formatKgs(item.customsAllocKgs)}</td>
-                      <td className="px-4 py-3">{formatKgs(item.bankFeeAllocKgs + item.otherAllocKgs)}</td>
-                      <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>
-                      <td className="px-4 py-3">¥{Number(row.purchasePriceYuan).toFixed(2)}</td>
-                      <td className="px-4 py-3">¥{item.totalYuan.toFixed(2)}</td>
-                      <td className="px-4 py-3 font-semibold">{formatKgs(item.finalCostKgs)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="w-[40%] px-4 py-3">{t('procurement.orders.product')}</th>
+                    <th className="w-[12%] px-4 py-3 text-right">{t('procurement.orders.quantity')}</th>
+                    <th className="w-[16%] px-4 py-3 text-right">{t('inventory.purchaseCostKgs')}</th>
+                    <th className="w-[16%] px-4 py-3 text-right">{t('stockMovement.unitCost')}</th>
+                    <th className="w-[16%] px-4 py-3 text-right">{t('procurement.orders.col.lineTotalLandedCost')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(previewTotals?.items ?? []).map((item, index) => {
+                    const row = (order.items ?? []).filter((entry) => entry.status !== 'CANCELLED')[index];
+                    if (!row) return null;
+                    return (
+                      <tr key={row.id}>
+                        <td className="px-4 py-3">
+                          <p className="truncate font-medium text-slate-900" title={row.productName}>
+                            {row.productName}
+                          </p>
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">{row.quantity}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">{formatKgs(item.costKgs)}</td>
+                        <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatKgs(item.finalCostKgs)}</td>
+                        <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatKgs(item.totalCostKgs)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </section>
           </>
           ) : null}
