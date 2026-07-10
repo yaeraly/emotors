@@ -203,6 +203,7 @@ export function isWarehouseManagerForbiddenPath(pathname: string) {
 
 function canWarehouseManagerAccessPath(pathname: string) {
   if (pathname === '/') return false;
+  if (pathname === '/inventory') return false;
   if (isWarehouseManagerForbiddenPath(pathname)) return false;
 
   if (
@@ -535,7 +536,7 @@ export function getDefaultRoute(role: Role) {
   if (role === 'SUPPLY_CHAIN_MANAGER') return '/procurement';
   if (role === 'HQ_SALES_MANAGER') return '/distribution';
   if (role === 'HQ_CASHIER') return '/distribution/invoices';
-  if (role === 'WAREHOUSE_MANAGER') return '/inventory';
+  if (role === 'WAREHOUSE_MANAGER') return '/hq-warehouses';
   if (role === 'FINANCE_MANAGER' || role === 'HQ_ACCOUNTANT' || role === 'ACCOUNTANT') return '/finance';
   if (role === 'FRANCHISE_OWNER') return '/dashboard';
   if (role === 'MANAGER') return '/sales';
@@ -555,10 +556,10 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (isSupplyChainManagerUser(user)) return '/procurement';
   if (isHqSalesManagerUser(user)) return '/distribution';
   if (isHqCashierUser(user)) return '/distribution/invoices';
-  if (isWarehouseManagerUser(user)) return '/inventory';
+  if (isWarehouseManagerUser(user)) return '/hq-warehouses';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
-  if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/inventory';
+  if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/hq-warehouses';
   if (isBranchWarehouseOperator(user)) return '/inventory';
   if (isBranchCashierUser(user)) return '/payments';
   if (isBranchAccountantUser(user)) return '/payments';

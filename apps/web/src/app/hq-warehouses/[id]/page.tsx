@@ -7,7 +7,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { formatHqWarehouseContactPerson } from '@/lib/hq-warehouse';
-import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, canManageHqWarehouse } from '@/lib/rbac';
+import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, canManageHqWarehouse, hasFullAccess, isWarehouseManagerUser } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -63,6 +63,9 @@ export default function HqWarehouseDetailPage() {
     try {
       const me = await apiFetch<User>('/auth/me');
       setUser(me);
+      if (isWarehouseManagerUser(me) && !hasFullAccess(me)) {
+        setTab((current) => (current === 'details' || current === 'history' ? 'inventory' : current));
+      }
       const detail = await apiFetch<Warehouse & { inventoryCount: number; pendingTransfers: number }>(`/hq-warehouses/${params.id}`);
       setWarehouse(detail);
       setForm({
@@ -192,6 +195,10 @@ export default function HqWarehouseDetailPage() {
   const canDeleteWarehouse = canDeleteHqWarehouse(user);
   const canEditInfo = canEditWarehouseInfo(user);
   const canManageWarehouse = canManageHqWarehouse(user);
+  const isWmScopedView = isWarehouseManagerUser(user) && !hasFullAccess(user);
+  const visibleTabs: Tab[] = isWmScopedView
+    ? ['inventory', 'receivings', 'transfers']
+    : ['details', 'inventory', 'receivings', 'transfers', 'history'];
 
   if (!warehouse) {
     return <ProtectedShell><p className="p-6">{t('common.loading')}</p></ProtectedShell>;
@@ -241,14 +248,27 @@ export default function HqWarehouseDetailPage() {
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <div className="flex flex-wrap gap-2">
-          {(['details', 'inventory', 'receivings', 'transfers', 'history'] as Tab[]).map((item) => (
+          {visibleTabs.map((item) => (
             <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-xl px-4 py-2 text-sm font-semibold ${tab === item ? 'bg-blue-600 text-white' : 'border border-slate-300 text-slate-700'}`}>
               {t(`hqWarehouse.tab.${item}`)}
             </button>
           ))}
         </div>
 
-        {tab === 'details' ? (
+        {isWmScopedView ? (
+          <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+            <ReadOnlyField label={t('warehouse.name')} value={warehouse.name} />
+            <ReadOnlyField label={t('warehouse.code')} value={warehouse.code} />
+            <ReadOnlyField label={t('hqWarehouse.country')} value={(warehouse as any).country ?? '—'} />
+            <ReadOnlyField label={t('hqWarehouse.city')} value={(warehouse as any).city ?? '—'} />
+            <ReadOnlyField label={t('warehouse.address')} value={warehouse.address ?? '—'} className="md:col-span-2" />
+            <ReadOnlyField label={t('hqWarehouse.contactPerson')} value={(warehouse as any).contactPerson ?? '—'} />
+            <ReadOnlyField label={t('hqWarehouse.phone')} value={(warehouse as any).phone ?? '—'} />
+            <ReadOnlyField label={t('common.status')} value={warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')} />
+          </div>
+        ) : null}
+
+        {!isWmScopedView && tab === 'details' ? (
           editing ? (
             <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
               <Field label={t('warehouse.name')} value={form.name} onChange={(v) => setForm({ ...form, name: v })} />

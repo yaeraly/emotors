@@ -33,16 +33,24 @@ export default function NewHqWarehousePage() {
   const canEditCode = hasFullAccess(user);
 
   useEffect(() => {
-    void Promise.all([
-      apiFetch<User>('/auth/me'),
-      apiFetch<Warehouse[]>('/hq-warehouses'),
-    ])
-      .then(([me, warehouses]) => {
+    void apiFetch<User>('/auth/me')
+      .then((me) => {
         setUser(me);
+        if (!canManageHqWarehouse(me)) {
+          router.replace('/hq-warehouses');
+        }
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+  }, [router, t]);
+
+  useEffect(() => {
+    if (!user || !canManageHqWarehouse(user)) return;
+    void apiFetch<Warehouse[]>('/hq-warehouses')
+      .then((warehouses) => {
         setExistingCodes(warehouses.map((warehouse) => warehouse.code));
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
-  }, [t]);
+  }, [t, user]);
 
   useEffect(() => {
     const source = `${form.city}|${form.name}`;

@@ -93,9 +93,10 @@ function HqWarehousesPageContent() {
 
   async function load() {
     try {
-      const [me, stats, list] = await Promise.all([
-        apiFetch<User>('/auth/me'),
-        apiFetch<Dashboard>('/hq-warehouses/dashboard'),
+      const me = await apiFetch<User>('/auth/me');
+      const wmScoped = isWarehouseManagerUser(me) && !hasFullAccess(me);
+      const [stats, list] = await Promise.all([
+        wmScoped ? Promise.resolve(null) : apiFetch<Dashboard>('/hq-warehouses/dashboard'),
         apiFetch<WarehouseMetrics[]>('/hq-warehouses'),
       ]);
       setUser(me);
@@ -219,6 +220,7 @@ function HqWarehousesPageContent() {
           <InventoryCountListContent />
         ) : (
           <>
+        {!isWmScopedView ? (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
           <WarehouseSummaryCard compact label={t('hqWarehouse.totalWarehouses')} value={String(summary.totalHqWarehouses)} />
           <WarehouseSummaryCard compact label={t('hqWarehouse.totalProducts')} value={String(summary.totalProducts)} />
@@ -231,8 +233,9 @@ function HqWarehousesPageContent() {
           <WarehouseSummaryCard compact label={t('branchWarehouse.totalReserved')} value={String(summary.totalReserved)} />
           <WarehouseSummaryCard compact label={t('branchWarehouse.totalAvailable')} value={String(summary.totalAvailable)} />
         </div>
+        ) : null}
 
-        {dashboard ? (
+        {!isWmScopedView && dashboard ? (
           <p className="text-sm text-slate-500">
             {t('hqWarehouse.pendingTransfers')}: {dashboard.pendingTransfers}
           </p>

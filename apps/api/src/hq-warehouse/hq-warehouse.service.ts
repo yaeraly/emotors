@@ -240,7 +240,7 @@ export class HqWarehouseService {
   }
 
   async update(user: AuthUser, id: string, dto: UpdateHqWarehouseDto) {
-    this.assertCanEditWarehouseInfo(user);
+    await this.assertCanEditWarehouseInfo(user, id);
     const existing = await this.getHqWarehouse(user, id);
     if (dto.name || dto.code) {
       await this.assertUniqueHqFields(dto.name ?? existing.name, dto.code ?? existing.code, id);
@@ -703,8 +703,9 @@ export class HqWarehouseService {
     }
   }
 
-  private assertCanEditWarehouseInfo(user: AuthUser) {
+  private async assertCanEditWarehouseInfo(user: AuthUser, warehouseId: string) {
     if (!canEditWarehouseInfo(user)) {
+      await this.auditDenied(user, 'HQ_WAREHOUSE_UPDATE_DENIED', warehouseId, 'UPDATE');
       throw new ForbiddenException('Only CEO can update warehouse information');
     }
   }
