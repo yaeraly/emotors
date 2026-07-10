@@ -120,6 +120,7 @@ type ProcurementOrder = {
   supplier?: { name: string };
   factory?: { name: string };
   hqWarehouse?: { name: string };
+  createdBy?: { fullName?: string } | null;
   totalPaidYuan?: number;
   totalPaidKgs?: number;
   remainingYuan?: number;
@@ -818,10 +819,20 @@ export default function ProcurementOrderDetailPage() {
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.generalInfo')}</h3>
             <div className="grid gap-4 md:grid-cols-4">
+              <Info label={t('procurement.orders.orderNumber')} value={order.orderNumber} />
+              <Info label={t('procurement.orders.orderDate')} value={order.createdAt ? formatOrderDate(order.createdAt) : '-'} />
+              <Info label={t('procurement.orders.status')} value={translateStatus(t, order.status, 'procurement')} />
+              <Info
+                label={t('procurement.orders.warehouse')}
+                value={order.hqWarehouse?.name ?? t('procurement.orders.hqWarehouseNotAssigned')}
+              />
+              <Info
+                label={t('chinaReceiving.supplyManager')}
+                value={order.createdBy?.fullName ?? t('chinaReceiving.supplyManagerNotAssigned')}
+              />
               <Info label={t('procurement.orders.supplier')} value={order.supplier?.name ?? ''} />
               <Info label={t('procurement.orders.factory')} value={order.factory?.name ?? '-'} />
               <Info label={t('procurement.orders.exchangeRate')} value={String(order.effectiveYuanRate ?? order.defaultYuanRate ?? '-')} />
-              <Info label={t('procurement.orders.status')} value={translateStatus(t, order.status, 'procurement')} />
             </div>
             {order.yuanRateLocked ? (
               <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.payments.rateLocked')}</p>

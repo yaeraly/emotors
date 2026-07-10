@@ -409,24 +409,28 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
           <Field label={t('procurement.orders.estimatedArrivalDate')}><input type="date" value={form.estimatedArrivalDate} onChange={(e) => setField('estimatedArrivalDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
         </div>
         <div className="mt-4 grid gap-4 md:grid-cols-3">
-          {chinaDomesticLocked ? (
-            <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
+          {mode === 'create' ? (
+            <>
+              {chinaDomesticLocked ? (
+                <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
+              ) : null}
+              <LockedFieldHint locked={chinaDomesticLocked} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
+                <Field label={t('procurement.orders.costInYuan')}>
+                  <input
+                    type="number"
+                    disabled={chinaDomesticLocked}
+                    value={form.chinaDomesticTransportYuan}
+                    onChange={(e) => setField('chinaDomesticTransportYuan', e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                  />
+                </Field>
+              </LockedFieldHint>
+              <Field label={t('procurement.orders.costInKgs')}><input type="number" readOnly value={chinaDomesticTransportKgs} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" /></Field>
+              <Field label={t('procurement.orders.customs')}><input type="number" value={form.customsCostKgs} onChange={(e) => setField('customsCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+              <Field label={t('procurement.orders.insurance')}><input type="number" value={form.insuranceCostKgs} onChange={(e) => setField('insuranceCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+              <Field label={t('procurement.orders.bankFees')}><input type="number" value={form.bankFeeCostKgs} onChange={(e) => setField('bankFeeCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+            </>
           ) : null}
-          <LockedFieldHint locked={chinaDomesticLocked} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
-            <Field label={t('procurement.orders.costInYuan')}>
-              <input
-                type="number"
-                disabled={chinaDomesticLocked}
-                value={form.chinaDomesticTransportYuan}
-                onChange={(e) => setField('chinaDomesticTransportYuan', e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
-              />
-            </Field>
-          </LockedFieldHint>
-          <Field label={t('procurement.orders.costInKgs')}><input type="number" readOnly value={chinaDomesticTransportKgs} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.customs')}><input type="number" value={form.customsCostKgs} onChange={(e) => setField('customsCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.insurance')}><input type="number" value={form.insuranceCostKgs} onChange={(e) => setField('insuranceCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          <Field label={t('procurement.orders.bankFees')}><input type="number" value={form.bankFeeCostKgs} onChange={(e) => setField('bankFeeCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
         </div>
       </section>
 
@@ -456,10 +460,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                 <th className="px-3 py-3">{t('procurement.orders.product')}</th>
                 <th className="px-3 py-3">{t('inventory.unit')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.quantity')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.netWeightKg')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.lineTotalNetWeightKg')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.currentPurchasePriceYuan')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
+                <th className="px-3 py-3">{t('procurement.orders.priceDifferenceYuan')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.totalYuan')}</th>
                 <th className="px-3 py-3" />
               </tr>
@@ -470,9 +473,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                   <td className="px-3 py-3 min-w-48 font-semibold text-slate-900">{line.productName}</td>
                   <td className="px-3 py-3">{formatProductUnit(line.product?.unit, language, t)}</td>
                   <td className="px-3 py-3"><input disabled={itemsLocked} type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
-                  <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : `${line.netWeightKg.toFixed(3)} ${language === 'en' ? 'kg' : 'кг'}`}</td>
-                  <td className="px-3 py-3">{line.totalNetWeightKg.toFixed(3)}</td>
-                  <td className="px-3 py-3 font-mono">¥{line.masterPriceYuan.toFixed(2)}</td>
+                  <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : line.totalNetWeightKg.toFixed(3)}</td>
                   <td className="px-3 py-3">
                     <input
                       disabled={itemsLocked}
@@ -484,6 +485,7 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                       className={`w-24 rounded-lg border px-2 py-1.5 ${line.priceChanged ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
                     />
                   </td>
+                  <td className="px-3 py-3 font-mono text-slate-800">{formatPriceDifferenceYuan(line.priceDifference)}</td>
                   <td className="px-3 py-3">¥{line.totalYuan.toFixed(2)}</td>
                   <td className="px-3 py-3"><button disabled={itemsLocked} type="button" onClick={() => removeLine(line.key)} className="text-red-600 disabled:opacity-50">{t('common.delete')}</button></td>
                 </tr>
@@ -519,4 +521,10 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 
 function formatKgs(value: number) {
   return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
+}
+
+function formatPriceDifferenceYuan(value: number) {
+  if (value === 0) return '0.00 ¥';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)} ¥`;
 }

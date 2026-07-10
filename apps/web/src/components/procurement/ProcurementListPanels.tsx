@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { canCreateProcurementOrder, canDeleteProcurementOrder, canManageProcurement, canManageTransportCompany, canViewTransportCompany } from '@/lib/rbac';
-import type { User } from '@/lib/types';
+import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
@@ -273,13 +273,17 @@ type ProcurementOrder = {
   status: string;
   totalYuan: string | number;
   totalCostKgs: string | number;
+  hqWarehouseId?: string;
   supplier?: { name: string };
   factory?: { name: string } | null;
+  hqWarehouse?: { id: string; name: string } | null;
 };
 
 export function ProcurementOrdersListPanel() {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<ProcurementOrder[]>([]);
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [hqWarehouseFilter, setHqWarehouseFilter] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -293,9 +297,23 @@ export function ProcurementOrdersListPanel() {
       setSuccess(message);
       window.localStorage.removeItem('emotors_procurement_success');
     }
-    void apiFetch<ProcurementOrder[]>('/procurement/orders').then(setOrders).catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
-    void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
+    void Promise.all([
+      apiFetch<ProcurementOrder[]>('/procurement/orders'),
+      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
+      apiFetch<User>('/auth/me'),
+    ])
+      .then(([orderResult, warehouseResult, userResult]) => {
+        setOrders(orderResult);
+        setWarehouses(warehouseResult);
+        setCurrentUser(userResult);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
+
+  const filteredOrders = useMemo(() => {
+    if (!hqWarehouseFilter) return orders;
+    return orders.filter((order) => order.hqWarehouseId === hqWarehouseFilter);
+  }, [orders, hqWarehouseFilter]);
 
   const canDelete = canDeleteProcurementOrder(currentUser);
 
@@ -324,6 +342,21 @@ export function ProcurementOrdersListPanel() {
     <>
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
       {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
+      <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <label className="block min-w-56">
+          <span className="text-sm font-semibold text-slate-700">{t('procurement.orders.warehouse')}</span>
+          <select
+            value={hqWarehouseFilter}
+            onChange={(event) => setHqWarehouseFilter(event.target.value)}
+            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+          >
+            <option value="">{t('procurement.orders.allHqWarehouses')}</option>
+            {warehouses.map((warehouse) => (
+              <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
+            ))}
+          </select>
+        </label>
+      </div>
       <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -331,6 +364,7 @@ export function ProcurementOrdersListPanel() {
               <th className="px-4 py-3">{t('procurement.orders.orderDate')}</th>
               <th className="px-4 py-3">{t('procurement.orders.supplier')}</th>
               <th className="px-4 py-3">{t('procurement.orders.factory')}</th>
+              <th className="px-4 py-3">{t('procurement.orders.warehouse')}</th>
               <th className="px-4 py-3">{t('procurement.orders.status')}</th>
               <th className="px-4 py-3">{t('procurement.orders.totalYuan')}</th>
               <th className="px-4 py-3">{t('procurement.orders.totalCostKgs')}</th>
@@ -338,11 +372,12 @@ export function ProcurementOrdersListPanel() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {orders.map((order) => (
+            {filteredOrders.map((order) => (
               <tr key={order.id}>
                 <td className="px-4 py-3 font-bold">{order.createdAt ? new Date(order.createdAt).toLocaleString('ru-RU') : '-'}</td>
                 <td className="px-4 py-3">{order.supplier?.name ?? '-'}</td>
                 <td className="px-4 py-3">{order.factory?.name ?? '-'}</td>
+                <td className="px-4 py-3">{order.hqWarehouse?.name ?? t('procurement.orders.hqWarehouseNotAssigned')}</td>
                 <td className="px-4 py-3">{translateStatus(t, order.status, 'procurement')}</td>
                 <td className="px-4 py-3">¥{Number(order.totalYuan ?? 0).toFixed(2)}</td>
                 <td className="px-4 py-3">{Number(order.totalCostKgs ?? 0).toLocaleString('ru-RU')} сом</td>
