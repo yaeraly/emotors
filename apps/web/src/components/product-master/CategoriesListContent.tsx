@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { canDeleteCategory, canManageProductCatalog } from '@/lib/rbac';
+import { isValidCategoryCodePrefix } from '@/lib/product-code-utils';
 import type { ProductCategory, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -70,6 +71,10 @@ export function CategoriesListContent({
     setError('');
 
     try {
+      if (form.code && !isValidCategoryCodePrefix(form.code)) {
+        setError(t('inventory.invalidCategoryCodePrefix'));
+        return;
+      }
       if (editing) {
         await apiFetch(`/inventory/categories/${editing.id}`, {
           method: 'PUT',
@@ -147,9 +152,10 @@ export function CategoriesListContent({
           className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3"
         >
           <Input
-            label={t('inventory.categoryCode')}
+            label={t('inventory.categoryCodePrefix')}
             value={form.code}
-            onChange={(value) => setForm({ ...form, code: value })}
+            onChange={(value) => setForm({ ...form, code: value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) })}
+            hint={t('inventory.categoryCodePrefixHint')}
           />
           <Input
             label={t('inventory.categoryNameKy')}
@@ -197,7 +203,7 @@ export function CategoriesListContent({
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">{t('inventory.categoryCode')}</th>
+              <th className="px-4 py-3">{t('inventory.categoryCodePrefix')}</th>
               <th className="px-4 py-3">{t('inventory.category')}</th>
               <th className="px-4 py-3">{t('inventory.productCount')}</th>
               <th className="px-4 py-3">{t('common.status')}</th>
@@ -258,10 +264,12 @@ function Input({
   label,
   value,
   onChange,
+  hint,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  hint?: string;
 }) {
   return (
     <label className="block">
@@ -272,6 +280,7 @@ function Input({
         required
         className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
       />
+      {hint ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null}
     </label>
   );
 }

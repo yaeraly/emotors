@@ -42,6 +42,13 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdatePurchasePriceDto } from './dto/update-purchase-price.dto';
 import { PurchasePriceHistoryQueryDto } from './dto/purchase-price-history-query.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
+import {
+  getCategoryCodePrefix,
+  isValidCategoryCodePrefix,
+  nextProductBarcode,
+  nextProductCode,
+  normalizeCategoryCodePrefix,
+} from './product-code.util';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -145,10 +152,14 @@ export class InventoryService {
 
   async createCategory(user: AuthUser, dto: CreateCategoryDto) {
     this.assertCanManageProductCatalog(user);
-    await this.ensureCategoryCodeAvailable(dto.code);
+    const normalizedCode = normalizeCategoryCodePrefix(dto.code);
+    if (!isValidCategoryCodePrefix(normalizedCode)) {
+      throw new BadRequestException('Code prefix must be 1-3 uppercase Latin letters');
+    }
+    await this.ensureCategoryCodeAvailable(normalizedCode);
     const category = await this.prisma.productCategory.create({
       data: {
-        code: dto.code.toUpperCase(),
+        code: normalizedCode,
         nameKy: dto.nameKy,
         nameRu: dto.nameRu,
         nameEn: dto.nameEn,
@@ -157,6 +168,12 @@ export class InventoryService {
       },
     });
     await this.auditCategory(user, 'CATEGORY_CREATED', category.id, { categoryId: category.id, newValue: category });
+    await this.auditCategory(user, 'CATEGORY_PREFIX_CREATED', category.id, {
+      userId: user.id,
+      categoryId: category.id,
+      prefix: category.code,
+      timestamp: new Date().toISOString(),
+    });
     return category;
   }
 
@@ -192,14 +209,19 @@ export class InventoryService {
     this.assertCanManageProductCatalog(user);
     const existing = await this.category(id);
 
+    let normalizedCode: string | undefined;
     if (dto.code) {
-      await this.ensureCategoryCodeAvailable(dto.code, id);
+      normalizedCode = normalizeCategoryCodePrefix(dto.code);
+      if (!isValidCategoryCodePrefix(normalizedCode)) {
+        throw new BadRequestException('Code prefix must be 1-3 uppercase Latin letters');
+      }
+      await this.ensureCategoryCodeAvailable(normalizedCode, id);
     }
 
     const category = await this.prisma.productCategory.update({
       where: { id },
       data: {
-        code: dto.code?.toUpperCase(),
+        code: normalizedCode,
         nameKy: dto.nameKy,
         nameRu: dto.nameRu,
         nameEn: dto.nameEn,
@@ -210,6 +232,15 @@ export class InventoryService {
     const action =
       dto.isActive === false && existing.isActive !== false ? 'CATEGORY_DISABLED' : 'CATEGORY_UPDATED';
     await this.auditCategory(user, action, id, { categoryId: id, oldValue: existing, newValue: category });
+    if (normalizedCode && normalizedCode !== existing.code) {
+      await this.auditCategory(user, 'CATEGORY_PREFIX_UPDATED', id, {
+        userId: user.id,
+        categoryId: id,
+        prefix: normalizedCode,
+        previousPrefix: existing.code,
+        timestamp: new Date().toISOString(),
+      });
+    }
     return category;
   }
 
@@ -244,7 +275,6 @@ export class InventoryService {
       }
       return await this.prisma.$transaction(async (tx) => {
         if (!dto.name?.trim()) throw new BadRequestException('Product name is required');
-        if (!dto.sku?.trim()) throw new BadRequestException('SKU is required');
         if (!dto.categoryId) throw new BadRequestException('Category is required');
 
         let warehouseId = dto.warehouseId?.trim();
@@ -282,10 +312,12 @@ export class InventoryService {
           transportCostKgs: 0,
           sellingPriceKgs: dto.sellingPriceKgs ?? 0,
         });
-        const existingProduct = await tx.product.findFirst({
-          where: { branchId, sku: dto.sku },
-          include: this.productInclude(),
-        });
+        const existingProduct = dto.sku?.trim()
+          ? await tx.product.findFirst({
+              where: { branchId, sku: dto.sku.trim() },
+              include: this.productInclude(),
+            })
+          : null;
 
         if (existingProduct && !existingProduct.deletedAt) {
           throw new ConflictException('Active product with this SKU already exists');
@@ -331,13 +363,21 @@ export class InventoryService {
           };
         }
 
+        const categoryProducts = await tx.product.findMany({
+          where: { categoryId: category.id, deletedAt: null },
+          select: { sku: true },
+        });
+        const prefix = getCategoryCodePrefix(category);
+        const generatedSku = nextProductCode(prefix, categoryProducts.map((row) => row.sku));
+        const generatedBarcode = nextProductBarcode(generatedSku);
+
         const product = await tx.product.create({
           data: {
             branchId,
             warehouseId: warehouse.id,
             name: dto.name,
-            sku: dto.sku,
-            barcode: dto.barcode?.trim() || null,
+            sku: generatedSku,
+            barcode: dto.barcode?.trim() || generatedBarcode,
             categoryId: category.id,
             category: category.nameEn,
             photoUrl: dto.photoUrl,
@@ -369,6 +409,14 @@ export class InventoryService {
           module: 'inventory',
           sku: product.sku,
           newValue: { name: product.name, sku: product.sku, weightKg: Number(product.weightKg) },
+        });
+        await this.auditInTx(tx, user, branchId, 'PRODUCT_CODE_GENERATED', 'Product', product.id, {
+          userId: user.id,
+          categoryId: category.id,
+          productId: product.id,
+          prefix,
+          generatedCode: product.sku,
+          timestamp: new Date().toISOString(),
         });
         await this.auditInTx(tx, user, branchId, 'PRODUCT_CREATE_FORM_UPDATED', 'Product', product.id, {
           catalogOnly: true,

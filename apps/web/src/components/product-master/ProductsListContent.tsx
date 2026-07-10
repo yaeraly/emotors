@@ -146,7 +146,6 @@ export function ProductsListContent() {
             <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">{t('inventory.photo')}</th>
-                <th className="px-4 py-3">{t('inventory.sku')}</th>
                 <th className="px-4 py-3">{t('inventory.name')}</th>
                 <th className="px-4 py-3">{t('inventory.category')}</th>
                 <th className="px-4 py-3">{t('inventory.unit')}</th>
@@ -176,7 +175,6 @@ export function ProductsListContent() {
                       <div className="h-12 w-12 rounded-xl bg-slate-100" />
                     )}
                   </td>
-                  <td className="px-4 py-3 font-bold text-slate-900">{product.sku}</td>
                   <td className="px-4 py-3">{product.name}</td>
                   <td className="px-4 py-3">
                     {product.productCategory

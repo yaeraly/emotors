@@ -393,6 +393,11 @@ export default function ProcurementOrderDetailPage() {
     }
   }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, previewSvhTransportKgs]);
 
+  const confirmedCargoPaymentKgs = useMemo(() => {
+    if (!cargoReceiptCompleted) return 0;
+    return Number(previewTotals?.totalCargoCostKgs ?? order?.totalCargoCostKgs ?? 0);
+  }, [cargoReceiptCompleted, previewTotals?.totalCargoCostKgs, order?.totalCargoCostKgs]);
+
   const importCostBreakdown = useMemo(() => {
     if (!previewTotals) return null;
     return {
@@ -1046,7 +1051,7 @@ export default function ProcurementOrderDetailPage() {
         {importCostBreakdown ? (
           <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
             <Info label={t('procurement.orders.chinaDomestic')} value={formatKgs(importCostBreakdown.chinaDomestic)} />
-            <Info label={t('procurement.orders.paidToSupplierKgs')} value={formatKgs(order?.totalPaidKgs ?? 0)} />
+            <Info label={t('procurement.orders.cargoPaymentKgs')} value={formatKgs(confirmedCargoPaymentKgs)} />
             <Info label={t('procurement.orders.domesticTransportKyrgyzstan')} value={formatKgs(importCostBreakdown.svhTransport)} />
             <Info label={t('procurement.orders.insurance')} value={formatKgs(importCostBreakdown.insurance)} />
             <Info label={t('procurement.orders.customs')} value={formatKgs(importCostBreakdown.customs)} />
@@ -1065,7 +1070,7 @@ export default function ProcurementOrderDetailPage() {
             <Info label={t('procurement.orders.totalNetWeightKg')} value={`${(previewTotals?.totalNetWeightKg ?? 0).toFixed(3)} kg`} />
             <Info label={t('procurement.orders.totalPackagingWeightKg')} value={`${(previewTotals?.totalPackagingWeightKg ?? 0).toFixed(3)} kg`} />
             <Info label={t('procurement.orders.shipmentWeight')} value={`${(previewTotals?.totalShipmentWeightKg ?? 0).toFixed(3)} kg`} />
-            <Info label={t('procurement.orders.paidToSupplierKgs')} value={formatKgs(order?.totalPaidKgs ?? 0)} />
+            <Info label={t('procurement.orders.cargoPaymentKgs')} value={formatKgs(confirmedCargoPaymentKgs)} />
             <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(previewTotals?.totalCostKgs ?? order.totalCostKgs)} />
           </section>
 
@@ -1074,7 +1079,6 @@ export default function ProcurementOrderDetailPage() {
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">SKU</th>
                   <th className="px-4 py-3">{t('procurement.orders.product')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.quantity')}</th>
                   <th className="px-4 py-3">{t('procurement.orders.receivedQty')}</th>
@@ -1091,7 +1095,6 @@ export default function ProcurementOrderDetailPage() {
                   if (!row) return null;
                   return (
                     <tr key={row.id}>
-                      <td className="px-4 py-3">{row.sku}</td>
                       <td className="px-4 py-3">{row.productName}</td>
                       <td className="px-4 py-3">{row.quantity}</td>
                       <td className="px-4 py-3">{row.receivedQuantity ?? '-'}</td>
