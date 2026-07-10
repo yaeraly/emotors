@@ -1903,6 +1903,7 @@ export class OperationsService {
           productId: item.productId,
           sku: item.sku,
           productName: item.productName,
+          ...this.mapChinaReceivingLineItemProductMeta(item),
           orderedQuantity: wmOnlyView ? undefined : item.quantity,
           expectedQuantity: item.quantity,
           actualReceivedQuantity: actualQuantity,
@@ -1943,6 +1944,7 @@ export class OperationsService {
         productId: item.productId,
         sku: item.sku,
         productName: item.productName,
+        ...this.mapChinaReceivingLineItemProductMeta(item),
         orderedQuantity: wmOnlyView ? undefined : item.quantity,
         expectedQuantity: item.quantity,
         actualReceivedQuantity: actualQuantity,
@@ -3018,7 +3020,20 @@ export class OperationsService {
         factory: wmView ? false : true,
         createdBy: { select: { id: true, fullName: true, role: true } },
         hqWarehouse: true,
-        items: true,
+        items: {
+          include: {
+            product: {
+              select: {
+                barcode: true,
+                categoryId: true,
+                category: true,
+                productCategory: {
+                  select: { id: true, nameRu: true, nameKy: true, nameEn: true, code: true },
+                },
+              },
+            },
+          },
+        },
         svhToHqTransport: wmView ? false : { include: { transportCompany: true } },
         differenceReports: wmView ? false : { where: { deletedAt: null } },
         receivings: {
@@ -3292,6 +3307,31 @@ export class OperationsService {
     );
 
     return report;
+  }
+
+  private mapChinaReceivingLineItemProductMeta(item: {
+    product?: {
+      barcode?: string | null;
+      categoryId?: string;
+      category?: string;
+      productCategory?: {
+        id: string;
+        nameRu: string;
+        nameKy: string;
+        nameEn: string;
+        code: string;
+      } | null;
+    } | null;
+  }) {
+    const product = item.product;
+    const category = product?.productCategory;
+    return {
+      categoryId: product?.categoryId ?? '',
+      categoryNameRu: category?.nameRu ?? product?.category ?? '',
+      categoryNameKy: category?.nameKy ?? product?.category ?? '',
+      categoryNameEn: category?.nameEn ?? product?.category ?? '',
+      barcode: product?.barcode ?? null,
+    };
   }
 
   private async assertChinaReceivingAccess(user: AuthUser, warehouseId: string) {

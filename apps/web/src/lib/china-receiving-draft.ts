@@ -41,6 +41,11 @@ export type ChinaReceivingLineItem = {
   productId: string;
   sku: string;
   productName: string;
+  categoryId?: string;
+  categoryNameRu?: string;
+  categoryNameKy?: string;
+  categoryNameEn?: string;
+  barcode?: string | null;
   expectedQuantity: number;
   actualReceivedQuantity?: number | null;
   damagedQuantity?: number;

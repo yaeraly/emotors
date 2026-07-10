@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { EntityCombobox } from '@/components/EntityCombobox';
 import { apiFetch, API_URL } from '@/lib/api';
 import { canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -14,6 +15,17 @@ import {
   type ChinaReceivingLineItem,
   type ChinaReceivingProgress,
 } from '@/lib/china-receiving-draft';
+import {
+  ALL_CATEGORIES,
+  buildCategoryOptions,
+  buildCategoryProgress,
+  buildCategorySummary,
+  loadStoredFilters,
+  matchesFilters,
+  persistFilters,
+  type ChinaReceivingFilters,
+  type VerificationFilterStatus,
+} from '@/lib/china-receiving-filters';
 
 type EditSession = {
   lockedByUserId: string;
@@ -330,13 +342,34 @@ function ChinaReceivingEditableView({
   user: User;
   onReload: () => Promise<ChinaReceivingDetail | null>;
 }) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const router = useRouter();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [filters, setFilters] = useState<ChinaReceivingFilters>(() => ({
+    categoryId: ALL_CATEGORIES,
+    search: '',
+    status: 'all',
+  }));
+  const [filtersReady, setFiltersReady] = useState(false);
+
+  useEffect(() => {
+    const stored = loadStoredFilters(task.id);
+    if (stored) setFilters(stored);
+    setFiltersReady(true);
+  }, [task.id]);
+
+  useEffect(() => {
+    if (!filtersReady) return;
+    persistFilters(task.id, filters);
+  }, [filters, filtersReady, task.id]);
+
+  const updateFilters = useCallback((patch: Partial<ChinaReceivingFilters>) => {
+    setFilters((current) => ({ ...current, ...patch }));
+  }, []);
 
   const readOnly = Boolean(task.readOnly) || !canReceiveProcurementToHq(user);
   const canEdit = canReceiveProcurementToHq(user) && !readOnly;
@@ -373,6 +406,37 @@ function ChinaReceivingEditableView({
   });
 
   const displayProgress = progress.products > 0 ? progress : task.progress ?? progress;
+
+  const uncategorizedLabel = t('chinaReceiving.category.uncategorized');
+  const categoryOptions = useMemo(
+    () => buildCategoryOptions(task.lineItems, language, t('chinaReceiving.category.all'), uncategorizedLabel),
+    [task.lineItems, language, t, uncategorizedLabel],
+  );
+
+  const filteredLineItems = useMemo(
+    () => task.lineItems.filter((item) => matchesFilters(item, rows[item.id], filters)),
+    [task.lineItems, rows, filters],
+  );
+
+  const categoryProgress = useMemo(
+    () => buildCategoryProgress(task.lineItems, rows, language, uncategorizedLabel),
+    [task.lineItems, rows, language, uncategorizedLabel],
+  );
+
+  const selectedCategorySummary = useMemo(
+    () => buildCategorySummary(task.lineItems, rows, filters.categoryId, language, uncategorizedLabel),
+    [task.lineItems, rows, filters.categoryId, language, uncategorizedLabel],
+  );
+
+  const statusFilterOptions = useMemo(
+    () => [
+      { value: 'all', label: t('chinaReceiving.verificationStatus.all') },
+      { value: 'unchecked', label: t('chinaReceiving.verificationStatus.unchecked') },
+      { value: 'checked', label: t('chinaReceiving.verificationStatus.checked') },
+      { value: 'discrepancy', label: t('chinaReceiving.verificationStatus.discrepancy') },
+    ],
+    [t],
+  );
 
   const showSaveToast = useCallback(() => {
     setSaveToast(t('chinaReceiving.savedToast'));
@@ -520,6 +584,7 @@ function ChinaReceivingEditableView({
             </p>
           </div>
           <div className="flex flex-wrap gap-4 text-sm text-slate-600">
+            <span>{t('chinaReceiving.summary.products')}: {displayProgress.products}</span>
             <span>{t('chinaReceiving.progressChecked')}: {displayProgress.checked}</span>
             <span>{t('chinaReceiving.progressRemaining')}: {displayProgress.remaining}</span>
           </div>
@@ -531,6 +596,105 @@ function ChinaReceivingEditableView({
           />
         </div>
       </div>
+
+      {categoryProgress.length > 0 ? (
+        <section className="space-y-3">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">{t('chinaReceiving.categoryProgressTitle')}</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {categoryProgress.map((card) => (
+              <button
+                key={card.categoryId}
+                type="button"
+                onClick={() => updateFilters({ categoryId: card.categoryId })}
+                className={`rounded-2xl border p-4 text-left shadow-sm transition ${
+                  filters.categoryId === card.categoryId
+                    ? 'border-blue-400 bg-blue-50'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <p className="truncate font-semibold text-slate-900" title={card.categoryName}>
+                  {card.categoryName}
+                </p>
+                <p className="mt-2 text-2xl font-bold text-slate-950">
+                  {card.checked} / {card.total}
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full rounded-full bg-emerald-500" style={{ width: `${card.percent}%` }} />
+                  </div>
+                  <span className="text-xs font-semibold text-slate-600">{card.percent}%</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <EntityCombobox
+            label={t('chinaReceiving.filterCategory')}
+            value={filters.categoryId}
+            options={categoryOptions}
+            onChange={(value) => updateFilters({ categoryId: value })}
+            allowClear={false}
+          />
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">{t('chinaReceiving.searchProduct')}</span>
+            <input
+              type="search"
+              value={filters.search}
+              onChange={(e) => updateFilters({ search: e.target.value })}
+              placeholder={t('chinaReceiving.searchProductPlaceholder')}
+              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-sm font-semibold text-slate-700">{t('chinaReceiving.verificationStatus.label')}</span>
+            <select
+              value={filters.status}
+              onChange={(e) => updateFilters({ status: e.target.value as VerificationFilterStatus })}
+              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            >
+              {statusFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        {filters.categoryId !== ALL_CATEGORIES || filters.search || filters.status !== 'all' ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+            <span>
+              {t('chinaReceiving.filteredCount')
+                .replace('{shown}', String(filteredLineItems.length))
+                .replace('{total}', String(task.lineItems.length))}
+            </span>
+            <button
+              type="button"
+              onClick={() => updateFilters({ categoryId: ALL_CATEGORIES, search: '', status: 'all' })}
+              className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold"
+            >
+              {t('chinaReceiving.clearFilters')}
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      {selectedCategorySummary ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-950">{selectedCategorySummary.categoryName}</h3>
+          <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <SummaryRow label={t('chinaReceiving.summary.products')} value={String(selectedCategorySummary.products)} />
+            <SummaryRow label={t('chinaReceiving.summary.expectedQty')} value={String(selectedCategorySummary.expectedQty)} />
+            <SummaryRow label={t('chinaReceiving.summary.receivedQty')} value={String(selectedCategorySummary.receivedQty)} />
+            <SummaryRow label={t('chinaReceiving.summary.shortage')} value={String(selectedCategorySummary.shortage)} tone="red" />
+            <SummaryRow label={t('chinaReceiving.summary.overage')} value={String(selectedCategorySummary.overage)} tone="green" />
+            <SummaryRow label={t('chinaReceiving.summary.damaged')} value={String(selectedCategorySummary.damaged)} tone="orange" />
+          </dl>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-4">
         <Info label={t('chinaReceiving.purchaseDate')} value={formatOrderDate(task.purchaseDate)} />
@@ -577,7 +741,14 @@ function ChinaReceivingEditableView({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {task.lineItems.map((item) => {
+            {filteredLineItems.length === 0 ? (
+              <tr>
+                <td colSpan={canEdit ? 9 : 8} className="px-4 py-8 text-center text-sm text-slate-500">
+                  {t('chinaReceiving.noFilteredProducts')}
+                </td>
+              </tr>
+            ) : null}
+            {filteredLineItems.map((item) => {
               const row = rows[item.id];
               const actual = Number(row?.actualQuantity ?? item.expectedQuantity);
               const damaged = Number(row?.damagedQuantity ?? 0);
