@@ -5,25 +5,23 @@ import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
 import { applyHqBranchWholesaleMarkup } from '@/lib/pricing-table-utils';
 import { canManagePricingPolicy } from '@/lib/rbac';
-import type { BranchType, User } from '@/lib/types';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
-type BranchPricingRow = {
+type FranchiseSalesRow = {
   id: string;
   name: string;
-  ownerName: string | null;
-  branchType: BranchType;
-  hqToBranchMarkupPercent: number;
-  calculatedPriceKgs: number;
-  referenceCostKgs: number;
+  sku: string;
+  categoryName: string;
+  costPriceKgs: number;
+  hqMarkupPercent: number;
+  branchPriceKgs: number;
   lastUpdated: string;
 };
 
-type EditableBranchRow = BranchPricingRow & {
+type EditableFranchiseRow = FranchiseSalesRow & {
   draftMarkup: number;
 };
-
-const MARKUP_PRESETS = [0, 10, 15, 20, 25];
 
 function formatPrice(value: number) {
   return value.toFixed(0);
@@ -31,7 +29,7 @@ function formatPrice(value: number) {
 
 export default function PricingBranchesPage() {
   const { t } = useTranslation();
-  const [rows, setRows] = useState<EditableBranchRow[]>([]);
+  const [rows, setRows] = useState<EditableFranchiseRow[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -41,15 +39,15 @@ export default function PricingBranchesPage() {
   const canManage = canManagePricingPolicy(user);
 
   async function load() {
-    const [branches, me] = await Promise.all([
-      apiFetch<BranchPricingRow[]>('/pricing/branches'),
+    const [products, me] = await Promise.all([
+      apiFetch<FranchiseSalesRow[]>('/pricing/franchise-sales'),
       apiFetch<User>('/auth/me'),
     ]);
     setUser(me);
     setRows(
-      branches.map((branch) => ({
-        ...branch,
-        draftMarkup: branch.hqToBranchMarkupPercent,
+      products.map((product) => ({
+        ...product,
+        draftMarkup: product.hqMarkupPercent,
       })),
     );
   }
@@ -62,36 +60,33 @@ export default function PricingBranchesPage() {
     const query = search.trim().toLowerCase();
     if (!query) return rows;
     return rows.filter((row) =>
-      [row.name, row.ownerName ?? ''].join(' ').toLowerCase().includes(query),
+      [row.name, row.sku, row.categoryName].join(' ').toLowerCase().includes(query),
     );
   }, [rows, search]);
 
-  function updateRow(branchId: string, draftMarkup: number) {
+  function updateRow(productId: string, draftMarkup: number) {
     setRows((current) =>
       current.map((row) => {
-        if (row.id !== branchId) return row;
-        const calculatedPriceKgs =
-          row.branchType === 'HQ_BRANCH'
-            ? row.referenceCostKgs
-            : applyHqBranchWholesaleMarkup(row.referenceCostKgs, draftMarkup);
-        return { ...row, draftMarkup, calculatedPriceKgs };
+        if (row.id !== productId) return row;
+        const branchPriceKgs = applyHqBranchWholesaleMarkup(row.costPriceKgs, draftMarkup);
+        return { ...row, draftMarkup, branchPriceKgs };
       }),
     );
   }
 
-  async function save(branchId: string) {
-    const row = rows.find((item) => item.id === branchId);
-    if (!row || !canManage || row.branchType === 'HQ_BRANCH') return;
+  async function save(productId: string) {
+    const row = rows.find((item) => item.id === productId);
+    if (!row || !canManage) return;
 
-    setSavingId(branchId);
+    setSavingId(productId);
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/pricing/branches/${branchId}`, {
+      await apiFetch(`/pricing/franchise-sales/${productId}`, {
         method: 'PUT',
-        body: JSON.stringify({ hqToBranchMarkupPercent: row.draftMarkup }),
+        body: JSON.stringify({ hqBranchWholesaleMarkupPercent: row.draftMarkup }),
       });
-      setSuccess(t('pricing.branchSaved'));
+      setSuccess(t('pricing.franchiseSaved'));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -107,24 +102,24 @@ export default function PricingBranchesPage() {
       {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
 
-      <p className="text-xs text-slate-500">{t('pricing.hqToBranchHint')}</p>
+      <p className="text-xs text-slate-500">{t('pricing.franchiseSalesHint')}</p>
 
       <input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder={t('pricing.searchBranches')}
+        placeholder={t('pricing.searchProducts')}
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm md:max-w-sm"
       />
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[760px] divide-y divide-slate-200 text-sm">
+        <table className="w-full min-w-[900px] divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-3 py-2">{t('pricing.colBranch')}</th>
-              <th className="px-3 py-2">{t('pricing.colOwner')}</th>
-              <th className="px-3 py-2">{t('pricing.colBranchType')}</th>
-              <th className="px-3 py-2">{t('pricing.colMarkup')}</th>
-              <th className="px-3 py-2">{t('pricing.colCalculatedPrice')}</th>
+              <th className="px-3 py-2">{t('pricing.colProduct')}</th>
+              <th className="px-3 py-2">{t('pricing.colCategory')}</th>
+              <th className="px-3 py-2">{t('pricing.colCost')}</th>
+              <th className="px-3 py-2">{t('pricing.colHqMarkup')}</th>
+              <th className="px-3 py-2">{t('pricing.colBranchPrice')}</th>
               <th className="px-3 py-2">{t('pricing.colLastUpdated')}</th>
               <th className="px-3 py-2">{t('pricing.colActions')}</th>
             </tr>
@@ -132,51 +127,30 @@ export default function PricingBranchesPage() {
           <tbody className="divide-y divide-slate-100">
             {filteredRows.map((row) => (
               <tr key={row.id}>
-                <td className="px-3 py-2 font-semibold text-slate-900">{row.name}</td>
-                <td className="px-3 py-2 text-slate-700">{row.ownerName ?? '—'}</td>
                 <td className="px-3 py-2">
-                  <span
-                    className={
-                      row.branchType === 'HQ_BRANCH'
-                        ? 'rounded-full bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-800'
-                        : 'rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-800'
-                    }
-                  >
-                    {row.branchType === 'HQ_BRANCH'
-                      ? t('pricing.branchTypeHq')
-                      : t('pricing.branchTypeFranchise')}
-                  </span>
+                  <p className="font-semibold text-slate-900">{row.name}</p>
+                  <p className="text-xs text-slate-500">{row.sku}</p>
                 </td>
+                <td className="px-3 py-2 text-slate-700">{row.categoryName}</td>
+                <td className="px-3 py-2 font-medium text-slate-800">{formatPrice(row.costPriceKgs)}</td>
                 <td className="px-3 py-2">
-                  {row.branchType === 'HQ_BRANCH' ? (
-                    <span className="text-slate-400">—</span>
-                  ) : canManage ? (
-                    <select
+                  {canManage ? (
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
                       value={row.draftMarkup}
                       onChange={(e) => updateRow(row.id, Number(e.target.value))}
-                      className="rounded border border-slate-300 px-2 py-1 text-sm"
-                    >
-                      {MARKUP_PRESETS.map((preset) => (
-                        <option key={preset} value={preset}>
-                          {preset}%
-                        </option>
-                      ))}
-                    </select>
+                      className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                    />
                   ) : (
-                    <span>{row.hqToBranchMarkupPercent}%</span>
+                    <span>{row.hqMarkupPercent}%</span>
                   )}
                 </td>
-                <td className="px-3 py-2 font-medium text-slate-800">
-                  {formatPrice(row.calculatedPriceKgs)}
-                  <span className="ml-1 text-[10px] text-slate-400">
-                    ({t('pricing.referenceCost')}: {formatPrice(row.referenceCostKgs)})
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-slate-600">
-                  {new Date(row.lastUpdated).toLocaleString()}
-                </td>
+                <td className="px-3 py-2 font-medium text-slate-800">{formatPrice(row.branchPriceKgs)}</td>
+                <td className="px-3 py-2 text-slate-600">{new Date(row.lastUpdated).toLocaleString()}</td>
                 <td className="px-3 py-2">
-                  {canManage && row.branchType === 'FRANCHISE_BRANCH' ? (
+                  {canManage ? (
                     <button
                       type="button"
                       disabled={savingId === row.id}

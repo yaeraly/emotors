@@ -2,6 +2,16 @@ import { BranchType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { IsEnum, IsNumber, IsOptional, Min } from 'class-validator';
 
+export class UpdateFranchiseSalesDto {
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  hqBranchWholesaleMarkupPercent!: number;
+
+  @IsOptional()
+  reason?: string;
+}
+
 export class UpdateBranchPricingDto {
   @IsOptional()
   @Type(() => Number)

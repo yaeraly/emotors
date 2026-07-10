@@ -51,6 +51,11 @@ enum BranchType {
   FRANCHISE_BRANCH
 }
 
+enum BranchPriceProfileStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -717,6 +722,8 @@ model Branch {
   branchType             BranchType @default(FRANCHISE_BRANCH)
   hqToBranchMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   hqToBranchMarkupUpdatedAt DateTime?
+  priceProfileId         String?
+  priceProfile           BranchPriceProfile? @relation(fields: [priceProfileId], references: [id])
   pricingChangeHistory   ProductPricingChangeHistory[] @relation("PricingChangeHistoryBranch")
   branchPurchaseRequests BranchPurchaseRequest[]
   branchRequestShortages BranchRequestShortage[]
@@ -725,6 +732,24 @@ model Branch {
   deletedAt      DateTime?
 
   @@index([assignedHqWarehouseId])
+  @@index([priceProfileId])
+}
+
+model BranchPriceProfile {
+  id                      String                   @id @default(cuid())
+  name                    String                   @unique
+  branchType              BranchType               @default(FRANCHISE_BRANCH)
+  defaultHqMarkupPercent  Decimal                  @default(0) @db.Decimal(8, 2)
+  status                  BranchPriceProfileStatus   @default(ACTIVE)
+  description             String?
+  createdById             String?
+  createdBy               User?                    @relation("BranchPriceProfileCreator", fields: [createdById], references: [id])
+  branches                Branch[]
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+
+  @@index([createdById])
+  @@index([status])
 }
 
 model User {
@@ -755,6 +780,7 @@ model User {
   yuanRateHistory YuanRateHistory[] @relation("YuanRateHistoryCreator")
   stockMovements StockMovement[] @relation("StockMovementCreator")
   productCategories ProductCategory[] @relation("ProductCategoryCreator")
+  branchPriceProfiles BranchPriceProfile[] @relation("BranchPriceProfileCreator")
   kpiTargets BranchKpiTarget[] @relation("KpiTargetCreator")
   npsSurveys NpsSurvey[] @relation("NpsSurveyCreator")
   courses Course[] @relation("CourseCreator")

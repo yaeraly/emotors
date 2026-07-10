@@ -15,6 +15,7 @@ type RetailRow = {
   categoryName: string;
   isActive: boolean;
   costPriceKgs: number;
+  branchPurchasePriceKgs: number;
   minimumSellingMarkupPercent: number;
   recommendedRetailMarkupPercent: number;
   retailPriceKgs: number;
@@ -36,8 +37,8 @@ function formatPrice(value: number) {
 function withCalculatedPrices(row: EditableRetailRow): EditableRetailRow {
   return {
     ...row,
-    draftMinPrice: applyMarkupRoundUp(row.costPriceKgs, row.draftMinMarkup),
-    draftRetailPrice: applyMarkupRoundUp(row.costPriceKgs, row.draftRecommendedMarkup),
+    draftMinPrice: applyMarkupRoundUp(row.branchPurchasePriceKgs, row.draftMinMarkup),
+    draftRetailPrice: applyMarkupRoundUp(row.branchPurchasePriceKgs, row.draftRecommendedMarkup),
   };
 }
 
@@ -151,7 +152,7 @@ export default function PricingRetailPage() {
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-3 py-2">{t('pricing.colProduct')}</th>
-              <th className="px-3 py-2">{t('pricing.colCost')}</th>
+              <th className="px-3 py-2">{t('pricing.colBranchPurchasePrice')}</th>
               <th className="px-3 py-2">{t('pricing.colMinMarkup')}</th>
               <th className="px-3 py-2">{t('pricing.colRecommendedMarkup')}</th>
               <th className="px-3 py-2">{t('pricing.colRetailPrice')}</th>
@@ -168,7 +169,7 @@ export default function PricingRetailPage() {
                     <p className="font-semibold text-slate-900">{row.name}</p>
                     <p className="text-xs text-slate-500">{row.sku}</p>
                   </td>
-                  <td className="px-3 py-2">{formatPrice(row.costPriceKgs)}</td>
+                  <td className="px-3 py-2">{formatPrice(row.branchPurchasePriceKgs)}</td>
                   <td className="px-3 py-2">
                     <input
                       type="number"

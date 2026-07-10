@@ -34,6 +34,27 @@ export function resolveHqToBranchPrice(
   return applyHqBranchWholesaleMarkup(costPriceKgs, markupPercent);
 }
 
+export function resolveBranchHqMarkupPercent(input: {
+  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
+  productDefaultMarkupPercent: number;
+  profileMarkupPercent?: number | null;
+  profileStatus?: 'ACTIVE' | 'INACTIVE' | null;
+}) {
+  if (input.branchType === 'HQ_BRANCH') return 0;
+  if (input.profileStatus === 'ACTIVE' && input.profileMarkupPercent != null) {
+    return Math.max(0, input.profileMarkupPercent);
+  }
+  return Math.max(0, input.productDefaultMarkupPercent);
+}
+
+export function resolveBranchPurchasePrice(
+  costPriceKgs: number,
+  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH',
+  markupPercent: number,
+) {
+  return resolveHqToBranchPrice(costPriceKgs, branchType, markupPercent);
+}
+
 export function pricesFromMarkups(
   costPriceKgs: number,
   markups: {
@@ -44,25 +65,29 @@ export function pricesFromMarkups(
     minimumSellingMarkupPercent: number;
   },
 ) {
+  const branchPurchasePriceKgs = applyHqBranchWholesaleMarkup(
+    costPriceKgs,
+    markups.hqBranchWholesaleMarkupPercent,
+  );
   const minimumWholesaleMarkupPercent = markups.minimumWholesaleMarkupPercent ?? markups.wholesaleMarkupPercent;
   return {
-    minimumWholesalePriceKgs: applyMarkupRoundUp(costPriceKgs, minimumWholesaleMarkupPercent),
-    wholesalePriceKgs: applyMarkupRoundUp(costPriceKgs, markups.wholesaleMarkupPercent),
-    hqBranchWholesalePriceKgs: applyHqBranchWholesaleMarkup(costPriceKgs, markups.hqBranchWholesaleMarkupPercent),
-    recommendedRetailPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.recommendedRetailMarkupPercent),
-    minimumSellingPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.minimumSellingMarkupPercent),
+    hqBranchWholesalePriceKgs: branchPurchasePriceKgs,
+    minimumWholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, minimumWholesaleMarkupPercent),
+    wholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.wholesaleMarkupPercent),
+    recommendedRetailPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.recommendedRetailMarkupPercent),
+    minimumSellingPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.minimumSellingMarkupPercent),
   };
 }
 
 export function validateRetailCurrentPrice(
-  costPriceKgs: number,
+  branchPurchasePriceKgs: number,
   minimumMarkupPercent: number,
   recommendedMarkupPercent: number,
   currentPriceKgs: number,
 ) {
-  if (costPriceKgs <= 0) return 'Cost price must be greater than 0 to validate retail price';
-  const minPrice = applyMarkupRoundUp(costPriceKgs, minimumMarkupPercent);
-  const maxPrice = applyMarkupRoundUp(costPriceKgs, recommendedMarkupPercent);
+  if (branchPurchasePriceKgs <= 0) return 'Cost price must be greater than 0 to validate retail price';
+  const minPrice = applyMarkupRoundUp(branchPurchasePriceKgs, minimumMarkupPercent);
+  const maxPrice = applyMarkupRoundUp(branchPurchasePriceKgs, recommendedMarkupPercent);
   if (currentPriceKgs + 0.01 < minPrice) {
     return 'Current retail price cannot be below minimum allowed price';
   }
@@ -73,14 +98,14 @@ export function validateRetailCurrentPrice(
 }
 
 export function validateWholesaleCurrentPrice(
-  costPriceKgs: number,
+  branchPurchasePriceKgs: number,
   minimumMarkupPercent: number,
   recommendedMarkupPercent: number,
   currentPriceKgs: number,
 ) {
-  if (costPriceKgs <= 0) return 'Cost price must be greater than 0 to validate wholesale price';
-  const minPrice = applyMarkupRoundUp(costPriceKgs, minimumMarkupPercent);
-  const maxPrice = applyMarkupRoundUp(costPriceKgs, recommendedMarkupPercent);
+  if (branchPurchasePriceKgs <= 0) return 'Cost price must be greater than 0 to validate wholesale price';
+  const minPrice = applyMarkupRoundUp(branchPurchasePriceKgs, minimumMarkupPercent);
+  const maxPrice = applyMarkupRoundUp(branchPurchasePriceKgs, recommendedMarkupPercent);
   if (currentPriceKgs + 0.01 < minPrice) {
     return 'Current wholesale price cannot be below minimum allowed price';
   }
@@ -104,11 +129,13 @@ export function validateMarkupInput(markups: {
 }
 
 export function validatePricingTiers(input: {
+  branchPurchasePriceKgs: number;
   wholesalePriceKgs: number;
   hqBranchWholesalePriceKgs: number;
   recommendedRetailPriceKgs: number;
   minimumSellingPriceKgs: number;
 }) {
+  if (input.branchPurchasePriceKgs <= 0) return 'Branch purchase price must be greater than 0';
   if (input.wholesalePriceKgs <= 0) return 'Wholesale price must be greater than 0';
   if (input.hqBranchWholesalePriceKgs <= 0) return 'HQ wholesale price must be greater than 0';
   if (input.recommendedRetailPriceKgs <= 0) return 'Retail price must be greater than 0';
@@ -120,7 +147,7 @@ export function validatePricingTiers(input: {
     return 'Wholesale price cannot exceed recommended retail price';
   }
   if (input.hqBranchWholesalePriceKgs > input.wholesalePriceKgs + 0.01) {
-    return 'HQ branch wholesale price cannot exceed wholesale price';
+    return 'Branch purchase price cannot exceed wholesale price';
   }
   return null;
 }
@@ -134,5 +161,9 @@ export function validateMarkups(costPriceKgs: number, markups: {
   const markupError = validateMarkupInput(markups);
   if (markupError) return markupError;
   if (costPriceKgs <= 0) return 'Cost price must be greater than 0 to calculate prices';
-  return validatePricingTiers(pricesFromMarkups(costPriceKgs, markups));
+  const prices = pricesFromMarkups(costPriceKgs, markups);
+  return validatePricingTiers({
+    branchPurchasePriceKgs: prices.hqBranchWholesalePriceKgs,
+    ...prices,
+  });
 }

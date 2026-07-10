@@ -24,16 +24,23 @@ export function pricesFromMarkups(
   costPriceKgs: number,
   markups: {
     wholesaleMarkupPercent: number;
+    minimumWholesaleMarkupPercent?: number;
     hqBranchWholesaleMarkupPercent: number;
     recommendedRetailMarkupPercent: number;
     minimumSellingMarkupPercent: number;
   },
 ) {
+  const branchPurchasePriceKgs = applyHqBranchWholesaleMarkup(
+    costPriceKgs,
+    markups.hqBranchWholesaleMarkupPercent,
+  );
+  const minimumWholesaleMarkupPercent = markups.minimumWholesaleMarkupPercent ?? markups.wholesaleMarkupPercent;
   return {
-    wholesalePriceKgs: applyMarkupRoundUp(costPriceKgs, markups.wholesaleMarkupPercent),
-    hqBranchWholesalePriceKgs: applyHqBranchWholesaleMarkup(costPriceKgs, markups.hqBranchWholesaleMarkupPercent),
-    recommendedRetailPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.recommendedRetailMarkupPercent),
-    minimumSellingPriceKgs: applyMarkupRoundUp(costPriceKgs, markups.minimumSellingMarkupPercent),
+    wholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.wholesaleMarkupPercent),
+    hqBranchWholesalePriceKgs: branchPurchasePriceKgs,
+    recommendedRetailPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.recommendedRetailMarkupPercent),
+    minimumSellingPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.minimumSellingMarkupPercent),
+    minimumWholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, minimumWholesaleMarkupPercent),
   };
 }
 

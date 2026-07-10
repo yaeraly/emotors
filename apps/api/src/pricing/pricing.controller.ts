@@ -10,10 +10,13 @@ import { UpdateCategoryMarkupDto, UpdateProductPricingDto } from './dto/pricing-
 import {
   PricingHistoryQueryDto,
   UpdateBranchPricingDto,
+  UpdateFranchiseSalesDto,
   UpdateRetailPricingDto,
   UpdateWholesalePricingDto,
 } from './dto/pricing-branch.dto';
+import { AssignBranchPriceProfileDto, UpsertBranchPriceProfileDto } from './dto/branch-price-profile.dto';
 import { PricingCatalogService } from './pricing-catalog.service';
+import { PricingProfileService } from './pricing-profile.service';
 import { PricingService } from './pricing.service';
 
 const PRICING_VIEW_ROLES = [
@@ -40,6 +43,7 @@ export class PricingController {
   constructor(
     private readonly pricingService: PricingService,
     private readonly pricingCatalogService: PricingCatalogService,
+    private readonly pricingProfileService: PricingProfileService,
   ) {}
 
   @Get('categories')
@@ -52,6 +56,22 @@ export class PricingController {
   @Roles(Role.CEO)
   updateCategoryMarkup(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateCategoryMarkupDto) {
     return this.pricingCatalogService.updateCategoryMarkup(user, id, dto);
+  }
+
+  @Get('franchise-sales')
+  @Roles(...PRICING_VIEW_ROLES)
+  listFranchiseSales(@CurrentUser() user: AuthUser) {
+    return this.pricingCatalogService.listFranchiseSalesProducts(user);
+  }
+
+  @Put('franchise-sales/:id')
+  @Roles(Role.CEO)
+  updateFranchiseSales(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateFranchiseSalesDto,
+  ) {
+    return this.pricingCatalogService.updateFranchiseSalesProduct(user, id, dto);
   }
 
   @Get('branches')
@@ -88,6 +108,54 @@ export class PricingController {
   @Roles(Role.CEO)
   updateWholesale(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateWholesalePricingDto) {
     return this.pricingCatalogService.updateWholesalePricing(user, id, dto);
+  }
+
+  @Get('profiles')
+  @Roles(...PRICING_VIEW_ROLES)
+  listProfiles(@CurrentUser() user: AuthUser) {
+    return this.pricingProfileService.list(user);
+  }
+
+  @Get('profiles/:id')
+  @Roles(...PRICING_VIEW_ROLES)
+  findProfile(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingProfileService.findOne(user, id);
+  }
+
+  @Post('profiles')
+  @Roles(Role.CEO)
+  createProfile(@CurrentUser() user: AuthUser, @Body() dto: UpsertBranchPriceProfileDto) {
+    return this.pricingProfileService.create(user, dto);
+  }
+
+  @Put('profiles/:id')
+  @Roles(Role.CEO)
+  updateProfile(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpsertBranchPriceProfileDto,
+  ) {
+    return this.pricingProfileService.update(user, id, dto);
+  }
+
+  @Post('profiles/:id/delete')
+  @Roles(Role.CEO)
+  deleteProfile(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.pricingProfileService.remove(user, id, body?.reason);
+  }
+
+  @Put('profiles/assign-branch/:branchId')
+  @Roles(Role.CEO)
+  assignBranchProfile(
+    @CurrentUser() user: AuthUser,
+    @Param('branchId') branchId: string,
+    @Body() dto: AssignBranchPriceProfileDto,
+  ) {
+    return this.pricingProfileService.assignBranch(user, branchId, dto);
   }
 
   @Get('history')
