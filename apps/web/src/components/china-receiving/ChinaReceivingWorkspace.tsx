@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -10,7 +10,6 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 import { useChinaReceivingDraft } from '@/hooks/useChinaReceivingDraft';
 import {
-  differenceDisplay,
   rowBackgroundClass,
   type ChinaReceivingLineItem,
   type ChinaReceivingProgress,
@@ -81,7 +80,7 @@ export function ChinaReceivingWorkspace({
   const [loading, setLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
-  const [savedFlash, setSavedFlash] = useState<Record<string, boolean>>({});
+  const [saveToast, setSaveToast] = useState<string | null>(null);
 
   const isCompleted = Boolean(task.hqStockMovementCreatedAt);
   const readOnly = Boolean(task.readOnly) || isCompleted || !canReceiveProcurementToHq(user);
@@ -120,35 +119,18 @@ export function ChinaReceivingWorkspace({
 
   const displayProgress = progress.products > 0 ? progress : task.progress ?? progress;
 
-  const flashSaved = useCallback((itemId: string) => {
-    setSavedFlash((current) => ({ ...current, [itemId]: true }));
-    window.setTimeout(() => {
-      setSavedFlash((current) => {
-        const next = { ...current };
-        delete next[itemId];
-        return next;
-      });
-    }, 2000);
-  }, []);
+  const showSaveToast = useCallback(() => {
+    setSaveToast(t('chinaReceiving.savedToast'));
+    window.setTimeout(() => setSaveToast(null), 2000);
+  }, [t]);
 
   const handleSaveRow = useCallback(
     async (itemId: string) => {
       const saved = await saveRow(itemId);
-      if (saved) flashSaved(itemId);
+      if (saved) showSaveToast();
     },
-    [flashSaved, saveRow],
+    [showSaveToast, saveRow],
   );
-
-  useEffect(() => {
-    for (const [itemId, row] of Object.entries(rows)) {
-      if (row.saveState === 'saved' && row.lastSavedAt && !row.isDirty && !savedFlash[itemId]) {
-        const savedAt = new Date(row.lastSavedAt).getTime();
-        if (Date.now() - savedAt < 1500) {
-          flashSaved(itemId);
-        }
-      }
-    }
-  }, [rows, savedFlash, flashSaved]);
 
   const hasDifference = useMemo(() => {
     return task.lineItems.some((item) => {
@@ -259,17 +241,19 @@ export function ChinaReceivingWorkspace({
         </p>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      {saveToast ? (
+        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
+          {saveToast}
+        </div>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <SummaryCard label={t('chinaReceiving.summary.products')} value={String(displayProgress.products)} />
         <SummaryCard label={t('chinaReceiving.summary.expectedQty')} value={String(displayProgress.expectedQty)} />
         <SummaryCard label={t('chinaReceiving.summary.receivedQty')} value={String(displayProgress.receivedQty)} />
         <SummaryCard label={t('chinaReceiving.summary.shortage')} value={String(displayProgress.shortage)} tone="red" />
         <SummaryCard label={t('chinaReceiving.summary.overage')} value={String(displayProgress.overage)} tone="green" />
         <SummaryCard label={t('chinaReceiving.summary.damaged')} value={String(displayProgress.damaged)} tone="orange" />
-        <SummaryCard label={t('chinaReceiving.summary.checked')} value={String(displayProgress.checked)} />
-        <SummaryCard label={t('chinaReceiving.summary.remaining')} value={String(displayProgress.remaining)} />
-        <SummaryCard label={t('chinaReceiving.summary.saved')} value={String(displayProgress.saved)} tone="green" />
-        <SummaryCard label={t('chinaReceiving.summary.unsaved')} value={String(unsavedCount)} tone="amber" />
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -283,8 +267,6 @@ export function ChinaReceivingWorkspace({
           <div className="flex flex-wrap gap-4 text-sm text-slate-600">
             <span>{t('chinaReceiving.progressChecked')}: {displayProgress.checked}</span>
             <span>{t('chinaReceiving.progressRemaining')}: {displayProgress.remaining}</span>
-            <span>{t('chinaReceiving.progressSaved')}: {displayProgress.saved}</span>
-            <span>{t('chinaReceiving.progressUnsaved')}: {unsavedCount}</span>
           </div>
         </div>
         <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
@@ -331,7 +313,8 @@ export function ChinaReceivingWorkspace({
               <th className="w-16 px-2 py-2" title={t('chinaReceiving.actualQty')}>{t('chinaReceiving.col.actualShort')}</th>
               <th className="w-14 px-2 py-2" title={t('chinaReceiving.damagedQty')}>{t('chinaReceiving.col.damagedShort')}</th>
               <th className="w-16 px-2 py-2" title={t('chinaReceiving.unitWeightKg')}>{t('chinaReceiving.col.weightShort')}</th>
-              <th className="w-14 px-2 py-2" title={t('chinaReceiving.difference')}>{t('chinaReceiving.col.diffShort')}</th>
+              <th className="w-12 px-2 py-2" title={t('chinaReceiving.summary.shortage')}>{t('chinaReceiving.col.shortageShort')}</th>
+              <th className="w-12 px-2 py-2" title={t('chinaReceiving.summary.overage')}>{t('chinaReceiving.col.overageShort')}</th>
               <th className="w-28 px-2 py-2" title={t('chinaReceiving.notes')}>{t('chinaReceiving.col.notesShort')}</th>
               {canEdit ? (
                 <th className="w-20 px-2 py-2" title={t('common.actions')}>{t('chinaReceiving.col.actionsShort')}</th>
@@ -344,7 +327,8 @@ export function ChinaReceivingWorkspace({
               const actual = Number(row?.actualQuantity ?? item.expectedQuantity);
               const damaged = Number(row?.damagedQuantity ?? 0);
               const diff = actual - item.expectedQuantity;
-              const diffUi = differenceDisplay(diff);
+              const shortage = diff < 0 ? Math.abs(diff) : 0;
+              const overage = diff > 0 ? diff : 0;
               const rowStatus = row?.rowStatus ?? 'IN_PROGRESS';
               const bg = row ? rowBackgroundClass(rowStatus, row.saveState, row.isDirty) : '';
               const noteValue = row?.note ?? '';
@@ -402,9 +386,11 @@ export function ChinaReceivingWorkspace({
                       <span className="block text-center">{unitWeight || '-'}</span>
                     )}
                   </td>
-                  <td className={`px-2 py-2 text-center font-semibold ${diffUi.color}`} title={t('chinaReceiving.difference')}>
-                    {diffUi.icon ? <span className="mr-0.5">{diffUi.icon}</span> : null}
-                    {diffUi.text}
+                  <td className="px-2 py-2 text-center font-semibold text-red-600">
+                    {shortage > 0 ? shortage : '-'}
+                  </td>
+                  <td className="px-2 py-2 text-center font-semibold text-emerald-600">
+                    {overage > 0 ? overage : '-'}
                   </td>
                   <td className="px-2 py-2">
                     {canEdit ? (
@@ -421,26 +407,15 @@ export function ChinaReceivingWorkspace({
                   </td>
                   {canEdit ? (
                     <td className="px-2 py-2">
-                      <div className="flex flex-col items-start gap-0.5">
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            disabled={row?.saveState === 'saving'}
-                            onClick={() => void handleSaveRow(item.id)}
-                            className="rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
-                            title={t('chinaReceiving.saveRow')}
-                          >
-                            {t('chinaReceiving.saveRow')}
-                          </button>
-                          {savedFlash[item.id] || (row?.serverIsSaved && !row.isDirty) ? (
-                            <span className="text-[11px] font-semibold text-emerald-600" title={t('chinaReceiving.savedInline')}>
-                              ✓ {t('chinaReceiving.savedInline')}
-                            </span>
-                          ) : row?.saveState === 'unsaved' || row?.isDirty ? (
-                            <span className="text-[11px] font-medium text-amber-700">{t('chinaReceiving.saveState.unsaved')}</span>
-                          ) : null}
-                        </div>
-                      </div>
+                      <button
+                        type="button"
+                        disabled={row?.saveState === 'saving'}
+                        onClick={() => void handleSaveRow(item.id)}
+                        className="rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                        title={t('chinaReceiving.saveRow')}
+                      >
+                        {row?.saveState === 'saving' ? t('chinaReceiving.saveState.saving') : t('chinaReceiving.saveRow')}
+                      </button>
                     </td>
                   ) : null}
                 </tr>
