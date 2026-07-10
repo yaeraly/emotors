@@ -280,7 +280,7 @@ export class InventoryService {
           purchasePriceYuan: dto.purchasePriceYuan,
           yuanRate,
           transportCostKgs: 0,
-          sellingPriceKgs: dto.sellingPriceKgs,
+          sellingPriceKgs: dto.sellingPriceKgs ?? 0,
         });
         const existingProduct = await tx.product.findFirst({
           where: { branchId, sku: dto.sku },

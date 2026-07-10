@@ -84,10 +84,11 @@ export class CreateProductDto {
   @Min(0)
   transportCostKgs?: number;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  sellingPriceKgs!: number;
+  sellingPriceKgs?: number;
 
   @IsOptional()
   @Type(() => Number)
