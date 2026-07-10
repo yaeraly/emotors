@@ -12,6 +12,7 @@ import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lo
 import { canEditProcurementOrderItemsInWindow } from '@/lib/rbac';
 import type { Product, User, Warehouse } from '@/lib/types';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
+import { formatProductUnit } from '@/lib/product-unit';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type Supplier = { id: string; name: string };
@@ -63,7 +64,7 @@ type Props = {
 
 export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) {
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [factories, setFactories] = useState<Factory[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
@@ -466,14 +467,12 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-3">{t('procurement.orders.product')}</th>
-                <th className="px-3 py-3">SKU</th>
-                <th className="px-3 py-3">{t('procurement.orders.unit')}</th>
+                <th className="px-3 py-3">{t('inventory.unit')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.quantity')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.netWeightKg')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.totalNetWeightKg')}</th>
+                <th className="px-3 py-3">{t('procurement.orders.lineTotalNetWeightKg')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.currentPurchasePriceYuan')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.purchasePriceYuan')}</th>
-                <th className="px-3 py-3">{t('procurement.orders.priceDifference')}</th>
                 <th className="px-3 py-3">{t('procurement.orders.totalYuan')}</th>
                 <th className="px-3 py-3" />
               </tr>
@@ -482,10 +481,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
               {lineDetails.map((line) => (
                 <tr key={line.key} className={line.missingWeight ? 'bg-amber-50' : line.priceChanged ? 'bg-blue-50' : ''}>
                   <td className="px-3 py-3 min-w-48 font-semibold text-slate-900">{line.productName}</td>
-                  <td className="px-3 py-3 font-mono text-xs">{line.sku}</td>
-                  <td className="px-3 py-3">{line.product?.unit ?? 'pcs'}</td>
+                  <td className="px-3 py-3">{formatProductUnit(line.product?.unit, language, t)}</td>
                   <td className="px-3 py-3"><input disabled={itemsLocked} type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} className="w-20 rounded-lg border border-slate-300 px-2 py-1.5" /></td>
-                  <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : `${line.netWeightKg.toFixed(3)} kg`}</td>
+                  <td className="px-3 py-3">{line.missingWeight ? <span className="text-amber-700">{t('procurement.orders.missing')}</span> : `${line.netWeightKg.toFixed(3)} ${language === 'en' ? 'kg' : 'кг'}`}</td>
                   <td className="px-3 py-3">{line.totalNetWeightKg.toFixed(3)}</td>
                   <td className="px-3 py-3 font-mono">¥{line.masterPriceYuan.toFixed(2)}</td>
                   <td className="px-3 py-3">
@@ -498,13 +496,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
                       onChange={(e) => updateLine(line.key, { purchasePriceYuan: e.target.value })}
                       className={`w-24 rounded-lg border px-2 py-1.5 ${line.priceChanged ? 'border-amber-400 bg-amber-50' : 'border-slate-300'}`}
                     />
-                  </td>
-                  <td className={`px-3 py-3 text-sm font-semibold ${line.priceDifference > 0 ? 'text-red-600' : line.priceDifference < 0 ? 'text-green-600' : 'text-slate-500'}`}>
-                    {line.priceDifference > 0
-                      ? t('procurement.orders.priceIncreased').replace('{amount}', line.priceDifference.toFixed(2))
-                      : line.priceDifference < 0
-                        ? t('procurement.orders.priceDecreased').replace('{amount}', line.priceDifference.toFixed(2))
-                        : '-'}
                   </td>
                   <td className="px-3 py-3">¥{line.totalYuan.toFixed(2)}</td>
                   <td className="px-3 py-3"><button disabled={itemsLocked} type="button" onClick={() => removeLine(line.key)} className="text-red-600 disabled:opacity-50">{t('common.delete')}</button></td>

@@ -11,6 +11,7 @@ import {
   getCategoryPrefix,
   nextProductCodes,
 } from '@/lib/product-code-utils';
+import { productUnitOptions } from '@/lib/product-unit';
 import { canEditPurchasePriceYuan } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -100,8 +101,8 @@ export default function NewProductPage() {
   const canEditPurchase = canEditPurchasePriceYuan(currentUser);
 
   const unitOptions = useMemo(
-    () => units.map((unit) => ({ value: unit, label: unit })),
-    [units],
+    () => productUnitOptions(units, language, t),
+    [units, language, t],
   );
   const supplierOptions = useMemo(
     () => suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name })),

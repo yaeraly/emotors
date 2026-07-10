@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
-import { API_URL, clearToken, getToken } from '@/lib/api';
-import { apiFetch } from '@/lib/api';
+import { API_URL, clearToken, getToken, apiFetch } from '@/lib/api';
+import { formatProductUnit } from '@/lib/product-unit';
 import { canArchiveProduct } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -149,7 +149,7 @@ export function ProductsListContent() {
                 <th className="px-4 py-3">{t('inventory.sku')}</th>
                 <th className="px-4 py-3">{t('inventory.name')}</th>
                 <th className="px-4 py-3">{t('inventory.category')}</th>
-                <th className="px-4 py-3">{t('inventory.warehouse')}</th>
+                <th className="px-4 py-3">{t('inventory.unit')}</th>
                 <th className="px-4 py-3">{t('inventory.quantity')}</th>
                 <th className="px-4 py-3">{t('inventory.finalCost')}</th>
                 <th className="px-4 py-3">{t('inventory.lowStock')}</th>
@@ -183,7 +183,7 @@ export function ProductsListContent() {
                       ? categoryName(product.productCategory, language)
                       : product.category}
                   </td>
-                  <td className="px-4 py-3">{product.warehouse?.name}</td>
+                  <td className="px-4 py-3">{formatProductUnit(product.unit, language, t)}</td>
                   <td className="px-4 py-3">{product.quantity}</td>
                   <td className="px-4 py-3">{formatKgs(product.finalCostKgs)}</td>
                   <td className="px-4 py-3">

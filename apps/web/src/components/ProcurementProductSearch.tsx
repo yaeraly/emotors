@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { formatProductUnit } from '@/lib/product-unit';
 import { rankProducts } from '@/lib/product-fuzzy-search';
 import type { Product, ProductListResponse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -15,7 +16,7 @@ type Props = {
 const DEBOUNCE_MS = 200;
 
 export function ProcurementProductSearch({ disabled = false, onSelect, inputRef }: Props) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
   const listboxId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const internalInputRef = useRef<HTMLInputElement>(null);
@@ -163,9 +164,9 @@ export function ProcurementProductSearch({ disabled = false, onSelect, inputRef 
                   {t('procurement.orders.productSearch.sku')}: {product.sku}
                 </p>
                 <p className="mt-1 text-xs text-slate-600">
-                  {product.warehouse?.name ?? t('procurement.orders.productSearch.warehouse')}: {product.quantity} {product.unit ?? 'pcs'}
+                  {product.warehouse?.name ?? t('procurement.orders.productSearch.warehouse')}: {product.quantity} {formatProductUnit(product.unit, language, t)}
                   {' · '}
-                  {t('procurement.orders.netWeightKg')}: {Number(product.weightKg || 0).toFixed(1)} kg
+                  {t('procurement.orders.netWeightKg')}: {Number(product.weightKg || 0).toFixed(1)} {language === 'en' ? 'kg' : 'кг'}
                   {' · '}
                   {t('procurement.orders.productSearch.lastPrice')}: ¥{Number(product.purchasePriceYuan || 0).toFixed(2)}
                 </p>

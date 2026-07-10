@@ -9,6 +9,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
 import { collectInventoryUnits } from '@/lib/product-code-utils';
+import { formatProductUnit, productUnitOptions } from '@/lib/product-unit';
 import {
   canEditProductCatalog,
   canEditProductUnit,
@@ -103,8 +104,8 @@ export default function ProductDetailPage() {
   const hidePricingProfile = shouldHideProductPricingFromProfile(currentUser);
 
   const unitOptions = useMemo(
-    () => units.map((unit) => ({ value: unit, label: unit })),
-    [units],
+    () => productUnitOptions(units, language, t),
+    [units, language, t],
   );
 
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
@@ -136,8 +137,6 @@ export default function ProductDetailPage() {
       }
 
       const nextWeight = Number(editForm.weightKg);
-      const weightChanged = product ? nextWeight !== Number(product.weightKg) : false;
-      const unitChanged = product ? editForm.unit.trim() !== (product.unit || '') : false;
       if (canEditProductCatalog(currentUser) && (!Number.isFinite(nextWeight) || nextWeight <= 0)) {
         setError(t('inventory.weightMustBePositive'));
         return;
@@ -158,19 +157,19 @@ export default function ProductDetailPage() {
         }),
       });
       setProduct(updated);
-      if (unitChanged && !weightChanged) {
-        window.localStorage.setItem('emotors_product_success', t('inventory.unitUpdatedSuccess'));
-        router.push(`/products/${params.id}`);
-        router.refresh();
-        return;
-      }
-      setSuccessMessage(
-        weightChanged && canEditProductCatalog(currentUser)
-          ? t('inventory.productWeightUpdatedSuccess')
-          : unitChanged
-            ? t('inventory.unitUpdatedSuccess')
-            : t('common.success'),
-      );
+      setEditForm({
+        name: updated.name,
+        sku: updated.sku,
+        categoryId: updated.categoryId,
+        photoUrl: updated.photoUrl ?? '',
+        warehouseId: updated.warehouse?.isActive === false ? '' : updated.warehouseId,
+        unit: updated.unit || 'pcs',
+        weightKg: String(updated.weightKg),
+        minStockLevel: String(updated.minStockLevel),
+      });
+      window.localStorage.setItem('emotors_product_success', t('inventory.productUpdatedSuccess'));
+      router.push(`/products/${params.id}`);
+      router.refresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
       if (message.toLowerCase().includes('inactive warehouse')) {
@@ -232,7 +231,7 @@ export default function ProductDetailPage() {
                   <p className="mt-2 text-slate-500">{product.description}</p>
                   <div className="mt-6 grid gap-4 md:grid-cols-4">
                     <Info label={t('inventory.category')} value={product.productCategory ? categoryName(product.productCategory, language) : product.category} />
-                    <Info label={t('inventory.unit')} value={product.unit || 'pcs'} />
+                    <Info label={t('inventory.unit')} value={formatProductUnit(product.unit, language, t)} />
                     <Info label={t('inventory.warehouse')} value={product.warehouse?.name ?? ''} />
                     <Info label={t('inventory.weightPerUnitKg')} value={`${Number(product.weightKg).toFixed(3)} kg`} />
                     <Info label={t('inventory.quantity')} value={String(product.quantity)} />
