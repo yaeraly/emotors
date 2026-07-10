@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DomesticTransportSection, type DomesticTransportForm } from '@/components/DomesticTransportSection';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
@@ -423,6 +423,11 @@ export default function ProcurementOrderDetailPage() {
       totalLandedCost: previewTotals.totalCostKgs,
     };
   }, [previewTotals, previewChinaDomesticTransportKgs, previewSvhTransportKgs, logisticsForm]);
+
+  const totalPurchaseCostKgs = useMemo(() => {
+    if (!previewTotals) return 0;
+    return previewTotals.items.reduce((sum, item) => sum + item.costKgs * item.effectiveQuantity, 0);
+  }, [previewTotals]);
 
   const landedCostCalculated = useMemo(() => {
     if (order?.landedCostStatus === 'CALCULATED' || order?.landedCostStatus === 'FINALIZED') return true;
@@ -1133,32 +1138,59 @@ export default function ProcurementOrderDetailPage() {
       </section>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.importCostBreakdown')}</h3>
-        {importCostBreakdown ? (
-          <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-            <Info label={t('procurement.orders.chinaDomestic')} value={formatKgs(importCostBreakdown.chinaDomestic)} />
-            <Info label={t('procurement.orders.paidToSupplierKgs')} value={formatKgs(confirmedSupplierPaidKgs)} />
-            <Info label={t('procurement.orders.domesticTransportKyrgyzstan')} value={formatKgs(importCostBreakdown.svhTransport)} />
-            <Info label={t('procurement.orders.insurance')} value={formatKgs(importCostBreakdown.insurance)} />
-            <Info label={t('procurement.orders.customs')} value={formatKgs(importCostBreakdown.customs)} />
-            <Info label={t('procurement.orders.transportCosts')} value={formatKgs(importCostBreakdown.otherExpenses)} />
-            {importCostBreakdown.bankFees > 0 ? (
-              <Info label={t('procurement.orders.bankFees')} value={formatKgs(importCostBreakdown.bankFees)} />
-            ) : null}
-            <Info label={t('procurement.orders.totalImportLogistics')} value={formatKgs(importCostBreakdown.totalImportLogistics)} />
-            <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(importCostBreakdown.totalLandedCost)} />
+        <CostBlock title={t('procurement.orders.productPurchase')}>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Info label={t('procurement.orders.paidToSupplier')} value={formatKgs(confirmedSupplierPaidKgs)} />
+            <Info
+              label={t('procurement.orders.weightedAverageYuanRate')}
+              value={effectiveYuanRate > 0 ? effectiveYuanRate.toFixed(4) : '-'}
+            />
+            <Info label={t('procurement.orders.totalPurchaseCost')} value={formatKgs(totalPurchaseCostKgs)} />
           </div>
-        ) : null}
-        <p className="mt-4 text-sm text-slate-500">{t('procurement.orders.weightAllocationHint')}</p>
+        </CostBlock>
       </section>
 
-          <section className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
-            <Info label={t('procurement.orders.totalNetWeightKg')} value={`${(previewTotals?.totalNetWeightKg ?? 0).toFixed(3)} kg`} />
-            <Info label={t('procurement.orders.totalPackagingWeightKg')} value={`${(previewTotals?.totalPackagingWeightKg ?? 0).toFixed(3)} kg`} />
-            <Info label={t('procurement.orders.shipmentWeight')} value={`${(previewTotals?.totalShipmentWeightKg ?? 0).toFixed(3)} kg`} />
-            <Info label={t('procurement.orders.paidToSupplierKgs')} value={formatKgs(confirmedSupplierPaidKgs)} />
-            <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(previewTotals?.totalCostKgs ?? order.totalCostKgs)} />
-          </section>
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <CostBlock title={t('procurement.orders.importLogistics')}>
+          {importCostBreakdown ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Info label={t('procurement.orders.chinaDomestic')} value={formatKgs(importCostBreakdown.chinaDomestic)} />
+              <Info label={t('procurement.orders.cargoPayment')} value={formatKgs(importCostBreakdown.cargoReceipt)} />
+              <Info label={t('procurement.orders.domesticTransportKyrgyzstan')} value={formatKgs(importCostBreakdown.svhTransport)} />
+              <Info label={t('procurement.orders.insurance')} value={formatKgs(importCostBreakdown.insurance)} />
+              <Info label={t('procurement.orders.customs')} value={formatKgs(importCostBreakdown.customs)} />
+              <Info label={t('procurement.orders.transportCosts')} value={formatKgs(importCostBreakdown.otherExpenses)} />
+              <Info
+                label={t('procurement.orders.totalImportLogistics')}
+                value={formatKgs(importCostBreakdown.totalImportLogistics)}
+                highlight
+              />
+            </div>
+          ) : null}
+          <p className="mt-4 text-sm text-slate-500">{t('procurement.orders.weightAllocationHint')}</p>
+        </CostBlock>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <CostBlock title={t('procurement.orders.finalLandedCost')}>
+          {importCostBreakdown ? (
+            <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr] lg:items-center">
+              <Info label={t('procurement.orders.totalPurchaseCost')} value={formatKgs(totalPurchaseCostKgs)} />
+              <p className="hidden text-center text-2xl font-bold text-slate-400 lg:block">+</p>
+              <Info
+                label={t('procurement.orders.totalImportLogistics')}
+                value={formatKgs(importCostBreakdown.totalImportLogistics)}
+              />
+              <p className="hidden text-center text-2xl font-bold text-slate-400 lg:block">=</p>
+              <Info
+                label={t('procurement.orders.estimatedLandedCost')}
+                value={formatKgs(importCostBreakdown.totalLandedCost)}
+                highlight
+              />
+            </div>
+          ) : null}
+        </CostBlock>
+      </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.productsTable')}</h3>
@@ -1299,8 +1331,32 @@ export default function ProcurementOrderDetailPage() {
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs font-semibold uppercase text-slate-400">{label}</p><p className="font-bold text-slate-950">{value}</p></div>;
+function Info({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div className={`rounded-2xl p-4 ${highlight ? 'border border-blue-200 bg-blue-50' : 'bg-slate-50'}`}>
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className={`font-bold ${highlight ? 'text-blue-900' : 'text-slate-950'}`}>{value}</p>
+    </div>
+  );
+}
+
+function CostBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-4">
+      <div className="border-b border-slate-200 pb-3">
+        <h3 className="text-lg font-bold text-slate-950">{title}</h3>
+      </div>
+      {children}
+    </div>
+  );
 }
 
 function TransportCompanySelect({
