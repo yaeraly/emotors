@@ -68,6 +68,13 @@ import {
   resolveChinaReceivingListStatus,
 } from './china-receiving.util';
 import {
+  buildChinaReceivingProgress,
+  isChinaReceivingSessionStale,
+  resolveChinaReceivingDraftState,
+  resolveRowStatus,
+} from './china-receiving-draft.util';
+import { SaveChinaReceivingDraftRowDto, SaveAllChinaReceivingDraftDto } from './dto/save-china-receiving-draft-row.dto';
+import {
   isWarehouseManagerOnlyView,
   sanitizeChinaReceivingDetail,
   sanitizeChinaReceivingListTask,
@@ -988,6 +995,19 @@ export class OperationsService {
         throw new BadRequestException('Procurement stock has already been received');
       }
 
+      const draftRows = await tx.chinaReceivingDraftRow.findMany({
+        where: { procurementOrderId: order.id },
+      });
+      const savedDraftIds = new Set(
+        draftRows.filter((row) => row.isSaved).map((row) => row.procurementItemId),
+      );
+      const unsavedItems = order.items.filter((item) => !savedDraftIds.has(item.id));
+      if (unsavedItems.length > 0) {
+        throw new BadRequestException(
+          `All receiving rows must be saved before final receive. Unsaved: ${unsavedItems.length}`,
+        );
+      }
+
       const cargoAttachmentCount = await tx.fileAttachment.count({
         where: {
           entityId: order.id,
@@ -1388,6 +1408,14 @@ export class OperationsService {
         referenceNumber: order.orderNumber,
         message: `Goods received into HQ warehouse for procurement ${order.orderNumber}.`,
       });
+      await tx.chinaReceivingDraftRow.deleteMany({ where: { procurementOrderId: order.id } });
+      await tx.chinaReceivingEditSession.deleteMany({ where: { procurementOrderId: order.id } });
+      await this.auditInTx(tx, user, 'HQ', 'RECEIVING_COMPLETED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        procurementOrderId: order.id,
+        receivingId: receiving.id,
+        timestamp: new Date().toISOString(),
+      });
       return tx.procurementGoodsReceiving.findUnique({ where: { id: receiving.id }, include: { items: true } });
     });
   }
@@ -1686,6 +1714,83 @@ export class OperationsService {
       });
     }
 
+    const [draftRows, editSession] = await Promise.all([
+      this.prisma.chinaReceivingDraftRow.findMany({
+        where: { procurementOrderId: order.id },
+        include: { lastSavedBy: { select: { id: true, fullName: true } } },
+      }),
+      this.prisma.chinaReceivingEditSession.findFirst({
+        where: { procurementOrderId: order.id },
+        include: { lockedByUser: { select: { id: true, fullName: true } } },
+      }),
+    ]);
+
+    if (draftRows.length > 0 && !order.hqStockMovementCreatedAt) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'ROW_RESTORED',
+          entity: 'ProcurementOrder',
+          entityId: order.id,
+          metadata: {
+            userId: user.id,
+            procurementOrderId: order.id,
+            restoredRowCount: draftRows.length,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
+
+    const lineItems = order.items.map((item) => {
+      const draft = draftRows.find((row) => row.procurementItemId === item.id);
+      const actualQuantity = draft?.actualQuantity ?? item.receivedQuantity ?? item.quantity;
+      const damagedQuantity = draft?.damagedQuantity ?? 0;
+      const isSaved = draft?.isSaved ?? false;
+      return {
+        id: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        productName: item.productName,
+        orderedQuantity: wmOnlyView ? undefined : item.quantity,
+        expectedQuantity: item.quantity,
+        actualReceivedQuantity: actualQuantity,
+        damagedQuantity,
+        note: draft?.note ?? null,
+        isSaved,
+        lastSavedAt: draft?.lastSavedAt ?? null,
+        lastSavedBy: draft?.lastSavedBy ?? null,
+        rowStatus: resolveRowStatus(actualQuantity, item.quantity, damagedQuantity, isSaved),
+        difference: actualQuantity - item.quantity,
+      };
+    });
+
+    const progress = buildChinaReceivingProgress(
+      order.items.map((item) => ({ id: item.id, expectedQuantity: item.quantity })),
+      draftRows.map((row) => ({
+        procurementItemId: row.procurementItemId,
+        actualQuantity: row.actualQuantity,
+        damagedQuantity: row.damagedQuantity,
+        note: row.note,
+        isSaved: row.isSaved,
+        lastSavedAt: row.lastSavedAt,
+      })),
+    );
+
+    const sessionStale = editSession ? isChinaReceivingSessionStale(editSession.lastHeartbeatAt) : true;
+    const activeSession =
+      editSession && !sessionStale
+        ? {
+            lockedByUserId: editSession.lockedByUserId,
+            lockedByUser: editSession.lockedByUser,
+            lockedAt: editSession.lockedAt,
+            lastHeartbeatAt: editSession.lastHeartbeatAt,
+            isCurrentUser: editSession.lockedByUserId === user.id,
+            canTakeOver: hasAnyFullAccessRole(roles) && editSession.lockedByUserId !== user.id,
+          }
+        : null;
+
     return sanitizeChinaReceivingDetail({
       id: order.id,
       orderNumber: order.orderNumber,
@@ -1696,6 +1801,7 @@ export class OperationsService {
       hqWarehouseId: order.hqWarehouseId,
       hqWarehouse: order.hqWarehouse,
       receivingStatus: resolveChinaReceivingListStatus(enriched),
+      draftState: resolveChinaReceivingDraftState(order.hqStockMovementCreatedAt),
       validation: wmOnlyView ? { canReceiveToHq: validation.canReceiveToHq } : validation,
       canReceive: !order.hqStockMovementCreatedAt && isWm && !isScm,
       canMarkArrival:
@@ -1704,6 +1810,11 @@ export class OperationsService {
       canViewActs: isScm || hasAnyFullAccessRole(roles) || isWm,
       arrivalMarked: Boolean(order.actualArrivalDate),
       hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
+      progress,
+      editSession: activeSession,
+      readOnly:
+        Boolean(order.hqStockMovementCreatedAt) ||
+        (activeSession !== null && activeSession.lockedByUserId !== user.id && !hasAnyFullAccessRole(roles)),
       supplier: wmOnlyView ? undefined : order.supplier,
       factory: wmOnlyView ? undefined : order.factory,
       differenceReports: wmOnlyView ? undefined : order.differenceReports,
@@ -1745,17 +1856,307 @@ export class OperationsService {
             createdAt: act.createdAt,
           })),
       })),
-      lineItems: order.items.map((item) => ({
-        id: item.id,
-        productId: item.productId,
-        sku: item.sku,
-        productName: item.productName,
-        orderedQuantity: wmOnlyView ? undefined : item.quantity,
-        expectedQuantity: item.quantity,
-        actualReceivedQuantity: item.receivedQuantity,
-        difference: (item.receivedQuantity ?? item.quantity) - item.quantity,
-      })),
+      lineItems,
     }, wmOnlyView);
+  }
+
+  async saveChinaReceivingDraftRow(
+    user: AuthUser,
+    orderId: string,
+    itemId: string,
+    dto: SaveChinaReceivingDraftRowDto,
+  ) {
+    await this.assertChinaReceivingDraftWritable(user, orderId);
+    const order = await this.loadChinaReceivingOrder(orderId);
+    const orderItem = order.items.find((item) => item.id === itemId);
+    if (!orderItem) throw new NotFoundException('Procurement line item not found');
+
+    const existing = await this.prisma.chinaReceivingDraftRow.findUnique({
+      where: {
+        procurementOrderId_procurementItemId: {
+          procurementOrderId: orderId,
+          procurementItemId: itemId,
+        },
+      },
+    });
+    const action = dto.autoSave ? 'ROW_AUTOSAVED' : existing ? 'ROW_UPDATED' : 'ROW_SAVED';
+    const saved = await this.prisma.chinaReceivingDraftRow.upsert({
+      where: {
+        procurementOrderId_procurementItemId: {
+          procurementOrderId: orderId,
+          procurementItemId: itemId,
+        },
+      },
+      create: {
+        procurementOrderId: orderId,
+        procurementItemId: itemId,
+        actualQuantity: dto.actualQuantity,
+        damagedQuantity: dto.damagedQuantity,
+        note: dto.note ?? null,
+        isSaved: true,
+        lastSavedAt: new Date(),
+        lastSavedById: user.id,
+      },
+      update: {
+        actualQuantity: dto.actualQuantity,
+        damagedQuantity: dto.damagedQuantity,
+        note: dto.note ?? null,
+        isSaved: true,
+        lastSavedAt: new Date(),
+        lastSavedById: user.id,
+      },
+      include: { lastSavedBy: { select: { id: true, fullName: true } } },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'ChinaReceivingDraftRow',
+        entityId: saved.id,
+        metadata: {
+          userId: user.id,
+          procurementOrderId: orderId,
+          procurementItemId: itemId,
+          actualQuantity: dto.actualQuantity,
+          damagedQuantity: dto.damagedQuantity,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+    if (dto.networkRecovery) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'NETWORK_RECOVERY',
+          entity: 'ProcurementOrder',
+          entityId: orderId,
+          metadata: {
+            userId: user.id,
+            procurementOrderId: orderId,
+            procurementItemId: itemId,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
+
+    return {
+      ...saved,
+      rowStatus: resolveRowStatus(
+        saved.actualQuantity,
+        orderItem.quantity,
+        saved.damagedQuantity,
+        saved.isSaved,
+      ),
+      difference: saved.actualQuantity - orderItem.quantity,
+    };
+  }
+
+  async saveAllChinaReceivingDraftRows(
+    user: AuthUser,
+    orderId: string,
+    dto: SaveAllChinaReceivingDraftDto,
+  ) {
+    await this.assertChinaReceivingDraftWritable(user, orderId);
+    const order = await this.loadChinaReceivingOrder(orderId);
+    const rows = Array.isArray(dto.rows) ? dto.rows : [];
+    if (!rows.length) throw new BadRequestException('At least one row is required');
+
+    const savedRows = [];
+    for (const row of rows) {
+      const orderItem = order.items.find((item) => item.id === row.procurementItemId);
+      if (!orderItem) continue;
+      const saved = await this.prisma.chinaReceivingDraftRow.upsert({
+        where: {
+          procurementOrderId_procurementItemId: {
+            procurementOrderId: orderId,
+            procurementItemId: row.procurementItemId,
+          },
+        },
+        create: {
+          procurementOrderId: orderId,
+          procurementItemId: row.procurementItemId,
+          actualQuantity: row.actualQuantity,
+          damagedQuantity: row.damagedQuantity,
+          note: row.note ?? null,
+          isSaved: true,
+          lastSavedAt: new Date(),
+          lastSavedById: user.id,
+        },
+        update: {
+          actualQuantity: row.actualQuantity,
+          damagedQuantity: row.damagedQuantity,
+          note: row.note ?? null,
+          isSaved: true,
+          lastSavedAt: new Date(),
+          lastSavedById: user.id,
+        },
+        include: { lastSavedBy: { select: { id: true, fullName: true } } },
+      });
+      savedRows.push({
+        ...saved,
+        rowStatus: resolveRowStatus(
+          saved.actualQuantity,
+          orderItem.quantity,
+          saved.damagedQuantity,
+          saved.isSaved,
+        ),
+        difference: saved.actualQuantity - orderItem.quantity,
+      });
+    }
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'SAVE_ALL',
+        entity: 'ProcurementOrder',
+        entityId: orderId,
+        metadata: {
+          userId: user.id,
+          procurementOrderId: orderId,
+          savedCount: savedRows.length,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    return { savedRows, count: savedRows.length };
+  }
+
+  async heartbeatChinaReceivingSession(user: AuthUser, orderId: string) {
+    const order = await this.loadChinaReceivingOrder(orderId);
+    await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
+    if (order.hqStockMovementCreatedAt) {
+      return { active: false, reason: 'COMPLETED' };
+    }
+
+    const existing = await this.prisma.chinaReceivingEditSession.findUnique({
+      where: { procurementOrderId: orderId },
+      include: { lockedByUser: { select: { id: true, fullName: true } } },
+    });
+
+    if (existing && !isChinaReceivingSessionStale(existing.lastHeartbeatAt) && existing.lockedByUserId !== user.id) {
+      return {
+        active: true,
+        lockedByUser: existing.lockedByUser,
+        isCurrentUser: false,
+        canTakeOver: hasAnyFullAccessRole(resolveUserRoles(user)),
+      };
+    }
+
+    const session = await this.prisma.chinaReceivingEditSession.upsert({
+      where: { procurementOrderId: orderId },
+      create: {
+        procurementOrderId: orderId,
+        lockedByUserId: user.id,
+        lockedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+      },
+      update: {
+        lockedByUserId: user.id,
+        lastHeartbeatAt: new Date(),
+        ...(existing && isChinaReceivingSessionStale(existing.lastHeartbeatAt)
+          ? { lockedAt: new Date() }
+          : {}),
+      },
+      include: { lockedByUser: { select: { id: true, fullName: true } } },
+    });
+
+    return {
+      active: true,
+      lockedByUser: session.lockedByUser,
+      isCurrentUser: true,
+      canTakeOver: false,
+    };
+  }
+
+  async takeOverChinaReceivingSession(user: AuthUser, orderId: string) {
+    if (!hasAnyFullAccessRole(resolveUserRoles(user))) {
+      throw new ForbiddenException('Only CEO can take over an active receiving session');
+    }
+    const order = await this.loadChinaReceivingOrder(orderId);
+    await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
+    if (order.hqStockMovementCreatedAt) {
+      throw new BadRequestException('Receiving is already completed');
+    }
+
+    const session = await this.prisma.chinaReceivingEditSession.upsert({
+      where: { procurementOrderId: orderId },
+      create: {
+        procurementOrderId: orderId,
+        lockedByUserId: user.id,
+        lockedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+      },
+      update: {
+        lockedByUserId: user.id,
+        lockedAt: new Date(),
+        lastHeartbeatAt: new Date(),
+      },
+      include: { lockedByUser: { select: { id: true, fullName: true } } },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'CHINA_RECEIVING_SESSION_TAKEOVER',
+        entity: 'ProcurementOrder',
+        entityId: orderId,
+        metadata: {
+          userId: user.id,
+          procurementOrderId: orderId,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    return {
+      active: true,
+      lockedByUser: session.lockedByUser,
+      isCurrentUser: true,
+      canTakeOver: false,
+    };
+  }
+
+  async releaseChinaReceivingSession(user: AuthUser, orderId: string) {
+    const existing = await this.prisma.chinaReceivingEditSession.findUnique({
+      where: { procurementOrderId: orderId },
+    });
+    if (existing?.lockedByUserId === user.id) {
+      await this.prisma.chinaReceivingEditSession.delete({ where: { procurementOrderId: orderId } });
+    }
+    return { released: true };
+  }
+
+  private async assertChinaReceivingDraftWritable(user: AuthUser, orderId: string) {
+    const roles = resolveUserRoles(user);
+    if (roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles)) {
+      throw new ForbiddenException('Supply Chain Manager cannot edit receiving drafts');
+    }
+    if (!canReceiveProcurementToHq(user) && !hasAnyFullAccessRole(roles)) {
+      throw new ForbiddenException('Only assigned HQ Warehouse Manager can edit receiving drafts');
+    }
+    const order = await this.loadChinaReceivingOrder(orderId);
+    await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
+    if (order.hqStockMovementCreatedAt) {
+      throw new BadRequestException('Receiving is already completed');
+    }
+    const session = await this.prisma.chinaReceivingEditSession.findUnique({
+      where: { procurementOrderId: orderId },
+    });
+    if (
+      session &&
+      !isChinaReceivingSessionStale(session.lastHeartbeatAt) &&
+      session.lockedByUserId !== user.id &&
+      !hasAnyFullAccessRole(roles)
+    ) {
+      throw new ForbiddenException('Receiving is currently being edited by another user');
+    }
   }
 
   async createReceivingDifferenceActs(user: AuthUser, orderId: string, dto: any) {

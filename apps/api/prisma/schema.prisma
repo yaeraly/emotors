@@ -800,6 +800,8 @@ model User {
   approvedInventoryCounts InventoryCountSession[] @relation("InventoryCountApprover")
   rejectedInventoryCounts InventoryCountSession[] @relation("InventoryCountRejecter")
   createdProcurementDifferenceReports ProcurementDifferenceReport[] @relation("ProcurementDifferenceReportCreator")
+  chinaReceivingDraftRowsSaved ChinaReceivingDraftRow[] @relation("ChinaReceivingDraftRowSaver")
+  chinaReceivingEditSessions ChinaReceivingEditSession[] @relation("ChinaReceivingEditSessionUser")
   createdPricingPolicies ProductPricingPolicy[] @relation("PricingPolicyCreator")
   updatedPricingPolicies ProductPricingPolicy[] @relation("PricingPolicyUpdater")
   pricingChangeHistory ProductPricingChangeHistory[] @relation("PricingChangeHistoryChanger")
@@ -2069,6 +2071,8 @@ model ProcurementOrder {
   supplierPayments         ProcurementSupplierPayment[]
   costAdjustments          ProcurementCostAdjustment[]
   svhToHqTransport         ProcurementSvhToHqTransport?
+  chinaReceivingDraftRows  ChinaReceivingDraftRow[]
+  chinaReceivingEditSession ChinaReceivingEditSession?
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
@@ -3266,6 +3270,39 @@ model ProcurementGoodsReceivingItem {
 
   @@index([receivingId])
   @@index([productId])
+}
+
+model ChinaReceivingDraftRow {
+  id                 String           @id @default(cuid())
+  procurementOrderId String
+  procurementOrder   ProcurementOrder @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  procurementItemId  String
+  actualQuantity     Int
+  damagedQuantity    Int              @default(0)
+  note               String?
+  isSaved            Boolean          @default(false)
+  lastSavedAt        DateTime?
+  lastSavedById      String?
+  lastSavedBy        User?            @relation("ChinaReceivingDraftRowSaver", fields: [lastSavedById], references: [id])
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([procurementOrderId, procurementItemId])
+  @@index([procurementOrderId])
+  @@index([procurementItemId])
+  @@index([lastSavedById])
+}
+
+model ChinaReceivingEditSession {
+  id                 String           @id @default(cuid())
+  procurementOrderId String           @unique
+  procurementOrder   ProcurementOrder @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  lockedByUserId     String
+  lockedByUser       User             @relation("ChinaReceivingEditSessionUser", fields: [lockedByUserId], references: [id])
+  lockedAt           DateTime         @default(now())
+  lastHeartbeatAt    DateTime         @default(now())
+
+  @@index([lockedByUserId])
 }
 
 model ProcurementDifferenceReport {

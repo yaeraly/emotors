@@ -11,6 +11,7 @@ import { OperationsService } from './operations.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { ProcurementDifferenceActQueryDto } from './dto/procurement-difference-act-query.dto';
 import { ChinaReceivingQueryDto } from './dto/china-receiving-query.dto';
+import { SaveAllChinaReceivingDraftDto, SaveChinaReceivingDraftRowDto } from './dto/save-china-receiving-draft-row.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller()
@@ -185,6 +186,50 @@ export class OperationsController {
   @RequirePermissions('procurement.receive', 'procurement.view', 'procurement.manage')
   getChinaReceivingTask(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
     return this.service.getChinaReceivingTask(user, orderId);
+  }
+
+  @Put('procurement/china-receiving/:orderId/draft-rows/:itemId')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive')
+  saveChinaReceivingDraftRow(
+    @CurrentUser() user: AuthUser,
+    @Param('orderId') orderId: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: SaveChinaReceivingDraftRowDto,
+  ) {
+    return this.service.saveChinaReceivingDraftRow(user, orderId, itemId, dto);
+  }
+
+  @Post('procurement/china-receiving/:orderId/draft-rows/save-all')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive')
+  saveAllChinaReceivingDraftRows(
+    @CurrentUser() user: AuthUser,
+    @Param('orderId') orderId: string,
+    @Body() dto: SaveAllChinaReceivingDraftDto,
+  ) {
+    return this.service.saveAllChinaReceivingDraftRows(user, orderId, dto);
+  }
+
+  @Post('procurement/china-receiving/:orderId/session')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive', 'procurement.view')
+  heartbeatChinaReceivingSession(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
+    return this.service.heartbeatChinaReceivingSession(user, orderId);
+  }
+
+  @Post('procurement/china-receiving/:orderId/session/take-over')
+  @Roles(Role.OWNER, Role.CEO)
+  @RequirePermissions('procurement.manage')
+  takeOverChinaReceivingSession(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
+    return this.service.takeOverChinaReceivingSession(user, orderId);
+  }
+
+  @Post('procurement/china-receiving/:orderId/session/release')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive')
+  releaseChinaReceivingSession(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
+    return this.service.releaseChinaReceivingSession(user, orderId);
   }
 
   @Post('procurement/china-receiving/:orderId/difference-acts')
