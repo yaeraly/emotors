@@ -92,6 +92,54 @@ export function buildChinaReceivingProgress(
   };
 }
 
+export type ReceivingBatchItemLike = {
+  productId: string;
+  expectedQuantity: number;
+  receivedQuantity: number;
+  damagedQuantity: number;
+};
+
+export type DiscrepancyActLike = {
+  differenceType: string;
+};
+
+export function buildChinaReceivingSummaryFromBatches(
+  batchItems: ReceivingBatchItemLike[],
+  discrepancyActs: DiscrepancyActLike[],
+) {
+  const productIds = new Set(batchItems.map((item) => item.productId));
+  let totalExpected = 0;
+  let totalReceived = 0;
+  let shortage = 0;
+  let overage = 0;
+  let damaged = 0;
+
+  for (const item of batchItems) {
+    totalExpected += item.expectedQuantity;
+    totalReceived += item.receivedQuantity;
+    const diff = item.receivedQuantity - item.expectedQuantity;
+    if (diff < 0) shortage += Math.abs(diff);
+    if (diff > 0) overage += diff;
+    damaged += item.damagedQuantity;
+  }
+
+  const discrepancyCounts = {
+    shortage: discrepancyActs.filter((act) => act.differenceType === 'SHORTAGE').length,
+    overage: discrepancyActs.filter((act) => act.differenceType === 'OVERAGE').length,
+    damaged: discrepancyActs.filter((act) => act.differenceType === 'DAMAGED').length,
+  };
+
+  return {
+    totalProducts: productIds.size,
+    totalExpected,
+    totalReceived,
+    shortage,
+    overage,
+    damaged,
+    discrepancyCounts,
+  };
+}
+
 export const CHINA_RECEIVING_SESSION_STALE_MS = 5 * 60 * 1000;
 
 export function isChinaReceivingSessionStale(lastHeartbeatAt: Date | string, now = Date.now()) {

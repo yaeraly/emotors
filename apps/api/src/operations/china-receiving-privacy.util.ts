@@ -94,5 +94,19 @@ export function sanitizeChinaReceivingDetail<T extends Record<string, unknown>>(
         : [],
     }));
   }
+  if (sanitized.documents && typeof sanitized.documents === 'object') {
+    const docs = sanitized.documents as Record<string, unknown>;
+    sanitized.documents = {
+      photos: docs.photos,
+      discrepancyActs: Array.isArray(docs.discrepancyActs)
+        ? (docs.discrepancyActs as Array<Record<string, unknown>>).map((act) => ({
+            id: act.id,
+            actNumber: act.actNumber,
+            differenceType: act.differenceType,
+            status: act.status,
+          }))
+        : [],
+    };
+  }
   return sanitized as T;
 }

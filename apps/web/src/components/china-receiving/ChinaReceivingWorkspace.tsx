@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, API_URL } from '@/lib/api';
 import { canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -22,6 +22,33 @@ type EditSession = {
   canTakeOver: boolean;
 };
 
+type ReceivingSummary = {
+  totalProducts: number;
+  totalExpected: number;
+  totalReceived: number;
+  shortage: number;
+  overage: number;
+  damaged: number;
+  discrepancyCounts: {
+    shortage: number;
+    overage: number;
+    damaged: number;
+  };
+  receivedAt?: string | null;
+  receivedBy?: { id: string; fullName: string } | null;
+  status: string;
+};
+
+type ReceivingDocuments = {
+  photos: Array<{ id: string; fileName: string; fileUrl: string; mimeType: string }>;
+  discrepancyActs: Array<{
+    id: string;
+    actNumber: string;
+    differenceType: string;
+    status: string;
+  }>;
+};
+
 export type ChinaReceivingDetail = {
   id: string;
   orderNumber: string;
@@ -35,8 +62,11 @@ export type ChinaReceivingDetail = {
   landedCostStatus?: string;
   landedCostPendingWeight?: boolean;
   hqStockMovementCreatedAt?: string | null;
+  receivedToHqAt?: string | null;
   lineItems: ChinaReceivingLineItem[];
   progress?: ChinaReceivingProgress;
+  receivingSummary?: ReceivingSummary | null;
+  documents?: ReceivingDocuments | null;
   editSession?: EditSession | null;
   readOnly?: boolean;
   shipmentBatches?: Array<{
@@ -65,7 +95,233 @@ function formatOrderDate(value?: string | null) {
   return new Date(value).toLocaleDateString('ru-RU');
 }
 
+function formatReceivedDateTime(value?: string | null) {
+  if (!value) return { date: '-', time: '-' };
+  const parsed = new Date(value);
+  return {
+    date: parsed.toLocaleDateString('ru-RU'),
+    time: parsed.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
 export function ChinaReceivingWorkspace({
+  task,
+  user,
+  onReload,
+}: {
+  task: ChinaReceivingDetail;
+  user: User;
+  onReload: () => Promise<ChinaReceivingDetail | null>;
+}) {
+  const isCompleted = Boolean(task.hqStockMovementCreatedAt);
+
+  if (isCompleted) {
+    return <ChinaReceivingCompletedView task={task} />;
+  }
+
+  return <ChinaReceivingEditableView task={task} user={user} onReload={onReload} />;
+}
+
+function ChinaReceivingCompletedView({ task }: { task: ChinaReceivingDetail }) {
+  const { t } = useTranslation();
+  const summary = task.receivingSummary;
+  const receivedAtSource = summary?.receivedAt ?? task.receivedToHqAt ?? task.hqStockMovementCreatedAt;
+  const receivedAt = formatReceivedDateTime(receivedAtSource);
+  const hasDiscrepancyActs =
+    (summary?.discrepancyCounts.shortage ?? 0) > 0 ||
+    (summary?.discrepancyCounts.overage ?? 0) > 0 ||
+    (summary?.discrepancyCounts.damaged ?? 0) > 0;
+  const hasDocuments =
+    (task.documents?.photos.length ?? 0) > 0 ||
+    (task.documents?.discrepancyActs.length ?? 0) > 0 ||
+    (task.shipmentBatches?.length ?? 0) > 0;
+
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 print:hidden">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('chinaReceiving.title')}</p>
+          <h2 className="text-3xl font-bold text-slate-950">{task.orderNumber}</h2>
+          <p className="text-sm text-slate-500">
+            {task.hqWarehouse?.name} · {translateStatus(t, task.receivingStatus, 'procurement')}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/hq-warehouses/china-receiving" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
+            {t('common.back')}
+          </Link>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold"
+          >
+            {t('chinaReceiving.print')}
+          </button>
+        </div>
+      </div>
+
+      <div id="china-receiving-print" className="space-y-6">
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+          <Info label={t('chinaReceiving.orderNumber')} value={task.orderNumber} />
+          <Info label={t('common.status')} value={translateStatus(t, task.receivingStatus, 'procurement')} />
+          <Info label={t('chinaReceiving.targetWarehouse')} value={task.hqWarehouse?.name ?? '-'} />
+          <Info
+            label={t('chinaReceiving.supplyManager')}
+            value={task.supplyManager?.fullName ?? t('chinaReceiving.supplyManagerNotAssigned')}
+          />
+          <Info label={t('chinaReceiving.purchaseDate')} value={formatOrderDate(task.purchaseDate)} />
+          <Info label={t('chinaReceiving.viewSummary.receivedAt')} value={receivedAt.date} />
+        </div>
+
+        {(task.shipmentBatches?.length ?? 0) > 0 ? (
+          <section className="space-y-4">
+            <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.shipmentBatch')}</h3>
+            {task.shipmentBatches?.map((batch) => (
+              <div key={batch.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-slate-400">{t('chinaReceiving.batchNumber')}</p>
+                    <p className="text-lg font-bold text-slate-950">{batch.receivingNumber}</p>
+                  </div>
+                  <p className="text-sm text-slate-500">{new Date(batch.receivedAt).toLocaleString()}</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">{t('chinaReceiving.col.product')}</th>
+                        <th className="px-4 py-3">{t('chinaReceiving.col.expectedShort')}</th>
+                        <th className="px-4 py-3">{t('chinaReceiving.col.actualShort')}</th>
+                        <th className="px-4 py-3">{t('chinaReceiving.col.diffShort')}</th>
+                        <th className="px-4 py-3">{t('chinaReceiving.actStatus')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {batch.items.map((item) => {
+                        const act = batch.discrepancyActs.find((row) => row.sku === item.sku);
+                        return (
+                          <tr key={item.id}>
+                            <td className="px-4 py-3">{item.productName}</td>
+                            <td className="px-4 py-3">{item.expectedQuantity}</td>
+                            <td className="px-4 py-3">{item.actualQuantity}</td>
+                            <td className="px-4 py-3">{item.difference}</td>
+                            <td className="px-4 py-3">{act ? translateStatus(t, act.status) : '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+          </section>
+        ) : null}
+
+        {summary ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.viewSummary.title')}</h3>
+            <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <SummaryRow label={t('chinaReceiving.summary.products')} value={String(summary.totalProducts)} />
+              <SummaryRow label={t('chinaReceiving.summary.expectedQty')} value={String(summary.totalExpected)} />
+              <SummaryRow label={t('chinaReceiving.summary.receivedQty')} value={String(summary.totalReceived)} />
+              <SummaryRow label={t('chinaReceiving.summary.shortage')} value={String(summary.shortage)} tone="red" />
+              <SummaryRow label={t('chinaReceiving.summary.overage')} value={String(summary.overage)} tone="green" />
+              <SummaryRow label={t('chinaReceiving.summary.damaged')} value={String(summary.damaged)} tone="orange" />
+              <SummaryRow label={t('chinaReceiving.viewSummary.receivedAt')} value={receivedAt.date} />
+              <SummaryRow label={t('chinaReceiving.viewSummary.receivedTime')} value={receivedAt.time} />
+              <SummaryRow
+                label={t('chinaReceiving.viewSummary.receivedBy')}
+                value={summary.receivedBy?.fullName ?? '-'}
+              />
+              <SummaryRow
+                label={t('chinaReceiving.viewSummary.status')}
+                value={translateStatus(t, summary.status, 'procurement')}
+              />
+            </dl>
+          </div>
+        ) : null}
+
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.discrepancies.title')}</h3>
+          {hasDiscrepancyActs ? (
+            <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+              <SummaryRow
+                label={t('chinaReceiving.summary.shortage')}
+                value={String(summary?.discrepancyCounts.shortage ?? 0)}
+                tone="red"
+              />
+              <SummaryRow
+                label={t('chinaReceiving.summary.overage')}
+                value={String(summary?.discrepancyCounts.overage ?? 0)}
+                tone="green"
+              />
+              <SummaryRow
+                label={t('chinaReceiving.summary.damaged')}
+                value={String(summary?.discrepancyCounts.damaged ?? 0)}
+                tone="orange"
+              />
+            </dl>
+          ) : (
+            <p className="mt-3 text-sm text-slate-600">{t('chinaReceiving.discrepancies.none')}</p>
+          )}
+        </div>
+
+        {hasDocuments ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.documents.title')}</h3>
+            <ul className="mt-4 space-y-2 text-sm text-slate-700">
+              {(task.documents?.discrepancyActs.length ?? 0) > 0 ? (
+                <li>
+                  <p className="font-semibold text-slate-900">{t('chinaReceiving.documents.discrepancyAct')}</p>
+                  <ul className="mt-1 space-y-1 pl-4">
+                    {task.documents?.discrepancyActs.map((act) => (
+                      <li key={act.id}>
+                        {act.actNumber} · {translateStatus(t, act.differenceType, 'procurement')}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ) : null}
+              {(task.documents?.photos.length ?? 0) > 0 ? (
+                <li>
+                  <p className="font-semibold text-slate-900">{t('chinaReceiving.documents.photos')}</p>
+                  <ul className="mt-1 space-y-1 pl-4">
+                    {task.documents?.photos.map((photo) => (
+                      <li key={photo.id}>
+                        <a
+                          href={`${API_URL}${photo.fileUrl}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold text-blue-700 hover:underline"
+                        >
+                          {photo.fileName}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ) : null}
+              {(task.shipmentBatches?.length ?? 0) > 0 ? (
+                <li>
+                  <p className="font-semibold text-slate-900">{t('chinaReceiving.documents.receivingDocs')}</p>
+                  <ul className="mt-1 space-y-1 pl-4">
+                    {task.shipmentBatches?.map((batch) => (
+                      <li key={batch.id}>
+                        {batch.receivingNumber} · {new Date(batch.receivedAt).toLocaleString()}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ) : null}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function ChinaReceivingEditableView({
   task,
   user,
   onReload,
@@ -82,9 +338,8 @@ export function ChinaReceivingWorkspace({
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
   const [saveToast, setSaveToast] = useState<string | null>(null);
 
-  const isCompleted = Boolean(task.hqStockMovementCreatedAt);
-  const readOnly = Boolean(task.readOnly) || isCompleted || !canReceiveProcurementToHq(user);
-  const canEdit = canReceiveProcurementToHq(user) && !isCompleted && !readOnly;
+  const readOnly = Boolean(task.readOnly) || !canReceiveProcurementToHq(user);
+  const canEdit = canReceiveProcurementToHq(user) && !readOnly;
   const isCeo = hasFullAccess(user);
 
   const {
@@ -103,7 +358,7 @@ export function ChinaReceivingWorkspace({
     orderId: task.id,
     lineItems: task.lineItems,
     readOnly: !canEdit,
-    enabled: !isCompleted,
+    enabled: true,
     onSessionExpired: () => {
       setSessionExpired(true);
       setShowLoginPrompt(true);
@@ -442,50 +697,6 @@ export function ChinaReceivingWorkspace({
           </button>
         </div>
       ) : null}
-
-      {(task.shipmentBatches?.length ?? 0) > 0 ? (
-        <section className="space-y-4">
-          <h3 className="text-lg font-bold text-slate-950">{t('chinaReceiving.shipmentBatch')}</h3>
-          {task.shipmentBatches?.map((batch) => (
-            <div key={batch.id} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase text-slate-400">{t('chinaReceiving.batchNumber')}</p>
-                  <p className="text-lg font-bold text-slate-950">{batch.receivingNumber}</p>
-                </div>
-                <p className="text-sm text-slate-500">{new Date(batch.receivedAt).toLocaleString()}</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">{t('chinaReceiving.col.product')}</th>
-                      <th className="px-4 py-3">{t('chinaReceiving.col.expectedShort')}</th>
-                      <th className="px-4 py-3">{t('chinaReceiving.col.actualShort')}</th>
-                      <th className="px-4 py-3">{t('chinaReceiving.col.diffShort')}</th>
-                      <th className="px-4 py-3">{t('chinaReceiving.actStatus')}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {batch.items.map((item) => {
-                      const act = batch.discrepancyActs.find((row) => row.sku === item.sku);
-                      return (
-                        <tr key={item.id}>
-                          <td className="px-4 py-3">{item.productName}</td>
-                          <td className="px-4 py-3">{item.expectedQuantity}</td>
-                          <td className="px-4 py-3">{item.actualQuantity}</td>
-                          <td className="px-4 py-3">{item.difference}</td>
-                          <td className="px-4 py-3">{act ? translateStatus(t, act.status) : '-'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ))}
-        </section>
-      ) : null}
     </section>
   );
 }
@@ -513,6 +724,25 @@ function SummaryCard({
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${toneClass}`}>{value}</p>
+    </div>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'red' | 'green' | 'orange';
+}) {
+  const toneClass =
+    tone === 'red' ? 'text-red-700' : tone === 'green' ? 'text-emerald-700' : tone === 'orange' ? 'text-orange-700' : 'text-slate-950';
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-2">
+      <dt className="text-sm text-slate-600">{label}</dt>
+      <dd className={`text-sm font-bold ${toneClass}`}>{value}</dd>
     </div>
   );
 }

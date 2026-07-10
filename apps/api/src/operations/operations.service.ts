@@ -72,6 +72,7 @@ import {
 } from './china-receiving.util';
 import {
   buildChinaReceivingProgress,
+  buildChinaReceivingSummaryFromBatches,
   isChinaReceivingSessionStale,
   resolveChinaReceivingDraftState,
   resolveRowStatus,
@@ -1745,37 +1746,56 @@ export class OperationsService {
     const isScm = roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles);
     const isWm = canReceiveProcurementToHq(user);
 
-    await this.prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        role: user.role,
-        action: 'CHINA_RECEIVING_OPENED',
-        entity: 'ProcurementOrder',
-        entityId: order.id,
-        metadata: {
+    const isCompleted = Boolean(order.hqStockMovementCreatedAt);
+
+    if (isCompleted) {
+      await this.prisma.auditLog.create({
+        data: {
           userId: user.id,
-          roles: user.roles ?? [user.role],
-          warehouseId: order.hqWarehouseId,
-          procurementOrderId: order.id,
-          tableLayout: 'compact',
-          timestamp: new Date().toISOString(),
+          role: user.role,
+          action: 'CHINA_RECEIVING_VIEW_OPENED',
+          entity: 'ProcurementOrder',
+          entityId: order.id,
+          metadata: {
+            userId: user.id,
+            procurementOrderId: order.id,
+            timestamp: new Date().toISOString(),
+          },
         },
-      },
-    });
-    await this.prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        role: user.role,
-        action: 'CHINA_RECEIVING_TABLE_COMPACTED',
-        entity: 'ProcurementOrder',
-        entityId: order.id,
-        metadata: {
+      });
+    } else {
+      await this.prisma.auditLog.create({
+        data: {
           userId: user.id,
-          procurementOrderId: order.id,
-          timestamp: new Date().toISOString(),
+          role: user.role,
+          action: 'CHINA_RECEIVING_OPENED',
+          entity: 'ProcurementOrder',
+          entityId: order.id,
+          metadata: {
+            userId: user.id,
+            roles: user.roles ?? [user.role],
+            warehouseId: order.hqWarehouseId,
+            procurementOrderId: order.id,
+            tableLayout: 'compact',
+            timestamp: new Date().toISOString(),
+          },
         },
-      },
-    });
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'CHINA_RECEIVING_TABLE_COMPACTED',
+          entity: 'ProcurementOrder',
+          entityId: order.id,
+          metadata: {
+            userId: user.id,
+            procurementOrderId: order.id,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
 
     if (isScm && (order.differenceReports?.length ?? 0) > 0) {
       await this.prisma.auditLog.create({
@@ -1796,19 +1816,58 @@ export class OperationsService {
       });
     }
 
-    const [draftRows, editSession] = await Promise.all([
-      this.prisma.chinaReceivingDraftRow.findMany({
-        where: { procurementOrderId: order.id, isArchived: false },
-        include: { lastSavedBy: { select: { id: true, fullName: true } } },
-        orderBy: { updatedAt: 'asc' },
-      }),
-      this.prisma.chinaReceivingEditSession.findFirst({
-        where: { procurementOrderId: order.id },
-        include: { lockedByUser: { select: { id: true, fullName: true } } },
-      }),
+    const differenceReportsForView = wmOnlyView && isCompleted
+      ? await this.prisma.procurementDifferenceReport.findMany({
+          where: { procurementOrderId: order.id, deletedAt: null },
+          select: {
+            id: true,
+            reportNumber: true,
+            receivingId: true,
+            procurementOrderId: true,
+            productId: true,
+            productName: true,
+            sku: true,
+            type: true,
+            status: true,
+            expectedQuantity: true,
+            receivedQuantity: true,
+            differenceQuantity: true,
+            damagedQuantity: true,
+            shortageReason: true,
+            note: true,
+            createdAt: true,
+          },
+        })
+      : (order.differenceReports ?? []);
+
+    const [draftRows, editSession, cargoAttachments] = await Promise.all([
+      isCompleted
+        ? Promise.resolve([])
+        : this.prisma.chinaReceivingDraftRow.findMany({
+            where: { procurementOrderId: order.id, isArchived: false },
+            include: { lastSavedBy: { select: { id: true, fullName: true } } },
+            orderBy: { updatedAt: 'asc' },
+          }),
+      isCompleted
+        ? Promise.resolve(null)
+        : this.prisma.chinaReceivingEditSession.findFirst({
+            where: { procurementOrderId: order.id },
+            include: { lockedByUser: { select: { id: true, fullName: true } } },
+          }),
+      isCompleted
+        ? this.prisma.fileAttachment.findMany({
+            where: {
+              entityId: order.id,
+              entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+              deletedAt: null,
+            },
+            select: { id: true, fileName: true, fileUrl: true, mimeType: true },
+            orderBy: { createdAt: 'asc' },
+          })
+        : Promise.resolve([]),
     ]);
 
-    if (draftRows.length > 0 && !order.hqStockMovementCreatedAt) {
+    if (draftRows.length > 0 && !isCompleted) {
       await this.prisma.auditLog.create({
         data: {
           userId: user.id,
@@ -1826,7 +1885,42 @@ export class OperationsService {
       });
     }
 
+    const receivedItemByProcurementId = new Map(
+      (order.receivings ?? []).flatMap((batch) =>
+        batch.items
+          .filter((row) => row.procurementItemId)
+          .map((row) => [row.procurementItemId as string, row]),
+      ),
+    );
+
     const lineItems = order.items.map((item) => {
+      if (isCompleted) {
+        const received = receivedItemByProcurementId.get(item.id);
+        const actualQuantity = received?.receivedQuantity ?? item.receivedQuantity ?? 0;
+        const damagedQuantity = received?.damagedQuantity ?? 0;
+        return {
+          id: item.id,
+          productId: item.productId,
+          sku: item.sku,
+          productName: item.productName,
+          orderedQuantity: wmOnlyView ? undefined : item.quantity,
+          expectedQuantity: item.quantity,
+          actualReceivedQuantity: actualQuantity,
+          damagedQuantity,
+          unitWeightKg: item.unitWeightKg != null ? Number(item.unitWeightKg) : null,
+          weightStatus: item.weightStatus,
+          needsWeightEntry: false,
+          note: null,
+          isSaved: true,
+          isChecked: true,
+          lastSavedAt: null,
+          updatedAt: null,
+          lastSavedBy: null,
+          rowStatus: resolveRowStatus(actualQuantity, item.quantity, damagedQuantity, true),
+          difference: actualQuantity - item.quantity,
+        };
+      }
+
       const draft = draftRows.find((row) => row.procurementItemId === item.id);
       const hasSavedDraft = Boolean(draft?.isSaved);
       const actualQuantity = hasSavedDraft
@@ -1867,17 +1961,75 @@ export class OperationsService {
       };
     });
 
-    const progress = buildChinaReceivingProgress(
-      order.items.map((item) => ({ id: item.id, expectedQuantity: item.quantity })),
-      draftRows.map((row) => ({
-        procurementItemId: row.procurementItemId,
-        actualQuantity: row.actualQuantity,
-        damagedQuantity: row.damagedQuantity,
-        note: row.note,
-        isSaved: row.isSaved,
-        lastSavedAt: row.lastSavedAt,
-      })),
-    );
+    const progress = isCompleted
+      ? (() => {
+          const batchItems = (order.receivings ?? []).flatMap((batch) =>
+            batch.items.map((row) => ({
+              productId: row.productId,
+              expectedQuantity: row.expectedQuantity,
+              receivedQuantity: row.receivedQuantity,
+              damagedQuantity: row.damagedQuantity,
+            })),
+          );
+          const summary = buildChinaReceivingSummaryFromBatches(
+            batchItems,
+            differenceReportsForView.map((act) => ({ differenceType: act.type })),
+          );
+          return {
+            products: summary.totalProducts,
+            checked: summary.totalProducts,
+            remaining: 0,
+            saved: summary.totalProducts,
+            unsaved: 0,
+            progress: 100,
+            expectedQty: summary.totalExpected,
+            receivedQty: summary.totalReceived,
+            shortage: summary.shortage,
+            overage: summary.overage,
+            damaged: summary.damaged,
+          };
+        })()
+      : buildChinaReceivingProgress(
+          order.items.map((item) => ({ id: item.id, expectedQuantity: item.quantity })),
+          draftRows.map((row) => ({
+            procurementItemId: row.procurementItemId,
+            actualQuantity: row.actualQuantity,
+            damagedQuantity: row.damagedQuantity,
+            note: row.note,
+            isSaved: row.isSaved,
+            lastSavedAt: row.lastSavedAt,
+          })),
+        );
+
+    const primaryReceiving = isCompleted ? ((order.receivings ?? [])[0] ?? null) : null;
+    const receivedByUser =
+      isCompleted && primaryReceiving?.receivedById
+        ? await this.prisma.user.findUnique({
+            where: { id: primaryReceiving.receivedById },
+            select: { id: true, fullName: true },
+          })
+        : null;
+    const batchItemsFlat = isCompleted
+      ? (order.receivings ?? []).flatMap((batch) =>
+          batch.items.map((row) => ({
+            productId: row.productId,
+            expectedQuantity: row.expectedQuantity,
+            receivedQuantity: row.receivedQuantity,
+            damagedQuantity: row.damagedQuantity,
+          })),
+        )
+      : [];
+    const receivingSummary = isCompleted
+      ? {
+          ...buildChinaReceivingSummaryFromBatches(
+            batchItemsFlat,
+            differenceReportsForView.map((act) => ({ differenceType: act.type })),
+          ),
+          receivedAt: (order.receivedToHqAt ?? primaryReceiving?.receivedAt ?? order.hqStockMovementCreatedAt)?.toISOString() ?? null,
+          receivedBy: receivedByUser,
+          status: resolveChinaReceivingListStatus(enriched),
+        }
+      : null;
 
     const sessionStale = editSession ? isChinaReceivingSessionStale(editSession.lastHeartbeatAt) : true;
     const activeSession =
@@ -1911,7 +2063,20 @@ export class OperationsService {
       canViewActs: isScm || hasAnyFullAccessRole(roles) || isWm,
       arrivalMarked: Boolean(order.actualArrivalDate),
       hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
+      receivedToHqAt: order.receivedToHqAt,
       progress,
+      receivingSummary,
+      documents: isCompleted
+        ? {
+            photos: cargoAttachments,
+            discrepancyActs: differenceReportsForView.map((act) => ({
+              id: act.id,
+              actNumber: act.reportNumber,
+              differenceType: act.type,
+              status: act.status,
+            })),
+          }
+        : null,
       editSession: activeSession,
       landedCostStatus: order.landedCostStatus,
       landedCostPendingWeight: order.landedCostStatus === ProcurementLandedCostStatus.PENDING_WEIGHT,
@@ -1952,10 +2117,11 @@ export class OperationsService {
           expectedQuantity: row.expectedQuantity,
           actualQuantity: row.receivedQuantity,
           receivedQuantity: row.receivedQuantity,
+          damagedQuantity: row.damagedQuantity,
           differenceQuantity: row.differenceQuantity,
           difference: row.receivedQuantity - row.expectedQuantity,
         })),
-        discrepancyActs: (order.differenceReports ?? [])
+        discrepancyActs: differenceReportsForView
           .filter((act) => act.receivingId === batch.id)
           .map((act) => ({
             id: act.id,
@@ -2855,7 +3021,10 @@ export class OperationsService {
         items: true,
         svhToHqTransport: wmView ? false : { include: { transportCompany: true } },
         differenceReports: wmView ? false : { where: { deletedAt: null } },
-        receivings: { where: { deletedAt: null }, include: { items: true } },
+        receivings: {
+          where: { deletedAt: null },
+          include: { items: true },
+        },
       },
     });
     if (!order) throw new NotFoundException('Procurement order not found');
