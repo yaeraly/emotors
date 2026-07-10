@@ -55,6 +55,58 @@ export function resolveBranchPurchasePrice(
   return resolveHqToBranchPrice(costPriceKgs, branchType, markupPercent);
 }
 
+export type BranchProductPriceSource = 'OVERRIDE' | 'PROFILE' | 'PRODUCT_DEFAULT' | 'HQ_COST';
+
+export function isProductOverrideEffective(
+  override: { status: string; startDate: Date; endDate: Date },
+  now: Date = new Date(),
+) {
+  if (override.status !== 'ACTIVE') return false;
+  return override.startDate.getTime() <= now.getTime() && now.getTime() <= override.endDate.getTime();
+}
+
+export function dateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
+  return startA.getTime() <= endB.getTime() && startB.getTime() <= endA.getTime();
+}
+
+export function resolveFinalBranchProductPrice(input: {
+  costPriceKgs: number;
+  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
+  productDefaultMarkupPercent: number;
+  profileMarkupPercent?: number | null;
+  profileStatus?: 'ACTIVE' | 'INACTIVE' | null;
+  overridePriceKgs?: number | null;
+  override?: { status: string; startDate: Date; endDate: Date } | null;
+  now?: Date;
+}): { priceKgs: number; source: BranchProductPriceSource } {
+  const override = input.override;
+  if (
+    override &&
+    isProductOverrideEffective(override, input.now) &&
+    input.overridePriceKgs != null &&
+    input.overridePriceKgs >= 0
+  ) {
+    return { priceKgs: roundMoney(input.overridePriceKgs), source: 'OVERRIDE' };
+  }
+
+  if (input.branchType === 'HQ_BRANCH') {
+    return { priceKgs: roundMoney(input.costPriceKgs), source: 'HQ_COST' };
+  }
+
+  const markupPercent = resolveBranchHqMarkupPercent({
+    branchType: input.branchType,
+    productDefaultMarkupPercent: input.productDefaultMarkupPercent,
+    profileMarkupPercent: input.profileMarkupPercent,
+    profileStatus: input.profileStatus,
+  });
+  const priceKgs = resolveBranchPurchasePrice(input.costPriceKgs, input.branchType, markupPercent);
+  const source: BranchProductPriceSource =
+    input.profileStatus === 'ACTIVE' && input.profileMarkupPercent != null
+      ? 'PROFILE'
+      : 'PRODUCT_DEFAULT';
+  return { priceKgs, source };
+}
+
 export function pricesFromMarkups(
   costPriceKgs: number,
   markups: {

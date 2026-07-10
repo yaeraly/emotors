@@ -24,7 +24,11 @@ function resolveDistributionUnitPrice(
   hqBranchWholesalePriceKgs: number,
   branchPricing?: BranchPricingConfig,
   legacyIsHqOwnedBranch?: boolean,
+  overrideUnitPriceKgs?: number | null,
 ) {
+  if (overrideUnitPriceKgs != null && overrideUnitPriceKgs >= 0) {
+    return overrideUnitPriceKgs;
+  }
   if (branchPricing) {
     return resolveHqToBranchPrice(unitCostKgs, branchPricing.branchType, branchPricing.hqToBranchMarkupPercent);
   }
@@ -204,6 +208,7 @@ export class PricingFifoService {
       branchPricing?: BranchPricingConfig;
       fallbackUnitCost?: number;
       fallbackUnitPrice?: number;
+      overrideUnitPriceKgs?: number | null;
     },
   ) {
     const batches = await tx.fifoInventoryBatch.findMany({
@@ -234,6 +239,7 @@ export class PricingFifoService {
         hqBranchWholesalePriceKgs,
         input.branchPricing,
         input.isHqOwnedBranch,
+        input.overrideUnitPriceKgs,
       );
       const lineCost = unitCostKgs * take;
       const linePrice = unitPriceKgs * take;
@@ -284,6 +290,7 @@ export class PricingFifoService {
       distributionOrderItemId: string;
       userId: string;
       userRole: string;
+      overrideUnitPriceKgs?: number | null;
     },
   ) {
     const preview = await this.previewFifoAllocation(tx, {
@@ -292,6 +299,7 @@ export class PricingFifoService {
       quantity: input.quantity,
       isHqOwnedBranch: input.isHqOwnedBranch,
       branchPricing: input.branchPricing,
+      overrideUnitPriceKgs: input.overrideUnitPriceKgs,
     });
 
     for (const line of preview.lines) {

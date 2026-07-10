@@ -56,6 +56,12 @@ enum BranchPriceProfileStatus {
   INACTIVE
 }
 
+enum ProductPriceOverrideStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -725,6 +731,7 @@ model Branch {
   priceProfileId         String?
   priceProfile           BranchPriceProfile? @relation(fields: [priceProfileId], references: [id])
   pricingChangeHistory   ProductPricingChangeHistory[] @relation("PricingChangeHistoryBranch")
+  productPriceOverrides  ProductPriceOverride[]
   branchPurchaseRequests BranchPurchaseRequest[]
   branchRequestShortages BranchRequestShortage[]
   createdAt      DateTime        @default(now())
@@ -750,6 +757,31 @@ model BranchPriceProfile {
 
   @@index([createdById])
   @@index([status])
+}
+
+model ProductPriceOverride {
+  id               String                     @id @default(cuid())
+  branchId         String
+  branch           Branch                     @relation(fields: [branchId], references: [id])
+  productId        String
+  product          Product                    @relation(fields: [productId], references: [id])
+  overridePriceKgs Decimal                    @db.Decimal(14, 2)
+  startDate        DateTime
+  endDate          DateTime
+  reason           String
+  status           ProductPriceOverrideStatus @default(ACTIVE)
+  createdById      String
+  createdBy        User                       @relation("ProductPriceOverrideCreator", fields: [createdById], references: [id])
+  approvedById     String?
+  approvedBy       User?                      @relation("ProductPriceOverrideApprover", fields: [approvedById], references: [id])
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  @@index([branchId])
+  @@index([productId])
+  @@index([branchId, productId])
+  @@index([status])
+  @@index([startDate, endDate])
 }
 
 model User {
@@ -781,6 +813,8 @@ model User {
   stockMovements StockMovement[] @relation("StockMovementCreator")
   productCategories ProductCategory[] @relation("ProductCategoryCreator")
   branchPriceProfiles BranchPriceProfile[] @relation("BranchPriceProfileCreator")
+  productPriceOverridesCreated ProductPriceOverride[] @relation("ProductPriceOverrideCreator")
+  productPriceOverridesApproved ProductPriceOverride[] @relation("ProductPriceOverrideApprover")
   kpiTargets BranchKpiTarget[] @relation("KpiTargetCreator")
   npsSurveys NpsSurvey[] @relation("NpsSurveyCreator")
   courses Course[] @relation("CourseCreator")
@@ -1272,6 +1306,7 @@ model Product {
   priceHistory      ProductPriceHistory[]
   purchasePriceHistory ProductPurchasePriceHistory[]
   pricingChangeHistory ProductPricingChangeHistory[]
+  priceOverrides    ProductPriceOverride[]
   fifoBatches       FifoInventoryBatch[]
   saleFifoAllocations SaleFifoAllocation[]
   distributionFifoAllocations DistributionFifoAllocation[]

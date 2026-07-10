@@ -15,7 +15,13 @@ import {
   UpdateWholesalePricingDto,
 } from './dto/pricing-branch.dto';
 import { AssignBranchPriceProfileDto, UpsertBranchPriceProfileDto } from './dto/branch-price-profile.dto';
+import {
+  ProductPriceOverrideQueryDto,
+  UpdateProductPriceOverrideDto,
+  UpsertProductPriceOverrideDto,
+} from './dto/product-price-override.dto';
 import { PricingCatalogService } from './pricing-catalog.service';
+import { PricingOverrideService } from './pricing-override.service';
 import { PricingProfileService } from './pricing-profile.service';
 import { PricingService } from './pricing.service';
 
@@ -44,6 +50,7 @@ export class PricingController {
     private readonly pricingService: PricingService,
     private readonly pricingCatalogService: PricingCatalogService,
     private readonly pricingProfileService: PricingProfileService,
+    private readonly pricingOverrideService: PricingOverrideService,
   ) {}
 
   @Get('categories')
@@ -156,6 +163,50 @@ export class PricingController {
     @Body() dto: AssignBranchPriceProfileDto,
   ) {
     return this.pricingProfileService.assignBranch(user, branchId, dto);
+  }
+
+  @Get('overrides')
+  @Roles(...PRICING_VIEW_ROLES)
+  listOverrides(@CurrentUser() user: AuthUser, @Query() query: ProductPriceOverrideQueryDto) {
+    return this.pricingOverrideService.list(user, query);
+  }
+
+  @Get('overrides/:id')
+  @Roles(...PRICING_VIEW_ROLES)
+  findOverride(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingOverrideService.findOne(user, id);
+  }
+
+  @Post('overrides')
+  @Roles(Role.CEO)
+  createOverride(@CurrentUser() user: AuthUser, @Body() dto: UpsertProductPriceOverrideDto) {
+    return this.pricingOverrideService.create(user, dto);
+  }
+
+  @Put('overrides/:id')
+  @Roles(Role.CEO)
+  updateOverride(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductPriceOverrideDto,
+  ) {
+    return this.pricingOverrideService.update(user, id, dto);
+  }
+
+  @Post('overrides/:id/approve')
+  @Roles(Role.CEO)
+  approveOverride(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingOverrideService.approve(user, id);
+  }
+
+  @Post('overrides/:id/cancel')
+  @Roles(Role.CEO)
+  cancelOverride(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.pricingOverrideService.cancel(user, id, body?.reason);
   }
 
   @Get('history')

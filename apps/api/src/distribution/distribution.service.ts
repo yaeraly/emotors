@@ -39,6 +39,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
+import { PricingOverrideService } from '../pricing/pricing-override.service';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
@@ -65,6 +66,7 @@ export class DistributionService {
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
     private readonly pricingFifoService: PricingFifoService,
+    private readonly pricingOverrideService: PricingOverrideService,
   ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
@@ -573,6 +575,11 @@ export class DistributionService {
         const isHqOwnedBranch = branch
           ? this.pricingFifoService.isHqBranchType(branch.branchType)
           : false;
+        const overrideUnitPriceKgs = await this.pricingOverrideService.getActiveOverridePrice(
+          order.branchId,
+          inventoryProduct.productId,
+          tx,
+        );
         await this.pricingFifoService.consumeFifoForDistribution(tx, {
           productId: inventoryProduct.productId,
           warehouseId: order.sourceWarehouseId,
@@ -583,6 +590,7 @@ export class DistributionService {
           distributionOrderItemId: item.id,
           userId: user.id,
           userRole: user.role,
+          overrideUnitPriceKgs,
         });
 
         await tx.inventoryBalance.update({
@@ -1374,6 +1382,12 @@ export class DistributionService {
           ? Number(product.hqBranchWholesalePriceKgs)
           : Number(product.sellingPriceKgs);
 
+      const overrideUnitPriceKgs = await this.pricingOverrideService.getActiveOverridePrice(
+        dto.branchId,
+        item.productId,
+        tx,
+      );
+
       const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
         productId: item.productId,
         warehouseId: dto.sourceWarehouseId,
@@ -1382,6 +1396,7 @@ export class DistributionService {
         branchPricing,
         fallbackUnitCost,
         fallbackUnitPrice,
+        overrideUnitPriceKgs,
       });
 
       const unitCost = fifoPreview.allocatedQty > 0 ? fifoPreview.unitCost : fallbackUnitCost;
