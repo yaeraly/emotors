@@ -1,5 +1,7 @@
 import {
   calculateAmountKgs,
+  resolveSupplierPaymentKgs,
+  sumConfirmedSupplierPaymentsKgs,
   summarizeSupplierPayments,
 } from './supplier-payment.util';
 
@@ -44,5 +46,16 @@ const overpaid = summarizeSupplierPayments(
   30000,
 );
 assertEqual(overpaid.supplierPaymentStatus, 'OVERPAID', 'overpaid status');
+
+assertClose(resolveSupplierPaymentKgs({ amountKgs: 1500, amountYuan: 100, exchangeRate: 10 }), 1500, 'stored kgs preferred');
+assertClose(resolveSupplierPaymentKgs({ amountYuan: 100, exchangeRate: 12.5 }), 1250, 'fallback kgs');
+assertClose(
+  sumConfirmedSupplierPaymentsKgs([
+    { status: 'ACTIVE', amountKgs: 1000, amountYuan: 100, exchangeRate: 11 },
+    { status: 'VOID', amountKgs: 500, amountYuan: 50, exchangeRate: 10 },
+  ]),
+  1000,
+  'confirmed supplier total',
+);
 
 console.log('supplier-payment.util.test.ts passed');

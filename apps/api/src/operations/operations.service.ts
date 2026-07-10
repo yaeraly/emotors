@@ -1690,6 +1690,21 @@ export class OperationsService {
           roles: user.roles ?? [user.role],
           warehouseId: order.hqWarehouseId,
           procurementOrderId: order.id,
+          tableLayout: 'compact',
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'CHINA_RECEIVING_TABLE_COMPACTED',
+        entity: 'ProcurementOrder',
+        entityId: order.id,
+        metadata: {
+          userId: user.id,
+          procurementOrderId: order.id,
           timestamp: new Date().toISOString(),
         },
       },

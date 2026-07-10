@@ -13,7 +13,9 @@
     "prisma:migrate": "npx prisma migrate dev --schema apps/api/prisma/schema.prisma",
     "prisma:migrate:deploy": "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma",
     "prisma:db:push": "npx prisma db push --schema apps/api/prisma/schema.prisma",
-    "prisma:seed": "npm run prisma:seed -w @emotors/api"
+    "prisma:seed": "npm run prisma:seed -w @emotors/api",
+    "product-code:migrate:preview": "npm run product-code:migrate:preview -w @emotors/api",
+    "product-code:migrate:apply": "npm run product-code:migrate:apply -w @emotors/api"
   },
   "devDependencies": {
     "concurrently": "latest",

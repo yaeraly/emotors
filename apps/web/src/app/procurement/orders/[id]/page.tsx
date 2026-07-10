@@ -9,6 +9,7 @@ import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPa
 import { LockedFieldHint } from '@/components/LockedFieldHint';
 import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
+import { sumConfirmedSupplierPaymentsKgs } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { buildHqReceivingValidationResult } from '@/lib/hq-receiving-validation';
@@ -393,6 +394,10 @@ export default function ProcurementOrderDetailPage() {
       return null;
     }
   }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, previewSvhTransportKgs]);
+
+  const confirmedSupplierPaidKgs = useMemo(() => {
+    return sumConfirmedSupplierPaymentsKgs(order?.supplierPayments ?? []);
+  }, [order?.supplierPayments]);
 
   const confirmedCargoPaymentKgs = useMemo(() => {
     if (!cargoReceiptCompleted) return 0;
@@ -1062,7 +1067,7 @@ export default function ProcurementOrderDetailPage() {
         {importCostBreakdown ? (
           <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
             <Info label={t('procurement.orders.chinaDomestic')} value={formatKgs(importCostBreakdown.chinaDomestic)} />
-            <Info label={t('procurement.orders.cargoPaymentKgs')} value={formatKgs(confirmedCargoPaymentKgs)} />
+            <Info label={t('procurement.orders.paidToSupplierKgs')} value={formatKgs(confirmedSupplierPaidKgs)} />
             <Info label={t('procurement.orders.domesticTransportKyrgyzstan')} value={formatKgs(importCostBreakdown.svhTransport)} />
             <Info label={t('procurement.orders.insurance')} value={formatKgs(importCostBreakdown.insurance)} />
             <Info label={t('procurement.orders.customs')} value={formatKgs(importCostBreakdown.customs)} />
@@ -1081,7 +1086,7 @@ export default function ProcurementOrderDetailPage() {
             <Info label={t('procurement.orders.totalNetWeightKg')} value={`${(previewTotals?.totalNetWeightKg ?? 0).toFixed(3)} kg`} />
             <Info label={t('procurement.orders.totalPackagingWeightKg')} value={`${(previewTotals?.totalPackagingWeightKg ?? 0).toFixed(3)} kg`} />
             <Info label={t('procurement.orders.shipmentWeight')} value={`${(previewTotals?.totalShipmentWeightKg ?? 0).toFixed(3)} kg`} />
-            <Info label={t('procurement.orders.cargoPaymentKgs')} value={formatKgs(confirmedCargoPaymentKgs)} />
+            <Info label={t('procurement.orders.paidToSupplierKgs')} value={formatKgs(confirmedSupplierPaidKgs)} />
             <Info label={t('procurement.orders.estimatedLandedCost')} value={formatKgs(previewTotals?.totalCostKgs ?? order.totalCostKgs)} />
           </section>
 

@@ -459,6 +459,7 @@ export class InventoryService {
         { productCategory: { nameKy: { contains: search, mode: 'insensitive' } } },
         { productCategory: { nameRu: { contains: search, mode: 'insensitive' } } },
         { productCategory: { nameEn: { contains: search, mode: 'insensitive' } } },
+        { codeMigrations: { some: { oldCode: { contains: search, mode: 'insensitive' } } } },
       ];
     }
 

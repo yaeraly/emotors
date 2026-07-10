@@ -12,7 +12,9 @@
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:db:push": "prisma db push --schema prisma/schema.prisma",
-    "prisma:seed": "ts-node prisma/seed.ts"
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "product-code:migrate:preview": "ts-node prisma/scripts/product-code-migration.ts preview",
+    "product-code:migrate:apply": "ts-node prisma/scripts/product-code-migration.ts apply"
   },
   "dependencies": {
     "@fastify/cors": "latest",

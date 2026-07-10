@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -11,12 +11,9 @@ import { translateStatus } from '@/lib/translate-status';
 import { useChinaReceivingDraft } from '@/hooks/useChinaReceivingDraft';
 import {
   differenceDisplay,
-  formatSaveTime,
   rowBackgroundClass,
   type ChinaReceivingLineItem,
   type ChinaReceivingProgress,
-  type ChinaReceivingRowStatus,
-  type LocalRowState,
 } from '@/lib/china-receiving-draft';
 
 type EditSession = {
@@ -67,36 +64,6 @@ function formatOrderDate(value?: string | null) {
   return new Date(value).toLocaleDateString('ru-RU');
 }
 
-function statusLabel(t: (key: string) => string, status: ChinaReceivingRowStatus) {
-  switch (status) {
-    case 'ACCEPTED':
-      return t('chinaReceiving.status.accepted');
-    case 'IN_PROGRESS':
-      return t('chinaReceiving.status.inProgress');
-    case 'SHORTAGE':
-      return t('chinaReceiving.status.shortage');
-    case 'OVERAGE':
-      return t('chinaReceiving.status.overage');
-    case 'DAMAGED':
-      return t('chinaReceiving.status.damaged');
-    default:
-      return status;
-  }
-}
-
-function saveStateLabel(t: (key: string) => string, state: LocalRowState['saveState']) {
-  switch (state) {
-    case 'saved':
-      return t('chinaReceiving.saveState.saved');
-    case 'saving':
-      return t('chinaReceiving.saveState.saving');
-    case 'error':
-      return t('chinaReceiving.saveState.error');
-    default:
-      return t('chinaReceiving.saveState.unsaved');
-  }
-}
-
 export function ChinaReceivingWorkspace({
   task,
   user,
@@ -112,6 +79,7 @@ export function ChinaReceivingWorkspace({
   const [loading, setLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [savedFlash, setSavedFlash] = useState<Record<string, boolean>>({});
 
   const isCompleted = Boolean(task.hqStockMovementCreatedAt);
   const readOnly = Boolean(task.readOnly) || isCompleted || !canReceiveProcurementToHq(user);
@@ -142,6 +110,36 @@ export function ChinaReceivingWorkspace({
   });
 
   const displayProgress = progress.products > 0 ? progress : task.progress ?? progress;
+
+  const flashSaved = useCallback((itemId: string) => {
+    setSavedFlash((current) => ({ ...current, [itemId]: true }));
+    window.setTimeout(() => {
+      setSavedFlash((current) => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+      });
+    }, 2000);
+  }, []);
+
+  const handleSaveRow = useCallback(
+    async (itemId: string) => {
+      await saveRow(itemId);
+      flashSaved(itemId);
+    },
+    [flashSaved, saveRow],
+  );
+
+  useEffect(() => {
+    for (const [itemId, row] of Object.entries(rows)) {
+      if (row.saveState === 'saved' && row.lastSavedAt && !row.isDirty && !savedFlash[itemId]) {
+        const savedAt = new Date(row.lastSavedAt).getTime();
+        if (Date.now() - savedAt < 1500) {
+          flashSaved(itemId);
+        }
+      }
+    }
+  }, [rows, savedFlash, flashSaved]);
 
   const hasDifference = useMemo(() => {
     return task.lineItems.some((item) => {
@@ -312,19 +310,18 @@ export function ChinaReceivingWorkspace({
       ) : null}
 
       <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+        <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
+          <thead className="bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">SKU</th>
-              <th className="px-4 py-3">{t('chinaReceiving.col.product')}</th>
-              <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
-              <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
-              <th className="px-4 py-3">{t('chinaReceiving.damagedQty')}</th>
-              <th className="px-4 py-3">{t('chinaReceiving.difference')}</th>
-              <th className="px-4 py-3">{t('chinaReceiving.col.status')}</th>
-              <th className="px-4 py-3">{t('chinaReceiving.saveStatus')}</th>
-              <th className="px-4 py-3">{t('chinaReceiving.notes')}</th>
-              {canEdit ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
+              <th className="px-2 py-2" title={t('chinaReceiving.col.product')}>{t('chinaReceiving.col.productShort')}</th>
+              <th className="w-14 px-2 py-2" title={t('chinaReceiving.expectedQty')}>{t('chinaReceiving.col.expectedShort')}</th>
+              <th className="w-16 px-2 py-2" title={t('chinaReceiving.actualQty')}>{t('chinaReceiving.col.actualShort')}</th>
+              <th className="w-14 px-2 py-2" title={t('chinaReceiving.damagedQty')}>{t('chinaReceiving.col.damagedShort')}</th>
+              <th className="w-14 px-2 py-2" title={t('chinaReceiving.difference')}>{t('chinaReceiving.col.diffShort')}</th>
+              <th className="w-28 px-2 py-2" title={t('chinaReceiving.notes')}>{t('chinaReceiving.col.notesShort')}</th>
+              {canEdit ? (
+                <th className="w-20 px-2 py-2" title={t('common.actions')}>{t('chinaReceiving.col.actionsShort')}</th>
+              ) : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -336,79 +333,76 @@ export function ChinaReceivingWorkspace({
               const diffUi = differenceDisplay(diff);
               const rowStatus = row?.rowStatus ?? 'IN_PROGRESS';
               const bg = row ? rowBackgroundClass(rowStatus, row.saveState, row.isDirty) : '';
+              const noteValue = row?.note ?? '';
               return (
                 <tr key={item.id} className={bg}>
-                  <td className="px-4 py-3">{item.sku}</td>
-                  <td className="px-4 py-3 font-medium">{item.productName}</td>
-                  <td className="px-4 py-3">{item.expectedQuantity}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-2">
+                    <p className="truncate font-medium text-slate-900" title={item.productName}>
+                      {item.productName}
+                    </p>
+                  </td>
+                  <td className="px-2 py-2 text-center">{item.expectedQuantity}</td>
+                  <td className="px-2 py-2">
                     {canEdit ? (
                       <input
                         type="number"
                         min={0}
                         value={row?.actualQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'actualQuantity', e.target.value)}
-                        className="w-24 rounded-lg border border-slate-300 px-2 py-1"
+                        className="w-full rounded border border-slate-300 px-1.5 py-1 text-center"
+                        title={t('chinaReceiving.actualQty')}
                       />
                     ) : (
-                      actual
+                      <span className="block text-center">{actual}</span>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-2">
                     {canEdit ? (
                       <input
                         type="number"
                         min={0}
                         value={row?.damagedQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'damagedQuantity', e.target.value)}
-                        className="w-24 rounded-lg border border-slate-300 px-2 py-1"
+                        className={`w-full rounded border px-1.5 py-1 text-center ${damaged > 0 ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-slate-300'}`}
+                        title={t('chinaReceiving.damagedQty')}
                       />
                     ) : (
-                      damaged
+                      <span className={`block text-center ${damaged > 0 ? 'font-semibold text-orange-700' : ''}`}>{damaged}</span>
                     )}
-                    {damaged > 0 ? (
-                      <span className="ml-2 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
-                        {t('chinaReceiving.damagedBadge').replace('{qty}', String(damaged))}
-                      </span>
-                    ) : null}
                   </td>
-                  <td className={`px-4 py-3 font-semibold ${diffUi.color}`}>
-                    {diffUi.icon ? <span className="mr-1">{diffUi.icon}</span> : null}
+                  <td className={`px-2 py-2 text-center font-semibold ${diffUi.color}`} title={t('chinaReceiving.difference')}>
+                    {diffUi.icon ? <span className="mr-0.5">{diffUi.icon}</span> : null}
                     {diffUi.text}
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="font-medium">{statusLabel(t, rowStatus)}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="font-medium">{saveStateLabel(t, row?.saveState ?? 'unsaved')}</p>
-                    {row?.lastSavedAt ? (
-                      <p className="text-xs text-slate-500">
-                        {t('chinaReceiving.lastSaved')}: {formatSaveTime(row.lastSavedAt)}
-                      </p>
-                    ) : null}
-                  </td>
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-2">
                     {canEdit ? (
                       <input
-                        value={row?.note ?? ''}
+                        value={noteValue}
                         onChange={(e) => updateRow(item.id, 'note', e.target.value)}
-                        className="w-full min-w-[120px] rounded-lg border border-slate-300 px-2 py-1"
-                        placeholder={t('chinaReceiving.notes')}
+                        className="w-full rounded border border-slate-300 px-1.5 py-1"
+                        title={noteValue || t('chinaReceiving.notes')}
+                        placeholder={t('chinaReceiving.col.notesShort')}
                       />
                     ) : (
-                      row?.note ?? '-'
+                      <span className="block truncate" title={noteValue || undefined}>{noteValue || '-'}</span>
                     )}
                   </td>
                   {canEdit ? (
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        disabled={row?.saveState === 'saving'}
-                        onClick={() => void saveRow(item.id)}
-                        className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                      >
-                        {t('chinaReceiving.saveRow')}
-                      </button>
+                    <td className="px-2 py-2">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={row?.saveState === 'saving'}
+                          onClick={() => void handleSaveRow(item.id)}
+                          className="rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                          title={t('chinaReceiving.saveRow')}
+                        >
+                          {t('chinaReceiving.saveRow')}
+                        </button>
+                        {savedFlash[item.id] ? (
+                          <span className="text-emerald-600" title={t('chinaReceiving.savedInline')}>✓</span>
+                        ) : null}
+                      </div>
                     </td>
                   ) : null}
                 </tr>
@@ -452,11 +446,10 @@ export function ChinaReceivingWorkspace({
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-4 py-3">SKU</th>
                       <th className="px-4 py-3">{t('chinaReceiving.col.product')}</th>
-                      <th className="px-4 py-3">{t('chinaReceiving.expectedQty')}</th>
-                      <th className="px-4 py-3">{t('chinaReceiving.actualQty')}</th>
-                      <th className="px-4 py-3">{t('chinaReceiving.difference')}</th>
+                      <th className="px-4 py-3">{t('chinaReceiving.col.expectedShort')}</th>
+                      <th className="px-4 py-3">{t('chinaReceiving.col.actualShort')}</th>
+                      <th className="px-4 py-3">{t('chinaReceiving.col.diffShort')}</th>
                       <th className="px-4 py-3">{t('chinaReceiving.actStatus')}</th>
                     </tr>
                   </thead>
@@ -465,7 +458,6 @@ export function ChinaReceivingWorkspace({
                       const act = batch.discrepancyActs.find((row) => row.sku === item.sku);
                       return (
                         <tr key={item.id}>
-                          <td className="px-4 py-3">{item.sku}</td>
                           <td className="px-4 py-3">{item.productName}</td>
                           <td className="px-4 py-3">{item.expectedQuantity}</td>
                           <td className="px-4 py-3">{item.actualQuantity}</td>

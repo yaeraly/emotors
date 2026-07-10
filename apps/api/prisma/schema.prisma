@@ -1247,6 +1247,7 @@ model Product {
   partsConsumptions PartsConsumption[]
   warranties Warranty[]
   procurementOrderItems ProcurementOrderItem[]
+  codeMigrations    ProductCodeMigration[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
@@ -1260,6 +1261,21 @@ model Product {
   @@index([isActive])
   @@index([defaultSupplierId])
   @@index([defaultFactoryId])
+}
+
+model ProductCodeMigration {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  oldCode       String
+  newCode       String
+  migrationName String
+  changedAt     DateTime @default(now())
+
+  @@index([productId])
+  @@index([oldCode])
+  @@index([newCode])
+  @@index([migrationName])
 }
 
 enum ProductPricingMode {
