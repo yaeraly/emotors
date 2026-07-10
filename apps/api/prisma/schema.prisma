@@ -62,6 +62,22 @@ enum ProductPriceOverrideStatus {
   CANCELLED
 }
 
+enum BranchPriceProfileType {
+  HQ_BRANCH
+  STANDARD_FRANCHISE
+  SILVER_FRANCHISE
+  GOLD_FRANCHISE
+  VIP_FRANCHISE
+  DEALER
+  DISTRIBUTOR
+}
+
+enum PricingPolicyVersionStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -745,6 +761,7 @@ model Branch {
 model BranchPriceProfile {
   id                      String                   @id @default(cuid())
   name                    String                   @unique
+  profileType             BranchPriceProfileType   @unique
   branchType              BranchType               @default(FRANCHISE_BRANCH)
   defaultHqMarkupPercent  Decimal                  @default(0) @db.Decimal(8, 2)
   status                  BranchPriceProfileStatus   @default(ACTIVE)
@@ -752,11 +769,84 @@ model BranchPriceProfile {
   createdById             String?
   createdBy               User?                    @relation("BranchPriceProfileCreator", fields: [createdById], references: [id])
   branches                Branch[]
+  categoryDiscounts       BranchPriceProfileCategoryDiscount[]
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
   @@index([createdById])
   @@index([status])
+}
+
+model BranchPriceProfileCategoryDiscount {
+  id              String             @id @default(cuid())
+  profileId       String
+  profile         BranchPriceProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  categoryId      String
+  category        ProductCategory    @relation(fields: [categoryId], references: [id])
+  discountPercent Decimal            @default(0) @db.Decimal(8, 2)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@unique([profileId, categoryId])
+  @@index([profileId])
+  @@index([categoryId])
+}
+
+model PricingPolicyVersion {
+  id            String                     @id @default(cuid())
+  versionNumber Int                        @unique
+  label         String
+  status        PricingPolicyVersionStatus @default(DRAFT)
+  isLocked      Boolean                    @default(false)
+  publishedAt   DateTime?
+  publishedById String?
+  publishedBy   User?                      @relation("PricingPolicyVersionPublisher", fields: [publishedById], references: [id])
+  createdById   String
+  createdBy     User                       @relation("PricingPolicyVersionCreator", fields: [createdById], references: [id])
+  categoryDiscountSnapshots PricingPolicyVersionCategoryDiscount[]
+  productSnapshots          PricingPolicyVersionProductSnapshot[]
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  @@index([status])
+  @@index([createdById])
+  @@index([publishedById])
+}
+
+model PricingPolicyVersionCategoryDiscount {
+  id              String                 @id @default(cuid())
+  versionId       String
+  version         PricingPolicyVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  profileId       String
+  profileType     BranchPriceProfileType
+  categoryId      String
+  discountPercent Decimal                @db.Decimal(8, 2)
+
+  @@unique([versionId, profileId, categoryId])
+  @@index([versionId])
+}
+
+model PricingPolicyVersionProductSnapshot {
+  id                             String               @id @default(cuid())
+  versionId                      String
+  version                        PricingPolicyVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  productId                      String
+  sku                            String
+  costPriceKgs                   Decimal              @db.Decimal(14, 2)
+  hqBranchWholesaleMarkupPercent Decimal              @db.Decimal(8, 2)
+  wholesaleMarkupPercent         Decimal              @db.Decimal(8, 2)
+  minimumWholesaleMarkupPercent  Decimal              @db.Decimal(8, 2)
+  recommendedRetailMarkupPercent Decimal              @db.Decimal(8, 2)
+  minimumSellingMarkupPercent    Decimal              @db.Decimal(8, 2)
+  hqBranchWholesalePriceKgs      Decimal              @db.Decimal(14, 2)
+  wholesalePriceKgs              Decimal              @db.Decimal(14, 2)
+  minimumWholesalePriceKgs       Decimal              @db.Decimal(14, 2)
+  recommendedRetailPriceKgs      Decimal              @db.Decimal(14, 2)
+  minimumSellingPriceKgs         Decimal              @db.Decimal(14, 2)
+
+  @@unique([versionId, productId])
+  @@index([versionId])
+  @@index([sku])
 }
 
 model ProductPriceOverride {
@@ -815,6 +905,8 @@ model User {
   branchPriceProfiles BranchPriceProfile[] @relation("BranchPriceProfileCreator")
   productPriceOverridesCreated ProductPriceOverride[] @relation("ProductPriceOverrideCreator")
   productPriceOverridesApproved ProductPriceOverride[] @relation("ProductPriceOverrideApprover")
+  pricingPolicyVersionsCreated PricingPolicyVersion[] @relation("PricingPolicyVersionCreator")
+  pricingPolicyVersionsPublished PricingPolicyVersion[] @relation("PricingPolicyVersionPublisher")
   kpiTargets BranchKpiTarget[] @relation("KpiTargetCreator")
   npsSurveys NpsSurvey[] @relation("NpsSurveyCreator")
   courses Course[] @relation("CourseCreator")
@@ -1512,6 +1604,7 @@ model ProductCategory {
   createdById String?
   createdBy   User?     @relation("ProductCategoryCreator", fields: [createdById], references: [id])
   products    Product[]
+  profileCategoryDiscounts BranchPriceProfileCategoryDiscount[]
   inventoryCountSessions InventoryCountSession[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt

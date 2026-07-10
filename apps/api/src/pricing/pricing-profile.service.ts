@@ -4,11 +4,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchPriceProfileStatus, BranchType, Prisma } from '@prisma/client';
+import { BranchPriceProfileStatus, BranchPriceProfileType, BranchType, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
 import { AssignBranchPriceProfileDto, UpsertBranchPriceProfileDto } from './dto/branch-price-profile.dto';
+
+const PRESET_PROFILE_TYPES: BranchPriceProfileType[] = [
+  BranchPriceProfileType.HQ_BRANCH,
+  BranchPriceProfileType.STANDARD_FRANCHISE,
+  BranchPriceProfileType.SILVER_FRANCHISE,
+  BranchPriceProfileType.GOLD_FRANCHISE,
+  BranchPriceProfileType.VIP_FRANCHISE,
+  BranchPriceProfileType.DEALER,
+  BranchPriceProfileType.DISTRIBUTOR,
+];
 
 @Injectable()
 export class PricingProfileService {
@@ -17,35 +27,31 @@ export class PricingProfileService {
   async list(user: AuthUser) {
     this.assertCanView(user);
     const profiles = await this.prisma.branchPriceProfile.findMany({
-      orderBy: { name: 'asc' },
+      orderBy: { profileType: 'asc' },
       include: {
-        _count: { select: { branches: true } },
+        _count: { select: { branches: true, categoryDiscounts: true } },
         branches: {
           where: { deletedAt: null },
           select: { id: true, name: true, code: true, branchType: true },
           orderBy: { name: 'asc' },
         },
+        categoryDiscounts: {
+          include: { category: { select: { id: true, code: true, nameRu: true, nameEn: true } } },
+        },
       },
     });
-    return profiles.map((profile) => ({
-      id: profile.id,
-      name: profile.name,
-      branchType: profile.branchType,
-      defaultHqMarkupPercent: Number(profile.defaultHqMarkupPercent),
-      status: profile.status,
-      description: profile.description,
-      branchCount: profile._count.branches,
-      branches: profile.branches,
-      createdAt: profile.createdAt,
-      updatedAt: profile.updatedAt,
-    }));
+    return profiles.map((profile) => this.toResponse(profile));
   }
 
   async create(user: AuthUser, dto: UpsertBranchPriceProfileDto) {
     this.assertCanManage(user);
-    if (dto.defaultHqMarkupPercent < 0) {
-      throw new BadRequestException('Markup must be >= 0');
+    if (!PRESET_PROFILE_TYPES.includes(dto.profileType)) {
+      throw new BadRequestException('Unsupported price profile type');
     }
+    const duplicateType = await this.prisma.branchPriceProfile.findUnique({
+      where: { profileType: dto.profileType },
+    });
+    if (duplicateType) throw new BadRequestException('Price profile type already exists');
     const duplicate = await this.prisma.branchPriceProfile.findUnique({
       where: { name: dto.name.trim() },
     });
@@ -55,8 +61,12 @@ export class PricingProfileService {
       const profile = await tx.branchPriceProfile.create({
         data: {
           name: dto.name.trim(),
-          branchType: dto.branchType ?? BranchType.FRANCHISE_BRANCH,
-          defaultHqMarkupPercent: dto.defaultHqMarkupPercent,
+          profileType: dto.profileType,
+          branchType:
+            dto.profileType === BranchPriceProfileType.HQ_BRANCH
+              ? BranchType.HQ_BRANCH
+              : BranchType.FRANCHISE_BRANCH,
+          defaultHqMarkupPercent: dto.defaultHqMarkupPercent ?? 0,
           status: dto.status ?? BranchPriceProfileStatus.ACTIVE,
           description: dto.description?.trim() || null,
           createdById: user.id,
@@ -64,8 +74,8 @@ export class PricingProfileService {
       });
       await this.auditInTx(tx, user, 'PRICE_PROFILE_CREATED', 'BranchPriceProfile', profile.id, {
         profileId: profile.id,
+        profileType: profile.profileType,
         name: profile.name,
-        defaultHqMarkupPercent: Number(profile.defaultHqMarkupPercent),
         reason: dto.reason,
       });
       return profile;
@@ -78,9 +88,6 @@ export class PricingProfileService {
     this.assertCanManage(user);
     const profile = await this.prisma.branchPriceProfile.findUnique({ where: { id } });
     if (!profile) throw new NotFoundException('Price profile not found');
-    if (dto.defaultHqMarkupPercent < 0) {
-      throw new BadRequestException('Markup must be >= 0');
-    }
     if (dto.name.trim() !== profile.name) {
       const duplicate = await this.prisma.branchPriceProfile.findUnique({
         where: { name: dto.name.trim() },
@@ -93,28 +100,14 @@ export class PricingProfileService {
         where: { id },
         data: {
           name: dto.name.trim(),
-          branchType: dto.branchType ?? profile.branchType,
-          defaultHqMarkupPercent: dto.defaultHqMarkupPercent,
           status: dto.status ?? profile.status,
           description: dto.description?.trim() || null,
         },
       });
       await this.auditInTx(tx, user, 'PRICE_PROFILE_UPDATED', 'BranchPriceProfile', id, {
         profileId: id,
-        oldMarkup: Number(profile.defaultHqMarkupPercent),
-        newMarkup: dto.defaultHqMarkupPercent,
+        profileType: profile.profileType,
         reason: dto.reason,
-      });
-      await this.auditInTx(tx, user, 'PRICE_RECALCULATED', 'BranchPriceProfile', id, {
-        profileId: id,
-        reason: dto.reason ?? 'Price profile markup updated',
-      });
-      await tx.branch.updateMany({
-        where: { priceProfileId: id, deletedAt: null },
-        data: {
-          hqToBranchMarkupPercent: dto.defaultHqMarkupPercent,
-          hqToBranchMarkupUpdatedAt: new Date(),
-        },
       });
       return next;
     });
@@ -129,6 +122,9 @@ export class PricingProfileService {
       include: { _count: { select: { branches: true } } },
     });
     if (!profile) throw new NotFoundException('Price profile not found');
+    if (PRESET_PROFILE_TYPES.includes(profile.profileType)) {
+      throw new BadRequestException('Preset price profiles cannot be deleted');
+    }
     if (profile._count.branches > 0) {
       throw new BadRequestException('Cannot delete a profile assigned to branches');
     }
@@ -152,9 +148,6 @@ export class PricingProfileService {
       include: { priceProfile: true },
     });
     if (!branch) throw new NotFoundException('Branch not found');
-    if (branch.branchType === BranchType.HQ_BRANCH) {
-      throw new BadRequestException('HQ branches always use cost pricing');
-    }
 
     let profile = null;
     if (dto.profileId) {
@@ -163,18 +156,24 @@ export class PricingProfileService {
       if (profile.status !== BranchPriceProfileStatus.ACTIVE) {
         throw new BadRequestException('Only active profiles can be assigned');
       }
+      if (
+        branch.branchType === BranchType.HQ_BRANCH &&
+        profile.profileType !== BranchPriceProfileType.HQ_BRANCH
+      ) {
+        throw new BadRequestException('HQ branches must use the HQ Branch profile');
+      }
+      if (
+        branch.branchType === BranchType.FRANCHISE_BRANCH &&
+        profile.profileType === BranchPriceProfileType.HQ_BRANCH
+      ) {
+        throw new BadRequestException('Franchise branches cannot use the HQ Branch profile');
+      }
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const next = await tx.branch.update({
         where: { id: branchId },
-        data: {
-          priceProfileId: dto.profileId ?? null,
-          hqToBranchMarkupPercent: profile
-            ? Number(profile.defaultHqMarkupPercent)
-            : Number(branch.hqToBranchMarkupPercent),
-          hqToBranchMarkupUpdatedAt: new Date(),
-        },
+        data: { priceProfileId: dto.profileId ?? null },
         include: { priceProfile: true },
       });
 
@@ -183,8 +182,6 @@ export class PricingProfileService {
         branchId,
         profileId: dto.profileId ?? null,
         oldProfileId: branch.priceProfileId,
-        oldMarkup: branch.priceProfile ? Number(branch.priceProfile.defaultHqMarkupPercent) : null,
-        newMarkup: profile ? Number(profile.defaultHqMarkupPercent) : null,
         reason: dto.reason,
       });
       await this.auditInTx(tx, user, 'PRICE_RECALCULATED', 'Branch', branchId, {
@@ -204,7 +201,7 @@ export class PricingProfileService {
         ? {
             id: updated.priceProfile.id,
             name: updated.priceProfile.name,
-            defaultHqMarkupPercent: Number(updated.priceProfile.defaultHqMarkupPercent),
+            profileType: updated.priceProfile.profileType,
           }
         : null,
     };
@@ -215,24 +212,57 @@ export class PricingProfileService {
     const profile = await this.prisma.branchPriceProfile.findUnique({
       where: { id },
       include: {
-        _count: { select: { branches: true } },
+        _count: { select: { branches: true, categoryDiscounts: true } },
         branches: {
           where: { deletedAt: null },
           select: { id: true, name: true, code: true, branchType: true },
           orderBy: { name: 'asc' },
         },
+        categoryDiscounts: {
+          include: { category: { select: { id: true, code: true, nameRu: true, nameEn: true } } },
+        },
       },
     });
     if (!profile) throw new NotFoundException('Price profile not found');
+    return this.toResponse(profile);
+  }
+
+  private toResponse(profile: {
+    id: string;
+    name: string;
+    profileType: BranchPriceProfileType;
+    branchType: BranchType;
+    defaultHqMarkupPercent: { toString(): string } | number;
+    status: BranchPriceProfileStatus;
+    description: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+    _count: { branches: number; categoryDiscounts: number };
+    branches: Array<{ id: string; name: string; code: string; branchType: BranchType }>;
+    categoryDiscounts: Array<{
+      id: string;
+      categoryId: string;
+      discountPercent: { toString(): string } | number;
+      category: { id: string; code: string; nameRu: string; nameEn: string };
+    }>;
+  }) {
     return {
       id: profile.id,
       name: profile.name,
+      profileType: profile.profileType,
       branchType: profile.branchType,
       defaultHqMarkupPercent: Number(profile.defaultHqMarkupPercent),
       status: profile.status,
       description: profile.description,
       branchCount: profile._count.branches,
+      categoryDiscountCount: profile._count.categoryDiscounts,
       branches: profile.branches,
+      categoryDiscounts: profile.categoryDiscounts.map((row) => ({
+        id: row.id,
+        categoryId: row.categoryId,
+        category: row.category,
+        discountPercent: Number(row.discountPercent),
+      })),
       createdAt: profile.createdAt,
       updatedAt: profile.updatedAt,
     };

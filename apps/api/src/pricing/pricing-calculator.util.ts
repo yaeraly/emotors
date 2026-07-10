@@ -41,9 +41,6 @@ export function resolveBranchHqMarkupPercent(input: {
   profileStatus?: 'ACTIVE' | 'INACTIVE' | null;
 }) {
   if (input.branchType === 'HQ_BRANCH') return 0;
-  if (input.profileStatus === 'ACTIVE' && input.profileMarkupPercent != null) {
-    return Math.max(0, input.profileMarkupPercent);
-  }
   return Math.max(0, input.productDefaultMarkupPercent);
 }
 
@@ -55,7 +52,28 @@ export function resolveBranchPurchasePrice(
   return resolveHqToBranchPrice(costPriceKgs, branchType, markupPercent);
 }
 
-export type BranchProductPriceSource = 'OVERRIDE' | 'PROFILE' | 'PRODUCT_DEFAULT' | 'HQ_COST';
+export type BranchProductPriceSource =
+  | 'OVERRIDE'
+  | 'CATEGORY_DISCOUNT'
+  | 'BASE_FRANCHISE'
+  | 'HQ_COST';
+
+/** Apply category discount on branch price: ROUNDUP(branchPrice × (1 - discount%), -1) */
+export function applyCategoryDiscountRoundUp(branchPriceKgs: number, discountPercent: number) {
+  if (branchPriceKgs <= 0) return 0;
+  if (discountPercent <= 0) return branchPriceKgs;
+  const raw = branchPriceKgs * (1 - discountPercent / 100);
+  return Math.ceil(raw / 10) * 10;
+}
+
+export function resolveBaseFranchiseBranchPrice(
+  costPriceKgs: number,
+  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH',
+  baseFranchiseMarkupPercent: number,
+) {
+  if (branchType === 'HQ_BRANCH') return roundMoney(costPriceKgs);
+  return applyHqBranchWholesaleMarkup(costPriceKgs, baseFranchiseMarkupPercent);
+}
 
 export function isProductOverrideEffective(
   override: { status: string; startDate: Date; endDate: Date },
@@ -72,13 +90,12 @@ export function dateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: 
 export function resolveFinalBranchProductPrice(input: {
   costPriceKgs: number;
   branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
-  productDefaultMarkupPercent: number;
-  profileMarkupPercent?: number | null;
-  profileStatus?: 'ACTIVE' | 'INACTIVE' | null;
+  baseFranchiseMarkupPercent: number;
+  categoryDiscountPercent?: number | null;
   overridePriceKgs?: number | null;
   override?: { status: string; startDate: Date; endDate: Date } | null;
   now?: Date;
-}): { priceKgs: number; source: BranchProductPriceSource } {
+}): { priceKgs: number; source: BranchProductPriceSource; baseFranchisePriceKgs: number } {
   const override = input.override;
   if (
     override &&
@@ -86,25 +103,45 @@ export function resolveFinalBranchProductPrice(input: {
     input.overridePriceKgs != null &&
     input.overridePriceKgs >= 0
   ) {
-    return { priceKgs: roundMoney(input.overridePriceKgs), source: 'OVERRIDE' };
+    const baseFranchisePriceKgs = resolveBaseFranchiseBranchPrice(
+      input.costPriceKgs,
+      input.branchType,
+      input.baseFranchiseMarkupPercent,
+    );
+    return {
+      priceKgs: roundMoney(input.overridePriceKgs),
+      source: 'OVERRIDE',
+      baseFranchisePriceKgs,
+    };
   }
 
   if (input.branchType === 'HQ_BRANCH') {
-    return { priceKgs: roundMoney(input.costPriceKgs), source: 'HQ_COST' };
+    return {
+      priceKgs: roundMoney(input.costPriceKgs),
+      source: 'HQ_COST',
+      baseFranchisePriceKgs: roundMoney(input.costPriceKgs),
+    };
   }
 
-  const markupPercent = resolveBranchHqMarkupPercent({
-    branchType: input.branchType,
-    productDefaultMarkupPercent: input.productDefaultMarkupPercent,
-    profileMarkupPercent: input.profileMarkupPercent,
-    profileStatus: input.profileStatus,
-  });
-  const priceKgs = resolveBranchPurchasePrice(input.costPriceKgs, input.branchType, markupPercent);
-  const source: BranchProductPriceSource =
-    input.profileStatus === 'ACTIVE' && input.profileMarkupPercent != null
-      ? 'PROFILE'
-      : 'PRODUCT_DEFAULT';
-  return { priceKgs, source };
+  const baseFranchisePriceKgs = resolveBaseFranchiseBranchPrice(
+    input.costPriceKgs,
+    input.branchType,
+    input.baseFranchiseMarkupPercent,
+  );
+  const discountPercent = Math.max(0, input.categoryDiscountPercent ?? 0);
+  if (discountPercent > 0) {
+    return {
+      priceKgs: applyCategoryDiscountRoundUp(baseFranchisePriceKgs, discountPercent),
+      source: 'CATEGORY_DISCOUNT',
+      baseFranchisePriceKgs,
+    };
+  }
+
+  return {
+    priceKgs: baseFranchisePriceKgs,
+    source: 'BASE_FRANCHISE',
+    baseFranchisePriceKgs,
+  };
 }
 
 export function pricesFromMarkups(

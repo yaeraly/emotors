@@ -77,7 +77,7 @@ export class PricingOverrideService {
 
     const branch = await this.prisma.branch.findFirst({
       where: { id: dto.branchId, deletedAt: null },
-      include: { priceProfile: true },
+      include: { priceProfile: { include: { categoryDiscounts: true } } },
     });
     if (!branch) throw new NotFoundException('Branch not found');
     if (branch.code === HQ_CATALOG_BRANCH_CODE || branch.branchType === BranchType.HQ_BRANCH) {
@@ -240,7 +240,7 @@ export class PricingOverrideService {
     const existing = await this.prisma.productPriceOverride.findUnique({
       where: { id },
       include: {
-        branch: { include: { priceProfile: true } },
+        branch: { include: { priceProfile: { include: { categoryDiscounts: true } } } },
         product: true,
       },
     });
@@ -318,7 +318,7 @@ export class PricingOverrideService {
     for (const row of stale) {
       const branch = await client.branch.findUnique({
         where: { id: row.branchId },
-        include: { priceProfile: true },
+        include: { priceProfile: { include: { categoryDiscounts: true } } },
       });
       const product = await client.product.findUnique({ where: { id: row.productId } });
       const standardPrice =
@@ -372,27 +372,26 @@ export class PricingOverrideService {
   private async resolveStandardBranchPrice(
     branch: {
       branchType: BranchType;
-      hqToBranchMarkupPercent: { toString(): string } | number;
       priceProfile?: {
-        status: string;
-        defaultHqMarkupPercent: { toString(): string } | number;
+        categoryDiscounts?: Array<{ categoryId: string; discountPercent: { toString(): string } | number }>;
       } | null;
     },
     product: {
       id: string;
+      categoryId: string;
       hqBranchWholesaleMarkupPercent: { toString(): string } | number;
     },
     tx?: Prisma.TransactionClient,
   ) {
     const cost = await this.fifoService.getLatestHqCostPrice(product.id, tx);
+    const categoryDiscount = branch.priceProfile?.categoryDiscounts?.find(
+      (row) => row.categoryId === product.categoryId,
+    );
     const resolved = resolveFinalBranchProductPrice({
       costPriceKgs: cost.costPriceKgs,
       branchType: branch.branchType,
-      productDefaultMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-      profileMarkupPercent: branch.priceProfile
-        ? Number(branch.priceProfile.defaultHqMarkupPercent)
-        : null,
-      profileStatus: branch.priceProfile?.status as 'ACTIVE' | 'INACTIVE' | null,
+      baseFranchiseMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      categoryDiscountPercent: categoryDiscount ? Number(categoryDiscount.discountPercent) : 0,
     });
     return resolved.priceKgs;
   }

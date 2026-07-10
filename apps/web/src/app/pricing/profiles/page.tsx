@@ -7,127 +7,99 @@ import { canManagePricingPolicy } from '@/lib/rbac';
 import type { BranchType, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
+type CategoryOption = { id: string; code: string; nameRu: string; nameEn: string };
+type CategoryDiscount = { categoryId: string; discountPercent: number };
+
 type PriceProfile = {
   id: string;
   name: string;
+  profileType: string;
   branchType: BranchType;
-  defaultHqMarkupPercent: number;
   status: 'ACTIVE' | 'INACTIVE';
   description?: string | null;
   branchCount: number;
   branches: Array<{ id: string; name: string; code: string; branchType: BranchType }>;
+  categoryDiscounts: Array<{
+    categoryId: string;
+    discountPercent: number;
+    category: CategoryOption;
+  }>;
 };
 
-type BranchOption = {
-  id: string;
-  name: string;
-  code: string;
-  branchType: BranchType;
-};
-
-type ProfileForm = {
-  name: string;
-  branchType: BranchType;
-  defaultHqMarkupPercent: string;
-  status: 'ACTIVE' | 'INACTIVE';
-  description: string;
-};
-
-const emptyForm: ProfileForm = {
-  name: '',
-  branchType: 'FRANCHISE_BRANCH',
-  defaultHqMarkupPercent: '15',
-  status: 'ACTIVE',
-  description: '',
-};
+type BranchOption = { id: string; name: string; code: string; branchType: BranchType };
 
 export default function PricingProfilesPage() {
   const { t } = useTranslation();
   const [profiles, setProfiles] = useState<PriceProfile[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [form, setForm] = useState<ProfileForm>(emptyForm);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [discountDraft, setDiscountDraft] = useState<Record<string, string>>({});
   const [assignBranchId, setAssignBranchId] = useState('');
   const [assignProfileId, setAssignProfileId] = useState('');
   const [saving, setSaving] = useState(false);
 
   const canManage = canManagePricingPolicy(user);
+  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0] ?? null;
 
   async function load() {
-    const [profileRows, branchRows, me] = await Promise.all([
+    const [profileRows, categoryRows, branchRows, me] = await Promise.all([
       apiFetch<PriceProfile[]>('/pricing/profiles'),
+      apiFetch<CategoryOption[]>('/pricing/categories'),
       apiFetch<BranchOption[]>('/branches'),
       apiFetch<User>('/auth/me'),
     ]);
     setProfiles(profileRows);
-    setBranches(branchRows.filter((branch) => branch.branchType === 'FRANCHISE_BRANCH'));
+    setCategories(
+      categoryRows.map((row) => ({
+        id: row.id,
+        code: row.code,
+        nameRu: row.nameRu,
+        nameEn: row.nameEn,
+      })),
+    );
+    setBranches(branchRows);
     setUser(me);
+    if (!selectedProfileId && profileRows[0]) setSelectedProfileId(profileRows[0].id);
   }
 
   useEffect(() => {
     void load().catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
+  useEffect(() => {
+    if (!selectedProfile) return;
+    const next: Record<string, string> = {};
+    for (const category of categories) {
+      const existing = selectedProfile.categoryDiscounts.find((row) => row.categoryId === category.id);
+      next[category.id] = existing ? String(existing.discountPercent) : '0';
+    }
+    setDiscountDraft(next);
+  }, [selectedProfile, categories]);
+
   const franchiseBranches = useMemo(
     () => branches.filter((branch) => branch.branchType === 'FRANCHISE_BRANCH'),
     [branches],
   );
 
-  function startEdit(profile: PriceProfile) {
-    setEditingId(profile.id);
-    setForm({
-      name: profile.name,
-      branchType: profile.branchType,
-      defaultHqMarkupPercent: String(profile.defaultHqMarkupPercent),
-      status: profile.status,
-      description: profile.description ?? '',
-    });
-  }
-
-  function resetForm() {
-    setEditingId(null);
-    setForm(emptyForm);
-  }
-
-  async function saveProfile() {
-    if (!canManage) return;
+  async function saveCategoryDiscounts() {
+    if (!canManage || !selectedProfile) return;
     setSaving(true);
     setError('');
     setSuccess('');
     try {
-      const payload = {
-        name: form.name.trim(),
-        branchType: form.branchType,
-        defaultHqMarkupPercent: Number(form.defaultHqMarkupPercent),
-        status: form.status,
-        description: form.description.trim() || undefined,
-      };
-      if (editingId) {
-        await apiFetch(`/pricing/profiles/${editingId}`, { method: 'PUT', body: JSON.stringify(payload) });
-      } else {
-        await apiFetch('/pricing/profiles', { method: 'POST', body: JSON.stringify(payload) });
-      }
-      setSuccess(t('pricing.profileSaved'));
-      resetForm();
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deleteProfile(id: string) {
-    if (!canManage) return;
-    setSaving(true);
-    setError('');
-    try {
-      await apiFetch(`/pricing/profiles/${id}/delete`, { method: 'POST', body: JSON.stringify({}) });
-      setSuccess(t('pricing.profileDeleted'));
-      if (editingId === id) resetForm();
+      const discounts: CategoryDiscount[] = categories.map((category) => ({
+        categoryId: category.id,
+        discountPercent: Number(discountDraft[category.id] ?? 0),
+      }));
+      await apiFetch(`/pricing/profiles/${selectedProfile.id}/category-discounts`, {
+        method: 'PUT',
+        body: JSON.stringify({ discounts }),
+      });
+      setSuccess(t('pricing.categoryDiscountsSaved'));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -161,70 +133,67 @@ export default function PricingProfilesPage() {
       <PricingHubNav activeTab="profiles" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
       {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
-      {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
-
       <p className="text-xs text-slate-500">{t('pricing.profilesHint')}</p>
 
-      {canManage ? (
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-[760px] divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2">{t('pricing.profileName')}</th>
+              <th className="px-3 py-2">{t('pricing.profileType')}</th>
+              <th className="px-3 py-2">{t('common.status')}</th>
+              <th className="px-3 py-2">{t('pricing.colBranch')}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {profiles.map((profile) => (
+              <tr
+                key={profile.id}
+                className={selectedProfile?.id === profile.id ? 'bg-blue-50' : undefined}
+                onClick={() => setSelectedProfileId(profile.id)}
+              >
+                <td className="px-3 py-2 font-semibold text-slate-900">{profile.name}</td>
+                <td className="px-3 py-2">{profile.profileType}</td>
+                <td className="px-3 py-2">
+                  {profile.status === 'ACTIVE' ? t('pricing.profileStatusActive') : t('pricing.profileStatusInactive')}
+                </td>
+                <td className="px-3 py-2">{profile.branchCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {canManage && selectedProfile ? (
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="text-lg font-bold text-slate-950">
-            {editingId ? t('pricing.editProfile') : t('pricing.createProfile')}
+            {t('pricing.categoryDiscountsFor').replace('{{profile}}', selectedProfile.name)}
           </h3>
           <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('pricing.profileName')}</span>
-              <input
-                value={form.name}
-                onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('pricing.colHqMarkup')}</span>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.defaultHqMarkupPercent}
-                onChange={(e) => setForm((current) => ({ ...current, defaultHqMarkupPercent: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
-              <select
-                value={form.status}
-                onChange={(e) => setForm((current) => ({ ...current, status: e.target.value as 'ACTIVE' | 'INACTIVE' }))}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="ACTIVE">{t('pricing.profileStatusActive')}</option>
-                <option value="INACTIVE">{t('pricing.profileStatusInactive')}</option>
-              </select>
-            </label>
-            <label className="block md:col-span-2 lg:col-span-3">
-              <span className="text-sm font-semibold text-slate-700">{t('pricing.profileDescription')}</span>
-              <input
-                value={form.description}
-                onChange={(e) => setForm((current) => ({ ...current, description: e.target.value }))}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </label>
+            {categories.map((category) => (
+              <label key={category.id} className="block">
+                <span className="text-sm font-semibold text-slate-700">{category.nameRu}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={discountDraft[category.id] ?? '0'}
+                  onChange={(e) =>
+                    setDiscountDraft((current) => ({ ...current, [category.id]: e.target.value }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+            ))}
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={saving || !form.name.trim()}
-              onClick={() => void saveProfile()}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              {saving ? t('common.loading') : t('common.save')}
-            </button>
-            {editingId ? (
-              <button type="button" onClick={resetForm} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold">
-                {t('common.cancel')}
-              </button>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void saveCategoryDiscounts()}
+            className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {saving ? t('common.loading') : t('pricing.saveCategoryDiscounts')}
+          </button>
         </section>
       ) : null}
 
@@ -254,12 +223,12 @@ export default function PricingProfilesPage() {
                 onChange={(e) => setAssignProfileId(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
-                <option value="">{t('pricing.defaultFranchiseMarkup')}</option>
+                <option value="">{t('pricing.standardFranchiseProfile')}</option>
                 {profiles
                   .filter((profile) => profile.status === 'ACTIVE')
                   .map((profile) => (
                     <option key={profile.id} value={profile.id}>
-                      {profile.name} ({profile.defaultHqMarkupPercent}%)
+                      {profile.name}
                     </option>
                   ))}
               </select>
@@ -275,64 +244,6 @@ export default function PricingProfilesPage() {
           </button>
         </section>
       ) : null}
-
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[760px] divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-3 py-2">{t('pricing.profileName')}</th>
-              <th className="px-3 py-2">{t('pricing.colHqMarkup')}</th>
-              <th className="px-3 py-2">{t('common.status')}</th>
-              <th className="px-3 py-2">{t('pricing.colBranch')}</th>
-              <th className="px-3 py-2">{t('pricing.colActions')}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {profiles.map((profile) => (
-              <tr key={profile.id}>
-                <td className="px-3 py-2">
-                  <p className="font-semibold text-slate-900">{profile.name}</p>
-                  {profile.description ? <p className="text-xs text-slate-500">{profile.description}</p> : null}
-                </td>
-                <td className="px-3 py-2">{profile.defaultHqMarkupPercent}%</td>
-                <td className="px-3 py-2">{profile.status === 'ACTIVE' ? t('pricing.profileStatusActive') : t('pricing.profileStatusInactive')}</td>
-                <td className="px-3 py-2">
-                  {profile.branches.length ? (
-                    <ul className="space-y-1 text-xs text-slate-600">
-                      {profile.branches.map((branch) => (
-                        <li key={branch.id}>{branch.name}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <span className="text-slate-400">—</span>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  {canManage ? (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => startEdit(profile)}
-                        className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold"
-                      >
-                        {t('common.edit')}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={saving || profile.branchCount > 0}
-                        onClick={() => void deleteProfile(profile.id)}
-                        className="rounded border border-red-300 px-2 py-1 text-xs font-semibold text-red-700 disabled:opacity-50"
-                      >
-                        {t('common.delete')}
-                      </button>
-                    </div>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </>
   );
 }

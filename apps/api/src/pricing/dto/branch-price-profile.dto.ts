@@ -1,18 +1,22 @@
+import { BranchPriceProfileStatus, BranchPriceProfileType, BranchType } from '@prisma/client';
 import { IsEnum, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
-import { BranchPriceProfileStatus, BranchType } from '@prisma/client';
 
 export class UpsertBranchPriceProfileDto {
   @IsString()
   @MinLength(1)
   name!: string;
 
+  @IsEnum(BranchPriceProfileType)
+  profileType!: BranchPriceProfileType;
+
   @IsOptional()
   @IsEnum(BranchType)
   branchType?: BranchType;
 
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  defaultHqMarkupPercent!: number;
+  defaultHqMarkupPercent?: number;
 
   @IsOptional()
   @IsEnum(BranchPriceProfileStatus)

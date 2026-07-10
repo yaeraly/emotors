@@ -39,7 +39,7 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
-import { PricingOverrideService } from '../pricing/pricing-override.service';
+import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
@@ -66,7 +66,7 @@ export class DistributionService {
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
     private readonly pricingFifoService: PricingFifoService,
-    private readonly pricingOverrideService: PricingOverrideService,
+    private readonly pricingResolutionService: PricingResolutionService,
   ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
@@ -575,7 +575,7 @@ export class DistributionService {
         const isHqOwnedBranch = branch
           ? this.pricingFifoService.isHqBranchType(branch.branchType)
           : false;
-        const overrideUnitPriceKgs = await this.pricingOverrideService.getActiveOverridePrice(
+        const overrideUnitPriceKgs = await this.pricingResolutionService.resolveBranchProductUnitPrice(
           order.branchId,
           inventoryProduct.productId,
           tx,
@@ -1382,7 +1382,7 @@ export class DistributionService {
           ? Number(product.hqBranchWholesalePriceKgs)
           : Number(product.sellingPriceKgs);
 
-      const overrideUnitPriceKgs = await this.pricingOverrideService.getActiveOverridePrice(
+      const overrideUnitPriceKgs = await this.pricingResolutionService.resolveBranchProductUnitPrice(
         dto.branchId,
         item.productId,
         tx,

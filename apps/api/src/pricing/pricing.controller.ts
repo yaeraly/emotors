@@ -21,9 +21,17 @@ import {
   UpsertProductPriceOverrideDto,
 } from './dto/product-price-override.dto';
 import { PricingCatalogService } from './pricing-catalog.service';
+import { PricingCategoryDiscountService } from './pricing-category-discount.service';
 import { PricingOverrideService } from './pricing-override.service';
 import { PricingProfileService } from './pricing-profile.service';
 import { PricingService } from './pricing.service';
+import { PricingVersionService } from './pricing-version.service';
+import { UpsertProfileCategoryDiscountsDto } from './dto/pricing-category-discount.dto';
+import {
+  CreatePricingPolicyVersionDto,
+  PublishPricingPolicyVersionDto,
+  RollbackPricingPolicyVersionDto,
+} from './dto/pricing-policy-version.dto';
 
 const PRICING_VIEW_ROLES = [
   Role.OWNER,
@@ -51,6 +59,8 @@ export class PricingController {
     private readonly pricingCatalogService: PricingCatalogService,
     private readonly pricingProfileService: PricingProfileService,
     private readonly pricingOverrideService: PricingOverrideService,
+    private readonly pricingCategoryDiscountService: PricingCategoryDiscountService,
+    private readonly pricingVersionService: PricingVersionService,
   ) {}
 
   @Get('categories')
@@ -163,6 +173,60 @@ export class PricingController {
     @Body() dto: AssignBranchPriceProfileDto,
   ) {
     return this.pricingProfileService.assignBranch(user, branchId, dto);
+  }
+
+  @Get('profiles/:id/category-discounts')
+  @Roles(...PRICING_VIEW_ROLES)
+  listProfileCategoryDiscounts(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingCategoryDiscountService.listForProfile(user, id);
+  }
+
+  @Put('profiles/:id/category-discounts')
+  @Roles(Role.CEO)
+  upsertProfileCategoryDiscounts(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpsertProfileCategoryDiscountsDto,
+  ) {
+    return this.pricingCategoryDiscountService.upsertForProfile(user, id, dto);
+  }
+
+  @Get('versions')
+  @Roles(...PRICING_VIEW_ROLES)
+  listVersions(@CurrentUser() user: AuthUser) {
+    return this.pricingVersionService.list(user);
+  }
+
+  @Get('versions/active')
+  @Roles(...PRICING_VIEW_ROLES)
+  getActiveVersion(@CurrentUser() user: AuthUser) {
+    return this.pricingVersionService.getActive(user);
+  }
+
+  @Post('versions')
+  @Roles(Role.CEO)
+  createVersion(@CurrentUser() user: AuthUser, @Body() dto: CreatePricingPolicyVersionDto) {
+    return this.pricingVersionService.create(user, dto);
+  }
+
+  @Post('versions/:id/publish')
+  @Roles(Role.CEO)
+  publishVersion(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: PublishPricingPolicyVersionDto,
+  ) {
+    return this.pricingVersionService.publish(user, id, dto);
+  }
+
+  @Post('versions/:id/rollback')
+  @Roles(Role.CEO)
+  rollbackVersion(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: RollbackPricingPolicyVersionDto,
+  ) {
+    return this.pricingVersionService.rollback(user, id, dto);
   }
 
   @Get('overrides')

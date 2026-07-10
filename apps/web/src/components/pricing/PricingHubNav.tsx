@@ -8,7 +8,7 @@ import { canViewPricing } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
-export type PricingHubTab = 'branches' | 'retail' | 'wholesale' | 'profiles' | 'overrides';
+export type PricingHubTab = 'branches' | 'retail' | 'wholesale' | 'profiles' | 'overrides' | 'versions';
 
 type Props = {
   activeTab: PricingHubTab;
@@ -29,6 +29,7 @@ export function PricingHubNav({ activeTab }: Props) {
     { id: 'wholesale', label: t('pricing.tabWholesale') },
     { id: 'profiles', label: t('pricing.tabProfiles') },
     { id: 'overrides', label: t('pricing.tabOverrides') },
+    { id: 'versions', label: t('pricing.tabVersions') },
   ];
 
   function setTab(tabId: string) {
