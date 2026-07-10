@@ -1,34 +1,45 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { FormEvent, useEffect, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
+import { EntityCombobox } from '@/components/EntityCombobox';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import { canEditProductCatalog, canEditPurchasePriceYuan } from '@/lib/rbac';
-import type { Product, ProductCategory, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
+import { collectInventoryUnits } from '@/lib/product-code-utils';
+import {
+  canEditProductCatalog,
+  canEditProductUnit,
+  canEditPurchasePriceYuan,
+  shouldHideProductPricingFromProfile,
+} from '@/lib/rbac';
+import type { Product, ProductCategory, ProductListResponse, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductDetailPage() {
   const { t, language } = useTranslation();
+  const router = useRouter();
   const params = useParams<{ id: string }>();
   const [product, setProduct] = useState<Product | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [units, setUnits] = useState<string[]>(['pcs']);
   const [editForm, setEditForm] = useState({
     name: '',
     sku: '',
     categoryId: '',
     photoUrl: '',
     warehouseId: '',
+    unit: 'pcs',
     weightKg: '0',
     minStockLevel: '0',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [unitError, setUnitError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [previewOpen, setPreviewOpen] = useState(false);
   const [showPurchasePriceHistory, setShowPurchasePriceHistory] = useState(false);
@@ -40,16 +51,29 @@ export default function ProductDetailPage() {
   const [priceSaving, setPriceSaving] = useState(false);
 
   useEffect(() => {
+    const success = window.localStorage.getItem('emotors_product_success');
+    if (success) {
+      setSuccessMessage(success);
+      window.localStorage.removeItem('emotors_product_success');
+    }
+  }, []);
+
+  useEffect(() => {
     Promise.all([
       apiFetch<Product>(`/inventory/products/${params.id}`),
       apiFetch<ProductCategory[]>('/inventory/categories'),
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
+      apiFetch<ProductListResponse>('/inventory/products?pageSize=500'),
       apiFetch<User>('/auth/me'),
     ])
-      .then(([productResult, categoryResult, warehouseResult, currentUserResult]) => {
+      .then(([productResult, categoryResult, warehouseResult, productsResult, currentUserResult]) => {
         setProduct(productResult);
         setCategories(categoryResult);
         setWarehouses(warehouseResult);
+        setUnits(collectInventoryUnits([
+          ...productsResult.items.map((item) => item.unit),
+          productResult.unit,
+        ]));
         setCurrentUser(currentUserResult);
         const currentWarehouseActive = productResult.warehouse?.isActive !== false;
         setEditForm({
@@ -58,6 +82,7 @@ export default function ProductDetailPage() {
           categoryId: productResult.categoryId,
           photoUrl: productResult.photoUrl ?? '',
           warehouseId: currentWarehouseActive ? productResult.warehouseId : '',
+          unit: productResult.unit || 'pcs',
           weightKg: String(productResult.weightKg),
           minStockLevel: String(productResult.minStockLevel),
         });
@@ -74,16 +99,34 @@ export default function ProductDetailPage() {
 
   const currentWarehouseInactive = Boolean(product?.warehouse && product.warehouse.isActive === false);
   const canSaveWarehouse = !currentWarehouseInactive || Boolean(editForm.warehouseId);
+  const canEditUnit = canEditProductUnit(currentUser);
+  const hidePricingProfile = shouldHideProductPricingFromProfile(currentUser);
+
+  const unitOptions = useMemo(
+    () => units.map((unit) => ({ value: unit, label: unit })),
+    [units],
+  );
 
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError('');
+    setUnitError('');
     setSuccessMessage('');
 
     try {
       if (!editForm.categoryId) {
         setError(t('inventory.categoryRequired'));
+        return;
+      }
+
+      if (canEditUnit && !editForm.unit.trim()) {
+        setUnitError(t('inventory.unitRequired'));
+        return;
+      }
+
+      if (canEditUnit && !unitOptions.some((option) => option.value === editForm.unit.trim())) {
+        setUnitError(t('inventory.unitRequired'));
         return;
       }
 
@@ -94,6 +137,7 @@ export default function ProductDetailPage() {
 
       const nextWeight = Number(editForm.weightKg);
       const weightChanged = product ? nextWeight !== Number(product.weightKg) : false;
+      const unitChanged = product ? editForm.unit.trim() !== (product.unit || '') : false;
       if (canEditProductCatalog(currentUser) && (!Number.isFinite(nextWeight) || nextWeight <= 0)) {
         setError(t('inventory.weightMustBePositive'));
         return;
@@ -106,6 +150,7 @@ export default function ProductDetailPage() {
           sku: editForm.sku,
           categoryId: editForm.categoryId,
           photoUrl: editForm.photoUrl || null,
+          ...(canEditUnit ? { unit: editForm.unit.trim() } : {}),
           ...(canEditProductCatalog(currentUser)
             ? { weightKg: nextWeight, warehouseId: editForm.warehouseId }
             : {}),
@@ -113,10 +158,18 @@ export default function ProductDetailPage() {
         }),
       });
       setProduct(updated);
+      if (unitChanged && !weightChanged) {
+        window.localStorage.setItem('emotors_product_success', t('inventory.unitUpdatedSuccess'));
+        router.push(`/products/${params.id}`);
+        router.refresh();
+        return;
+      }
       setSuccessMessage(
         weightChanged && canEditProductCatalog(currentUser)
           ? t('inventory.productWeightUpdatedSuccess')
-          : t('common.success'),
+          : unitChanged
+            ? t('inventory.unitUpdatedSuccess')
+            : t('common.success'),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
@@ -179,6 +232,7 @@ export default function ProductDetailPage() {
                   <p className="mt-2 text-slate-500">{product.description}</p>
                   <div className="mt-6 grid gap-4 md:grid-cols-4">
                     <Info label={t('inventory.category')} value={product.productCategory ? categoryName(product.productCategory, language) : product.category} />
+                    <Info label={t('inventory.unit')} value={product.unit || 'pcs'} />
                     <Info label={t('inventory.warehouse')} value={product.warehouse?.name ?? ''} />
                     <Info label={t('inventory.weightPerUnitKg')} value={`${Number(product.weightKg).toFixed(3)} kg`} />
                     <Info label={t('inventory.quantity')} value={String(product.quantity)} />
@@ -225,7 +279,25 @@ export default function ProductDetailPage() {
                     ))}
                   </select>
                 </label>
-                <ReadOnlyField label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} hint={t('inventory.sellingPriceFromPolicy')} />
+                {canEditUnit ? (
+                  <div>
+                    <EntityCombobox
+                      label={t('inventory.unit')}
+                      value={editForm.unit}
+                      options={unitOptions}
+                      onChange={(value) => {
+                        setEditForm({ ...editForm, unit: value });
+                        setUnitError('');
+                      }}
+                      allowClear={false}
+                      required
+                    />
+                    {unitError ? <p className="mt-1 text-xs font-semibold text-red-600">{unitError}</p> : null}
+                  </div>
+                ) : null}
+                {!hidePricingProfile ? (
+                  <ReadOnlyField label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} hint={t('inventory.sellingPriceFromPolicy')} />
+                ) : null}
                 <Input label={t('inventory.weightPerUnitKg')} type="number" value={editForm.weightKg} onChange={(value) => setEditForm({ ...editForm, weightKg: value })} min="0.001" step="0.001" />
                 <Input label={t('inventory.minStockLevel')} type="number" value={editForm.minStockLevel} onChange={(value) => setEditForm({ ...editForm, minStockLevel: value })} />
                 <button disabled={saving || !canSaveWarehouse} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-5" type="submit">{saving ? t('common.loading') : t('common.save')}</button>
@@ -240,8 +312,12 @@ export default function ProductDetailPage() {
                 <Info label={t('procurement.orders.factory')} value={product.defaultFactory?.name ?? '-'} />
                 <Info label={t('inventory.latestYuanRate')} value={String(product.latestYuanRate)} />
                 <Info label={t('inventory.finalCostKgs')} value={formatKgs(product.finalCostKgs)} />
-                <Info label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} />
-                <Info label={t('inventory.marginAmount')} value={`${formatKgs(product.marginAmount)} (${Number(product.marginPercent).toFixed(2)}%)`} />
+                {!hidePricingProfile ? (
+                  <>
+                    <Info label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} />
+                    <Info label={t('inventory.marginAmount')} value={`${formatKgs(product.marginAmount)} (${Number(product.marginPercent).toFixed(2)}%)`} />
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => setShowPurchasePriceHistory((current) => !current)}
@@ -283,6 +359,7 @@ export default function ProductDetailPage() {
                   </form>
                 </Panel>
               ) : null}
+              {!hidePricingProfile ? (
               <Panel title={t('inventory.priceHistory')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">
                   {product.priceHistory?.length ? product.priceHistory.map((item) => (
@@ -294,6 +371,7 @@ export default function ProductDetailPage() {
                   )) : <p className="text-sm text-slate-500">{t('inventory.noPriceHistory')}</p>}
                 </div>
               </Panel>
+              ) : null}
               <Panel title={t('inventory.stockMovements')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">
                   {product.stockMovements?.length ? product.stockMovements.map((movement) => (

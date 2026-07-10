@@ -43,6 +43,7 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(1)
   unit?: string;
 
   @IsOptional()

@@ -738,6 +738,16 @@ export function canEditProductCatalog(user: Pick<User, 'role' | 'roles' | 'permi
   return canManageProductCatalog(user);
 }
 
+export function canEditProductUnit(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER');
+}
+
+export function shouldHideProductPricingFromProfile(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user) return false;
+  return isSupplyChainManagerUser(user) && !hasFullAccess(user);
+}
+
 export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return hasFullAccess(user);

@@ -28,7 +28,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { ensureHqCatalogBranch } from '../product-catalog/hq-product-catalog.util';
 import { HQ_WAREHOUSE_ACCESS_DENIED, HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES } from '../hq-warehouse/hq-warehouse-assignment.constants';
-import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
+import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditProductUnit, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -426,7 +426,7 @@ export class InventoryService {
     ]);
 
     return {
-      items: items.map((product) => this.toProductResponse(product)),
+      items: items.map((product) => this.toProductResponse(product, user)),
       total,
       page,
       pageSize,
@@ -474,11 +474,19 @@ export class InventoryService {
       throw new NotFoundException('Product not found');
     }
 
-    return this.toProductResponse(product);
+    return this.toProductResponse(product, user);
   }
 
   async updateProduct(user: AuthUser, id: string, dto: UpdateProductDto) {
     this.assertCanManageProductCatalog(user);
+    if (dto.unit !== undefined) {
+      if (!canEditProductUnit(user)) {
+        throw new ForbiddenException('You do not have permission to edit product unit of measure');
+      }
+      if (!dto.unit.trim()) {
+        throw new BadRequestException('Unit of measure is required');
+      }
+    }
     if (dto.sellingPriceKgs !== undefined && !canEditSellingPrice(user)) {
       const product = await this.prisma.product.findFirst({ where: { id, deletedAt: null } });
       await this.auditProductAccessDenied(user, id, product?.branchId ?? null, 'PRODUCT_PRICE_EDIT_DENIED', {
@@ -513,6 +521,9 @@ export class InventoryService {
       }
       const weightChanged =
         dto.weightKg !== undefined && Number(dto.weightKg) !== oldWeightKg;
+      const oldUnit = current.unit;
+      const nextUnit = dto.unit !== undefined ? dto.unit.trim() : oldUnit;
+      const unitChanged = dto.unit !== undefined && nextUnit !== oldUnit;
 
       let purchasePriceYuan = Number(current.purchasePriceYuan);
       if (dto.purchasePriceYuan !== undefined) {
@@ -574,7 +585,7 @@ export class InventoryService {
           photoUrl: dto.photoUrl,
           description: dto.description,
           characteristics: dto.characteristics as Prisma.InputJsonValue,
-          unit: dto.unit,
+          unit: dto.unit !== undefined ? nextUnit : undefined,
           defaultSupplierId: dto.defaultSupplierId,
           defaultFactoryId: dto.defaultFactoryId,
           weightKg: next.weightKg,
@@ -647,6 +658,17 @@ export class InventoryService {
           newWarehouseId: dto.warehouseId,
           oldValue: { warehouseId: oldWarehouseId },
           newValue: { warehouseId: dto.warehouseId },
+        });
+      }
+
+      if (unitChanged) {
+        await this.auditInTx(tx, user, current.branchId, 'PRODUCT_UNIT_UPDATED', 'Product', id, {
+          userId: user.id,
+          role: user.role,
+          productId: id,
+          oldUnit,
+          newUnit: nextUnit,
+          timestamp: new Date().toISOString(),
         });
       }
 
@@ -1697,7 +1719,7 @@ export class InventoryService {
       throw new NotFoundException('Product not found');
     }
 
-    return this.toProductResponse(product);
+    return this.toProductResponse(product, user);
   }
 
   private async getProductForWrite(tx: PrismaTx | PrismaService, user: AuthUser, id: string) {
@@ -2006,14 +2028,14 @@ export class InventoryService {
     });
   }
 
-  private toProductResponse(product: any) {
+  private toProductResponse(product: any, user?: AuthUser) {
     const totalQuantity =
       product.inventoryBalances?.reduce(
         (sum: number, balance: any) => sum + balance.quantity,
         0,
       ) ?? 0;
 
-    return {
+    const response = {
       ...product,
       weightKg: Number(product.weightKg),
       purchasePriceYuan: Number(product.purchasePriceYuan),
@@ -2034,6 +2056,63 @@ export class InventoryService {
         differenceYuan: Number(row.differenceYuan),
       })),
     };
+
+    return user ? this.applyProductProfileVisibility(user, response) : response;
+  }
+
+  private shouldHideProductPricingFields(user: AuthUser) {
+    const roles = resolveUserRoles(user);
+    return roles.includes(Role.SUPPLY_CHAIN_MANAGER) && !hasAnyFullAccessRole(roles);
+  }
+
+  private applyProductProfileVisibility(user: AuthUser, payload: Record<string, unknown>) {
+    if (!this.shouldHideProductPricingFields(user)) {
+      return payload;
+    }
+
+    void this.prisma.auditLog
+      .create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'PRODUCT_PROFILE_SENSITIVE_FIELDS_HIDDEN',
+          entity: 'Product',
+          entityId: String(payload.id ?? ''),
+          metadata: {
+            userId: user.id,
+            role: user.role,
+            productId: payload.id,
+            timestamp: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      })
+      .catch(() => undefined);
+
+    const next: Record<string, unknown> = { ...payload };
+    for (const key of [
+      'sellingPriceKgs',
+      'marginAmount',
+      'marginPercent',
+      'wholesalePriceKgs',
+      'recommendedRetailPriceKgs',
+      'minimumSellingPriceKgs',
+      'hqBranchWholesalePriceKgs',
+    ]) {
+      delete next[key];
+    }
+
+    if (Array.isArray(next.priceHistory)) {
+      next.priceHistory = next.priceHistory.map((row) => {
+        if (!row || typeof row !== 'object') return row;
+        const historyRow = { ...(row as Record<string, unknown>) };
+        delete historyRow.sellingPriceKgs;
+        delete historyRow.marginAmount;
+        delete historyRow.marginPercent;
+        return historyRow;
+      });
+    }
+
+    return next;
   }
 
   private toBalanceResponse(balance: any, user?: AuthUser) {

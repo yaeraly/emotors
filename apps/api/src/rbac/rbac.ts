@@ -228,6 +228,11 @@ export function canCreateProduct(user: Pick<AuthUser, 'role' | 'roles' | 'permis
   return canManageProductCatalog(user);
 }
 
+export function canEditProductUnit(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER);
+}
+
 export function canArchiveProduct(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return hasAnyFullAccessRole(resolveUserRoles(user));
 }
