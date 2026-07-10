@@ -13,6 +13,7 @@ export type LocalRowState = {
   note: string;
   saveState: RowSaveState;
   lastSavedAt: string | null;
+  updatedAt: string | null;
   isDirty: boolean;
   serverIsSaved: boolean;
   rowStatus: ChinaReceivingRowStatus;
@@ -42,10 +43,21 @@ export type ChinaReceivingLineItem = {
   damagedQuantity?: number;
   note?: string | null;
   isSaved?: boolean;
+  isChecked?: boolean;
   lastSavedAt?: string | null;
+  updatedAt?: string | null;
   rowStatus?: ChinaReceivingRowStatus;
   difference?: number;
 };
+
+export function buildServerDraftFingerprint(lineItems: ChinaReceivingLineItem[]) {
+  return lineItems
+    .map(
+      (item) =>
+        `${item.id}:${item.isSaved ? 1 : 0}:${item.actualReceivedQuantity ?? ''}:${item.damagedQuantity ?? ''}:${item.note ?? ''}:${item.updatedAt ?? ''}`,
+    )
+    .join('|');
+}
 
 export function computeDifference(actual: number, expected: number) {
   return actual - expected;

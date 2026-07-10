@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import {
   buildProgressFromRows,
+  buildServerDraftFingerprint,
   clearLocalDraft,
-  loadLocalDraft,
   LocalRowState,
   persistLocalDraft,
   resolveRowStatus,
@@ -19,6 +19,7 @@ type SaveRowPayload = {
   note?: string;
   autoSave?: boolean;
   networkRecovery?: boolean;
+  expectedUpdatedAt?: string;
 };
 
 type PendingSave = {
@@ -34,21 +35,25 @@ type UseChinaReceivingDraftOptions = {
   enabled: boolean;
   onSessionExpired?: () => void;
   onNetworkRecovery?: () => void;
+  onDraftConflict?: () => void;
 };
 
 const AUTO_SAVE_MS = 1000;
 const HEARTBEAT_MS = 30_000;
 const MAX_RETRIES = 5;
 
+type SavedDraftResponse = {
+  actualQuantity: number;
+  damagedQuantity: number;
+  note: string | null;
+  isSaved: boolean;
+  lastSavedAt: string | null;
+  updatedAt: string;
+  rowStatus: string;
+};
+
 async function saveDraftRow(orderId: string, itemId: string, payload: SaveRowPayload) {
-  return apiFetch<{
-    actualQuantity: number;
-    damagedQuantity: number;
-    note: string | null;
-    isSaved: boolean;
-    lastSavedAt: string;
-    rowStatus: string;
-  }>(`/procurement/china-receiving/${orderId}/draft-rows/${itemId}`, {
+  return apiFetch<SavedDraftResponse>(`/procurement/china-receiving/${orderId}/draft-rows/${itemId}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   });
@@ -57,15 +62,18 @@ async function saveDraftRow(orderId: string, itemId: string, payload: SaveRowPay
 function initRowsFromItems(lineItems: ChinaReceivingLineItem[]): Record<string, LocalRowState> {
   const rows: Record<string, LocalRowState> = {};
   for (const item of lineItems) {
-    const actual = item.actualReceivedQuantity ?? item.expectedQuantity;
-    const damaged = item.damagedQuantity ?? 0;
-    const isSaved = item.isSaved ?? false;
+    const isSaved = Boolean(item.isSaved);
+    const actual = isSaved
+      ? Number(item.actualReceivedQuantity ?? 0)
+      : Number(item.actualReceivedQuantity ?? item.expectedQuantity);
+    const damaged = Number(item.damagedQuantity ?? 0);
     rows[item.id] = {
       actualQuantity: String(actual),
       damagedQuantity: String(damaged),
       note: item.note ?? '',
       saveState: isSaved ? 'saved' : 'unsaved',
       lastSavedAt: item.lastSavedAt ?? null,
+      updatedAt: item.updatedAt ?? null,
       isDirty: false,
       serverIsSaved: isSaved,
       rowStatus: item.rowStatus ?? resolveRowStatus(actual, item.expectedQuantity, damaged, isSaved),
@@ -81,6 +89,7 @@ export function useChinaReceivingDraft({
   enabled,
   onSessionExpired,
   onNetworkRecovery,
+  onDraftConflict,
 }: UseChinaReceivingDraftOptions) {
   const [rows, setRows] = useState<Record<string, LocalRowState>>({});
   const [savingAll, setSavingAll] = useState(false);
@@ -90,30 +99,20 @@ export function useChinaReceivingDraft({
   const processingQueue = useRef(false);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
+  const serverDraftFingerprint = useMemo(() => buildServerDraftFingerprint(lineItems), [lineItems]);
+  const initializedFingerprint = useRef<string | null>(null);
 
   useEffect(() => {
     if (!lineItems.length) return;
-    const initial = initRowsFromItems(lineItems);
-    const localBackup = loadLocalDraft(orderId);
-    if (localBackup) {
-      for (const [itemId, backup] of Object.entries(localBackup)) {
-        if (!initial[itemId]) continue;
-        initial[itemId] = {
-          ...initial[itemId],
-          actualQuantity: backup.actualQuantity,
-          damagedQuantity: backup.damagedQuantity,
-          note: backup.note,
-          isDirty: true,
-          saveState: 'unsaved',
-          serverIsSaved: false,
-        };
-      }
-    }
-    setRows(initial);
-  }, [orderId, lineItems]);
+    if (initializedFingerprint.current === serverDraftFingerprint) return;
+    initializedFingerprint.current = serverDraftFingerprint;
+    setRows(initRowsFromItems(lineItems));
+  }, [orderId, lineItems, serverDraftFingerprint]);
 
   useEffect(() => {
     if (!enabled || readOnly) return;
+    const hasUnsaved = Object.values(rows).some((row) => row.isDirty || !row.serverIsSaved);
+    if (!hasUnsaved) return;
     persistLocalDraft(orderId, rows);
   }, [orderId, rows, enabled, readOnly]);
 
@@ -137,6 +136,33 @@ export function useChinaReceivingDraft({
     [lineItems, rows],
   );
 
+  const applySavedRow = useCallback(
+    (itemId: string, saved: SavedDraftResponse) => {
+      const item = lineItems.find((line) => line.id === itemId);
+      if (!item) return;
+      setRows((current) => ({
+        ...current,
+        [itemId]: {
+          actualQuantity: String(saved.actualQuantity),
+          damagedQuantity: String(saved.damagedQuantity),
+          note: saved.note ?? '',
+          saveState: 'saved',
+          isDirty: false,
+          serverIsSaved: true,
+          lastSavedAt: saved.lastSavedAt,
+          updatedAt: saved.updatedAt,
+          rowStatus: resolveRowStatus(
+            saved.actualQuantity,
+            item.expectedQuantity,
+            saved.damagedQuantity,
+            true,
+          ),
+        },
+      }));
+    },
+    [lineItems],
+  );
+
   const processQueue = useCallback(async () => {
     if (processingQueue.current || readOnly) return;
     processingQueue.current = true;
@@ -148,26 +174,7 @@ export function useChinaReceivingDraft({
           networkRecovery: true,
         });
         pendingQueue.current.shift();
-        setRows((current) => {
-          const item = lineItems.find((row) => row.id === next.itemId);
-          if (!item || !current[next.itemId]) return current;
-          return {
-            ...current,
-            [next.itemId]: {
-              ...current[next.itemId],
-              saveState: 'saved',
-              isDirty: false,
-              serverIsSaved: true,
-              lastSavedAt: saved.lastSavedAt,
-              rowStatus: resolveRowStatus(
-                saved.actualQuantity,
-                item.expectedQuantity,
-                saved.damagedQuantity,
-                true,
-              ),
-            },
-          };
-        });
+        applySavedRow(next.itemId, saved);
         if (networkOffline) {
           setNetworkOffline(false);
           onNetworkRecovery?.();
@@ -176,6 +183,11 @@ export function useChinaReceivingDraft({
         const message = err instanceof Error ? err.message : 'Save failed';
         if (message === 'Unauthorized') {
           onSessionExpired?.();
+          break;
+        }
+        if (message === 'CHINA_RECEIVING_DRAFT_CONFLICT') {
+          onDraftConflict?.();
+          pendingQueue.current.shift();
           break;
         }
         next.retries += 1;
@@ -193,7 +205,7 @@ export function useChinaReceivingDraft({
       }
     }
     processingQueue.current = false;
-  }, [lineItems, networkOffline, onNetworkRecovery, onSessionExpired, orderId, readOnly]);
+  }, [applySavedRow, networkOffline, onDraftConflict, onNetworkRecovery, onSessionExpired, orderId, readOnly]);
 
   const enqueueSave = useCallback(
     (itemId: string, payload: SaveRowPayload) => {
@@ -206,17 +218,18 @@ export function useChinaReceivingDraft({
   );
 
   const saveRow = useCallback(
-    async (itemId: string, autoSave = false) => {
-      if (readOnly) return;
+    async (itemId: string, autoSave = false): Promise<boolean> => {
+      if (readOnly) return false;
       const row = rowsRef.current[itemId];
       const item = lineItems.find((line) => line.id === itemId);
-      if (!row || !item) return;
+      if (!row || !item) return false;
 
       const payload: SaveRowPayload = {
         actualQuantity: Number(row.actualQuantity) || 0,
         damagedQuantity: Number(row.damagedQuantity) || 0,
         note: row.note || undefined,
         autoSave,
+        expectedUpdatedAt: row.updatedAt ?? undefined,
       };
 
       setRows((current) => ({
@@ -231,46 +244,31 @@ export function useChinaReceivingDraft({
           ...current,
           [itemId]: { ...current[itemId], saveState: 'unsaved', isDirty: true },
         }));
-        return;
+        return false;
       }
 
       try {
         const saved = await saveDraftRow(orderId, itemId, payload);
-        setRows((current) => ({
-          ...current,
-          [itemId]: {
-            ...current[itemId],
-            saveState: 'saved',
-            isDirty: false,
-            serverIsSaved: true,
-            lastSavedAt: saved.lastSavedAt,
-            rowStatus: resolveRowStatus(
-              saved.actualQuantity,
-              item.expectedQuantity,
-              saved.damagedQuantity,
-              true,
-            ),
-          },
-        }));
+        applySavedRow(itemId, saved);
+        return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Save failed';
         if (message === 'Unauthorized') {
           onSessionExpired?.();
-          setRows((current) => ({
-            ...current,
-            [itemId]: { ...current[itemId], saveState: 'unsaved', isDirty: true },
-          }));
-          return;
+        } else if (message === 'CHINA_RECEIVING_DRAFT_CONFLICT') {
+          onDraftConflict?.();
+        } else {
+          setNetworkOffline(true);
+          enqueueSave(itemId, payload);
         }
-        setNetworkOffline(true);
-        enqueueSave(itemId, payload);
         setRows((current) => ({
           ...current,
           [itemId]: { ...current[itemId], saveState: 'unsaved', isDirty: true },
         }));
+        return false;
       }
     },
-    [enqueueSave, lineItems, onSessionExpired, orderId, readOnly],
+    [applySavedRow, enqueueSave, lineItems, onDraftConflict, onSessionExpired, orderId, readOnly],
   );
 
   const scheduleAutoSave = useCallback(
@@ -316,6 +314,7 @@ export function useChinaReceivingDraft({
             actualQuantity: Number(row.actualQuantity) || 0,
             damagedQuantity: Number(row.damagedQuantity) || 0,
             note: row.note || undefined,
+            expectedUpdatedAt: row.updatedAt ?? undefined,
           });
         }
         setNetworkOffline(true);
@@ -334,6 +333,7 @@ export function useChinaReceivingDraft({
       });
       setRows((current) => {
         const next = { ...current };
+        const now = new Date().toISOString();
         for (const [itemId] of dirtyRows) {
           const item = lineItems.find((line) => line.id === itemId);
           if (!item || !next[itemId]) continue;
@@ -344,7 +344,8 @@ export function useChinaReceivingDraft({
             saveState: 'saved',
             isDirty: false,
             serverIsSaved: true,
-            lastSavedAt: new Date().toISOString(),
+            lastSavedAt: now,
+            updatedAt: now,
             rowStatus: resolveRowStatus(actual, item.expectedQuantity, damaged, true),
           };
         }
@@ -360,6 +361,7 @@ export function useChinaReceivingDraft({
             actualQuantity: Number(row.actualQuantity) || 0,
             damagedQuantity: Number(row.damagedQuantity) || 0,
             note: row.note || undefined,
+            expectedUpdatedAt: row.updatedAt ?? undefined,
           });
         }
         setNetworkOffline(true);
@@ -403,7 +405,13 @@ export function useChinaReceivingDraft({
 
   const clearDraftAfterComplete = useCallback(() => {
     clearLocalDraft(orderId);
+    initializedFingerprint.current = null;
   }, [orderId]);
+
+  const reloadFromServer = useCallback((items: ChinaReceivingLineItem[]) => {
+    initializedFingerprint.current = buildServerDraftFingerprint(items);
+    setRows(initRowsFromItems(items));
+  }, []);
 
   return {
     rows,
@@ -416,5 +424,6 @@ export function useChinaReceivingDraft({
     saveRow,
     saveAll,
     clearDraftAfterComplete,
+    reloadFromServer,
   };
 }

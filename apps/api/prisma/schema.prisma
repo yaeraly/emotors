@@ -3293,10 +3293,14 @@ model ChinaReceivingDraftRow {
   procurementOrderId String
   procurementOrder   ProcurementOrder @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
   procurementItemId  String
+  productId          String?
+  hqWarehouseId      String?
   actualQuantity     Int
   damagedQuantity    Int              @default(0)
   note               String?
   isSaved            Boolean          @default(false)
+  isChecked          Boolean          @default(false)
+  isArchived         Boolean          @default(false)
   lastSavedAt        DateTime?
   lastSavedById      String?
   lastSavedBy        User?            @relation("ChinaReceivingDraftRowSaver", fields: [lastSavedById], references: [id])
@@ -3306,7 +3310,10 @@ model ChinaReceivingDraftRow {
   @@unique([procurementOrderId, procurementItemId])
   @@index([procurementOrderId])
   @@index([procurementItemId])
+  @@index([productId])
+  @@index([hqWarehouseId])
   @@index([lastSavedById])
+  @@index([isArchived])
 }
 
 model ChinaReceivingEditSession {

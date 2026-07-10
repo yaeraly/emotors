@@ -71,7 +71,7 @@ export function ChinaReceivingWorkspace({
 }: {
   task: ChinaReceivingDetail;
   user: User;
-  onReload: () => Promise<void>;
+  onReload: () => Promise<ChinaReceivingDetail | null>;
 }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -97,6 +97,7 @@ export function ChinaReceivingWorkspace({
     saveRow,
     saveAll,
     clearDraftAfterComplete,
+    reloadFromServer,
   } = useChinaReceivingDraft({
     orderId: task.id,
     lineItems: task.lineItems,
@@ -107,6 +108,12 @@ export function ChinaReceivingWorkspace({
       setShowLoginPrompt(true);
     },
     onNetworkRecovery: () => setError(''),
+    onDraftConflict: () => {
+      setError(t('chinaReceiving.draftConflict'));
+      void onReload().then((detail) => {
+        if (detail?.lineItems?.length) reloadFromServer(detail.lineItems);
+      });
+    },
   });
 
   const displayProgress = progress.products > 0 ? progress : task.progress ?? progress;
@@ -124,8 +131,8 @@ export function ChinaReceivingWorkspace({
 
   const handleSaveRow = useCallback(
     async (itemId: string) => {
-      await saveRow(itemId);
-      flashSaved(itemId);
+      const saved = await saveRow(itemId);
+      if (saved) flashSaved(itemId);
     },
     [flashSaved, saveRow],
   );
@@ -389,19 +396,25 @@ export function ChinaReceivingWorkspace({
                   </td>
                   {canEdit ? (
                     <td className="px-2 py-2">
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          disabled={row?.saveState === 'saving'}
-                          onClick={() => void handleSaveRow(item.id)}
-                          className="rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
-                          title={t('chinaReceiving.saveRow')}
-                        >
-                          {t('chinaReceiving.saveRow')}
-                        </button>
-                        {savedFlash[item.id] ? (
-                          <span className="text-emerald-600" title={t('chinaReceiving.savedInline')}>✓</span>
-                        ) : null}
+                      <div className="flex flex-col items-start gap-0.5">
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={row?.saveState === 'saving'}
+                            onClick={() => void handleSaveRow(item.id)}
+                            className="rounded bg-blue-600 px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-50"
+                            title={t('chinaReceiving.saveRow')}
+                          >
+                            {t('chinaReceiving.saveRow')}
+                          </button>
+                          {savedFlash[item.id] || (row?.serverIsSaved && !row.isDirty) ? (
+                            <span className="text-[11px] font-semibold text-emerald-600" title={t('chinaReceiving.savedInline')}>
+                              ✓ {t('chinaReceiving.savedInline')}
+                            </span>
+                          ) : row?.saveState === 'unsaved' || row?.isDirty ? (
+                            <span className="text-[11px] font-medium text-amber-700">{t('chinaReceiving.saveState.unsaved')}</span>
+                          ) : null}
+                        </div>
                       </div>
                     </td>
                   ) : null}

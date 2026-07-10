@@ -19,6 +19,10 @@ export class SaveChinaReceivingDraftRowDto {
 
   @IsOptional()
   networkRecovery?: boolean;
+
+  @IsOptional()
+  @IsString()
+  expectedUpdatedAt?: string;
 }
 
 export class SaveAllChinaReceivingDraftRowDto {

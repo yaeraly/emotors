@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   AlertType,
   BranchDistributionOrderStatus,
@@ -996,7 +996,7 @@ export class OperationsService {
       }
 
       const draftRows = await tx.chinaReceivingDraftRow.findMany({
-        where: { procurementOrderId: order.id },
+        where: { procurementOrderId: order.id, isArchived: false },
       });
       const savedDraftIds = new Set(
         draftRows.filter((row) => row.isSaved).map((row) => row.procurementItemId),
@@ -1104,15 +1104,23 @@ export class OperationsService {
         throw new BadRequestException('Receiving requires an active HQ warehouse');
       }
       const receivedMap = new Map<string, any>((dto.items ?? []).map((item: any) => [item.procurementItemId ?? item.productId, item]));
+      const draftMap = new Map(
+        draftRows.filter((row) => row.isSaved).map((row) => [row.procurementItemId, row]),
+      );
       const receivedItems = order.items.map((item) => {
+        const draft = draftMap.get(item.id);
         const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
-        const receivedQuantity = Number(received.receivedQuantity ?? item.quantity);
+        const receivedQuantity = draft
+          ? draft.actualQuantity
+          : Number(received.receivedQuantity ?? item.quantity);
+        const damagedQuantity = draft ? draft.damagedQuantity : Number(received.damagedQuantity ?? 0);
+        const note = draft?.note ?? received.note;
         return {
           ...item,
           receivedQuantity,
-          damagedQuantity: Number(received.damagedQuantity ?? 0),
+          damagedQuantity,
           difference: receivedQuantity - item.quantity,
-          receivedNote: received.note,
+          receivedNote: note,
           shortageReason: received.shortageReason,
         };
       });
@@ -1408,8 +1416,18 @@ export class OperationsService {
         referenceNumber: order.orderNumber,
         message: `Goods received into HQ warehouse for procurement ${order.orderNumber}.`,
       });
-      await tx.chinaReceivingDraftRow.deleteMany({ where: { procurementOrderId: order.id } });
+      await tx.chinaReceivingDraftRow.updateMany({
+        where: { procurementOrderId: order.id },
+        data: { isArchived: true },
+      });
       await tx.chinaReceivingEditSession.deleteMany({ where: { procurementOrderId: order.id } });
+      await this.auditInTx(tx, user, 'HQ', 'CHINA_RECEIVING_FINALIZED_FROM_DRAFT', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        procurementOrderId: order.id,
+        receivingId: receiving.id,
+        draftRowCount: draftRows.length,
+        timestamp: new Date().toISOString(),
+      });
       await this.auditInTx(tx, user, 'HQ', 'RECEIVING_COMPLETED', 'ProcurementOrder', order.id, {
         userId: user.id,
         procurementOrderId: order.id,
@@ -1731,8 +1749,9 @@ export class OperationsService {
 
     const [draftRows, editSession] = await Promise.all([
       this.prisma.chinaReceivingDraftRow.findMany({
-        where: { procurementOrderId: order.id },
+        where: { procurementOrderId: order.id, isArchived: false },
         include: { lastSavedBy: { select: { id: true, fullName: true } } },
+        orderBy: { updatedAt: 'asc' },
       }),
       this.prisma.chinaReceivingEditSession.findFirst({
         where: { procurementOrderId: order.id },
@@ -1745,7 +1764,7 @@ export class OperationsService {
         data: {
           userId: user.id,
           role: user.role,
-          action: 'ROW_RESTORED',
+          action: 'CHINA_RECEIVING_DRAFT_RESTORED',
           entity: 'ProcurementOrder',
           entityId: order.id,
           metadata: {
@@ -1760,9 +1779,12 @@ export class OperationsService {
 
     const lineItems = order.items.map((item) => {
       const draft = draftRows.find((row) => row.procurementItemId === item.id);
-      const actualQuantity = draft?.actualQuantity ?? item.receivedQuantity ?? item.quantity;
-      const damagedQuantity = draft?.damagedQuantity ?? 0;
-      const isSaved = draft?.isSaved ?? false;
+      const hasSavedDraft = Boolean(draft?.isSaved);
+      const actualQuantity = hasSavedDraft
+        ? draft!.actualQuantity
+        : (draft?.actualQuantity ?? item.receivedQuantity ?? item.quantity);
+      const damagedQuantity = hasSavedDraft ? draft!.damagedQuantity : (draft?.damagedQuantity ?? 0);
+      const isSaved = hasSavedDraft;
       return {
         id: item.id,
         productId: item.productId,
@@ -1772,9 +1794,11 @@ export class OperationsService {
         expectedQuantity: item.quantity,
         actualReceivedQuantity: actualQuantity,
         damagedQuantity,
-        note: draft?.note ?? null,
+        note: hasSavedDraft ? (draft!.note ?? '') : (draft?.note ?? null),
         isSaved,
-        lastSavedAt: draft?.lastSavedAt ?? null,
+        isChecked: draft?.isChecked ?? isSaved,
+        lastSavedAt: draft?.lastSavedAt?.toISOString() ?? null,
+        updatedAt: draft?.updatedAt?.toISOString() ?? null,
         lastSavedBy: draft?.lastSavedBy ?? null,
         rowStatus: resolveRowStatus(actualQuantity, item.quantity, damagedQuantity, isSaved),
         difference: actualQuantity - item.quantity,
@@ -1827,6 +1851,21 @@ export class OperationsService {
       hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
       progress,
       editSession: activeSession,
+      draftRows: draftRows.map((row) => ({
+        id: row.id,
+        procurementItemId: row.procurementItemId,
+        productId: row.productId,
+        hqWarehouseId: row.hqWarehouseId,
+        actualQuantity: row.actualQuantity,
+        damagedQuantity: row.damagedQuantity,
+        note: row.note,
+        isSaved: row.isSaved,
+        isChecked: row.isChecked,
+        isArchived: row.isArchived,
+        lastSavedAt: row.lastSavedAt,
+        updatedAt: row.updatedAt,
+        lastSavedBy: row.lastSavedBy,
+      })),
       readOnly:
         Boolean(order.hqStockMovementCreatedAt) ||
         (activeSession !== null && activeSession.lockedByUserId !== user.id && !hasAnyFullAccessRole(roles)),
@@ -1875,6 +1914,17 @@ export class OperationsService {
     }, wmOnlyView);
   }
 
+  async getChinaReceivingDrafts(user: AuthUser, orderId: string) {
+    const order = await this.loadChinaReceivingOrder(orderId);
+    await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
+    const drafts = await this.prisma.chinaReceivingDraftRow.findMany({
+      where: { procurementOrderId: orderId, isArchived: false },
+      include: { lastSavedBy: { select: { id: true, fullName: true } } },
+      orderBy: { updatedAt: 'asc' },
+    });
+    return drafts;
+  }
+
   async saveChinaReceivingDraftRow(
     user: AuthUser,
     orderId: string,
@@ -1894,7 +1944,51 @@ export class OperationsService {
         },
       },
     });
-    const action = dto.autoSave ? 'ROW_AUTOSAVED' : existing ? 'ROW_UPDATED' : 'ROW_SAVED';
+
+    if (existing?.isArchived) {
+      throw new BadRequestException('Receiving draft is archived and cannot be edited');
+    }
+
+    if (dto.expectedUpdatedAt && existing) {
+      const expectedMs = new Date(dto.expectedUpdatedAt).getTime();
+      const currentMs = existing.updatedAt.getTime();
+      if (Number.isFinite(expectedMs) && currentMs > expectedMs) {
+        await this.prisma.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'CHINA_RECEIVING_DRAFT_CONFLICT',
+            entity: 'ChinaReceivingDraftRow',
+            entityId: existing.id,
+            metadata: {
+              userId: user.id,
+              procurementOrderId: orderId,
+              procurementOrderItemId: itemId,
+              productId: orderItem.productId,
+              oldValue: {
+                actualQuantity: existing.actualQuantity,
+                damagedQuantity: existing.damagedQuantity,
+                note: existing.note,
+                updatedAt: existing.updatedAt.toISOString(),
+              },
+              newValue: {
+                actualQuantity: dto.actualQuantity,
+                damagedQuantity: dto.damagedQuantity,
+                note: dto.note ?? null,
+              },
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+        throw new ConflictException('CHINA_RECEIVING_DRAFT_CONFLICT');
+      }
+    }
+
+    const auditAction = existing
+      ? 'CHINA_RECEIVING_DRAFT_UPDATED'
+      : 'CHINA_RECEIVING_DRAFT_CREATED';
+    const legacyAction = dto.autoSave ? 'ROW_AUTOSAVED' : existing ? 'ROW_UPDATED' : 'ROW_SAVED';
+
     const saved = await this.prisma.chinaReceivingDraftRow.upsert({
       where: {
         procurementOrderId_procurementItemId: {
@@ -1905,39 +1999,69 @@ export class OperationsService {
       create: {
         procurementOrderId: orderId,
         procurementItemId: itemId,
+        productId: orderItem.productId,
+        hqWarehouseId: order.hqWarehouseId,
         actualQuantity: dto.actualQuantity,
         damagedQuantity: dto.damagedQuantity,
         note: dto.note ?? null,
         isSaved: true,
+        isChecked: true,
+        isArchived: false,
         lastSavedAt: new Date(),
         lastSavedById: user.id,
       },
       update: {
+        productId: orderItem.productId,
+        hqWarehouseId: order.hqWarehouseId,
         actualQuantity: dto.actualQuantity,
         damagedQuantity: dto.damagedQuantity,
         note: dto.note ?? null,
         isSaved: true,
+        isChecked: true,
         lastSavedAt: new Date(),
         lastSavedById: user.id,
       },
       include: { lastSavedBy: { select: { id: true, fullName: true } } },
     });
 
+    const auditMetadata = {
+      userId: user.id,
+      procurementOrderId: orderId,
+      procurementOrderItemId: itemId,
+      productId: orderItem.productId,
+      oldValue: existing
+        ? {
+            actualQuantity: existing.actualQuantity,
+            damagedQuantity: existing.damagedQuantity,
+            note: existing.note,
+          }
+        : null,
+      newValue: {
+        actualQuantity: dto.actualQuantity,
+        damagedQuantity: dto.damagedQuantity,
+        note: dto.note ?? null,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
     await this.prisma.auditLog.create({
       data: {
         userId: user.id,
         role: user.role,
-        action,
+        action: auditAction,
         entity: 'ChinaReceivingDraftRow',
         entityId: saved.id,
-        metadata: {
-          userId: user.id,
-          procurementOrderId: orderId,
-          procurementItemId: itemId,
-          actualQuantity: dto.actualQuantity,
-          damagedQuantity: dto.damagedQuantity,
-          timestamp: new Date().toISOString(),
-        },
+        metadata: auditMetadata,
+      },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: legacyAction,
+        entity: 'ChinaReceivingDraftRow',
+        entityId: saved.id,
+        metadata: auditMetadata,
       },
     });
     if (dto.networkRecovery) {
@@ -1960,6 +2084,8 @@ export class OperationsService {
 
     return {
       ...saved,
+      updatedAt: saved.updatedAt.toISOString(),
+      lastSavedAt: saved.lastSavedAt?.toISOString() ?? null,
       rowStatus: resolveRowStatus(
         saved.actualQuantity,
         orderItem.quantity,
@@ -1994,18 +2120,25 @@ export class OperationsService {
         create: {
           procurementOrderId: orderId,
           procurementItemId: row.procurementItemId,
+          productId: orderItem.productId,
+          hqWarehouseId: order.hqWarehouseId,
           actualQuantity: row.actualQuantity,
           damagedQuantity: row.damagedQuantity,
           note: row.note ?? null,
           isSaved: true,
+          isChecked: true,
+          isArchived: false,
           lastSavedAt: new Date(),
           lastSavedById: user.id,
         },
         update: {
+          productId: orderItem.productId,
+          hqWarehouseId: order.hqWarehouseId,
           actualQuantity: row.actualQuantity,
           damagedQuantity: row.damagedQuantity,
           note: row.note ?? null,
           isSaved: true,
+          isChecked: true,
           lastSavedAt: new Date(),
           lastSavedById: user.id,
         },

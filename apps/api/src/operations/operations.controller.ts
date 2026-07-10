@@ -188,6 +188,13 @@ export class OperationsController {
     return this.service.getChinaReceivingTask(user, orderId);
   }
 
+  @Get('procurement/china-receiving/:orderId/drafts')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
+  @RequirePermissions('procurement.receive', 'procurement.view')
+  getChinaReceivingDrafts(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
+    return this.service.getChinaReceivingDrafts(user, orderId);
+  }
+
   @Put('procurement/china-receiving/:orderId/draft-rows/:itemId')
   @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_MANAGER)
   @RequirePermissions('procurement.receive')
