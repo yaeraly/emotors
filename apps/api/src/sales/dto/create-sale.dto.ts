@@ -1,4 +1,4 @@
-import { PaymentMethod } from '@prisma/client';
+import { PaymentMethod, PriceAboveRecommendedReasonCode } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -11,6 +11,7 @@ import {
   IsString,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -41,6 +42,18 @@ export class CreateSaleItemDto {
   @IsNumber()
   @Min(0)
   unitCost!: number;
+
+  @IsOptional()
+  @IsEnum(PriceAboveRecommendedReasonCode)
+  priceAboveRecommendedReasonCode?: PriceAboveRecommendedReasonCode;
+
+  @ValidateIf(
+    (item: CreateSaleItemDto) =>
+      item.priceAboveRecommendedReasonCode === PriceAboveRecommendedReasonCode.OTHER,
+  )
+  @IsString()
+  @MinLength(1)
+  priceAboveRecommendedComment?: string;
 }
 
 export class CreateSaleDto {

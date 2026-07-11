@@ -18,16 +18,22 @@ type RetailRow = {
   branchPurchasePriceKgs: number;
   minimumSellingMarkupPercent: number;
   recommendedRetailMarkupPercent: number;
+  enableMaximumRetailPrice: boolean;
+  maximumRetailMarkupPercent: number;
   retailPriceKgs: number;
   minimumRetailPriceKgs: number;
+  maximumRetailPriceKgs: number;
   currentPriceKgs: number;
 };
 
 type EditableRetailRow = RetailRow & {
   draftMinMarkup: number;
   draftRecommendedMarkup: number;
+  draftEnableMaximum: boolean;
+  draftMaxMarkup: number;
   draftRetailPrice: number;
   draftMinPrice: number;
+  draftMaxPrice: number;
 };
 
 function formatPrice(value: number) {
@@ -39,6 +45,9 @@ function withCalculatedPrices(row: EditableRetailRow): EditableRetailRow {
     ...row,
     draftMinPrice: applyMarkupRoundUp(row.branchPurchasePriceKgs, row.draftMinMarkup),
     draftRetailPrice: applyMarkupRoundUp(row.branchPurchasePriceKgs, row.draftRecommendedMarkup),
+    draftMaxPrice: row.draftEnableMaximum
+      ? applyMarkupRoundUp(row.branchPurchasePriceKgs, row.draftMaxMarkup)
+      : 0,
   };
 }
 
@@ -46,10 +55,16 @@ function validateRetailRange(row: EditableRetailRow) {
   if (row.draftMinMarkup > row.draftRecommendedMarkup + 0.01) {
     return 'pricing.validationMinimumRetail';
   }
+  if (row.draftEnableMaximum && row.draftMaxMarkup < row.draftRecommendedMarkup - 0.01) {
+    return 'pricing.validationMaximumRetail';
+  }
   if (row.currentPriceKgs + 0.01 < row.draftMinPrice) {
     return 'pricing.validationCurrentBelowMin';
   }
-  if (row.currentPriceKgs > row.draftRetailPrice + 0.01) {
+  if (row.draftEnableMaximum && row.currentPriceKgs > row.draftMaxPrice + 0.01) {
+    return 'pricing.validationCurrentAboveMaximum';
+  }
+  if (!row.draftEnableMaximum && row.currentPriceKgs > row.draftRetailPrice + 0.01) {
     return 'pricing.validationCurrentAboveRecommended';
   }
   return null;
@@ -78,8 +93,11 @@ export default function PricingRetailPage() {
           ...product,
           draftMinMarkup: product.minimumSellingMarkupPercent,
           draftRecommendedMarkup: product.recommendedRetailMarkupPercent,
+          draftEnableMaximum: product.enableMaximumRetailPrice,
+          draftMaxMarkup: product.maximumRetailMarkupPercent,
           draftRetailPrice: product.retailPriceKgs,
           draftMinPrice: product.minimumRetailPriceKgs,
+          draftMaxPrice: product.maximumRetailPriceKgs,
         }),
       ),
     );
@@ -98,7 +116,9 @@ export default function PricingRetailPage() {
   }, [rows, search]);
 
   function updateRow(productId: string, updater: (row: EditableRetailRow) => EditableRetailRow) {
-    setRows((current) => current.map((row) => (row.id === productId ? updater(row) : row)));
+    setRows((current) =>
+      current.map((row) => (row.id === productId ? withCalculatedPrices(updater(row)) : row)),
+    );
   }
 
   async function save(productId: string) {
@@ -120,6 +140,8 @@ export default function PricingRetailPage() {
         body: JSON.stringify({
           minimumSellingMarkupPercent: row.draftMinMarkup,
           recommendedRetailMarkupPercent: row.draftRecommendedMarkup,
+          enableMaximumRetailPrice: row.draftEnableMaximum,
+          maximumRetailMarkupPercent: row.draftEnableMaximum ? row.draftMaxMarkup : 0,
         }),
       });
       setSuccess(t('pricing.productSaved'));
@@ -148,15 +170,17 @@ export default function PricingRetailPage() {
       />
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[820px] divide-y divide-slate-200 text-sm">
+        <table className="w-full min-w-[980px] divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-3 py-2">{t('pricing.colProduct')}</th>
               <th className="px-3 py-2">{t('pricing.colBranchPurchasePrice')}</th>
               <th className="px-3 py-2">{t('pricing.colMinMarkup')}</th>
               <th className="px-3 py-2">{t('pricing.colRecommendedMarkup')}</th>
+              <th className="px-3 py-2">{t('pricing.colEnableMaximum')}</th>
+              <th className="px-3 py-2">{t('pricing.colMaxMarkup')}</th>
               <th className="px-3 py-2">{t('pricing.colRetailPrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colCurrentPrice')}</th>
+              <th className="px-3 py-2">{t('pricing.colMaxRetailPrice')}</th>
               <th className="px-3 py-2">{t('pricing.colActions')}</th>
             </tr>
           </thead>
@@ -178,9 +202,10 @@ export default function PricingRetailPage() {
                       disabled={!canManage}
                       value={row.draftMinMarkup}
                       onChange={(e) =>
-                        updateRow(row.id, (current) =>
-                          withCalculatedPrices({ ...current, draftMinMarkup: Number(e.target.value) }),
-                        )
+                        updateRow(row.id, (current) => ({
+                          ...current,
+                          draftMinMarkup: Number(e.target.value),
+                        }))
                       }
                       className="w-20 rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
                     />
@@ -193,28 +218,46 @@ export default function PricingRetailPage() {
                       disabled={!canManage}
                       value={row.draftRecommendedMarkup}
                       onChange={(e) =>
-                        updateRow(row.id, (current) =>
-                          withCalculatedPrices({
-                            ...current,
-                            draftRecommendedMarkup: Number(e.target.value),
-                          }),
-                        )
+                        updateRow(row.id, (current) => ({
+                          ...current,
+                          draftRecommendedMarkup: Number(e.target.value),
+                        }))
+                      }
+                      className="w-20 rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      disabled={!canManage}
+                      checked={row.draftEnableMaximum}
+                      onChange={(e) =>
+                        updateRow(row.id, (current) => ({
+                          ...current,
+                          draftEnableMaximum: e.target.checked,
+                        }))
+                      }
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      disabled={!canManage || !row.draftEnableMaximum}
+                      value={row.draftMaxMarkup}
+                      onChange={(e) =>
+                        updateRow(row.id, (current) => ({
+                          ...current,
+                          draftMaxMarkup: Number(e.target.value),
+                        }))
                       }
                       className="w-20 rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
                     />
                   </td>
                   <td className="px-3 py-2 font-medium">{formatPrice(row.draftRetailPrice)}</td>
-                  <td className="px-3 py-2">
-                    <span className={rangeError ? 'font-semibold text-red-600' : 'font-medium text-slate-800'}>
-                      {formatPrice(row.currentPriceKgs)}
-                    </span>
-                    {rangeError ? (
-                      <p className="text-[10px] text-red-600">{t(rangeError)}</p>
-                    ) : (
-                      <p className="text-[10px] text-slate-400">
-                        {formatPrice(row.draftMinPrice)} – {formatPrice(row.draftRetailPrice)}
-                      </p>
-                    )}
+                  <td className="px-3 py-2 font-medium">
+                    {row.draftEnableMaximum ? formatPrice(row.draftMaxPrice) : '—'}
                   </td>
                   <td className="px-3 py-2">
                     {canManage ? (
@@ -226,6 +269,9 @@ export default function PricingRetailPage() {
                       >
                         {savingId === row.id ? '…' : t('common.save')}
                       </button>
+                    ) : null}
+                    {rangeError ? (
+                      <p className="mt-1 text-[10px] text-red-600">{t(rangeError)}</p>
                     ) : null}
                   </td>
                 </tr>

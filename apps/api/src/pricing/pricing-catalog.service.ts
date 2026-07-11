@@ -300,8 +300,11 @@ export class PricingCatalogService {
       branchPurchasePriceKgs: row.hqBranchWholesalePriceKgs,
       minimumSellingMarkupPercent: row.minimumSellingMarkupPercent,
       recommendedRetailMarkupPercent: row.recommendedRetailMarkupPercent,
+      enableMaximumRetailPrice: row.enableMaximumRetailPrice,
+      maximumRetailMarkupPercent: row.maximumRetailMarkupPercent,
       retailPriceKgs: row.recommendedRetailPriceKgs,
       minimumRetailPriceKgs: row.minimumSellingPriceKgs,
+      maximumRetailPriceKgs: row.maximumRetailPriceKgs,
       currentPriceKgs: row.recommendedRetailPriceKgs,
     }));
   }
@@ -319,8 +322,11 @@ export class PricingCatalogService {
       branchPurchasePriceKgs: row.hqBranchWholesalePriceKgs,
       minimumWholesaleMarkupPercent: row.minimumWholesaleMarkupPercent,
       recommendedWholesaleMarkupPercent: row.wholesaleMarkupPercent,
+      enableMaximumWholesalePrice: row.enableMaximumWholesalePrice,
+      maximumWholesaleMarkupPercent: row.maximumWholesaleMarkupPercent,
       wholesalePriceKgs: row.wholesalePriceKgs,
       minimumWholesalePriceKgs: row.minimumWholesalePriceKgs,
+      maximumWholesalePriceKgs: row.maximumWholesalePriceKgs,
       currentPriceKgs: row.wholesalePriceKgs,
     }));
   }
@@ -334,6 +340,13 @@ export class PricingCatalogService {
     if (dto.minimumSellingMarkupPercent > dto.recommendedRetailMarkupPercent + 0.01) {
       throw new BadRequestException('Minimum retail markup cannot exceed recommended retail markup');
     }
+    const enableMaximumRetailPrice = dto.enableMaximumRetailPrice ?? false;
+    if (
+      enableMaximumRetailPrice &&
+      (dto.maximumRetailMarkupPercent ?? 0) < dto.recommendedRetailMarkupPercent - 0.01
+    ) {
+      throw new BadRequestException('Maximum retail markup cannot be below recommended retail markup');
+    }
 
     const cost = await this.fifoService.getLatestHqCostPrice(product.id);
     const prices = pricesFromMarkups(cost.costPriceKgs, {
@@ -342,6 +355,8 @@ export class PricingCatalogService {
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
       recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
       minimumSellingMarkupPercent: dto.minimumSellingMarkupPercent,
+      enableMaximumRetailPrice,
+      maximumRetailMarkupPercent: dto.maximumRetailMarkupPercent ?? 0,
     });
 
     const currentPrice = Number(product.recommendedRetailPriceKgs);
@@ -350,6 +365,10 @@ export class PricingCatalogService {
       dto.minimumSellingMarkupPercent,
       dto.recommendedRetailMarkupPercent,
       currentPrice,
+      {
+        enableMaximumPrice: enableMaximumRetailPrice,
+        maximumMarkupPercent: dto.maximumRetailMarkupPercent ?? 0,
+      },
     );
     if (retailValidation) throw new BadRequestException(retailValidation);
 
@@ -360,6 +379,9 @@ export class PricingCatalogService {
         hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
         recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
         minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
+        maximumRetailPriceKgs: prices.maximumRetailPriceKgs,
+        enableMaximumRetailPrice,
+        maximumRetailMarkupPercent: dto.maximumRetailMarkupPercent ?? 0,
         wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
         minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
         hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
@@ -387,6 +409,13 @@ export class PricingCatalogService {
     if (dto.minimumWholesaleMarkupPercent > dto.recommendedWholesaleMarkupPercent + 0.01) {
       throw new BadRequestException('Minimum wholesale markup cannot exceed recommended wholesale markup');
     }
+    const enableMaximumWholesalePrice = dto.enableMaximumWholesalePrice ?? false;
+    if (
+      enableMaximumWholesalePrice &&
+      (dto.maximumWholesaleMarkupPercent ?? 0) < dto.recommendedWholesaleMarkupPercent - 0.01
+    ) {
+      throw new BadRequestException('Maximum wholesale markup cannot be below recommended wholesale markup');
+    }
 
     const cost = await this.fifoService.getLatestHqCostPrice(product.id);
     const prices = pricesFromMarkups(cost.costPriceKgs, {
@@ -395,6 +424,8 @@ export class PricingCatalogService {
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
       recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
       minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+      enableMaximumWholesalePrice,
+      maximumWholesaleMarkupPercent: dto.maximumWholesaleMarkupPercent ?? 0,
     });
 
     const currentPrice = Number(product.wholesalePriceKgs);
@@ -403,6 +434,10 @@ export class PricingCatalogService {
       dto.minimumWholesaleMarkupPercent,
       dto.recommendedWholesaleMarkupPercent,
       currentPrice,
+      {
+        enableMaximumPrice: enableMaximumWholesalePrice,
+        maximumMarkupPercent: dto.maximumWholesaleMarkupPercent ?? 0,
+      },
     );
     if (wholesaleValidation) throw new BadRequestException(wholesaleValidation);
 
@@ -413,6 +448,9 @@ export class PricingCatalogService {
         hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
         recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
         minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
+        maximumWholesalePriceKgs: prices.maximumWholesalePriceKgs,
+        enableMaximumWholesalePrice,
+        maximumWholesaleMarkupPercent: dto.maximumWholesaleMarkupPercent ?? 0,
         wholesaleMarkupPercent: dto.recommendedWholesaleMarkupPercent,
         minimumWholesaleMarkupPercent: dto.minimumWholesaleMarkupPercent,
         hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
@@ -645,6 +683,12 @@ export class PricingCatalogService {
       hqBranchWholesalePriceKgs: number;
       recommendedRetailPriceKgs: number;
       minimumSellingPriceKgs: number;
+      maximumRetailPriceKgs?: number;
+      maximumWholesalePriceKgs?: number;
+      enableMaximumRetailPrice?: boolean;
+      enableMaximumWholesalePrice?: boolean;
+      maximumRetailMarkupPercent?: number;
+      maximumWholesaleMarkupPercent?: number;
       wholesaleMarkupPercent: number;
       minimumWholesaleMarkupPercent?: number;
       hqBranchWholesaleMarkupPercent: number;
@@ -695,6 +739,12 @@ export class PricingCatalogService {
         hqBranchWholesalePriceKgs: input.hqBranchWholesalePriceKgs,
         recommendedRetailPriceKgs: input.recommendedRetailPriceKgs,
         minimumSellingPriceKgs: input.minimumSellingPriceKgs,
+        maximumRetailPriceKgs: input.maximumRetailPriceKgs ?? 0,
+        maximumWholesalePriceKgs: input.maximumWholesalePriceKgs ?? 0,
+        enableMaximumRetailPrice: input.enableMaximumRetailPrice ?? false,
+        enableMaximumWholesalePrice: input.enableMaximumWholesalePrice ?? false,
+        maximumRetailMarkupPercent: input.maximumRetailMarkupPercent ?? 0,
+        maximumWholesaleMarkupPercent: input.maximumWholesaleMarkupPercent ?? 0,
         wholesaleMarkupPercent: input.wholesaleMarkupPercent,
         minimumWholesaleMarkupPercent:
           input.minimumWholesaleMarkupPercent ?? Number(product.minimumWholesaleMarkupPercent),
@@ -768,6 +818,12 @@ export class PricingCatalogService {
       hqBranchWholesaleMarkupPercent: Prisma.Decimal;
       recommendedRetailMarkupPercent: Prisma.Decimal;
       minimumSellingMarkupPercent: Prisma.Decimal;
+      enableMaximumRetailPrice?: boolean;
+      enableMaximumWholesalePrice?: boolean;
+      maximumRetailMarkupPercent?: Prisma.Decimal;
+      maximumWholesaleMarkupPercent?: Prisma.Decimal;
+      maximumRetailPriceKgs?: Prisma.Decimal;
+      maximumWholesalePriceKgs?: Prisma.Decimal;
     },
     reason?: string,
   ) {
@@ -796,6 +852,12 @@ export class PricingCatalogService {
           hqBranchWholesaleMarkupPercent: source.hqBranchWholesaleMarkupPercent,
           recommendedRetailMarkupPercent: source.recommendedRetailMarkupPercent,
           minimumSellingMarkupPercent: source.minimumSellingMarkupPercent,
+          enableMaximumRetailPrice: source.enableMaximumRetailPrice ?? false,
+          enableMaximumWholesalePrice: source.enableMaximumWholesalePrice ?? false,
+          maximumRetailMarkupPercent: source.maximumRetailMarkupPercent ?? 0,
+          maximumWholesaleMarkupPercent: source.maximumWholesaleMarkupPercent ?? 0,
+          maximumRetailPriceKgs: source.maximumRetailPriceKgs ?? 0,
+          maximumWholesalePriceKgs: source.maximumWholesalePriceKgs ?? 0,
           sellingPriceKgs,
         },
       });
@@ -843,10 +905,23 @@ export class PricingCatalogService {
       recommendedRetailMarkupPercent: Prisma.Decimal;
       recommendedRetailPriceKgs: Prisma.Decimal;
       minimumSellingPriceKgs: Prisma.Decimal;
+      enableMaximumRetailPrice?: boolean;
+      maximumRetailMarkupPercent?: Prisma.Decimal;
+      maximumRetailPriceKgs?: Prisma.Decimal;
+      hqBranchWholesalePriceKgs?: Prisma.Decimal;
       productCategory?: { id: string; nameRu: string; nameKy: string; nameEn: string; code: string } | null;
     },
     cost: { costPriceKgs: number },
   ) {
+    const branchPurchasePriceKgs = Number(
+      product.hqBranchWholesalePriceKgs ??
+        pricesFromMarkups(cost.costPriceKgs, {
+          wholesaleMarkupPercent: 0,
+          hqBranchWholesaleMarkupPercent: 0,
+          recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+          minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+        }).hqBranchWholesalePriceKgs,
+    );
     return {
       id: product.id,
       name: product.name,
@@ -855,10 +930,14 @@ export class PricingCatalogService {
       categoryName: product.productCategory?.nameRu ?? product.productCategory?.nameEn ?? '-',
       isActive: product.isActive,
       costPriceKgs: cost.costPriceKgs,
+      branchPurchasePriceKgs,
       minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
       recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
       retailPriceKgs: Number(product.recommendedRetailPriceKgs),
       minimumRetailPriceKgs: Number(product.minimumSellingPriceKgs),
+      enableMaximumRetailPrice: Boolean(product.enableMaximumRetailPrice),
+      maximumRetailMarkupPercent: Number(product.maximumRetailMarkupPercent ?? 0),
+      maximumRetailPriceKgs: Number(product.maximumRetailPriceKgs ?? 0),
       currentPriceKgs: Number(product.recommendedRetailPriceKgs),
     };
   }
@@ -873,6 +952,10 @@ export class PricingCatalogService {
       wholesaleMarkupPercent: Prisma.Decimal;
       minimumWholesaleMarkupPercent: Prisma.Decimal;
       wholesalePriceKgs: Prisma.Decimal;
+      enableMaximumWholesalePrice?: boolean;
+      maximumWholesaleMarkupPercent?: Prisma.Decimal;
+      maximumWholesalePriceKgs?: Prisma.Decimal;
+      hqBranchWholesaleMarkupPercent?: Prisma.Decimal;
       productCategory?: { id: string; nameRu: string; nameKy: string; nameEn: string; code: string } | null;
     },
     cost: { costPriceKgs: number },
@@ -880,9 +963,11 @@ export class PricingCatalogService {
     const prices = pricesFromMarkups(cost.costPriceKgs, {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
       minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
-      hqBranchWholesaleMarkupPercent: 0,
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent ?? 0),
       recommendedRetailMarkupPercent: 0,
       minimumSellingMarkupPercent: 0,
+      enableMaximumWholesalePrice: Boolean(product.enableMaximumWholesalePrice),
+      maximumWholesaleMarkupPercent: Number(product.maximumWholesaleMarkupPercent ?? 0),
     });
     return {
       id: product.id,
@@ -892,10 +977,14 @@ export class PricingCatalogService {
       categoryName: product.productCategory?.nameRu ?? product.productCategory?.nameEn ?? '-',
       isActive: product.isActive,
       costPriceKgs: cost.costPriceKgs,
+      branchPurchasePriceKgs: prices.hqBranchWholesalePriceKgs,
       minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
       recommendedWholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      enableMaximumWholesalePrice: Boolean(product.enableMaximumWholesalePrice),
+      maximumWholesaleMarkupPercent: Number(product.maximumWholesaleMarkupPercent ?? 0),
       wholesalePriceKgs: Number(product.wholesalePriceKgs),
       minimumWholesalePriceKgs: prices.minimumWholesalePriceKgs,
+      maximumWholesalePriceKgs: Number(product.maximumWholesalePriceKgs ?? prices.maximumWholesalePriceKgs),
       currentPriceKgs: Number(product.wholesalePriceKgs),
     };
   }
@@ -912,6 +1001,10 @@ export class PricingCatalogService {
       hqBranchWholesaleMarkupPercent: Prisma.Decimal;
       recommendedRetailMarkupPercent: Prisma.Decimal;
       minimumSellingMarkupPercent: Prisma.Decimal;
+      enableMaximumRetailPrice?: boolean;
+      enableMaximumWholesalePrice?: boolean;
+      maximumRetailMarkupPercent?: Prisma.Decimal;
+      maximumWholesaleMarkupPercent?: Prisma.Decimal;
       wholesalePriceKgs?: Prisma.Decimal;
       recommendedRetailPriceKgs?: Prisma.Decimal;
       sellingPriceKgs?: Prisma.Decimal;
@@ -926,6 +1019,10 @@ export class PricingCatalogService {
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
       recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
       minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+      enableMaximumRetailPrice: Boolean(product.enableMaximumRetailPrice),
+      enableMaximumWholesalePrice: Boolean(product.enableMaximumWholesalePrice),
+      maximumRetailMarkupPercent: Number(product.maximumRetailMarkupPercent ?? 0),
+      maximumWholesaleMarkupPercent: Number(product.maximumWholesaleMarkupPercent ?? 0),
     };
     const prices = pricesFromMarkups(cost.costPriceKgs, markups);
 
@@ -942,6 +1039,8 @@ export class PricingCatalogService {
       costReceivedAt: cost.receivedAt,
       ...prices,
       ...markups,
+      enableMaximumRetailPrice: markups.enableMaximumRetailPrice,
+      enableMaximumWholesalePrice: markups.enableMaximumWholesalePrice,
       currentRetailPriceKgs: Number(product.recommendedRetailPriceKgs ?? prices.recommendedRetailPriceKgs),
       currentWholesalePriceKgs: Number(product.wholesalePriceKgs ?? prices.wholesalePriceKgs),
       updatedAt: product.updatedAt ?? null,

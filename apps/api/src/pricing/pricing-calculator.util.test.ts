@@ -11,6 +11,7 @@ import {
   resolveBranchPurchasePrice,
   resolveFinalBranchProductPrice,
   resolveHqToBranchPrice,
+  validateSellingPriceLimits,
 } from './pricing-calculator.util';
 
 describe('pricing-calculator.util', () => {
@@ -185,5 +186,55 @@ describe('pricing-calculator.util', () => {
   it('HQ branch with zero markup uses exact cost', () => {
     expect(applyHqBranchWholesaleMarkup(1234, 0)).toBe(1234);
     expect(resolveBaseFranchiseBranchPrice(1234, 'HQ_BRANCH', 0)).toBe(1234);
+  });
+
+  it('validates selling price limits', () => {
+    expect(
+      validateSellingPriceLimits({
+        unitPrice: 900,
+        minimumPriceKgs: 1000,
+        recommendedPriceKgs: 1200,
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateSellingPriceLimits({
+        unitPrice: 1300,
+        minimumPriceKgs: 1000,
+        recommendedPriceKgs: 1200,
+      }),
+    ).toEqual({ ok: true, warning: true, message: 'Цена выше рекомендуемой. Укажите причину.' });
+    expect(
+      validateSellingPriceLimits({
+        unitPrice: 1500,
+        minimumPriceKgs: 1000,
+        recommendedPriceKgs: 1200,
+        maximumPriceKgs: 1400,
+        maximumEnabled: true,
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateSellingPriceLimits({
+        unitPrice: 1100,
+        minimumPriceKgs: 1000,
+        recommendedPriceKgs: 1200,
+        maximumEnabled: false,
+      }),
+    ).toEqual({ ok: true, warning: false });
+  });
+
+  it('calculates maximum retail and wholesale prices when enabled', () => {
+    const prices = pricesFromMarkups(1000, {
+      hqBranchWholesaleMarkupPercent: 20,
+      wholesaleMarkupPercent: 10,
+      minimumWholesaleMarkupPercent: 5,
+      recommendedRetailMarkupPercent: 25,
+      minimumSellingMarkupPercent: 15,
+      enableMaximumRetailPrice: true,
+      maximumRetailMarkupPercent: 40,
+      enableMaximumWholesalePrice: true,
+      maximumWholesaleMarkupPercent: 30,
+    });
+    expect(prices.maximumRetailPriceKgs).toBe(1680);
+    expect(prices.maximumWholesalePriceKgs).toBe(1560);
   });
 });

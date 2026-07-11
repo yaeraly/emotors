@@ -126,8 +126,18 @@ enum PricingEnginePriceType {
   BRANCH_PURCHASE
   RETAIL_MINIMUM
   RETAIL_RECOMMENDED
+  RETAIL_MAXIMUM
   WHOLESALE_MINIMUM
   WHOLESALE_RECOMMENDED
+  WHOLESALE_MAXIMUM
+}
+
+enum PriceAboveRecommendedReasonCode {
+  HIGH_TRANSPORTATION_COST
+  REMOTE_REGION
+  PRODUCT_SHORTAGE
+  CUSTOMER_REQUEST
+  OTHER
 }
 
 enum UserStatus {
@@ -1352,6 +1362,8 @@ model SaleItem {
   appliedAdjustmentMode PricingAdjustmentMode?
   appliedAdjustmentValue Decimal? @db.Decimal(14, 2)
   priceResolvedAt      DateTime?
+  priceAboveRecommendedReasonCode PriceAboveRecommendedReasonCode?
+  priceAboveRecommendedComment String?
   createdAt    DateTime @default(now())
 
   @@index([saleId])
@@ -1551,6 +1563,12 @@ model Product {
   hqBranchWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   recommendedRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   minimumSellingMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  enableMaximumRetailPrice Boolean @default(false)
+  maximumRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  maximumRetailPriceKgs Decimal @default(0) @db.Decimal(14, 2)
+  enableMaximumWholesalePrice Boolean @default(false)
+  maximumWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  maximumWholesalePriceKgs Decimal @default(0) @db.Decimal(14, 2)
   marginAmount      Decimal   @default(0) @db.Decimal(14, 2)
   marginPercent     Decimal   @default(0) @db.Decimal(8, 2)
   minStockLevel     Int       @default(0)

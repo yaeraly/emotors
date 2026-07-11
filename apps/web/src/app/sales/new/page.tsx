@@ -27,7 +27,17 @@ type SaleItemForm = {
   unitCost: string;
   availableQty: number;
   maxDiscountPercent: number;
+  priceAboveRecommendedReasonCode: string;
+  priceAboveRecommendedComment: string;
 };
+
+const PRICE_ABOVE_REASONS = [
+  'HIGH_TRANSPORTATION_COST',
+  'REMOTE_REGION',
+  'PRODUCT_SHORTAGE',
+  'CUSTOMER_REQUEST',
+  'OTHER',
+] as const;
 
 const paymentMethods: PaymentMethod[] = [
   'CASH',
@@ -124,6 +134,8 @@ export default function NewSalePage() {
         unitCost: '0',
         availableQty: product.availableQty,
         maxDiscountPercent: product.maximumDiscountPercent,
+        priceAboveRecommendedReasonCode: '',
+        priceAboveRecommendedComment: '',
       },
     ]);
     setError('');
@@ -201,6 +213,15 @@ export default function NewSalePage() {
       quantity: Number(item.quantity),
       unitPrice: Number(item.unitPrice),
       unitCost: Number(item.unitCost || 0),
+      ...(Number(item.unitPrice) > item.listPrice + 0.01
+        ? {
+            priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode || undefined,
+            priceAboveRecommendedComment:
+              item.priceAboveRecommendedReasonCode === 'OTHER'
+                ? item.priceAboveRecommendedComment.trim() || undefined
+                : undefined,
+          }
+        : {}),
     }));
 
     if (
@@ -227,6 +248,20 @@ export default function NewSalePage() {
       if (discount > item.maxDiscountPercent + 0.01) {
         setError(t('pricing.discountExceeded'));
         return null;
+      }
+      const unitPrice = Number(item.unitPrice || 0);
+      if (unitPrice > item.listPrice + 0.01) {
+        if (!item.priceAboveRecommendedReasonCode) {
+          setError(t('sales.priceAboveRecommendedReasonRequired'));
+          return null;
+        }
+        if (
+          item.priceAboveRecommendedReasonCode === 'OTHER' &&
+          !item.priceAboveRecommendedComment.trim()
+        ) {
+          setError(t('sales.priceAboveRecommendedCommentRequired'));
+          return null;
+        }
       }
       if (!validItems[index]?.productId) {
         setError(t('sales.validationItems'));
@@ -511,6 +546,40 @@ export default function NewSalePage() {
                       required
                       readOnly={branchSalesManagerView}
                     />
+                    {Number(item.unitPrice) > item.listPrice + 0.01 ? (
+                      <div className="lg:col-span-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-sm font-semibold text-amber-800">
+                          {t('sales.priceAboveRecommendedWarning')}
+                        </p>
+                        <label className="block text-sm">
+                          <span className="font-semibold text-slate-700">{t('sales.priceAboveReason')}</span>
+                          <select
+                            value={item.priceAboveRecommendedReasonCode}
+                            onChange={(e) =>
+                              updateItem(index, { priceAboveRecommendedReasonCode: e.target.value })
+                            }
+                            className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                          >
+                            <option value="">{t('sales.selectReason')}</option>
+                            {PRICE_ABOVE_REASONS.map((code) => (
+                              <option key={code} value={code}>
+                                {t(`sales.priceAboveReason.${code}`)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {item.priceAboveRecommendedReasonCode === 'OTHER' ? (
+                          <SaleInput
+                            label={t('sales.priceAboveComment')}
+                            value={item.priceAboveRecommendedComment}
+                            onChange={(value) =>
+                              updateItem(index, { priceAboveRecommendedComment: value })
+                            }
+                            required
+                          />
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="rounded-xl bg-slate-50 p-3 text-sm">
                       <p className="text-xs font-semibold uppercase text-slate-400">
                         {t('sales.totalAmount')}

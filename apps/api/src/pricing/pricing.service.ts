@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PricingPolicyStatus, Prisma } from '@prisma/client';
+import { PricingEnginePriceType, PricingPolicyStatus, PriceAboveRecommendedReasonCode, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -17,10 +17,14 @@ import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { UpsertPricingPolicyDto } from './dto/upsert-pricing-policy.dto';
 import {
   DISCOUNT_EXCEEDS_ALLOWED_LIMIT,
+  PRICE_ABOVE_MAXIMUM,
+  PRICE_ABOVE_RECOMMENDED_REASON_REQUIRED,
   PRICE_BELOW_MINIMUM,
   PRICING_POLICY_FIELDS,
   PricingPolicyField,
 } from './pricing-policy.util';
+import { validateSellingPriceLimits } from './pricing-calculator.util';
+import { PricingEngineService } from './pricing-engine.service';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -28,11 +32,16 @@ type SaleItemInput = {
   productId?: string;
   productSku?: string;
   unitPrice: number;
+  priceAboveRecommendedReasonCode?: PriceAboveRecommendedReasonCode;
+  priceAboveRecommendedComment?: string;
 };
 
 @Injectable()
 export class PricingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pricingEngine: PricingEngineService,
+  ) {}
 
   list(user: AuthUser) {
     this.assertCanView(user);
@@ -256,22 +265,77 @@ export class PricingService {
       });
       if (!product) continue;
 
-      const listPrice = Number(product.recommendedRetailPriceKgs || product.sellingPriceKgs);
-      const minPrice = Number(product.minimumSellingPriceKgs || 0);
-      const maxDiscount = Number(product.maximumDiscountPercent || 0);
+      const [minResult, recommendedResult] = await Promise.all([
+        this.pricingEngine.resolvePrice({
+          productId: item.productId,
+          branchId,
+          priceType: PricingEnginePriceType.RETAIL_MINIMUM,
+        }),
+        this.pricingEngine.resolvePrice({
+          productId: item.productId,
+          branchId,
+          priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+        }),
+      ]);
 
-      if (item.unitPrice + 0.01 < minPrice) {
+      let maximumPriceKgs: number | null = null;
+      if (product.enableMaximumRetailPrice) {
+        const maxResult = await this.pricingEngine.resolvePrice({
+          productId: item.productId,
+          branchId,
+          priceType: PricingEnginePriceType.RETAIL_MAXIMUM,
+        });
+        maximumPriceKgs = maxResult.resolvedPriceKgs;
+      }
+
+      const validation = validateSellingPriceLimits({
+        unitPrice: item.unitPrice,
+        minimumPriceKgs: minResult.resolvedPriceKgs,
+        recommendedPriceKgs: recommendedResult.resolvedPriceKgs,
+        maximumPriceKgs,
+        maximumEnabled: product.enableMaximumRetailPrice,
+      });
+
+      if (!validation.ok) {
+        const reason = validation.error === 'PRICE_ABOVE_MAXIMUM' ? PRICE_ABOVE_MAXIMUM : PRICE_BELOW_MINIMUM;
         await this.audit(user, 'PRICE_CHANGE_DENIED', 'Product', product.id, {
           branchId,
           productId: product.id,
-          reason: PRICE_BELOW_MINIMUM,
-          oldValue: { minimumSellingPriceKgs: minPrice },
+          reason,
+          oldValue: {
+            minimumPriceKgs: minResult.resolvedPriceKgs,
+            maximumPriceKgs,
+          },
           newValue: { unitPrice: item.unitPrice },
         });
-        throw new BadRequestException(PRICE_BELOW_MINIMUM);
+        throw new BadRequestException(reason);
       }
 
-      if (listPrice > 0) {
+      if (validation.warning) {
+        if (!item.priceAboveRecommendedReasonCode) {
+          throw new BadRequestException(PRICE_ABOVE_RECOMMENDED_REASON_REQUIRED);
+        }
+        if (
+          item.priceAboveRecommendedReasonCode === PriceAboveRecommendedReasonCode.OTHER &&
+          !item.priceAboveRecommendedComment?.trim()
+        ) {
+          throw new BadRequestException(PRICE_ABOVE_RECOMMENDED_REASON_REQUIRED);
+        }
+        await this.audit(user, 'PRICE_ABOVE_RECOMMENDED', 'Product', product.id, {
+          userId: user.id,
+          branchId,
+          productId: product.id,
+          sellingPrice: item.unitPrice,
+          recommendedPrice: recommendedResult.resolvedPriceKgs,
+          reasonCode: item.priceAboveRecommendedReasonCode,
+          comment: item.priceAboveRecommendedComment ?? null,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const listPrice = recommendedResult.resolvedPriceKgs;
+      const maxDiscount = Number(product.maximumDiscountPercent || 0);
+      if (listPrice > 0 && item.unitPrice <= listPrice + 0.01) {
         const discountPercent = ((listPrice - item.unitPrice) / listPrice) * 100;
         if (discountPercent > maxDiscount + 0.01) {
           await this.audit(user, 'PRICE_CHANGE_DENIED', 'Product', product.id, {

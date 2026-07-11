@@ -234,6 +234,10 @@ export function pricesFromMarkups(
     hqBranchWholesaleMarkupPercent: number;
     recommendedRetailMarkupPercent: number;
     minimumSellingMarkupPercent: number;
+    maximumRetailMarkupPercent?: number;
+    maximumWholesaleMarkupPercent?: number;
+    enableMaximumRetailPrice?: boolean;
+    enableMaximumWholesalePrice?: boolean;
   },
 ) {
   const branchPurchasePriceKgs = applyHqBranchWholesaleMarkup(
@@ -241,13 +245,53 @@ export function pricesFromMarkups(
     markups.hqBranchWholesaleMarkupPercent,
   );
   const minimumWholesaleMarkupPercent = markups.minimumWholesaleMarkupPercent ?? markups.wholesaleMarkupPercent;
+  const maximumRetailPriceKgs =
+    markups.enableMaximumRetailPrice && (markups.maximumRetailMarkupPercent ?? 0) > 0
+      ? applyMarkupRoundUp(branchPurchasePriceKgs, markups.maximumRetailMarkupPercent ?? 0)
+      : 0;
+  const maximumWholesalePriceKgs =
+    markups.enableMaximumWholesalePrice && (markups.maximumWholesaleMarkupPercent ?? 0) > 0
+      ? applyMarkupRoundUp(branchPurchasePriceKgs, markups.maximumWholesaleMarkupPercent ?? 0)
+      : 0;
   return {
     hqBranchWholesalePriceKgs: branchPurchasePriceKgs,
     minimumWholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, minimumWholesaleMarkupPercent),
     wholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.wholesaleMarkupPercent),
     recommendedRetailPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.recommendedRetailMarkupPercent),
     minimumSellingPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.minimumSellingMarkupPercent),
+    maximumRetailPriceKgs,
+    maximumWholesalePriceKgs,
   };
+}
+
+export type SellingPriceValidationResult =
+  | { ok: true; warning: false }
+  | { ok: true; warning: true; message: string }
+  | { ok: false; error: string };
+
+export function validateSellingPriceLimits(input: {
+  unitPrice: number;
+  minimumPriceKgs: number;
+  recommendedPriceKgs: number;
+  maximumPriceKgs?: number | null;
+  maximumEnabled?: boolean;
+}): SellingPriceValidationResult {
+  if (input.unitPrice + 0.01 < input.minimumPriceKgs) {
+    return { ok: false, error: 'PRICE_BELOW_MINIMUM' };
+  }
+  if (input.maximumEnabled && input.maximumPriceKgs != null && input.maximumPriceKgs > 0) {
+    if (input.unitPrice > input.maximumPriceKgs + 0.01) {
+      return { ok: false, error: 'PRICE_ABOVE_MAXIMUM' };
+    }
+  }
+  if (input.unitPrice > input.recommendedPriceKgs + 0.01) {
+    return {
+      ok: true,
+      warning: true,
+      message: 'Цена выше рекомендуемой. Укажите причину.',
+    };
+  }
+  return { ok: true, warning: false };
 }
 
 export function validateRetailCurrentPrice(
@@ -255,12 +299,26 @@ export function validateRetailCurrentPrice(
   minimumMarkupPercent: number,
   recommendedMarkupPercent: number,
   currentPriceKgs: number,
+  options?: {
+    maximumMarkupPercent?: number;
+    enableMaximumPrice?: boolean;
+  },
 ) {
   if (branchPurchasePriceKgs <= 0) return 'Cost price must be greater than 0 to validate retail price';
   const minPrice = applyMarkupRoundUp(branchPurchasePriceKgs, minimumMarkupPercent);
   const maxPrice = applyMarkupRoundUp(branchPurchasePriceKgs, recommendedMarkupPercent);
   if (currentPriceKgs + 0.01 < minPrice) {
     return 'Current retail price cannot be below minimum allowed price';
+  }
+  if (options?.enableMaximumPrice && (options.maximumMarkupPercent ?? 0) > 0) {
+    const ceiling = applyMarkupRoundUp(branchPurchasePriceKgs, options.maximumMarkupPercent ?? 0);
+    if (recommendedMarkupPercent > (options.maximumMarkupPercent ?? 0) + 0.01) {
+      return 'Recommended retail markup cannot exceed maximum retail markup';
+    }
+    if (currentPriceKgs > ceiling + 0.01) {
+      return 'Current retail price cannot exceed maximum allowed price';
+    }
+    return null;
   }
   if (currentPriceKgs > maxPrice + 0.01) {
     return 'Current retail price cannot exceed recommended retail price';
@@ -273,12 +331,26 @@ export function validateWholesaleCurrentPrice(
   minimumMarkupPercent: number,
   recommendedMarkupPercent: number,
   currentPriceKgs: number,
+  options?: {
+    maximumMarkupPercent?: number;
+    enableMaximumPrice?: boolean;
+  },
 ) {
   if (branchPurchasePriceKgs <= 0) return 'Cost price must be greater than 0 to validate wholesale price';
   const minPrice = applyMarkupRoundUp(branchPurchasePriceKgs, minimumMarkupPercent);
   const maxPrice = applyMarkupRoundUp(branchPurchasePriceKgs, recommendedMarkupPercent);
   if (currentPriceKgs + 0.01 < minPrice) {
     return 'Current wholesale price cannot be below minimum allowed price';
+  }
+  if (options?.enableMaximumPrice && (options.maximumMarkupPercent ?? 0) > 0) {
+    const ceiling = applyMarkupRoundUp(branchPurchasePriceKgs, options.maximumMarkupPercent ?? 0);
+    if (recommendedMarkupPercent > (options.maximumMarkupPercent ?? 0) + 0.01) {
+      return 'Recommended wholesale markup cannot exceed maximum wholesale markup';
+    }
+    if (currentPriceKgs > ceiling + 0.01) {
+      return 'Current wholesale price cannot exceed maximum allowed price';
+    }
+    return null;
   }
   if (currentPriceKgs > maxPrice + 0.01) {
     return 'Current wholesale price cannot exceed recommended wholesale price';

@@ -1,6 +1,7 @@
 import { BranchType } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsNumber, IsOptional, Min, ValidateIf } from 'class-validator';
+import { PriceAboveRecommendedReasonCode } from '@prisma/client';
 
 export class UpdateFranchiseSalesDto {
   @Type(() => Number)
@@ -35,6 +36,16 @@ export class UpdateRetailPricingDto {
   recommendedRetailMarkupPercent!: number;
 
   @IsOptional()
+  @IsBoolean()
+  enableMaximumRetailPrice?: boolean;
+
+  @ValidateIf((dto: UpdateRetailPricingDto) => dto.enableMaximumRetailPrice === true)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maximumRetailMarkupPercent?: number;
+
+  @IsOptional()
   reason?: string;
 }
 
@@ -50,7 +61,32 @@ export class UpdateWholesalePricingDto {
   recommendedWholesaleMarkupPercent!: number;
 
   @IsOptional()
+  @IsBoolean()
+  enableMaximumWholesalePrice?: boolean;
+
+  @ValidateIf((dto: UpdateWholesalePricingDto) => dto.enableMaximumWholesalePrice === true)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  maximumWholesaleMarkupPercent?: number;
+
+  @IsOptional()
   reason?: string;
+}
+
+export class ValidateSellingPriceDto {
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  unitPrice!: number;
+
+  @IsOptional()
+  @IsEnum(PriceAboveRecommendedReasonCode)
+  priceAboveRecommendedReasonCode?: PriceAboveRecommendedReasonCode;
+
+  @ValidateIf((dto: ValidateSellingPriceDto) => dto.priceAboveRecommendedReasonCode === PriceAboveRecommendedReasonCode.OTHER)
+  @IsOptional()
+  priceAboveRecommendedComment?: string;
 }
 
 export class PricingHistoryQueryDto {

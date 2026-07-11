@@ -153,6 +153,17 @@ export class PricingEngineService {
           Number(product.recommendedRetailMarkupPercent ?? 0),
         );
         break;
+      case PricingEnginePriceType.RETAIL_MAXIMUM:
+        resolvedPriceKgs = product.enableMaximumRetailPrice
+          ? calculateRetailPriceKgs(
+              effectiveBranchPriceKgs,
+              Number(product.maximumRetailMarkupPercent ?? 0),
+            )
+          : calculateRetailPriceKgs(
+              effectiveBranchPriceKgs,
+              Number(product.recommendedRetailMarkupPercent ?? 0),
+            );
+        break;
       case PricingEnginePriceType.WHOLESALE_MINIMUM:
         resolvedPriceKgs = calculateWholesalePriceKgs(
           effectiveBranchPriceKgs,
@@ -164,6 +175,17 @@ export class PricingEngineService {
           effectiveBranchPriceKgs,
           Number(product.wholesaleMarkupPercent ?? 0),
         );
+        break;
+      case PricingEnginePriceType.WHOLESALE_MAXIMUM:
+        resolvedPriceKgs = product.enableMaximumWholesalePrice
+          ? calculateWholesalePriceKgs(
+              effectiveBranchPriceKgs,
+              Number(product.maximumWholesaleMarkupPercent ?? 0),
+            )
+          : calculateWholesalePriceKgs(
+              effectiveBranchPriceKgs,
+              Number(product.wholesaleMarkupPercent ?? 0),
+            );
         break;
     }
 

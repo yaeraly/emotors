@@ -277,6 +277,7 @@ export class SalesService {
             recommendedRetailPriceKgs: true,
             minimumSellingPriceKgs: true,
             maximumDiscountPercent: true,
+            enableMaximumRetailPrice: true,
             productCategory: { select: { code: true } },
           },
         },
@@ -302,6 +303,7 @@ export class SalesService {
           sellingPriceKgs,
           minimumSellingPriceKgs: Number(balance.product.minimumSellingPriceKgs || 0),
           maximumDiscountPercent: Number(balance.product.maximumDiscountPercent || 0),
+          enableMaximumRetailPrice: Boolean(balance.product.enableMaximumRetailPrice),
         };
       })
       .filter((product) => product.availableQty > 0)
@@ -778,6 +780,8 @@ export class SalesService {
         totalPrice,
         totalCost,
         profitAmount,
+        priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? null,
+        priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? null,
       };
     });
     const totalAmount = this.roundMoney(
