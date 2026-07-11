@@ -6,12 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
-import {
-  collectInventoryUnits,
-  getCategoryPrefix,
-  isValidCategoryCodePrefix,
-  nextProductCodes,
-} from '@/lib/product-code-utils';
+import { collectInventoryUnits } from '@/lib/product-code-utils';
 import { productUnitOptions } from '@/lib/product-unit';
 import { canEditPurchasePriceYuan } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
@@ -19,6 +14,17 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 type SupplierOption = { id: string; name: string; isActive?: boolean };
 type FactoryOption = { id: string; name: string; isActive?: boolean };
+type SuggestedProductCode = {
+  categoryId: string;
+  prefix: string;
+  suggestedCode: string;
+  barcode: string;
+};
+type ProductCodeValidation = {
+  valid: boolean;
+  normalizedCode: string;
+  error: string | null;
+};
 
 export default function NewProductPage() {
   const router = useRouter();
@@ -33,6 +39,7 @@ export default function NewProductPage() {
   const [saving, setSaving] = useState(false);
   const [generatingCodes, setGeneratingCodes] = useState(false);
   const lastCategoryIdRef = useRef('');
+  const validateRequestIdRef = useRef(0);
   const [form, setForm] = useState({
     name: '',
     sku: '',
@@ -67,37 +74,52 @@ export default function NewProductPage() {
   }, [t]);
 
   useEffect(() => {
-    if (!form.categoryId || categories.length === 0) return;
+    if (!form.categoryId) return;
     if (lastCategoryIdRef.current === form.categoryId) return;
-
-    const category = categories.find((row) => row.id === form.categoryId);
-    if (!category) return;
 
     lastCategoryIdRef.current = form.categoryId;
     setGeneratingCodes(true);
+    setSkuError('');
 
-    void apiFetch<ProductListResponse>(
-      `/inventory/products?categoryId=${encodeURIComponent(form.categoryId)}&pageSize=500`,
+    void apiFetch<SuggestedProductCode>(
+      `/inventory/products/suggest-code?categoryId=${encodeURIComponent(form.categoryId)}`,
     )
       .then((response) => {
-        const prefix = getCategoryPrefix(category, language);
-        const codes = nextProductCodes(
-          prefix,
-          response.items.map((product) => product.sku),
-          response.items.map((product) => product.barcode),
-        );
         setForm((current) => ({
           ...current,
-          sku: codes.sku,
-          barcode: codes.barcode,
+          sku: response.suggestedCode,
+          barcode: response.barcode,
         }));
-        setSkuError('');
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : t('common.error'));
       })
       .finally(() => setGeneratingCodes(false));
-  }, [categories, form.categoryId, language, t]);
+  }, [form.categoryId, t]);
+
+  useEffect(() => {
+    if (!form.sku.trim() || generatingCodes) {
+      setSkuError('');
+      return;
+    }
+
+    const requestId = ++validateRequestIdRef.current;
+    const timer = window.setTimeout(() => {
+      void apiFetch<ProductCodeValidation>(
+        `/inventory/products/validate-code?sku=${encodeURIComponent(form.sku.trim())}`,
+      )
+        .then((result) => {
+          if (requestId !== validateRequestIdRef.current) return;
+          setSkuError(result.valid ? '' : result.error || t('inventory.invalidProductCode'));
+        })
+        .catch((err) => {
+          if (requestId !== validateRequestIdRef.current) return;
+          setSkuError(err instanceof Error ? err.message : t('inventory.invalidProductCode'));
+        });
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [form.sku, generatingCodes, t]);
 
   const canEditPurchase = canEditPurchasePriceYuan(currentUser);
 
@@ -117,7 +139,6 @@ export default function NewProductPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    setSkuError('');
     setSaving(true);
 
     try {
@@ -127,9 +148,17 @@ export default function NewProductPage() {
         return;
       }
 
-      const category = categories.find((row) => row.id === form.categoryId);
-      if (category && !isValidCategoryCodePrefix(getCategoryPrefix(category, language))) {
-        setError(t('inventory.invalidCategoryCodePrefix'));
+      if (!form.sku.trim()) {
+        setSkuError(t('inventory.productCodeRequired'));
+        setSaving(false);
+        return;
+      }
+
+      const validation = await apiFetch<ProductCodeValidation>(
+        `/inventory/products/validate-code?sku=${encodeURIComponent(form.sku.trim())}`,
+      );
+      if (!validation.valid) {
+        setSkuError(validation.error || t('inventory.activeSkuExists'));
         setSaving(false);
         return;
       }
@@ -145,6 +174,8 @@ export default function NewProductPage() {
         method: 'POST',
         body: JSON.stringify({
           name: form.name,
+          sku: validation.normalizedCode,
+          barcode: form.barcode.trim() || validation.normalizedCode,
           categoryId: form.categoryId,
           unit: form.unit,
           photoUrl: form.photoUrl || undefined,
@@ -163,8 +194,8 @@ export default function NewProductPage() {
       router.push('/product-master');
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      if (message.toLowerCase().includes('sku')) {
-        setSkuError(t('inventory.activeSkuExists'));
+      if (message.toLowerCase().includes('sku') || message.toLowerCase().includes('product code')) {
+        setSkuError(message);
       } else {
         setError(message);
       }
@@ -180,6 +211,15 @@ export default function NewProductPage() {
   function handleCategoryChange(categoryId: string) {
     lastCategoryIdRef.current = '';
     setField('categoryId', categoryId);
+  }
+
+  function handleSkuChange(value: string) {
+    const normalized = value.toUpperCase().replace(/\s+/g, '');
+    setForm((current) => ({
+      ...current,
+      sku: normalized,
+      barcode: !current.barcode || current.barcode === current.sku ? normalized : current.barcode,
+    }));
   }
 
   return (
@@ -211,10 +251,13 @@ export default function NewProductPage() {
               ))}
             </select>
           </label>
-          <ReadOnlyField
+          <Input
             label={t('inventory.productCode')}
-            value={form.sku || '—'}
-            hint={generatingCodes ? t('inventory.generatingCodes') : t('inventory.productCodeAutoGenerated')}
+            value={form.sku}
+            onChange={handleSkuChange}
+            required
+            error={skuError}
+            hint={generatingCodes ? t('inventory.generatingCodes') : t('inventory.productCodeEditableHint')}
           />
           <ReadOnlyField
             label="Barcode"
@@ -278,7 +321,7 @@ export default function NewProductPage() {
             />
           </label>
           <button
-            disabled={saving || generatingCodes}
+            disabled={saving || generatingCodes || Boolean(skuError)}
             className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300 md:col-span-2"
             type="submit"
           >
@@ -339,7 +382,7 @@ function Input({
         type={type}
         min={min ?? (type === 'number' ? 0 : undefined)}
         step={step ?? (type === 'number' ? '0.01' : undefined)}
-        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 uppercase"
       />
       {hint ? <span className="mt-1 block text-xs text-slate-500">{hint}</span> : null}
       {error ? <span className="mt-1 block text-xs font-semibold text-red-600">{error}</span> : null}

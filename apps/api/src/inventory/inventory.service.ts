@@ -45,9 +45,12 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import {
   getCategoryCodePrefix,
   isValidCategoryCodePrefix,
+  isValidProductCode,
   nextProductBarcode,
   nextProductCode,
   normalizeCategoryCodePrefix,
+  normalizeProductCode,
+  resolveCategoryProductCodePrefix,
 } from './product-code.util';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 
@@ -267,6 +270,65 @@ export class InventoryService {
     return this.prisma.productCategory.delete({ where: { id } });
   }
 
+  async suggestProductCode(user: AuthUser, categoryId: string, branchId?: string) {
+    this.assertCanManageProductCatalog(user);
+    const category = await this.getActiveCategory(this.prisma, categoryId);
+    const resolvedBranchId = branchId?.trim() || (await this.resolveHqCatalogBranchId(this.prisma));
+    const prefix = resolveCategoryProductCodePrefix(category);
+    const usedCodes = await this.collectCategoryProductCodes(this.prisma, category.id, prefix);
+    const suggestedCode = nextProductCode(prefix, usedCodes);
+
+    return {
+      categoryId: category.id,
+      prefix,
+      suggestedCode,
+      barcode: nextProductBarcode(suggestedCode),
+      branchId: resolvedBranchId,
+    };
+  }
+
+  async validateProductCode(
+    user: AuthUser,
+    sku: string,
+    branchId?: string,
+    excludeProductId?: string,
+  ) {
+    this.assertCanManageProductCatalog(user);
+    const normalized = normalizeProductCode(sku);
+    if (!isValidProductCode(normalized)) {
+      return {
+        valid: false,
+        normalizedCode: normalized,
+        error: 'Product code must be 1-12 uppercase Latin letters or digits without spaces',
+      };
+    }
+
+    const resolvedBranchId = branchId?.trim() || (await this.resolveHqCatalogBranchId(this.prisma));
+    const duplicate = await this.prisma.product.findFirst({
+      where: {
+        branchId: resolvedBranchId,
+        deletedAt: null,
+        sku: { equals: normalized, mode: 'insensitive' },
+        ...(excludeProductId ? { NOT: { id: excludeProductId } } : {}),
+      },
+      select: { id: true, sku: true },
+    });
+
+    if (duplicate) {
+      return {
+        valid: false,
+        normalizedCode: normalized,
+        error: 'Active product with this product code already exists',
+      };
+    }
+
+    return {
+      valid: true,
+      normalizedCode: normalized,
+      error: null,
+    };
+  }
+
   async createProduct(user: AuthUser, dto: CreateProductDto) {
     try {
       this.assertCanManageProductCatalog(user);
@@ -314,7 +376,10 @@ export class InventoryService {
         });
         const existingProduct = dto.sku?.trim()
           ? await tx.product.findFirst({
-              where: { branchId, sku: dto.sku.trim() },
+              where: {
+                branchId,
+                sku: { equals: normalizeProductCode(dto.sku), mode: 'insensitive' },
+              },
               include: this.productInclude(),
             })
           : null;
@@ -363,13 +428,29 @@ export class InventoryService {
           };
         }
 
-        const categoryProducts = await tx.product.findMany({
-          where: { categoryId: category.id, deletedAt: null },
-          select: { sku: true },
-        });
-        const prefix = getCategoryCodePrefix(category);
-        const generatedSku = nextProductCode(prefix, categoryProducts.map((row) => row.sku));
-        const generatedBarcode = nextProductBarcode(generatedSku);
+        const prefix = resolveCategoryProductCodePrefix(category);
+        const usedCodes = await this.collectCategoryProductCodes(tx, category.id, prefix);
+        const requestedSku = dto.sku?.trim() ? normalizeProductCode(dto.sku) : '';
+        let generatedSku: string;
+        if (requestedSku) {
+          if (!isValidProductCode(requestedSku)) {
+            throw new BadRequestException(
+              'Product code must be 1-12 uppercase Latin letters or digits without spaces',
+            );
+          }
+          await this.ensureSkuAvailable(tx, branchId, requestedSku);
+          generatedSku = requestedSku;
+        } else {
+          generatedSku = nextProductCode(prefix, usedCodes);
+        }
+        const generatedBarcode = dto.barcode?.trim()
+          ? normalizeProductCode(dto.barcode)
+          : nextProductBarcode(generatedSku);
+        if (dto.barcode?.trim() && !isValidProductCode(generatedBarcode)) {
+          throw new BadRequestException(
+            'Barcode must be 1-12 uppercase Latin letters or digits without spaces',
+          );
+        }
 
         const product = await tx.product.create({
           data: {
@@ -377,7 +458,7 @@ export class InventoryService {
             warehouseId: warehouse.id,
             name: dto.name,
             sku: generatedSku,
-            barcode: dto.barcode?.trim() || generatedBarcode,
+            barcode: generatedBarcode,
             categoryId: category.id,
             category: category.nameEn,
             photoUrl: dto.photoUrl,
@@ -548,8 +629,14 @@ export class InventoryService {
     return this.prisma.$transaction(async (tx) => {
       const current = await this.getProductForWrite(tx, user, id);
 
-      if (dto.sku && dto.sku !== current.sku) {
-        await this.ensureSkuAvailable(tx, current.branchId, dto.sku, current.id);
+      if (dto.sku && normalizeProductCode(dto.sku) !== normalizeProductCode(current.sku)) {
+        const normalizedSku = normalizeProductCode(dto.sku);
+        if (!isValidProductCode(normalizedSku)) {
+          throw new BadRequestException(
+            'Product code must be 1-12 uppercase Latin letters or digits without spaces',
+          );
+        }
+        await this.ensureSkuAvailable(tx, current.branchId, normalizedSku, current.id);
       }
 
       if (dto.warehouseId) {
@@ -627,7 +714,7 @@ export class InventoryService {
         where: { id },
         data: {
           name: dto.name,
-          sku: dto.sku,
+          sku: dto.sku !== undefined ? normalizeProductCode(dto.sku) : undefined,
           categoryId: category?.id,
           category: category?.nameEn,
           warehouseId: dto.warehouseId,
@@ -1667,10 +1754,11 @@ export class InventoryService {
     sku: string,
     exceptId?: string,
   ) {
+    const normalizedSku = normalizeProductCode(sku);
     const existing = await tx.product.findFirst({
       where: {
         branchId,
-        sku,
+        sku: { equals: normalizedSku, mode: 'insensitive' },
         deletedAt: null,
         ...(exceptId ? { NOT: { id: exceptId } } : {}),
       },
@@ -1678,8 +1766,40 @@ export class InventoryService {
     });
 
     if (existing) {
-      throw new ConflictException('Duplicate SKU in this branch');
+      throw new ConflictException('Active product with this product code already exists');
     }
+  }
+
+  private async collectCategoryProductCodes(
+    tx: PrismaTx,
+    categoryId: string,
+    prefix: string,
+  ): Promise<string[]> {
+    const [products, migrations] = await Promise.all([
+      tx.product.findMany({
+        where: { categoryId },
+        select: { sku: true },
+      }),
+      tx.productCodeMigration.findMany({
+        where: {
+          OR: [
+            { oldCode: { startsWith: prefix, mode: 'insensitive' } },
+            { newCode: { startsWith: prefix, mode: 'insensitive' } },
+          ],
+        },
+        select: { oldCode: true, newCode: true },
+      }),
+    ]);
+
+    const codes = new Set<string>();
+    for (const product of products) {
+      if (product.sku) codes.add(normalizeProductCode(product.sku));
+    }
+    for (const migration of migrations) {
+      if (migration.oldCode) codes.add(normalizeProductCode(migration.oldCode));
+      if (migration.newCode) codes.add(normalizeProductCode(migration.newCode));
+    }
+    return [...codes];
   }
 
   private async ensureCategoryCodeAvailable(code: string, exceptId?: string) {

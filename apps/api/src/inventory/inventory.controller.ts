@@ -26,6 +26,7 @@ import { CreateStockMovementDto } from './dto/create-stock-movement.dto';
 import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { CreateYuanRateDto } from './dto/create-yuan-rate.dto';
 import { ProductQueryDto } from './dto/product-query.dto';
+import { SuggestProductCodeQueryDto, ValidateProductCodeQueryDto } from './dto/suggest-product-code.dto';
 import { StockMovementQueryDto } from './dto/stock-movement-query.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -86,6 +87,23 @@ export class InventoryController {
   @RequirePermissions('products.manage')
   createProduct(@CurrentUser() user: AuthUser, @Body() dto: CreateProductDto) {
     return this.inventoryService.createProduct(user, dto);
+  }
+
+  @Get('products/suggest-code')
+  @RequirePermissions('products.manage')
+  suggestProductCode(@CurrentUser() user: AuthUser, @Query() query: SuggestProductCodeQueryDto) {
+    return this.inventoryService.suggestProductCode(user, query.categoryId, query.branchId);
+  }
+
+  @Get('products/validate-code')
+  @RequirePermissions('products.manage')
+  validateProductCode(@CurrentUser() user: AuthUser, @Query() query: ValidateProductCodeQueryDto) {
+    return this.inventoryService.validateProductCode(
+      user,
+      query.sku,
+      query.branchId,
+      query.excludeProductId,
+    );
   }
 
   @Post('products/upload-image')
