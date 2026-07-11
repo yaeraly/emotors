@@ -2,6 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { MaximumMarkupOverrideModal } from '@/components/pricing/MaximumMarkupOverrideModal';
+import {
+  MarkupTableHeaders,
+  MaximumMarkupSourceDot,
+  RowActionsMenu,
+  formatCompactDate,
+  formatCompactMoney,
+  formatCompactPercent,
+  markupTable,
+} from '@/components/pricing/pricing-markup-table-ui';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
 import { canManagePricingPolicy } from '@/lib/rbac';
@@ -33,15 +42,6 @@ type EditableRetailRow = RetailRow & {
   draftMinMarkup: number;
   draftRecommendedMarkup: number;
 };
-
-function formatPrice(value: number) {
-  return value.toFixed(0);
-}
-
-function formatDate(value: string | null) {
-  if (!value) return '—';
-  return new Date(value).toLocaleString();
-}
 
 export default function PricingRetailPage() {
   const { t } = useTranslation();
@@ -141,121 +141,104 @@ export default function PricingRetailPage() {
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm md:max-w-sm"
       />
 
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[1280px] divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-3 py-2">{t('pricing.colProduct')}</th>
-              <th className="px-3 py-2">{t('pricing.colCategory')}</th>
-              <th className="px-3 py-2">{t('pricing.colBranchPurchasePrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colMinMarkup')}</th>
-              <th className="px-3 py-2">{t('pricing.colMinimumPrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colRecommendedMarkup')}</th>
-              <th className="px-3 py-2">{t('pricing.colRecommendedPrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colMaxMarkup')}</th>
-              <th className="px-3 py-2">{t('pricing.colMaxRetailPrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colMaximumMarkupSource')}</th>
-              <th className="px-3 py-2">{t('pricing.colLastUpdated')}</th>
-              <th className="px-3 py-2">{t('pricing.colActions')}</th>
-            </tr>
+      <div className={markupTable.wrapper}>
+        <table className={markupTable.table}>
+          <thead className={markupTable.thead}>
+            <MarkupTableHeaders />
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredRows.map((row) => {
               const hasError = row.validationStatus === 'ERROR';
               return (
                 <tr key={row.id} className={hasError ? 'bg-red-50/60' : undefined}>
-                  <td className="px-3 py-2">
-                    <p className="font-semibold text-slate-900">{row.name}</p>
-                    <p className="text-xs text-slate-500">{row.sku}</p>
+                  <td className={markupTable.tdProduct}>
+                    <p className={markupTable.productName} title={row.name}>
+                      {row.name}
+                    </p>
+                    <p className={markupTable.productSku} title={row.sku}>
+                      {row.sku}
+                    </p>
                   </td>
-                  <td className="px-3 py-2">{row.categoryName}</td>
-                  <td className="px-3 py-2">{formatPrice(row.effectiveBranchPriceKgs)}</td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      disabled={!canManage}
-                      value={row.draftMinMarkup}
-                      onChange={(e) =>
-                        updateRow(row.id, (current) => ({
-                          ...current,
-                          draftMinMarkup: Number(e.target.value),
-                        }))
-                      }
-                      className="w-20 rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
-                    />
+                  <td className={markupTable.tdCategory} title={row.categoryName}>
+                    {row.categoryName}
                   </td>
-                  <td className="px-3 py-2">{formatPrice(row.minimumRetailPriceKgs)}</td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      disabled={!canManage}
-                      value={row.draftRecommendedMarkup}
-                      onChange={(e) =>
-                        updateRow(row.id, (current) => ({
-                          ...current,
-                          draftRecommendedMarkup: Number(e.target.value),
-                        }))
-                      }
-                      className="w-20 rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
-                    />
+                  <td className={markupTable.tdMoney}>{formatCompactMoney(row.effectiveBranchPriceKgs)}</td>
+                  <td className={markupTable.tdPercent}>
+                    {canManage ? (
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={row.draftMinMarkup}
+                        onChange={(e) =>
+                          updateRow(row.id, (current) => ({
+                            ...current,
+                            draftMinMarkup: Number(e.target.value),
+                          }))
+                        }
+                        className={markupTable.input}
+                      />
+                    ) : (
+                      formatCompactPercent(row.minimumRetailMarkupPercent)
+                    )}
                   </td>
-                  <td className="px-3 py-2">{formatPrice(row.recommendedRetailPriceKgs)}</td>
-                  <td className="px-3 py-2 font-medium">
-                    {row.effectiveMaximumRetailMarkupPercent.toFixed(2)}%
+                  <td className={markupTable.tdMoney}>{formatCompactMoney(row.minimumRetailPriceKgs)}</td>
+                  <td className={markupTable.tdPercent}>
+                    {canManage ? (
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={row.draftRecommendedMarkup}
+                        onChange={(e) =>
+                          updateRow(row.id, (current) => ({
+                            ...current,
+                            draftRecommendedMarkup: Number(e.target.value),
+                          }))
+                        }
+                        className={markupTable.input}
+                      />
+                    ) : (
+                      formatCompactPercent(row.recommendedRetailMarkupPercent)
+                    )}
                   </td>
-                  <td className="px-3 py-2 font-medium">{formatPrice(row.maximumRetailPriceKgs)}</td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        row.maximumRetailMarkupSource === 'CEO_PRODUCT_OVERRIDE'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-slate-100 text-slate-700'
-                      }`}
-                    >
-                      {row.maximumRetailMarkupSource === 'CEO_PRODUCT_OVERRIDE'
-                        ? t('pricing.maximumMarkupSourceCeo')
-                        : t('pricing.maximumMarkupSourceInherited')}
+                  <td className={markupTable.tdMoney}>
+                    {formatCompactMoney(row.recommendedRetailPriceKgs)}
+                  </td>
+                  <td className={markupTable.tdPercent}>
+                    <span className="inline-flex items-center justify-center">
+                      {formatCompactPercent(row.effectiveMaximumRetailMarkupPercent)}
+                      <MaximumMarkupSourceDot
+                        source={row.maximumRetailMarkupSource}
+                        inheritedLabel={t('pricing.maximumMarkupSourceInherited')}
+                        ceoLabel={t('pricing.maximumMarkupSourceCeo')}
+                      />
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-xs text-slate-500">{formatDate(row.lastUpdated)}</td>
-                  <td className="px-3 py-2">
+                  <td className={markupTable.tdMoney}>{formatCompactMoney(row.maximumRetailPriceKgs)}</td>
+                  <td className={markupTable.tdUpdated} title={row.lastUpdated ?? undefined}>
+                    {formatCompactDate(row.lastUpdated)}
+                  </td>
+                  <td className={markupTable.tdActions}>
                     {canManage ? (
-                      <div className="flex flex-col gap-1">
-                        <button
-                          type="button"
-                          disabled={savingId === row.id}
-                          onClick={() => void save(row.id)}
-                          className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold disabled:opacity-50"
-                        >
-                          {savingId === row.id ? '…' : t('common.save')}
-                        </button>
-                        {row.maximumRetailMarkupSource === 'INHERITED' ? (
-                          <button
-                            type="button"
-                            disabled={savingId === row.id}
-                            onClick={() => setOverrideRow(row)}
-                            className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-900 disabled:opacity-50"
-                          >
-                            {t('pricing.changeMaximumMarkup')}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={savingId === row.id}
-                            onClick={() => void restoreInheritance(row.id)}
-                            className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold disabled:opacity-50"
-                          >
-                            {t('pricing.restoreInheritedMaximum')}
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
+                      <RowActionsMenu
+                        disabled={savingId === row.id}
+                        canSave={savingId !== row.id}
+                        hasOverride={row.maximumRetailMarkupSource === 'CEO_PRODUCT_OVERRIDE'}
+                        onSave={() => void save(row.id)}
+                        onOverride={() => setOverrideRow(row)}
+                        onRestore={() => void restoreInheritance(row.id)}
+                        saveLabel={t('common.save')}
+                        overrideLabel={t('pricing.changeMaximumMarkup')}
+                        restoreLabel={t('pricing.restoreInheritedMaximum')}
+                      />
+                    ) : (
+                      '—'
+                    )}
                     {hasError ? (
-                      <p className="mt-1 text-[10px] text-red-600">{row.validationErrors[0]}</p>
+                      <p className="mt-0.5 truncate text-[9px] text-red-600" title={row.validationErrors[0]}>
+                        !
+                      </p>
                     ) : null}
                   </td>
                 </tr>
