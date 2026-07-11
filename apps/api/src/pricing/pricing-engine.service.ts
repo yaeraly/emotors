@@ -12,6 +12,13 @@ import {
 import { PricingEngineResolveInput, PricingEngineResolveResult } from './pricing-engine.types';
 import { PricingFifoService } from './pricing-fifo.service';
 import { PricingSchedulerService } from './pricing-scheduler.service';
+import {
+  isMaximumPolicyActive,
+  resolveRetailMaximumMarkup,
+  resolveRetailMaximumPolicy,
+  resolveWholesaleMaximumMarkup,
+  resolveWholesaleMaximumPolicy,
+} from './pricing-policy-resolution.util';
 
 @Injectable()
 export class PricingEngineService {
@@ -153,17 +160,22 @@ export class PricingEngineService {
           Number(product.recommendedRetailMarkupPercent ?? 0),
         );
         break;
-      case PricingEnginePriceType.RETAIL_MAXIMUM:
-        resolvedPriceKgs = product.enableMaximumRetailPrice
-          ? calculateRetailPriceKgs(
-              effectiveBranchPriceKgs,
-              Number(product.maximumRetailMarkupPercent ?? 0),
-            )
-          : calculateRetailPriceKgs(
-              effectiveBranchPriceKgs,
-              Number(product.recommendedRetailMarkupPercent ?? 0),
-            );
+      case PricingEnginePriceType.RETAIL_MAXIMUM: {
+        const category = product.productCategory ?? {
+          defaultRetailMaximumPolicy: 'DISABLED' as const,
+          defaultRetailMaximumMarkupPercent: 0,
+        };
+        const retailPolicy = resolveRetailMaximumPolicy(product, category);
+        const retailMarkup = resolveRetailMaximumMarkup(product, category);
+        resolvedPriceKgs =
+          isMaximumPolicyActive(retailPolicy) && retailMarkup > 0
+            ? calculateRetailPriceKgs(effectiveBranchPriceKgs, retailMarkup)
+            : calculateRetailPriceKgs(
+                effectiveBranchPriceKgs,
+                Number(product.recommendedRetailMarkupPercent ?? 0),
+              );
         break;
+      }
       case PricingEnginePriceType.WHOLESALE_MINIMUM:
         resolvedPriceKgs = calculateWholesalePriceKgs(
           effectiveBranchPriceKgs,
@@ -176,17 +188,22 @@ export class PricingEngineService {
           Number(product.wholesaleMarkupPercent ?? 0),
         );
         break;
-      case PricingEnginePriceType.WHOLESALE_MAXIMUM:
-        resolvedPriceKgs = product.enableMaximumWholesalePrice
-          ? calculateWholesalePriceKgs(
-              effectiveBranchPriceKgs,
-              Number(product.maximumWholesaleMarkupPercent ?? 0),
-            )
-          : calculateWholesalePriceKgs(
-              effectiveBranchPriceKgs,
-              Number(product.wholesaleMarkupPercent ?? 0),
-            );
+      case PricingEnginePriceType.WHOLESALE_MAXIMUM: {
+        const category = product.productCategory ?? {
+          defaultWholesaleMaximumPolicy: 'DISABLED' as const,
+          defaultWholesaleMaximumMarkupPercent: 0,
+        };
+        const wholesalePolicy = resolveWholesaleMaximumPolicy(product, category);
+        const wholesaleMarkup = resolveWholesaleMaximumMarkup(product, category);
+        resolvedPriceKgs =
+          isMaximumPolicyActive(wholesalePolicy) && wholesaleMarkup > 0
+            ? calculateWholesalePriceKgs(effectiveBranchPriceKgs, wholesaleMarkup)
+            : calculateWholesalePriceKgs(
+                effectiveBranchPriceKgs,
+                Number(product.wholesaleMarkupPercent ?? 0),
+              );
         break;
+      }
     }
 
     return {

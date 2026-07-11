@@ -13,6 +13,7 @@ export type PricingHubTab =
   | 'retail'
   | 'wholesale'
   | 'profiles'
+  | 'category-policies'
   | 'category-rules'
   | 'product-rules'
   | 'overrides'
@@ -37,6 +38,7 @@ export function PricingHubNav({ activeTab }: Props) {
     { id: 'retail', label: t('pricing.tabRetail') },
     { id: 'wholesale', label: t('pricing.tabWholesale') },
     { id: 'profiles', label: t('pricing.tabProfiles') },
+    { id: 'category-policies', label: t('pricing.tabCategoryPolicies') },
     { id: 'category-rules', label: t('pricing.tabCategoryRules') },
     { id: 'product-rules', label: t('pricing.tabProductRules') },
     { id: 'overrides', label: t('pricing.tabOverrides') },

@@ -20,6 +20,9 @@ type RetailRow = {
   recommendedRetailMarkupPercent: number;
   enableMaximumRetailPrice: boolean;
   maximumRetailMarkupPercent: number;
+  retailMaximumPolicySource?: 'CATEGORY' | 'PRODUCT';
+  inheritedRetailPolicy?: boolean;
+  resolvedRetailMaximumPolicy?: 'DISABLED' | 'WARNING_ONLY' | 'HARD_LIMIT';
   retailPriceKgs: number;
   minimumRetailPriceKgs: number;
   maximumRetailPriceKgs: number;
@@ -179,6 +182,7 @@ export default function PricingRetailPage() {
               <th className="px-3 py-2">{t('pricing.colRecommendedMarkup')}</th>
               <th className="px-3 py-2">{t('pricing.colEnableMaximum')}</th>
               <th className="px-3 py-2">{t('pricing.colMaxMarkup')}</th>
+              <th className="px-3 py-2">{t('pricing.colPolicySource')}</th>
               <th className="px-3 py-2">{t('pricing.colRetailPrice')}</th>
               <th className="px-3 py-2">{t('pricing.colMaxRetailPrice')}</th>
               <th className="px-3 py-2">{t('pricing.colActions')}</th>
@@ -227,24 +231,30 @@ export default function PricingRetailPage() {
                     />
                   </td>
                   <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      disabled={!canManage}
-                      checked={row.draftEnableMaximum}
-                      onChange={(e) =>
-                        updateRow(row.id, (current) => ({
-                          ...current,
-                          draftEnableMaximum: e.target.checked,
-                        }))
-                      }
-                    />
+                    {row.inheritedRetailPolicy ? (
+                      <span className="text-xs text-slate-600">
+                        {t(`pricing.maximumPolicy.${row.resolvedRetailMaximumPolicy ?? 'DISABLED'}`)}
+                      </span>
+                    ) : (
+                      <input
+                        type="checkbox"
+                        disabled={!canManage}
+                        checked={row.draftEnableMaximum}
+                        onChange={(e) =>
+                          updateRow(row.id, (current) => ({
+                            ...current,
+                            draftEnableMaximum: e.target.checked,
+                          }))
+                        }
+                      />
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <input
                       type="number"
                       min="0"
                       step="0.01"
-                      disabled={!canManage || !row.draftEnableMaximum}
+                      disabled={!canManage || !row.draftEnableMaximum || row.inheritedRetailPolicy}
                       value={row.draftMaxMarkup}
                       onChange={(e) =>
                         updateRow(row.id, (current) => ({
@@ -254,6 +264,11 @@ export default function PricingRetailPage() {
                       }
                       className="w-20 rounded border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
                     />
+                  </td>
+                  <td className="px-3 py-2 text-xs text-slate-500">
+                    {row.inheritedRetailPolicy
+                      ? t('pricing.policySourceCategory')
+                      : t('pricing.policySourceProduct')}
                   </td>
                   <td className="px-3 py-2 font-medium">{formatPrice(row.draftRetailPrice)}</td>
                   <td className="px-3 py-2 font-medium">

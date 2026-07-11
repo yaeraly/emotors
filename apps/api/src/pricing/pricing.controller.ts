@@ -7,6 +7,8 @@ import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { UpsertPricingPolicyDto } from './dto/upsert-pricing-policy.dto';
 import { UpdateCategoryMarkupDto, UpdateProductPricingDto } from './dto/pricing-catalog.dto';
+import { UpdateCategoryMaximumPolicyDto } from './dto/category-maximum-policy.dto';
+import { UpdateProductMaximumPolicyDto } from './dto/product-maximum-policy.dto';
 import {
   PricingHistoryQueryDto,
   UpdateBranchPricingDto,
@@ -81,6 +83,32 @@ export class PricingController {
   @Roles(Role.CEO)
   updateCategoryMarkup(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateCategoryMarkupDto) {
     return this.pricingCatalogService.updateCategoryMarkup(user, id, dto);
+  }
+
+  @Put('categories/:id/maximum-policy')
+  @Roles(Role.CEO)
+  updateCategoryMaximumPolicy(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateCategoryMaximumPolicyDto,
+  ) {
+    return this.pricingCatalogService.updateCategoryMaximumPolicy(user, id, dto);
+  }
+
+  @Get('products/:id/maximum-policy')
+  @Roles(...PRICING_VIEW_ROLES)
+  getProductMaximumPolicy(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingCatalogService.getProductMaximumPolicy(user, id);
+  }
+
+  @Put('products/:id/maximum-policy')
+  @Roles(Role.CEO)
+  updateProductMaximumPolicy(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateProductMaximumPolicyDto,
+  ) {
+    return this.pricingCatalogService.updateProductMaximumPolicy(user, id, dto);
   }
 
   @Get('franchise-sales')

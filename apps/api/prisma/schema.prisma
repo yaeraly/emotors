@@ -140,6 +140,17 @@ enum PriceAboveRecommendedReasonCode {
   OTHER
 }
 
+enum MaximumPricePolicy {
+  DISABLED
+  WARNING_ONLY
+  HARD_LIMIT
+}
+
+enum MaximumPricePolicySource {
+  CATEGORY
+  PRODUCT
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -1563,6 +1574,10 @@ model Product {
   hqBranchWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   recommendedRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   minimumSellingMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  retailMaximumPolicySource MaximumPricePolicySource @default(CATEGORY)
+  wholesaleMaximumPolicySource MaximumPricePolicySource @default(CATEGORY)
+  retailMaximumPolicy MaximumPricePolicy @default(DISABLED)
+  wholesaleMaximumPolicy MaximumPricePolicy @default(DISABLED)
   enableMaximumRetailPrice Boolean @default(false)
   maximumRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   maximumRetailPriceKgs Decimal @default(0) @db.Decimal(14, 2)
@@ -1779,6 +1794,10 @@ model ProductCategory {
   hqBranchWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   recommendedRetailMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   minimumSellingMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  defaultRetailMaximumPolicy MaximumPricePolicy @default(DISABLED)
+  defaultWholesaleMaximumPolicy MaximumPricePolicy @default(DISABLED)
+  defaultRetailMaximumMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
+  defaultWholesaleMaximumMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   isActive    Boolean   @default(true)
   createdById String?
   createdBy   User?     @relation("ProductCategoryCreator", fields: [createdById], references: [id])

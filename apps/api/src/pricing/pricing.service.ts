@@ -24,6 +24,10 @@ import {
   PricingPolicyField,
 } from './pricing-policy.util';
 import { validateSellingPriceLimits } from './pricing-calculator.util';
+import {
+  isMaximumPolicyActive,
+  resolveRetailMaximumPolicy,
+} from './pricing-policy-resolution.util';
 import { PricingEngineService } from './pricing-engine.service';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -262,8 +266,26 @@ export class PricingService {
       if (!item.productId) continue;
       const product = await this.prisma.product.findFirst({
         where: { id: item.productId, branchId, deletedAt: null },
+        include: {
+          productCategory: {
+            select: {
+              defaultRetailMaximumPolicy: true,
+              defaultWholesaleMaximumPolicy: true,
+              defaultRetailMaximumMarkupPercent: true,
+              defaultWholesaleMaximumMarkupPercent: true,
+            },
+          },
+        },
       });
       if (!product) continue;
+
+      const category = product.productCategory ?? {
+        defaultRetailMaximumPolicy: 'DISABLED' as const,
+        defaultWholesaleMaximumPolicy: 'DISABLED' as const,
+        defaultRetailMaximumMarkupPercent: 0,
+        defaultWholesaleMaximumMarkupPercent: 0,
+      };
+      const retailMaximumPolicy = resolveRetailMaximumPolicy(product, category);
 
       const [minResult, recommendedResult] = await Promise.all([
         this.pricingEngine.resolvePrice({
@@ -279,7 +301,7 @@ export class PricingService {
       ]);
 
       let maximumPriceKgs: number | null = null;
-      if (product.enableMaximumRetailPrice) {
+      if (isMaximumPolicyActive(retailMaximumPolicy)) {
         const maxResult = await this.pricingEngine.resolvePrice({
           productId: item.productId,
           branchId,
@@ -293,7 +315,7 @@ export class PricingService {
         minimumPriceKgs: minResult.resolvedPriceKgs,
         recommendedPriceKgs: recommendedResult.resolvedPriceKgs,
         maximumPriceKgs,
-        maximumEnabled: product.enableMaximumRetailPrice,
+        maximumPolicy: retailMaximumPolicy,
       });
 
       if (!validation.ok) {

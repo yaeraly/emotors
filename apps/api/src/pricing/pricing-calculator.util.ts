@@ -269,21 +269,41 @@ export type SellingPriceValidationResult =
   | { ok: true; warning: true; message: string }
   | { ok: false; error: string };
 
+export type MaximumPricePolicyValue = 'DISABLED' | 'WARNING_ONLY' | 'HARD_LIMIT';
+
 export function validateSellingPriceLimits(input: {
   unitPrice: number;
   minimumPriceKgs: number;
   recommendedPriceKgs: number;
   maximumPriceKgs?: number | null;
   maximumEnabled?: boolean;
+  maximumPolicy?: MaximumPricePolicyValue;
 }): SellingPriceValidationResult {
+  const maximumPolicy =
+    input.maximumPolicy ?? (input.maximumEnabled ? 'HARD_LIMIT' : 'DISABLED');
+
   if (input.unitPrice + 0.01 < input.minimumPriceKgs) {
     return { ok: false, error: 'PRICE_BELOW_MINIMUM' };
   }
-  if (input.maximumEnabled && input.maximumPriceKgs != null && input.maximumPriceKgs > 0) {
-    if (input.unitPrice > input.maximumPriceKgs + 0.01) {
-      return { ok: false, error: 'PRICE_ABOVE_MAXIMUM' };
-    }
+
+  const aboveMaximum =
+    maximumPolicy !== 'DISABLED' &&
+    input.maximumPriceKgs != null &&
+    input.maximumPriceKgs > 0 &&
+    input.unitPrice > input.maximumPriceKgs + 0.01;
+
+  if (aboveMaximum && maximumPolicy === 'HARD_LIMIT') {
+    return { ok: false, error: 'PRICE_ABOVE_MAXIMUM' };
   }
+
+  if (aboveMaximum && maximumPolicy === 'WARNING_ONLY') {
+    return {
+      ok: true,
+      warning: true,
+      message: 'Цена выше максимальной. Укажите причину.',
+    };
+  }
+
   if (input.unitPrice > input.recommendedPriceKgs + 0.01) {
     return {
       ok: true,

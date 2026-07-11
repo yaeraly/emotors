@@ -10,10 +10,12 @@ import { ProductImageUploader } from '@/components/ProductImageUploader';
 import { apiFetch } from '@/lib/api';
 import { collectInventoryUnits } from '@/lib/product-code-utils';
 import { formatProductUnit, productUnitOptions } from '@/lib/product-unit';
+import { ProductMaximumPolicySection } from '@/components/pricing/ProductMaximumPolicySection';
 import {
   canEditProductCatalog,
   canEditProductUnit,
   canEditPurchasePriceYuan,
+  canManagePricingPolicy,
   shouldHideProductPricingFromProfile,
 } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
@@ -102,6 +104,7 @@ export default function ProductDetailPage() {
   const canSaveWarehouse = !currentWarehouseInactive || Boolean(editForm.warehouseId);
   const canEditUnit = canEditProductUnit(currentUser);
   const hidePricingProfile = shouldHideProductPricingFromProfile(currentUser);
+  const showMaximumPolicy = canManagePricingPolicy(currentUser) || !hidePricingProfile;
 
   const unitOptions = useMemo(
     () => productUnitOptions(units, language, t),
@@ -359,6 +362,7 @@ export default function ProductDetailPage() {
                   </form>
                 </Panel>
               ) : null}
+              {showMaximumPolicy ? <ProductMaximumPolicySection productId={params.id} /> : null}
               {!hidePricingProfile ? (
               <Panel title={t('inventory.priceHistory')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">

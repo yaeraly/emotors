@@ -237,4 +237,20 @@ describe('pricing-calculator.util', () => {
     expect(prices.maximumRetailPriceKgs).toBe(1680);
     expect(prices.maximumWholesalePriceKgs).toBe(1560);
   });
+
+  it('warns above maximum when policy is WARNING_ONLY', () => {
+    expect(
+      validateSellingPriceLimits({
+        unitPrice: 1500,
+        minimumPriceKgs: 1000,
+        recommendedPriceKgs: 1200,
+        maximumPriceKgs: 1400,
+        maximumPolicy: 'WARNING_ONLY',
+      }),
+    ).toEqual({
+      ok: true,
+      warning: true,
+      message: 'Цена выше максимальной. Укажите причину.',
+    });
+  });
 });
