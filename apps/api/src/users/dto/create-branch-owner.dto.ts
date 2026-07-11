@@ -1,4 +1,4 @@
-import { BranchStatus, UserStatus } from '@prisma/client';
+import { BranchStatus, BranchType, UserStatus } from '@prisma/client';
 import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class CreateBranchOwnerDto {
@@ -44,6 +44,10 @@ export class CreateBranchOwnerDto {
   @IsOptional()
   @IsEnum(BranchStatus)
   branchStatus?: BranchStatus;
+
+  @IsOptional()
+  @IsEnum(BranchType)
+  branchType?: BranchType;
 
   @IsOptional()
   @IsEnum(UserStatus)

@@ -5,12 +5,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchStatus, Prisma, Role, UserStatus, WarehouseType } from '@prisma/client';
+import { BranchStatus, BranchType, Prisma, Role, UserStatus, WarehouseType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { AuthUser } from '../auth/auth.types';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveDefaultPriceProfileId } from '../pricing/pricing-profile-defaults.util';
 import {
   anyRoleRequiresBranch,
   hasAnyFullAccessRole,
@@ -363,6 +364,8 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const warehouseName = `${dto.branchName.trim()}нын склады`;
     const warehouseCode = `${branchCode}-WH`;
+    const branchType = dto.branchType ?? BranchType.FRANCHISE;
+    const priceProfileId = await resolveDefaultPriceProfileId(this.prisma, branchType);
 
     const result = await this.prisma.$transaction(async (tx) => {
       const branch = await tx.branch.create({
@@ -374,6 +377,8 @@ export class UsersService {
           phone: dto.branchPhone?.trim() || dto.phone?.trim() || null,
           ownerName: dto.fullName.trim(),
           status: dto.branchStatus ?? BranchStatus.ACTIVE,
+          branchType,
+          priceProfileId,
           openedAt: new Date(),
         },
       });

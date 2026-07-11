@@ -13,6 +13,7 @@ type CategoryDiscount = { categoryId: string; discountPercent: number };
 type PriceProfile = {
   id: string;
   name: string;
+  code: string;
   profileType: string;
   branchType: BranchType;
   status: 'ACTIVE' | 'INACTIVE';
@@ -27,6 +28,26 @@ type PriceProfile = {
 };
 
 type BranchOption = { id: string; name: string; code: string; branchType: BranchType };
+
+const FRANCHISE_PROFILE_TYPES = new Set([
+  'STANDARD_FRANCHISE',
+  'BRONZE_FRANCHISE',
+  'SILVER_FRANCHISE',
+  'GOLD_FRANCHISE',
+  'PLATINUM_FRANCHISE',
+  'VIP_FRANCHISE',
+]);
+
+const DEALER_PROFILE_TYPES = new Set(['DEALER', 'DEALER_PREMIUM']);
+const DISTRIBUTOR_PROFILE_TYPES = new Set(['DISTRIBUTOR', 'DISTRIBUTOR_PREMIUM']);
+
+function isProfileCompatibleWithBranch(branchType: BranchType, profileType: string) {
+  if (branchType === 'HQ_BRANCH') return profileType === 'HQ_BRANCH';
+  if (branchType === 'FRANCHISE') return FRANCHISE_PROFILE_TYPES.has(profileType);
+  if (branchType === 'DEALER') return DEALER_PROFILE_TYPES.has(profileType);
+  if (branchType === 'DISTRIBUTOR') return DISTRIBUTOR_PROFILE_TYPES.has(profileType);
+  return false;
+}
 
 export default function PricingProfilesPage() {
   const { t } = useTranslation();
@@ -44,6 +65,13 @@ export default function PricingProfilesPage() {
 
   const canManage = canManagePricingPolicy(user);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? profiles[0] ?? null;
+  const selectedAssignBranch = branches.find((branch) => branch.id === assignBranchId) ?? null;
+
+  function profileTypeLabel(profileType: string) {
+    const key = `pricing.profileTypeName.${profileType}`;
+    const translated = t(key);
+    return translated === key ? profileType : translated;
+  }
 
   async function load() {
     const [profileRows, categoryRows, branchRows, me] = await Promise.all([
@@ -80,10 +108,15 @@ export default function PricingProfilesPage() {
     setDiscountDraft(next);
   }, [selectedProfile, categories]);
 
-  const franchiseBranches = useMemo(
-    () => branches.filter((branch) => branch.branchType === 'FRANCHISE'),
-    [branches],
-  );
+  const assignableBranches = branches;
+
+  const compatibleProfiles = useMemo(() => {
+    const activeProfiles = profiles.filter((profile) => profile.status === 'ACTIVE');
+    if (!selectedAssignBranch) return activeProfiles;
+    return activeProfiles.filter((profile) =>
+      isProfileCompatibleWithBranch(selectedAssignBranch.branchType, profile.profileType),
+    );
+  }, [profiles, selectedAssignBranch]);
 
   async function saveCategoryDiscounts() {
     if (!canManage || !selectedProfile) return;
@@ -153,7 +186,7 @@ export default function PricingProfilesPage() {
                 onClick={() => setSelectedProfileId(profile.id)}
               >
                 <td className="px-3 py-2 font-semibold text-slate-900">{profile.name}</td>
-                <td className="px-3 py-2">{profile.profileType}</td>
+                <td className="px-3 py-2">{profileTypeLabel(profile.profileType)}</td>
                 <td className="px-3 py-2">
                   {profile.status === 'ACTIVE' ? t('pricing.profileStatusActive') : t('pricing.profileStatusInactive')}
                 </td>
@@ -169,6 +202,9 @@ export default function PricingProfilesPage() {
           <h3 className="text-lg font-bold text-slate-950">
             {t('pricing.categoryDiscountsFor').replace('{{profile}}', selectedProfile.name)}
           </h3>
+          {selectedProfile.description ? (
+            <p className="mt-1 text-sm text-slate-500">{selectedProfile.description}</p>
+          ) : null}
           <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {categories.map((category) => (
               <label key={category.id} className="block">
@@ -205,13 +241,16 @@ export default function PricingProfilesPage() {
               <span className="text-sm font-semibold text-slate-700">{t('pricing.colBranch')}</span>
               <select
                 value={assignBranchId}
-                onChange={(e) => setAssignBranchId(e.target.value)}
+                onChange={(e) => {
+                  setAssignBranchId(e.target.value);
+                  setAssignProfileId('');
+                }}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="">{t('pricing.selectBranch')}</option>
-                {franchiseBranches.map((branch) => (
+                {assignableBranches.map((branch) => (
                   <option key={branch.id} value={branch.id}>
-                    {branch.name}
+                    {branch.name} ({branch.branchType})
                   </option>
                 ))}
               </select>
@@ -222,15 +261,14 @@ export default function PricingProfilesPage() {
                 value={assignProfileId}
                 onChange={(e) => setAssignProfileId(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                disabled={!assignBranchId}
               >
-                <option value="">{t('pricing.standardFranchiseProfile')}</option>
-                {profiles
-                  .filter((profile) => profile.status === 'ACTIVE')
-                  .map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name}
-                    </option>
-                  ))}
+                <option value="">{t('pricing.defaultBranchProfile')}</option>
+                {compatibleProfiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
               </select>
             </label>
           </div>

@@ -9,16 +9,14 @@ import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
 import { AssignBranchPriceProfileDto, UpsertBranchPriceProfileDto } from './dto/branch-price-profile.dto';
-
-const PRESET_PROFILE_TYPES: BranchPriceProfileType[] = [
-  BranchPriceProfileType.HQ_BRANCH,
-  BranchPriceProfileType.STANDARD_FRANCHISE,
-  BranchPriceProfileType.SILVER_FRANCHISE,
-  BranchPriceProfileType.GOLD_FRANCHISE,
-  BranchPriceProfileType.VIP_FRANCHISE,
-  BranchPriceProfileType.DEALER,
-  BranchPriceProfileType.DISTRIBUTOR,
-];
+import {
+  getBranchTypeForProfileType,
+  getProfileCode,
+  getProfileHierarchyOrder,
+  isProfileCompatibleWithBranch,
+  PRESET_PROFILE_TYPES,
+  resolveDefaultPriceProfileId,
+} from './pricing-profile-defaults.util';
 
 @Injectable()
 export class PricingProfileService {
@@ -27,7 +25,6 @@ export class PricingProfileService {
   async list(user: AuthUser) {
     this.assertCanView(user);
     const profiles = await this.prisma.branchPriceProfile.findMany({
-      orderBy: { profileType: 'asc' },
       include: {
         _count: { select: { branches: true, categoryDiscounts: true } },
         branches: {
@@ -40,7 +37,12 @@ export class PricingProfileService {
         },
       },
     });
-    return profiles.map((profile) => this.toResponse(profile));
+    return profiles
+      .sort(
+        (left, right) =>
+          getProfileHierarchyOrder(left.profileType) - getProfileHierarchyOrder(right.profileType),
+      )
+      .map((profile) => this.toResponse(profile));
   }
 
   async create(user: AuthUser, dto: UpsertBranchPriceProfileDto) {
@@ -56,17 +58,19 @@ export class PricingProfileService {
       where: { name: dto.name.trim() },
     });
     if (duplicate) throw new BadRequestException('Profile name already exists');
+    const profileCode = getProfileCode(dto.profileType);
+    const duplicateCode = await this.prisma.branchPriceProfile.findUnique({
+      where: { code: profileCode },
+    });
+    if (duplicateCode) throw new BadRequestException('Profile code already exists');
 
     const created = await this.prisma.$transaction(async (tx) => {
       const profile = await tx.branchPriceProfile.create({
         data: {
           name: dto.name.trim(),
-          code: dto.profileType,
+          code: profileCode,
           profileType: dto.profileType,
-          branchType:
-            dto.profileType === BranchPriceProfileType.HQ_BRANCH
-              ? BranchType.HQ_BRANCH
-              : BranchType.FRANCHISE,
+          branchType: getBranchTypeForProfileType(dto.profileType),
           defaultHqMarkupPercent: dto.defaultHqMarkupPercent ?? 0,
           status: dto.status ?? BranchPriceProfileStatus.ACTIVE,
           description: dto.description?.trim() || null,
@@ -126,6 +130,9 @@ export class PricingProfileService {
     if (PRESET_PROFILE_TYPES.includes(profile.profileType)) {
       throw new BadRequestException('Preset price profiles cannot be deleted');
     }
+    if (profile.status === BranchPriceProfileStatus.ACTIVE && profile._count.branches > 0) {
+      throw new BadRequestException('Cannot delete an active profile assigned to branches');
+    }
     if (profile._count.branches > 0) {
       throw new BadRequestException('Cannot delete a profile assigned to branches');
     }
@@ -150,44 +157,39 @@ export class PricingProfileService {
     });
     if (!branch) throw new NotFoundException('Branch not found');
 
+    const targetProfileId =
+      dto.profileId ??
+      (await resolveDefaultPriceProfileId(this.prisma, branch.branchType));
+
     let profile = null;
-    if (dto.profileId) {
-      profile = await this.prisma.branchPriceProfile.findUnique({ where: { id: dto.profileId } });
+    if (targetProfileId) {
+      profile = await this.prisma.branchPriceProfile.findUnique({ where: { id: targetProfileId } });
       if (!profile) throw new NotFoundException('Price profile not found');
       if (profile.status !== BranchPriceProfileStatus.ACTIVE) {
         throw new BadRequestException('Only active profiles can be assigned');
       }
-      if (
-        branch.branchType === BranchType.HQ_BRANCH &&
-        profile.profileType !== BranchPriceProfileType.HQ_BRANCH
-      ) {
-        throw new BadRequestException('HQ branches must use the HQ Branch profile');
-      }
-      if (
-        branch.branchType === BranchType.FRANCHISE &&
-        profile.profileType === BranchPriceProfileType.HQ_BRANCH
-      ) {
-        throw new BadRequestException('Franchise branches cannot use the HQ Branch profile');
+      if (!isProfileCompatibleWithBranch(branch.branchType, profile.profileType)) {
+        throw new BadRequestException('Profile is not compatible with branch type');
       }
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const next = await tx.branch.update({
         where: { id: branchId },
-        data: { priceProfileId: dto.profileId ?? null },
+        data: { priceProfileId: targetProfileId },
         include: { priceProfile: true },
       });
 
       const action = branch.priceProfileId ? 'PRICE_PROFILE_CHANGED' : 'PRICE_PROFILE_ASSIGNED';
       await this.auditInTx(tx, user, action, 'Branch', branchId, {
         branchId,
-        profileId: dto.profileId ?? null,
+        profileId: targetProfileId,
         oldProfileId: branch.priceProfileId,
         reason: dto.reason,
       });
       await this.auditInTx(tx, user, 'PRICE_RECALCULATED', 'Branch', branchId, {
         branchId,
-        profileId: dto.profileId ?? null,
+        profileId: targetProfileId,
         reason: dto.reason ?? 'Branch price profile assignment changed',
       });
       return next;
@@ -231,6 +233,7 @@ export class PricingProfileService {
   private toResponse(profile: {
     id: string;
     name: string;
+    code: string;
     profileType: BranchPriceProfileType;
     branchType: BranchType;
     defaultHqMarkupPercent: { toString(): string } | number;
@@ -250,6 +253,7 @@ export class PricingProfileService {
     return {
       id: profile.id,
       name: profile.name,
+      code: profile.code,
       profileType: profile.profileType,
       branchType: profile.branchType,
       defaultHqMarkupPercent: Number(profile.defaultHqMarkupPercent),

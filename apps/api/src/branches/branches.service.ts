@@ -14,6 +14,7 @@ import { BranchQueryDto } from './dto/branch-query.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { AssignBranchHqWarehouseDto } from './dto/assign-branch-hq-warehouse.dto';
+import { resolveDefaultPriceProfileId } from '../pricing/pricing-profile-defaults.util';
 
 const branchInclude = {
   priceProfile: {
@@ -54,6 +55,9 @@ export class BranchesService {
       await this.assertActiveHqWarehouse(assignedHqWarehouseId);
     }
 
+    const branchType = dto.branchType ?? BranchType.FRANCHISE;
+    const priceProfileId = await resolveDefaultPriceProfileId(this.prisma, branchType);
+
     const branch = await this.prisma.branch.create({
       data: {
         name: dto.name,
@@ -63,9 +67,10 @@ export class BranchesService {
         phone: dto.phone,
         ownerName: dto.ownerName,
         status: dto.status,
-        branchType: dto.branchType ?? BranchType.FRANCHISE,
+        branchType,
         openedAt: dto.openedAt,
         assignedHqWarehouseId,
+        priceProfileId,
       },
       include: branchInclude,
     });
