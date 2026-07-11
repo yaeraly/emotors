@@ -37,6 +37,10 @@ import {
   VersionActionDto,
 } from './dto/pricing-policy-version.dto';
 import {
+  PreviewRetailMarkupDto,
+  PreviewWholesaleMarkupDto,
+} from './dto/pricing-markup-preview.dto';
+import {
   OverrideMaximumRetailMarkupDto,
   OverrideMaximumWholesaleMarkupDto,
   RestoreMaximumMarkupInheritanceDto,
@@ -156,6 +160,16 @@ export class PricingController {
     return this.pricingCatalogService.updateRetailPricing(user, id, dto);
   }
 
+  @Post('retail/:id/preview')
+  @Roles(Role.CEO)
+  previewRetail(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: PreviewRetailMarkupDto,
+  ) {
+    return this.pricingCatalogService.previewRetailPricing(user, id, dto);
+  }
+
   @Put('retail/:id/maximum-markup-override')
   @Roles(Role.CEO)
   overrideRetailMaximumMarkup(
@@ -186,6 +200,16 @@ export class PricingController {
   @Roles(Role.CEO)
   updateWholesale(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateWholesalePricingDto) {
     return this.pricingCatalogService.updateWholesalePricing(user, id, dto);
+  }
+
+  @Post('wholesale/:id/preview')
+  @Roles(Role.CEO)
+  previewWholesale(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: PreviewWholesaleMarkupDto,
+  ) {
+    return this.pricingCatalogService.previewWholesalePricing(user, id, dto);
   }
 
   @Put('wholesale/:id/maximum-markup-override')

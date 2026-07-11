@@ -152,11 +152,14 @@ export function MaximumMarkupSourceDot({
 type RowActionsMenuProps = {
   disabled: boolean;
   canSave: boolean;
+  isDirty: boolean;
   hasOverride: boolean;
   onSave: () => void;
+  onCancel: () => void;
   onOverride: () => void;
   onRestore: () => void;
   saveLabel: string;
+  cancelLabel: string;
   overrideLabel: string;
   restoreLabel: string;
 };
@@ -164,11 +167,14 @@ type RowActionsMenuProps = {
 export function RowActionsMenu({
   disabled,
   canSave,
+  isDirty,
   hasOverride,
   onSave,
+  onCancel,
   onOverride,
   onRestore,
   saveLabel,
+  cancelLabel,
   overrideLabel,
   restoreLabel,
 }: RowActionsMenuProps) {
@@ -210,6 +216,18 @@ export function RowActionsMenu({
           >
             {saveLabel}
           </button>
+          {isDirty ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onCancel();
+              }}
+              className="block w-full px-2.5 py-1.5 text-left hover:bg-slate-50"
+            >
+              {cancelLabel}
+            </button>
+          ) : null}
           {hasOverride ? (
             <button
               type="button"

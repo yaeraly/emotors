@@ -26,6 +26,11 @@ import {
 } from './pricing-calculator.util';
 import { PricingFifoService } from './pricing-fifo.service';
 import {
+  PreviewRetailMarkupDto,
+  PreviewWholesaleMarkupDto,
+  type MarkupPreviewResult,
+} from './dto/pricing-markup-preview.dto';
+import {
   OverrideMaximumRetailMarkupDto,
   OverrideMaximumWholesaleMarkupDto,
 } from './dto/product-maximum-markup-override.dto';
@@ -691,6 +696,102 @@ export class PricingCatalogService {
         };
       }),
     );
+  }
+
+  async previewRetailPricing(
+    user: AuthUser,
+    productId: string,
+    dto: PreviewRetailMarkupDto,
+  ): Promise<MarkupPreviewResult> {
+    this.assertCanManage(user);
+
+    const context = await this.resolveRetailMarkupContext(productId);
+    const previewProduct = {
+      ...context.product,
+      minimumSellingMarkupPercent: dto.minimumSellingMarkupPercent,
+      recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
+      maximumRetailMarkupOverridePercent:
+        dto.maximumRetailMarkupOverridePercent !== undefined
+          ? dto.maximumRetailMarkupOverridePercent
+          : context.product.maximumRetailMarkupOverridePercent,
+    };
+    const markupRow = buildRetailMarkupRow(
+      previewProduct,
+      context.category,
+      context.effectiveBranchPriceKgs,
+    );
+
+    if (markupRow.validationStatus === 'ERROR') {
+      return {
+        productId,
+        validationStatus: 'ERROR',
+        validationErrors: markupRow.validationErrors,
+        preview: null,
+      };
+    }
+
+    return {
+      productId,
+      validationStatus: 'OK',
+      validationErrors: [],
+      preview: {
+        minimumPriceKgs: markupRow.minimumRetailPriceKgs,
+        recommendedPriceKgs: markupRow.recommendedRetailPriceKgs,
+        maximumPriceKgs: markupRow.maximumRetailPriceKgs,
+        effectiveMaximumMarkupPercent: markupRow.effectiveMaximumRetailMarkupPercent,
+        inheritedMaximumMarkupPercent: markupRow.inheritedMaximumRetailMarkupPercent,
+        maximumMarkupOverridePercent: markupRow.maximumRetailMarkupOverridePercent,
+        maximumMarkupSource: markupRow.maximumRetailMarkupSource,
+      },
+    };
+  }
+
+  async previewWholesalePricing(
+    user: AuthUser,
+    productId: string,
+    dto: PreviewWholesaleMarkupDto,
+  ): Promise<MarkupPreviewResult> {
+    this.assertCanManage(user);
+
+    const context = await this.resolveWholesaleMarkupContext(productId);
+    const previewProduct = {
+      ...context.product,
+      minimumWholesaleMarkupPercent: dto.minimumWholesaleMarkupPercent,
+      wholesaleMarkupPercent: dto.recommendedWholesaleMarkupPercent,
+      maximumWholesaleMarkupOverridePercent:
+        dto.maximumWholesaleMarkupOverridePercent !== undefined
+          ? dto.maximumWholesaleMarkupOverridePercent
+          : context.product.maximumWholesaleMarkupOverridePercent,
+    };
+    const markupRow = buildWholesaleMarkupRow(
+      previewProduct,
+      context.category,
+      context.effectiveBranchPriceKgs,
+    );
+
+    if (markupRow.validationStatus === 'ERROR') {
+      return {
+        productId,
+        validationStatus: 'ERROR',
+        validationErrors: markupRow.validationErrors,
+        preview: null,
+      };
+    }
+
+    return {
+      productId,
+      validationStatus: 'OK',
+      validationErrors: [],
+      preview: {
+        minimumPriceKgs: markupRow.minimumWholesalePriceKgs,
+        recommendedPriceKgs: markupRow.recommendedWholesalePriceKgs,
+        maximumPriceKgs: markupRow.maximumWholesalePriceKgs,
+        effectiveMaximumMarkupPercent: markupRow.effectiveMaximumWholesaleMarkupPercent,
+        inheritedMaximumMarkupPercent: markupRow.inheritedMaximumWholesaleMarkupPercent,
+        maximumMarkupOverridePercent: markupRow.maximumWholesaleMarkupOverridePercent,
+        maximumMarkupSource: markupRow.maximumWholesaleMarkupSource,
+      },
+    };
   }
 
   async updateRetailPricing(user: AuthUser, productId: string, dto: UpdateRetailPricingDto) {
@@ -1870,6 +1971,86 @@ export class PricingCatalogService {
       currentRetailPriceKgs: Number(product.recommendedRetailPriceKgs ?? prices.recommendedRetailPriceKgs),
       currentWholesalePriceKgs: Number(product.wholesalePriceKgs ?? prices.wholesalePriceKgs),
       updatedAt: product.updatedAt ?? null,
+    };
+  }
+
+  private async resolveRetailMarkupContext(productId: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      include: {
+        productCategory: {
+          select: {
+            id: true,
+            nameRu: true,
+            nameEn: true,
+            defaultRetailMaximumPolicy: true,
+            defaultWholesaleMaximumPolicy: true,
+            defaultRetailMaximumMarkupPercent: true,
+            defaultWholesaleMaximumMarkupPercent: true,
+          },
+        },
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const prices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+    });
+
+    return {
+      product,
+      category: product.productCategory ?? {
+        defaultRetailMaximumPolicy: MaximumPricePolicy.DISABLED,
+        defaultWholesaleMaximumPolicy: MaximumPricePolicy.DISABLED,
+        defaultRetailMaximumMarkupPercent: 0,
+        defaultWholesaleMaximumMarkupPercent: 0,
+      },
+      effectiveBranchPriceKgs: prices.hqBranchWholesalePriceKgs,
+    };
+  }
+
+  private async resolveWholesaleMarkupContext(productId: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      include: {
+        productCategory: {
+          select: {
+            id: true,
+            nameRu: true,
+            nameEn: true,
+            defaultRetailMaximumPolicy: true,
+            defaultWholesaleMaximumPolicy: true,
+            defaultRetailMaximumMarkupPercent: true,
+            defaultWholesaleMaximumMarkupPercent: true,
+          },
+        },
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const prices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+    });
+
+    return {
+      product,
+      category: product.productCategory ?? {
+        defaultRetailMaximumPolicy: MaximumPricePolicy.DISABLED,
+        defaultWholesaleMaximumPolicy: MaximumPricePolicy.DISABLED,
+        defaultRetailMaximumMarkupPercent: 0,
+        defaultWholesaleMaximumMarkupPercent: 0,
+      },
+      effectiveBranchPriceKgs: prices.hqBranchWholesalePriceKgs,
     };
   }
 

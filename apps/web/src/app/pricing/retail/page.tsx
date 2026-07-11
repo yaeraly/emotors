@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { MaximumMarkupOverrideModal } from '@/components/pricing/MaximumMarkupOverrideModal';
+import { PreviewPriceCell } from '@/components/pricing/PreviewPriceCell';
 import {
   MarkupTableHeaders,
   MaximumMarkupSourceDot,
@@ -12,7 +13,9 @@ import {
   markupTable,
 } from '@/components/pricing/pricing-markup-table-ui';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
+import { usePricingMarkupPreview } from '@/hooks/use-pricing-markup-preview';
 import { apiFetch } from '@/lib/api';
+import { createMarkupRowEditorState } from '@/lib/pricing-markup-preview';
 import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -38,10 +41,14 @@ type RetailRow = {
   lastUpdated: string | null;
 };
 
-type EditableRetailRow = RetailRow & {
-  draftMinMarkup: number;
-  draftRecommendedMarkup: number;
-};
+type EditableRetailRow = RetailRow & ReturnType<typeof createMarkupRowEditorState>;
+
+function toEditableRow(product: RetailRow): EditableRetailRow {
+  return {
+    ...product,
+    ...createMarkupRowEditorState(product, 'retail'),
+  };
+}
 
 export default function PricingRetailPage() {
   const { t } = useTranslation();
@@ -54,6 +61,7 @@ export default function PricingRetailPage() {
   const [overrideRow, setOverrideRow] = useState<RetailRow | null>(null);
 
   const canManage = canManagePricingPolicy(user);
+  const { schedulePreview, cancelRowEdits } = usePricingMarkupPreview('retail', setRows);
 
   async function load() {
     const [products, me] = await Promise.all([
@@ -61,13 +69,7 @@ export default function PricingRetailPage() {
       apiFetch<User>('/auth/me'),
     ]);
     setUser(me);
-    setRows(
-      products.map((product) => ({
-        ...product,
-        draftMinMarkup: product.minimumRetailMarkupPercent,
-        draftRecommendedMarkup: product.recommendedRetailMarkupPercent,
-      })),
-    );
+    setRows(products.map(toEditableRow));
   }
 
   useEffect(() => {
@@ -82,27 +84,71 @@ export default function PricingRetailPage() {
     );
   }, [rows, search]);
 
-  function updateRow(productId: string, updater: (row: EditableRetailRow) => EditableRetailRow) {
-    setRows((current) => current.map((row) => (row.id === productId ? updater(row) : row)));
+  function requestPreview(row: EditableRetailRow) {
+    schedulePreview(row.id, {
+      minimumSellingMarkupPercent: row.draftMinMarkup,
+      recommendedRetailMarkupPercent: row.draftRecommendedMarkup,
+      maximumRetailMarkupOverridePercent: row.maximumRetailMarkupOverridePercent,
+    });
+  }
+
+  function updateMinMarkup(productId: string, value: number) {
+    setRows((current) =>
+      current.map((row) => {
+        if (row.id !== productId) return row;
+        const next = {
+          ...row,
+          draftMinMarkup: value,
+          isDirty:
+            Math.abs(value - row.savedMinMarkup) > 0.001 ||
+            Math.abs(row.draftRecommendedMarkup - row.savedRecMarkup) > 0.001,
+        };
+        requestPreview(next);
+        return next;
+      }),
+    );
+  }
+
+  function updateRecommendedMarkup(productId: string, value: number) {
+    setRows((current) =>
+      current.map((row) => {
+        if (row.id !== productId) return row;
+        const next = {
+          ...row,
+          draftRecommendedMarkup: value,
+          isDirty:
+            Math.abs(row.draftMinMarkup - row.savedMinMarkup) > 0.001 ||
+            Math.abs(value - row.savedRecMarkup) > 0.001,
+        };
+        requestPreview(next);
+        return next;
+      }),
+    );
   }
 
   async function save(productId: string) {
     const row = rows.find((item) => item.id === productId);
     if (!row || !canManage) return;
+    if (row.previewValid === false) {
+      setError(row.previewValidationErrors[0] ?? t('common.error'));
+      return;
+    }
 
     setSavingId(productId);
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/pricing/retail/${productId}`, {
+      const saved = await apiFetch<RetailRow>(`/pricing/retail/${productId}`, {
         method: 'PUT',
         body: JSON.stringify({
           minimumSellingMarkupPercent: row.draftMinMarkup,
           recommendedRetailMarkupPercent: row.draftRecommendedMarkup,
         }),
       });
+      setRows((current) =>
+        current.map((item) => (item.id === productId ? toEditableRow({ ...item, ...saved }) : item)),
+      );
       setSuccess(t('pricing.productSaved'));
-      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -115,14 +161,28 @@ export default function PricingRetailPage() {
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/pricing/retail/${productId}/maximum-markup-override`, { method: 'DELETE' });
+      const saved = await apiFetch<RetailRow>(`/pricing/retail/${productId}/maximum-markup-override`, {
+        method: 'DELETE',
+      });
+      setRows((current) =>
+        current.map((item) => (item.id === productId ? toEditableRow({ ...item, ...saved }) : item)),
+      );
       setSuccess(t('pricing.inheritanceRestored'));
-      await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSavingId(null);
     }
+  }
+
+  function rowValidationMessage(row: EditableRetailRow) {
+    if (row.previewValid === false && row.previewValidationErrors.length) {
+      return row.previewValidationErrors[0];
+    }
+    if (row.previewValid === null && row.validationStatus === 'ERROR') {
+      return row.validationErrors[0];
+    }
+    return null;
   }
 
   return (
@@ -148,7 +208,8 @@ export default function PricingRetailPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredRows.map((row) => {
-              const hasError = row.validationStatus === 'ERROR';
+              const validationMessage = rowValidationMessage(row);
+              const hasError = validationMessage != null;
               return (
                 <tr key={row.id} className={hasError ? 'bg-red-50/60' : undefined}>
                   <td className={markupTable.tdProduct}>
@@ -170,19 +231,18 @@ export default function PricingRetailPage() {
                         min="0"
                         step="0.01"
                         value={row.draftMinMarkup}
-                        onChange={(e) =>
-                          updateRow(row.id, (current) => ({
-                            ...current,
-                            draftMinMarkup: Number(e.target.value),
-                          }))
-                        }
+                        onChange={(e) => updateMinMarkup(row.id, Number(e.target.value))}
                         className={markupTable.input}
                       />
                     ) : (
                       formatCompactPercent(row.minimumRetailMarkupPercent)
                     )}
                   </td>
-                  <td className={markupTable.tdMoney}>{formatCompactMoney(row.minimumRetailPriceKgs)}</td>
+                  <PreviewPriceCell
+                    value={row.displayMinPrice}
+                    flash={row.flash.min}
+                    previewing={row.isPreviewing}
+                  />
                   <td className={markupTable.tdPercent}>
                     {canManage ? (
                       <input
@@ -190,32 +250,33 @@ export default function PricingRetailPage() {
                         min="0"
                         step="0.01"
                         value={row.draftRecommendedMarkup}
-                        onChange={(e) =>
-                          updateRow(row.id, (current) => ({
-                            ...current,
-                            draftRecommendedMarkup: Number(e.target.value),
-                          }))
-                        }
+                        onChange={(e) => updateRecommendedMarkup(row.id, Number(e.target.value))}
                         className={markupTable.input}
                       />
                     ) : (
                       formatCompactPercent(row.recommendedRetailMarkupPercent)
                     )}
                   </td>
-                  <td className={markupTable.tdMoney}>
-                    {formatCompactMoney(row.recommendedRetailPriceKgs)}
-                  </td>
+                  <PreviewPriceCell
+                    value={row.displayRecPrice}
+                    flash={row.flash.rec}
+                    previewing={row.isPreviewing}
+                  />
                   <td className={markupTable.tdPercent}>
                     <span className="inline-flex items-center justify-center">
-                      {formatCompactPercent(row.effectiveMaximumRetailMarkupPercent)}
+                      {formatCompactPercent(row.displayMaxMarkup)}
                       <MaximumMarkupSourceDot
-                        source={row.maximumRetailMarkupSource}
+                        source={row.displayMaxSource}
                         inheritedLabel={t('pricing.maximumMarkupSourceInherited')}
                         ceoLabel={t('pricing.maximumMarkupSourceCeo')}
                       />
                     </span>
                   </td>
-                  <td className={markupTable.tdMoney}>{formatCompactMoney(row.maximumRetailPriceKgs)}</td>
+                  <PreviewPriceCell
+                    value={row.displayMaxPrice}
+                    flash={row.flash.max}
+                    previewing={row.isPreviewing}
+                  />
                   <td className={markupTable.tdUpdated} title={row.lastUpdated ?? undefined}>
                     {formatCompactDate(row.lastUpdated)}
                   </td>
@@ -223,12 +284,15 @@ export default function PricingRetailPage() {
                     {canManage ? (
                       <RowActionsMenu
                         disabled={savingId === row.id}
-                        canSave={savingId !== row.id}
+                        canSave={savingId !== row.id && row.previewValid !== false}
+                        isDirty={row.isDirty}
                         hasOverride={row.maximumRetailMarkupSource === 'CEO_PRODUCT_OVERRIDE'}
                         onSave={() => void save(row.id)}
+                        onCancel={() => cancelRowEdits(row.id)}
                         onOverride={() => setOverrideRow(row)}
                         onRestore={() => void restoreInheritance(row.id)}
                         saveLabel={t('common.save')}
+                        cancelLabel={t('common.cancel')}
                         overrideLabel={t('pricing.changeMaximumMarkup')}
                         restoreLabel={t('pricing.restoreInheritedMaximum')}
                       />
@@ -236,7 +300,7 @@ export default function PricingRetailPage() {
                       '—'
                     )}
                     {hasError ? (
-                      <p className="mt-0.5 truncate text-[9px] text-red-600" title={row.validationErrors[0]}>
+                      <p className="mt-0.5 truncate text-[9px] text-red-600" title={validationMessage ?? undefined}>
                         !
                       </p>
                     ) : null}
@@ -251,12 +315,16 @@ export default function PricingRetailPage() {
       <MaximumMarkupOverrideModal
         open={overrideRow != null}
         title={t('pricing.changeMaximumMarkup')}
+        channel="retail"
+        productId={overrideRow?.id}
+        minimumMarkupPercent={rows.find((row) => row.id === overrideRow?.id)?.draftMinMarkup}
+        recommendedMarkupPercent={rows.find((row) => row.id === overrideRow?.id)?.draftRecommendedMarkup}
         inheritedMaximumMarkupPercent={overrideRow?.inheritedMaximumRetailMarkupPercent ?? 0}
         currentOverridePercent={overrideRow?.maximumRetailMarkupOverridePercent ?? null}
         onClose={() => setOverrideRow(null)}
         onSubmit={async (payload) => {
           if (!overrideRow) return;
-          await apiFetch(`/pricing/retail/${overrideRow.id}/maximum-markup-override`, {
+          const saved = await apiFetch<RetailRow>(`/pricing/retail/${overrideRow.id}/maximum-markup-override`, {
             method: 'PUT',
             body: JSON.stringify({
               maximumRetailMarkupOverridePercent: payload.overridePercent,
@@ -264,8 +332,13 @@ export default function PricingRetailPage() {
               overrideReasonComment: payload.overrideReasonComment,
             }),
           });
+          setRows((current) =>
+            current.map((item) =>
+              item.id === overrideRow.id ? toEditableRow({ ...item, ...saved }) : item,
+            ),
+          );
           setSuccess(t('pricing.maximumMarkupOverridden'));
-          await load();
+          setOverrideRow(null);
         }}
       />
     </>
