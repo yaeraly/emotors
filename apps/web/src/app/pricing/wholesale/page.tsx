@@ -61,7 +61,7 @@ export default function PricingWholesalePage() {
   const [overrideRow, setOverrideRow] = useState<WholesaleRow | null>(null);
 
   const canManage = canManagePricingPolicy(user);
-  const { schedulePreview, cancelRowEdits } = usePricingMarkupPreview('wholesale', setRows);
+  const { schedulePreview, cancelRowEdits, cancelRowPreviews, markRowSaved } = usePricingMarkupPreview('wholesale', setRows);
 
   async function load() {
     const [products, me] = await Promise.all([
@@ -137,6 +137,7 @@ export default function PricingWholesalePage() {
     setSavingId(productId);
     setError('');
     setSuccess('');
+    cancelRowPreviews(productId);
     try {
       const saved = await apiFetch<WholesaleRow>(`/pricing/wholesale/${productId}`, {
         method: 'PUT',
@@ -145,10 +146,11 @@ export default function PricingWholesalePage() {
           recommendedWholesaleMarkupPercent: row.draftRecommendedMarkup,
         }),
       });
+      markRowSaved(productId);
       setRows((current) =>
-        current.map((item) => (item.id === productId ? toEditableRow({ ...item, ...saved }) : item)),
+        current.map((item) => (item.id === productId ? toEditableRow(saved) : item)),
       );
-      setSuccess(t('pricing.productSaved'));
+      setSuccess(t('pricing.markupSaved'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -164,8 +166,9 @@ export default function PricingWholesalePage() {
       const saved = await apiFetch<WholesaleRow>(`/pricing/wholesale/${productId}/maximum-markup-override`, {
         method: 'DELETE',
       });
+      markRowSaved(productId);
       setRows((current) =>
-        current.map((item) => (item.id === productId ? toEditableRow({ ...item, ...saved }) : item)),
+        current.map((item) => (item.id === productId ? toEditableRow(saved) : item)),
       );
       setSuccess(t('pricing.inheritanceRestored'));
     } catch (err) {
@@ -332,10 +335,9 @@ export default function PricingWholesalePage() {
               overrideReasonComment: payload.overrideReasonComment,
             }),
           });
+          markRowSaved(overrideRow.id);
           setRows((current) =>
-            current.map((item) =>
-              item.id === overrideRow.id ? toEditableRow({ ...item, ...saved }) : item,
-            ),
+            current.map((item) => (item.id === overrideRow.id ? toEditableRow(saved) : item)),
           );
           setSuccess(t('pricing.maximumMarkupOverridden'));
           setOverrideRow(null);

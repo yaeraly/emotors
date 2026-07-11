@@ -32,6 +32,8 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const controllersRef = useRef<Record<string, AbortController>>({});
   const flashTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const saveRevisionRef = useRef<Record<string, number>>({});
+  const previewRevisionRef = useRef<Record<string, number>>({});
 
   const clearFlash = useCallback(
     (productId: string) => {
@@ -49,8 +51,31 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
     [setRows],
   );
 
+  const cancelRowPreviews = useCallback((productId: string) => {
+    if (timersRef.current[productId]) {
+      clearTimeout(timersRef.current[productId]);
+      delete timersRef.current[productId];
+    }
+    controllersRef.current[productId]?.abort();
+    delete controllersRef.current[productId];
+    if (flashTimersRef.current[productId]) {
+      clearTimeout(flashTimersRef.current[productId]);
+      delete flashTimersRef.current[productId];
+    }
+    previewRevisionRef.current[productId] = (previewRevisionRef.current[productId] ?? 0) + 1;
+  }, []);
+
+  const markRowSaved = useCallback((productId: string) => {
+    saveRevisionRef.current[productId] = (saveRevisionRef.current[productId] ?? 0) + 1;
+    cancelRowPreviews(productId);
+  }, [cancelRowPreviews]);
+
   const applyPreviewResult = useCallback(
-    (productId: string, result: MarkupPreviewResponse) => {
+    (productId: string, result: MarkupPreviewResponse, previewRevision: number) => {
+      if (previewRevisionRef.current[productId] !== previewRevision) {
+        return;
+      }
+
       setRows((current) =>
         current.map((row) => {
           if (row.id !== productId) return row;
@@ -101,6 +126,10 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
 
   const runPreview = useCallback(
     async (productId: string, payload: PreviewPayload) => {
+      const saveRevisionAtStart = saveRevisionRef.current[productId] ?? 0;
+      const previewRevision = (previewRevisionRef.current[productId] ?? 0) + 1;
+      previewRevisionRef.current[productId] = previewRevision;
+
       controllersRef.current[productId]?.abort();
       const controller = new AbortController();
       controllersRef.current[productId] = controller;
@@ -115,9 +144,15 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
-        applyPreviewResult(productId, result);
+        if (saveRevisionRef.current[productId] !== saveRevisionAtStart) {
+          return;
+        }
+        applyPreviewResult(productId, result, previewRevision);
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        if (saveRevisionRef.current[productId] !== saveRevisionAtStart) {
           return;
         }
         setRows((current) =>
@@ -180,16 +215,7 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
 
   const cancelRowEdits = useCallback(
     (productId: string) => {
-      if (timersRef.current[productId]) {
-        clearTimeout(timersRef.current[productId]);
-        delete timersRef.current[productId];
-      }
-      controllersRef.current[productId]?.abort();
-      delete controllersRef.current[productId];
-      if (flashTimersRef.current[productId]) {
-        clearTimeout(flashTimersRef.current[productId]);
-        delete flashTimersRef.current[productId];
-      }
+      cancelRowPreviews(productId);
 
       setRows((current) =>
         current.map((row) => {
@@ -202,7 +228,9 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
           const recPrice =
             channel === 'retail'
               ? Number((row as { recommendedRetailPriceKgs?: number }).recommendedRetailPriceKgs ?? row.displayRecPrice)
-              : Number((row as { recommendedWholesalePriceKgs?: number }).recommendedWholesalePriceKgs ?? row.displayRecPrice);
+              : Number(
+                  (row as { recommendedWholesalePriceKgs?: number }).recommendedWholesalePriceKgs ?? row.displayRecPrice,
+                );
           const maxPrice =
             channel === 'retail'
               ? Number((row as { maximumRetailPriceKgs?: number }).maximumRetailPriceKgs ?? row.displayMaxPrice)
@@ -221,8 +249,8 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
             channel === 'retail'
               ? ((row as { maximumRetailMarkupSource?: 'INHERITED' | 'CEO_PRODUCT_OVERRIDE' }).maximumRetailMarkupSource ??
                   row.displayMaxSource)
-              : ((row as { maximumWholesaleMarkupSource?: 'INHERITED' | 'CEO_PRODUCT_OVERRIDE' }).maximumWholesaleMarkupSource ??
-                  row.displayMaxSource);
+              : ((row as { maximumWholesaleMarkupSource?: 'INHERITED' | 'CEO_PRODUCT_OVERRIDE' })
+                  .maximumWholesaleMarkupSource ?? row.displayMaxSource);
 
           return {
             ...row,
@@ -242,7 +270,7 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
         }),
       );
     },
-    [setRows],
+    [cancelRowPreviews, channel, setRows],
   );
 
   useEffect(() => {
@@ -256,5 +284,5 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
     };
   }, []);
 
-  return { schedulePreview, cancelRowEdits, runPreview };
+  return { schedulePreview, cancelRowEdits, cancelRowPreviews, markRowSaved, runPreview };
 }

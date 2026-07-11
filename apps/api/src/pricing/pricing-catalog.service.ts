@@ -51,9 +51,22 @@ import {
   resolveEffectiveMaximumWholesaleMarkupPercent,
   validateRetailMarkups,
   validateWholesaleMarkups,
+  type RetailMarkupInput,
+  type WholesaleMarkupInput,
 } from './product-markup-resolution.util';
 
 type PrismaTx = Prisma.TransactionClient;
+
+const PRODUCT_CATEGORY_MARKUP_SELECT = {
+  id: true,
+  nameRu: true,
+  nameKy: true,
+  nameEn: true,
+  defaultRetailMaximumPolicy: true,
+  defaultWholesaleMaximumPolicy: true,
+  defaultRetailMaximumMarkupPercent: true,
+  defaultWholesaleMaximumMarkupPercent: true,
+} as const;
 
 @Injectable()
 export class PricingCatalogService {
@@ -613,25 +626,7 @@ export class PricingCatalogService {
           recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
           minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
         });
-        const effectiveBranchPriceKgs = prices.hqBranchWholesalePriceKgs;
-        const category = product.productCategory ?? {
-          defaultRetailMaximumPolicy: MaximumPricePolicy.DISABLED,
-          defaultWholesaleMaximumPolicy: MaximumPricePolicy.DISABLED,
-          defaultRetailMaximumMarkupPercent: 0,
-          defaultWholesaleMaximumMarkupPercent: 0,
-        };
-        const markupRow = buildRetailMarkupRow(product, category, effectiveBranchPriceKgs);
-
-        return {
-          ...markupRow,
-          id: product.id,
-          name: product.name,
-          sku: product.sku,
-          categoryId: product.categoryId,
-          categoryName: category.nameRu ?? category.nameEn ?? '-',
-          isActive: product.isActive,
-          lastUpdated: product.updatedAt,
-        };
+        return this.formatRetailCatalogRow(product, prices.hqBranchWholesalePriceKgs);
       }),
     );
   }
@@ -675,25 +670,7 @@ export class PricingCatalogService {
           recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
           minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
         });
-        const effectiveBranchPriceKgs = prices.hqBranchWholesalePriceKgs;
-        const category = product.productCategory ?? {
-          defaultRetailMaximumPolicy: MaximumPricePolicy.DISABLED,
-          defaultWholesaleMaximumPolicy: MaximumPricePolicy.DISABLED,
-          defaultRetailMaximumMarkupPercent: 0,
-          defaultWholesaleMaximumMarkupPercent: 0,
-        };
-        const markupRow = buildWholesaleMarkupRow(product, category, effectiveBranchPriceKgs);
-
-        return {
-          ...markupRow,
-          id: product.id,
-          name: product.name,
-          sku: product.sku,
-          categoryId: product.categoryId,
-          categoryName: category.nameRu ?? category.nameEn ?? '-',
-          isActive: product.isActive,
-          lastUpdated: product.updatedAt,
-        };
+        return this.formatWholesaleCatalogRow(product, prices.hqBranchWholesalePriceKgs);
       }),
     );
   }
@@ -902,7 +879,7 @@ export class PricingCatalogService {
       }
 
       await this.syncSkuProducts(tx, user, updated, dto.reason);
-      return this.getRetailProductRow(user, product.id);
+      return this.loadRetailProductRowFromTx(tx, product.id);
     });
   }
 
@@ -988,7 +965,7 @@ export class PricingCatalogService {
       });
 
       await this.syncSkuProducts(tx, user, updated, dto.overrideReasonComment);
-      return this.getRetailProductRow(user, product.id);
+      return this.loadRetailProductRowFromTx(tx, product.id);
     });
   }
 
@@ -1061,7 +1038,7 @@ export class PricingCatalogService {
       });
 
       await this.syncSkuProducts(tx, user, updated);
-      const row = await this.getRetailProductRow(user, product.id);
+      const row = await this.loadRetailProductRowFromTx(tx, product.id);
       return { ...row, validationStatus: validation.validationStatus, validationErrors: validation.validationErrors };
     });
   }
@@ -1177,7 +1154,7 @@ export class PricingCatalogService {
       }
 
       await this.syncSkuProducts(tx, user, updated, dto.reason);
-      return this.getWholesaleProductRow(user, product.id);
+      return this.loadWholesaleProductRowFromTx(tx, product.id);
     });
   }
 
@@ -1266,7 +1243,7 @@ export class PricingCatalogService {
       });
 
       await this.syncSkuProducts(tx, user, updated, dto.overrideReasonComment);
-      return this.getWholesaleProductRow(user, product.id);
+      return this.loadWholesaleProductRowFromTx(tx, product.id);
     });
   }
 
@@ -1342,7 +1319,7 @@ export class PricingCatalogService {
       });
 
       await this.syncSkuProducts(tx, user, updated);
-      const row = await this.getWholesaleProductRow(user, product.id);
+      const row = await this.loadWholesaleProductRowFromTx(tx, product.id);
       return { ...row, validationStatus: validation.validationStatus, validationErrors: validation.validationErrors };
     });
   }
@@ -2054,18 +2031,177 @@ export class PricingCatalogService {
     };
   }
 
+  private defaultCategoryMaximumFields(
+    category?: {
+      defaultRetailMaximumPolicy: MaximumPricePolicy;
+      defaultWholesaleMaximumPolicy: MaximumPricePolicy;
+      defaultRetailMaximumMarkupPercent: Prisma.Decimal;
+      defaultWholesaleMaximumMarkupPercent: Prisma.Decimal;
+      nameRu?: string | null;
+      nameEn?: string | null;
+      nameKy?: string | null;
+    } | null,
+  ) {
+    return (
+      category ?? {
+        defaultRetailMaximumPolicy: MaximumPricePolicy.DISABLED,
+        defaultWholesaleMaximumPolicy: MaximumPricePolicy.DISABLED,
+        defaultRetailMaximumMarkupPercent: new Prisma.Decimal(0),
+        defaultWholesaleMaximumMarkupPercent: new Prisma.Decimal(0),
+      }
+    );
+  }
+
+  private formatRetailCatalogRow(
+    product: {
+      id: string;
+      name: string;
+      sku: string;
+      categoryId: string;
+      isActive: boolean;
+      updatedAt: Date;
+      wholesaleMarkupPercent: Prisma.Decimal;
+      minimumWholesaleMarkupPercent: Prisma.Decimal;
+      hqBranchWholesaleMarkupPercent: Prisma.Decimal;
+      recommendedRetailMarkupPercent: Prisma.Decimal;
+      minimumSellingMarkupPercent: Prisma.Decimal;
+      maximumRetailMarkupOverridePercent?: Prisma.Decimal | null;
+      productCategory?: {
+        id: string;
+        nameRu: string;
+        nameKy: string;
+        nameEn: string;
+        defaultRetailMaximumPolicy: MaximumPricePolicy;
+        defaultWholesaleMaximumPolicy: MaximumPricePolicy;
+        defaultRetailMaximumMarkupPercent: Prisma.Decimal;
+        defaultWholesaleMaximumMarkupPercent: Prisma.Decimal;
+      } | null;
+    },
+    effectiveBranchPriceKgs: number,
+  ) {
+    const category = this.defaultCategoryMaximumFields(product.productCategory);
+    const markupRow = buildRetailMarkupRow(
+      product as unknown as RetailMarkupInput & { id: string },
+      category,
+      effectiveBranchPriceKgs,
+    );
+
+    return {
+      ...markupRow,
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      categoryId: product.categoryId,
+      categoryName: category.nameRu ?? category.nameEn ?? '-',
+      isActive: product.isActive,
+      maximumRetailMarkupPercent: markupRow.maximumRetailMarkupOverridePercent,
+      lastUpdated: product.updatedAt,
+      updatedAt: product.updatedAt,
+    };
+  }
+
+  private formatWholesaleCatalogRow(
+    product: {
+      id: string;
+      name: string;
+      sku: string;
+      categoryId: string;
+      isActive: boolean;
+      updatedAt: Date;
+      wholesaleMarkupPercent: Prisma.Decimal;
+      minimumWholesaleMarkupPercent: Prisma.Decimal;
+      hqBranchWholesaleMarkupPercent: Prisma.Decimal;
+      recommendedRetailMarkupPercent: Prisma.Decimal;
+      minimumSellingMarkupPercent: Prisma.Decimal;
+      maximumWholesaleMarkupOverridePercent?: Prisma.Decimal | null;
+      productCategory?: {
+        id: string;
+        nameRu: string;
+        nameKy: string;
+        nameEn: string;
+        defaultRetailMaximumPolicy: MaximumPricePolicy;
+        defaultWholesaleMaximumPolicy: MaximumPricePolicy;
+        defaultRetailMaximumMarkupPercent: Prisma.Decimal;
+        defaultWholesaleMaximumMarkupPercent: Prisma.Decimal;
+      } | null;
+    },
+    effectiveBranchPriceKgs: number,
+  ) {
+    const category = this.defaultCategoryMaximumFields(product.productCategory);
+    const markupRow = buildWholesaleMarkupRow(
+      product as unknown as WholesaleMarkupInput & { id: string },
+      category,
+      effectiveBranchPriceKgs,
+    );
+
+    return {
+      ...markupRow,
+      id: product.id,
+      name: product.name,
+      sku: product.sku,
+      categoryId: product.categoryId,
+      categoryName: category.nameRu ?? category.nameEn ?? '-',
+      isActive: product.isActive,
+      maximumWholesaleMarkupPercent: markupRow.maximumWholesaleMarkupOverridePercent,
+      lastUpdated: product.updatedAt,
+      updatedAt: product.updatedAt,
+    };
+  }
+
+  private async loadRetailProductRowFromTx(tx: PrismaTx, productId: string) {
+    const product = await tx.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      include: {
+        productCategory: {
+          select: PRODUCT_CATEGORY_MARKUP_SELECT,
+        },
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const prices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+    });
+
+    return this.formatRetailCatalogRow(product, prices.hqBranchWholesalePriceKgs);
+  }
+
+  private async loadWholesaleProductRowFromTx(tx: PrismaTx, productId: string) {
+    const product = await tx.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      include: {
+        productCategory: {
+          select: PRODUCT_CATEGORY_MARKUP_SELECT,
+        },
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const prices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+    });
+
+    return this.formatWholesaleCatalogRow(product, prices.hqBranchWholesalePriceKgs);
+  }
+
   private async getRetailProductRow(user: AuthUser, productId: string) {
-    const rows = await this.listRetailProducts(user);
-    const row = rows.find((item) => item.id === productId || item.productId === productId);
-    if (!row) throw new NotFoundException('Product not found');
-    return row;
+    this.assertCanView(user);
+    return this.loadRetailProductRowFromTx(this.prisma, productId);
   }
 
   private async getWholesaleProductRow(user: AuthUser, productId: string) {
-    const rows = await this.listWholesaleProducts(user);
-    const row = rows.find((item) => item.id === productId || item.productId === productId);
-    if (!row) throw new NotFoundException('Product not found');
-    return row;
+    this.assertCanView(user);
+    return this.loadWholesaleProductRowFromTx(this.prisma, productId);
   }
 
   private async getActivePricingPolicyVersionId() {
