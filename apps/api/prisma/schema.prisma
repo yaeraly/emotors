@@ -151,6 +151,23 @@ enum MaximumPricePolicySource {
   PRODUCT
 }
 
+enum MaximumMarkupOverrideReasonCode {
+  MARKET_PRICE
+  PRODUCT_SPECIFIC_MARGIN
+  COMPETITION
+  SLOW_MOVING_PRODUCT
+  HIGH_DEMAND
+  PROMOTION
+  STRATEGIC_PRODUCT
+  MANAGEMENT_DECISION
+  OTHER
+}
+
+enum MaximumMarkupSource {
+  INHERITED
+  CEO_PRODUCT_OVERRIDE
+}
+
 enum UserStatus {
   ACTIVE
   INACTIVE
@@ -1584,6 +1601,16 @@ model Product {
   enableMaximumWholesalePrice Boolean @default(false)
   maximumWholesaleMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   maximumWholesalePriceKgs Decimal @default(0) @db.Decimal(14, 2)
+  maximumRetailMarkupOverridePercent Decimal? @db.Decimal(8, 2)
+  retailMaximumOverrideReasonCode MaximumMarkupOverrideReasonCode?
+  retailMaximumOverrideReasonComment String?
+  retailMaximumOverriddenById String?
+  retailMaximumOverriddenAt DateTime?
+  maximumWholesaleMarkupOverridePercent Decimal? @db.Decimal(8, 2)
+  wholesaleMaximumOverrideReasonCode MaximumMarkupOverrideReasonCode?
+  wholesaleMaximumOverrideReasonComment String?
+  wholesaleMaximumOverriddenById String?
+  wholesaleMaximumOverriddenAt DateTime?
   marginAmount      Decimal   @default(0) @db.Decimal(14, 2)
   marginPercent     Decimal   @default(0) @db.Decimal(8, 2)
   minStockLevel     Int       @default(0)

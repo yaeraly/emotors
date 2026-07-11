@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.types';
@@ -36,6 +36,11 @@ import {
   SchedulePricingPolicyVersionDto,
   VersionActionDto,
 } from './dto/pricing-policy-version.dto';
+import {
+  OverrideMaximumRetailMarkupDto,
+  OverrideMaximumWholesaleMarkupDto,
+  RestoreMaximumMarkupInheritanceDto,
+} from './dto/product-maximum-markup-override.dto';
 import { PricingCategoryRuleService } from './pricing-category-rule.service';
 import { PricingProductRuleService } from './pricing-product-rule.service';
 import { PricingSimulationService } from './pricing-simulation.service';
@@ -151,6 +156,26 @@ export class PricingController {
     return this.pricingCatalogService.updateRetailPricing(user, id, dto);
   }
 
+  @Put('retail/:id/maximum-markup-override')
+  @Roles(Role.CEO)
+  overrideRetailMaximumMarkup(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: OverrideMaximumRetailMarkupDto,
+  ) {
+    return this.pricingCatalogService.overrideRetailMaximumMarkup(user, id, dto);
+  }
+
+  @Delete('retail/:id/maximum-markup-override')
+  @Roles(Role.CEO)
+  restoreRetailMaximumMarkup(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() _dto: RestoreMaximumMarkupInheritanceDto,
+  ) {
+    return this.pricingCatalogService.restoreRetailMaximumMarkupInheritance(user, id);
+  }
+
   @Get('wholesale')
   @Roles(...PRICING_VIEW_ROLES)
   listWholesale(@CurrentUser() user: AuthUser) {
@@ -161,6 +186,26 @@ export class PricingController {
   @Roles(Role.CEO)
   updateWholesale(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateWholesalePricingDto) {
     return this.pricingCatalogService.updateWholesalePricing(user, id, dto);
+  }
+
+  @Put('wholesale/:id/maximum-markup-override')
+  @Roles(Role.CEO)
+  overrideWholesaleMaximumMarkup(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: OverrideMaximumWholesaleMarkupDto,
+  ) {
+    return this.pricingCatalogService.overrideWholesaleMaximumMarkup(user, id, dto);
+  }
+
+  @Delete('wholesale/:id/maximum-markup-override')
+  @Roles(Role.CEO)
+  restoreWholesaleMaximumMarkup(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() _dto: RestoreMaximumMarkupInheritanceDto,
+  ) {
+    return this.pricingCatalogService.restoreWholesaleMaximumMarkupInheritance(user, id);
   }
 
   @Get('profiles')
