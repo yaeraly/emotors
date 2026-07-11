@@ -31,7 +31,12 @@ import {
   CreatePricingPolicyVersionDto,
   PublishPricingPolicyVersionDto,
   RollbackPricingPolicyVersionDto,
+  SchedulePricingPolicyVersionDto,
+  VersionActionDto,
 } from './dto/pricing-policy-version.dto';
+import { PricingCategoryRuleService } from './pricing-category-rule.service';
+import { PricingProductRuleService } from './pricing-product-rule.service';
+import { PricingSimulationService } from './pricing-simulation.service';
 
 const PRICING_VIEW_ROLES = [
   Role.OWNER,
@@ -60,6 +65,9 @@ export class PricingController {
     private readonly pricingProfileService: PricingProfileService,
     private readonly pricingOverrideService: PricingOverrideService,
     private readonly pricingCategoryDiscountService: PricingCategoryDiscountService,
+    private readonly pricingCategoryRuleService: PricingCategoryRuleService,
+    private readonly pricingProductRuleService: PricingProductRuleService,
+    private readonly pricingSimulationService: PricingSimulationService,
     private readonly pricingVersionService: PricingVersionService,
   ) {}
 
@@ -207,6 +215,97 @@ export class PricingController {
   @Roles(Role.CEO)
   createVersion(@CurrentUser() user: AuthUser, @Body() dto: CreatePricingPolicyVersionDto) {
     return this.pricingVersionService.create(user, dto);
+  }
+
+  @Post('versions/:id/clone')
+  @Roles(Role.CEO)
+  cloneVersion(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CreatePricingPolicyVersionDto) {
+    return this.pricingVersionService.clone(user, id, dto);
+  }
+
+  @Post('versions/:id/submit-review')
+  @Roles(Role.CEO)
+  submitVersionReview(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: VersionActionDto,
+  ) {
+    return this.pricingVersionService.submitForReview(user, id, dto);
+  }
+
+  @Post('versions/:id/approve')
+  @Roles(Role.CEO)
+  approveVersion(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: VersionActionDto,
+  ) {
+    return this.pricingVersionService.approve(user, id, dto);
+  }
+
+  @Post('versions/:id/schedule')
+  @Roles(Role.CEO)
+  scheduleVersion(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: SchedulePricingPolicyVersionDto,
+  ) {
+    return this.pricingVersionService.schedule(user, id, dto);
+  }
+
+  @Get('versions/:id/category-rules')
+  @Roles(...PRICING_VIEW_ROLES)
+  listVersionCategoryRules(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingCategoryRuleService.listForVersion(user, id);
+  }
+
+  @Put('versions/:id/category-rules')
+  @Roles(Role.CEO)
+  upsertVersionCategoryRule(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: {
+      pricingProfileId: string;
+      categoryId: string;
+      discountPercent: number;
+      reasonNote?: string;
+    },
+  ) {
+    return this.pricingCategoryRuleService.upsert(user, id, dto);
+  }
+
+  @Get('versions/:id/product-rules')
+  @Roles(...PRICING_VIEW_ROLES)
+  listVersionProductRules(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingProductRuleService.listForVersion(user, id);
+  }
+
+  @Put('versions/:id/product-rules')
+  @Roles(Role.CEO)
+  upsertVersionProductRule(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: {
+      pricingProfileId: string;
+      productId: string;
+      adjustmentMode: 'PERCENTAGE_DISCOUNT' | 'FIXED_AMOUNT_DISCOUNT' | 'FIXED_SELLING_PRICE';
+      adjustmentValue: number;
+      reasonNote?: string;
+    },
+  ) {
+    return this.pricingProductRuleService.upsert(user, id, dto);
+  }
+
+  @Get('versions/:id/simulation')
+  @Roles(...PRICING_VIEW_ROLES)
+  getVersionSimulation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingSimulationService.getLatest(user, id);
+  }
+
+  @Post('versions/:id/simulation/refresh')
+  @Roles(Role.CEO)
+  refreshVersionSimulation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingSimulationService.refresh(user, id);
   }
 
   @Post('versions/:id/publish')

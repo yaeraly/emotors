@@ -98,12 +98,14 @@ export class PricingOverrideService {
           branchId: dto.branchId,
           productId: dto.productId,
           overridePriceKgs: dto.overridePriceKgs,
+          adjustmentMode: 'FIXED_SELLING_PRICE',
+          adjustmentValue: dto.overridePriceKgs,
           startDate,
           endDate,
           reason: dto.reason.trim(),
-          status: ProductPriceOverrideStatus.ACTIVE,
+          status: ProductPriceOverrideStatus.DRAFT,
           createdById: user.id,
-          approvedById: dto.approvedById ?? null,
+          approvedById: null,
         },
         include: {
           branch: { select: { id: true, name: true, code: true, branchType: true } },
@@ -146,8 +148,8 @@ export class PricingOverrideService {
     this.assertCanManage(user);
     const existing = await this.prisma.productPriceOverride.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Product override not found');
-    if (existing.status !== ProductPriceOverrideStatus.ACTIVE) {
-      throw new BadRequestException('Only active overrides can be edited');
+    if (existing.status !== ProductPriceOverrideStatus.DRAFT && existing.status !== ProductPriceOverrideStatus.PENDING_APPROVAL) {
+      throw new BadRequestException('Only draft overrides can be edited');
     }
 
     const startDate = dto.startDate ? new Date(dto.startDate) : existing.startDate;
@@ -202,14 +204,23 @@ export class PricingOverrideService {
     this.assertCanManage(user);
     const existing = await this.prisma.productPriceOverride.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Product override not found');
-    if (existing.status !== ProductPriceOverrideStatus.ACTIVE) {
-      throw new BadRequestException('Only active overrides can be approved');
+    if (existing.status !== ProductPriceOverrideStatus.DRAFT && existing.status !== ProductPriceOverrideStatus.PENDING_APPROVAL) {
+      throw new BadRequestException('Only draft overrides can be approved');
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const shouldActivate =
+        existing.startDate.getTime() <= now.getTime() && now.getTime() <= existing.endDate.getTime();
       const override = await tx.productPriceOverride.update({
         where: { id },
-        data: { approvedById: user.id },
+        data: {
+          approvedById: user.id,
+          approvedAt: now,
+          status: shouldActivate
+            ? ProductPriceOverrideStatus.ACTIVE
+            : ProductPriceOverrideStatus.APPROVED,
+        },
         include: {
           branch: { select: { id: true, name: true, code: true, branchType: true } },
           product: { select: { id: true, name: true, sku: true } },

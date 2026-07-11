@@ -16,6 +16,9 @@ import { UpdateBranchDto } from './dto/update-branch.dto';
 import { AssignBranchHqWarehouseDto } from './dto/assign-branch-hq-warehouse.dto';
 
 const branchInclude = {
+  priceProfile: {
+    select: { id: true, name: true, code: true, profileType: true },
+  },
   assignedHqWarehouse: {
     select: {
       id: true,
@@ -60,7 +63,7 @@ export class BranchesService {
         phone: dto.phone,
         ownerName: dto.ownerName,
         status: dto.status,
-        branchType: dto.branchType ?? BranchType.FRANCHISE_BRANCH,
+        branchType: dto.branchType ?? BranchType.FRANCHISE,
         openedAt: dto.openedAt,
         assignedHqWarehouseId,
       },
@@ -95,6 +98,10 @@ export class BranchesService {
 
     if (query.status) {
       where.status = query.status;
+    }
+
+    if (query.branchType) {
+      where.branchType = query.branchType;
     }
 
     if (query.ownerName?.trim()) {

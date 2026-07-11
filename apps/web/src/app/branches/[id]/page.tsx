@@ -18,7 +18,7 @@ type BranchForm = {
   phone: string;
   ownerName: string;
   status: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
-  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
+  branchType: 'HQ_BRANCH' | 'FRANCHISE' | 'DEALER' | 'DISTRIBUTOR';
   assignedHqWarehouseId: string;
 };
 
@@ -40,7 +40,7 @@ export default function BranchDetailPage() {
     phone: '',
     ownerName: '',
     status: 'ACTIVE',
-    branchType: 'FRANCHISE_BRANCH',
+    branchType: 'FRANCHISE',
     assignedHqWarehouseId: '',
   });
   const [error, setError] = useState('');
@@ -68,7 +68,7 @@ export default function BranchDetailPage() {
       phone: branchData.phone ?? '',
       ownerName: branchData.ownerName ?? '',
       status: branchData.status ?? 'ACTIVE',
-      branchType: branchData.branchType ?? 'FRANCHISE_BRANCH',
+      branchType: branchData.branchType ?? 'FRANCHISE',
       assignedHqWarehouseId: branchData.assignedHqWarehouseId ?? '',
     });
   }
@@ -228,11 +228,31 @@ export default function BranchDetailPage() {
                   <input
                     type="radio"
                     name="branchType"
-                    value="FRANCHISE_BRANCH"
-                    checked={form.branchType === 'FRANCHISE_BRANCH'}
-                    onChange={() => setForm({ ...form, branchType: 'FRANCHISE_BRANCH' })}
+                    value="FRANCHISE"
+                    checked={form.branchType === 'FRANCHISE'}
+                    onChange={() => setForm({ ...form, branchType: 'FRANCHISE' })}
                   />
-                  {t('pricing.branchTypeFranchise')}
+                  {t('branches.branchTypeFranchise')}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="branchType"
+                    value="DEALER"
+                    checked={form.branchType === 'DEALER'}
+                    onChange={() => setForm({ ...form, branchType: 'DEALER' })}
+                  />
+                  {t('branches.branchTypeDealer')}
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="radio"
+                    name="branchType"
+                    value="DISTRIBUTOR"
+                    checked={form.branchType === 'DISTRIBUTOR'}
+                    onChange={() => setForm({ ...form, branchType: 'DISTRIBUTOR' })}
+                  />
+                  {t('branches.branchTypeDistributor')}
                 </label>
               </div>
             </label>

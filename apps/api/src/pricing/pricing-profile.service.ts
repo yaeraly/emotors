@@ -61,11 +61,12 @@ export class PricingProfileService {
       const profile = await tx.branchPriceProfile.create({
         data: {
           name: dto.name.trim(),
+          code: dto.profileType,
           profileType: dto.profileType,
           branchType:
             dto.profileType === BranchPriceProfileType.HQ_BRANCH
               ? BranchType.HQ_BRANCH
-              : BranchType.FRANCHISE_BRANCH,
+              : BranchType.FRANCHISE,
           defaultHqMarkupPercent: dto.defaultHqMarkupPercent ?? 0,
           status: dto.status ?? BranchPriceProfileStatus.ACTIVE,
           description: dto.description?.trim() || null,
@@ -163,7 +164,7 @@ export class PricingProfileService {
         throw new BadRequestException('HQ branches must use the HQ Branch profile');
       }
       if (
-        branch.branchType === BranchType.FRANCHISE_BRANCH &&
+        branch.branchType === BranchType.FRANCHISE &&
         profile.profileType === BranchPriceProfileType.HQ_BRANCH
       ) {
         throw new BadRequestException('Franchise branches cannot use the HQ Branch profile');

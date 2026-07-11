@@ -19,6 +19,7 @@ export default function BranchesPage() {
     search: '',
     city: '',
     status: '',
+    branchType: '',
     ownerName: '',
   });
   const [error, setError] = useState('');
@@ -29,6 +30,7 @@ export default function BranchesPage() {
     if (filters.search.trim()) params.set('search', filters.search.trim());
     if (filters.city) params.set('city', filters.city);
     if (filters.status) params.set('status', filters.status);
+    if (filters.branchType) params.set('branchType', filters.branchType);
     if (filters.ownerName.trim()) params.set('ownerName', filters.ownerName.trim());
     const value = params.toString();
     return value ? `?${value}` : '';
@@ -68,7 +70,22 @@ export default function BranchesPage() {
   }
 
   function clearFilters() {
-    setFilters({ search: '', city: '', status: '', ownerName: '' });
+    setFilters({ search: '', city: '', status: '', branchType: '', ownerName: '' });
+  }
+
+  function branchTypeLabel(branchType?: string) {
+    switch (branchType) {
+      case 'HQ_BRANCH':
+        return t('branches.branchTypeHq');
+      case 'FRANCHISE':
+        return t('branches.branchTypeFranchise');
+      case 'DEALER':
+        return t('branches.branchTypeDealer');
+      case 'DISTRIBUTOR':
+        return t('branches.branchTypeDistributor');
+      default:
+        return '—';
+    }
   }
 
   const ceoView = hasFullAccess(user);
@@ -126,8 +143,18 @@ export default function BranchesPage() {
                 <option key={status} value={status}>{translateStatus(t, status, 'branch')}</option>
               ))}
             </select>
+            <select
+              value={filters.branchType}
+              onChange={(event) => setFilters({ ...filters, branchType: event.target.value })}
+              className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+            >
+              <option value="">{t('branches.allBranchTypes')}</option>
+              <option value="HQ_BRANCH">{t('branches.branchTypeHq')}</option>
+              <option value="FRANCHISE">{t('branches.branchTypeFranchise')}</option>
+              <option value="DEALER">{t('branches.branchTypeDealer')}</option>
+              <option value="DISTRIBUTOR">{t('branches.branchTypeDistributor')}</option>
+            </select>
             <input
-              value={filters.ownerName}
               onChange={(event) => setFilters({ ...filters, ownerName: event.target.value })}
               placeholder={t('branches.ownerName')}
               className="rounded-xl border border-slate-300 px-4 py-3 outline-none ring-blue-500 focus:ring-2"
@@ -148,7 +175,8 @@ export default function BranchesPage() {
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Code</th>
+                  <th className="px-4 py-3">{t('branches.branchType')}</th>
+                  <th className="px-4 py-3">{t('branches.pricingProfile')}</th>
                   <th className="px-4 py-3">City</th>
                   <th className="px-4 py-3">Phone</th>
                   <th className="px-4 py-3">Owner</th>
@@ -169,7 +197,8 @@ export default function BranchesPage() {
                 ) : branches.map((branch) => (
                   <tr key={branch.id}>
                     <td className="px-4 py-3 font-bold">{branch.name}</td>
-                    <td className="px-4 py-3">{branch.code}</td>
+                    <td className="px-4 py-3">{branchTypeLabel(branch.branchType)}</td>
+                    <td className="px-4 py-3">{branch.priceProfile?.name ?? '—'}</td>
                     <td className="px-4 py-3">{branch.city ?? '-'}</td>
                     <td className="px-4 py-3">{branch.phone ?? '-'}</td>
                     <td className="px-4 py-3">{branch.ownerName ?? '-'}</td>

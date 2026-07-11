@@ -87,7 +87,7 @@ export default function PricingOverridesPage() {
       apiFetch<User>('/auth/me'),
     ]);
     setOverrides(overrideRows);
-    setBranches(branchRows.filter((branch) => branch.branchType === 'FRANCHISE_BRANCH'));
+    setBranches(branchRows.filter((branch) => branch.branchType === 'FRANCHISE'));
     setProducts(productRows.map((row) => ({ id: row.id, name: row.name, sku: row.sku })));
     setUser(me);
   }
@@ -97,7 +97,7 @@ export default function PricingOverridesPage() {
   }, [t, statusFilter]);
 
   const franchiseBranches = useMemo(
-    () => branches.filter((branch) => branch.branchType === 'FRANCHISE_BRANCH'),
+    () => branches.filter((branch) => branch.branchType === 'FRANCHISE'),
     [branches],
   );
 

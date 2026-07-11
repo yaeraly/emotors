@@ -24,7 +24,7 @@ export default function NewBranchPage() {
     address: '',
     phone: '',
     ownerName: '',
-    branchType: 'FRANCHISE_BRANCH' as 'HQ_BRANCH' | 'FRANCHISE_BRANCH',
+    branchType: 'FRANCHISE' as 'HQ_BRANCH' | 'FRANCHISE' | 'DEALER' | 'DISTRIBUTOR',
     assignedHqWarehouseId: '',
   });
 
@@ -111,11 +111,31 @@ export default function NewBranchPage() {
                 <input
                   type="radio"
                   name="branchType"
-                  value="FRANCHISE_BRANCH"
-                  checked={form.branchType === 'FRANCHISE_BRANCH'}
-                  onChange={() => setField('branchType', 'FRANCHISE_BRANCH')}
+                  value="FRANCHISE"
+                  checked={form.branchType === 'FRANCHISE'}
+                  onChange={() => setField('branchType', 'FRANCHISE')}
                 />
-                {t('pricing.branchTypeFranchise')}
+                {t('branches.branchTypeFranchise')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="branchType"
+                  value="DEALER"
+                  checked={form.branchType === 'DEALER'}
+                  onChange={() => setField('branchType', 'DEALER')}
+                />
+                {t('branches.branchTypeDealer')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="radio"
+                  name="branchType"
+                  value="DISTRIBUTOR"
+                  checked={form.branchType === 'DISTRIBUTOR'}
+                  onChange={() => setField('branchType', 'DISTRIBUTOR')}
+                />
+                {t('branches.branchTypeDistributor')}
               </label>
             </div>
           </label>

@@ -81,7 +81,7 @@ export default function PricingProfilesPage() {
   }, [selectedProfile, categories]);
 
   const franchiseBranches = useMemo(
-    () => branches.filter((branch) => branch.branchType === 'FRANCHISE_BRANCH'),
+    () => branches.filter((branch) => branch.branchType === 'FRANCHISE'),
     [branches],
   );
 

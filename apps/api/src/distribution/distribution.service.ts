@@ -1387,6 +1387,10 @@ export class DistributionService {
         item.productId,
         tx,
       );
+      const priceFreeze = await this.pricingResolutionService.resolveWithFreeze(
+        dto.branchId,
+        item.productId,
+      );
 
       const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
         productId: item.productId,
@@ -1438,6 +1442,16 @@ export class DistributionService {
         totalCost,
         totalPrice,
         profit: this.roundMoney(totalPrice - totalCost),
+        pricingPolicyVersionId: priceFreeze.pricingPolicyVersionId,
+        pricingProfileId: priceFreeze.pricingProfileId,
+        resolvedPriceKgs: priceFreeze.resolvedPriceKgs,
+        baseCostKgs: priceFreeze.baseCostKgs,
+        baseBranchPriceKgs: priceFreeze.baseBranchPriceKgs,
+        appliedRuleType: priceFreeze.appliedRuleType,
+        appliedRuleId: priceFreeze.appliedRuleId,
+        appliedAdjustmentMode: priceFreeze.appliedAdjustmentMode,
+        appliedAdjustmentValue: priceFreeze.appliedAdjustmentValue,
+        priceResolvedAt: priceFreeze.priceResolvedAt,
       });
     }
     const totalAmount = this.roundMoney(items.reduce((sum, item) => sum + item.totalPrice, 0));

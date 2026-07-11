@@ -48,7 +48,42 @@ enum BranchStatus {
 
 enum BranchType {
   HQ_BRANCH
-  FRANCHISE_BRANCH
+  FRANCHISE
+  DEALER
+  DISTRIBUTOR
+}
+
+enum PricingAdjustmentMode {
+  PERCENTAGE_DISCOUNT
+  FIXED_AMOUNT_DISCOUNT
+  FIXED_SELLING_PRICE
+}
+
+enum PricingRuleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PricingAppliedRuleType {
+  TEMP_OVERRIDE
+  PRODUCT_RULE
+  CATEGORY_RULE
+  BASE_FRANCHISE
+  HQ_COST
+}
+
+enum PricingChangeReasonCode {
+  COST_PRICE_INCREASED
+  COST_PRICE_DECREASED
+  CURRENCY_RATE_CHANGE
+  NEW_SUPPLIER
+  PROMOTION
+  SEASONAL_CHANGE
+  MARKET_ADJUSTMENT
+  COMPETITION
+  MANAGEMENT_DECISION
+  PARTNER_AGREEMENT
+  OTHER
 }
 
 enum BranchPriceProfileStatus {
@@ -57,9 +92,13 @@ enum BranchPriceProfileStatus {
 }
 
 enum ProductPriceOverrideStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
   ACTIVE
   EXPIRED
   CANCELLED
+  REJECTED
 }
 
 enum BranchPriceProfileType {
@@ -74,8 +113,21 @@ enum BranchPriceProfileType {
 
 enum PricingPolicyVersionStatus {
   DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SCHEDULED
   ACTIVE
   ARCHIVED
+  CANCELLED
+  REJECTED
+}
+
+enum PricingEnginePriceType {
+  BRANCH_PURCHASE
+  RETAIL_MINIMUM
+  RETAIL_RECOMMENDED
+  WHOLESALE_MINIMUM
+  WHOLESALE_RECOMMENDED
 }
 
 enum UserStatus {
@@ -741,7 +793,7 @@ model Branch {
   kpiRecommendations KpiRecommendation[]
   assignedHqWarehouseId String?
   assignedHqWarehouse   Warehouse? @relation("BranchAssignedHqWarehouse", fields: [assignedHqWarehouseId], references: [id])
-  branchType             BranchType @default(FRANCHISE_BRANCH)
+  branchType             BranchType @default(FRANCHISE)
   hqToBranchMarkupPercent Decimal @default(0) @db.Decimal(8, 2)
   hqToBranchMarkupUpdatedAt DateTime?
   priceProfileId         String?
@@ -761,8 +813,9 @@ model Branch {
 model BranchPriceProfile {
   id                      String                   @id @default(cuid())
   name                    String                   @unique
+  code                    String                   @unique
   profileType             BranchPriceProfileType   @unique
-  branchType              BranchType               @default(FRANCHISE_BRANCH)
+  branchType              BranchType               @default(FRANCHISE)
   defaultHqMarkupPercent  Decimal                  @default(0) @db.Decimal(8, 2)
   status                  BranchPriceProfileStatus   @default(ACTIVE)
   description             String?
@@ -770,6 +823,8 @@ model BranchPriceProfile {
   createdBy               User?                    @relation("BranchPriceProfileCreator", fields: [createdById], references: [id])
   branches                Branch[]
   categoryDiscounts       BranchPriceProfileCategoryDiscount[]
+  categoryRules           PricingCategoryRule[]
+  productRules            PricingProductRule[]
   createdAt               DateTime                 @default(now())
   updatedAt               DateTime                 @updatedAt
 
@@ -793,24 +848,106 @@ model BranchPriceProfileCategoryDiscount {
 }
 
 model PricingPolicyVersion {
-  id            String                     @id @default(cuid())
-  versionNumber Int                        @unique
-  label         String
-  status        PricingPolicyVersionStatus @default(DRAFT)
-  isLocked      Boolean                    @default(false)
-  publishedAt   DateTime?
-  publishedById String?
-  publishedBy   User?                      @relation("PricingPolicyVersionPublisher", fields: [publishedById], references: [id])
-  createdById   String
-  createdBy     User                       @relation("PricingPolicyVersionCreator", fields: [createdById], references: [id])
+  id                String                     @id @default(cuid())
+  versionNumber     Int                        @unique
+  label             String
+  status            PricingPolicyVersionStatus @default(DRAFT)
+  isLocked          Boolean                    @default(false)
+  changeReason      PricingChangeReasonCode?
+  changeReasonNote  String?
+  effectiveFrom     DateTime?
+  effectiveTimezone String                     @default("Asia/Bishkek")
+  effectiveUntil    DateTime?
+  publishedAt       DateTime?
+  publishedById     String?
+  publishedBy       User?                      @relation("PricingPolicyVersionPublisher", fields: [publishedById], references: [id])
+  approvedById      String?
+  approvedBy        User?                      @relation("PricingPolicyVersionApprover", fields: [approvedById], references: [id])
+  scheduledById     String?
+  scheduledBy       User?                      @relation("PricingPolicyVersionScheduler", fields: [scheduledById], references: [id])
+  scheduledAt       DateTime?
+  archivedAt        DateTime?
+  createdById       String
+  createdBy         User                       @relation("PricingPolicyVersionCreator", fields: [createdById], references: [id])
   categoryDiscountSnapshots PricingPolicyVersionCategoryDiscount[]
   productSnapshots          PricingPolicyVersionProductSnapshot[]
-  createdAt     DateTime                   @default(now())
-  updatedAt     DateTime                   @updatedAt
+  categoryRules             PricingCategoryRule[]
+  productRules              PricingProductRule[]
+  productOverrides          ProductPriceOverride[]
+  simulations               PricingSimulation[]
+  sales                     Sale[]
+  distributionOrders        BranchDistributionOrder[]
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
 
   @@index([status])
+  @@index([effectiveFrom])
   @@index([createdById])
   @@index([publishedById])
+  @@index([approvedById])
+}
+
+model PricingCategoryRule {
+  id                    String                 @id @default(cuid())
+  pricingPolicyVersionId String
+  pricingPolicyVersion  PricingPolicyVersion   @relation(fields: [pricingPolicyVersionId], references: [id], onDelete: Cascade)
+  pricingProfileId      String
+  pricingProfile        BranchPriceProfile       @relation(fields: [pricingProfileId], references: [id])
+  categoryId            String
+  category              ProductCategory          @relation(fields: [categoryId], references: [id])
+  discountPercent       Decimal                  @db.Decimal(8, 2)
+  status                PricingRuleStatus        @default(ACTIVE)
+  reason                PricingChangeReasonCode?
+  reasonNote            String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  @@unique([pricingPolicyVersionId, pricingProfileId, categoryId])
+  @@index([pricingPolicyVersionId])
+  @@index([pricingProfileId])
+  @@index([categoryId])
+  @@index([status])
+}
+
+model PricingProductRule {
+  id                    String                 @id @default(cuid())
+  pricingPolicyVersionId String
+  pricingPolicyVersion  PricingPolicyVersion   @relation(fields: [pricingPolicyVersionId], references: [id], onDelete: Cascade)
+  pricingProfileId      String
+  pricingProfile        BranchPriceProfile       @relation(fields: [pricingProfileId], references: [id])
+  productId             String
+  product               Product                  @relation(fields: [productId], references: [id])
+  adjustmentMode        PricingAdjustmentMode
+  adjustmentValue       Decimal                  @db.Decimal(14, 2)
+  status                PricingRuleStatus        @default(ACTIVE)
+  reason                PricingChangeReasonCode?
+  reasonNote            String?
+  createdById           String?
+  createdBy             User?                    @relation("PricingProductRuleCreator", fields: [createdById], references: [id])
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  @@unique([pricingPolicyVersionId, pricingProfileId, productId])
+  @@index([pricingPolicyVersionId])
+  @@index([pricingProfileId])
+  @@index([productId])
+  @@index([status])
+}
+
+model PricingSimulation {
+  id                    String               @id @default(cuid())
+  pricingPolicyVersionId String
+  pricingPolicyVersion  PricingPolicyVersion @relation(fields: [pricingPolicyVersionId], references: [id], onDelete: Cascade)
+  summary               Json
+  rows                  Json
+  validationErrors      Json?
+  createdById           String
+  createdBy             User                 @relation("PricingSimulationCreator", fields: [createdById], references: [id])
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@index([pricingPolicyVersionId])
+  @@index([createdById])
 }
 
 model PricingPolicyVersionCategoryDiscount {
@@ -850,28 +987,34 @@ model PricingPolicyVersionProductSnapshot {
 }
 
 model ProductPriceOverride {
-  id               String                     @id @default(cuid())
-  branchId         String
-  branch           Branch                     @relation(fields: [branchId], references: [id])
-  productId        String
-  product          Product                    @relation(fields: [productId], references: [id])
-  overridePriceKgs Decimal                    @db.Decimal(14, 2)
-  startDate        DateTime
-  endDate          DateTime
-  reason           String
-  status           ProductPriceOverrideStatus @default(ACTIVE)
-  createdById      String
-  createdBy        User                       @relation("ProductPriceOverrideCreator", fields: [createdById], references: [id])
-  approvedById     String?
-  approvedBy       User?                      @relation("ProductPriceOverrideApprover", fields: [approvedById], references: [id])
-  createdAt        DateTime                   @default(now())
-  updatedAt        DateTime                   @updatedAt
+  id                     String                     @id @default(cuid())
+  branchId               String
+  branch                 Branch                     @relation(fields: [branchId], references: [id])
+  productId              String
+  product                Product                    @relation(fields: [productId], references: [id])
+  pricingPolicyVersionId String?
+  pricingPolicyVersion   PricingPolicyVersion?      @relation(fields: [pricingPolicyVersionId], references: [id])
+  adjustmentMode         PricingAdjustmentMode      @default(FIXED_SELLING_PRICE)
+  adjustmentValue        Decimal                    @db.Decimal(14, 2)
+  overridePriceKgs       Decimal                    @db.Decimal(14, 2)
+  startDate              DateTime
+  endDate                DateTime
+  reason                 String
+  status                 ProductPriceOverrideStatus @default(DRAFT)
+  createdById            String
+  createdBy              User                       @relation("ProductPriceOverrideCreator", fields: [createdById], references: [id])
+  approvedById           String?
+  approvedBy             User?                      @relation("ProductPriceOverrideApprover", fields: [approvedById], references: [id])
+  approvedAt             DateTime?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
 
   @@index([branchId])
   @@index([productId])
   @@index([branchId, productId])
   @@index([status])
   @@index([startDate, endDate])
+  @@index([pricingPolicyVersionId])
 }
 
 model User {
@@ -907,6 +1050,10 @@ model User {
   productPriceOverridesApproved ProductPriceOverride[] @relation("ProductPriceOverrideApprover")
   pricingPolicyVersionsCreated PricingPolicyVersion[] @relation("PricingPolicyVersionCreator")
   pricingPolicyVersionsPublished PricingPolicyVersion[] @relation("PricingPolicyVersionPublisher")
+  pricingPolicyVersionsApproved PricingPolicyVersion[] @relation("PricingPolicyVersionApprover")
+  pricingPolicyVersionsScheduled PricingPolicyVersion[] @relation("PricingPolicyVersionScheduler")
+  pricingProductRulesCreated PricingProductRule[] @relation("PricingProductRuleCreator")
+  pricingSimulationsCreated PricingSimulation[] @relation("PricingSimulationCreator")
   kpiTargets BranchKpiTarget[] @relation("KpiTargetCreator")
   npsSurveys NpsSurvey[] @relation("NpsSurveyCreator")
   courses Course[] @relation("CourseCreator")
@@ -1145,6 +1292,8 @@ model Sale {
   customer        Customer              @relation(fields: [customerId], references: [id])
   sellerId        String
   seller          User                  @relation("SaleSeller", fields: [sellerId], references: [id])
+  pricingPolicyVersionId String?
+  pricingPolicyVersion   PricingPolicyVersion? @relation(fields: [pricingPolicyVersionId], references: [id])
   receiptNumber   String                @unique
   saleDate        DateTime              @default(now())
   totalAmount     Decimal               @default(0) @db.Decimal(14, 2)
@@ -1193,10 +1342,21 @@ model SaleItem {
   totalPrice   Decimal  @db.Decimal(14, 2)
   totalCost    Decimal  @db.Decimal(14, 2)
   profitAmount Decimal  @db.Decimal(14, 2)
+  pricingPolicyVersionId String?
+  pricingProfileId     String?
+  resolvedPriceKgs     Decimal? @db.Decimal(14, 2)
+  baseCostKgs          Decimal? @db.Decimal(14, 2)
+  baseBranchPriceKgs   Decimal? @db.Decimal(14, 2)
+  appliedRuleType      PricingAppliedRuleType?
+  appliedRuleId        String?
+  appliedAdjustmentMode PricingAdjustmentMode?
+  appliedAdjustmentValue Decimal? @db.Decimal(14, 2)
+  priceResolvedAt      DateTime?
   createdAt    DateTime @default(now())
 
   @@index([saleId])
   @@index([productId])
+  @@index([pricingPolicyVersionId])
 }
 
 model Payment {
@@ -1399,6 +1559,7 @@ model Product {
   purchasePriceHistory ProductPurchasePriceHistory[]
   pricingChangeHistory ProductPricingChangeHistory[]
   priceOverrides    ProductPriceOverride[]
+  pricingProductRules PricingProductRule[]
   fifoBatches       FifoInventoryBatch[]
   saleFifoAllocations SaleFifoAllocation[]
   distributionFifoAllocations DistributionFifoAllocation[]
@@ -1605,6 +1766,7 @@ model ProductCategory {
   createdBy   User?     @relation("ProductCategoryCreator", fields: [createdById], references: [id])
   products    Product[]
   profileCategoryDiscounts BranchPriceProfileCategoryDiscount[]
+  pricingCategoryRules PricingCategoryRule[]
   inventoryCountSessions InventoryCountSession[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -2553,6 +2715,8 @@ model BranchDistributionOrder {
   destinationWarehouseId String
   destinationWarehouse   Warehouse                     @relation("DistributionDestinationWarehouse", fields: [destinationWarehouseId], references: [id])
   status                 BranchDistributionOrderStatus @default(DRAFT)
+  pricingPolicyVersionId String?
+  pricingPolicyVersion   PricingPolicyVersion?         @relation(fields: [pricingPolicyVersionId], references: [id])
   totalAmount            Decimal                       @default(0) @db.Decimal(14, 2)
   totalCost              Decimal                       @default(0) @db.Decimal(14, 2)
   totalProfit            Decimal                       @default(0) @db.Decimal(14, 2)
@@ -2580,6 +2744,7 @@ model BranchDistributionOrder {
   @@index([status])
   @@index([createdById])
   @@index([approvedById])
+  @@index([pricingPolicyVersionId])
 }
 
 model HqWarehousePickingTask {
@@ -2617,6 +2782,16 @@ model BranchDistributionOrderItem {
   totalCost   Decimal                 @db.Decimal(14, 2)
   totalPrice  Decimal                 @db.Decimal(14, 2)
   profit      Decimal                 @db.Decimal(14, 2)
+  pricingPolicyVersionId String?
+  pricingProfileId     String?
+  resolvedPriceKgs     Decimal? @db.Decimal(14, 2)
+  baseCostKgs          Decimal? @db.Decimal(14, 2)
+  baseBranchPriceKgs   Decimal? @db.Decimal(14, 2)
+  appliedRuleType      PricingAppliedRuleType?
+  appliedRuleId        String?
+  appliedAdjustmentMode PricingAdjustmentMode?
+  appliedAdjustmentValue Decimal? @db.Decimal(14, 2)
+  priceResolvedAt      DateTime?
   goodsReceivingItems GoodsReceivingItem[]
   distributionFifoAllocations DistributionFifoAllocation[]
   createdAt   DateTime                @default(now())

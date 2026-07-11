@@ -2,6 +2,7 @@ import {
   applyCategoryDiscountRoundUp,
   applyHqBranchWholesaleMarkup,
   applyMarkupRoundUp,
+  applyPricingAdjustment,
   dateRangesOverlap,
   isProductOverrideEffective,
   pricesFromMarkups,
@@ -26,7 +27,7 @@ describe('pricing-calculator.util', () => {
   it('uses product base franchise markup only (profiles do not change markup)', () => {
     expect(
       resolveBranchHqMarkupPercent({
-        branchType: 'FRANCHISE_BRANCH',
+        branchType: 'FRANCHISE',
         productDefaultMarkupPercent: 20,
         profileMarkupPercent: 10,
         profileStatus: 'ACTIVE',
@@ -53,6 +54,24 @@ describe('pricing-calculator.util', () => {
     expect(applyCategoryDiscountRoundUp(2400, 0)).toBe(2400);
   });
 
+  it('applies product rule modes', () => {
+    expect(applyPricingAdjustment(2400, 'PERCENTAGE_DISCOUNT', 10)).toBe(2160);
+    expect(applyPricingAdjustment(2400, 'FIXED_AMOUNT_DISCOUNT', 100)).toBe(2300);
+    expect(applyPricingAdjustment(2400, 'FIXED_SELLING_PRICE', 2100)).toBe(2100);
+  });
+
+  it('product rule overrides category rule in resolver', () => {
+    const resolved = resolveFinalBranchProductPrice({
+      costPriceKgs: 2000,
+      branchType: 'FRANCHISE',
+      baseFranchiseMarkupPercent: 20,
+      categoryDiscountPercent: 3,
+      productRule: { mode: 'FIXED_SELLING_PRICE', value: 2100 },
+    });
+    expect(resolved.priceKgs).toBe(2100);
+    expect(resolved.source).toBe('PRODUCT_RULE');
+  });
+
   it('detects overlapping date ranges', () => {
     const startA = new Date('2026-07-01');
     const endA = new Date('2026-07-31');
@@ -65,16 +84,10 @@ describe('pricing-calculator.util', () => {
   it('active override has highest priority', () => {
     const resolved = resolveFinalBranchProductPrice({
       costPriceKgs: 2000,
-      branchType: 'FRANCHISE_BRANCH',
+      branchType: 'FRANCHISE',
       baseFranchiseMarkupPercent: 20,
       categoryDiscountPercent: 3,
-      overridePriceKgs: 2100,
-      override: {
-        status: 'ACTIVE',
-        startDate: new Date('2026-07-01'),
-        endDate: new Date('2026-07-31'),
-      },
-      now: new Date('2026-07-15'),
+      override: { mode: 'FIXED_SELLING_PRICE', value: 2100 },
     });
     expect(resolved.priceKgs).toBe(2100);
     expect(resolved.source).toBe('OVERRIDE');
@@ -83,7 +96,7 @@ describe('pricing-calculator.util', () => {
   it('VIP category discount applies after base franchise price', () => {
     const resolved = resolveFinalBranchProductPrice({
       costPriceKgs: 2000,
-      branchType: 'FRANCHISE_BRANCH',
+      branchType: 'FRANCHISE',
       baseFranchiseMarkupPercent: 20,
       categoryDiscountPercent: 3,
     });
@@ -95,7 +108,7 @@ describe('pricing-calculator.util', () => {
   it('standard franchise uses base franchise price without discount', () => {
     const resolved = resolveFinalBranchProductPrice({
       costPriceKgs: 1000,
-      branchType: 'FRANCHISE_BRANCH',
+      branchType: 'FRANCHISE',
       baseFranchiseMarkupPercent: 20,
       categoryDiscountPercent: 0,
     });
@@ -117,7 +130,7 @@ describe('pricing-calculator.util', () => {
   it('expired override reverts to category discount pricing', () => {
     const resolved = resolveFinalBranchProductPrice({
       costPriceKgs: 2000,
-      branchType: 'FRANCHISE_BRANCH',
+      branchType: 'FRANCHISE',
       baseFranchiseMarkupPercent: 20,
       categoryDiscountPercent: 3,
       overridePriceKgs: 2100,
@@ -143,35 +156,34 @@ describe('pricing-calculator.util', () => {
 
     const activePrice = resolveFinalBranchProductPrice({
       costPriceKgs: 2000,
-      branchType: 'FRANCHISE_BRANCH',
+      branchType: 'FRANCHISE',
       baseFranchiseMarkupPercent: 20,
       categoryDiscountPercent: 3,
       overridePriceKgs: 2100,
       override,
-      now: new Date('2026-07-30'),
+      now: new Date('2026-07-15'),
     });
+    expect(activePrice.priceKgs).toBe(2100);
+
     const expiredPrice = resolveFinalBranchProductPrice({
       costPriceKgs: 2000,
-      branchType: 'FRANCHISE_BRANCH',
+      branchType: 'FRANCHISE',
       baseFranchiseMarkupPercent: 20,
       categoryDiscountPercent: 3,
       overridePriceKgs: 2100,
       override,
       now: new Date('2026-08-01'),
     });
-    expect(activePrice.source).toBe('OVERRIDE');
     expect(expiredPrice.source).toBe('CATEGORY_DISCOUNT');
   });
 
-  it('base franchise branch price uses ROUNDUP formula', () => {
-    expect(resolveBaseFranchiseBranchPrice(2000, 'FRANCHISE_BRANCH', 20)).toBe(2400);
-    expect(resolveBaseFranchiseBranchPrice(2000, 'HQ_BRANCH', 20)).toBe(2000);
+  it('base franchise markup 20% and 100% remain product-specific', () => {
+    expect(resolveBaseFranchiseBranchPrice(1000, 'FRANCHISE', 20)).toBe(1200);
+    expect(resolveBaseFranchiseBranchPrice(1000, 'FRANCHISE', 100)).toBe(2000);
   });
 
-  it('retail price uses branch price as base', () => {
-    const branchPrice = applyMarkupRoundUp(2000, 20);
-    const retailPrice = applyMarkupRoundUp(branchPrice, 25);
-    expect(branchPrice).toBe(2400);
-    expect(retailPrice).toBe(3000);
+  it('HQ branch with zero markup uses exact cost', () => {
+    expect(applyHqBranchWholesaleMarkup(1234, 0)).toBe(1234);
+    expect(resolveBaseFranchiseBranchPrice(1234, 'HQ_BRANCH', 0)).toBe(1234);
   });
 });

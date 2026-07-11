@@ -2,11 +2,17 @@ export function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+/** Google Sheets style: ROUNDUP(value, -1) → nearest 10 */
+export function roundUpToTens(value: number) {
+  if (value <= 0) return 0;
+  return Math.ceil(value / 10) * 10;
+}
+
 /** Google Sheets style: ROUNDUP(cost * markup% + cost, -1) → nearest 10 */
 export function applyMarkupRoundUp(costPrice: number, markupPercent: number) {
   if (costPrice <= 0) return 0;
   const raw = costPrice * (markupPercent / 100) + costPrice;
-  return Math.ceil(raw / 10) * 10;
+  return roundUpToTens(raw);
 }
 
 /** HQ wholesale: when markup is 0, return exact cost without ROUNDUP. */
@@ -25,9 +31,16 @@ export function deriveMarkupPercent(costPrice: number, sellingPrice: number) {
   return roundMoney(((sellingPrice - costPrice) / costPrice) * 100);
 }
 
+export type BranchTypeForPricing = 'HQ_BRANCH' | 'FRANCHISE' | 'DEALER' | 'DISTRIBUTOR';
+
+export type PricingAdjustmentMode =
+  | 'PERCENTAGE_DISCOUNT'
+  | 'FIXED_AMOUNT_DISCOUNT'
+  | 'FIXED_SELLING_PRICE';
+
 export function resolveHqToBranchPrice(
   costPriceKgs: number,
-  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH',
+  branchType: BranchTypeForPricing,
   markupPercent: number,
 ) {
   if (branchType === 'HQ_BRANCH') return roundMoney(costPriceKgs);
@@ -35,7 +48,7 @@ export function resolveHqToBranchPrice(
 }
 
 export function resolveBranchHqMarkupPercent(input: {
-  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
+  branchType: BranchTypeForPricing;
   productDefaultMarkupPercent: number;
   profileMarkupPercent?: number | null;
   profileStatus?: 'ACTIVE' | 'INACTIVE' | null;
@@ -46,14 +59,38 @@ export function resolveBranchHqMarkupPercent(input: {
 
 export function resolveBranchPurchasePrice(
   costPriceKgs: number,
-  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH',
+  branchType: BranchTypeForPricing,
   markupPercent: number,
 ) {
   return resolveHqToBranchPrice(costPriceKgs, branchType, markupPercent);
 }
 
+export function calculateBaseBranchPriceKgs(input: {
+  costPriceKgs: number;
+  markupPercent: number;
+  branchType: BranchTypeForPricing;
+}) {
+  return resolveBaseFranchiseBranchPrice(
+    input.costPriceKgs,
+    input.branchType,
+    input.markupPercent,
+  );
+}
+
+export function calculateRetailPriceKgs(effectiveBranchPriceKgs: number, retailMarkupPercent: number) {
+  return applyMarkupRoundUp(effectiveBranchPriceKgs, retailMarkupPercent);
+}
+
+export function calculateWholesalePriceKgs(
+  effectiveBranchPriceKgs: number,
+  wholesaleMarkupPercent: number,
+) {
+  return applyMarkupRoundUp(effectiveBranchPriceKgs, wholesaleMarkupPercent);
+}
+
 export type BranchProductPriceSource =
   | 'OVERRIDE'
+  | 'PRODUCT_RULE'
   | 'CATEGORY_DISCOUNT'
   | 'BASE_FRANCHISE'
   | 'HQ_COST';
@@ -63,12 +100,44 @@ export function applyCategoryDiscountRoundUp(branchPriceKgs: number, discountPer
   if (branchPriceKgs <= 0) return 0;
   if (discountPercent <= 0) return branchPriceKgs;
   const raw = branchPriceKgs * (1 - discountPercent / 100);
-  return Math.ceil(raw / 10) * 10;
+  return roundUpToTens(raw);
+}
+
+export const applyCategoryDiscount = applyCategoryDiscountRoundUp;
+
+export function applyPricingAdjustment(
+  baseBranchPriceKgs: number,
+  mode: PricingAdjustmentMode,
+  adjustmentValue: number,
+): number {
+  if (adjustmentValue < 0) {
+    throw new Error('adjustmentValue cannot be negative');
+  }
+
+  let result: number;
+  switch (mode) {
+    case 'PERCENTAGE_DISCOUNT':
+      result = applyCategoryDiscountRoundUp(baseBranchPriceKgs, adjustmentValue);
+      break;
+    case 'FIXED_AMOUNT_DISCOUNT':
+      result = roundUpToTens(baseBranchPriceKgs - adjustmentValue);
+      break;
+    case 'FIXED_SELLING_PRICE':
+      result = adjustmentValue;
+      break;
+    default:
+      throw new Error(`Unknown adjustment mode: ${mode}`);
+  }
+
+  if (result < 0) {
+    throw new Error('Resulting price cannot be negative');
+  }
+  return result;
 }
 
 export function resolveBaseFranchiseBranchPrice(
   costPriceKgs: number,
-  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH',
+  branchType: BranchTypeForPricing,
   baseFranchiseMarkupPercent: number,
 ) {
   if (branchType === 'HQ_BRANCH') return roundMoney(costPriceKgs);
@@ -79,7 +148,7 @@ export function isProductOverrideEffective(
   override: { status: string; startDate: Date; endDate: Date },
   now: Date = new Date(),
 ) {
-  if (override.status !== 'ACTIVE') return false;
+  if (override.status !== 'ACTIVE' && override.status !== 'APPROVED') return false;
   return override.startDate.getTime() <= now.getTime() && now.getTime() <= override.endDate.getTime();
 }
 
@@ -89,27 +158,33 @@ export function dateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: 
 
 export function resolveFinalBranchProductPrice(input: {
   costPriceKgs: number;
-  branchType: 'HQ_BRANCH' | 'FRANCHISE_BRANCH';
+  branchType: BranchTypeForPricing;
   baseFranchiseMarkupPercent: number;
   categoryDiscountPercent?: number | null;
+  productRule?: { mode: PricingAdjustmentMode; value: number } | null;
   overridePriceKgs?: number | null;
-  override?: { status: string; startDate: Date; endDate: Date } | null;
+  override?: { mode: PricingAdjustmentMode; value: number } | { status: string; startDate: Date; endDate: Date } | null;
   now?: Date;
 }): { priceKgs: number; source: BranchProductPriceSource; baseFranchisePriceKgs: number } {
-  const override = input.override;
-  if (
-    override &&
-    isProductOverrideEffective(override, input.now) &&
-    input.overridePriceKgs != null &&
-    input.overridePriceKgs >= 0
-  ) {
-    const baseFranchisePriceKgs = resolveBaseFranchiseBranchPrice(
-      input.costPriceKgs,
-      input.branchType,
-      input.baseFranchiseMarkupPercent,
-    );
+  const baseFranchisePriceKgs = resolveBaseFranchiseBranchPrice(
+    input.costPriceKgs,
+    input.branchType,
+    input.baseFranchiseMarkupPercent,
+  );
+
+  const modeOverride =
+    input.override && 'mode' in input.override
+      ? input.override
+      : input.overridePriceKgs != null &&
+          input.override &&
+          'status' in input.override &&
+          isProductOverrideEffective(input.override, input.now)
+        ? { mode: 'FIXED_SELLING_PRICE' as const, value: input.overridePriceKgs }
+        : null;
+
+  if (modeOverride) {
     return {
-      priceKgs: roundMoney(input.overridePriceKgs),
+      priceKgs: applyPricingAdjustment(baseFranchisePriceKgs, modeOverride.mode, modeOverride.value),
       source: 'OVERRIDE',
       baseFranchisePriceKgs,
     };
@@ -123,11 +198,18 @@ export function resolveFinalBranchProductPrice(input: {
     };
   }
 
-  const baseFranchisePriceKgs = resolveBaseFranchiseBranchPrice(
-    input.costPriceKgs,
-    input.branchType,
-    input.baseFranchiseMarkupPercent,
-  );
+  if (input.productRule) {
+    return {
+      priceKgs: applyPricingAdjustment(
+        baseFranchisePriceKgs,
+        input.productRule.mode,
+        input.productRule.value,
+      ),
+      source: 'PRODUCT_RULE',
+      baseFranchisePriceKgs,
+    };
+  }
+
   const discountPercent = Math.max(0, input.categoryDiscountPercent ?? 0);
   if (discountPercent > 0) {
     return {
