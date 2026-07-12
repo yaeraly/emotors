@@ -183,7 +183,7 @@ export class BranchesService {
     return updated;
   }
 
-  async delete(id: string) {
+  async delete(user: AuthUser, id: string) {
     const branch = await this.prisma.branch.findFirst({
       where: { id, deletedAt: null },
     });
@@ -206,6 +206,7 @@ export class BranchesService {
     ]);
     const hasRelatedData =
       users + customers + sales + products + stockMovements + warehouses > 0;
+    const previousStatus = branch.status;
 
     await this.prisma.branch.update({
       where: { id },
@@ -215,12 +216,33 @@ export class BranchesService {
       },
     });
 
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'BRANCH_DELETED',
+        entity: 'Branch',
+        entityId: id,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          branchId: id,
+          branchName: branch.name,
+          deletionType: 'soft_delete',
+          previousStatus,
+          newStatus: BranchStatus.INACTIVE,
+          hasRelatedData,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
     return {
       success: true,
-      message: hasRelatedData
-        ? 'Branch deactivated because it has related data.'
-        : 'Branch deactivated successfully',
+      deletedBranchId: id,
+      message: 'Филиал успешно удалён',
       deactivated: true,
+      hasRelatedData,
     };
   }
 

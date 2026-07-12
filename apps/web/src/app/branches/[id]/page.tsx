@@ -155,14 +155,18 @@ export default function BranchDetailPage() {
         throw new Error(t('branches.deleteFailed'));
       }
 
-      const result = (await response.json()) as { deactivated?: boolean };
-      if (result.deactivated) {
-        setSuccess(t('branches.deactivated'));
-        await load();
-        return;
+      const result = (await response.json()) as {
+        success?: boolean;
+        deletedBranchId?: string;
+        message?: string;
+      };
+
+      if (!result.success) {
+        throw new Error(t('branches.deleteFailed'));
       }
 
-      router.push('/branches');
+      window.localStorage.setItem('emotors-branch-deleted', t('branches.deletedSuccess'));
+      router.replace('/branches');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('branches.deleteFailed'));
     } finally {

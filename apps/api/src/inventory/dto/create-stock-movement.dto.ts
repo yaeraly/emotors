@@ -32,6 +32,12 @@ export class CreateStockMovementDto {
   unitCostKgs?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  totalCostKgs?: number;
+
+  @IsOptional()
   @IsString()
   note?: string;
 

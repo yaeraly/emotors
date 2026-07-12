@@ -2,6 +2,7 @@ import {
   allocateExpenseAmount,
   buildAllocationTotals,
   DEFAULT_EXPENSE_ALLOCATION,
+  distributeRoundedAmounts,
   ExpenseAllocationKey,
   ExpenseAllocationMethod,
   hasPendingWeightForExpense,
@@ -278,8 +279,9 @@ export function calculateLandedCosts(
   for (const key of Object.keys(expenseAllocations) as ExpenseAllocationKey[]) {
     const amount = Number(resolvedLogistics[key] ?? 0);
     const method = allocationMethods[key] ?? DEFAULT_EXPENSE_ALLOCATION[key];
-    expenseAllocations[key] = allocationLines.map((line) =>
-      allocateExpenseAmount(method, amount, line, allocationTotals),
+    expenseAllocations[key] = distributeRoundedAmounts(
+      allocationLines.map((line) => allocateExpenseAmount(method, amount, line, allocationTotals)),
+      amount,
     );
   }
 
@@ -302,11 +304,14 @@ export function calculateLandedCosts(
         bankFeeAllocKgs +
         otherAllocKgs,
     );
-    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 1;
-    const transportCostKgs = roundMoney(totalLineLogistics / effectiveQty);
-    const finalCostKgs = roundMoney(item.costKgs + transportCostKgs);
+    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const transportCostKgs =
+      effectiveQty > 0 ? totalLineLogistics / effectiveQty : 0;
+    const finalCostKgs =
+      effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs) : 0;
     const totalYuan = roundMoney(item.quantity * Number(item.purchasePriceYuan || 0));
-    const totalCostKgs = roundMoney(finalCostKgs * effectiveQty);
+    const totalCostKgs =
+      effectiveQty > 0 ? roundMoney(totalLineLogistics + item.basePurchaseCostKgs) : 0;
 
     return {
       ...item,
@@ -318,9 +323,31 @@ export function calculateLandedCosts(
       insuranceAllocKgs,
       bankFeeAllocKgs,
       otherAllocKgs,
-      transportCostKgs,
+      transportCostKgs: effectiveQty > 0 ? roundMoney(transportCostKgs) : 0,
       finalCostKgs,
       totalYuan,
+      totalCostKgs,
+    };
+  });
+
+  const rawLineTotals = calculatedItems.map((item) => item.totalCostKgs);
+  const reconciledLineTotals = distributeRoundedAmounts(
+    rawLineTotals,
+    roundMoney(rawLineTotals.reduce((sum, amount) => sum + amount, 0)),
+  );
+  const reconciledItems = calculatedItems.map((item, index) => {
+    const totalCostKgs = reconciledLineTotals[index];
+    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const transportCostKgs =
+      effectiveQty > 0
+        ? roundMoney(totalCostKgs - item.basePurchaseCostKgs)
+        : 0;
+    const finalCostKgs =
+      effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs / effectiveQty) : 0;
+    return {
+      ...item,
+      transportCostKgs: effectiveQty > 0 ? roundMoney(transportCostKgs / effectiveQty) : 0,
+      finalCostKgs,
       totalCostKgs,
     };
   });
@@ -336,7 +363,7 @@ export function calculateLandedCosts(
       Number(resolvedLogistics.otherExpenseKgs || 0),
   );
   const costPerKg = allocationBaseWeight > 0 ? roundRate(totalLogisticsCost / allocationBaseWeight) : 0;
-  const totalCostKgs = roundMoney(calculatedItems.reduce((sum, item) => sum + item.totalCostKgs, 0));
+  const totalCostKgs = roundMoney(reconciledItems.reduce((sum, item) => sum + item.totalCostKgs, 0));
   const isProvisional = pendingWeight;
   const landedCostStatus: LandedCostOrderResult['landedCostStatus'] = pendingWeight
     ? 'PENDING_WEIGHT'
@@ -345,8 +372,8 @@ export function calculateLandedCosts(
       : 'READY_TO_CALCULATE';
 
   return {
-    items: calculatedItems,
-    totalYuan: roundMoney(calculatedItems.reduce((sum, item) => sum + item.totalYuan, 0)),
+    items: reconciledItems,
+    totalYuan: roundMoney(reconciledItems.reduce((sum, item) => sum + item.totalYuan, 0)),
     totalTransportCostKgs: totalLogisticsCost,
     totalCostKgs,
     totalNetWeightKg,

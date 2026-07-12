@@ -40,8 +40,8 @@ export class BranchesController {
 
   @Delete(':id')
   @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_DIRECTOR)
-  delete(@Param('id') id: string) {
-    return this.branchesService.delete(id);
+  delete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.branchesService.delete(user, id);
   }
 
   @Put(':id/assigned-hq-warehouse')

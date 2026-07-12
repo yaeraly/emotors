@@ -1604,17 +1604,30 @@ export class InventoryService {
       throw new BadRequestException('Negative stock is not allowed');
     }
 
-    const unitCostKgs = dto.unitCostKgs ?? Number(product.finalCostKgs);
-    const totalCostKgs = this.roundMoney(Math.abs(dto.quantity) * unitCostKgs);
+    const quantityAbs = Math.abs(dto.quantity);
+    let totalCostKgs: number;
+    let unitCostKgs: number;
+
+    if (dto.totalCostKgs !== undefined) {
+      totalCostKgs = this.roundMoney(dto.totalCostKgs);
+      unitCostKgs = quantityAbs > 0 ? totalCostKgs / quantityAbs : 0;
+    } else {
+      unitCostKgs = dto.unitCostKgs ?? Number(product.finalCostKgs);
+      totalCostKgs = this.roundMoney(quantityAbs * unitCostKgs);
+    }
+
+    const currentTotalValue = Number(current?.totalValueKgs ?? 0);
     const nextAverageCost =
       quantityDelta > 0
         ? this.roundMoney(
-            ((currentQuantity * Number(current?.averageCostKgs ?? 0)) +
-              quantityDelta * unitCostKgs) /
+            (currentQuantity * Number(current?.averageCostKgs ?? 0) + totalCostKgs) /
               Math.max(currentQuantity + quantityDelta, 1),
           )
         : Number(current?.averageCostKgs ?? product.finalCostKgs);
-    const nextTotalValue = this.roundMoney(nextQuantity * nextAverageCost);
+    const nextTotalValue =
+      quantityDelta > 0
+        ? this.roundMoney(currentTotalValue + totalCostKgs)
+        : this.roundMoney(nextQuantity * nextAverageCost);
 
     const movement = await tx.stockMovement.create({
       data: {

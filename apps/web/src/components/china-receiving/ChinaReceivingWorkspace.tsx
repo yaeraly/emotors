@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { EntityCombobox } from '@/components/EntityCombobox';
+import { PopupFilterButton } from '@/components/PopupFilterButton';
 import { apiFetch, API_URL } from '@/lib/api';
 import { canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -418,13 +418,16 @@ function ChinaReceivingEditableView({
 
   const statusFilterOptions = useMemo(
     () => [
-      { value: 'all', label: t('chinaReceiving.verificationStatus.all') },
+      { value: 'all', label: t('chinaReceiving.verificationStatus.allStatuses') },
       { value: 'unchecked', label: t('chinaReceiving.verificationStatus.unchecked') },
       { value: 'checked', label: t('chinaReceiving.verificationStatus.checked') },
       { value: 'discrepancy', label: t('chinaReceiving.verificationStatus.discrepancy') },
     ],
     [t],
   );
+
+  const hasActiveFilters =
+    filters.categoryId !== ALL_CATEGORIES || filters.search.trim().length > 0 || filters.status !== 'all';
 
   const showSaveToast = useCallback(() => {
     setSaveToast(t('chinaReceiving.savedToast'));
@@ -585,15 +588,26 @@ function ChinaReceivingEditableView({
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <EntityCombobox
+        <div className="flex flex-wrap items-end gap-3">
+          <PopupFilterButton
             label={t('chinaReceiving.filterCategory')}
             value={filters.categoryId}
             options={categoryOptions}
+            allValue={ALL_CATEGORIES}
+            allLabel={t('chinaReceiving.category.all')}
             onChange={(value) => updateFilters({ categoryId: value })}
-            allowClear={false}
+            formatActiveLabel={(label, selectedLabel) => `${label}: ${selectedLabel}`}
           />
-          <label className="block">
+          <PopupFilterButton
+            label={t('chinaReceiving.verificationStatus.label')}
+            value={filters.status}
+            options={statusFilterOptions}
+            allValue="all"
+            allLabel={t('chinaReceiving.verificationStatus.allStatuses')}
+            onChange={(value) => updateFilters({ status: value as VerificationFilterStatus })}
+            formatActiveLabel={(label, selectedLabel) => `${label}: ${selectedLabel}`}
+          />
+          <label className="block min-w-[12rem] flex-1">
             <span className="text-sm font-semibold text-slate-700">{t('chinaReceiving.searchProduct')}</span>
             <input
               type="search"
@@ -603,22 +617,8 @@ function ChinaReceivingEditableView({
               className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
             />
           </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">{t('chinaReceiving.verificationStatus.label')}</span>
-            <select
-              value={filters.status}
-              onChange={(e) => updateFilters({ status: e.target.value as VerificationFilterStatus })}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-            >
-              {statusFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
-        {filters.categoryId !== ALL_CATEGORIES || filters.search || filters.status !== 'all' ? (
+        {hasActiveFilters ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
             <span>
               {t('chinaReceiving.filteredCount')
@@ -630,7 +630,7 @@ function ChinaReceivingEditableView({
               onClick={() => updateFilters({ categoryId: ALL_CATEGORIES, search: '', status: 'all' })}
               className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold"
             >
-              {t('chinaReceiving.clearFilters')}
+              {t('common.reset')}
             </button>
           </div>
         ) : null}

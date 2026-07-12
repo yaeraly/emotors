@@ -1230,6 +1230,9 @@ export class OperationsService {
         cargo,
       );
       const batchDiscrepancyActIds: string[] = [];
+      let allocatedInventoryValueKgs = 0;
+      let receivedLineCount = 0;
+      let inventoryBatchCount = 0;
 
       for (const [index, item] of receivedItems.entries()) {
         const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
@@ -1294,17 +1297,20 @@ export class OperationsService {
           },
         });
         if (item.receivedQuantity > 0) {
-          const unitCostKgs = item.snapshotUnitLandedCostKgs ?? next.finalCostKgs;
+          receivedLineCount += 1;
+          const allocatedLineLandedCostKgs = next.totalCostKgs;
+          allocatedInventoryValueKgs += allocatedLineLandedCostKgs;
           const movement = await this.inventoryService.createStockMovementInTx(tx, user, {
             productId: item.productId,
             warehouseId: hqWarehouseId,
             type: StockMovementType.IN,
             quantity: item.receivedQuantity,
-            unitCostKgs,
+            totalCostKgs: allocatedLineLandedCostKgs,
             referenceType: 'PROCUREMENT_GOODS_RECEIVING',
             referenceId: receiving.id,
             note: `Procurement receiving ${receiving.receivingNumber}`,
           });
+          inventoryBatchCount += 1;
           await this.auditInTx(tx, user, 'HQ', 'STOCK_MOVEMENT_CREATED', 'StockMovement', movement.id, {
             userId: user.id,
             roles: user.roles ?? [user.role],
@@ -1375,6 +1381,19 @@ export class OperationsService {
         batchDiscrepancyActIds.push(...lineActs.map((act) => act.id));
       }
 
+      const confirmedFullLandedCostKgs =
+        Math.round((recalculated.totalCostKgs + Number.EPSILON) * 100) / 100;
+      const allocatedInventoryValueRounded =
+        Math.round((allocatedInventoryValueKgs + Number.EPSILON) * 100) / 100;
+      const differenceKgs =
+        Math.round((allocatedInventoryValueRounded - confirmedFullLandedCostKgs + Number.EPSILON) * 100) /
+        100;
+      if (differenceKgs !== 0) {
+        throw new BadRequestException(
+          `Стоимость принятого товара не совпадает с подтверждённой полной себестоимостью. Разница: ${differenceKgs.toFixed(2)} сом`,
+        );
+      }
+
       if (batchDiscrepancyActIds.length > 0) {
         await this.auditInTx(
           tx,
@@ -1432,6 +1451,11 @@ export class OperationsService {
         procurementOrderId: order.id,
         hqWarehouseId,
         recalculatedLandedCost: true,
+        confirmedFullLandedCostKgs,
+        allocatedInventoryValueKgs: allocatedInventoryValueRounded,
+        differenceKgs,
+        receivedLineCount,
+        inventoryBatchCount,
         reason: dto.reason,
       });
       await this.auditInTx(tx, user, 'HQ', 'HQ_RECEIVING_COMPLETED', 'ProcurementOrder', order.id, {

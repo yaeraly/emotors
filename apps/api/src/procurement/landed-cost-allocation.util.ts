@@ -52,17 +52,34 @@ export function allocateExpenseAmount(
   switch (method) {
     case 'BY_WEIGHT':
       if (!line.hasKnownWeight || totals.totalWeight <= 0 || line.lineShipmentWeightKg <= 0) return 0;
-      return roundMoney((totalCost * line.lineShipmentWeightKg) / totals.totalWeight);
+      return (totalCost * line.lineShipmentWeightKg) / totals.totalWeight;
     case 'BY_QUANTITY':
       if (totals.totalQuantity <= 0 || line.effectiveQuantity <= 0) return 0;
-      return roundMoney((totalCost * line.effectiveQuantity) / totals.totalQuantity);
+      return (totalCost * line.effectiveQuantity) / totals.totalQuantity;
     case 'BY_PURCHASE_VALUE':
       if (totals.totalPurchaseValue <= 0 || line.basePurchaseCostKgs <= 0) return 0;
-      return roundMoney((totalCost * line.basePurchaseCostKgs) / totals.totalPurchaseValue);
+      return (totalCost * line.basePurchaseCostKgs) / totals.totalPurchaseValue;
     case 'MANUAL':
     default:
       return 0;
   }
+}
+
+export function distributeRoundedAmounts(rawAmounts: number[], targetTotal: number): number[] {
+  if (rawAmounts.length === 0) return [];
+  const rounded = rawAmounts.map((amount) => roundMoney(amount));
+  const sum = roundMoney(rounded.reduce((total, amount) => total + amount, 0));
+  const remainder = roundMoney(targetTotal - sum);
+  if (remainder === 0) return rounded;
+
+  for (let index = rounded.length - 1; index >= 0; index -= 1) {
+    if (rawAmounts[index] > 0 || rounded[index] > 0) {
+      rounded[index] = roundMoney(rounded[index] + remainder);
+      break;
+    }
+  }
+
+  return rounded;
 }
 
 export function buildAllocationTotals(lines: AllocationLineContext[]): AllocationTotals {

@@ -51,6 +51,12 @@ export default function BranchesPage() {
       void loadBranches();
       router.refresh();
     }
+    const deletedMessage = window.localStorage.getItem('emotors-branch-deleted');
+    if (deletedMessage) {
+      window.localStorage.removeItem('emotors-branch-deleted');
+      setSuccess(deletedMessage);
+      void loadBranches();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, t, query]);
 
