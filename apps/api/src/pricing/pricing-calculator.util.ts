@@ -1,17 +1,27 @@
+import { Prisma } from '@prisma/client';
+
 export function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-/** Google Sheets style: ROUNDUP(value, -1) → nearest 10 */
-export function roundUpToTens(value: number) {
-  if (value <= 0) return 0;
-  return Math.ceil(value / 10) * 10;
+function toDecimal(value: number | Prisma.Decimal) {
+  return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
 }
 
-/** Google Sheets style: ROUNDUP(cost * markup% + cost, -1) → nearest 10 */
+/** Google Sheets style: ROUNDUP(value, -1) → nearest 10 KGS */
+export function roundUpToTens(value: number | Prisma.Decimal) {
+  const decimal = toDecimal(value);
+  if (decimal.lte(0)) return 0;
+  return decimal.div(10).ceil().mul(10).toNumber();
+}
+
+/** Google Sheets style: ROUNDUP(cost * markup% + cost, -1) → nearest 10 KGS */
 export function applyMarkupRoundUp(costPrice: number, markupPercent: number) {
   if (costPrice <= 0) return 0;
-  const raw = costPrice * (markupPercent / 100) + costPrice;
+  if (!Number.isFinite(markupPercent)) return 0;
+  const base = new Prisma.Decimal(costPrice);
+  const markupRate = new Prisma.Decimal(markupPercent).div(100);
+  const raw = base.mul(markupRate).plus(base);
   return roundUpToTens(raw);
 }
 

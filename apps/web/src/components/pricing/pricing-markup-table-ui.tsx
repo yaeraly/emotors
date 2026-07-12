@@ -21,9 +21,27 @@ export const markupTable = {
   tdUpdated: 'px-1 py-1.5 align-middle text-center text-[10px] text-slate-500 whitespace-nowrap',
   tdActions: 'px-1 py-1.5 align-middle text-center',
   input:
-    'w-[3.25rem] max-w-full rounded border border-slate-300 px-1 py-0.5 text-xs text-center tabular-nums disabled:bg-slate-50',
+    'w-[3.25rem] max-w-full rounded border px-1 py-0.5 text-xs text-center tabular-nums disabled:bg-slate-50',
   productName: 'truncate font-semibold text-slate-900',
   productSku: 'truncate text-[10px] text-slate-500',
+} as const;
+
+export const markupGroup = {
+  min: {
+    cell: 'bg-amber-50/90',
+    input: 'border-amber-200 bg-amber-50/50 focus:border-amber-400 focus:ring-1 focus:ring-amber-100',
+    price: 'bg-amber-50/90 text-amber-950',
+  },
+  rec: {
+    cell: 'bg-emerald-50/90',
+    input: 'border-emerald-200 bg-emerald-50/50 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-100',
+    price: 'bg-emerald-50/90 text-emerald-950',
+  },
+  max: {
+    cell: 'bg-rose-50/90',
+    input: 'border-rose-200 bg-rose-50/50 focus:border-rose-400 focus:ring-1 focus:ring-rose-100',
+    price: 'bg-rose-50/90 text-rose-950',
+  },
 } as const;
 
 export function CompactHeaderCell({
@@ -91,11 +109,6 @@ export function MarkupTableHeaders() {
         label={t('pricing.compactCol.maxPrice')}
         tooltip={t('pricing.tooltip.maxPrice')}
         className={markupTable.thMoney}
-      />
-      <CompactHeaderCell
-        label={t('pricing.compactCol.updated')}
-        tooltip={t('pricing.tooltip.updated')}
-        className={markupTable.thUpdated}
       />
       <CompactHeaderCell
         label={t('pricing.compactCol.actions')}

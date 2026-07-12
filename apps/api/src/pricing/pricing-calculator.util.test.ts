@@ -11,6 +11,7 @@ import {
   resolveBranchPurchasePrice,
   resolveFinalBranchProductPrice,
   resolveHqToBranchPrice,
+  roundUpToTens,
   validateSellingPriceLimits,
 } from './pricing-calculator.util';
 
@@ -23,6 +24,16 @@ describe('pricing-calculator.util', () => {
   it('applies franchise markup with ROUNDUP to nearest 10', () => {
     expect(applyHqBranchWholesaleMarkup(1000, 15)).toBe(1160);
     expect(applyHqBranchWholesaleMarkup(1000, 0)).toBe(1000);
+    expect(applyMarkupRoundUp(1000, 20)).toBe(1200);
+    expect(applyMarkupRoundUp(1000, 35)).toBe(1350);
+    expect(applyMarkupRoundUp(1000, 50)).toBe(1500);
+  });
+
+  it('rounds raw totals up to nearest 10 KGS', () => {
+    expect(roundUpToTens(1201)).toBe(1210);
+    expect(roundUpToTens(1210)).toBe(1210);
+    expect(roundUpToTens(1211)).toBe(1220);
+    expect(roundUpToTens(1250.01)).toBe(1260);
   });
 
   it('uses product base franchise markup only (profiles do not change markup)', () => {

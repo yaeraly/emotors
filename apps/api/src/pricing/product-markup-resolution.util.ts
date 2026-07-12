@@ -8,14 +8,20 @@ import {
 } from './pricing-policy-resolution.util';
 
 export const MARKUP_VALIDATION_MESSAGES = {
-  MIN_NEGATIVE: 'Минимальная наценка не может быть отрицательной',
-  RECOMMENDED_NEGATIVE: 'Рекомендуемая наценка не может быть отрицательной',
-  MAX_NEGATIVE: 'Максимальная наценка не может быть отрицательной',
+  MIN_NEGATIVE: 'Наценка не может быть отрицательной',
+  RECOMMENDED_NEGATIVE: 'Наценка не может быть отрицательной',
+  MAX_NEGATIVE: 'Наценка не может быть отрицательной',
+  INVALID_MARKUP: 'Введите корректное значение наценки',
   RECOMMENDED_BELOW_MIN: 'Рекомендуемая наценка не может быть меньше минимальной',
   MAX_BELOW_RECOMMENDED: 'Максимальная наценка не может быть меньше рекомендуемой',
+  PRICE_CALCULATION_FAILED: 'Не удалось рассчитать цену',
   INHERITED_MAX_MISMATCH:
     'Унаследованная максимальная наценка не подходит к рекомендуемой наценке. Измените рекомендуемую наценку или установите индивидуальную максимальную наценку',
 } as const;
+
+export function isValidMarkupPercent(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
 
 export type MarkupValidationStatus = 'OK' | 'ERROR';
 

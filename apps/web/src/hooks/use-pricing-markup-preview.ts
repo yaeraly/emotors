@@ -2,9 +2,14 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { apiFetch } from '@/lib/api';
-import type { MarkupPreviewResponse, MarkupRowEditorState } from '@/lib/pricing-markup-preview';
+import {
+  applyLocalMarkupPreview,
+  type MarkupPreviewResponse,
+  type MarkupRowEditorState,
+  isMarkupRowDirty,
+} from '@/lib/pricing-markup-preview';
 
-const PREVIEW_DEBOUNCE_MS = 300;
+const PREVIEW_DEBOUNCE_MS = 280;
 const FLASH_DURATION_MS = 650;
 
 type RetailPreviewPayload = {
@@ -21,11 +26,33 @@ type WholesalePreviewPayload = {
 
 type PreviewPayload = RetailPreviewPayload | WholesalePreviewPayload;
 
-function isValidMarkup(value: number) {
-  return Number.isFinite(value) && value >= 0;
+function buildPreviewPayload(
+  channel: 'retail' | 'wholesale',
+  row: MarkupRowEditorState,
+): PreviewPayload | null {
+  if (row.draftMinMarkup == null || row.draftRecommendedMarkup == null || row.draftMaxMarkup == null) {
+    return null;
+  }
+
+  const maxOverride =
+    Math.abs(row.draftMaxMarkup - row.inheritedMaxMarkup) > 0.001 ? row.draftMaxMarkup : null;
+
+  if (channel === 'retail') {
+    return {
+      minimumSellingMarkupPercent: row.draftMinMarkup,
+      recommendedRetailMarkupPercent: row.draftRecommendedMarkup,
+      maximumRetailMarkupOverridePercent: maxOverride,
+    };
+  }
+
+  return {
+    minimumWholesaleMarkupPercent: row.draftMinMarkup,
+    recommendedWholesaleMarkupPercent: row.draftRecommendedMarkup,
+    maximumWholesaleMarkupOverridePercent: maxOverride,
+  };
 }
 
-export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEditorState>(
+export function usePricingMarkupPreview<T extends { id: string; effectiveBranchPriceKgs: number } & MarkupRowEditorState>(
   channel: 'retail' | 'wholesale',
   setRows: React.Dispatch<React.SetStateAction<T[]>>,
 ) {
@@ -65,10 +92,13 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
     previewRevisionRef.current[productId] = (previewRevisionRef.current[productId] ?? 0) + 1;
   }, []);
 
-  const markRowSaved = useCallback((productId: string) => {
-    saveRevisionRef.current[productId] = (saveRevisionRef.current[productId] ?? 0) + 1;
-    cancelRowPreviews(productId);
-  }, [cancelRowPreviews]);
+  const markRowSaved = useCallback(
+    (productId: string) => {
+      saveRevisionRef.current[productId] = (saveRevisionRef.current[productId] ?? 0) + 1;
+      cancelRowPreviews(productId);
+    },
+    [cancelRowPreviews],
+  );
 
   const applyPreviewResult = useCallback(
     (productId: string, result: MarkupPreviewResponse, previewRevision: number) => {
@@ -80,9 +110,7 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
         current.map((row) => {
           if (row.id !== productId) return row;
 
-          const isDirty =
-            Math.abs(row.draftMinMarkup - row.savedMinMarkup) > 0.001 ||
-            Math.abs(row.draftRecommendedMarkup - row.savedRecMarkup) > 0.001;
+          const isDirty = isMarkupRowDirty(row);
 
           if (result.validationStatus === 'ERROR' || !result.preview) {
             return {
@@ -162,7 +190,7 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
                   ...row,
                   isPreviewing: false,
                   previewValidationErrors: [
-                    error instanceof Error ? error.message : 'Preview failed',
+                    error instanceof Error ? error.message : 'Не удалось рассчитать цену',
                   ],
                   previewValid: false,
                 } as T)
@@ -175,29 +203,30 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
   );
 
   const schedulePreview = useCallback(
-    (productId: string, payload: PreviewPayload) => {
-      const min =
-        channel === 'retail'
-          ? (payload as RetailPreviewPayload).minimumSellingMarkupPercent
-          : (payload as WholesalePreviewPayload).minimumWholesaleMarkupPercent;
-      const rec =
-        channel === 'retail'
-          ? (payload as RetailPreviewPayload).recommendedRetailMarkupPercent
-          : (payload as WholesalePreviewPayload).recommendedWholesaleMarkupPercent;
+    (productId: string, row: T) => {
+      const payload = buildPreviewPayload(channel, row);
+      const isDirty = isMarkupRowDirty(row);
 
-      if (!isValidMarkup(min) || !isValidMarkup(rec)) {
+      setRows((current) =>
+        current.map((item) => {
+          if (item.id !== productId) return item;
+          const withLocal = applyLocalMarkupPreview({ ...item, ...row, isDirty });
+          return withLocal as T;
+        }),
+      );
+
+      if (!payload) {
         setRows((current) =>
-          current.map((row) => {
-            if (row.id !== productId) return row;
-            return {
-              ...row,
-              previewValidationErrors: [],
-              previewValid: false,
-              isDirty:
-                Math.abs(row.draftMinMarkup - row.savedMinMarkup) > 0.001 ||
-                Math.abs(row.draftRecommendedMarkup - row.savedRecMarkup) > 0.001,
-            } as T;
-          }),
+          current.map((item) =>
+            item.id === productId
+              ? ({
+                  ...item,
+                  previewValidationErrors: [],
+                  previewValid: null,
+                  isDirty,
+                } as T)
+              : item,
+          ),
         );
         return;
       }
@@ -235,16 +264,7 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
             channel === 'retail'
               ? Number((row as { maximumRetailPriceKgs?: number }).maximumRetailPriceKgs ?? row.displayMaxPrice)
               : Number((row as { maximumWholesalePriceKgs?: number }).maximumWholesalePriceKgs ?? row.displayMaxPrice);
-          const maxMarkup =
-            channel === 'retail'
-              ? Number(
-                  (row as { effectiveMaximumRetailMarkupPercent?: number }).effectiveMaximumRetailMarkupPercent ??
-                    row.displayMaxMarkup,
-                )
-              : Number(
-                  (row as { effectiveMaximumWholesaleMarkupPercent?: number }).effectiveMaximumWholesaleMarkupPercent ??
-                    row.displayMaxMarkup,
-                );
+          const maxMarkup = row.savedMaxMarkup;
           const maxSource =
             channel === 'retail'
               ? ((row as { maximumRetailMarkupSource?: 'INHERITED' | 'CEO_PRODUCT_OVERRIDE' }).maximumRetailMarkupSource ??
@@ -256,6 +276,7 @@ export function usePricingMarkupPreview<T extends { id: string } & MarkupRowEdit
             ...row,
             draftMinMarkup: row.savedMinMarkup,
             draftRecommendedMarkup: row.savedRecMarkup,
+            draftMaxMarkup: row.savedMaxMarkup,
             displayMinPrice: minPrice,
             displayRecPrice: recPrice,
             displayMaxPrice: maxPrice,
