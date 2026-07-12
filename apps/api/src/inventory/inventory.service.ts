@@ -42,6 +42,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { UpdatePurchasePriceDto } from './dto/update-purchase-price.dto';
 import { PurchasePriceHistoryQueryDto } from './dto/purchase-price-history-query.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
+import { CATEGORY_CHANGE_MIGRATION_NAME } from './product-code-migration.util';
 import {
   getCategoryCodePrefix,
   isValidCategoryCodePrefix,
@@ -626,10 +627,21 @@ export class InventoryService {
       });
       throw new ForbiddenException(SELLING_PRICE_EDIT_DENIED_MESSAGE);
     }
-    return this.prisma.$transaction(async (tx) => {
-      const current = await this.getProductForWrite(tx, user, id);
 
-      if (dto.sku && normalizeProductCode(dto.sku) !== normalizeProductCode(current.sku)) {
+    const maxAttempts = dto.categoryId !== undefined ? 3 : 1;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+      const current = await this.getProductForWrite(tx, user, id);
+      const categoryChanged =
+        dto.categoryId !== undefined && dto.categoryId !== current.categoryId;
+
+      if (
+        !categoryChanged &&
+        dto.sku &&
+        normalizeProductCode(dto.sku) !== normalizeProductCode(current.sku)
+      ) {
         const normalizedSku = normalizeProductCode(dto.sku);
         if (!isValidProductCode(normalizedSku)) {
           throw new BadRequestException(
@@ -647,9 +659,29 @@ export class InventoryService {
       const oldWarehouseId = current.warehouseId;
       const warehouseChanged =
         dto.warehouseId !== undefined && dto.warehouseId !== oldWarehouseId;
-      const category = dto.categoryId
-        ? await this.getActiveCategory(tx, dto.categoryId)
+
+      let category = dto.categoryId
+        ? categoryChanged
+          ? await this.getActiveCategoryForProductCategoryChange(tx, dto.categoryId)
+          : await this.getActiveCategory(tx, dto.categoryId)
         : null;
+
+      let regeneratedSku: string | undefined;
+      let regeneratedBarcode: string | undefined;
+      if (categoryChanged && category) {
+        const prefix = resolveCategoryProductCodePrefix(category);
+        if (!isValidCategoryCodePrefix(prefix)) {
+          throw new BadRequestException('Для выбранной категории не настроен префикс кода');
+        }
+        regeneratedSku = await this.allocateNextProductCode(
+          tx,
+          current.branchId,
+          category.id,
+          prefix,
+          current.id,
+        );
+        regeneratedBarcode = nextProductBarcode(regeneratedSku);
+      }
 
       const oldWeightKg = Number(current.weightKg);
       if (dto.weightKg !== undefined) {
@@ -710,11 +742,20 @@ export class InventoryService {
         (dto.purchasePriceYuan !== undefined &&
           Number(dto.purchasePriceYuan) !== Number(current.purchasePriceYuan));
 
+      const oldCategoryId = current.categoryId;
+      const oldProductCode = current.sku;
+      const nextSku = categoryChanged
+        ? regeneratedSku
+        : dto.sku !== undefined
+          ? normalizeProductCode(dto.sku)
+          : undefined;
+
       await tx.product.update({
         where: { id },
         data: {
           name: dto.name,
-          sku: dto.sku !== undefined ? normalizeProductCode(dto.sku) : undefined,
+          sku: nextSku,
+          barcode: categoryChanged ? regeneratedBarcode : undefined,
           categoryId: category?.id,
           category: category?.nameEn,
           warehouseId: dto.warehouseId,
@@ -749,14 +790,50 @@ export class InventoryService {
         },
       });
 
+      if (categoryChanged && category && regeneratedSku) {
+        await tx.productCodeMigration.create({
+          data: {
+            productId: id,
+            oldCode: oldProductCode,
+            newCode: regeneratedSku,
+            migrationName: CATEGORY_CHANGE_MIGRATION_NAME,
+          },
+        });
+        await this.auditInTx(
+          tx,
+          user,
+          current.branchId,
+          'PRODUCT_CATEGORY_CHANGED_AND_CODE_REGENERATED',
+          'Product',
+          id,
+          {
+            productId: id,
+            oldCategoryId,
+            newCategoryId: category.id,
+            oldProductCode,
+            newProductCode: regeneratedSku,
+            changedById: user.id,
+            changedAt: new Date().toISOString(),
+            oldValue: {
+              categoryId: oldCategoryId,
+              sku: oldProductCode,
+            },
+            newValue: {
+              categoryId: category.id,
+              sku: regeneratedSku,
+            },
+          },
+        );
+      }
+
       await this.auditInTx(tx, user, current.branchId, 'PRODUCT_UPDATED', 'Product', id, {
         module: 'inventory',
-        sku: dto.sku ?? current.sku,
+        sku: nextSku ?? current.sku,
         productId: id,
         oldValue: { name: current.name, sku: current.sku, sellingPriceKgs: Number(current.sellingPriceKgs) },
         newValue: {
           name: dto.name ?? current.name,
-          sku: dto.sku ?? current.sku,
+          sku: nextSku ?? current.sku,
           sellingPriceKgs: next.sellingPriceKgs,
         },
       });
@@ -809,7 +886,20 @@ export class InventoryService {
       }
 
       return this.getProductResponseInTx(tx, user, id);
-    });
+        });
+      } catch (error) {
+        if (this.isUniqueConstraintError(error) && attempt < maxAttempts - 1) {
+          lastError = error;
+          continue;
+        }
+        if (this.isUniqueConstraintError(error)) {
+          throw new ConflictException('Не удалось сформировать уникальный код товара');
+        }
+        throw error;
+      }
+    }
+
+    throw lastError ?? new ConflictException('Не удалось сформировать уникальный код товара');
   }
 
   async deleteProduct(user: AuthUser, id: string) {
@@ -1746,6 +1836,41 @@ export class InventoryService {
   private async resolveHqCatalogBranchId(tx: PrismaTx) {
     const branch = await ensureHqCatalogBranch(tx);
     return branch.id;
+  }
+
+  private async getActiveCategoryForProductCategoryChange(tx: PrismaTx, id: string) {
+    const category = await tx.productCategory.findFirst({ where: { id } });
+    if (!category || !category.isActive) {
+      throw new NotFoundException('Выбранная категория не найдена');
+    }
+    return category;
+  }
+
+  private async allocateNextProductCode(
+    tx: PrismaTx,
+    branchId: string,
+    categoryId: string,
+    prefix: string,
+    exceptProductId: string,
+    maxAttempts = 5,
+  ): Promise<string> {
+    let usedCodes = await this.collectCategoryProductCodes(tx, categoryId, prefix);
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const candidate = nextProductCode(prefix, usedCodes);
+      try {
+        await this.ensureSkuAvailable(tx, branchId, candidate, exceptProductId);
+        return candidate;
+      } catch (error) {
+        if (error instanceof ConflictException) {
+          usedCodes = [...usedCodes, candidate];
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new ConflictException('Не удалось сформировать уникальный код товара');
   }
 
   private async ensureSkuAvailable(

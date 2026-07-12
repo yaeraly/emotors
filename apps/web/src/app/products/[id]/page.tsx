@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { EntityCombobox } from '@/components/EntityCombobox';
 import { ProtectedShell } from '@/components/ProtectedShell';
@@ -19,11 +19,17 @@ import {
   shouldHideProductPricingFromProfile,
 } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
+
+type SuggestedProductCode = {
+  categoryId: string;
+  prefix: string;
+  suggestedCode: string;
+  barcode: string;
+};
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ProductDetailPage() {
   const { t, language } = useTranslation();
-  const router = useRouter();
   const params = useParams<{ id: string }>();
   const [product, setProduct] = useState<Product | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -52,6 +58,10 @@ export default function ProductDetailPage() {
     note: '',
   });
   const [priceSaving, setPriceSaving] = useState(false);
+  const [originalCategoryId, setOriginalCategoryId] = useState('');
+  const [previewCode, setPreviewCode] = useState('');
+  const [generatingPreview, setGeneratingPreview] = useState(false);
+  const previewCategoryIdRef = useRef('');
 
   useEffect(() => {
     const success = window.localStorage.getItem('emotors_product_success');
@@ -79,6 +89,7 @@ export default function ProductDetailPage() {
         ]));
         setCurrentUser(currentUserResult);
         const currentWarehouseActive = productResult.warehouse?.isActive !== false;
+        setOriginalCategoryId(productResult.categoryId);
         setEditForm({
           name: productResult.name,
           sku: productResult.sku,
@@ -99,6 +110,33 @@ export default function ProductDetailPage() {
         setError(err instanceof Error ? err.message : t('common.error')),
       );
   }, [params.id, t]);
+
+  const categoryChanged = Boolean(
+    originalCategoryId && editForm.categoryId && editForm.categoryId !== originalCategoryId,
+  );
+
+  useEffect(() => {
+    if (!categoryChanged || !editForm.categoryId) {
+      setPreviewCode('');
+      previewCategoryIdRef.current = '';
+      return;
+    }
+
+    if (previewCategoryIdRef.current === editForm.categoryId) return;
+    previewCategoryIdRef.current = editForm.categoryId;
+    setGeneratingPreview(true);
+
+    void apiFetch<SuggestedProductCode>(
+      `/inventory/products/suggest-code?categoryId=${encodeURIComponent(editForm.categoryId)}`,
+    )
+      .then((response) => {
+        setPreviewCode(response.suggestedCode);
+      })
+      .catch(() => {
+        setPreviewCode('');
+      })
+      .finally(() => setGeneratingPreview(false));
+  }, [categoryChanged, editForm.categoryId]);
 
   const currentWarehouseInactive = Boolean(product?.warehouse && product.warehouse.isActive === false);
   const canSaveWarehouse = !currentWarehouseInactive || Boolean(editForm.warehouseId);
@@ -139,6 +177,13 @@ export default function ProductDetailPage() {
         return;
       }
 
+      if (categoryChanged) {
+        const confirmed = window.confirm(t('inventory.categoryChangeCodeConfirm'));
+        if (!confirmed) {
+          return;
+        }
+      }
+
       const nextWeight = Number(editForm.weightKg);
       if (canEditProductCatalog(currentUser) && (!Number.isFinite(nextWeight) || nextWeight <= 0)) {
         setError(t('inventory.weightMustBePositive'));
@@ -149,7 +194,7 @@ export default function ProductDetailPage() {
         method: 'PUT',
         body: JSON.stringify({
           name: editForm.name,
-          sku: editForm.sku,
+          ...(categoryChanged ? {} : { sku: editForm.sku }),
           categoryId: editForm.categoryId,
           photoUrl: editForm.photoUrl || null,
           ...(canEditUnit ? { unit: editForm.unit.trim() } : {}),
@@ -160,6 +205,8 @@ export default function ProductDetailPage() {
         }),
       });
       setProduct(updated);
+      setOriginalCategoryId(updated.categoryId);
+      setPreviewCode('');
       setEditForm({
         name: updated.name,
         sku: updated.sku,
@@ -170,9 +217,7 @@ export default function ProductDetailPage() {
         weightKg: String(updated.weightKg),
         minStockLevel: String(updated.minStockLevel),
       });
-      window.localStorage.setItem('emotors_product_success', t('inventory.productUpdatedSuccess'));
-      router.push(`/products/${params.id}`);
-      router.refresh();
+      setSuccessMessage(t('inventory.productUpdatedSuccess'));
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
       if (message.toLowerCase().includes('inactive warehouse')) {
@@ -261,6 +306,18 @@ export default function ProductDetailPage() {
                 </div>
                 <Input label={t('inventory.name')} value={editForm.name} onChange={(value) => setEditForm({ ...editForm, name: value })} />
                 <ReadOnlyField label={t('inventory.productCode')} value={editForm.sku} />
+                {categoryChanged ? (
+                  <div className="md:col-span-5 space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p>{t('inventory.categoryChangeCodeNotice')}</p>
+                    {generatingPreview ? (
+                      <p className="text-amber-700">{t('common.loading')}</p>
+                    ) : previewCode ? (
+                      <p className="font-semibold">
+                        {t('inventory.categoryChangeCodePreview').replace('{code}', previewCode)}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">{t('inventory.category')}</span>
                   <select value={editForm.categoryId} onChange={(event) => setEditForm({ ...editForm, categoryId: event.target.value })} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" required>

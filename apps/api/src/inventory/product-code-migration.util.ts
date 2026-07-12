@@ -1,6 +1,7 @@
 import { isValidCategoryCodePrefix, nextProductCode, normalizeCategoryCodePrefix } from './product-code.util';
 
 export const PRODUCT_CODE_MIGRATION_NAME = 'short_code_v1';
+export const CATEGORY_CHANGE_MIGRATION_NAME = 'category_change';
 
 export type ProductCodeMigrationPreviewRow = {
   productId: string;
