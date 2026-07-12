@@ -204,9 +204,6 @@ const emptySvhForm = (): DomesticTransportForm => ({
   transportCompanyId: '',
   transportCostKgs: '0',
   dispatchDate: '',
-  receiptNumber: '',
-  receiptDate: '',
-  receiptAmountKgs: '0',
   notes: '',
   status: 'WAITING',
 });
@@ -376,9 +373,6 @@ export default function ProcurementOrderDetailPage() {
     return svhForm.transportCompanyId !== (svh.transportCompanyId ?? '')
       || svhForm.transportCostKgs !== String(svh.transportCostKgs ?? 0)
       || svhForm.dispatchDate !== (svh.dispatchDate ? svh.dispatchDate.slice(0, 10) : '')
-      || svhForm.receiptNumber !== (svh.receiptNumber ?? '')
-      || svhForm.receiptDate !== (svh.receiptDate ? svh.receiptDate.slice(0, 10) : '')
-      || svhForm.receiptAmountKgs !== String(svh.receiptAmountKgs ?? 0)
       || svhForm.status !== svh.status
       || svhForm.notes !== (svh.notes ?? '');
   }, [order?.svhToHqTransport, svhForm]);
@@ -451,25 +445,16 @@ export default function ProcurementOrderDetailPage() {
 
   const scmProductTableTotals = useMemo(() => {
     let totalQuantity = 0;
-    let totalNetWeightKg = 0;
-    let allWeightsKnown = activeOrderItems.length > 0;
     let totalYuan = 0;
 
     for (const item of activeOrderItems) {
       totalQuantity += item.quantity;
       const purchasePriceYuan = Number(item.purchasePriceYuan ?? 0);
       totalYuan += item.quantity * purchasePriceYuan;
-      const unitWeightKg = resolveUnitWeightKg(item);
-      if (unitWeightKg == null) {
-        allWeightsKnown = false;
-      } else {
-        totalNetWeightKg += unitWeightKg * item.quantity;
-      }
     }
 
     return {
       totalQuantity,
-      totalNetWeightKg: allWeightsKnown ? totalNetWeightKg : null,
       totalYuan,
     };
   }, [activeOrderItems]);
@@ -534,9 +519,6 @@ export default function ProcurementOrderDetailPage() {
         transportCompanyId: svh.transportCompanyId ?? '',
         transportCostKgs: String(svh.transportCostKgs ?? 0),
         dispatchDate: svh.dispatchDate ? svh.dispatchDate.slice(0, 10) : '',
-        receiptNumber: svh.receiptNumber ?? '',
-        receiptDate: svh.receiptDate ? svh.receiptDate.slice(0, 10) : '',
-        receiptAmountKgs: String(svh.receiptAmountKgs ?? 0),
         status: svh.status,
         notes: svh.notes ?? '',
       } : emptySvhForm());
@@ -705,9 +687,6 @@ export default function ProcurementOrderDetailPage() {
           transportCostKgs: Number(svhForm.transportCostKgs || 0),
           dispatchDate: svhForm.dispatchDate || undefined,
           arrivalDate: svhForm.status === 'COMPLETED' ? (svhForm.dispatchDate || undefined) : undefined,
-          receiptNumber: svhForm.receiptNumber || undefined,
-          receiptDate: svhForm.receiptDate || undefined,
-          receiptAmountKgs: Number(svhForm.receiptAmountKgs || 0),
           status: svhForm.status,
           notes: svhForm.notes || undefined,
           changeReason: svhChangeReason.trim() || undefined,
@@ -748,41 +727,6 @@ export default function ProcurementOrderDetailPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
-  }
-
-  async function uploadDomesticAttachment(file: File, documentType: string) {
-    const token = getToken();
-    if (!token) return;
-    setError('');
-    setSuccess('');
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('documentType', documentType);
-    if (documentType === 'RECEIPT') {
-      formData.append('transportCompanyId', svhForm.transportCompanyId);
-      formData.append('receiptNumber', svhForm.receiptNumber);
-      formData.append('receiptDate', svhForm.receiptDate);
-      formData.append('receiptAmountKgs', svhForm.receiptAmountKgs || '0');
-    }
-    const response = await fetch(`${API_URL}/procurement/orders/${id}/domestic-transport/attachments`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.message || t('common.error'));
-    }
-    setSuccess(t('common.success'));
-    await load();
-  }
-
-  async function deleteDomesticAttachment(attachmentId: string) {
-    setError('');
-    setSuccess('');
-    await apiFetch(`/procurement/orders/${id}/attachments/${attachmentId}`, { method: 'DELETE' });
-    setSuccess(t('common.success'));
-    await load();
   }
 
   async function receiveGoods() {
@@ -1087,17 +1031,11 @@ export default function ProcurementOrderDetailPage() {
             transportCompanies={transportCompanies}
             form={svhForm}
             onChange={setSvhField}
-            currentReceipt={order.svhToHqReceipt ?? null}
-            attachments={order.domesticTransportAttachments ?? []}
-            receiptHistory={order.domesticTransportReceiptHistory ?? []}
-            timeline={order.domesticTransportTimeline ?? []}
             dirty={svhDirty}
             saving={savingSvh}
             changeReason={svhChangeReason}
             onChangeReason={setSvhChangeReason}
             onSave={() => void saveSvhTransport()}
-            onUpload={uploadDomesticAttachment}
-            onDeleteAttachment={deleteDomesticAttachment}
           />
           {!svhTransportCompleted && canReceive && readyForHqReceiving && !finalized ? (
             <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.domesticTransport.receiveBlocked')}</p>
@@ -1245,7 +1183,6 @@ export default function ProcurementOrderDetailPage() {
                       <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.purchasePriceYuan')}>{t('procurement.orders.col.purchasePriceShort')}</th>
                       <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.priceDifferenceYuan')}>{t('procurement.orders.col.priceDifferenceShort')}</th>
                       <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.productWeight')}>{t('procurement.orders.col.weightShort')}</th>
-                      <th className="w-24 px-2 py-2 text-right" title={t('procurement.orders.lineTotalNetWeightKg')}>{t('procurement.orders.col.totalWeightShort')}</th>
                       <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.totalYuan')}>{t('procurement.orders.col.totalYuanShort')}</th>
                     </tr>
                   </thead>
@@ -1256,7 +1193,6 @@ export default function ProcurementOrderDetailPage() {
                       const priceDifferenceYuan = referencePriceYuan != null ? purchasePriceYuan - referencePriceYuan : null;
                       const unitWeightKg = resolveUnitWeightKg(row);
                       const lineTotalYuan = row.quantity * purchasePriceYuan;
-                      const lineTotalNetWeightKg = unitWeightKg != null ? unitWeightKg * row.quantity : null;
 
                       return (
                         <tr key={row.id}>
@@ -1273,9 +1209,6 @@ export default function ProcurementOrderDetailPage() {
                           <td className="px-2 py-1.5 text-right tabular-nums">
                             {unitWeightKg != null ? formatWeightKg(unitWeightKg) : t('procurement.orders.weightNotSpecified')}
                           </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">
-                            {lineTotalNetWeightKg != null ? formatWeightKg(lineTotalNetWeightKg) : t('procurement.orders.weightNotCalculated')}
-                          </td>
                           <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatYuan(lineTotalYuan)}</td>
                         </tr>
                       );
@@ -1286,11 +1219,6 @@ export default function ProcurementOrderDetailPage() {
                       <td className="px-2 py-2">{t('procurement.orders.tableTotals')}</td>
                       <td className="px-2 py-2 text-right tabular-nums">{scmProductTableTotals.totalQuantity}</td>
                       <td className="px-2 py-2" colSpan={3} />
-                      <td className="px-2 py-2 text-right tabular-nums">
-                        {scmProductTableTotals.totalNetWeightKg != null
-                          ? formatWeightKg(scmProductTableTotals.totalNetWeightKg)
-                          : t('procurement.orders.weightNotCalculated')}
-                      </td>
                       <td className="px-2 py-2 text-right tabular-nums">{formatYuan(scmProductTableTotals.totalYuan)}</td>
                     </tr>
                   </tfoot>
@@ -1510,9 +1438,6 @@ function formHasDomesticData(form: DomesticTransportForm) {
   return form.transportCompanyId !== ''
     || form.transportCostKgs !== '0'
     || form.dispatchDate !== ''
-    || form.receiptNumber !== ''
-    || form.receiptDate !== ''
-    || form.receiptAmountKgs !== '0'
     || form.notes !== ''
     || form.status !== 'WAITING';
 }
