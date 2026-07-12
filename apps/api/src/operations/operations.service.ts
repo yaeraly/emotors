@@ -2,8 +2,15 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import {
   AlertType,
   BranchDistributionOrderStatus,
+  BranchPurchaseRequestLineStatus,
   BranchPurchaseRequestStatus,
+  BranchRequestIssueStatus,
+  BranchRequestIssueType,
+  BranchRequestLineRejectionReason,
   BranchRequestShortageStatus,
+  PricingPolicyStatus,
+  SupplyAbsenceReason,
+  SupplyInquiryStatus,
   FileAttachmentEntityType,
   HqWarrantyDecision,
   Prisma,
@@ -89,6 +96,12 @@ import {
   isBranchOnlyRequestUser,
   sanitizeBranchPurchaseRequest,
 } from './branch-purchase-request.presenter';
+import {
+  deriveRequestStatusFromLines,
+  resolveLineReview,
+  type LineReviewAction,
+  type LineReviewInput,
+} from './branch-request-review.util';
 import {
   buildBatchDiscrepancyAuditMetadata,
   buildDiscrepancyActAuditMetadata,
@@ -455,13 +468,19 @@ export class OperationsService {
 
     const assignedHqWarehouseId = await this.requireBranchAssignedHqWarehouse(user, existing.branchId);
 
-    const updated = await this.prisma.branchPurchaseRequest.update({
-      where: { id },
-      data: {
-        status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
-        assignedHqWarehouseId,
-      },
-      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.branchPurchaseRequestItem.updateMany({
+        where: { requestId: id },
+        data: { lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW },
+      });
+      return tx.branchPurchaseRequest.update({
+        where: { id },
+        data: {
+          status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
+          assignedHqWarehouseId,
+        },
+        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+      });
     });
 
     await this.auditBranchRequest(user, updated.branchId, 'BRANCH_REQUEST_SUBMITTED', 'BranchPurchaseRequest', id, {
@@ -533,7 +552,8 @@ export class OperationsService {
       where: { id, deletedAt: null },
       include: {
         items: true,
-        branch: { select: { assignedHqWarehouseId: true } },
+        branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
+        createdBy: { select: { id: true, fullName: true, role: true } },
       },
     });
     if (!existing) throw new NotFoundException('Branch purchase request not found');
@@ -543,22 +563,48 @@ export class OperationsService {
     }
 
     if (status === BranchPurchaseRequestStatus.REJECTED) {
-      const updated = await this.prisma.branchPurchaseRequest.update({
-        where: { id },
-        data: { status, reviewedById: user.id, reviewedAt: new Date() },
-        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+      const updated = await this.prisma.$transaction(async (tx) => {
+        for (const item of existing.items) {
+          await tx.branchPurchaseRequestItem.update({
+            where: { id: item.id },
+            data: {
+              lineStatus: BranchPurchaseRequestLineStatus.REJECTED,
+              approvedQuantity: 0,
+              unavailableQuantity: item.quantity,
+              rejectionReasonCode: BranchRequestLineRejectionReason.OTHER,
+              publicComment: dto?.publicComment?.trim() || 'Заявка отклонена',
+            },
+          });
+        }
+        return tx.branchPurchaseRequest.update({
+          where: { id },
+          data: { status, reviewedById: user.id, reviewedAt: new Date() },
+          include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+        });
       });
-      await this.auditBranchRequest(user, updated.branchId, 'HQ_SALES_REQUEST_REVIEWED', 'BranchPurchaseRequest', id, {
-        oldValue: existing.status,
-        newValue: status,
-      });
-      await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_REVIEWED', 'BranchPurchaseRequest', id, {
-        oldValue: existing.status,
-        newValue: status,
-      });
-      await this.auditBranchRequest(user, updated.branchId, `BRANCH_PURCHASE_REQUEST_${status}`, 'BranchPurchaseRequest', id);
+      await this.auditBranchRequest(user, updated.branchId, 'BRANCH_REQUEST_REVIEW_SUBMITTED', 'BranchPurchaseRequest', id);
       await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_REJECTED', 'BranchPurchaseRequest', id);
       return updated;
+    }
+
+    return this.submitBranchPurchaseRequestReview(user, id, dto);
+  }
+
+  async submitBranchPurchaseRequestReview(user: AuthUser, id: string, dto?: any) {
+    if (!canManageBranchPurchaseRequests(user)) throw new ForbiddenException('Forbidden resource');
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: { id, deletedAt: null },
+      include: {
+        items: true,
+        branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
+        createdBy: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+    if (!existing) throw new NotFoundException('Branch purchase request not found');
+    await this.assertBranchPurchaseRequestAccess(user, existing);
+    if (!isSubmittedBranchPurchaseStatus(existing.status)) {
+      throw new BadRequestException('Only submitted requests can be reviewed');
     }
 
     const assignedHqWarehouseId =
@@ -573,79 +619,194 @@ export class OperationsService {
       existing.items.map((item) => ({ productId: item.productId, sku: item.sku })),
       { branchId: existing.branchId },
     );
-    const approvedMap = new Map<string, number>(
-      ((dto?.items as Array<{ id?: string; productId?: string; approvedQuantity: number }>) ?? []).map((item) => [
-        item.id ?? item.productId ?? '',
-        Number(item.approvedQuantity),
-      ]),
+    const pricingPolicyMap = await this.loadActivePricingPolicyMap(
+      existing.items.map((item) => item.sku),
     );
 
-    let anyPartial = false;
-    let anyApproved = false;
-    let anyShortage = false;
+    const reviewInputs = this.normalizeLineReviewInputs(dto, existing.items);
+    if (reviewInputs.length !== existing.items.length) {
+      throw new BadRequestException('Every request line must have a review decision');
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const resolvedLines: Array<{
+        itemId: string;
+        lineStatus: BranchPurchaseRequestLineStatus;
+        approvedQuantity: number;
+        unavailableQuantity: number;
+        rejectionReasonCode: BranchRequestLineRejectionReason | null;
+        publicComment: string | null;
+        notifyCeoNoPricingPolicy: boolean;
+        notifyCeoOutOfStock: boolean;
+      }> = [];
+
       for (const item of existing.items) {
+        const input = reviewInputs.find((row) => row.id === item.id);
+        if (!input) {
+          throw new BadRequestException(`Missing review decision for line ${item.sku}`);
+        }
+
         const available = stockMap.get(item.productId) ?? 0;
-        const requested = item.quantity;
-        const approvedQuantity =
-          approvedMap.has(item.id) || approvedMap.has(item.productId)
-            ? Number(approvedMap.get(item.id) ?? approvedMap.get(item.productId))
-            : Math.min(requested, available);
+        const hasPricingPolicy = pricingPolicyMap.has(item.sku.trim().toUpperCase());
 
-        if (approvedQuantity > available) {
-          throw new BadRequestException(`Cannot approve more than available HQ stock for ${item.sku}`);
-        }
-        if (approvedQuantity < 0) {
-          throw new BadRequestException('Approved quantity cannot be negative');
+        let resolved;
+        try {
+          resolved = resolveLineReview(input, {
+            requestedQuantity: item.quantity,
+            availableQuantity: available,
+            hasPricingPolicy,
+          });
+        } catch (error) {
+          if (error instanceof Error && error.message === 'APPROVED_QUANTITY_EXCEEDS_AVAILABLE') {
+            throw new BadRequestException(`Cannot approve more than available HQ stock for ${item.sku}`);
+          }
+          throw error;
         }
 
-        const missingQty = requested - approvedQuantity;
+        if (
+          (resolved.lineStatus === BranchPurchaseRequestLineStatus.REJECTED ||
+            resolved.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES) &&
+          !resolved.publicComment?.trim()
+        ) {
+          throw new BadRequestException(`A public comment is required for line ${item.sku}`);
+        }
+
         await tx.branchPurchaseRequestItem.update({
           where: { id: item.id },
-          data: { approvedQuantity, hqAvailableStock: available },
+          data: {
+            approvedQuantity: resolved.approvedQuantity,
+            unavailableQuantity: resolved.unavailableQuantity,
+            hqAvailableStock: available,
+            lineStatus: resolved.lineStatus,
+            rejectionReasonCode: resolved.rejectionReasonCode,
+            publicComment: resolved.publicComment,
+            hasPricingPolicyAtReview: hasPricingPolicy,
+          },
         });
 
-        if (missingQty > 0) {
-          anyShortage = true;
+        if (resolved.unavailableQuantity > 0 || resolved.approvedQuantity < item.quantity) {
+          const missingQty = Math.max(item.quantity - resolved.approvedQuantity, 0);
           await tx.branchRequestShortage.create({
             data: {
               branchRequestId: existing.id,
               branchRequestItemId: item.id,
               branchId: existing.branchId,
               productId: item.productId,
-              requestedQty: requested,
+              requestedQty: item.quantity,
               availableQty: available,
-              approvedQty: approvedQuantity,
+              approvedQty: resolved.approvedQuantity,
               missingQty,
               assignedHqWarehouseId,
               status:
-                approvedQuantity === 0
+                resolved.approvedQuantity === 0
                   ? BranchRequestShortageStatus.OPEN
                   : BranchRequestShortageStatus.PARTIALLY_FULFILLED,
             },
           });
         }
 
-        if (approvedQuantity < requested) anyPartial = true;
-        if (approvedQuantity > 0) anyApproved = true;
+        resolvedLines.push({
+          itemId: item.id,
+          ...resolved,
+        });
       }
 
-      const finalStatus =
-        anyPartial || (anyShortage && !anyApproved)
-          ? BranchPurchaseRequestStatus.PARTIALLY_APPROVED
-          : BranchPurchaseRequestStatus.APPROVED;
+      const derivedStatus = deriveRequestStatusFromLines(
+        resolvedLines.map((line) => ({
+          lineStatus: line.lineStatus,
+          approvedQuantity: line.approvedQuantity,
+          unavailableQuantity: line.unavailableQuantity,
+        })),
+      );
 
-      return tx.branchPurchaseRequest.update({
+      const request = await tx.branchPurchaseRequest.update({
         where: { id },
         data: {
-          status: finalStatus,
+          status:
+            derivedStatus === 'REJECTED'
+              ? BranchPurchaseRequestStatus.REJECTED
+              : derivedStatus === 'PARTIALLY_APPROVED'
+                ? BranchPurchaseRequestStatus.PARTIALLY_APPROVED
+                : BranchPurchaseRequestStatus.APPROVED,
           reviewedById: user.id,
           reviewedAt: new Date(),
           assignedHqWarehouseId,
         },
-        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+        include: {
+          items: true,
+          createdBy: { select: { id: true, fullName: true, role: true } },
+          branch: { select: { id: true, name: true } },
+          assignedHqWarehouse: { select: { id: true, name: true } },
+        },
       });
+
+      for (const line of resolvedLines) {
+        const item = existing.items.find((row) => row.id === line.itemId);
+        if (!item) continue;
+
+        if (line.notifyCeoNoPricingPolicy) {
+          await this.upsertBranchRequestIssueInTx(tx, user, {
+            issueType: BranchRequestIssueType.NO_PRICING_POLICY,
+            request,
+            item,
+            availableQuantity: stockMap.get(item.productId) ?? 0,
+            unavailableQuantity: line.unavailableQuantity,
+            publicComment: line.publicComment,
+            hqWarehouseId: assignedHqWarehouseId,
+            alertType: AlertType.BRANCH_REQUEST_NO_PRICING_POLICY,
+            alertTitle: 'Требуется ценовая политика',
+            alertMessage: `Филиал запросил товар, для которого не настроена ценовая политика: ${item.productName} (${item.sku}).`,
+          });
+        }
+
+        if (line.notifyCeoOutOfStock) {
+          await this.upsertBranchRequestIssueInTx(tx, user, {
+            issueType: BranchRequestIssueType.OUT_OF_STOCK,
+            request,
+            item,
+            availableQuantity: stockMap.get(item.productId) ?? 0,
+            unavailableQuantity: line.unavailableQuantity || item.quantity,
+            publicComment: line.publicComment,
+            hqWarehouseId: assignedHqWarehouseId,
+            alertType: AlertType.BRANCH_REQUEST_OUT_OF_STOCK,
+            alertTitle: 'Запрошенного товара нет на складе HQ',
+            alertMessage: `Филиал запросил товар, которого нет в наличии на складе HQ: ${item.productName} (${item.sku}).`,
+          });
+        }
+
+        const auditAction =
+          line.lineStatus === BranchPurchaseRequestLineStatus.APPROVED
+            ? 'BRANCH_REQUEST_LINE_APPROVED'
+            : line.lineStatus === BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED
+              ? 'BRANCH_REQUEST_LINE_PARTIALLY_APPROVED'
+              : line.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES
+                ? 'BRANCH_REQUEST_LINE_REMOVED'
+                : 'BRANCH_REQUEST_LINE_REJECTED';
+
+        await this.auditInTx(tx, user, existing.branchId, auditAction, 'BranchPurchaseRequestItem', item.id, {
+          requestId: existing.id,
+          requestLineId: item.id,
+          branchId: existing.branchId,
+          productId: item.productId,
+          requestedQuantity: item.quantity,
+          availableQuantity: stockMap.get(item.productId) ?? 0,
+          approvedQuantity: line.approvedQuantity,
+          unavailableQuantity: line.unavailableQuantity,
+          reasonCode: line.rejectionReasonCode,
+          publicComment: line.publicComment,
+          createdById: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      await this.auditInTx(tx, user, existing.branchId, 'BRANCH_REQUEST_REVIEW_SUBMITTED', 'BranchPurchaseRequest', id, {
+        requestId: id,
+        branchId: existing.branchId,
+        reviewedById: user.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      return request;
     });
 
     await this.auditBranchRequest(user, updated.branchId, 'HQ_SALES_REQUEST_REVIEWED', 'BranchPurchaseRequest', id, {
@@ -656,28 +817,215 @@ export class OperationsService {
       oldValue: existing.status,
       newValue: updated.status,
     });
-    await this.auditBranchRequest(user, updated.branchId, 'HQ_SALES_REQUEST_APPROVED', 'BranchPurchaseRequest', id);
-    await this.auditBranchRequest(user, updated.branchId, 'HQ_REQUEST_APPROVED', 'BranchPurchaseRequest', id, {
-      hqWarehouseId: assignedHqWarehouseId,
-      requestId: id,
-      branchId: updated.branchId,
-    });
-    await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_APPROVED', 'BranchPurchaseRequest', id);
-    await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_APPROVED', 'BranchPurchaseRequest', id);
-    if (anyPartial) {
-      await this.auditBranchRequest(user, updated.branchId, 'REQUEST_PARTIALLY_APPROVED', 'BranchPurchaseRequest', id);
-    }
-    if (anyShortage) {
-      await this.auditBranchRequest(user, updated.branchId, 'REQUEST_SHORTAGE_CREATED', 'BranchPurchaseRequest', id);
-      await this.auditBranchRequest(user, updated.branchId, 'SHORTAGE_CREATED', 'BranchPurchaseRequest', id);
-      await this.auditBranchRequest(user, updated.branchId, 'HQ_SHORTAGE_CREATED', 'BranchPurchaseRequest', id, {
-        hqWarehouseId: assignedHqWarehouseId,
-        requestId: id,
-        branchId: updated.branchId,
-      });
-    }
 
     return updated;
+  }
+
+  async branchRequestIssues(user: AuthUser) {
+    if (!this.hasAnyRole(user, [Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR])) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+    return this.prisma.branchRequestIssue.findMany({
+      where: { status: { in: [BranchRequestIssueStatus.OPEN, BranchRequestIssueStatus.WAITING_FOR_SUPPLY] } },
+      include: {
+        branchRequest: { select: { id: true, requestNumber: true } },
+        branchRequestItem: { select: { id: true, sku: true, productName: true, quantity: true, publicComment: true } },
+        branch: { select: { id: true, name: true } },
+        product: { select: { id: true, sku: true, name: true, category: true, productCategory: true } },
+        supplyInquiries: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: { respondedBy: { select: { id: true, fullName: true } } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createSupplyInquiry(user: AuthUser, issueId: string, dto: any) {
+    if (!this.hasAnyRole(user, [Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR])) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+
+    const issue = await this.prisma.branchRequestIssue.findUnique({
+      where: { id: issueId },
+      include: {
+        branchRequest: true,
+        branchRequestItem: true,
+        product: { select: { id: true, sku: true, name: true } },
+      },
+    });
+    if (!issue) throw new NotFoundException('Branch request issue not found');
+
+    const message =
+      dto?.message?.trim() ||
+      'Почему данного товара нет на складе HQ? Укажите причину отсутствия и план следующей поставки.';
+
+    const inquiry = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.supplyInquiry.create({
+        data: {
+          inquiryNumber: `SINQ-${Date.now()}`,
+          status: SupplyInquiryStatus.OPEN,
+          priority: dto?.priority?.trim() || 'NORMAL',
+          message,
+          branchRequestId: issue.branchRequestId,
+          branchRequestItemId: issue.branchRequestItemId,
+          branchRequestIssueId: issue.id,
+          productId: issue.productId,
+          requestedQuantity: issue.requestedQuantity,
+          availableQuantity: issue.availableQuantity,
+          unavailableQuantity: issue.unavailableQuantity,
+          createdById: user.id,
+        },
+        include: {
+          product: { select: { id: true, sku: true, name: true } },
+          branchRequest: { select: { id: true, requestNumber: true } },
+        },
+      });
+
+      await tx.branchRequestIssue.update({
+        where: { id: issue.id },
+        data: { status: BranchRequestIssueStatus.WAITING_FOR_SUPPLY },
+      });
+
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.SUPPLY_INQUIRY_CREATED,
+        branchId: issue.branchId,
+        entityType: 'SupplyInquiry',
+        entityId: created.id,
+        referenceNumber: created.inquiryNumber,
+        title: 'Вопрос CEO по отсутствующему товару',
+        message: `CEO задал вопрос по товару ${issue.branchRequestItem.productName} (${issue.branchRequestItem.sku}).`,
+        recipientRoles: [Role.SUPPLY_CHAIN_MANAGER],
+      });
+
+      await this.auditInTx(tx, user, issue.branchId, 'CEO_SUPPLY_INQUIRY_CREATED', 'SupplyInquiry', created.id, {
+        requestId: issue.branchRequestId,
+        requestLineId: issue.branchRequestItemId,
+        productId: issue.productId,
+        assignedToRole: Role.SUPPLY_CHAIN_MANAGER,
+        createdById: user.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      return created;
+    });
+
+    return inquiry;
+  }
+
+  async respondSupplyInquiry(user: AuthUser, inquiryId: string, dto: any) {
+    if (!this.hasAnyRole(user, [Role.SUPPLY_CHAIN_MANAGER, Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR])) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+
+    const inquiry = await this.prisma.supplyInquiry.findUnique({
+      where: { id: inquiryId },
+      include: {
+        product: { select: { id: true, sku: true, name: true } },
+        branchRequest: { select: { id: true, requestNumber: true, branchId: true } },
+        branchRequestIssue: { select: { id: true, branchId: true } },
+      },
+    });
+    if (!inquiry) throw new NotFoundException('Supply inquiry not found');
+
+    const absenceReason = dto?.absenceReason as SupplyAbsenceReason | undefined;
+    if (!absenceReason) {
+      throw new BadRequestException('Absence reason is required');
+    }
+    if (absenceReason === SupplyAbsenceReason.OTHER && !dto?.responseComment?.trim()) {
+      throw new BadRequestException('Comment is required when reason is OTHER');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.supplyInquiry.update({
+        where: { id: inquiryId },
+        data: {
+          status: SupplyInquiryStatus.ANSWERED,
+          absenceReason,
+          responseComment: dto?.responseComment?.trim() || null,
+          expectedOrderDate: dto?.expectedOrderDate ? new Date(dto.expectedOrderDate) : null,
+          expectedShipmentDate: dto?.expectedShipmentDate ? new Date(dto.expectedShipmentDate) : null,
+          expectedArrivalDate: dto?.expectedArrivalDate ? new Date(dto.expectedArrivalDate) : null,
+          procurementOrderId: dto?.procurementOrderId?.trim() || null,
+          respondedById: user.id,
+          respondedAt: new Date(),
+        },
+        include: {
+          product: { select: { id: true, sku: true, name: true } },
+          branchRequest: { select: { id: true, requestNumber: true } },
+          respondedBy: { select: { id: true, fullName: true } },
+        },
+      });
+
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.SUPPLY_INQUIRY_RESPONDED,
+        branchId: inquiry.branchRequestIssue?.branchId ?? null,
+        entityType: 'SupplyInquiry',
+        entityId: updated.id,
+        referenceNumber: updated.inquiryNumber,
+        title: 'Supply Manager ответил по отсутствующему товару',
+        message: `Supply Manager ответил по товару ${updated.product.name} (${updated.product.sku}).`,
+        recipientRoles: [Role.CEO, Role.OWNER],
+      });
+
+      await this.auditInTx(tx, user, inquiry.branchRequest.branchId, 'SUPPLY_MANAGER_RESPONSE_CREATED', 'SupplyInquiry', updated.id, {
+        requestId: inquiry.branchRequestId,
+        requestLineId: inquiry.branchRequestItemId,
+        productId: inquiry.productId,
+        absenceReason,
+        respondedById: user.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      return updated;
+    });
+  }
+
+  async updateBranchRequestIssueStatus(user: AuthUser, issueId: string, status: BranchRequestIssueStatus) {
+    if (!this.hasAnyRole(user, [Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR])) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const issue = await tx.branchRequestIssue.update({
+        where: { id: issueId },
+        data: {
+          status,
+          resolvedAt:
+            status === BranchRequestIssueStatus.RESOLVED || status === BranchRequestIssueStatus.CANCELLED
+              ? new Date()
+              : null,
+        },
+      });
+
+      await this.auditInTx(tx, user, issue.branchId, 'SUPPLY_ISSUE_STATUS_CHANGED', 'BranchRequestIssue', issueId, {
+        status,
+        changedById: user.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      return issue;
+    });
+
+    return updated;
+  }
+
+  async supplyInquiries(user: AuthUser) {
+    if (!this.hasAnyRole(user, [Role.SUPPLY_CHAIN_MANAGER, Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR])) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+
+    return this.prisma.supplyInquiry.findMany({
+      where: { status: { in: [SupplyInquiryStatus.OPEN, SupplyInquiryStatus.ANSWERED] } },
+      include: {
+        product: { select: { id: true, sku: true, name: true } },
+        branchRequest: { select: { id: true, requestNumber: true } },
+        createdBy: { select: { id: true, fullName: true } },
+        respondedBy: { select: { id: true, fullName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async branchProductShortages(
@@ -3991,6 +4339,9 @@ export class OperationsService {
       request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
       { branchId: request.branchId },
     );
+    const pricingPolicyMap = await this.loadActivePricingPolicyMap(
+      request.items.map((item) => item.sku),
+    );
 
     return {
       ...request,
@@ -4003,6 +4354,7 @@ export class OperationsService {
           ...item,
           hqAvailableStock: available,
           missingQty,
+          pricingPolicyAvailable: pricingPolicyMap.has(item.sku.trim().toUpperCase()),
         };
       }),
     };
@@ -4124,6 +4476,144 @@ export class OperationsService {
           ...extra,
         } as Prisma.InputJsonValue,
       },
+    });
+  }
+
+  private async loadActivePricingPolicyMap(skus: string[]) {
+    const normalized = [...new Set(skus.map((sku) => sku.trim().toUpperCase()).filter(Boolean))];
+    if (!normalized.length) return new Set<string>();
+
+    const policies = await this.prisma.productPricingPolicy.findMany({
+      where: { sku: { in: normalized }, status: PricingPolicyStatus.ACTIVE },
+      select: { sku: true },
+    });
+    return new Set(policies.map((policy) => policy.sku.toUpperCase()));
+  }
+
+  private normalizeLineReviewInputs(
+    dto: any,
+    items: Array<{ id: string; quantity: number }>,
+  ): LineReviewInput[] {
+    const rows = (dto?.items as Array<Record<string, unknown>>) ?? [];
+    if (!rows.length) {
+      return items.map((item) => ({
+        id: item.id,
+        action: 'APPROVE' as LineReviewAction,
+        approvedQuantity: item.quantity,
+      }));
+    }
+
+    return rows.map((row) => ({
+      id: String(row.id ?? ''),
+      action: (String(row.action ?? 'APPROVE').toUpperCase() as LineReviewAction) || 'APPROVE',
+      approvedQuantity:
+        row.approvedQuantity !== undefined ? Number(row.approvedQuantity) : undefined,
+      publicComment: typeof row.publicComment === 'string' ? row.publicComment : undefined,
+    }));
+  }
+
+  private async upsertBranchRequestIssueInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    input: {
+      issueType: BranchRequestIssueType;
+      request: {
+        id: string;
+        requestNumber: string;
+        branchId: string;
+        branch?: { name?: string | null } | null;
+        createdAt: Date;
+        assignedHqWarehouse?: { name?: string | null } | null;
+      };
+      item: {
+        id: string;
+        productId: string;
+        productName: string;
+        sku: string;
+        quantity: number;
+      };
+      availableQuantity: number;
+      unavailableQuantity: number;
+      publicComment: string | null;
+      hqWarehouseId: string;
+      alertType: AlertType;
+      alertTitle: string;
+      alertMessage: string;
+    },
+  ) {
+    const existingIssue = await tx.branchRequestIssue.findFirst({
+      where: {
+        issueType: input.issueType,
+        branchRequestItemId: input.item.id,
+        productId: input.item.productId,
+        status: { in: [BranchRequestIssueStatus.OPEN, BranchRequestIssueStatus.WAITING_FOR_SUPPLY] },
+      },
+    });
+
+    const issue =
+      existingIssue ??
+      (await tx.branchRequestIssue.create({
+        data: {
+          issueType: input.issueType,
+          branchRequestId: input.request.id,
+          branchRequestItemId: input.item.id,
+          branchId: input.request.branchId,
+          productId: input.item.productId,
+          requestedQuantity: input.item.quantity,
+          availableQuantity: input.availableQuantity,
+          unavailableQuantity: input.unavailableQuantity,
+          hqWarehouseId: input.hqWarehouseId,
+          publicComment: input.publicComment,
+        },
+      }));
+
+    if (existingIssue) {
+      await tx.branchRequestIssue.update({
+        where: { id: existingIssue.id },
+        data: {
+          requestedQuantity: input.item.quantity,
+          availableQuantity: input.availableQuantity,
+          unavailableQuantity: input.unavailableQuantity,
+          publicComment: input.publicComment,
+        },
+      });
+    }
+
+    const alerts = await this.notificationsService.notifyInTx(tx, user, {
+      type: input.alertType,
+      branchId: input.request.branchId,
+      entityType: 'BranchRequestIssue',
+      entityId: issue.id,
+      referenceNumber: input.request.requestNumber,
+      title: input.alertTitle,
+      message: `${input.alertMessage} Филиал: ${input.request.branch?.name ?? input.request.branchId}. Запрошено: ${input.item.quantity}. Доступно: ${input.availableQuantity}.`,
+      recipientRoles: [Role.CEO, Role.OWNER],
+    });
+
+    const alertId = alerts[0]?.id;
+    if (alertId) {
+      await tx.branchRequestIssue.update({
+        where: { id: issue.id },
+        data: { latestAlertId: alertId },
+      });
+    }
+
+    const auditAction =
+      input.issueType === BranchRequestIssueType.NO_PRICING_POLICY
+        ? 'CEO_NOTIFICATION_NO_PRICING_POLICY_CREATED'
+        : 'CEO_NOTIFICATION_OUT_OF_STOCK_CREATED';
+
+    await this.auditInTx(tx, user, input.request.branchId, auditAction, 'BranchRequestIssue', issue.id, {
+      requestId: input.request.id,
+      requestLineId: input.item.id,
+      productId: input.item.productId,
+      issueType: input.issueType,
+      requestedQuantity: input.item.quantity,
+      availableQuantity: input.availableQuantity,
+      unavailableQuantity: input.unavailableQuantity,
+      publicComment: input.publicComment,
+      createdById: user.id,
+      timestamp: new Date().toISOString(),
     });
   }
 

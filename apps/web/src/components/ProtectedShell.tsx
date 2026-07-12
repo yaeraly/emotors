@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchRequestIssues, canViewSupplyInquiries, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, roleCodesForUser } from '@/lib/rbac';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, visibleBranchOwnerSidebarModules } from '@/lib/unified-nav';
 import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -145,6 +145,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const roleLabel = roleCodesForUser(user).join(', ');
   const supplyChainManagerView = isSupplyChainManagerUser(user);
   const canSeeBranchProductShortages = canViewBranchProductShortages(user);
+  const canSeeBranchRequestIssues = canViewBranchRequestIssues(user);
+  const canSeeSupplyInquiries = canViewSupplyInquiries(user);
   const ceoOperationalView = isCeoUser(user);
   const warehouseManagerView = isWarehouseManagerUser(user);
   const hqSalesManagerView = isHqSalesManagerUser(user);
@@ -240,11 +242,17 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canSeeProcurement ? (
                   <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
                 ) : null}
+                {canSeeSupplyInquiries ? (
+                  <Link href="/supply-inquiries" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyInquiries.title')}</Link>
+                ) : null}
                 {canSeeDistribution ? (
                   <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
                 ) : null}
                 {canSeeBranchProductShortages ? (
                   <Link href="/branch-product-shortages" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('productShortages.title')}</Link>
+                ) : null}
+                {canSeeBranchRequestIssues ? (
+                  <Link href="/branch-request-issues" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('branchRequestIssues.title')}</Link>
                 ) : null}
                 {ceoOperationalView ? (
                   <div className="border-t border-slate-100 pt-2">

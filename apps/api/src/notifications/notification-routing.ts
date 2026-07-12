@@ -28,6 +28,10 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   SUPPLIER_PAYMENT_COMPLETED: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER] },
   PAYMENT_RECEIVED: { module: NotificationModule.FINANCE, roles: [Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
   BRANCH_INVOICE_CREATED: { module: NotificationModule.FINANCE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER] },
+  BRANCH_REQUEST_NO_PRICING_POLICY: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
+  BRANCH_REQUEST_OUT_OF_STOCK: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
+  SUPPLY_INQUIRY_CREATED: { module: NotificationModule.PROCUREMENT, roles: [Role.SUPPLY_CHAIN_MANAGER] },
+  SUPPLY_INQUIRY_RESPONDED: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER] },
 };
 
 export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: string; message: string }>> = {
@@ -106,6 +110,22 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   SUPPLIER_PAYMENT_COMPLETED: {
     title: 'Supplier Payment Completed',
     message: 'A supplier payment was completed.',
+  },
+  BRANCH_REQUEST_NO_PRICING_POLICY: {
+    title: 'Требуется ценовая политика',
+    message: 'Филиал запросил товар, для которого не настроена ценовая политика.',
+  },
+  BRANCH_REQUEST_OUT_OF_STOCK: {
+    title: 'Запрошенного товара нет на складе HQ',
+    message: 'Филиал запросил товар, которого нет в наличии на складе HQ.',
+  },
+  SUPPLY_INQUIRY_CREATED: {
+    title: 'Вопрос CEO по отсутствующему товару',
+    message: 'CEO задал вопрос Supply Manager по отсутствующему товару.',
+  },
+  SUPPLY_INQUIRY_RESPONDED: {
+    title: 'Supply Manager ответил по отсутствующему товару',
+    message: 'Supply Manager ответил по отсутствующему товару.',
   },
 };
 

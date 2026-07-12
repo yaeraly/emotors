@@ -252,6 +252,7 @@ const SUPPLY_CHAIN_MANAGER_ALLOWED_PREFIXES = [
   '/alerts',
   '/notifications',
   '/branch-purchase-requests',
+  '/supply-inquiries',
   '/supplier-claims',
 ];
 
@@ -391,6 +392,7 @@ const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
   '/branch-warehouses',
   '/warehouses',
   '/branch-product-shortages',
+  '/branch-request-issues',
   '/sales',
   '/customers',
   '/crm',
@@ -658,6 +660,12 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (pathname.startsWith('/branch-product-shortages')) {
     return canViewBranchProductShortages(user);
+  }
+  if (pathname.startsWith('/branch-request-issues')) {
+    return canViewBranchRequestIssues(user);
+  }
+  if (pathname.startsWith('/supply-inquiries')) {
+    return canViewSupplyInquiries(user);
   }
   if (pathname.startsWith('/reservations')) return hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/warehouse-release')) return hasPermission(user, 'inventory.manage') || hasPermission(user, 'sales.manage');
@@ -1257,6 +1265,15 @@ export function canSeeHqStockInBranchRequests(user: Pick<User, 'role' | 'roles' 
 export function canViewBranchProductShortages(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return hasFullAccess(user) || hasRole(user, 'SYSTEM_ADMINISTRATOR');
+}
+
+export function canViewBranchRequestIssues(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canViewBranchProductShortages(user);
+}
+
+export function canViewSupplyInquiries(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'SUPPLY_CHAIN_MANAGER') || hasRole(user, 'SYSTEM_ADMINISTRATOR');
 }
 
 export function canDispatchFromHq(user: Pick<User, 'role' | 'roles'> | null | undefined) {

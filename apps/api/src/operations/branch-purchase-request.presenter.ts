@@ -10,9 +10,20 @@ export function isBranchOnlyRequestUser(user: AuthUser, canViewAll: boolean) {
   return canManageOwnBranchProductRequest(user) && !canViewAll;
 }
 
+const REVIEWED_REQUEST_STATUSES = new Set<BranchPurchaseRequestStatus>([
+  BranchPurchaseRequestStatus.APPROVED,
+  BranchPurchaseRequestStatus.PARTIALLY_APPROVED,
+  BranchPurchaseRequestStatus.REJECTED,
+  BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE,
+  BranchPurchaseRequestStatus.SHIPPED,
+  BranchPurchaseRequestStatus.RECEIVED,
+  BranchPurchaseRequestStatus.RECEIVED_WITH_DIFFERENCE,
+  BranchPurchaseRequestStatus.COMPLETED,
+]);
+
 export function resolveBranchDisplayStatus(
   status: BranchPurchaseRequestStatus,
-  items: Array<{ quantity: number; approvedQuantity?: number | null }>,
+  items: Array<{ quantity: number; approvedQuantity?: number | null; lineStatus?: string | null }>,
 ) {
   const hasPartial =
     status === BranchPurchaseRequestStatus.APPROVED ||
@@ -44,9 +55,11 @@ export function resolveBranchDisplayStatus(
 
 export function sanitizeBranchPurchaseRequest<T extends {
   status: BranchPurchaseRequestStatus;
-    items: Array<{
+  reviewedAt?: Date | string | null;
+  items: Array<{
     quantity: number;
     approvedQuantity?: number | null;
+    unavailableQuantity?: number | null;
     hqAvailableStock?: number | null;
     currentBranchStock?: number;
     missingQty?: number | null;
@@ -54,6 +67,10 @@ export function sanitizeBranchPurchaseRequest<T extends {
     estimatedUnitCost?: unknown;
     totalAmount?: unknown;
     wholesalePriceKgs?: unknown;
+    lineStatus?: string | null;
+    rejectionReasonCode?: string | null;
+    publicComment?: string | null;
+    hasPricingPolicyAtReview?: boolean | null;
   }>;
 }>(request: T, hideSensitive: boolean) {
   if (!hideSensitive) {
@@ -67,6 +84,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
   const branchDisplayStatus = resolveBranchDisplayStatus(request.status, request.items);
   const partialFulfillmentMessage =
     branchDisplayStatus === 'PARTIALLY_APPROVED' ? 'PARTIAL_FULFILLMENT_LATER' : null;
+  const reviewed = Boolean(request.reviewedAt) || REVIEWED_REQUEST_STATUSES.has(request.status);
 
   return {
     ...request,
@@ -77,19 +95,26 @@ export function sanitizeBranchPurchaseRequest<T extends {
       productId: (item as { productId?: string }).productId,
       sku: (item as { sku?: string }).sku,
       productName: (item as { productName?: string }).productName,
-      quantity: item.approvedQuantity ?? item.quantity,
-      approvedQuantity: undefined,
+      quantity: item.quantity,
+      approvedQuantity: reviewed ? (item.approvedQuantity ?? 0) : undefined,
+      unavailableQuantity: reviewed ? (item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)) : undefined,
+      lineStatus: reviewed ? item.lineStatus : undefined,
+      rejectionReasonCode: reviewed ? item.rejectionReasonCode : undefined,
+      publicComment: reviewed ? item.publicComment : undefined,
       unit: (item as { unit?: string }).unit,
       note: (item as { note?: string | null }).note,
       branchPurchasePriceKgs: item.wholesalePriceKgs,
       totalAmount: item.totalAmount,
       weightKg: undefined,
       hqAvailableStock: undefined,
-      missingQty: undefined,
+      missingQty: reviewed
+        ? item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)
+        : undefined,
       currentBranchStock: undefined,
       transportExpenseAllocation: undefined,
       estimatedUnitCost: undefined,
       wholesalePriceKgs: undefined,
+      hasPricingPolicyAtReview: undefined,
     })),
   };
 }

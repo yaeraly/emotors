@@ -7,6 +7,10 @@ export type StatusDomain =
   | 'branch'
   | 'branchRequest'
   | 'branchShortage'
+  | 'branchRequestLine'
+  | 'branchRequestIssue'
+  | 'supplyInquiry'
+  | 'supplyAbsenceReason'
   | 'service'
   | 'inventory'
   | 'general';

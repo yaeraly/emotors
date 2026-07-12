@@ -25,13 +25,34 @@ export function notificationHref(alert: NotificationItem): string | null {
     return `/distribution/shortage-reports/${alert.entityId}`;
   }
   if (alert.entityType === 'BranchPurchaseRequest' && alert.entityId) {
-    return '/branch-purchase-requests';
+    return `/branch-purchase-requests/${alert.entityId}`;
+  }
+  if (alert.entityType === 'BranchRequestIssue' && alert.entityId) {
+    if (alert.type === 'BRANCH_REQUEST_NO_PRICING_POLICY') {
+      return '/branch-request-issues';
+    }
+    return '/branch-request-issues';
+  }
+  if (alert.entityType === 'SupplyInquiry' && alert.entityId) {
+    return '/supply-inquiries';
   }
   if (alert.entityType === 'ProcurementOrder' && alert.entityId) {
     return `/procurement/orders/${alert.entityId}`;
   }
   if (alert.entityType === 'Product' && alert.entityId) {
     return `/products/${alert.entityId}`;
+  }
+  if (alert.type === 'BRANCH_REQUEST_NO_PRICING_POLICY') {
+    return '/branch-request-issues';
+  }
+  if (alert.type === 'BRANCH_REQUEST_OUT_OF_STOCK') {
+    return '/branch-request-issues';
+  }
+  if (alert.type === 'SUPPLY_INQUIRY_CREATED') {
+    return '/supply-inquiries';
+  }
+  if (alert.type === 'SUPPLY_INQUIRY_RESPONDED') {
+    return '/branch-request-issues';
   }
   if (alert.type === 'LOW_STOCK' || alert.type === 'OUT_OF_STOCK') {
     return '/inventory';

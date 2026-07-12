@@ -276,6 +276,53 @@ enum InventoryCountStatus {
   ARCHIVED
 }
 
+enum BranchPurchaseRequestLineStatus {
+  PENDING_REVIEW
+  APPROVED
+  PARTIALLY_APPROVED
+  REJECTED
+  REMOVED_BY_HQ_SALES
+}
+
+enum BranchRequestLineRejectionReason {
+  NO_PRICING_POLICY
+  OUT_OF_STOCK
+  OTHER
+}
+
+enum BranchRequestIssueType {
+  NO_PRICING_POLICY
+  OUT_OF_STOCK
+}
+
+enum BranchRequestIssueStatus {
+  OPEN
+  WAITING_FOR_SUPPLY
+  RESOLVED
+  CANCELLED
+}
+
+enum SupplyInquiryStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+  CANCELLED
+}
+
+enum SupplyAbsenceReason {
+  NOT_ORDERED
+  ORDER_PLANNED
+  ORDER_IN_PROGRESS
+  SUPPLIER_DELAY
+  PRODUCTION_DELAY
+  TRANSPORT_DELAY
+  CUSTOMS_DELAY
+  RECEIVING_IN_PROGRESS
+  PRODUCT_DISCONTINUED
+  DEMAND_FORECAST_ERROR
+  OTHER
+}
+
 enum BranchPurchaseRequestStatus {
   DRAFT
   SUBMITTED
@@ -501,6 +548,10 @@ enum AlertType {
   GOODS_RECEIVED_HQ
   SUPPLIER_PAYMENT_DUE
   SUPPLIER_PAYMENT_COMPLETED
+  BRANCH_REQUEST_NO_PRICING_POLICY
+  BRANCH_REQUEST_OUT_OF_STOCK
+  SUPPLY_INQUIRY_CREATED
+  SUPPLY_INQUIRY_RESPONDED
 }
 
 enum NotificationModule {
@@ -844,6 +895,7 @@ model Branch {
   productPriceOverrides  ProductPriceOverride[]
   branchPurchaseRequests BranchPurchaseRequest[]
   branchRequestShortages BranchRequestShortage[]
+  branchRequestIssues    BranchRequestIssue[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1162,6 +1214,8 @@ model User {
   createdBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestCreator")
   reviewedBranchPurchaseRequests BranchPurchaseRequest[] @relation("BranchPurchaseRequestReviewer")
   reviewedBranchRequestShortages BranchRequestShortage[] @relation("BranchRequestShortageReviewer")
+  createdSupplyInquiries SupplyInquiry[] @relation("SupplyInquiryCreator")
+  respondedSupplyInquiries SupplyInquiry[] @relation("SupplyInquiryResponder")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1628,6 +1682,8 @@ model Product {
   saleFifoAllocations SaleFifoAllocation[]
   distributionFifoAllocations DistributionFifoAllocation[]
   branchRequestShortages BranchRequestShortage[]
+  branchRequestIssues    BranchRequestIssue[]
+  supplyInquiries        SupplyInquiry[]
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
@@ -2490,6 +2546,7 @@ model ProcurementOrder {
   chinaReceivingDraftRows  ChinaReceivingDraftRow[]
   chinaReceivingEditSession ChinaReceivingEditSession?
   landedCostSnapshots      ProcurementLandedCostSnapshot[]
+  supplyInquiries          SupplyInquiry[]
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt
   deletedAt                DateTime?
@@ -3841,6 +3898,8 @@ model BranchPurchaseRequest {
   totalEstimatedAmount Decimal @default(0) @db.Decimal(14, 2)
   items              BranchPurchaseRequestItem[]
   shortages          BranchRequestShortage[]
+  issues             BranchRequestIssue[]
+  supplyInquiries    SupplyInquiry[]
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   deletedAt          DateTime?
@@ -3871,12 +3930,87 @@ model BranchPurchaseRequestItem {
   totalAmount               Decimal  @default(0) @db.Decimal(14, 2)
   weightKg                  Decimal  @default(0) @db.Decimal(14, 3)
   note                      String?
+  lineStatus                BranchPurchaseRequestLineStatus @default(PENDING_REVIEW)
+  rejectionReasonCode       BranchRequestLineRejectionReason?
+  publicComment             String?
+  unavailableQuantity       Int      @default(0)
+  hasPricingPolicyAtReview  Boolean?
   shortages                 BranchRequestShortage[]
+  issues                    BranchRequestIssue[]
+  supplyInquiries           SupplyInquiry[]
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
   @@index([requestId])
   @@index([productId])
+  @@index([lineStatus])
+}
+
+model BranchRequestIssue {
+  id                    String                  @id @default(cuid())
+  issueType             BranchRequestIssueType
+  status                BranchRequestIssueStatus @default(OPEN)
+  branchRequestId       String
+  branchRequest         BranchPurchaseRequest   @relation(fields: [branchRequestId], references: [id], onDelete: Cascade)
+  branchRequestItemId   String
+  branchRequestItem     BranchPurchaseRequestItem @relation(fields: [branchRequestItemId], references: [id], onDelete: Cascade)
+  branchId              String
+  branch                Branch                  @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  productId             String
+  product               Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  requestedQuantity     Int
+  availableQuantity     Int                     @default(0)
+  unavailableQuantity   Int                     @default(0)
+  hqWarehouseId         String?
+  publicComment         String?
+  latestAlertId         String?
+  supplyInquiries       SupplyInquiry[]
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+  resolvedAt            DateTime?
+
+  @@index([branchRequestId])
+  @@index([branchRequestItemId])
+  @@index([productId])
+  @@index([issueType, status])
+}
+
+model SupplyInquiry {
+  id                    String               @id @default(cuid())
+  inquiryNumber         String               @unique
+  status                SupplyInquiryStatus  @default(OPEN)
+  priority              String               @default("NORMAL")
+  message               String
+  branchRequestId       String
+  branchRequest         BranchPurchaseRequest @relation(fields: [branchRequestId], references: [id], onDelete: Cascade)
+  branchRequestItemId   String
+  branchRequestItem     BranchPurchaseRequestItem @relation(fields: [branchRequestItemId], references: [id], onDelete: Cascade)
+  branchRequestIssueId  String?
+  branchRequestIssue    BranchRequestIssue?  @relation(fields: [branchRequestIssueId], references: [id], onDelete: SetNull)
+  productId             String
+  product               Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  requestedQuantity     Int
+  availableQuantity     Int                  @default(0)
+  unavailableQuantity   Int                  @default(0)
+  createdById           String
+  createdBy             User                 @relation("SupplyInquiryCreator", fields: [createdById], references: [id])
+  respondedById         String?
+  respondedBy           User?                @relation("SupplyInquiryResponder", fields: [respondedById], references: [id])
+  respondedAt           DateTime?
+  absenceReason         SupplyAbsenceReason?
+  responseComment       String?
+  expectedOrderDate     DateTime?
+  expectedShipmentDate  DateTime?
+  expectedArrivalDate   DateTime?
+  procurementOrderId    String?
+  procurementOrder      ProcurementOrder?    @relation(fields: [procurementOrderId], references: [id], onDelete: SetNull)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@index([branchRequestId])
+  @@index([branchRequestItemId])
+  @@index([status])
+  @@index([createdById])
 }
 
 model BranchRequestShortage {

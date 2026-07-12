@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { BranchPurchaseRequestStatus, Role } from '@prisma/client';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { BranchPurchaseRequestStatus, BranchRequestIssueStatus, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -97,6 +97,54 @@ export class OperationsController {
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
   rejectBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.reviewBranchPurchaseRequest(user, id, BranchPurchaseRequestStatus.REJECTED);
+  }
+
+  @Post('branch-purchase-requests/:id/submit-review')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
+  submitBranchPurchaseRequestReview(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.submitBranchPurchaseRequestReview(user, id, dto);
+  }
+
+  @Get('branch-request-issues')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  branchRequestIssues(@CurrentUser() user: AuthUser) {
+    return this.service.branchRequestIssues(user);
+  }
+
+  @Post('branch-request-issues/:id/supply-inquiry')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  createSupplyInquiry(
+    @CurrentUser() user: AuthUser,
+    @Param('id') issueId: string,
+    @Body() dto: any,
+  ) {
+    return this.service.createSupplyInquiry(user, issueId, dto);
+  }
+
+  @Patch('branch-request-issues/:id/status')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  updateBranchRequestIssueStatus(
+    @CurrentUser() user: AuthUser,
+    @Param('id') issueId: string,
+    @Body() dto: { status: BranchRequestIssueStatus },
+  ) {
+    return this.service.updateBranchRequestIssueStatus(user, issueId, dto.status);
+  }
+
+  @Get('supply-inquiries')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER)
+  supplyInquiries(@CurrentUser() user: AuthUser) {
+    return this.service.supplyInquiries(user);
+  }
+
+  @Post('supply-inquiries/:id/respond')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER)
+  respondSupplyInquiry(
+    @CurrentUser() user: AuthUser,
+    @Param('id') inquiryId: string,
+    @Body() dto: any,
+  ) {
+    return this.service.respondSupplyInquiry(user, inquiryId, dto);
   }
 
   @Get('branch-product-shortages')
