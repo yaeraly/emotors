@@ -28,6 +28,9 @@ type BaseProductRow = {
   sku: string;
   categoryName: string;
   effectiveBranchPriceKgs: number;
+  masterBranchPriceKgs?: number;
+  ruleApplied?: boolean;
+  displayBranchId?: string | null;
   inheritedMaximumRetailMarkupPercent?: number;
   inheritedMaximumWholesaleMarkupPercent?: number;
   maximumRetailMarkupOverridePercent?: number | null;
@@ -57,6 +60,7 @@ type MarkupPricingTableProps = {
   onRestore: (productId: string) => void;
   onOpenOverride: (row: EditableMarkupRow) => void;
   rowValidationMessage: (row: EditableMarkupRow) => string | null;
+  displayBranchId?: string;
   t: (key: string) => string;
 };
 
@@ -81,6 +85,7 @@ export function MarkupPricingTable({
   onRestore,
   onOpenOverride,
   rowValidationMessage,
+  displayBranchId,
   t,
 }: MarkupPricingTableProps) {
   const query = search.trim().toLowerCase();
@@ -129,11 +134,27 @@ export function MarkupPricingTable({
                     {row.categoryName}
                   </td>
                   <td className={markupTable.tdMoney}>
-                    {formatCompactMoney(row.effectiveBranchPriceKgs)}
-                    <PriceExplanationButton
-                      productId={row.id}
-                      priceType={channel === 'retail' ? 'RETAIL_RECOMMENDED' : 'WHOLESALE_RECOMMENDED'}
-                    />
+                    <div className="flex flex-col items-end gap-0.5">
+                      {row.masterBranchPriceKgs != null &&
+                      Math.abs(row.masterBranchPriceKgs - row.effectiveBranchPriceKgs) > 0.001 ? (
+                        <span className="text-[10px] text-slate-400">
+                          {t('pricing.colMasterPrice')}: {formatCompactMoney(row.masterBranchPriceKgs)}
+                        </span>
+                      ) : null}
+                      <span className="inline-flex items-center gap-1">
+                        {formatCompactMoney(row.effectiveBranchPriceKgs)}
+                        {row.ruleApplied && !row.isDirty ? (
+                          <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold text-amber-800">
+                            {t('pricing.ruleAppliedBadge')}
+                          </span>
+                        ) : null}
+                        <PriceExplanationButton
+                          productId={row.id}
+                          branchId={displayBranchId ?? row.displayBranchId}
+                          priceType={channel === 'retail' ? 'RETAIL_RECOMMENDED' : 'WHOLESALE_RECOMMENDED'}
+                        />
+                      </span>
+                    </div>
                   </td>
                   <td className={`${markupTable.tdPercent} ${markupGroup.min.cell}`}>
                     {canManage ? (

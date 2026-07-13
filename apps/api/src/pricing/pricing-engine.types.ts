@@ -42,6 +42,9 @@ export type PricingEngineResolveResult = {
 export type PriceExplanationLine = {
   key: string;
   label: string;
+  previousValueKgs: number | null;
+  adjustment: string | null;
+  resultingValueKgs: number | null;
   valueKgs: number | null;
   percent: number | null;
   detail: string | null;
@@ -91,6 +94,18 @@ export function toPriceFreezePayload(result: PricingEngineResolveResult): PriceF
   };
 }
 
+function formatAdjustment(mode: PricingAdjustmentMode | null, value: number | null, asDiscount = false) {
+  if (mode == null || value == null) return 'None';
+  if (mode === 'PERCENTAGE_DISCOUNT') return asDiscount ? `-${value}%` : `${value}%`;
+  if (mode === 'FIXED_AMOUNT_DISCOUNT') return `-${value}`;
+  if (mode === 'FIXED_SELLING_PRICE') return `= ${value}`;
+  return String(value);
+}
+
+/**
+ * Ordered CEO explanation pipeline generated only from Engine result (no FE formulas).
+ * FIFO → Master Franchise → Profile → Category Rule → Product Rule → Override → Final
+ */
 export function buildPriceExplanation(
   result: PricingEngineResolveResult,
   input: {
@@ -100,77 +115,98 @@ export function buildPriceExplanation(
     currency: string;
   },
 ): PriceExplanationResult {
+  const fifo = result.baseCostKgs;
+  const master = result.baseBranchPriceKgs;
+  const effective = result.effectiveBranchPriceKgs;
+  const finalPrice = result.resolvedPriceKgs;
+
+  const profileApplied = result.appliedRuleType === PricingAppliedRuleType.PRICING_PROFILE;
+  const categoryApplied = result.appliedRuleType === PricingAppliedRuleType.CATEGORY_RULE;
+  const productApplied = result.appliedRuleType === PricingAppliedRuleType.PRODUCT_RULE;
+  const overrideApplied = result.temporaryOverrideApplied;
+
   const lines: PriceExplanationLine[] = [
     {
       key: 'fifoCost',
       label: 'FIFO Cost',
-      valueKgs: result.baseCostKgs,
+      previousValueKgs: null,
+      adjustment: null,
+      resultingValueKgs: fifo,
+      valueKgs: fifo,
       percent: null,
       detail: null,
       applied: true,
     },
     {
       key: 'hqFranchiseMarkup',
-      label: 'HQ Franchise Markup',
-      valueKgs: result.baseBranchPriceKgs,
+      label: 'Master Franchise Markup',
+      previousValueKgs: fifo,
+      adjustment: `+${result.baseFranchiseMarkupPercent}%`,
+      resultingValueKgs: master,
+      valueKgs: master,
       percent: result.baseFranchiseMarkupPercent,
       detail: `+${result.baseFranchiseMarkupPercent}%`,
-      applied: result.baseFranchiseMarkupPercent !== 0 || result.baseBranchPriceKgs !== result.baseCostKgs,
+      applied: true,
+    },
+    {
+      key: 'pricingProfile',
+      label: 'Pricing Profile',
+      previousValueKgs: master,
+      adjustment: profileApplied
+        ? formatAdjustment('PERCENTAGE_DISCOUNT', result.pricingProfileDiscountPercent, true)
+        : result.pricingProfileName
+          ? result.pricingProfileName
+          : 'None',
+      resultingValueKgs: profileApplied ? effective : master,
+      valueKgs: profileApplied ? effective : null,
+      percent: result.pricingProfileDiscountPercent,
+      detail: profileApplied
+        ? `-${result.pricingProfileDiscountPercent}%`
+        : result.pricingProfileName ?? 'None',
+      applied: profileApplied,
     },
     {
       key: 'categoryRule',
       label: 'Category Rule',
-      valueKgs:
-        result.appliedRuleType === PricingAppliedRuleType.CATEGORY_RULE
-          ? result.effectiveBranchPriceKgs
-          : null,
+      previousValueKgs: master,
+      adjustment: categoryApplied
+        ? formatAdjustment('PERCENTAGE_DISCOUNT', result.categoryRulePercent, true)
+        : 'None',
+      resultingValueKgs: categoryApplied ? effective : null,
+      valueKgs: categoryApplied ? effective : null,
       percent: result.categoryRulePercent,
-      detail:
-        result.categoryRulePercent != null ? `${result.categoryRulePercent}%` : 'None',
-      applied: result.appliedRuleType === PricingAppliedRuleType.CATEGORY_RULE,
+      detail: categoryApplied ? `-${result.categoryRulePercent}%` : 'None',
+      applied: categoryApplied,
     },
     {
       key: 'productRule',
       label: 'Product Rule',
-      valueKgs:
-        result.appliedRuleType === PricingAppliedRuleType.PRODUCT_RULE
-          ? result.effectiveBranchPriceKgs
-          : null,
+      previousValueKgs: master,
+      adjustment: productApplied
+        ? formatAdjustment(result.productRuleMode, result.productRuleValue)
+        : 'None',
+      resultingValueKgs: productApplied ? effective : null,
+      valueKgs: productApplied ? effective : null,
       percent: result.productRuleValue,
-      detail:
-        result.productRuleMode && result.productRuleValue != null
-          ? `${result.productRuleMode}=${result.productRuleValue}`
-          : 'None',
-      applied: result.appliedRuleType === PricingAppliedRuleType.PRODUCT_RULE,
-    },
-    {
-      key: 'pricingProfile',
-      label: 'Pricing Profile Discount',
-      valueKgs:
-        result.appliedRuleType === PricingAppliedRuleType.PRICING_PROFILE
-          ? result.effectiveBranchPriceKgs
-          : null,
-      percent: result.pricingProfileDiscountPercent,
-      detail:
-        result.pricingProfileDiscountPercent != null
-          ? `-${result.pricingProfileDiscountPercent}%`
-          : result.pricingProfileName
-            ? result.pricingProfileName
-            : 'None',
-      applied: result.appliedRuleType === PricingAppliedRuleType.PRICING_PROFILE,
+      detail: productApplied
+        ? formatAdjustment(result.productRuleMode, result.productRuleValue)
+        : 'None',
+      applied: productApplied,
     },
     {
       key: 'temporaryOverride',
       label: 'Temporary Override',
-      valueKgs:
-        result.appliedRuleType === PricingAppliedRuleType.TEMP_OVERRIDE
-          ? result.effectiveBranchPriceKgs
-          : null,
-      percent: result.appliedAdjustmentValue,
-      detail: result.temporaryOverrideApplied
-        ? `${result.appliedAdjustmentMode ?? ''}=${result.appliedAdjustmentValue ?? ''}`
+      previousValueKgs: master,
+      adjustment: overrideApplied
+        ? formatAdjustment(result.appliedAdjustmentMode, result.appliedAdjustmentValue)
         : 'None',
-      applied: result.temporaryOverrideApplied,
+      resultingValueKgs: overrideApplied ? effective : null,
+      valueKgs: overrideApplied ? effective : null,
+      percent: result.appliedAdjustmentValue,
+      detail: overrideApplied
+        ? formatAdjustment(result.appliedAdjustmentMode, result.appliedAdjustmentValue)
+        : 'None',
+      applied: overrideApplied,
     },
     {
       key: 'finalPrice',
@@ -182,7 +218,13 @@ export function buildPriceExplanation(
             : input.priceType.startsWith('WHOLESALE')
               ? 'Final Wholesale Price'
               : 'Final Selling Price',
-      valueKgs: result.resolvedPriceKgs,
+      previousValueKgs: effective,
+      adjustment:
+        input.priceType === PricingEnginePriceType.BRANCH_PURCHASE
+          ? null
+          : input.priceType,
+      resultingValueKgs: finalPrice,
+      valueKgs: finalPrice,
       percent: null,
       detail: null,
       applied: true,
@@ -195,7 +237,7 @@ export function buildPriceExplanation(
     priceType: input.priceType,
     currency: input.currency,
     lines,
-    finalPriceKgs: result.resolvedPriceKgs,
+    finalPriceKgs: finalPrice,
     appliedRuleType: result.appliedRuleType,
     appliedRuleId: result.appliedRuleId,
     pricingPolicyVersionId: result.pricingPolicyVersionId,

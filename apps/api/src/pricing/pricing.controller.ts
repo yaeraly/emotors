@@ -163,8 +163,8 @@ export class PricingController {
 
   @Get('franchise-sales')
   @Roles(...PRICING_VIEW_ROLES)
-  listFranchiseSales(@CurrentUser() user: AuthUser) {
-    return this.pricingCatalogService.listFranchiseSalesProducts(user);
+  listFranchiseSales(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
+    return this.pricingCatalogService.listFranchiseSalesProducts(user, branchId);
   }
 
   @Put('franchise-sales/:id')
@@ -191,8 +191,8 @@ export class PricingController {
 
   @Get('retail')
   @Roles(...PRICING_VIEW_ROLES)
-  listRetail(@CurrentUser() user: AuthUser) {
-    return this.pricingCatalogService.listRetailProducts(user);
+  listRetail(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
+    return this.pricingCatalogService.listRetailProducts(user, branchId);
   }
 
   @Put('retail/:id')
@@ -233,8 +233,8 @@ export class PricingController {
 
   @Get('wholesale')
   @Roles(...PRICING_VIEW_ROLES)
-  listWholesale(@CurrentUser() user: AuthUser) {
-    return this.pricingCatalogService.listWholesaleProducts(user);
+  listWholesale(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
+    return this.pricingCatalogService.listWholesaleProducts(user, branchId);
   }
 
   @Put('wholesale/:id')

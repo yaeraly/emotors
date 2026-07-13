@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchType, MaximumMarkupOverrideReasonCode, MaximumPricePolicy, MaximumPricePolicySource, PricingPolicyVersionStatus, ProductPricingMode, Prisma } from '@prisma/client';
+import { BranchType, MaximumMarkupOverrideReasonCode, MaximumPricePolicy, MaximumPricePolicySource, PricingAppliedRuleType, PricingEnginePriceType, PricingPolicyVersionStatus, ProductPricingMode, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
@@ -25,6 +25,7 @@ import {
   validateMarkups,
 } from './pricing-calculator.util';
 import { PricingFifoService } from './pricing-fifo.service';
+import { PricingEngineService } from './pricing-engine.service';
 import {
   PreviewRetailMarkupDto,
   PreviewWholesaleMarkupDto,
@@ -73,6 +74,7 @@ export class PricingCatalogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fifoService: PricingFifoService,
+    private readonly pricingEngine: PricingEngineService,
   ) {}
 
   async listCategories(user: AuthUser) {
@@ -408,20 +410,47 @@ export class PricingCatalogService {
     );
   }
 
-  async listFranchiseSalesProducts(user: AuthUser) {
+  async listFranchiseSalesProducts(user: AuthUser, branchId?: string) {
+    const displayBranch = await this.resolveCatalogDisplayBranch(branchId);
     const rows = await this.listProducts(user);
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      sku: row.sku,
-      categoryId: row.categoryId,
-      categoryName: row.categoryName,
-      isActive: row.isActive,
-      costPriceKgs: row.costPriceKgs,
-      hqMarkupPercent: row.hqBranchWholesaleMarkupPercent,
-      branchPriceKgs: row.hqBranchWholesalePriceKgs,
-      lastUpdated: row.updatedAt,
-    }));
+    return Promise.all(
+      rows.map(async (row) => {
+        const engine = displayBranch
+          ? await this.pricingEngine.resolvePrice({
+              productId: row.id,
+              branchId: displayBranch.id,
+              priceType: PricingEnginePriceType.BRANCH_PURCHASE,
+            })
+          : null;
+
+        const masterBranchPriceKgs = engine?.baseBranchPriceKgs ?? row.hqBranchWholesalePriceKgs;
+        const effectiveBranchPriceKgs = engine?.resolvedPriceKgs ?? masterBranchPriceKgs;
+        const ruleApplied = this.isRuleApplied(engine?.appliedRuleType, masterBranchPriceKgs, effectiveBranchPriceKgs);
+
+        return {
+          id: row.id,
+          name: row.name,
+          sku: row.sku,
+          categoryId: row.categoryId,
+          categoryName: row.categoryName,
+          isActive: row.isActive,
+          costPriceKgs: engine?.baseCostKgs ?? row.costPriceKgs,
+          hqMarkupPercent: row.hqBranchWholesaleMarkupPercent,
+          /** @deprecated use effectiveBranchPriceKgs — kept for backward-compatible clients */
+          branchPriceKgs: effectiveBranchPriceKgs,
+          masterBranchPriceKgs,
+          effectiveBranchPriceKgs,
+          ruleApplied,
+          appliedRuleType: engine?.appliedRuleType ?? null,
+          pricingProfileId: engine?.pricingProfileId ?? displayBranch?.priceProfileId ?? null,
+          pricingProfileName: engine?.pricingProfileName ?? displayBranch?.priceProfile?.name ?? null,
+          pricingPolicyVersionId: engine?.pricingPolicyVersionId ?? null,
+          displayBranchId: displayBranch?.id ?? null,
+          displayBranchName: displayBranch?.name ?? null,
+          lastUpdated: row.updatedAt,
+        };
+      }),
+    );
   }
 
   async updateFranchiseSalesProduct(user: AuthUser, productId: string, dto: UpdateFranchiseSalesDto) {
@@ -446,9 +475,10 @@ export class PricingCatalogService {
     };
     const validationError = validateMarkups(cost.costPriceKgs, nextMarkups);
     if (validationError) throw new BadRequestException(validationError);
+    // Persist derived master prices for storage/history only — display after save uses Engine.
     const prices = pricesFromMarkups(cost.costPriceKgs, nextMarkups);
 
-    return this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async (tx) => {
       const updated = await this.persistProductPricing(tx, user, product, {
         costPriceKgs: cost.costPriceKgs,
         ...prices,
@@ -462,17 +492,12 @@ export class PricingCatalogService {
         sku: product.sku,
         reason: dto.reason ?? 'HQ franchise markup update',
       });
-      return {
-        id: updated.id,
-        name: updated.name,
-        sku: updated.sku,
-        categoryName: product.productCategory?.nameRu ?? product.category ?? '-',
-        costPriceKgs: cost.costPriceKgs,
-        hqMarkupPercent: Number(updated.hqBranchWholesaleMarkupPercent),
-        branchPriceKgs: Number(updated.hqBranchWholesalePriceKgs),
-        lastUpdated: updated.updatedAt,
-      };
     });
+
+    const rows = await this.listFranchiseSalesProducts(user);
+    const row = rows.find((item) => item.id === productId);
+    if (!row) throw new NotFoundException('Product not found after update');
+    return row;
   }
 
   async listBranches(user: AuthUser) {
@@ -587,10 +612,11 @@ export class PricingCatalogService {
     };
   }
 
-  async listRetailProducts(user: AuthUser) {
+  async listRetailProducts(user: AuthUser, branchId?: string) {
     this.assertCanView(user);
     await this.fifoService.syncFifoBatchesFromHqStockMovements();
 
+    const displayBranch = await this.resolveCatalogDisplayBranch(branchId);
     const hqBranch = await this.prisma.branch.findFirst({
       where: { code: HQ_CATALOG_BRANCH_CODE },
       select: { id: true },
@@ -617,24 +643,15 @@ export class PricingCatalogService {
     });
 
     return Promise.all(
-      products.map(async (product) => {
-        const cost = await this.fifoService.getLatestHqCostPrice(product.id);
-        const prices = pricesFromMarkups(cost.costPriceKgs, {
-          wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
-          minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
-          hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-          recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
-          minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
-        });
-        return this.formatRetailCatalogRow(product, prices.hqBranchWholesalePriceKgs);
-      }),
+      products.map(async (product) => this.toEngineRetailCatalogRow(product, displayBranch)),
     );
   }
 
-  async listWholesaleProducts(user: AuthUser) {
+  async listWholesaleProducts(user: AuthUser, branchId?: string) {
     this.assertCanView(user);
     await this.fifoService.syncFifoBatchesFromHqStockMovements();
 
+    const displayBranch = await this.resolveCatalogDisplayBranch(branchId);
     const hqBranch = await this.prisma.branch.findFirst({
       where: { code: HQ_CATALOG_BRANCH_CODE },
       select: { id: true },
@@ -661,17 +678,7 @@ export class PricingCatalogService {
     });
 
     return Promise.all(
-      products.map(async (product) => {
-        const cost = await this.fifoService.getLatestHqCostPrice(product.id);
-        const prices = pricesFromMarkups(cost.costPriceKgs, {
-          wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
-          minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
-          hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-          recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
-          minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
-        });
-        return this.formatWholesaleCatalogRow(product, prices.hqBranchWholesalePriceKgs);
-      }),
+      products.map(async (product) => this.toEngineWholesaleCatalogRow(product, displayBranch)),
     );
   }
 
@@ -2290,17 +2297,8 @@ export class PricingCatalogService {
       },
     });
     if (!product) throw new NotFoundException('Product not found');
-
-    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
-    const prices = pricesFromMarkups(cost.costPriceKgs, {
-      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
-      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
-      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
-      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
-    });
-
-    return this.formatRetailCatalogRow(product, prices.hqBranchWholesalePriceKgs);
+    const displayBranch = await this.resolveCatalogDisplayBranch();
+    return this.toEngineRetailCatalogRow(product, displayBranch);
   }
 
   private async loadWholesaleProductRowFromTx(tx: PrismaTx, productId: string) {
@@ -2313,17 +2311,8 @@ export class PricingCatalogService {
       },
     });
     if (!product) throw new NotFoundException('Product not found');
-
-    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
-    const prices = pricesFromMarkups(cost.costPriceKgs, {
-      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
-      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
-      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
-      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
-    });
-
-    return this.formatWholesaleCatalogRow(product, prices.hqBranchWholesalePriceKgs);
+    const displayBranch = await this.resolveCatalogDisplayBranch();
+    return this.toEngineWholesaleCatalogRow(product, displayBranch);
   }
 
   private async getRetailProductRow(user: AuthUser, productId: string) {
@@ -2374,6 +2363,206 @@ export class PricingCatalogService {
       reasonComment: input.reasonComment,
       timestamp: new Date().toISOString(),
     });
+  }
+
+  private async resolveCatalogDisplayBranch(branchId?: string) {
+    if (branchId) {
+      return this.prisma.branch.findFirst({
+        where: { id: branchId, deletedAt: null, code: { not: HQ_CATALOG_BRANCH_CODE } },
+        include: { priceProfile: { select: { id: true, name: true } } },
+      });
+    }
+
+    return this.prisma.branch.findFirst({
+      where: {
+        deletedAt: null,
+        code: { not: HQ_CATALOG_BRANCH_CODE },
+        priceProfileId: { not: null },
+        branchType: { not: BranchType.HQ_BRANCH },
+      },
+      orderBy: { name: 'asc' },
+      include: { priceProfile: { select: { id: true, name: true } } },
+    });
+  }
+
+  private isRuleApplied(
+    appliedRuleType: PricingAppliedRuleType | null | undefined,
+    masterPriceKgs: number,
+    effectivePriceKgs: number,
+  ) {
+    if (!appliedRuleType) return Math.abs(masterPriceKgs - effectivePriceKgs) > 0.001;
+    return (
+      appliedRuleType === PricingAppliedRuleType.TEMP_OVERRIDE ||
+      appliedRuleType === PricingAppliedRuleType.PRODUCT_RULE ||
+      appliedRuleType === PricingAppliedRuleType.CATEGORY_RULE ||
+      appliedRuleType === PricingAppliedRuleType.PRICING_PROFILE ||
+      Math.abs(masterPriceKgs - effectivePriceKgs) > 0.001
+    );
+  }
+
+  private async toEngineRetailCatalogRow(
+    product: Parameters<PricingCatalogService['formatRetailCatalogRow']>[0],
+    displayBranch: Awaited<ReturnType<PricingCatalogService['resolveCatalogDisplayBranch']>>,
+  ) {
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const masterPrices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+    });
+
+    // Markup-derived row for editable fields only; displayed prices overwritten by Engine.
+    const baseRow = this.formatRetailCatalogRow(product, masterPrices.hqBranchWholesalePriceKgs);
+
+    if (!displayBranch) {
+      return {
+        ...baseRow,
+        masterBranchPriceKgs: masterPrices.hqBranchWholesalePriceKgs,
+        masterMinimumRetailPriceKgs: baseRow.minimumRetailPriceKgs,
+        masterRecommendedRetailPriceKgs: baseRow.recommendedRetailPriceKgs,
+        masterMaximumRetailPriceKgs: baseRow.maximumRetailPriceKgs,
+        ruleApplied: false,
+        appliedRuleType: null,
+        pricingProfileId: null,
+        pricingProfileName: null,
+        pricingPolicyVersionId: null,
+        displayBranchId: null,
+        displayBranchName: null,
+      };
+    }
+
+    const [branchPurchase, retailMin, retailRec, retailMax] = await Promise.all([
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.BRANCH_PURCHASE,
+      }),
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.RETAIL_MINIMUM,
+      }),
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+      }),
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.RETAIL_MAXIMUM,
+      }),
+    ]);
+
+    const masterBranchPriceKgs = branchPurchase.baseBranchPriceKgs;
+    const effectiveBranchPriceKgs = branchPurchase.resolvedPriceKgs;
+
+    return {
+      ...baseRow,
+      effectiveBranchPriceKgs,
+      minimumRetailPriceKgs: retailMin.resolvedPriceKgs,
+      recommendedRetailPriceKgs: retailRec.resolvedPriceKgs,
+      maximumRetailPriceKgs: retailMax.resolvedPriceKgs,
+      masterBranchPriceKgs,
+      masterMinimumRetailPriceKgs: baseRow.minimumRetailPriceKgs,
+      masterRecommendedRetailPriceKgs: baseRow.recommendedRetailPriceKgs,
+      masterMaximumRetailPriceKgs: baseRow.maximumRetailPriceKgs,
+      ruleApplied: this.isRuleApplied(
+        branchPurchase.appliedRuleType,
+        masterBranchPriceKgs,
+        effectiveBranchPriceKgs,
+      ),
+      appliedRuleType: branchPurchase.appliedRuleType,
+      pricingProfileId: branchPurchase.pricingProfileId,
+      pricingProfileName: branchPurchase.pricingProfileName,
+      pricingPolicyVersionId: branchPurchase.pricingPolicyVersionId,
+      displayBranchId: displayBranch.id,
+      displayBranchName: displayBranch.name,
+    };
+  }
+
+  private async toEngineWholesaleCatalogRow(
+    product: Parameters<PricingCatalogService['formatWholesaleCatalogRow']>[0],
+    displayBranch: Awaited<ReturnType<PricingCatalogService['resolveCatalogDisplayBranch']>>,
+  ) {
+    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const masterPrices = pricesFromMarkups(cost.costPriceKgs, {
+      wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
+      minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
+      minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
+    });
+
+    const baseRow = this.formatWholesaleCatalogRow(product, masterPrices.hqBranchWholesalePriceKgs);
+
+    if (!displayBranch) {
+      return {
+        ...baseRow,
+        masterBranchPriceKgs: masterPrices.hqBranchWholesalePriceKgs,
+        masterMinimumWholesalePriceKgs: baseRow.minimumWholesalePriceKgs,
+        masterRecommendedWholesalePriceKgs: baseRow.recommendedWholesalePriceKgs,
+        masterMaximumWholesalePriceKgs: baseRow.maximumWholesalePriceKgs,
+        ruleApplied: false,
+        appliedRuleType: null,
+        pricingProfileId: null,
+        pricingProfileName: null,
+        pricingPolicyVersionId: null,
+        displayBranchId: null,
+        displayBranchName: null,
+      };
+    }
+
+    const [branchPurchase, wholesaleMin, wholesaleRec, wholesaleMax] = await Promise.all([
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.BRANCH_PURCHASE,
+      }),
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.WHOLESALE_MINIMUM,
+      }),
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.WHOLESALE_RECOMMENDED,
+      }),
+      this.pricingEngine.resolvePrice({
+        productId: product.id,
+        branchId: displayBranch.id,
+        priceType: PricingEnginePriceType.WHOLESALE_MAXIMUM,
+      }),
+    ]);
+
+    const masterBranchPriceKgs = branchPurchase.baseBranchPriceKgs;
+    const effectiveBranchPriceKgs = branchPurchase.resolvedPriceKgs;
+
+    return {
+      ...baseRow,
+      effectiveBranchPriceKgs,
+      minimumWholesalePriceKgs: wholesaleMin.resolvedPriceKgs,
+      recommendedWholesalePriceKgs: wholesaleRec.resolvedPriceKgs,
+      maximumWholesalePriceKgs: wholesaleMax.resolvedPriceKgs,
+      masterBranchPriceKgs,
+      masterMinimumWholesalePriceKgs: baseRow.minimumWholesalePriceKgs,
+      masterRecommendedWholesalePriceKgs: baseRow.recommendedWholesalePriceKgs,
+      masterMaximumWholesalePriceKgs: baseRow.maximumWholesalePriceKgs,
+      ruleApplied: this.isRuleApplied(
+        branchPurchase.appliedRuleType,
+        masterBranchPriceKgs,
+        effectiveBranchPriceKgs,
+      ),
+      appliedRuleType: branchPurchase.appliedRuleType,
+      pricingProfileId: branchPurchase.pricingProfileId,
+      pricingProfileName: branchPurchase.pricingProfileName,
+      pricingPolicyVersionId: branchPurchase.pricingPolicyVersionId,
+      displayBranchId: displayBranch.id,
+      displayBranchName: displayBranch.name,
+    };
   }
 
   private assertCanView(user: AuthUser) {

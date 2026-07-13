@@ -19,7 +19,7 @@ describe('pricing master rounding config', () => {
 });
 
 describe('buildPriceExplanation', () => {
-  it('builds CEO explanation lines from engine result', () => {
+  it('builds ordered CEO explanation with previous/adjustment/result', () => {
     const explanation = buildPriceExplanation(
       {
         resolvedPriceKgs: 1145,
@@ -50,9 +50,15 @@ describe('buildPriceExplanation', () => {
     );
 
     expect(explanation.finalPriceKgs).toBe(1145);
-    expect(explanation.lines.find((l) => l.key === 'fifoCost')?.valueKgs).toBe(1000);
-    expect(explanation.lines.find((l) => l.key === 'hqFranchiseMarkup')?.percent).toBe(20);
-    expect(explanation.lines.find((l) => l.key === 'categoryRule')?.applied).toBe(true);
+    const fifo = explanation.lines.find((l) => l.key === 'fifoCost');
+    const master = explanation.lines.find((l) => l.key === 'hqFranchiseMarkup');
+    const category = explanation.lines.find((l) => l.key === 'categoryRule');
+    expect(fifo?.resultingValueKgs).toBe(1000);
+    expect(master?.previousValueKgs).toBe(1000);
+    expect(master?.resultingValueKgs).toBe(1200);
+    expect(category?.applied).toBe(true);
+    expect(category?.previousValueKgs).toBe(1200);
+    expect(category?.resultingValueKgs).toBe(1145);
     expect(explanation.lines.find((l) => l.key === 'temporaryOverride')?.detail).toBe('None');
   });
 });

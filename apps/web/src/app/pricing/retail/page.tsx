@@ -18,6 +18,9 @@ type RetailRow = {
   sku: string;
   categoryName: string;
   effectiveBranchPriceKgs: number;
+  masterBranchPriceKgs?: number;
+  ruleApplied?: boolean;
+  displayBranchId?: string | null;
   minimumRetailMarkupPercent: number;
   minimumRetailPriceKgs: number;
   recommendedRetailMarkupPercent: number;
@@ -48,16 +51,24 @@ export default function PricingRetailPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [overrideRow, setOverrideRow] = useState<EditableMarkupRow | null>(null);
+  const [branchId, setBranchId] = useState('');
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; branchType: string }>>([]);
 
   const canManage = canManagePricingPolicy(user);
   const { schedulePreview, cancelRowEdits, cancelRowPreviews, markRowSaved } = usePricingMarkupPreview('retail', setRows);
 
-  async function load() {
-    const [products, me] = await Promise.all([
-      apiFetch<RetailRow[]>('/pricing/retail'),
+  async function load(selectedBranchId?: string) {
+    const query = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
+    const [products, me, branchRows] = await Promise.all([
+      apiFetch<RetailRow[]>(`/pricing/retail${query}`),
       apiFetch<User>('/auth/me'),
+      apiFetch<Array<{ id: string; name: string; branchType: string }>>('/branches'),
     ]);
     setUser(me);
+    const nonHq = branchRows.filter((b) => b.branchType !== 'HQ_BRANCH');
+    setBranches(nonHq);
+    const nextBranchId = selectedBranchId || products[0]?.displayBranchId || nonHq[0]?.id || '';
+    setBranchId(nextBranchId);
     setRows(products.map(toEditableRow));
   }
 
@@ -94,7 +105,7 @@ export default function PricingRetailPage() {
     setSuccess('');
     cancelRowPreviews(productId);
     try {
-      const saved = await apiFetch<RetailRow>(`/pricing/retail/${productId}`, {
+      await apiFetch<RetailRow>(`/pricing/retail/${productId}`, {
         method: 'PUT',
         body: JSON.stringify({
           minimumSellingMarkupPercent: row.draftMinMarkup,
@@ -103,7 +114,7 @@ export default function PricingRetailPage() {
         }),
       });
       markRowSaved(productId);
-      setRows((current) => current.map((item) => (item.id === productId ? toEditableRow(saved) : item)));
+      await load(branchId);
       setSuccess(t('pricing.markupsSaved'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -117,11 +128,11 @@ export default function PricingRetailPage() {
     setError('');
     setSuccess('');
     try {
-      const saved = await apiFetch<RetailRow>(`/pricing/retail/${productId}/maximum-markup-override`, {
+      await apiFetch<RetailRow>(`/pricing/retail/${productId}/maximum-markup-override`, {
         method: 'DELETE',
       });
       markRowSaved(productId);
-      setRows((current) => current.map((item) => (item.id === productId ? toEditableRow(saved) : item)));
+      await load(branchId);
       setSuccess(t('pricing.inheritanceRestored'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -147,6 +158,25 @@ export default function PricingRetailPage() {
       {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
       {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
       <p className="text-xs text-slate-500">{t('pricing.retailHint')}</p>
+      <p className="text-xs text-slate-500">{t('pricing.catalogEngineHint')}</p>
+      <label className="text-sm text-slate-600">
+        {t('pricing.displayBranch')}
+        <select
+          value={branchId}
+          onChange={(e) => {
+            const next = e.target.value;
+            setBranchId(next);
+            void load(next).catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+          }}
+          className="ml-2 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        >
+          {branches.map((branch) => (
+            <option key={branch.id} value={branch.id}>
+              {branch.name}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <MarkupPricingTable
         channel="retail"
@@ -161,6 +191,7 @@ export default function PricingRetailPage() {
         onRestore={(id) => void restoreInheritance(id)}
         onOpenOverride={setOverrideRow}
         rowValidationMessage={rowValidationMessage}
+        displayBranchId={branchId}
         t={t}
       />
 
@@ -176,7 +207,7 @@ export default function PricingRetailPage() {
         onClose={() => setOverrideRow(null)}
         onSubmit={async (payload) => {
           if (!overrideRow) return;
-          const saved = await apiFetch<RetailRow>(`/pricing/retail/${overrideRow.id}/maximum-markup-override`, {
+          await apiFetch<RetailRow>(`/pricing/retail/${overrideRow.id}/maximum-markup-override`, {
             method: 'PUT',
             body: JSON.stringify({
               maximumRetailMarkupOverridePercent: payload.overridePercent,
@@ -185,7 +216,7 @@ export default function PricingRetailPage() {
             }),
           });
           markRowSaved(overrideRow.id);
-          setRows((current) => current.map((item) => (item.id === overrideRow.id ? toEditableRow(saved) : item)));
+          await load(branchId);
           setSuccess(t('pricing.maximumMarkupOverridden'));
           setOverrideRow(null);
         }}
