@@ -9,6 +9,9 @@ import { useTranslation } from '@/i18n/useTranslation';
 type ExplanationLine = {
   key: string;
   label: string;
+  previousValueKgs: number | null;
+  adjustment: string | null;
+  resultingValueKgs: number | null;
   valueKgs: number | null;
   percent: number | null;
   detail: string | null;
@@ -94,7 +97,7 @@ export function PriceExplanationButton({
         i
       </button>
       {open ? (
-        <div className="absolute right-0 z-20 mt-7 w-72 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-lg">
+        <div className="absolute right-0 z-20 mt-7 w-80 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-lg">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {t('pricing.explanationTitle')}
@@ -109,20 +112,34 @@ export function PriceExplanationButton({
           </div>
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
           {explanation ? (
-            <ul className="space-y-1.5 text-xs text-slate-700">
-              {explanation.lines.map((line) => (
-                <li key={line.key} className="flex items-start justify-between gap-2">
-                  <span className="text-slate-500">
-                    {line.label}
-                    {line.detail ? ` (${line.detail})` : ''}
-                  </span>
-                  <span className="font-medium tabular-nums">
-                    {line.valueKgs != null
-                      ? `${Math.round(line.valueKgs)} ${explanation.currency}`
-                      : line.detail === 'None'
-                        ? t('pricing.explanationNone')
+            <ol className="space-y-2 text-xs text-slate-700">
+              {explanation.lines.map((line, index) => (
+                <li key={line.key} className="border-b border-slate-100 pb-2 last:border-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-slate-800">
+                      {index > 0 ? '↓ ' : ''}
+                      {line.label}
+                    </span>
+                    {!line.applied && line.key !== 'fifoCost' && line.key !== 'hqFranchiseMarkup' && line.key !== 'finalPrice' ? (
+                      <span className="text-slate-400">{t('pricing.explanationNone')}</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 grid grid-cols-3 gap-1 text-[11px] text-slate-500">
+                    <span>
+                      {t('pricing.explanationPrevious')}:{' '}
+                      {line.previousValueKgs != null
+                        ? `${Math.round(line.previousValueKgs)}`
                         : '—'}
-                  </span>
+                    </span>
+                    <span>
+                      {t('pricing.explanationAdjustment')}: {line.adjustment ?? '—'}
+                    </span>
+                    <span className="text-right font-semibold text-slate-800">
+                      {line.resultingValueKgs != null
+                        ? `${Math.round(line.resultingValueKgs)} ${explanation.currency}`
+                        : '—'}
+                    </span>
+                  </div>
                 </li>
               ))}
               {explanation.pricingProfileName ? (
@@ -130,7 +147,7 @@ export function PriceExplanationButton({
                   {t('pricing.profile')}: {explanation.pricingProfileName}
                 </li>
               ) : null}
-            </ul>
+            </ol>
           ) : null}
         </div>
       ) : null}

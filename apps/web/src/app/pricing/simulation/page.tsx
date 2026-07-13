@@ -138,6 +138,7 @@ export default function PricingSimulationPage() {
                   <th className="px-3 py-3">{t('pricing.branch')}</th>
                   <th className="px-3 py-3">{t('pricing.profile')}</th>
                   <th className="px-3 py-3">{t('pricing.simFifoCost')}</th>
+                  <th className="px-3 py-3">{t('pricing.colMasterPrice')}</th>
                   <th className="px-3 py-3">{t('pricing.simBranchPrice')}</th>
                   <th className="px-3 py-3">{t('pricing.simRetailPrice')}</th>
                   <th className="px-3 py-3">{t('pricing.simWholesalePrice')}</th>
@@ -156,7 +157,8 @@ export default function PricingSimulationPage() {
                     <td className="px-3 py-2">{String(row.branchName ?? '')}</td>
                     <td className="px-3 py-2">{String(row.profileName ?? '')}</td>
                     <td className="px-3 py-2">{Number(row.fifoCostKgs ?? 0).toFixed(0)}</td>
-                    <td className="px-3 py-2">{Number(row.branchPriceKgs ?? 0).toFixed(0)}</td>
+                    <td className="px-3 py-2">{Number(row.masterBranchPriceKgs ?? row.branchPriceKgs ?? 0).toFixed(0)}</td>
+                    <td className="px-3 py-2">{Number(row.effectiveBranchPriceKgs ?? row.branchPriceKgs ?? 0).toFixed(0)}</td>
                     <td className="px-3 py-2">{Number(row.retailPriceKgs ?? 0).toFixed(0)}</td>
                     <td className="px-3 py-2">{Number(row.wholesalePriceKgs ?? 0).toFixed(0)}</td>
                     <td className="px-3 py-2">{Number(row.hqMarginPercent ?? 0).toFixed(1)}%</td>
