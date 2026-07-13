@@ -43,7 +43,7 @@ export function resolveBranchDisplayStatus(
   if (status === BranchPurchaseRequestStatus.APPROVED) return 'ACCEPTED';
   if (status === BranchPurchaseRequestStatus.REJECTED) return 'REJECTED';
   if (status === BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE || status === BranchPurchaseRequestStatus.SHIPPED) {
-    return 'SHIPPED';
+    return 'SENT_TO_WAREHOUSE';
   }
   if (status === BranchPurchaseRequestStatus.COMPLETED || status === BranchPurchaseRequestStatus.RECEIVED) {
     return 'COMPLETED';

@@ -30,8 +30,8 @@ export type ResolvedLineReview = {
 };
 
 const DEFAULT_NO_PRICING_COMMENT =
-  'Для товара ещё не настроена ценовая политика';
-const DEFAULT_OUT_OF_STOCK_COMMENT = 'Товара нет на складе HQ';
+  'Для данного товара не настроена ценовая политика.';
+const DEFAULT_OUT_OF_STOCK_COMMENT = 'Недостаточно товара на складе HQ';
 
 export function resolveLineReview(
   input: LineReviewInput,

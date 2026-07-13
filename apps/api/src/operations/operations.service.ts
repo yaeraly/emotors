@@ -607,6 +607,7 @@ export class OperationsService {
       });
       await this.auditBranchRequest(user, updated.branchId, 'BRANCH_REQUEST_REVIEW_SUBMITTED', 'BranchPurchaseRequest', id);
       await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_REJECTED', 'BranchPurchaseRequest', id);
+      await this.notifyBranchSalesReviewOutcome(user, updated);
       return updated;
     }
 
@@ -775,6 +776,7 @@ export class OperationsService {
         if (!item) continue;
 
         if (line.notifyCeoNoPricingPolicy) {
+          const branchName = request.branch?.name ?? 'филиал';
           await this.upsertBranchRequestIssueInTx(tx, user, {
             issueType: BranchRequestIssueType.NO_PRICING_POLICY,
             request,
@@ -785,11 +787,12 @@ export class OperationsService {
             hqWarehouseId: assignedHqWarehouseId,
             alertType: AlertType.BRANCH_REQUEST_NO_PRICING_POLICY,
             alertTitle: 'Требуется ценовая политика',
-            alertMessage: `Филиал запросил товар, для которого не настроена ценовая политика: ${item.productName} (${item.sku}).`,
+            alertMessage: `Филиал '${branchName}' заказал товар, для которого отсутствует ценовая политика.`,
           });
         }
 
         if (line.notifyCeoOutOfStock) {
+          const branchName = request.branch?.name ?? 'филиал';
           await this.upsertBranchRequestIssueInTx(tx, user, {
             issueType: BranchRequestIssueType.OUT_OF_STOCK,
             request,
@@ -799,8 +802,8 @@ export class OperationsService {
             publicComment: line.publicComment,
             hqWarehouseId: assignedHqWarehouseId,
             alertType: AlertType.BRANCH_REQUEST_OUT_OF_STOCK,
-            alertTitle: 'Запрошенного товара нет на складе HQ',
-            alertMessage: `Филиал запросил товар, которого нет в наличии на складе HQ: ${item.productName} (${item.sku}).`,
+            alertTitle: 'Недостаточно товара на складе HQ',
+            alertMessage: `Филиал '${branchName}' заказал товар, но на складе HQ недостаточно остатков.`,
           });
         }
 
@@ -847,6 +850,8 @@ export class OperationsService {
       oldValue: existing.status,
       newValue: updated.status,
     });
+
+    await this.notifyBranchSalesReviewOutcome(user, updated);
 
     return updated;
   }
@@ -4766,11 +4771,11 @@ export class OperationsService {
     const alerts = await this.notificationsService.notifyInTx(tx, user, {
       type: input.alertType,
       branchId: input.request.branchId,
-      entityType: 'BranchRequestIssue',
-      entityId: issue.id,
+      entityType: 'BranchPurchaseRequest',
+      entityId: input.request.id,
       referenceNumber: input.request.requestNumber,
       title: input.alertTitle,
-      message: `${input.alertMessage} Филиал: ${input.request.branch?.name ?? input.request.branchId}. Запрошено: ${input.item.quantity}. Доступно: ${input.availableQuantity}.`,
+      message: `${input.alertMessage} Заказ: ${input.request.requestNumber}. Товар: ${input.item.productName} (${input.item.sku}). Запрошено: ${input.item.quantity}. Дата: ${input.request.createdAt.toLocaleDateString('ru-RU')}.`,
       recipientRoles: [Role.CEO, Role.OWNER],
     });
 
@@ -4798,6 +4803,38 @@ export class OperationsService {
       publicComment: input.publicComment,
       createdById: user.id,
       timestamp: new Date().toISOString(),
+    });
+  }
+
+  private async notifyBranchSalesReviewOutcome(
+    user: AuthUser,
+    request: {
+      id: string;
+      requestNumber: string;
+      branchId: string;
+      status: BranchPurchaseRequestStatus;
+    },
+  ) {
+    let type: AlertType;
+    if (request.status === BranchPurchaseRequestStatus.REJECTED) {
+      type = AlertType.BRANCH_ORDER_REJECTED;
+    } else if (request.status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED) {
+      type = AlertType.BRANCH_ORDER_PARTIALLY_APPROVED;
+    } else {
+      type = AlertType.BRANCH_ORDER_APPROVED;
+    }
+
+    await this.notificationsService.notify(user, {
+      type,
+      branchId: request.branchId,
+      entityType: 'BranchPurchaseRequest',
+      entityId: request.id,
+      referenceNumber: request.requestNumber,
+    });
+
+    await this.auditBranchRequest(user, request.branchId, 'BRANCH_ORDER_REVIEW_NOTIFICATION_CREATED', 'BranchPurchaseRequest', request.id, {
+      alertType: type,
+      status: request.status,
     });
   }
 

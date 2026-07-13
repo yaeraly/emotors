@@ -131,6 +131,13 @@ function approvedLineTotal(item: RequestItem, approvedQuantity: number) {
   return Math.round((price * approvedQuantity + Number.EPSILON) * 100) / 100;
 }
 
+function translateRejectionReason(t: (key: string) => string, code?: string | null) {
+  if (!code) return '—';
+  const key = `branchRequest.rejectionReason.${code}`;
+  const translated = t(key);
+  return translated !== key ? translated : code;
+}
+
 function defaultLineDecision(item: RequestItem): LineDecision {
   const available = item.hqAvailableStock ?? 0;
   const hasPolicy = item.pricingPolicyAvailable !== false;
@@ -262,6 +269,20 @@ export default function BranchPurchaseRequestDetailPage() {
 
   const reviewable = useMemo(() => request && isSubmittedStatus(request.status), [request]);
   const reviewed = useMemo(() => request && (Boolean(request.reviewedAt) || isReviewedStatus(request.status)), [request]);
+  const approvedItemCount = useMemo(
+    () => request?.items.filter((item) => (item.approvedQuantity ?? 0) > 0).length ?? 0,
+    [request],
+  );
+  const rejectedItemCount = useMemo(
+    () =>
+      request?.items.filter(
+        (item) =>
+          item.lineStatus === 'REJECTED' ||
+          item.lineStatus === 'REMOVED_BY_HQ_SALES' ||
+          (item.approvedQuantity ?? 0) === 0,
+      ).length ?? 0,
+    [request],
+  );
 
   if (user && !canView) {
     return (
@@ -323,6 +344,17 @@ export default function BranchPurchaseRequestDetailPage() {
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
+
+        {branchOnlyView && reviewed ? (
+          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm md:grid-cols-2">
+            <p className="font-semibold text-green-700">
+              {t('branchProductRequest.approvedItems')}: {approvedItemCount}
+            </p>
+            <p className="font-semibold text-red-700">
+              {t('branchProductRequest.rejectedItems')}: {rejectedItemCount}
+            </p>
+          </div>
+        ) : null}
 
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
           <div>
@@ -390,6 +422,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     <th className="px-4 py-3">{t('branchProductRequest.approvedQuantity')}</th>
                     <th className="px-4 py-3">{t('branchProductRequest.missingQuantity')}</th>
                     <th className="px-4 py-3">{t('distribution.status')}</th>
+                    <th className="px-4 py-3">{t('inventoryCount.rejectionReason')}</th>
                     <th className="px-4 py-3">{t('crm.notes')}</th>
                   </>
                 ) : (
@@ -483,7 +516,10 @@ export default function BranchPurchaseRequestDetailPage() {
                         <td className="px-4 py-3">
                           {translateStatus(t, item.lineStatus ?? request.status, 'branchRequestLine')}
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{item.publicComment ?? '-'}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {translateRejectionReason(t, item.rejectionReasonCode)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{item.publicComment ?? '—'}</td>
                       </>
                     ) : (
                       <td className="px-4 py-3">{item.quantity}</td>

@@ -10,6 +10,9 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   INVENTORY_APPROVED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR] },
   INVENTORY_REJECTED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR] },
   BRANCH_ORDER_SUBMITTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER, Role.SUPPLY_CHAIN_MANAGER] },
+  BRANCH_ORDER_APPROVED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.MANAGER, Role.FRANCHISE_OWNER] },
+  BRANCH_ORDER_PARTIALLY_APPROVED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.MANAGER, Role.FRANCHISE_OWNER] },
+  BRANCH_ORDER_REJECTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.MANAGER, Role.FRANCHISE_OWNER] },
   PROCUREMENT_CREATED: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER, Role.SUPPLY_CHAIN_MANAGER] },
   PROCUREMENT_WAITING_APPROVAL: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER] },
   PROCUREMENT_STATUS_CHANGED: { module: NotificationModule.PROCUREMENT, roles: [Role.SUPPLY_CHAIN_MANAGER] },
@@ -50,6 +53,18 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   BRANCH_ORDER_SUBMITTED: {
     title: 'New Branch Order',
     message: 'A branch submitted a new purchase request.',
+  },
+  BRANCH_ORDER_APPROVED: {
+    title: 'Заявка подтверждена',
+    message: 'HQ Sales подтвердил заявку филиала.',
+  },
+  BRANCH_ORDER_PARTIALLY_APPROVED: {
+    title: 'Заявка частично подтверждена',
+    message: 'HQ Sales частично подтвердил заявку филиала. Проверьте позиции и причины отклонения.',
+  },
+  BRANCH_ORDER_REJECTED: {
+    title: 'Заявка отклонена',
+    message: 'HQ Sales отклонил заявку филиала.',
   },
   PROCUREMENT_CREATED: {
     title: 'Procurement Order Created',
@@ -113,11 +128,11 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   },
   BRANCH_REQUEST_NO_PRICING_POLICY: {
     title: 'Требуется ценовая политика',
-    message: 'Филиал запросил товар, для которого не настроена ценовая политика.',
+    message: 'Филиал заказал товар, для которого отсутствует ценовая политика.',
   },
   BRANCH_REQUEST_OUT_OF_STOCK: {
-    title: 'Запрошенного товара нет на складе HQ',
-    message: 'Филиал запросил товар, которого нет в наличии на складе HQ.',
+    title: 'Недостаточно товара на складе HQ',
+    message: 'Филиал заказал товар, но на складе HQ недостаточно остатков.',
   },
   SUPPLY_INQUIRY_CREATED: {
     title: 'Вопрос CEO по отсутствующему товару',

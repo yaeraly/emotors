@@ -29,7 +29,7 @@ export function notificationHref(alert: NotificationItem): string | null {
   }
   if (alert.entityType === 'BranchRequestIssue' && alert.entityId) {
     if (alert.type === 'BRANCH_REQUEST_NO_PRICING_POLICY') {
-      return '/branch-request-issues';
+      return '/pricing';
     }
     return '/branch-request-issues';
   }
@@ -43,7 +43,7 @@ export function notificationHref(alert: NotificationItem): string | null {
     return `/products/${alert.entityId}`;
   }
   if (alert.type === 'BRANCH_REQUEST_NO_PRICING_POLICY') {
-    return '/branch-request-issues';
+    return '/pricing';
   }
   if (alert.type === 'BRANCH_REQUEST_OUT_OF_STOCK') {
     return '/branch-request-issues';
