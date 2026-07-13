@@ -25,9 +25,10 @@ export class CreateBranchOwnerDto {
   @MinLength(2)
   branchName!: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(2)
-  branchCode!: string;
+  branchCode?: string;
 
   @IsOptional()
   @IsString()

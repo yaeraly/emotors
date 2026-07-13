@@ -19,7 +19,6 @@ export default function NewBranchPage() {
   const [hqWarehouses, setHqWarehouses] = useState<Warehouse[]>([]);
   const [form, setForm] = useState({
     name: '',
-    code: '',
     city: '',
     address: '',
     phone: '',
@@ -83,13 +82,16 @@ export default function NewBranchPage() {
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-          {(['name', 'code', 'city', 'address', 'phone', 'ownerName'] as const).map((key) => (
+          <p className="md:col-span-2 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t('branches.autoCodeHint')}
+          </p>
+          {(['name', 'city', 'address', 'phone', 'ownerName'] as const).map((key) => (
             <label key={key} className="block">
               <span className="text-sm font-semibold text-slate-700">{key}</span>
               <input
                 value={form[key]}
                 onChange={(event) => setField(key, event.target.value)}
-                required={key === 'name' || key === 'code'}
+                required={key === 'name'}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>

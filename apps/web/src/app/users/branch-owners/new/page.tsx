@@ -27,7 +27,6 @@ export default function NewBranchOwnerPage() {
     username: '',
     password: '',
     branchName: '',
-    branchCode: '',
     city: '',
     address: '',
     branchPhone: '',
@@ -103,7 +102,7 @@ export default function NewBranchOwnerPage() {
           <h3 className="mb-4 text-lg font-bold">{t('users.branchDetails')}</h3>
           <div className="grid gap-4 md:grid-cols-2">
             <Input label={t('branches.name')} value={form.branchName} onChange={(value) => setField('branchName', value)} required />
-            <Input label={t('branches.code')} value={form.branchCode} onChange={(value) => setField('branchCode', value)} required />
+            <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600 md:col-span-2">{t('branches.autoCodeHint')}</p>
             <Input label={t('branches.city')} value={form.city} onChange={(value) => setField('city', value)} />
             <Input label={t('branches.phone')} value={form.branchPhone} onChange={(value) => setField('branchPhone', value)} />
             <label className="block md:col-span-2">

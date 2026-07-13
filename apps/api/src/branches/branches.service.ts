@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { BranchStatus, BranchType, Prisma, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
@@ -15,6 +16,7 @@ import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { AssignBranchHqWarehouseDto } from './dto/assign-branch-hq-warehouse.dto';
 import { resolveDefaultPriceProfileId } from '../pricing/pricing-profile-defaults.util';
+import { BRANCH_CODE_GENERATION_FAILED, generateBranchCode } from './branch-code.util';
 
 const branchInclude = {
   priceProfile: {
@@ -57,23 +59,78 @@ export class BranchesService {
 
     const branchType = dto.branchType ?? BranchType.FRANCHISE;
     const priceProfileId = await resolveDefaultPriceProfileId(this.prisma, branchType);
+    const manualCode = dto.code?.trim().toUpperCase() || null;
 
-    const branch = await this.prisma.branch.create({
-      data: {
-        name: dto.name,
-        code: dto.code,
-        city: dto.city,
-        address: dto.address,
-        phone: dto.phone,
-        ownerName: dto.ownerName,
-        status: dto.status,
-        branchType,
-        openedAt: dto.openedAt,
-        assignedHqWarehouseId,
-        priceProfileId,
-      },
-      include: branchInclude,
-    });
+    let branch;
+    try {
+      branch = await this.prisma.$transaction(async (tx) => {
+        const code = manualCode ?? (await generateBranchCode(tx, branchType));
+        const created = await tx.branch.create({
+          data: {
+            name: dto.name,
+            code,
+            city: dto.city,
+            address: dto.address,
+            phone: dto.phone,
+            ownerName: dto.ownerName,
+            status: dto.status,
+            branchType,
+            openedAt: dto.openedAt,
+            assignedHqWarehouseId,
+            priceProfileId,
+          },
+          include: branchInclude,
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'BRANCH_CODE_GENERATED',
+            entity: 'Branch',
+            entityId: created.id,
+            metadata: {
+              branchId: created.id,
+              branchCode: created.code,
+              branchType,
+              generatedById: user.id,
+              generationMethod: manualCode ? 'manual' : 'auto_sequence',
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'BRANCH_CREATED',
+            entity: 'Branch',
+            entityId: created.id,
+            metadata: {
+              branchId: created.id,
+              branchCode: created.code,
+              branchType,
+              name: created.name,
+              pricingProfileId: created.priceProfileId,
+              status: created.status,
+              createdById: user.id,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+
+        return created;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === BRANCH_CODE_GENERATION_FAILED) {
+        throw new InternalServerErrorException(BRANCH_CODE_GENERATION_FAILED);
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new InternalServerErrorException(BRANCH_CODE_GENERATION_FAILED);
+      }
+      throw error;
+    }
 
     if (assignedHqWarehouseId) {
       await this.auditHqWarehouseAssignment(user, branch.id, null, assignedHqWarehouseId);

@@ -78,6 +78,7 @@ type DraftLine = {
   branchPurchasePriceKgs: number | null;
   wholesalePriceKgs: number | null;
   pricingPending: boolean;
+  priceResolving: boolean;
   branchStock: number | null;
   hqStock: number | null;
   quantity: string;
@@ -92,6 +93,14 @@ function lineTotal(line: DraftLine) {
 
 function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
   if (!line.productId) return '—';
+  if (line.priceResolving) {
+    return (
+      <span className="inline-flex items-center gap-1 text-slate-500">
+        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+        {t('common.loading')}
+      </span>
+    );
+  }
   if (line.pricingPending || line.branchPurchasePriceKgs == null) {
     return t('branchProductRequest.pricingPending');
   }
@@ -109,6 +118,7 @@ function emptyLine(): DraftLine {
     branchPurchasePriceKgs: null,
     wholesalePriceKgs: null,
     pricingPending: false,
+    priceResolving: false,
     branchStock: 0,
     hqStock: null,
     quantity: '1',
@@ -183,7 +193,8 @@ export default function BranchPurchaseRequestsPage() {
                 quantity: String(Number(line.quantity) + 1),
                 branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
                 wholesalePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
-                pricingPending: product.pricingPending ?? product.branchPurchasePriceKgs == null,
+                pricingPending: product.pricingPending ?? (product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs) == null,
+                priceResolving: false,
               }
             : line,
         );
@@ -199,6 +210,7 @@ export default function BranchPurchaseRequestsPage() {
         branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? null,
         wholesalePriceKgs: product.branchPurchasePriceKgs ?? null,
         pricingPending: product.pricingPending ?? product.branchPurchasePriceKgs == null,
+        priceResolving: product.branchPurchasePriceKgs == null && !product.pricingPending,
         branchStock: 0,
         hqStock: null,
         quantity: '1',
@@ -324,6 +336,20 @@ export default function BranchPurchaseRequestsPage() {
   useEffect(() => {
     if (!showForm || !branchOnlyView || !form.branchId || !draftProductIds) return;
 
+    setLines((current) =>
+      current.map((line) =>
+        line.productId
+          ? {
+              ...line,
+              priceResolving: true,
+              branchPurchasePriceKgs: null,
+              wholesalePriceKgs: null,
+              pricingPending: false,
+            }
+          : line,
+      ),
+    );
+
     const params = new URLSearchParams({ branchId: form.branchId, productIds: draftProductIds });
     void apiFetch<Record<string, number | null>>(`/branch-purchase-requests/product-prices?${params.toString()}`)
       .then((prices) => {
@@ -335,12 +361,17 @@ export default function BranchPurchaseRequestsPage() {
                   branchPurchasePriceKgs: prices[line.productId],
                   wholesalePriceKgs: prices[line.productId],
                   pricingPending: prices[line.productId] == null,
+                  priceResolving: false,
                 }
               : line,
           ),
         );
       })
-      .catch(() => null);
+      .catch(() => {
+        setLines((current) =>
+          current.map((line) => (line.productId ? { ...line, priceResolving: false, pricingPending: true } : line)),
+        );
+      });
   }, [branchOnlyView, draftProductIds, form.branchId, showForm]);
 
   const draftTotalAmount = lines.reduce((sum, line) => sum + lineTotal(line), 0);

@@ -177,11 +177,31 @@ export default function UsersPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
-          <StatCard label={t('users.totalUsers')} value={stats.total} />
-          <StatCard label={t('users.hqUsers')} value={stats.hq} />
-          <StatCard label={t('users.branchUsers')} value={stats.branch} />
-          <StatCard label={t('users.filteredUsers')} value={filteredUsers.length} />
+        <div className={isBranchOwnerPanel ? 'grid grid-cols-2 gap-2 sm:grid-cols-4' : 'grid gap-3 md:grid-cols-4'}>
+          <StatCard
+            compact={isBranchOwnerPanel}
+            label={isBranchOwnerPanel ? t('users.statsTotal') : t('users.totalUsers')}
+            title={isBranchOwnerPanel ? t('users.totalUsers') : undefined}
+            value={stats.total}
+          />
+          <StatCard
+            compact={isBranchOwnerPanel}
+            label={isBranchOwnerPanel ? t('users.statsHq') : t('users.hqUsers')}
+            title={isBranchOwnerPanel ? t('users.hqUsers') : undefined}
+            value={stats.hq}
+          />
+          <StatCard
+            compact={isBranchOwnerPanel}
+            label={isBranchOwnerPanel ? t('users.statsBranches') : t('users.branchUsers')}
+            title={isBranchOwnerPanel ? t('users.branchUsers') : undefined}
+            value={stats.branch}
+          />
+          <StatCard
+            compact={isBranchOwnerPanel}
+            label={isBranchOwnerPanel ? t('users.statsFound') : t('users.filteredUsers')}
+            title={isBranchOwnerPanel ? t('users.filteredUsers') : undefined}
+            value={filteredUsers.length}
+          />
         </div>
 
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -345,7 +365,37 @@ function formatDate(value?: string | null) {
   return new Date(value).toLocaleString();
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({
+  label,
+  value,
+  compact = false,
+  title,
+}: {
+  label: string;
+  value: number;
+  compact?: boolean;
+  title?: string;
+}) {
+  if (compact) {
+    return (
+      <div
+        className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+        title={title}
+        aria-label={title ? `${title}: ${value}` : undefined}
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
+            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+          <p className="text-lg font-bold leading-tight text-slate-950 dark:text-slate-50">{value}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>

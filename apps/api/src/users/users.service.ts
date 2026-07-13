@@ -19,6 +19,7 @@ import {
   userHasPermission,
 } from '../rbac/rbac';
 import { EMPLOYEE_ID_GENERATION_FAILED, generateBranchEmployeeId } from './employee-id.util';
+import { BRANCH_CODE_GENERATION_FAILED, generateBranchCode } from '../branches/branch-code.util';
 
 const TEMP_PASSWORD = 'Emotors@2026';
 const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
@@ -362,10 +363,12 @@ export class UsersService {
     if (!username) throw new BadRequestException('Username is required');
     this.validatePassword(dto.password);
 
-    const branchCode = dto.branchCode.trim().toUpperCase();
-    const existingBranch = await this.prisma.branch.findUnique({ where: { code: branchCode } });
-    if (existingBranch) {
-      throw new ConflictException('Branch code already exists');
+    const branchCodeInput = dto.branchCode?.trim().toUpperCase() || null;
+    if (branchCodeInput) {
+      const existingBranch = await this.prisma.branch.findUnique({ where: { code: branchCodeInput } });
+      if (existingBranch) {
+        throw new ConflictException('Branch code already exists');
+      }
     }
 
     const existingUser = await this.prisma.user.findFirst({
@@ -383,72 +386,104 @@ export class UsersService {
 
     const email = dto.email?.trim().toLowerCase() || `${username}@emotors.local`;
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const warehouseName = `${dto.branchName.trim()}нын склады`;
-    const warehouseCode = `${branchCode}-WH`;
     const branchType = dto.branchType ?? BranchType.FRANCHISE;
     const priceProfileId = await resolveDefaultPriceProfileId(this.prisma, branchType);
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      const branch = await tx.branch.create({
-        data: {
-          name: dto.branchName.trim(),
-          code: branchCode,
-          city: dto.city?.trim() || null,
-          address: dto.address?.trim() || null,
-          phone: dto.branchPhone?.trim() || dto.phone?.trim() || null,
-          ownerName: dto.fullName.trim(),
-          status: dto.branchStatus ?? BranchStatus.ACTIVE,
-          branchType,
-          priceProfileId,
-          openedAt: new Date(),
-        },
-      });
+    let result;
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        const branchCode = branchCodeInput ?? (await generateBranchCode(tx, branchType));
+        const warehouseName = `${dto.branchName.trim()}нын склады`;
+        const warehouseCode = `${branchCode}-WH`;
 
-      const warehouse = await tx.warehouse.create({
-        data: {
+        const branch = await tx.branch.create({
+          data: {
+            name: dto.branchName.trim(),
+            code: branchCode,
+            city: dto.city?.trim() || null,
+            address: dto.address?.trim() || null,
+            phone: dto.branchPhone?.trim() || dto.phone?.trim() || null,
+            ownerName: dto.fullName.trim(),
+            status: dto.branchStatus ?? BranchStatus.ACTIVE,
+            branchType,
+            priceProfileId,
+            openedAt: new Date(),
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'BRANCH_CODE_GENERATED',
+            entity: 'Branch',
+            entityId: branch.id,
+            metadata: {
+              branchId: branch.id,
+              branchCode: branch.code,
+              branchType,
+              generatedById: user.id,
+              generationMethod: branchCodeInput ? 'manual' : 'auto_sequence',
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+
+        const warehouse = await tx.warehouse.create({
+          data: {
+            branchId: branch.id,
+            warehouseType: WarehouseType.BRANCH,
+            name: warehouseName,
+            code: warehouseCode,
+            address: dto.address?.trim() || null,
+            city: dto.city?.trim() || null,
+            isActive: true,
+          },
+        });
+
+        const owner = await tx.user.create({
+          data: {
+            fullName: dto.fullName.trim(),
+            phone: dto.phone?.trim() || null,
+            email,
+            username,
+            passwordHash,
+            role: Role.FRANCHISE_OWNER,
+            branchId: branch.id,
+            status: dto.status ?? UserStatus.ACTIVE,
+            mustChangePassword: true,
+          },
+          include: { branch: true, userRoles: { include: { role: true } } },
+        });
+
+        await this.auditInTx(tx, user, 'BRANCH_CREATED', 'Branch', branch.id, {
           branchId: branch.id,
-          warehouseType: WarehouseType.BRANCH,
-          name: warehouseName,
-          code: warehouseCode,
-          address: dto.address?.trim() || null,
-          city: dto.city?.trim() || null,
-          isActive: true,
-        },
-      });
-
-      const owner = await tx.user.create({
-        data: {
-          fullName: dto.fullName.trim(),
-          phone: dto.phone?.trim() || null,
-          email,
-          username,
-          passwordHash,
-          role: Role.FRANCHISE_OWNER,
+          branchCode: branch.code,
+          warehouseId: warehouse.id,
+          newValue: { name: branch.name, code: branch.code },
+        });
+        await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_CREATED', 'Warehouse', warehouse.id, {
           branchId: branch.id,
-          status: dto.status ?? UserStatus.ACTIVE,
-          mustChangePassword: true,
-        },
-        include: { branch: true, userRoles: { include: { role: true } } },
-      });
+          warehouseId: warehouse.id,
+          newValue: { name: warehouse.name, code: warehouse.code, warehouseType: WarehouseType.BRANCH },
+        });
+        await this.auditInTx(tx, user, 'BRANCH_OWNER_CREATED', 'User', owner.id, {
+          branchId: branch.id,
+          warehouseId: warehouse.id,
+          newValue: { fullName: owner.fullName, username: owner.username },
+        });
 
-      await this.auditInTx(tx, user, 'BRANCH_CREATED', 'Branch', branch.id, {
-        branchId: branch.id,
-        warehouseId: warehouse.id,
-        newValue: { name: branch.name, code: branch.code },
+        return { owner, branch, warehouse };
       });
-      await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_CREATED', 'Warehouse', warehouse.id, {
-        branchId: branch.id,
-        warehouseId: warehouse.id,
-        newValue: { name: warehouse.name, code: warehouse.code, warehouseType: WarehouseType.BRANCH },
-      });
-      await this.auditInTx(tx, user, 'BRANCH_OWNER_CREATED', 'User', owner.id, {
-        branchId: branch.id,
-        warehouseId: warehouse.id,
-        newValue: { fullName: owner.fullName, username: owner.username },
-      });
-
-      return { owner, branch, warehouse };
-    });
+    } catch (error) {
+      if (error instanceof Error && error.message === BRANCH_CODE_GENERATION_FAILED) {
+        throw new BadRequestException(BRANCH_CODE_GENERATION_FAILED);
+      }
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new BadRequestException(BRANCH_CODE_GENERATION_FAILED);
+      }
+      throw error;
+    }
 
     const synced = await this.syncUserRoles(result.owner.id, [Role.FRANCHISE_OWNER], user);
     return {

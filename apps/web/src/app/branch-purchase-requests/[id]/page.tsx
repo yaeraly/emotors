@@ -34,6 +34,8 @@ type RequestItem = {
   rejectionReasonCode?: string | null;
   publicComment?: string | null;
   branchPurchasePriceKgs?: number;
+  resolvedBranchPriceKgs?: number | null;
+  hasPricingPolicyAtSubmit?: boolean;
   wholesalePriceKgs?: number;
   transportExpenseAllocation?: number;
   estimatedUnitCost?: number;
@@ -96,6 +98,37 @@ function resolveRequestStatusLabel(
     return translateStatus(t, request.branchDisplayStatus, 'branchRequest');
   }
   return translateStatus(t, request.status);
+}
+
+function getFrozenBranchPrice(item: RequestItem) {
+  const raw = item.resolvedBranchPriceKgs ?? item.wholesalePriceKgs ?? item.branchPurchasePriceKgs;
+  if (raw == null) return null;
+  const price = Number(raw);
+  if (!Number.isFinite(price)) return null;
+  if (price === 0 && item.hasPricingPolicyAtSubmit === false) return null;
+  if (price === 0 && item.pricingPolicyAvailable === false) return null;
+  return price;
+}
+
+function formatFrozenBranchPrice(item: RequestItem, t: (key: string) => string) {
+  if (item.hasPricingPolicyAtSubmit === false || item.pricingPolicyAvailable === false) {
+    return t('branchProductRequest.pricingPending');
+  }
+  const price = getFrozenBranchPrice(item);
+  if (price == null) return t('branchProductRequest.pricingPending');
+  return price.toFixed(2);
+}
+
+function requestLineTotal(item: RequestItem) {
+  const price = getFrozenBranchPrice(item);
+  if (price == null) return 0;
+  return Math.round((price * item.quantity + Number.EPSILON) * 100) / 100;
+}
+
+function approvedLineTotal(item: RequestItem, approvedQuantity: number) {
+  const price = getFrozenBranchPrice(item);
+  if (price == null) return 0;
+  return Math.round((price * approvedQuantity + Number.EPSILON) * 100) / 100;
 }
 
 function defaultLineDecision(item: RequestItem): LineDecision {
@@ -365,6 +398,13 @@ export default function BranchPurchaseRequestDetailPage() {
                 <th className="px-4 py-3">{t('branchProductRequest.unit')}</th>
                 {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.branchStock')}</th> : null}
                 {canManage && reviewable ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
+                {!branchOnlyView && reviewable ? (
+                  <>
+                    <th className="px-4 py-3">{t('branchProductRequest.branchPurchasePrice')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.requestLineTotal')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.approvedLineTotal')}</th>
+                  </>
+                ) : null}
                 {!branchOnlyView && !reviewable ? (
                   <>
                     <th className="px-4 py-3">{t('branchProductRequest.wholesalePrice')}</th>
@@ -496,6 +536,15 @@ export default function BranchPurchaseRequestDetailPage() {
                           ) : null}
                         </div>
                       </td>
+                    ) : null}
+                    {!branchOnlyView && reviewable ? (
+                      <>
+                        <td className="px-4 py-3">{formatFrozenBranchPrice(item, t)}</td>
+                        <td className="px-4 py-3">{requestLineTotal(item).toFixed(2)}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900">
+                          {approvedLineTotal(item, approvedValue).toFixed(2)}
+                        </td>
+                      </>
                     ) : null}
                     {!branchOnlyView && !reviewable ? (
                       <>
