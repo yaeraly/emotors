@@ -10,8 +10,10 @@ import { PricingProductRuleService } from './pricing-product-rule.service';
 import { PricingProfileService } from './pricing-profile.service';
 import { PricingResolutionService } from './pricing-resolution.service';
 import { PricingSchedulerService } from './pricing-scheduler.service';
+import { PricingSettingsService } from './pricing-settings.service';
 import { PricingSimulationService } from './pricing-simulation.service';
 import { PricingService } from './pricing.service';
+import { PricingValidationService } from './pricing-validation.service';
 import { PricingVersionService } from './pricing-version.service';
 
 @Module({
@@ -30,6 +32,8 @@ import { PricingVersionService } from './pricing-version.service';
     PricingEngineService,
     PricingSimulationService,
     PricingSchedulerService,
+    PricingSettingsService,
+    PricingValidationService,
   ],
   exports: [
     PricingService,
@@ -45,6 +49,8 @@ import { PricingVersionService } from './pricing-version.service';
     PricingEngineService,
     PricingSimulationService,
     PricingSchedulerService,
+    PricingSettingsService,
+    PricingValidationService,
   ],
 })
 export class PricingModule {}

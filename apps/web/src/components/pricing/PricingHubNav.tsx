@@ -18,7 +18,8 @@ export type PricingHubTab =
   | 'product-rules'
   | 'overrides'
   | 'simulation'
-  | 'versions';
+  | 'versions'
+  | 'settings';
 
 type Props = {
   activeTab: PricingHubTab;
@@ -34,6 +35,7 @@ export function PricingHubNav({ activeTab }: Props) {
   }, []);
 
   const tabs = [
+    { id: 'settings', label: t('pricing.tabSettings') },
     { id: 'branches', label: t('pricing.tabFranchiseSales') },
     { id: 'retail', label: t('pricing.tabRetail') },
     { id: 'wholesale', label: t('pricing.tabWholesale') },

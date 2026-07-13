@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
+import { PriceExplanationButton } from '@/components/pricing/PriceExplanationButton';
 import { apiFetch } from '@/lib/api';
 import { applyHqBranchWholesaleMarkup } from '@/lib/pricing-table-utils';
 import { canManagePricingPolicy } from '@/lib/rbac';
@@ -147,7 +148,10 @@ export default function PricingBranchesPage() {
                     <span>{row.hqMarkupPercent}%</span>
                   )}
                 </td>
-                <td className="px-3 py-2 font-medium text-slate-800">{formatPrice(row.branchPriceKgs)}</td>
+                <td className="px-3 py-2 font-medium text-slate-800">
+                  {formatPrice(row.branchPriceKgs)}
+                  <PriceExplanationButton productId={row.id} priceType="BRANCH_PURCHASE" />
+                </td>
                 <td className="px-3 py-2 text-slate-600">{new Date(row.lastUpdated).toLocaleString()}</td>
                 <td className="px-3 py-2">
                   {canManage ? (

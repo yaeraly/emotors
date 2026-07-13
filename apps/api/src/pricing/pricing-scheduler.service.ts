@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { PricingPolicyVersionStatus, ProductPriceOverrideStatus } from '@prisma/client';
+import { PricingPolicyVersionStatus, Prisma, ProductPriceOverrideStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PricingValidationService } from './pricing-validation.service';
 
 @Injectable()
 export class PricingSchedulerService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly validationService: PricingValidationService,
+  ) {}
 
   async runDueActivations() {
     await Promise.all([
@@ -86,6 +90,26 @@ export class PricingSchedulerService {
     });
 
     for (const version of due) {
+      const validation = await this.validationService.validateVersion(version.id);
+      if (!validation.valid) {
+        await this.prisma.auditLog.create({
+          data: {
+            userId: version.scheduledById,
+            role: 'SYSTEM',
+            action: 'PRICE_POLICY_VALIDATION_FAILED',
+            entity: 'PricingPolicyVersion',
+            entityId: version.id,
+            metadata: {
+              versionNumber: version.versionNumber,
+              source: 'SCHEDULED_ACTIVATION',
+              validation,
+              timestamp: now.toISOString(),
+            } as Prisma.InputJsonValue,
+          },
+        });
+        continue;
+      }
+
       await this.prisma.$transaction(async (tx) => {
         await tx.pricingPolicyVersion.updateMany({
           where: { status: PricingPolicyVersionStatus.ACTIVE },

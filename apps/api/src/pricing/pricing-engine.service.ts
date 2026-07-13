@@ -7,12 +7,21 @@ import {
   calculateBaseBranchPriceKgs,
   calculateRetailPriceKgs,
   calculateWholesalePriceKgs,
+  DEFAULT_PRICING_ROUNDING,
   type BranchTypeForPricing,
   type PricingAdjustmentMode,
+  type PricingRoundingConfig,
 } from './pricing-calculator.util';
-import { PricingEngineResolveInput, PricingEngineResolveResult, PricingCalculationStep } from './pricing-engine.types';
+import {
+  buildPriceExplanation,
+  PricingEngineResolveInput,
+  PricingEngineResolveResult,
+  PricingCalculationStep,
+  PriceExplanationResult,
+} from './pricing-engine.types';
 import { PricingFifoService } from './pricing-fifo.service';
 import { PricingSchedulerService } from './pricing-scheduler.service';
+import { PricingSettingsService } from './pricing-settings.service';
 import {
   isMaximumPolicyActive,
   resolveRetailMaximumMarkup,
@@ -38,6 +47,7 @@ export class PricingEngineService {
     private readonly prisma: PrismaService,
     private readonly fifoService: PricingFifoService,
     private readonly schedulerService: PricingSchedulerService,
+    private readonly settingsService: PricingSettingsService,
   ) {}
 
   async resolvePrice(input: PricingEngineResolveInput): Promise<PricingEngineResolveResult> {
@@ -45,6 +55,7 @@ export class PricingEngineService {
 
     const priceType = input.priceType ?? PricingEnginePriceType.BRANCH_PURCHASE;
     const asOf = input.documentDate ?? new Date();
+    const rounding = await this.settingsService.getRoundingConfig().catch(() => DEFAULT_PRICING_ROUNDING);
 
     const branch = await this.prisma.branch.findFirst({
       where: { id: input.branchId, deletedAt: null },
@@ -87,7 +98,11 @@ export class PricingEngineService {
 
     const calculationSteps: PricingCalculationStep[] = [
       { step: 'fifoCost', valueKgs: baseCostKgs, detail: cost.source },
-      { step: 'masterFranchise', valueKgs: baseBranchPriceKgs, detail: `markup=${baseFranchiseMarkupPercent}` },
+      {
+        step: 'masterFranchise',
+        valueKgs: baseBranchPriceKgs,
+        detail: `markup=${baseFranchiseMarkupPercent}`,
+      },
     ];
 
     let effectiveBranchPriceKgs = baseBranchPriceKgs;
@@ -95,6 +110,11 @@ export class PricingEngineService {
     let appliedRuleId: string | null = null;
     let appliedAdjustmentMode: PricingAdjustmentMode | null = null;
     let appliedAdjustmentValue: number | null = null;
+    let categoryRulePercent: number | null = null;
+    let productRuleMode: PricingAdjustmentMode | null = null;
+    let productRuleValue: number | null = null;
+    let pricingProfileDiscountPercent: number | null = null;
+    let temporaryOverrideApplied = false;
 
     if (branchType === 'HQ_BRANCH') {
       effectiveBranchPriceKgs = baseCostKgs;
@@ -114,12 +134,18 @@ export class PricingEngineService {
           baseBranchPriceKgs,
           tempOverride.mode,
           tempOverride.value,
+          rounding,
         );
         appliedRuleType = PricingAppliedRuleType.TEMP_OVERRIDE;
         appliedRuleId = tempOverride.id;
         appliedAdjustmentMode = tempOverride.mode;
         appliedAdjustmentValue = tempOverride.value;
-        calculationSteps.push({ step: 'tempOverride', valueKgs: effectiveBranchPriceKgs });
+        temporaryOverrideApplied = true;
+        calculationSteps.push({
+          step: 'tempOverride',
+          valueKgs: effectiveBranchPriceKgs,
+          detail: `${tempOverride.mode}=${tempOverride.value}`,
+        });
       } else if (profileId) {
         let resolvedByRule = false;
 
@@ -135,12 +161,18 @@ export class PricingEngineService {
           if (productRule) {
             const mode = productRule.adjustmentMode as PricingAdjustmentMode;
             const value = Number(productRule.adjustmentValue);
-            effectiveBranchPriceKgs = applyPricingAdjustment(baseBranchPriceKgs, mode, value);
+            effectiveBranchPriceKgs = applyPricingAdjustment(baseBranchPriceKgs, mode, value, rounding);
             appliedRuleType = PricingAppliedRuleType.PRODUCT_RULE;
             appliedRuleId = productRule.id;
             appliedAdjustmentMode = mode;
             appliedAdjustmentValue = value;
-            calculationSteps.push({ step: 'productRule', valueKgs: effectiveBranchPriceKgs });
+            productRuleMode = mode;
+            productRuleValue = value;
+            calculationSteps.push({
+              step: 'productRule',
+              valueKgs: effectiveBranchPriceKgs,
+              detail: `${mode}=${value}`,
+            });
             resolvedByRule = true;
           } else if (pricingProduct.categoryId) {
             const categoryRule = await this.prisma.pricingCategoryRule.findFirst({
@@ -157,12 +189,18 @@ export class PricingEngineService {
                 baseBranchPriceKgs,
                 'PERCENTAGE_DISCOUNT',
                 value,
+                rounding,
               );
               appliedRuleType = PricingAppliedRuleType.CATEGORY_RULE;
               appliedRuleId = categoryRule.id;
               appliedAdjustmentMode = 'PERCENTAGE_DISCOUNT';
               appliedAdjustmentValue = value;
-              calculationSteps.push({ step: 'categoryRule', valueKgs: effectiveBranchPriceKgs });
+              categoryRulePercent = value;
+              calculationSteps.push({
+                step: 'categoryRule',
+                valueKgs: effectiveBranchPriceKgs,
+                detail: `discount=${value}%`,
+              });
               resolvedByRule = true;
             }
           }
@@ -179,11 +217,13 @@ export class PricingEngineService {
               baseBranchPriceKgs,
               'PERCENTAGE_DISCOUNT',
               discountPercent,
+              rounding,
             );
             appliedRuleType = PricingAppliedRuleType.PRICING_PROFILE;
             appliedRuleId = profileDiscount?.id ?? profileId;
             appliedAdjustmentMode = 'PERCENTAGE_DISCOUNT';
             appliedAdjustmentValue = discountPercent;
+            pricingProfileDiscountPercent = discountPercent;
             calculationSteps.push({
               step: 'pricingProfile',
               valueKgs: effectiveBranchPriceKgs,
@@ -210,12 +250,14 @@ export class PricingEngineService {
         resolvedPriceKgs = calculateRetailPriceKgs(
           effectiveBranchPriceKgs,
           Number(pricingProduct.minimumSellingMarkupPercent ?? 0),
+          rounding,
         );
         break;
       case PricingEnginePriceType.RETAIL_RECOMMENDED:
         resolvedPriceKgs = calculateRetailPriceKgs(
           effectiveBranchPriceKgs,
           Number(pricingProduct.recommendedRetailMarkupPercent ?? 0),
+          rounding,
         );
         break;
       case PricingEnginePriceType.RETAIL_MAXIMUM: {
@@ -223,10 +265,11 @@ export class PricingEngineService {
         const retailMarkup = resolveRetailMaximumMarkup(pricingProduct, category);
         resolvedPriceKgs =
           isMaximumPolicyActive(retailPolicy) && retailMarkup > 0
-            ? calculateRetailPriceKgs(effectiveBranchPriceKgs, retailMarkup)
+            ? calculateRetailPriceKgs(effectiveBranchPriceKgs, retailMarkup, rounding)
             : calculateRetailPriceKgs(
                 effectiveBranchPriceKgs,
                 Number(pricingProduct.recommendedRetailMarkupPercent ?? 0),
+                rounding,
               );
         break;
       }
@@ -234,12 +277,14 @@ export class PricingEngineService {
         resolvedPriceKgs = calculateWholesalePriceKgs(
           effectiveBranchPriceKgs,
           Number(pricingProduct.minimumWholesaleMarkupPercent ?? 0),
+          rounding,
         );
         break;
       case PricingEnginePriceType.WHOLESALE_RECOMMENDED:
         resolvedPriceKgs = calculateWholesalePriceKgs(
           effectiveBranchPriceKgs,
           Number(pricingProduct.wholesaleMarkupPercent ?? 0),
+          rounding,
         );
         break;
       case PricingEnginePriceType.WHOLESALE_MAXIMUM: {
@@ -247,28 +292,50 @@ export class PricingEngineService {
         const wholesaleMarkup = resolveWholesaleMaximumMarkup(pricingProduct, category);
         resolvedPriceKgs =
           isMaximumPolicyActive(wholesalePolicy) && wholesaleMarkup > 0
-            ? calculateWholesalePriceKgs(effectiveBranchPriceKgs, wholesaleMarkup)
+            ? calculateWholesalePriceKgs(effectiveBranchPriceKgs, wholesaleMarkup, rounding)
             : calculateWholesalePriceKgs(
                 effectiveBranchPriceKgs,
                 Number(pricingProduct.wholesaleMarkupPercent ?? 0),
+                rounding,
               );
         break;
       }
     }
 
+    calculationSteps.push({ step: 'finalPrice', valueKgs: resolvedPriceKgs, detail: priceType });
+
     return {
       resolvedPriceKgs,
       pricingPolicyVersionId: versionId,
       pricingProfileId: branch.priceProfileId,
+      pricingProfileName: branch.priceProfile?.name ?? null,
       baseCostKgs,
+      baseFranchiseMarkupPercent,
       baseBranchPriceKgs,
       effectiveBranchPriceKgs,
       appliedRuleType,
       appliedRuleId,
       appliedAdjustmentMode,
       appliedAdjustmentValue,
+      categoryRulePercent,
+      productRuleMode,
+      productRuleValue,
+      pricingProfileDiscountPercent,
+      temporaryOverrideApplied,
       calculationSteps,
     };
+  }
+
+  async explainPrice(input: PricingEngineResolveInput): Promise<PriceExplanationResult> {
+    const priceType = input.priceType ?? PricingEnginePriceType.BRANCH_PURCHASE;
+    const result = await this.resolvePrice(input);
+    const currency = await this.settingsService.getCurrency().catch(() => 'KGS');
+    return buildPriceExplanation(result, {
+      productId: input.productId,
+      branchId: input.branchId,
+      priceType,
+      currency,
+    });
   }
 
   async getActiveVersionId(): Promise<string | null> {

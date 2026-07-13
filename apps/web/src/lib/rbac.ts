@@ -786,6 +786,11 @@ export function canManagePricingPolicy(user: Pick<User, 'role' | 'roles' | 'perm
   return hasRole(user, 'CEO');
 }
 
+export function canViewPriceExplanation(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user);
+}
+
 export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
   if (isBranchWarehouseOperator(user)) return false;

@@ -19,6 +19,8 @@ import {
 import { pricesFromMarkups } from './pricing-calculator.util';
 import { PricingCatalogService } from './pricing-catalog.service';
 import { PricingSchedulerService } from './pricing-scheduler.service';
+import { PricingSettingsService } from './pricing-settings.service';
+import { PricingValidationService } from './pricing-validation.service';
 
 @Injectable()
 export class PricingVersionService {
@@ -26,6 +28,8 @@ export class PricingVersionService {
     private readonly prisma: PrismaService,
     private readonly catalogService: PricingCatalogService,
     private readonly schedulerService: PricingSchedulerService,
+    private readonly validationService: PricingValidationService,
+    private readonly settingsService: PricingSettingsService,
   ) {}
 
   async list(user: AuthUser) {
@@ -257,6 +261,13 @@ export class PricingVersionService {
       throw new BadRequestException('Only versions ready for review can be approved');
     }
     await this.assertHasSimulation(id);
+    const validation = await this.validationService.validateVersion(id, { auditUser: user });
+    if (!validation.valid) {
+      throw new BadRequestException({
+        message: 'Pricing policy version failed validation',
+        validation,
+      });
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const next = await tx.pricingPolicyVersion.update({
@@ -285,6 +296,13 @@ export class PricingVersionService {
       throw new BadRequestException('Only approved versions can be scheduled');
     }
     await this.assertHasSimulation(id);
+    const validation = await this.validationService.validateVersion(id, { auditUser: user });
+    if (!validation.valid) {
+      throw new BadRequestException({
+        message: 'Pricing policy version failed validation',
+        validation,
+      });
+    }
 
     const effectiveFrom = new Date(dto.effectiveFrom);
     if (Number.isNaN(effectiveFrom.getTime())) {
@@ -302,7 +320,8 @@ export class PricingVersionService {
         data: {
           status: PricingPolicyVersionStatus.SCHEDULED,
           effectiveFrom,
-          effectiveTimezone: dto.effectiveTimezone ?? 'Asia/Bishkek',
+          effectiveTimezone:
+            dto.effectiveTimezone ?? (await this.settingsService.getDefaultActivationTimezone()),
           scheduledById: user.id,
           scheduledAt: now,
           changeReason: dto.changeReason ?? version.changeReason,
@@ -341,6 +360,11 @@ export class PricingVersionService {
     return this.activateNow(user, id, new Date(), dto.reason);
   }
 
+  async validate(user: AuthUser, id: string) {
+    this.assertCanView(user);
+    return this.validationService.validateVersion(id, { auditUser: user });
+  }
+
   private async activateNow(user: AuthUser, id: string, effectiveFrom: Date, reason?: string) {
     const version = await this.prisma.pricingPolicyVersion.findUnique({ where: { id } });
     if (!version) throw new NotFoundException('Pricing policy version not found');
@@ -354,6 +378,14 @@ export class PricingVersionService {
       if (Array.isArray(errors) && errors.length) {
         throw new BadRequestException('Cannot publish version with validation errors');
       }
+    }
+
+    const validation = await this.validationService.validateVersion(id, { auditUser: user });
+    if (!validation.valid) {
+      throw new BadRequestException({
+        message: 'Pricing policy version failed activation validation',
+        validation,
+      });
     }
 
     const published = await this.prisma.$transaction(async (tx) => {

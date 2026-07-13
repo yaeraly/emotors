@@ -51,6 +51,8 @@ export class PricingService {
 
   list(user: AuthUser) {
     this.assertCanView(user);
+    // Legacy ProductPricingPolicy archive — readable for historical compatibility.
+    // Runtime price resolution uses PricingEngineService exclusively.
     return this.prisma.productPricingPolicy.findMany({
       include: {
         createdBy: { select: { id: true, fullName: true, role: true } },
@@ -93,6 +95,7 @@ export class PricingService {
 
   async create(user: AuthUser, dto: UpsertPricingPolicyDto) {
     this.assertCanManage(user);
+    // Legacy write path kept for backward compatibility; not used by runtime resolution.
     this.validatePolicyValues(dto);
 
     const hqProduct = await this.resolveHqCatalogProduct(dto.sku, dto.hqCatalogProductId);
@@ -621,6 +624,30 @@ export class PricingService {
 
   private roundMoney(value: number) {
     return Math.round((value + Number.EPSILON) * 100) / 100;
+  }
+
+  async auditExplanationView(
+    user: AuthUser,
+    explanation: {
+      productId: string;
+      branchId: string;
+      priceType: string;
+      finalPriceKgs: number;
+      appliedRuleType: string;
+      appliedRuleId: string | null;
+      pricingPolicyVersionId: string | null;
+      pricingProfileId: string | null;
+    },
+  ) {
+    return this.audit(user, 'PRICE_EXPLANATION_VIEWED', 'Product', explanation.productId, {
+      branchId: explanation.branchId,
+      priceType: explanation.priceType,
+      finalPriceKgs: explanation.finalPriceKgs,
+      appliedRuleType: explanation.appliedRuleType,
+      appliedRuleId: explanation.appliedRuleId,
+      pricingPolicyVersionId: explanation.pricingPolicyVersionId,
+      pricingProfileId: explanation.pricingProfileId,
+    });
   }
 
   private assertCanView(user: AuthUser) {

@@ -2,6 +2,7 @@
 
 import { MaximumMarkupOverrideModal } from '@/components/pricing/MaximumMarkupOverrideModal';
 import { PreviewPriceCell } from '@/components/pricing/PreviewPriceCell';
+import { PriceExplanationButton } from '@/components/pricing/PriceExplanationButton';
 import {
   MarkupTableHeaders,
   MaximumMarkupSourceDot,
@@ -127,7 +128,13 @@ export function MarkupPricingTable({
                   <td className={markupTable.tdCategory} title={row.categoryName}>
                     {row.categoryName}
                   </td>
-                  <td className={markupTable.tdMoney}>{formatCompactMoney(row.effectiveBranchPriceKgs)}</td>
+                  <td className={markupTable.tdMoney}>
+                    {formatCompactMoney(row.effectiveBranchPriceKgs)}
+                    <PriceExplanationButton
+                      productId={row.id}
+                      priceType={channel === 'retail' ? 'RETAIL_RECOMMENDED' : 'WHOLESALE_RECOMMENDED'}
+                    />
+                  </td>
                   <td className={`${markupTable.tdPercent} ${markupGroup.min.cell}`}>
                     {canManage ? (
                       <input

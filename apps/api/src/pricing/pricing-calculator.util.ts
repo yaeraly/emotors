@@ -1,28 +1,77 @@
 import { Prisma } from '@prisma/client';
 
-export function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+export type PricingRoundingStrategy = 'ROUNDUP' | 'ROUND_NEAREST' | 'NONE';
+
+export type PricingRoundingConfig = {
+  strategy: PricingRoundingStrategy;
+  /** Sheets-style precision: -1 = nearest 10, 0 = integer, 2 = cents */
+  roundUpPrecision: number;
+  decimalPrecision: number;
+};
+
+export const DEFAULT_PRICING_ROUNDING: PricingRoundingConfig = {
+  strategy: 'ROUNDUP',
+  roundUpPrecision: -1,
+  decimalPrecision: 2,
+};
+
+export function roundMoney(value: number, decimalPrecision = 2) {
+  const factor = 10 ** Math.max(0, decimalPrecision);
+  return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
 function toDecimal(value: number | Prisma.Decimal) {
   return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
 }
 
-/** Google Sheets style: ROUNDUP(value, -1) → nearest 10 KGS */
-export function roundUpToTens(value: number | Prisma.Decimal) {
+/** Apply centralized pricing rounding (master settings). Defaults match historical ROUNDUP to tens. */
+export function applyPricingRounding(
+  value: number | Prisma.Decimal,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
+) {
   const decimal = toDecimal(value);
   if (decimal.lte(0)) return 0;
-  return decimal.div(10).ceil().mul(10).toNumber();
+
+  if (config.strategy === 'NONE') {
+    return roundMoney(decimal.toNumber(), config.decimalPrecision);
+  }
+
+  if (config.strategy === 'ROUND_NEAREST') {
+    const precision = config.roundUpPrecision;
+    if (precision >= 0) {
+      return roundMoney(decimal.toNumber(), precision);
+    }
+    const factor = new Prisma.Decimal(10).pow(Math.abs(precision));
+    return decimal.div(factor).toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP).mul(factor).toNumber();
+  }
+
+  // ROUNDUP (default)
+  const precision = config.roundUpPrecision;
+  if (precision >= 0) {
+    const factor = new Prisma.Decimal(10).pow(precision);
+    return decimal.mul(factor).ceil().div(factor).toNumber();
+  }
+  const factor = new Prisma.Decimal(10).pow(Math.abs(precision));
+  return decimal.div(factor).ceil().mul(factor).toNumber();
+}
+
+/** Google Sheets style: ROUNDUP(value, -1) → nearest 10 KGS */
+export function roundUpToTens(value: number | Prisma.Decimal) {
+  return applyPricingRounding(value, DEFAULT_PRICING_ROUNDING);
 }
 
 /** Google Sheets style: ROUNDUP(cost * markup% + cost, -1) → nearest 10 KGS */
-export function applyMarkupRoundUp(costPrice: number, markupPercent: number) {
+export function applyMarkupRoundUp(
+  costPrice: number,
+  markupPercent: number,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
+) {
   if (costPrice <= 0) return 0;
   if (!Number.isFinite(markupPercent)) return 0;
   const base = new Prisma.Decimal(costPrice);
   const markupRate = new Prisma.Decimal(markupPercent).div(100);
   const raw = base.mul(markupRate).plus(base);
-  return roundUpToTens(raw);
+  return applyPricingRounding(raw, config);
 }
 
 /** HQ wholesale: when markup is 0, return exact cost without ROUNDUP. */
@@ -87,15 +136,20 @@ export function calculateBaseBranchPriceKgs(input: {
   );
 }
 
-export function calculateRetailPriceKgs(effectiveBranchPriceKgs: number, retailMarkupPercent: number) {
-  return applyMarkupRoundUp(effectiveBranchPriceKgs, retailMarkupPercent);
+export function calculateRetailPriceKgs(
+  effectiveBranchPriceKgs: number,
+  retailMarkupPercent: number,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
+) {
+  return applyMarkupRoundUp(effectiveBranchPriceKgs, retailMarkupPercent, config);
 }
 
 export function calculateWholesalePriceKgs(
   effectiveBranchPriceKgs: number,
   wholesaleMarkupPercent: number,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
 ) {
-  return applyMarkupRoundUp(effectiveBranchPriceKgs, wholesaleMarkupPercent);
+  return applyMarkupRoundUp(effectiveBranchPriceKgs, wholesaleMarkupPercent, config);
 }
 
 export type BranchProductPriceSource =
@@ -107,11 +161,15 @@ export type BranchProductPriceSource =
   | 'HQ_COST';
 
 /** Apply category discount on branch price: ROUNDUP(branchPrice × (1 - discount%), -1) */
-export function applyCategoryDiscountRoundUp(branchPriceKgs: number, discountPercent: number) {
+export function applyCategoryDiscountRoundUp(
+  branchPriceKgs: number,
+  discountPercent: number,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
+) {
   if (branchPriceKgs <= 0) return 0;
   if (discountPercent <= 0) return branchPriceKgs;
   const raw = branchPriceKgs * (1 - discountPercent / 100);
-  return roundUpToTens(raw);
+  return applyPricingRounding(raw, config);
 }
 
 export const applyCategoryDiscount = applyCategoryDiscountRoundUp;
@@ -120,6 +178,7 @@ export function applyPricingAdjustment(
   baseBranchPriceKgs: number,
   mode: PricingAdjustmentMode,
   adjustmentValue: number,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
 ): number {
   if (adjustmentValue < 0) {
     throw new Error('adjustmentValue cannot be negative');
@@ -128,10 +187,10 @@ export function applyPricingAdjustment(
   let result: number;
   switch (mode) {
     case 'PERCENTAGE_DISCOUNT':
-      result = applyCategoryDiscountRoundUp(baseBranchPriceKgs, adjustmentValue);
+      result = applyCategoryDiscountRoundUp(baseBranchPriceKgs, adjustmentValue, config);
       break;
     case 'FIXED_AMOUNT_DISCOUNT':
-      result = roundUpToTens(baseBranchPriceKgs - adjustmentValue);
+      result = applyPricingRounding(baseBranchPriceKgs - adjustmentValue, config);
       break;
     case 'FIXED_SELLING_PRICE':
       result = adjustmentValue;

@@ -1045,6 +1045,26 @@ model PricingSimulation {
   @@index([createdById])
 }
 
+/// Global singleton for Pricing Policy master settings (Общие настройки).
+model PricingMasterSettings {
+  id                        String   @id @default(cuid())
+  singletonKey              String   @unique @default("DEFAULT")
+  baseCalculationSource     String   @default("FIFO_COST")
+  roundingStrategy          String   @default("ROUNDUP")
+  roundUpPrecision          Int      @default(-1)
+  currency                  String   @default("KGS")
+  defaultDecimalPrecision   Int      @default(2)
+  defaultMinimumMarkup      Decimal  @default(0) @db.Decimal(8, 2)
+  defaultMaximumMarkup      Decimal  @default(0) @db.Decimal(8, 2)
+  defaultActivationTimezone String   @default("Asia/Bishkek")
+  updatedById               String?
+  updatedBy                 User?    @relation("PricingMasterSettingsUpdater", fields: [updatedById], references: [id])
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@index([updatedById])
+}
+
 model PricingPolicyVersionCategoryDiscount {
   id              String                 @id @default(cuid())
   versionId       String
@@ -1149,6 +1169,7 @@ model User {
   pricingPolicyVersionsScheduled PricingPolicyVersion[] @relation("PricingPolicyVersionScheduler")
   pricingProductRulesCreated PricingProductRule[] @relation("PricingProductRuleCreator")
   pricingSimulationsCreated PricingSimulation[] @relation("PricingSimulationCreator")
+  pricingMasterSettingsUpdated PricingMasterSettings[] @relation("PricingMasterSettingsUpdater")
   kpiTargets BranchKpiTarget[] @relation("KpiTargetCreator")
   npsSurveys NpsSurvey[] @relation("NpsSurveyCreator")
   courses Course[] @relation("CourseCreator")

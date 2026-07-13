@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PricingPolicyVersionStatus, Prisma } from '@prisma/client';
+import { PricingEnginePriceType, PricingPolicyVersionStatus, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
@@ -52,6 +52,15 @@ export class PricingSimulationService {
       include: { priceProfile: true },
     });
 
+    const channels: Array<{
+      channel: 'FRANCHISE' | 'RETAIL' | 'WHOLESALE';
+      priceType: PricingEnginePriceType;
+    }> = [
+      { channel: 'FRANCHISE', priceType: PricingEnginePriceType.BRANCH_PURCHASE },
+      { channel: 'RETAIL', priceType: PricingEnginePriceType.RETAIL_RECOMMENDED },
+      { channel: 'WHOLESALE', priceType: PricingEnginePriceType.WHOLESALE_RECOMMENDED },
+    ];
+
     const rows: Array<Record<string, unknown>> = [];
     const validationErrors: string[] = [];
     let increaseCount = 0;
@@ -61,59 +70,138 @@ export class PricingSimulationService {
 
     for (const branch of branches) {
       for (const product of products) {
-        const oldResult = activeVersionId
-          ? await this.pricingEngine.resolvePrice({
-              productId: product.id,
-              branchId: branch.id,
-              pricingPolicyVersionId: activeVersionId,
-            })
-          : await this.pricingEngine.resolvePrice({
-              productId: product.id,
-              branchId: branch.id,
-            });
-
-        const newResult = await this.pricingEngine.resolvePrice({
+        const branchPurchaseNew = await this.pricingEngine.resolvePrice({
           productId: product.id,
           branchId: branch.id,
           pricingPolicyVersionId: versionId,
+          priceType: PricingEnginePriceType.BRANCH_PURCHASE,
         });
-
-        const oldPrice = oldResult.resolvedPriceKgs;
-        const newPrice = newResult.resolvedPriceKgs;
-        const diffKgs = newPrice - oldPrice;
-        const diffPercent = oldPrice > 0 ? (diffKgs / oldPrice) * 100 : 0;
-        const oldMargin =
-          oldResult.baseCostKgs > 0
-            ? ((oldPrice - oldResult.baseCostKgs) / oldResult.baseCostKgs) * 100
-            : 0;
-        const newMargin =
-          newResult.baseCostKgs > 0
-            ? ((newPrice - newResult.baseCostKgs) / newResult.baseCostKgs) * 100
-            : 0;
-
-        if (newPrice < 0) {
-          validationErrors.push(`Negative price for ${product.sku} at ${branch.name}`);
-        }
-        if (diffKgs > 0) increaseCount += 1;
-        if (diffKgs < 0) decreaseCount += 1;
-        marginDeltaSum += newMargin - oldMargin;
-        marginDeltaCount += 1;
-
-        rows.push({
+        const retailNew = await this.pricingEngine.resolvePrice({
           productId: product.id,
-          productName: product.name,
-          sku: product.sku,
-          category: product.category,
           branchId: branch.id,
-          branchName: branch.name,
-          profileName: branch.priceProfile?.name ?? '—',
-          oldPriceKgs: oldPrice,
-          newPriceKgs: newPrice,
-          diffKgs,
-          diffPercent,
-          oldMarginPercent: oldMargin,
-          newMarginPercent: newMargin,
+          pricingPolicyVersionId: versionId,
+          priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
         });
+        const wholesaleNew = await this.pricingEngine.resolvePrice({
+          productId: product.id,
+          branchId: branch.id,
+          pricingPolicyVersionId: versionId,
+          priceType: PricingEnginePriceType.WHOLESALE_RECOMMENDED,
+        });
+
+        for (const { channel, priceType } of channels) {
+          const oldResult = activeVersionId
+            ? await this.pricingEngine.resolvePrice({
+                productId: product.id,
+                branchId: branch.id,
+                pricingPolicyVersionId: activeVersionId,
+                priceType,
+              })
+            : await this.pricingEngine.resolvePrice({
+                productId: product.id,
+                branchId: branch.id,
+                priceType,
+              });
+
+          const newResult =
+            channel === 'FRANCHISE'
+              ? branchPurchaseNew
+              : channel === 'RETAIL'
+                ? retailNew
+                : wholesaleNew;
+
+          const oldPrice = oldResult.resolvedPriceKgs;
+          const newPrice = newResult.resolvedPriceKgs;
+          const diffKgs = newPrice - oldPrice;
+          const diffPercent = oldPrice > 0 ? (diffKgs / oldPrice) * 100 : 0;
+          const fifoCost = newResult.baseCostKgs;
+          const branchPrice = branchPurchaseNew.resolvedPriceKgs;
+          const retailPrice = retailNew.resolvedPriceKgs;
+          const wholesalePrice = wholesaleNew.resolvedPriceKgs;
+          const hqMarginPercent =
+            fifoCost > 0 ? ((branchPrice - fifoCost) / fifoCost) * 100 : 0;
+          const branchMarginPercent =
+            branchPrice > 0 ? ((newPrice - branchPrice) / branchPrice) * 100 : 0;
+          const oldMargin =
+            oldResult.baseCostKgs > 0
+              ? ((oldPrice - oldResult.baseCostKgs) / oldResult.baseCostKgs) * 100
+              : 0;
+          const newMargin =
+            fifoCost > 0 ? ((newPrice - fifoCost) / fifoCost) * 100 : 0;
+
+          if (newPrice < 0) {
+            validationErrors.push(
+              `Negative ${channel} price for ${product.sku} at ${branch.name}`,
+            );
+          }
+          if (diffKgs > 0) increaseCount += 1;
+          if (diffKgs < 0) decreaseCount += 1;
+          marginDeltaSum += newMargin - oldMargin;
+          marginDeltaCount += 1;
+
+          rows.push({
+            channel,
+            priceType,
+            productId: product.id,
+            productName: product.name,
+            sku: product.sku,
+            category: product.category,
+            branchId: branch.id,
+            branchName: branch.name,
+            profileName: branch.priceProfile?.name ?? '—',
+            pricingProfileId: newResult.pricingProfileId,
+            fifoCostKgs: fifoCost,
+            branchPriceKgs: branchPrice,
+            retailPriceKgs: retailPrice,
+            wholesalePriceKgs: wholesalePrice,
+            hqMarginPercent,
+            branchMarginPercent,
+            appliedCategoryRule:
+              newResult.appliedRuleType === 'CATEGORY_RULE'
+                ? {
+                    id: newResult.appliedRuleId,
+                    discountPercent: newResult.categoryRulePercent,
+                  }
+                : null,
+            appliedProductRule:
+              newResult.appliedRuleType === 'PRODUCT_RULE'
+                ? {
+                    id: newResult.appliedRuleId,
+                    mode: newResult.productRuleMode,
+                    value: newResult.productRuleValue,
+                  }
+                : null,
+            appliedPricingProfile:
+              newResult.appliedRuleType === 'PRICING_PROFILE'
+                ? {
+                    id: newResult.pricingProfileId,
+                    name: newResult.pricingProfileName,
+                    discountPercent: newResult.pricingProfileDiscountPercent,
+                  }
+                : newResult.pricingProfileId
+                  ? {
+                      id: newResult.pricingProfileId,
+                      name: newResult.pricingProfileName,
+                      discountPercent: null,
+                    }
+                  : null,
+            temporaryOverride: newResult.temporaryOverrideApplied
+              ? {
+                  id: newResult.appliedRuleId,
+                  mode: newResult.appliedAdjustmentMode,
+                  value: newResult.appliedAdjustmentValue,
+                }
+              : null,
+            appliedRuleType: newResult.appliedRuleType,
+            finalSellingPriceKgs: newPrice,
+            oldPriceKgs: oldPrice,
+            newPriceKgs: newPrice,
+            diffKgs,
+            diffPercent,
+            oldMarginPercent: oldMargin,
+            newMarginPercent: newMargin,
+          });
+        }
       }
     }
 
@@ -122,10 +210,12 @@ export class PricingSimulationService {
       categoriesAffected: new Set(products.map((p) => p.categoryId)).size,
       branchesAffected: branches.length,
       profilesAffected: new Set(branches.map((b) => b.priceProfileId).filter(Boolean)).size,
+      channelsSimulated: ['FRANCHISE', 'RETAIL', 'WHOLESALE'],
       productsWithIncrease: increaseCount,
       productsWithDecrease: decreaseCount,
       averageMarginChange: marginDeltaCount ? marginDeltaSum / marginDeltaCount : 0,
       validationErrorCount: validationErrors.length,
+      rowCount: rows.length,
     };
 
     const simulation = await this.prisma.$transaction(async (tx) => {
@@ -149,6 +239,7 @@ export class PricingSimulationService {
           entityId: saved.id,
           metadata: {
             pricingPolicyVersionId: versionId,
+            channels: summary.channelsSimulated,
             summary,
             timestamp: new Date().toISOString(),
           },

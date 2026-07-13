@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { PricingEnginePriceType, Role } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuthUser } from '../auth/auth.types';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { canViewPriceExplanation } from '../rbac/rbac';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { UpsertPricingPolicyDto } from './dto/upsert-pricing-policy.dto';
@@ -48,6 +49,9 @@ import {
 import { PricingCategoryRuleService } from './pricing-category-rule.service';
 import { PricingProductRuleService } from './pricing-product-rule.service';
 import { PricingSimulationService } from './pricing-simulation.service';
+import { PricingEngineService } from './pricing-engine.service';
+import { PricingSettingsService } from './pricing-settings.service';
+import { UpdatePricingMasterSettingsDto } from './dto/pricing-master-settings.dto';
 
 const PRICING_VIEW_ROLES = [
   Role.OWNER,
@@ -80,7 +84,44 @@ export class PricingController {
     private readonly pricingProductRuleService: PricingProductRuleService,
     private readonly pricingSimulationService: PricingSimulationService,
     private readonly pricingVersionService: PricingVersionService,
+    private readonly pricingEngineService: PricingEngineService,
+    private readonly pricingSettingsService: PricingSettingsService,
   ) {}
+
+  @Get('settings')
+  @Roles(...PRICING_VIEW_ROLES)
+  getSettings(@CurrentUser() user: AuthUser) {
+    return this.pricingSettingsService.get(user);
+  }
+
+  @Put('settings')
+  @Roles(Role.CEO)
+  updateSettings(@CurrentUser() user: AuthUser, @Body() dto: UpdatePricingMasterSettingsDto) {
+    return this.pricingSettingsService.update(user, dto);
+  }
+
+  @Get('explain')
+  @Roles(Role.OWNER, Role.CEO)
+  async explainPrice(
+    @CurrentUser() user: AuthUser,
+    @Query('productId') productId: string,
+    @Query('branchId') branchId: string,
+    @Query('priceType') priceType?: PricingEnginePriceType,
+  ) {
+    if (!canViewPriceExplanation(user)) {
+      throw new ForbiddenException('Price explanation is available only to CEO and OWNER');
+    }
+    if (!productId || !branchId) {
+      throw new BadRequestException('productId and branchId are required');
+    }
+    const explanation = await this.pricingEngineService.explainPrice({
+      productId,
+      branchId,
+      priceType: priceType ?? PricingEnginePriceType.BRANCH_PURCHASE,
+    });
+    await this.pricingService.auditExplanationView(user, explanation);
+    return explanation;
+  }
 
   @Get('categories')
   @Roles(...PRICING_VIEW_ROLES)
@@ -403,6 +444,12 @@ export class PricingController {
   @Roles(Role.CEO)
   refreshVersionSimulation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.pricingSimulationService.refresh(user, id);
+  }
+
+  @Post('versions/:id/validate')
+  @Roles(...PRICING_VIEW_ROLES)
+  validateVersion(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.pricingVersionService.validate(user, id);
   }
 
   @Post('versions/:id/publish')

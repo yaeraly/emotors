@@ -245,6 +245,11 @@ export function canManagePricingPolicy(user: Pick<AuthUser, 'role' | 'roles' | '
   return resolveUserRoles(user).includes(Role.CEO);
 }
 
+/** CEO and OWNER may view internal price calculation breakdown. */
+export function canViewPriceExplanation(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
 export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   const roles = resolveUserRoles(user);
   if (isBranchWarehouseOperator(user)) return false;

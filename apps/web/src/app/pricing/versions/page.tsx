@@ -11,7 +11,7 @@ type PolicyVersion = {
   id: string;
   versionNumber: number;
   label: string;
-  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  status: 'DRAFT' | 'READY_FOR_REVIEW' | 'APPROVED' | 'SCHEDULED' | 'ACTIVE' | 'ARCHIVED';
   isLocked: boolean;
   publishedAt?: string | null;
   productSnapshotCount: number;
@@ -91,6 +91,36 @@ export default function PricingVersionsPage() {
     }
   }
 
+  async function validateVersion(id: string) {
+    if (!canManage) return;
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const report = await apiFetch<{
+        valid: boolean;
+        errorCount: number;
+        warningCount: number;
+        issues: Array<{ code: string; message: string; severity: string }>;
+      }>(`/pricing/versions/${id}/validate`, { method: 'POST', body: JSON.stringify({}) });
+      if (report.valid) {
+        setSuccess(t('pricing.validationPassed'));
+      } else {
+        setError(
+          `${t('pricing.validationFailed')}: ${report.issues
+            .filter((i) => i.severity === 'ERROR')
+            .slice(0, 5)
+            .map((i) => i.message)
+            .join('; ')}`,
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <>
       <PricingHubNav activeTab="versions" />
@@ -138,6 +168,16 @@ export default function PricingVersionsPage() {
                 <td className="px-3 py-2">
                   {canManage ? (
                     <div className="flex flex-wrap gap-2">
+                      {version.status === 'DRAFT' || version.status === 'READY_FOR_REVIEW' || version.status === 'APPROVED' ? (
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => void validateVersion(version.id)}
+                          className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold"
+                        >
+                          {t('pricing.validateVersion')}
+                        </button>
+                      ) : null}
                       {version.status === 'DRAFT' ? (
                         <button
                           type="button"

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
 import { canManagePricingPolicy } from '@/lib/rbac';
@@ -10,17 +10,20 @@ import { useTranslation } from '@/i18n/useTranslation';
 type DraftVersion = { id: string; label: string; versionNumber: number; status: string };
 type Simulation = {
   id: string;
-  summary: Record<string, number>;
+  summary: Record<string, number | string | string[]>;
   rows: Array<Record<string, unknown>>;
   validationErrors?: string[];
   createdAt: string;
 };
+
+const CHANNELS = ['FRANCHISE', 'RETAIL', 'WHOLESALE'] as const;
 
 export default function PricingSimulationPage() {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [draft, setDraft] = useState<DraftVersion | null>(null);
   const [simulation, setSimulation] = useState<Simulation | null>(null);
+  const [channel, setChannel] = useState<(typeof CHANNELS)[number]>('FRANCHISE');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -31,7 +34,8 @@ export default function PricingSimulationPage() {
       apiFetch<DraftVersion[]>('/pricing/versions'),
       apiFetch<User>('/auth/me'),
     ]);
-    const draftVersion = versions.find((v) => v.status === 'DRAFT' || v.status === 'READY_FOR_REVIEW') ?? null;
+    const draftVersion =
+      versions.find((v) => v.status === 'DRAFT' || v.status === 'READY_FOR_REVIEW') ?? null;
     setDraft(draftVersion);
     setUser(me);
     if (draftVersion) {
@@ -67,6 +71,11 @@ export default function PricingSimulationPage() {
     }
   }
 
+  const filteredRows = useMemo(() => {
+    if (!simulation) return [];
+    return simulation.rows.filter((row) => String(row.channel ?? 'FRANCHISE') === channel);
+  }, [simulation, channel]);
+
   return (
     <>
       <PricingHubNav activeTab="simulation" />
@@ -86,32 +95,80 @@ export default function PricingSimulationPage() {
       {simulation ? (
         <div className="space-y-4">
           <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 md:grid-cols-4">
-            <div><span className="text-xs text-slate-500">{t('pricing.productsAffected')}</span><p className="font-bold">{simulation.summary.productsAffected}</p></div>
-            <div><span className="text-xs text-slate-500">{t('pricing.branchesAffected')}</span><p className="font-bold">{simulation.summary.branchesAffected}</p></div>
-            <div><span className="text-xs text-slate-500">{t('pricing.priceIncreases')}</span><p className="font-bold">{simulation.summary.productsWithIncrease}</p></div>
-            <div><span className="text-xs text-slate-500">{t('pricing.priceDecreases')}</span><p className="font-bold">{simulation.summary.productsWithDecrease}</p></div>
+            <div>
+              <span className="text-xs text-slate-500">{t('pricing.productsAffected')}</span>
+              <p className="font-bold">{Number(simulation.summary.productsAffected ?? 0)}</p>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500">{t('pricing.branchesAffected')}</span>
+              <p className="font-bold">{Number(simulation.summary.branchesAffected ?? 0)}</p>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500">{t('pricing.priceIncreases')}</span>
+              <p className="font-bold">{Number(simulation.summary.productsWithIncrease ?? 0)}</p>
+            </div>
+            <div>
+              <span className="text-xs text-slate-500">{t('pricing.priceDecreases')}</span>
+              <p className="font-bold">{Number(simulation.summary.productsWithDecrease ?? 0)}</p>
+            </div>
           </div>
+
+          <div className="flex flex-wrap gap-2">
+            {CHANNELS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setChannel(item)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium ${
+                  channel === item
+                    ? 'bg-slate-900 text-white'
+                    : 'border border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                {t(`pricing.simulationChannel.${item}`)}
+              </button>
+            ))}
+          </div>
+
           <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-[960px] text-sm">
+            <table className="min-w-[1400px] text-sm">
               <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">{t('pricing.product')}</th>
-                  <th className="px-4 py-3">{t('pricing.branch')}</th>
-                  <th className="px-4 py-3">{t('pricing.profile')}</th>
-                  <th className="px-4 py-3">{t('pricing.oldPrice')}</th>
-                  <th className="px-4 py-3">{t('pricing.newPrice')}</th>
-                  <th className="px-4 py-3">{t('pricing.diff')}</th>
+                  <th className="px-3 py-3">{t('pricing.product')}</th>
+                  <th className="px-3 py-3">{t('pricing.branch')}</th>
+                  <th className="px-3 py-3">{t('pricing.profile')}</th>
+                  <th className="px-3 py-3">{t('pricing.simFifoCost')}</th>
+                  <th className="px-3 py-3">{t('pricing.simBranchPrice')}</th>
+                  <th className="px-3 py-3">{t('pricing.simRetailPrice')}</th>
+                  <th className="px-3 py-3">{t('pricing.simWholesalePrice')}</th>
+                  <th className="px-3 py-3">{t('pricing.simHqMargin')}</th>
+                  <th className="px-3 py-3">{t('pricing.simBranchMargin')}</th>
+                  <th className="px-3 py-3">{t('pricing.simAppliedRule')}</th>
+                  <th className="px-3 py-3">{t('pricing.simOverride')}</th>
+                  <th className="px-3 py-3">{t('pricing.simFinalPrice')}</th>
+                  <th className="px-3 py-3">{t('pricing.diff')}</th>
                 </tr>
               </thead>
               <tbody>
-                {simulation.rows.slice(0, 200).map((row, index) => (
+                {filteredRows.slice(0, 200).map((row, index) => (
                   <tr key={index} className="border-t border-slate-100">
-                    <td className="px-4 py-3">{String(row.sku ?? '')}</td>
-                    <td className="px-4 py-3">{String(row.branchName ?? '')}</td>
-                    <td className="px-4 py-3">{String(row.profileName ?? '')}</td>
-                    <td className="px-4 py-3">{Number(row.oldPriceKgs ?? 0)}</td>
-                    <td className="px-4 py-3">{Number(row.newPriceKgs ?? 0)}</td>
-                    <td className="px-4 py-3">{Number(row.diffKgs ?? 0)}</td>
+                    <td className="px-3 py-2">{String(row.sku ?? '')}</td>
+                    <td className="px-3 py-2">{String(row.branchName ?? '')}</td>
+                    <td className="px-3 py-2">{String(row.profileName ?? '')}</td>
+                    <td className="px-3 py-2">{Number(row.fifoCostKgs ?? 0).toFixed(0)}</td>
+                    <td className="px-3 py-2">{Number(row.branchPriceKgs ?? 0).toFixed(0)}</td>
+                    <td className="px-3 py-2">{Number(row.retailPriceKgs ?? 0).toFixed(0)}</td>
+                    <td className="px-3 py-2">{Number(row.wholesalePriceKgs ?? 0).toFixed(0)}</td>
+                    <td className="px-3 py-2">{Number(row.hqMarginPercent ?? 0).toFixed(1)}%</td>
+                    <td className="px-3 py-2">{Number(row.branchMarginPercent ?? 0).toFixed(1)}%</td>
+                    <td className="px-3 py-2">{String(row.appliedRuleType ?? '—')}</td>
+                    <td className="px-3 py-2">
+                      {row.temporaryOverride ? t('pricing.explanationApplied') : t('pricing.explanationNone')}
+                    </td>
+                    <td className="px-3 py-2 font-semibold">
+                      {Number(row.finalSellingPriceKgs ?? row.newPriceKgs ?? 0).toFixed(0)}
+                    </td>
+                    <td className="px-3 py-2">{Number(row.diffKgs ?? 0).toFixed(0)}</td>
                   </tr>
                 ))}
               </tbody>

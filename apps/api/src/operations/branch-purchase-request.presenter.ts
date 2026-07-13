@@ -53,6 +53,7 @@ export function resolveBranchDisplayStatus(
   return status;
 }
 
+/** Branch users may only see Branch Price, Quantity, and Total — never internal pricing layers. */
 export function sanitizeBranchPurchaseRequest<T extends {
   status: BranchPurchaseRequestStatus;
   reviewedAt?: Date | string | null;
@@ -67,10 +68,21 @@ export function sanitizeBranchPurchaseRequest<T extends {
     estimatedUnitCost?: unknown;
     totalAmount?: unknown;
     wholesalePriceKgs?: unknown;
+    branchPurchasePriceKgs?: unknown;
+    resolvedBranchPriceKgs?: unknown;
     lineStatus?: string | null;
     rejectionReasonCode?: string | null;
     publicComment?: string | null;
     hasPricingPolicyAtReview?: boolean | null;
+    pricingPolicyVersionId?: unknown;
+    pricingProfileId?: unknown;
+    appliedRuleType?: unknown;
+    appliedRuleId?: unknown;
+    appliedAdjustmentMode?: unknown;
+    appliedAdjustmentValue?: unknown;
+    baseCostKgs?: unknown;
+    baseBranchPriceKgs?: unknown;
+    priceResolvedAt?: unknown;
   }>;
 }>(request: T, hideSensitive: boolean) {
   if (!hideSensitive) {
@@ -90,31 +102,52 @@ export function sanitizeBranchPurchaseRequest<T extends {
     ...request,
     branchDisplayStatus,
     partialFulfillmentMessage,
-    items: request.items.map((item) => ({
-      id: (item as { id?: string }).id,
-      productId: (item as { productId?: string }).productId,
-      sku: (item as { sku?: string }).sku,
-      productName: (item as { productName?: string }).productName,
-      quantity: item.quantity,
-      approvedQuantity: reviewed ? (item.approvedQuantity ?? 0) : undefined,
-      unavailableQuantity: reviewed ? (item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)) : undefined,
-      lineStatus: reviewed ? item.lineStatus : undefined,
-      rejectionReasonCode: reviewed ? item.rejectionReasonCode : undefined,
-      publicComment: reviewed ? item.publicComment : undefined,
-      unit: (item as { unit?: string }).unit,
-      note: (item as { note?: string | null }).note,
-      branchPurchasePriceKgs: item.wholesalePriceKgs,
-      totalAmount: item.totalAmount,
-      weightKg: undefined,
-      hqAvailableStock: undefined,
-      missingQty: reviewed
-        ? item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)
-        : undefined,
-      currentBranchStock: undefined,
-      transportExpenseAllocation: undefined,
-      estimatedUnitCost: undefined,
-      wholesalePriceKgs: undefined,
-      hasPricingPolicyAtReview: undefined,
-    })),
+    items: request.items.map((item) => {
+      const branchPrice =
+        item.branchPurchasePriceKgs ??
+        item.resolvedBranchPriceKgs ??
+        item.wholesalePriceKgs ??
+        null;
+      return {
+        id: (item as { id?: string }).id,
+        productId: (item as { productId?: string }).productId,
+        sku: (item as { sku?: string }).sku,
+        productName: (item as { productName?: string }).productName,
+        quantity: item.quantity,
+        approvedQuantity: reviewed ? (item.approvedQuantity ?? 0) : undefined,
+        unavailableQuantity: reviewed
+          ? (item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0))
+          : undefined,
+        lineStatus: reviewed ? item.lineStatus : undefined,
+        rejectionReasonCode: reviewed ? item.rejectionReasonCode : undefined,
+        publicComment: reviewed ? item.publicComment : undefined,
+        unit: (item as { unit?: string }).unit,
+        note: (item as { note?: string | null }).note,
+        branchPurchasePriceKgs: branchPrice,
+        totalAmount: item.totalAmount,
+        // Explicitly omit internal pricing layers for branch users
+        weightKg: undefined,
+        hqAvailableStock: undefined,
+        missingQty: reviewed
+          ? item.unavailableQuantity ?? Math.max(item.quantity - (item.approvedQuantity ?? 0), 0)
+          : undefined,
+        currentBranchStock: undefined,
+        transportExpenseAllocation: undefined,
+        estimatedUnitCost: undefined,
+        wholesalePriceKgs: undefined,
+        hasPricingPolicyAtReview: undefined,
+        hasPricingPolicyAtSubmit: undefined,
+        pricingPolicyVersionId: undefined,
+        pricingProfileId: undefined,
+        appliedRuleType: undefined,
+        appliedRuleId: undefined,
+        appliedAdjustmentMode: undefined,
+        appliedAdjustmentValue: undefined,
+        baseCostKgs: undefined,
+        baseBranchPriceKgs: undefined,
+        priceResolvedAt: undefined,
+        resolvedBranchPriceKgs: undefined,
+      };
+    }),
   };
 }
