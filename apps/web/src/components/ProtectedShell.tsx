@@ -39,6 +39,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
       return;
     }
 
+    setLoading(true);
+    setForbidden(false);
+
     apiFetch<User>('/auth/me')
       .then((currentUser) => {
         if (currentUser.mustChangePassword && pathname !== '/change-password') {
@@ -315,6 +318,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             ) : branchWarehouseOperatorView ? (
               <>
                 <Link href="/inventory" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{t('nav.inventory')}</Link>
+                <Link href="/inventory/count" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventoryCount.title')}</Link>
                 <Link href="/distribution/orders?status=SHIPPED" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.receiveGoods')}</Link>
                 <Link href="/distribution/receivings" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.orders.receivingHistory')}</Link>
                 <Link href="/service/parts-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.partsRequests')}</Link>

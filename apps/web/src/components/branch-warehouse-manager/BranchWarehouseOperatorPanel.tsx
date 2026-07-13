@@ -22,9 +22,12 @@ type StockRow = {
   id: string;
   sku: string;
   product: { name: string };
+  categoryName?: string | null;
   quantity: number;
   reservedQuantity: number;
   availableQuantity: number;
+  totalValueKgs?: number;
+  lastMovementAt?: string | null;
 };
 
 type PendingOrder = {
@@ -59,7 +62,7 @@ export function BranchWarehouseOperatorPanel() {
           return;
         }
         setWarehouse(branchWarehouse);
-        const inventory = await apiFetch<StockRow[]>(`/branch-warehouses/${branchWarehouse.id}/inventory`);
+        const inventory = await apiFetch<StockRow[]>(`/branch-warehouses/${branchWarehouse.id}/products`);
         setStock(inventory);
         setPendingOrders(orders);
       } catch (err) {
@@ -106,6 +109,12 @@ export function BranchWarehouseOperatorPanel() {
             {t('inventoryCount.newInventory')}
           </Link>
           <Link
+            href="/inventory/count"
+            className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
+          >
+            {t('inventoryCount.title')}
+          </Link>
+          <Link
             href="/distribution/orders?status=SHIPPED"
             className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700"
           >
@@ -118,25 +127,19 @@ export function BranchWarehouseOperatorPanel() {
         <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard label={t('branchWarehouse.skuCount')} value={String(warehouse.totalSkuCount)} />
-        <SummaryCard label={t('hqWarehouse.totalStock')} value={String(warehouse.totalProductQuantity)} />
-        <SummaryCard
-          label={t('inventory.totalStockValue')}
-          value={formatKgs(warehouse.totalStockValueKgs)}
-        />
-        <SummaryCard label={t('branchWarehouse.available')} value={String(warehouse.availableQuantity)} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <SummaryCard label={t('branchWarehouse.totalProducts')} value={String(warehouse.totalSkuCount)} />
+        <SummaryCard label={t('branchWarehouse.totalUnits')} value={String(warehouse.totalProductQuantity)} />
         <SummaryCard label={t('branchWarehouse.reserved')} value={String(warehouse.reservedQuantity)} />
         <SummaryCard
-          label={t('branchWarehouse.lastInventory')}
-          value={formatDate(warehouse.lastInventoryDate)}
+          label={t('branchWarehouse.inventoryValue')}
+          value={formatKgs(warehouse.totalStockValueKgs)}
         />
       </div>
 
       {pendingOrders.length > 0 ? (
         <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
           <h3 className="text-lg font-bold text-amber-900">{t('distribution.receiveGoods')}</h3>
-          <p className="mt-1 text-sm text-amber-800">{t('distribution.receiveGoods')}</p>
           <div className="mt-4 space-y-2">
             {pendingOrders.map((order) => (
               <Link
@@ -153,20 +156,23 @@ export function BranchWarehouseOperatorPanel() {
       ) : null}
 
       <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <table className="min-w-[960px] divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
               <th className="px-4 py-3">{t('inventory.products')}</th>
-              <th className="px-4 py-3">SKU</th>
-              <th className="px-4 py-3">{t('hqWarehouse.quantity')}</th>
-              <th className="px-4 py-3">{t('hqWarehouse.reserved')}</th>
-              <th className="px-4 py-3">{t('hqWarehouse.available')}</th>
+              <th className="px-4 py-3">{t('branchWarehouse.productCode')}</th>
+              <th className="px-4 py-3">{t('inventory.category')}</th>
+              <th className="px-4 py-3">{t('branchWarehouse.onHand')}</th>
+              <th className="px-4 py-3">{t('branchWarehouse.reserved')}</th>
+              <th className="px-4 py-3">{t('branchWarehouse.available')}</th>
+              <th className="px-4 py-3">{t('branchWarehouse.lineInventoryValue')}</th>
+              <th className="px-4 py-3">{t('branchWarehouse.lastMovement')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {stock.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                   {t('inventoryCount.noHistory')}
                 </td>
               </tr>
@@ -175,9 +181,12 @@ export function BranchWarehouseOperatorPanel() {
                 <tr key={row.id}>
                   <td className="px-4 py-3 font-semibold text-slate-900">{row.product.name}</td>
                   <td className="px-4 py-3 text-slate-700">{row.sku}</td>
+                  <td className="px-4 py-3 text-slate-700">{row.categoryName || '—'}</td>
                   <td className="px-4 py-3 text-slate-700">{row.quantity}</td>
                   <td className="px-4 py-3 text-slate-700">{row.reservedQuantity}</td>
                   <td className="px-4 py-3 text-slate-700">{row.availableQuantity}</td>
+                  <td className="px-4 py-3 font-semibold text-slate-900">{formatKgs(row.totalValueKgs)}</td>
+                  <td className="px-4 py-3 text-slate-600">{formatDate(row.lastMovementAt)}</td>
                 </tr>
               ))
             )}
@@ -190,9 +199,9 @@ export function BranchWarehouseOperatorPanel() {
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-slate-950">{value}</p>
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-lg font-bold text-slate-950">{value}</p>
     </div>
   );
 }
@@ -206,5 +215,5 @@ function formatKgs(value: number | string | null | undefined) {
 
 function formatDate(value: string | null | undefined) {
   if (!value) return '—';
-  return new Date(value).toLocaleDateString();
+  return new Date(value).toLocaleString();
 }

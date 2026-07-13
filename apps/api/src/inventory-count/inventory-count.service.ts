@@ -301,14 +301,18 @@ export class InventoryCountService {
         branchId: session.warehouse.branchId ?? undefined,
         newValue: this.buildSummary(updated),
       });
+      const summary = this.buildSummary(updated);
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.INVENTORY_SUBMITTED,
         branchId: session.warehouse.branchId ?? undefined,
         entityType: 'InventoryCountSession',
         entityId: id,
         referenceNumber: updated.sessionNumber,
+        title: isBranchWarehouse(session.warehouse)
+          ? 'Инвентаризация филиала ожидает проверки'
+          : undefined,
         message: isBranchWarehouse(session.warehouse)
-          ? `Branch warehouse submitted inventory ${updated.sessionNumber} for approval.`
+          ? `Филиал ${session.warehouse.name}: инвентаризация ${updated.sessionNumber} ожидает проверки BR_CEO. Расхождений: ${summary.shortages + summary.overages}, сумма: ${summary.totalDifferenceValueKgs} KGS.`
           : `Warehouse Manager submitted inventory ${updated.sessionNumber} for approval.`,
       });
       return this.toSessionResponse(updated);
@@ -407,10 +411,14 @@ export class InventoryCountService {
       });
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.INVENTORY_APPROVED,
+        branchId: session.warehouse.branchId ?? undefined,
         entityType: 'InventoryCountSession',
         entityId: id,
         referenceNumber: updated.sessionNumber,
-        message: `Inventory ${updated.sessionNumber} was approved.`,
+        title: isBranchWarehouse(session.warehouse) ? 'Инвентаризация утверждена' : undefined,
+        message: isBranchWarehouse(session.warehouse)
+          ? `Инвентаризация ${updated.sessionNumber} утверждена BR_CEO.`
+          : `Inventory ${updated.sessionNumber} was approved.`,
       });
       return this.toSessionResponse(updated);
     });
@@ -455,12 +463,16 @@ export class InventoryCountService {
       });
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.INVENTORY_REJECTED,
+        branchId: session.warehouse.branchId ?? undefined,
         entityType: 'InventoryCountSession',
         entityId: id,
         referenceNumber: updated.sessionNumber,
-        message: dto.reason
-          ? `Inventory ${updated.sessionNumber} was rejected: ${dto.reason}`
-          : `Inventory ${updated.sessionNumber} was rejected.`,
+        title: isBranchWarehouse(session.warehouse) ? 'Инвентаризация отклонена' : undefined,
+        message: isBranchWarehouse(session.warehouse)
+          ? `Инвентаризация ${updated.sessionNumber} отклонена BR_CEO: ${dto.reason}`
+          : dto.reason
+            ? `Inventory ${updated.sessionNumber} was rejected: ${dto.reason}`
+            : `Inventory ${updated.sessionNumber} was rejected.`,
       });
       return this.toSessionResponse(updated);
     });

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCreateSale } from '@/lib/rbac';
+import { canCreateSale, isBranchSalesManagerUser } from '@/lib/rbac';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -19,6 +19,8 @@ export default function SalesPage() {
   const [paymentStatus, setPaymentStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  const branchSalesView = isBranchSalesManagerUser(user);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -90,11 +92,13 @@ export default function SalesPage() {
           </p>
         ) : null}
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className={`grid gap-4 ${branchSalesView ? 'md:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
           <SummaryCard label={t('sales.dailySales')} value={formatKgs(report?.totalSalesAmount)} />
           <SummaryCard label={t('sales.dailyPaid')} value={formatKgs(report?.totalPaidAmount)} />
           <SummaryCard label={t('sales.dailyDebt')} value={formatKgs(report?.totalDebtAmount)} />
-          <SummaryCard label={t('sales.dailyProfit')} value={formatKgs(report?.totalProfitAmount)} />
+          {!branchSalesView ? (
+            <SummaryCard label={t('sales.dailyProfit')} value={formatKgs(report?.totalProfitAmount)} />
+          ) : null}
         </div>
 
         <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2">
@@ -120,7 +124,7 @@ export default function SalesPage() {
 
         <div className="h-[calc(100vh-300px)] min-h-[420px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-[1120px] divide-y divide-slate-200 text-sm">
+            <table className={`divide-y divide-slate-200 text-sm ${branchSalesView ? 'min-w-[980px]' : 'min-w-[1120px]'}`}>
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">{t('sales.receiptNumber')}</th>
@@ -130,7 +134,7 @@ export default function SalesPage() {
                   <th className="px-4 py-3">{t('sales.totalAmount')}</th>
                   <th className="px-4 py-3">{t('sales.paidAmount')}</th>
                   <th className="px-4 py-3">{t('sales.debtAmount')}</th>
-                  <th className="px-4 py-3">{t('sales.profitAmount')}</th>
+                  {!branchSalesView ? <th className="px-4 py-3">{t('sales.profitAmount')}</th> : null}
                   <th className="px-4 py-3">{t('common.status')}</th>
                   <th className="px-4 py-3">Sale Status</th>
                   <th className="px-4 py-3">{t('common.actions')}</th>
@@ -139,13 +143,13 @@ export default function SalesPage() {
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={branchSalesView ? 10 : 11} className="px-4 py-8 text-center text-slate-500">
                       {t('sales.loadingSales')}
                     </td>
                   </tr>
                 ) : sales.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={branchSalesView ? 10 : 11} className="px-4 py-8 text-center text-slate-500">
                       {t('sales.noSales')}
                     </td>
                   </tr>
@@ -173,9 +177,11 @@ export default function SalesPage() {
                       <td className="px-4 py-3 font-semibold text-red-700">
                         {formatKgs(sale.debtAmount)}
                       </td>
-                      <td className="px-4 py-3 font-semibold text-slate-900">
-                        {formatKgs(sale.profitAmount)}
-                      </td>
+                      {!branchSalesView ? (
+                        <td className="px-4 py-3 font-semibold text-slate-900">
+                          {formatKgs(sale.profitAmount)}
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3">
                         <PaymentStatusPill status={sale.paymentStatus} />
                       </td>

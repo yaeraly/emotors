@@ -299,7 +299,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3">{t('crm.fullName')}</th>
                   <th className="px-4 py-3">{t('users.username')}</th>
                   <th className="px-4 py-3">{t('users.phone')}</th>
-                  <th className="px-4 py-3">{t('crm.branch')}</th>
+                  {!isBranchOwnerPanel ? <th className="px-4 py-3">{t('crm.branch')}</th> : null}
                   {!isBranchOwnerPanel ? <th className="px-4 py-3">{t('users.userType')}</th> : null}
                   <th className="px-4 py-3">{t('users.assignedRoles')}</th>
                   <th className="px-4 py-3">{t('users.status')}</th>
@@ -313,7 +313,9 @@ export default function UsersPage() {
                     <td className="px-4 py-3 font-bold">{user.fullName}</td>
                     <td className="px-4 py-3">{user.username || (user.hasLogin === false ? t('users.noLoginBadge') : '-')}</td>
                     <td className="px-4 py-3">{user.phone || '-'}</td>
-                    <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : user.branch?.name ?? user.branchId}</td>
+                    {!isBranchOwnerPanel ? (
+                      <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : user.branch?.name ?? user.branchId}</td>
+                    ) : null}
                     {!isBranchOwnerPanel ? (
                       <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : t('users.branchEmployees')}</td>
                     ) : null}

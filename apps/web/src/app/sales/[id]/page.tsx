@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCancelSale, canManageSaleWorkflow, canVoidPayment } from '@/lib/rbac';
+import { canCancelSale, canManageSaleWorkflow, canVoidPayment, isBranchSalesManagerUser } from '@/lib/rbac';
 import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -119,6 +119,8 @@ export default function SaleDetailPage() {
     }
   }
 
+  const branchSalesView = isBranchSalesManagerUser(currentUser);
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -172,11 +174,13 @@ export default function SaleDetailPage() {
                   <Info label={t('crm.branch')} value={sale.branch?.name ?? ''} />
                 </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-4">
+                <div className={`mt-6 grid gap-4 ${branchSalesView ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
                   <Metric label={t('sales.totalAmount')} value={formatKgs(sale.totalAmount)} />
                   <Metric label={t('sales.paidAmount')} value={formatKgs(sale.paidAmount)} />
                   <Metric label={t('sales.debtAmount')} value={formatKgs(sale.debtAmount)} />
-                  <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
+                  {!branchSalesView ? (
+                    <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
+                  ) : null}
                 </div>
                 <div className="mt-6 flex flex-wrap gap-2 print:hidden">
                   {canManageSaleWorkflow(currentUser) ? (
@@ -285,16 +289,16 @@ export default function SaleDetailPage() {
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-950">{t('sales.saleItems')}</h3>
               <div className="mt-4 overflow-x-auto">
-                <table className="min-w-[860px] divide-y divide-slate-200 text-sm">
+                <table className={`divide-y divide-slate-200 text-sm ${branchSalesView ? 'min-w-[720px]' : 'min-w-[860px]'}`}>
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3">{t('sales.product')}</th>
                       <th className="px-4 py-3">{t('sales.sku')}</th>
                       <th className="px-4 py-3">{t('sales.quantity')}</th>
                       <th className="px-4 py-3">{t('sales.unitPrice')}</th>
-                      <th className="px-4 py-3">{t('sales.unitCost')}</th>
+                      {!branchSalesView ? <th className="px-4 py-3">{t('sales.unitCost')}</th> : null}
                       <th className="px-4 py-3">{t('sales.totalAmount')}</th>
-                      <th className="px-4 py-3">{t('sales.profitAmount')}</th>
+                      {!branchSalesView ? <th className="px-4 py-3">{t('sales.profitAmount')}</th> : null}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -306,9 +310,9 @@ export default function SaleDetailPage() {
                         <td className="px-4 py-3">{item.productSku ?? '-'}</td>
                         <td className="px-4 py-3">{item.quantity}</td>
                         <td className="px-4 py-3">{formatKgs(item.unitPrice)}</td>
-                        <td className="px-4 py-3">{formatKgs(item.unitCost)}</td>
+                        {!branchSalesView ? <td className="px-4 py-3">{formatKgs(item.unitCost)}</td> : null}
                         <td className="px-4 py-3">{formatKgs(item.totalPrice)}</td>
-                        <td className="px-4 py-3">{formatKgs(item.profitAmount)}</td>
+                        {!branchSalesView ? <td className="px-4 py-3">{formatKgs(item.profitAmount)}</td> : null}
                       </tr>
                     ))}
                   </tbody>

@@ -17,6 +17,14 @@ export function clearToken() {
   window.localStorage.removeItem(TOKEN_KEY);
 }
 
+export function clearAuthState() {
+  clearToken();
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem('bsm-menu-audit');
+  window.sessionStorage.removeItem('users.createSuccess');
+  window.sessionStorage.removeItem('users.branchOwnerCreatedSuccess');
+}
+
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},

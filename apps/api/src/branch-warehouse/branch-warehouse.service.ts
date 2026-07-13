@@ -137,10 +137,22 @@ export class BranchWarehouseService {
       },
       orderBy: { product: { sku: 'asc' } },
     });
+    const productIds = balances.map((balance) => balance.productId);
+    const lastMovements = productIds.length
+      ? await this.prisma.stockMovement.findMany({
+          where: { warehouseId: id, productId: { in: productIds }, status: 'ACTIVE' },
+          orderBy: { createdAt: 'desc' },
+          distinct: ['productId'],
+          select: { productId: true, createdAt: true },
+        })
+      : [];
+    const lastMovementMap = new Map(lastMovements.map((row) => [row.productId, row.createdAt]));
+
     return balances.map((balance) => ({
       ...this.mapBalance(balance, user),
       categoryName: balance.product.productCategory?.nameRu ?? balance.product.category,
       supplierName: balance.product.defaultSupplier?.name ?? null,
+      lastMovementAt: lastMovementMap.get(balance.productId) ?? balance.updatedAt,
       ...(this.shouldHideLineItemCosts(user)
         ? {}
         : {
@@ -290,7 +302,7 @@ export class BranchWarehouseService {
       updatedAt: balance.updatedAt,
     };
     if (user && this.shouldHideLineItemCosts(user)) {
-      const { averageCostKgs, landedCostKgs, totalValueKgs, ...rest } = response;
+      const { averageCostKgs, landedCostKgs, ...rest } = response;
       return rest;
     }
     return response;

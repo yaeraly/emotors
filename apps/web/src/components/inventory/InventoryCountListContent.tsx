@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { apiFetch } from '@/lib/api';
-import { canDeleteInventoryCount } from '@/lib/rbac';
+import { canDeleteInventoryCount, isBranchOwnerUser } from '@/lib/rbac';
 import type { InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -74,6 +74,7 @@ export function InventoryCountListContent() {
             sessions={activeSessions}
             t={t}
             user={user}
+            branchOwnerView={isBranchOwnerUser(user)}
             onDelete={(session) => {
               setDeleteTarget(session);
               setDeleteRequireReason(!['DRAFT', 'COUNTING'].includes(session.status));
@@ -94,6 +95,7 @@ export function InventoryCountListContent() {
             sessions={historySessions}
             t={t}
             user={user}
+            branchOwnerView={isBranchOwnerUser(user)}
             onDelete={(session) => {
               setDeleteTarget(session);
               setDeleteRequireReason(true);
@@ -120,24 +122,31 @@ function SessionTable({
   sessions,
   t,
   user,
+  branchOwnerView,
   onDelete,
 }: {
   sessions: InventoryCountSession[];
   t: (key: string) => string;
   user: User | null;
+  branchOwnerView: boolean;
   onDelete: (session: InventoryCountSession) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <table className="min-w-full divide-y divide-slate-200 text-sm">
+      <table className={`min-w-full divide-y divide-slate-200 text-sm ${branchOwnerView ? 'min-w-[1100px]' : ''}`}>
         <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
           <tr>
             <th className="px-4 py-3">{t('inventoryCount.sessionNumber')}</th>
             <th className="px-4 py-3">{t('inventory.warehouse')}</th>
+            {branchOwnerView ? <th className="px-4 py-3">{t('common.createdDate')}</th> : null}
+            {branchOwnerView ? <th className="px-4 py-3">{t('inventoryCount.createdBy')}</th> : null}
             <th className="px-4 py-3">{t('inventoryCount.inventoryType')}</th>
             <th className="px-4 py-3">{t('inventoryCount.status')}</th>
             <th className="px-4 py-3">{t('inventoryCount.countedProducts')}</th>
-            <th className="px-4 py-3">{t('common.createdDate')}</th>
+            {branchOwnerView ? <th className="px-4 py-3">{t('inventoryCount.shortages')}</th> : null}
+            {branchOwnerView ? <th className="px-4 py-3">{t('inventoryCount.overages')}</th> : null}
+            {branchOwnerView ? <th className="px-4 py-3">{t('inventoryCount.totalDifferenceValue')}</th> : null}
+            {!branchOwnerView ? <th className="px-4 py-3">{t('common.createdDate')}</th> : null}
             <th className="px-4 py-3">{t('common.actions')}</th>
           </tr>
         </thead>
@@ -146,6 +155,12 @@ function SessionTable({
             <tr key={session.id}>
               <td className="px-4 py-3 font-bold">{session.sessionNumber}</td>
               <td className="px-4 py-3">{session.warehouse?.name}</td>
+              {branchOwnerView ? (
+                <td className="px-4 py-3">{new Date(session.createdAt).toLocaleDateString()}</td>
+              ) : null}
+              {branchOwnerView ? (
+                <td className="px-4 py-3">{session.createdBy?.fullName ?? '—'}</td>
+              ) : null}
               <td className="px-4 py-3">{inventoryTypeLabel(session.inventoryType, t)}</td>
               <td className="px-4 py-3">
                 <StatusBadge status={session.status} t={t} />
@@ -153,7 +168,20 @@ function SessionTable({
               <td className="px-4 py-3">
                 {session.summary?.countedProducts ?? 0} / {session.summary?.totalProducts ?? 0}
               </td>
-              <td className="px-4 py-3">{new Date(session.createdAt).toLocaleDateString()}</td>
+              {branchOwnerView ? (
+                <td className="px-4 py-3">{session.summary?.shortages ?? 0}</td>
+              ) : null}
+              {branchOwnerView ? (
+                <td className="px-4 py-3">{session.summary?.overages ?? 0}</td>
+              ) : null}
+              {branchOwnerView ? (
+                <td className="px-4 py-3 font-semibold">
+                  {Number(session.summary?.totalDifferenceValueKgs ?? 0).toFixed(2)}
+                </td>
+              ) : null}
+              {!branchOwnerView ? (
+                <td className="px-4 py-3">{new Date(session.createdAt).toLocaleDateString()}</td>
+              ) : null}
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-2">
                   <Link

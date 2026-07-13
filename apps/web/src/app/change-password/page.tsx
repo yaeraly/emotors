@@ -3,8 +3,16 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, clearAuthState, setToken } from '@/lib/api';
+import { getDefaultRouteForUser } from '@/lib/rbac';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+
+type ChangePasswordResponse = {
+  success: boolean;
+  accessToken: string;
+  user: User;
+};
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -19,12 +27,13 @@ export default function ChangePasswordPage() {
     setError('');
     setSaving(true);
     try {
-      await apiFetch('/auth/change-password', {
+      const response = await apiFetch<ChangePasswordResponse>('/auth/change-password', {
         method: 'POST',
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      router.replace('/customers');
-      router.refresh();
+      clearAuthState();
+      setToken(response.accessToken);
+      router.replace(getDefaultRouteForUser(response.user));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {

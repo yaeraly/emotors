@@ -166,7 +166,10 @@ export class AuthService {
   }
 
   async changePassword(user: AuthUser, dto: ChangePasswordDto) {
-    const currentUser = await this.prisma.user.findUnique({ where: { id: user.id } });
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      include: { branch: true, userRoles: { include: { role: true } } },
+    });
     if (!currentUser) throw new UnauthorizedException('User no longer exists');
     const matches = await bcrypt.compare(dto.currentPassword, currentUser.passwordHash);
     if (!matches) throw new UnauthorizedException('Invalid current password');
@@ -176,8 +179,45 @@ export class AuthService {
       where: { id: user.id },
       data: { passwordHash, mustChangePassword: false },
     });
-    await this.audit(user.id, user.role, 'password_changed', 'User', user.id);
-    return { success: true };
+    await this.audit(user.id, user.role, 'PASSWORD_CHANGED', 'User', user.id);
+    await this.audit(user.id, user.role, 'AUTH_SESSION_INVALIDATED', 'User', user.id);
+
+    const roles = this.roleCodes(currentUser);
+    const payload: JwtPayload = {
+      sub: currentUser.id,
+      email: currentUser.email,
+      role: currentUser.role,
+      roles,
+      branchId: currentUser.branchId ?? '',
+    };
+    const expiresIn =
+      this.configService.get<string>('JWT_ACCESS_EXPIRES_IN') ?? '15m';
+    const signOptions: JwtSignOptions = {
+      secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      expiresIn: expiresIn as JwtSignOptions['expiresIn'],
+    };
+    const accessToken = await this.jwtService.signAsync(payload, signOptions);
+    const permissions = await this.permissionsForUser(currentUser.id, currentUser.role);
+    await this.audit(user.id, user.role, 'AUTH_SESSION_RECREATED', 'User', user.id);
+
+    return {
+      success: true,
+      accessToken,
+      user: {
+        id: currentUser.id,
+        email: currentUser.email,
+        username: currentUser.username,
+        fullName: currentUser.fullName,
+        role: currentUser.role,
+        roles,
+        branchId: currentUser.branchId,
+        branch: currentUser.branch,
+        employeeId: currentUser.employeeId,
+        status: currentUser.status,
+        permissions,
+        mustChangePassword: false,
+      },
+    };
   }
 
   async logout(user: AuthUser) {
