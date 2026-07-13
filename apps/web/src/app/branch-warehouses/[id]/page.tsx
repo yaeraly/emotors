@@ -144,11 +144,16 @@ export default function BranchWarehouseDetailPage() {
   const [distribution, setDistribution] = useState<DistributionRow[]>([]);
   const [error, setError] = useState('');
 
+  const inspectionView = canInspectAnyBranchWarehouse(user);
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'products', label: t('branchWarehouse.tabs.products') },
     { id: 'stock', label: t('branchWarehouse.tabs.stock') },
-    { id: 'movements', label: t('branchWarehouse.tabs.movements') },
-    { id: 'inventory', label: t('branchWarehouse.tabs.inventory') },
+    ...(inspectionView
+      ? []
+      : ([
+          { id: 'movements', label: t('branchWarehouse.tabs.movements') },
+          { id: 'inventory', label: t('branchWarehouse.tabs.inventory') },
+        ] as Array<{ id: Tab; label: string }>)),
     { id: 'receiving', label: t('branchWarehouse.tabs.receiving') },
     { id: 'distribution', label: t('branchWarehouse.tabs.distributionHistory') },
   ];
@@ -156,6 +161,12 @@ export default function BranchWarehouseDetailPage() {
   useEffect(() => {
     void load();
   }, [params.id, tab]);
+
+  useEffect(() => {
+    if (inspectionView && (tab === 'movements' || tab === 'inventory')) {
+      setTab('products');
+    }
+  }, [inspectionView, tab]);
 
   async function load() {
     try {
@@ -216,7 +227,6 @@ export default function BranchWarehouseDetailPage() {
   }
 
   const canEdit = canEditWarehouseInfo(user) && warehouse?.permissions?.canEdit !== false;
-  const inspectionView = canInspectAnyBranchWarehouse(user);
   const branchContextId = fromBranchId ?? warehouse?.branchId ?? null;
 
   if (!warehouse && !error) {
@@ -284,20 +294,24 @@ export default function BranchWarehouseDetailPage() {
                 {t('common.back')}
               </Link>
             )}
-            <button
-              type="button"
-              onClick={() => setTab('movements')}
-              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
-            >
-              {t('branchWarehouse.tabs.movements')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('inventory')}
-              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
-            >
-              {t('branchWarehouse.tabs.inventory')}
-            </button>
+            {!inspectionView ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setTab('movements')}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+                >
+                  {t('branchWarehouse.tabs.movements')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab('inventory')}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+                >
+                  {t('branchWarehouse.tabs.inventory')}
+                </button>
+              </>
+            ) : null}
             {canEdit && !editing ? (
               <button
                 type="button"
@@ -309,7 +323,6 @@ export default function BranchWarehouseDetailPage() {
             ) : null}
           </div>
         </div>
-
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
