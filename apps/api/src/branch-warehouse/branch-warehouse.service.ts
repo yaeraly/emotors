@@ -55,7 +55,28 @@ export class BranchWarehouseService {
     return {
       ...warehouse,
       ...metrics,
+      permissions: this.buildPermissions(user),
     };
+  }
+
+  async warehouseByBranchId(user: AuthUser, branchId: string) {
+    this.assertBranchWarehouseBranchAccess(user, branchId);
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+      select: { id: true, name: true, code: true },
+    });
+    if (!branch) {
+      throw new NotFoundException('Branch not found');
+    }
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { ...activeBranchWarehouseWhere, branchId },
+      include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+    });
+    if (!warehouse || !isBranchWarehouse(warehouse)) {
+      throw new NotFoundException('Склад филиала не найден');
+    }
+    return this.detail(user, warehouse.id);
   }
 
   async update(user: AuthUser, id: string, dto: UpdateBranchWarehouseDto) {
@@ -197,15 +218,17 @@ export class BranchWarehouseService {
 
   async inventoryHistory(user: AuthUser, id: string) {
     await this.getWarehouse(user, id);
-    return this.prisma.inventoryCountSession.findMany({
-      where: { warehouseId: id },
+    const sessions = await this.prisma.inventoryCountSession.findMany({
+      where: { warehouseId: id, deletedAt: null },
       include: {
         createdBy: { select: { fullName: true } },
         approvedBy: { select: { fullName: true } },
+        items: { select: { differenceQuantity: true, differenceValueKgs: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
+    return sessions.map((session) => this.mapInventorySession(session));
   }
 
   async movements(user: AuthUser, id: string) {
@@ -215,6 +238,7 @@ export class BranchWarehouseService {
       include: {
         product: { select: { sku: true, name: true } },
         createdBy: { select: { fullName: true } },
+        warehouse: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
@@ -248,6 +272,11 @@ export class BranchWarehouseService {
     const reservedQuantity = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
     const totalStockValueKgs = balances.reduce((sum, item) => sum + Number(item.totalValueKgs), 0);
     const productIds = new Set(balances.filter((b) => b.quantity > 0).map((b) => b.productId));
+    const lastMovement = await this.prisma.stockMovement.findFirst({
+      where: { warehouseId: warehouse.id, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
 
     return {
       id: warehouse.id,
@@ -267,7 +296,68 @@ export class BranchWarehouseService {
       availableQuantity: Math.max(totalQuantity - reservedQuantity, 0),
       lastInventoryDate:
         lastInventory?.completedAt ?? lastInventory?.approvedAt ?? lastInventory?.finishDate ?? null,
+      lastMovementAt: lastMovement?.createdAt ?? null,
     };
+  }
+
+  private mapInventorySession(session: {
+    id: string;
+    sessionNumber: string;
+    inventoryType: string;
+    status: string;
+    createdAt: Date;
+    approvedAt: Date | null;
+    finishDate: Date | null;
+    createdBy?: { fullName: string } | null;
+    approvedBy?: { fullName: string } | null;
+    items: Array<{ differenceQuantity: number; differenceValueKgs: Prisma.Decimal }>;
+  }) {
+    const shortages = session.items.filter((item) => item.differenceQuantity < 0);
+    const overages = session.items.filter((item) => item.differenceQuantity > 0);
+    const shortageValueKgs = shortages.reduce(
+      (sum, item) => sum + Math.abs(Number(item.differenceValueKgs)),
+      0,
+    );
+    const surplusValueKgs = overages.reduce((sum, item) => sum + Number(item.differenceValueKgs), 0);
+    const netDifferenceValueKgs = session.items.reduce(
+      (sum, item) => sum + Number(item.differenceValueKgs),
+      0,
+    );
+
+    return {
+      id: session.id,
+      sessionNumber: session.sessionNumber,
+      inventoryType: session.inventoryType,
+      status: session.status,
+      createdAt: session.createdAt,
+      approvedAt: session.approvedAt,
+      finishDate: session.finishDate,
+      createdBy: session.createdBy,
+      approvedBy: session.approvedBy,
+      productCount: session.items.length,
+      shortageValueKgs: Math.round(shortageValueKgs * 100) / 100,
+      surplusValueKgs: Math.round(surplusValueKgs * 100) / 100,
+      netDifferenceValueKgs: Math.round(netDifferenceValueKgs * 100) / 100,
+    };
+  }
+
+  private buildPermissions(user: AuthUser) {
+    return {
+      canEdit: canEditWarehouseInfo(user),
+      readOnly: !canEditWarehouseInfo(user),
+    };
+  }
+
+  private assertBranchWarehouseBranchAccess(user: AuthUser, branchId: string) {
+    if (this.canViewAll(user)) {
+      return;
+    }
+    if (!user.branchId) {
+      throw new ForbiddenException('У вас нет доступа к складу этого филиала');
+    }
+    if (user.branchId !== branchId) {
+      throw new ForbiddenException('У вас нет доступа к складу этого филиала');
+    }
   }
 
   private mapBalance(
@@ -328,11 +418,11 @@ export class BranchWarehouseService {
       include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
     });
     if (!warehouse || !isBranchWarehouse(warehouse)) {
-      throw new NotFoundException('Branch warehouse not found');
+      throw new NotFoundException('Склад филиала не найден');
     }
     if (!this.canViewAll(user) && warehouse.branchId !== user.branchId) {
       await this.auditAccessDenied(user, id, warehouse.branchId);
-      throw new ForbiddenException('You can only access your own branch warehouse');
+      throw new ForbiddenException('У вас нет доступа к складу этого филиала');
     }
     return warehouse;
   }

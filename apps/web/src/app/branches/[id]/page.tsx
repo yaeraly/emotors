@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { API_URL, apiFetch, clearToken, getToken } from '@/lib/api';
-import { canAssignBranchHqWarehouse, canManageBranches } from '@/lib/rbac';
+import { canAssignBranchHqWarehouse, canManageBranches, canInspectAnyBranchWarehouse } from '@/lib/rbac';
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -47,6 +47,9 @@ export default function BranchDetailPage() {
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [branchWarehouseId, setBranchWarehouseId] = useState<string | null>(null);
+  const [branchWarehouseMissing, setBranchWarehouseMissing] = useState(false);
+  const [branchWarehouseLoading, setBranchWarehouseLoading] = useState(false);
 
   async function load() {
     const [dashboardData, me, branchData, warehouses] = await Promise.all([
@@ -77,8 +80,34 @@ export default function BranchDetailPage() {
     void load().catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [id, t]);
 
+  useEffect(() => {
+    if (!user || !canInspectAnyBranchWarehouse(user)) {
+      setBranchWarehouseId(null);
+      setBranchWarehouseMissing(false);
+      return;
+    }
+    setBranchWarehouseLoading(true);
+    apiFetch<{ id: string }>(`/branches/${id}/warehouse`)
+      .then((warehouse) => {
+        setBranchWarehouseId(warehouse.id);
+        setBranchWarehouseMissing(false);
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : '';
+        if (message.includes('не найден') || message.includes('not found')) {
+          setBranchWarehouseId(null);
+          setBranchWarehouseMissing(true);
+          return;
+        }
+        setBranchWarehouseId(null);
+        setBranchWarehouseMissing(false);
+      })
+      .finally(() => setBranchWarehouseLoading(false));
+  }, [id, user]);
+
   const canManage = canManageBranches(user);
   const canAssign = canAssignBranchHqWarehouse(user);
+  const canInspectWarehouse = canInspectAnyBranchWarehouse(user);
 
   async function saveAssignment(event: FormEvent) {
     event.preventDefault();
@@ -333,6 +362,31 @@ export default function BranchDetailPage() {
                 {t('branchHqRouting.hqWarehouseManager')}: {branch.assignedHqWarehouse.hqManagerAssignments[0].user.fullName}
               </p>
             ) : null}
+          </div>
+        ) : null}
+
+        {canInspectWarehouse ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase text-slate-400">{t('branchWarehouse.branchWarehouseTab')}</p>
+                {branchWarehouseLoading ? (
+                  <p className="mt-2 text-sm text-slate-500">{t('common.loading')}</p>
+                ) : branchWarehouseId ? (
+                  <p className="mt-1 text-sm text-slate-600">{t('branchWarehouse.warehouseLabel')}</p>
+                ) : branchWarehouseMissing ? (
+                  <p className="mt-2 text-sm text-slate-500">{t('branchWarehouse.noWarehouseAssigned')}</p>
+                ) : null}
+              </div>
+              {branchWarehouseId ? (
+                <Link
+                  href={`/branch-warehouses/${branchWarehouseId}?fromBranch=${id}`}
+                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+                >
+                  {t('branchWarehouse.openWarehouse')}
+                </Link>
+              ) : null}
+            </div>
           </div>
         ) : null}
 

@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canEditWarehouseInfo } from '@/lib/rbac';
+import { canEditWarehouseInfo, canInspectAnyBranchWarehouse } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { translateStatus } from '@/lib/translate-status';
 
 type Tab = 'products' | 'stock' | 'movements' | 'inventory' | 'receiving' | 'distribution';
 
@@ -29,6 +30,9 @@ type WarehouseDetail = {
   totalStockValueKgs: number;
   reservedQuantity: number;
   availableQuantity: number;
+  lastMovementAt?: string | null;
+  lastInventoryDate?: string | null;
+  permissions?: { canEdit: boolean; readOnly: boolean };
 };
 
 type BranchOption = {
@@ -44,7 +48,12 @@ type ProductRow = {
   categoryName?: string | null;
   supplierName?: string | null;
   quantity: number;
-  sellingPriceKgs: number;
+  reservedQuantity: number;
+  availableQuantity: number;
+  landedCostKgs?: number;
+  totalValueKgs?: number;
+  lastMovementAt?: string | null;
+  sellingPriceKgs?: number;
   status: string;
 };
 
@@ -64,8 +73,12 @@ type MovementRow = {
   type: string;
   quantity: number;
   createdAt: string;
+  note?: string | null;
+  referenceType?: string | null;
+  referenceId?: string | null;
   product?: { sku: string; name: string };
   createdBy?: { fullName: string };
+  warehouse?: { name: string };
 };
 
 type InventoryRow = {
@@ -74,7 +87,13 @@ type InventoryRow = {
   inventoryType: string;
   status: string;
   createdAt: string;
+  approvedAt?: string | null;
   createdBy?: { fullName: string };
+  approvedBy?: { fullName: string };
+  productCount: number;
+  shortageValueKgs: number;
+  surplusValueKgs: number;
+  netDifferenceValueKgs: number;
 };
 
 type ReceivingRow = {
@@ -96,6 +115,8 @@ type DistributionRow = {
 
 export default function BranchWarehouseDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const fromBranchId = searchParams.get('fromBranch');
   const router = useRouter();
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
@@ -194,9 +215,11 @@ export default function BranchWarehouseDetailPage() {
     }
   }
 
-  const canEdit = canEditWarehouseInfo(user);
+  const canEdit = canEditWarehouseInfo(user) && warehouse?.permissions?.canEdit !== false;
+  const inspectionView = canInspectAnyBranchWarehouse(user);
+  const branchContextId = fromBranchId ?? warehouse?.branchId ?? null;
 
-  if (!warehouse) {
+  if (!warehouse && !error) {
     return (
       <ProtectedShell>
         <p className="p-6">{t('common.loading')}</p>
@@ -204,21 +227,77 @@ export default function BranchWarehouseDetailPage() {
     );
   }
 
+  if (!warehouse) {
+    return (
+      <ProtectedShell>
+        <p className="rounded-xl bg-red-50 p-6 text-sm text-red-700">{error || t('common.error')}</p>
+      </ProtectedShell>
+    );
+  }
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
+        {branchContextId && inspectionView ? (
+          <nav className="text-sm text-slate-500">
+            <Link href="/branches" className="font-semibold text-blue-600 hover:underline">
+              {t('nav.branches')}
+            </Link>
+            <span className="mx-2">→</span>
+            <Link href={`/branches/${branchContextId}`} className="font-semibold text-blue-600 hover:underline">
+              {warehouse.branchName ?? t('branchWarehouse.branchName')}
+            </Link>
+            <span className="mx-2">→</span>
+            <span className="font-semibold text-slate-700">{t('branchWarehouse.warehouseLabel')}</span>
+          </nav>
+        ) : null}
+
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('branchWarehouse.title')}</p>
-            <h2 className="text-3xl font-bold text-slate-950">{warehouse.branchName ?? warehouse.name}</h2>
+            {inspectionView ? (
+              <>
+                <p className="mt-1 text-sm text-slate-600">
+                  {t('branchWarehouse.branchName')}: <span className="font-semibold text-slate-900">{warehouse.branchName ?? '—'}</span>
+                </p>
+                <h2 className="text-3xl font-bold text-slate-950">
+                  {t('branchWarehouse.warehouseLabel')}: {warehouse.name}
+                </h2>
+              </>
+            ) : (
+              <h2 className="text-3xl font-bold text-slate-950">{warehouse.branchName ?? warehouse.name}</h2>
+            )}
             <p className="text-sm text-slate-500">
-              {warehouse.name} · {warehouse.code} · {warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')}
+              {warehouse.code} · {warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive')}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/branch-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
-              {t('common.back')}
-            </Link>
+            {branchContextId && inspectionView ? (
+              <Link
+                href={`/branches/${branchContextId}`}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold"
+              >
+                {t('branchWarehouse.backToBranch')}
+              </Link>
+            ) : (
+              <Link href="/branch-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
+                {t('common.back')}
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={() => setTab('movements')}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+            >
+              {t('branchWarehouse.tabs.movements')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('inventory')}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700"
+            >
+              {t('branchWarehouse.tabs.inventory')}
+            </button>
             {canEdit && !editing ? (
               <button
                 type="button"
@@ -234,12 +313,22 @@ export default function BranchWarehouseDetailPage() {
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
-        <div className="grid gap-4 md:grid-cols-5">
-          <SummaryCard label={t('branchWarehouse.skuCount')} value={String(warehouse.totalSkuCount)} />
-          <SummaryCard label={t('hqWarehouse.totalStock')} value={String(warehouse.totalProductQuantity)} />
-          <SummaryCard label={t('hqWarehouse.totalValue')} value={`${warehouse.totalStockValueKgs.toLocaleString()} KGS`} />
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+          <SummaryCard label={t('branchWarehouse.totalProducts')} value={String(warehouse.totalSkuCount)} />
+          <SummaryCard label={t('branchWarehouse.totalUnits')} value={String(warehouse.totalProductQuantity)} />
           <SummaryCard label={t('branchWarehouse.reserved')} value={String(warehouse.reservedQuantity)} />
           <SummaryCard label={t('branchWarehouse.available')} value={String(warehouse.availableQuantity)} />
+          <SummaryCard label={t('branchWarehouse.inventoryValue')} value={`${warehouse.totalStockValueKgs.toLocaleString()} KGS`} />
+          <SummaryCard
+            label={t('branchWarehouse.lastMovement')}
+            value={warehouse.lastMovementAt ? new Date(warehouse.lastMovementAt).toLocaleDateString() : '—'}
+          />
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <SummaryCard
+            label={t('branchWarehouse.lastInventory')}
+            value={warehouse.lastInventoryDate ? new Date(warehouse.lastInventoryDate).toLocaleDateString() : '—'}
+          />
         </div>
 
         <div className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
@@ -345,23 +434,29 @@ export default function BranchWarehouseDetailPage() {
           <SimpleTable
             headers={[
               t('inventory.products'),
-              'SKU',
+              t('branchWarehouse.productCode'),
               t('inventory.categories'),
-              t('procurement.suppliers.title'),
-              t('hqWarehouse.quantity'),
-              t('inventory.sellingPriceKgs'),
-              t('common.status'),
+              t('branchWarehouse.onHand'),
+              t('branchWarehouse.reserved'),
+              t('branchWarehouse.available'),
+              t('stockMovement.unitCost'),
+              t('branchWarehouse.lineInventoryValue'),
+              t('branchWarehouse.lastMovement'),
+              t('common.actions'),
             ]}
             rows={products.map((row) => [
               row.product.name,
               row.sku,
               row.categoryName ?? '—',
-              row.supplierName ?? '—',
               row.quantity,
-              row.sellingPriceKgs,
-              row.status,
+              row.reservedQuantity,
+              row.availableQuantity,
+              row.landedCostKgs != null ? `${row.landedCostKgs.toLocaleString()} KGS` : '—',
+              row.totalValueKgs != null ? `${row.totalValueKgs.toLocaleString()} KGS` : '—',
+              row.lastMovementAt ? new Date(row.lastMovementAt).toLocaleDateString() : '—',
+              t('common.open'),
             ])}
-            emptyLabel={t('inventoryCount.noHistory')}
+            emptyLabel={t('branchWarehouse.noProducts')}
           />
         ) : null}
 
@@ -396,16 +491,20 @@ export default function BranchWarehouseDetailPage() {
               t('stockMovement.product'),
               t('stockMovement.type'),
               t('stockMovement.quantity'),
+              t('stockMovement.warehouse'),
               t('users.title'),
+              t('stockMovement.note'),
             ]}
             rows={movements.map((row) => [
               new Date(row.createdAt).toLocaleString(),
               `${row.product?.sku ?? ''} · ${row.product?.name ?? ''}`,
               row.type,
               row.quantity,
+              row.referenceType ? `${row.referenceType}${row.referenceId ? ` #${row.referenceId.slice(-6)}` : ''}` : row.warehouse?.name ?? '—',
               row.createdBy?.fullName ?? '—',
+              row.note ?? '—',
             ])}
-            emptyLabel={t('inventoryCount.noHistory')}
+            emptyLabel={t('branchWarehouse.noMovements')}
           />
         ) : null}
 
@@ -413,19 +512,30 @@ export default function BranchWarehouseDetailPage() {
           <SimpleTable
             headers={[
               '#',
-              t('inventoryCount.inventoryType'),
-              t('common.status'),
               t('common.date'),
               t('users.title'),
+              t('common.status'),
+              t('inventoryCount.shortages'),
+              t('inventoryCount.overages'),
+              t('inventoryCount.totalDifferenceValue'),
+              t('branchWarehouse.approvedBy'),
+              t('branchWarehouse.approvalDate'),
+              t('common.actions'),
             ]}
             rows={inventory.map((row) => [
               row.sessionNumber,
-              row.inventoryType,
-              row.status,
               new Date(row.createdAt).toLocaleDateString(),
               row.createdBy?.fullName ?? '—',
+              translateStatus(t, row.status, 'inventoryCount'),
+              `${row.shortageValueKgs.toLocaleString()} KGS`,
+              `${row.surplusValueKgs.toLocaleString()} KGS`,
+              `${row.netDifferenceValueKgs.toLocaleString()} KGS`,
+              row.approvedBy?.fullName ?? '—',
+              row.approvedAt ? new Date(row.approvedAt).toLocaleDateString() : '—',
+              t('common.open'),
             ])}
-            emptyLabel={t('inventoryCount.noHistory')}
+            rowLinks={inventory.map((row) => `/inventory/count/${row.id}`)}
+            emptyLabel={t('branchWarehouse.noInventoryCounts')}
           />
         ) : null}
 
@@ -505,10 +615,12 @@ function SimpleTable({
   headers,
   rows,
   emptyLabel,
+  rowLinks,
 }: {
   headers: string[];
   rows: (string | number)[][];
   emptyLabel: string;
+  rowLinks?: string[];
 }) {
   return (
     <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -534,7 +646,13 @@ function SimpleTable({
               <tr key={index}>
                 {row.map((cell, cellIndex) => (
                   <td key={cellIndex} className="px-4 py-3">
-                    {cell}
+                    {rowLinks?.[index] && cellIndex === row.length - 1 ? (
+                      <Link href={rowLinks[index]} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
+                        {cell}
+                      </Link>
+                    ) : (
+                      cell
+                    )}
                   </td>
                 ))}
               </tr>

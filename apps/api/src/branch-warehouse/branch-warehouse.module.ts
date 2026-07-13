@@ -5,5 +5,6 @@ import { BranchWarehouseService } from './branch-warehouse.service';
 @Module({
   controllers: [BranchWarehouseController],
   providers: [BranchWarehouseService],
+  exports: [BranchWarehouseService],
 })
 export class BranchWarehouseModule {}

@@ -743,6 +743,16 @@ export function canViewBranchWarehouses(user: Pick<User, 'role' | 'roles' | 'per
   );
 }
 
+/** HQ users who can open any branch warehouse for inspection (CEO, SCM, HQ Sales). */
+export function canInspectAnyBranchWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user) return false;
+  return (
+    hasFullAccess(user) ||
+    hasRole(user, 'SUPPLY_CHAIN_MANAGER') ||
+    hasRole(user, 'HQ_SALES_MANAGER')
+  );
+}
+
 export function canEditProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return canManageProductCatalog(user);
 }

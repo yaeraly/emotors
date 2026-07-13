@@ -13,6 +13,7 @@ export type StatusDomain =
   | 'supplyAbsenceReason'
   | 'service'
   | 'inventory'
+  | 'inventoryCount'
   | 'general';
 
 export function translateStatus(
