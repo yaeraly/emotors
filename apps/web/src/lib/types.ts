@@ -721,6 +721,15 @@ export type StockValueReport = {
   byCategory: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
 };
 
+export type DistributionDeliveryCostSummary = {
+  transportCostKgs: number;
+  totalShipmentWeightKg: number;
+  costPerKg: number;
+  productCostTotal: number;
+  deliveryCostTotal: number;
+  landedCostTotal: number;
+};
+
 export type BranchDistributionOrderItem = {
   id: string;
   orderId: string;
@@ -734,6 +743,12 @@ export type BranchDistributionOrderItem = {
   totalCost: number;
   totalPrice: number;
   profit: number;
+  transportExpenseAllocation?: number;
+  transportCostPerUnit?: number;
+  landedUnitCostKgs?: number;
+  transferCostKgs?: number;
+  deliveryCostKgs?: number;
+  totalLandedCostKgs?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -752,6 +767,15 @@ export type BranchDistributionOrder = {
   totalCost: number;
   totalProfit: number;
   note?: string | null;
+  transportCompany?: string | null;
+  transportCostKgs?: number;
+  driverName?: string | null;
+  vehicleNumber?: string | null;
+  transportNotes?: string | null;
+  totalShipmentWeightKg?: number;
+  deliveryCostEnteredAt?: string | null;
+  deliveryCostEnteredById?: string | null;
+  deliveryCostSummary?: DistributionDeliveryCostSummary;
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   approvedById?: string | null;

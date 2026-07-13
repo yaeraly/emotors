@@ -47,6 +47,7 @@ import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
 import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
+import { SendDistributionOrderDto } from './dto/send-distribution-order.dto';
 import { allocateBranchReceivingTransportCost } from './branch-receiving-transport.util';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
@@ -301,13 +302,9 @@ export class DistributionService {
         include: { branchInvoice: true, items: true },
       });
       if (!order) throw new NotFoundException('Distribution order not found');
-      if (
-        order.status !== BranchDistributionOrderStatus.INVOICED &&
-        order.status !== BranchDistributionOrderStatus.PAYMENT_PENDING &&
-        order.status !== BranchDistributionOrderStatus.PAID
-      ) {
+      if (order.status !== BranchDistributionOrderStatus.PAID) {
         throw new BadRequestException(
-          'Order must be invoiced and payment registered before sending to warehouse',
+          'Order must be fully paid or installment-approved before sending to warehouse',
         );
       }
       if (!order.branchInvoice?.sentToBranchAt) {
@@ -496,10 +493,11 @@ export class DistributionService {
     });
   }
 
-  send(user: AuthUser, id: string) {
+  send(user: AuthUser, id: string, dto: SendDistributionOrderDto) {
     if (!canDispatchFromHq(user)) {
       throw new ForbiddenException('Only Warehouse Manager can dispatch goods from HQ warehouse');
     }
+    const transportCostKgs = Math.max(Number(dto.transportCostKgs ?? 0), 0);
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: {
@@ -519,6 +517,49 @@ export class DistributionService {
         );
       }
       this.assertHqSourceWarehouse(order.sourceWarehouse);
+
+      const { allocations, totalShipmentWeightKg } = await this.allocateOrderDeliveryCost(
+        tx,
+        order.items,
+        transportCostKgs,
+      );
+      const allocationByProductId = new Map(allocations.map((row) => [row.productId, row]));
+
+      await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: {
+          transportCompany: dto.transportCompany?.trim() || null,
+          transportCostKgs,
+          driverName: dto.driverName?.trim() || null,
+          vehicleNumber: dto.vehicleNumber?.trim() || null,
+          transportNotes: dto.transportNotes?.trim() || null,
+          totalShipmentWeightKg,
+          deliveryCostEnteredAt: new Date(),
+          deliveryCostEnteredById: user.id,
+        },
+      });
+
+      for (const item of order.items) {
+        const allocation = allocationByProductId.get(item.productId);
+        await tx.branchDistributionOrderItem.update({
+          where: { id: item.id },
+          data: {
+            transportExpenseAllocation: allocation?.transportExpenseAllocation ?? 0,
+            transportCostPerUnit: allocation?.transportCostPerUnit ?? 0,
+            landedUnitCostKgs: allocation?.finalUnitCostKgs ?? Number(item.unitCost),
+          },
+        });
+      }
+
+      await this.auditTransfer(tx, user, 'BRANCH_DELIVERY_COST_ADDED', order, {
+        transportCostKgs,
+        totalShipmentWeightKg,
+        transportCompany: dto.transportCompany ?? null,
+      });
+      await this.auditTransfer(tx, user, 'DELIVERY_COST_ALLOCATED', order, {
+        transportCostKgs,
+        allocations,
+      });
 
       for (const item of order.items) {
         const inventoryProduct = await this.resolveSourceInventoryProduct(
@@ -729,7 +770,13 @@ export class DistributionService {
         }
       }
 
-      const transportCostKgs = Math.max(Number(dto.transportCostKgs ?? 0), 0);
+      const transportCostKgs =
+        Number(order.transportCostKgs ?? 0) > 0
+          ? Number(order.transportCostKgs)
+          : Math.max(Number(dto.transportCostKgs ?? 0), 0);
+      const hasPreallocatedDelivery = order.items.some(
+        (item) => Number(item.landedUnitCostKgs ?? 0) > 0 || Number(item.transportExpenseAllocation ?? 0) > 0,
+      );
       const transportLines = [];
       for (const orderItem of order.items) {
         const received = receivedMap.get(orderItem.id)!;
@@ -746,8 +793,22 @@ export class DistributionService {
           unitCostKgs: Number(orderItem.unitCost),
         });
       }
-      const transportAllocations = allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
-      const transportByProductId = new Map(transportAllocations.map((row) => [row.productId, row]));
+      const transportAllocations = hasPreallocatedDelivery
+        ? []
+        : allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
+      const transportByProductId = hasPreallocatedDelivery
+        ? new Map(
+            order.items.map((item) => [
+              item.productId,
+              {
+                productId: item.productId,
+                transportExpenseAllocation: Number(item.transportExpenseAllocation ?? 0),
+                transportCostPerUnit: Number(item.transportCostPerUnit ?? 0),
+                finalUnitCostKgs: Number(item.landedUnitCostKgs ?? item.unitCost),
+              },
+            ]),
+          )
+        : new Map(transportAllocations.map((row) => [row.productId, row]));
 
       const receiving = await tx.goodsReceiving.create({
         data: {
@@ -758,12 +819,12 @@ export class DistributionService {
           receivedById: user.id,
           receivedAt: new Date(),
           note: dto.note,
-          transportCompany: dto.transportCompany,
+          transportCompany: order.transportCompany ?? dto.transportCompany,
           transportCostKgs,
-          driverName: dto.driverName,
-          vehicleNumber: dto.vehicleNumber,
+          driverName: order.driverName ?? dto.driverName,
+          vehicleNumber: order.vehicleNumber ?? dto.vehicleNumber,
           arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date(),
-          transportNotes: dto.transportNotes,
+          transportNotes: order.transportNotes ?? dto.transportNotes,
         },
       });
 
@@ -957,7 +1018,21 @@ export class DistributionService {
       if (transportCostKgs > 0) {
         await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_TRANSPORT_ALLOCATED', order, {
           transportCostKgs,
-          allocations: transportAllocations,
+          allocations: hasPreallocatedDelivery
+            ? order.items.map((item) => ({
+                productId: item.productId,
+                transportExpenseAllocation: Number(item.transportExpenseAllocation ?? 0),
+                transportCostPerUnit: Number(item.transportCostPerUnit ?? 0),
+                finalUnitCostKgs: Number(item.landedUnitCostKgs ?? item.unitCost),
+              }))
+            : transportAllocations,
+        });
+        await this.auditTransfer(tx, user, 'BRANCH_LANDED_COST_CALCULATED', order, {
+          transportCostKgs,
+          receivingId: receiving.id,
+        });
+        await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_COST_UPDATED', order, {
+          receivingId: receiving.id,
         });
       }
 
@@ -1706,20 +1781,84 @@ export class DistributionService {
     }
   }
 
+  private async allocateOrderDeliveryCost(
+    tx: PrismaTx,
+    items: Array<{ productId: string; quantity: number; unitCost: Prisma.Decimal | number }>,
+    transportCostKgs: number,
+  ) {
+    const transportLines = [];
+    let totalShipmentWeightKg = 0;
+    for (const item of items) {
+      const product = await tx.product.findFirst({
+        where: { id: item.productId, deletedAt: null },
+        select: { weightKg: true },
+      });
+      const weightKg = Number(product?.weightKg ?? 0);
+      const lineWeight = weightKg > 0 ? weightKg * item.quantity : 0;
+      totalShipmentWeightKg += lineWeight;
+      transportLines.push({
+        productId: item.productId,
+        receivedQuantity: item.quantity,
+        weightKg,
+        unitCostKgs: Number(item.unitCost),
+      });
+    }
+    const allocations = allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
+    return {
+      allocations,
+      totalShipmentWeightKg: Math.round((totalShipmentWeightKg + Number.EPSILON) * 1000) / 1000,
+    };
+  }
+
   private toResponse(order: any) {
+    const transportCostKgs = Number(order.transportCostKgs ?? 0);
+    const totalShipmentWeightKg = Number(order.totalShipmentWeightKg ?? 0);
+    const items = order.items?.map((item: any) => {
+      const unitCost = Number(item.unitCost);
+      const transportExpenseAllocation = Number(item.transportExpenseAllocation ?? 0);
+      const transportCostPerUnit = Number(item.transportCostPerUnit ?? 0);
+      const landedUnitCostKgs = Number(item.landedUnitCostKgs ?? unitCost + transportCostPerUnit);
+      return {
+        ...item,
+        unitCost,
+        unitPrice: Number(item.unitPrice),
+        totalCost: Number(item.totalCost),
+        totalPrice: Number(item.totalPrice),
+        profit: Number(item.profit),
+        transportExpenseAllocation,
+        transportCostPerUnit,
+        landedUnitCostKgs,
+        transferCostKgs: unitCost,
+        deliveryCostKgs: transportExpenseAllocation,
+        totalLandedCostKgs: landedUnitCostKgs * Number(item.quantity),
+      };
+    });
+    const productCostTotal = items?.reduce((sum: number, item: any) => sum + item.unitCost * item.quantity, 0) ?? 0;
+    const deliveryCostTotal =
+      items?.reduce((sum: number, item: any) => sum + item.transportExpenseAllocation, 0) ?? transportCostKgs;
+    const landedCostTotal =
+      items?.reduce((sum: number, item: any) => sum + item.landedUnitCostKgs * item.quantity, 0) ?? productCostTotal;
+    const costPerKg =
+      totalShipmentWeightKg > 0 && transportCostKgs > 0
+        ? Math.round((transportCostKgs / totalShipmentWeightKg + Number.EPSILON) * 100) / 100
+        : 0;
+
     return {
       ...order,
       totalAmount: Number(order.totalAmount),
       totalCost: Number(order.totalCost),
       totalProfit: Number(order.totalProfit),
-      items: order.items?.map((item: any) => ({
-        ...item,
-        unitCost: Number(item.unitCost),
-        unitPrice: Number(item.unitPrice),
-        totalCost: Number(item.totalCost),
-        totalPrice: Number(item.totalPrice),
-        profit: Number(item.profit),
-      })),
+      transportCostKgs,
+      totalShipmentWeightKg,
+      deliveryCostSummary: {
+        transportCostKgs,
+        totalShipmentWeightKg,
+        costPerKg,
+        productCostTotal: Math.round((productCostTotal + Number.EPSILON) * 100) / 100,
+        deliveryCostTotal: Math.round((deliveryCostTotal + Number.EPSILON) * 100) / 100,
+        landedCostTotal: Math.round((landedCostTotal + Number.EPSILON) * 100) / 100,
+      },
+      items,
       branchInvoice: order.branchInvoice
         ? this.toInvoiceResponse(order.branchInvoice)
         : order.branchInvoice,

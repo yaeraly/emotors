@@ -38,6 +38,13 @@ export default function DistributionOrderDetailPage() {
     arrivalDate: new Date().toISOString().slice(0, 10),
     transportNotes: '',
   });
+  const [sendDeliveryForm, setSendDeliveryForm] = useState({
+    transportCompany: '',
+    transportCostKgs: '0',
+    driverName: '',
+    vehicleNumber: '',
+    transportNotes: '',
+  });
   const [receiving, setReceiving] = useState<GoodsReceiving | null>(null);
   const [shortageReport, setShortageReport] = useState<ShortageReport | null>(null);
   const [error, setError] = useState('');
@@ -81,6 +88,7 @@ export default function DistributionOrderDetailPage() {
       | 'complete'
       | 'cancel',
     message: string,
+    body?: Record<string, unknown>,
   ) {
     if (path === 'send' && !window.confirm(t('distribution.confirmSendDeductStock'))) {
       return;
@@ -91,7 +99,7 @@ export default function DistributionOrderDetailPage() {
       setOrder(
         await apiFetch<BranchDistributionOrder>(`/distribution/orders/${id}/${path}`, {
           method: 'POST',
-          body: path === 'send-to-warehouse' ? JSON.stringify({}) : undefined,
+          body: body ? JSON.stringify(body) : path === 'send-to-warehouse' ? JSON.stringify({}) : undefined,
         }),
       );
       setSuccess(message);
@@ -99,6 +107,16 @@ export default function DistributionOrderDetailPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
+  }
+
+  async function sendWithDeliveryCost() {
+    await action('send', t('distribution.orderSent'), {
+      transportCompany: sendDeliveryForm.transportCompany || undefined,
+      transportCostKgs: Number(sendDeliveryForm.transportCostKgs || 0),
+      driverName: sendDeliveryForm.driverName || undefined,
+      vehicleNumber: sendDeliveryForm.vehicleNumber || undefined,
+      transportNotes: sendDeliveryForm.transportNotes || undefined,
+    });
   }
 
   function updateReceiveItem(index: number, updates: Partial<ReceiveItemForm>) {
@@ -162,6 +180,12 @@ export default function DistributionOrderDetailPage() {
   const canReceive =
     order?.status === 'SHIPPED' ||
     order?.status === 'SENT';
+  const hasPreallocatedDelivery = Boolean(
+    order && (Number(order.transportCostKgs ?? 0) > 0 || order.deliveryCostEnteredAt),
+  );
+  const showDeliveryCostSummary =
+    showFinancials &&
+    Boolean(order?.deliveryCostSummary && Number(order.deliveryCostSummary.transportCostKgs) > 0);
 
   return (
     <ProtectedShell>
@@ -196,7 +220,7 @@ export default function DistributionOrderDetailPage() {
                     {t('distribution.sendInvoice')}
                   </button>
                 ) : null}
-                {['INVOICED', 'PAYMENT_PENDING', 'PAID'].includes(order.status) && canApprove && invoiceSent ? (
+                {order.status === 'PAID' && canApprove && invoiceSent ? (
                   <button onClick={() => void action('send-to-warehouse', t('distribution.sentToWarehouse'))} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white" type="button">
                     {t('distribution.sendToWarehouse')}
                   </button>
@@ -212,8 +236,8 @@ export default function DistributionOrderDetailPage() {
                   </button>
                 ) : null}
                 {order.status === 'PACKED' && canDispatch ? (
-                  <button onClick={() => void action('send', t('distribution.orderSent'))} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
-                    {t('distribution.send')}
+                  <button onClick={() => void sendWithDeliveryCost()} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white" type="button">
+                    {t('distribution.sendWithDeliveryCost')}
                   </button>
                 ) : null}
                 {['RECEIVED', 'RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE'].includes(order.status) && canApprove ? (
@@ -249,19 +273,118 @@ export default function DistributionOrderDetailPage() {
                 </div>
               </section>
             ) : null}
+            {order.status === 'PACKED' && canDispatch ? (
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
+                <h3 className="text-lg font-bold">{t('distribution.deliveryCostSection')}</h3>
+                <p className="text-sm text-slate-600">{t('distribution.deliveryCostEnter')}</p>
+                <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
+                    <input value={sendDeliveryForm.transportCompany} onChange={(event) => setSendDeliveryForm((current) => ({ ...current, transportCompany: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('distribution.deliveryCost')}</span>
+                    <input type="number" min="0" step="0.01" required value={sendDeliveryForm.transportCostKgs} onChange={(event) => setSendDeliveryForm((current) => ({ ...current, transportCostKgs: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
+                    <input value={sendDeliveryForm.driverName} onChange={(event) => setSendDeliveryForm((current) => ({ ...current, driverName: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.vehicleNumber')}</span>
+                    <input value={sendDeliveryForm.vehicleNumber} onChange={(event) => setSendDeliveryForm((current) => ({ ...current, vehicleNumber: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                  </label>
+                  <label className="block md:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
+                    <textarea value={sendDeliveryForm.transportNotes} onChange={(event) => setSendDeliveryForm((current) => ({ ...current, transportNotes: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={2} />
+                  </label>
+                </div>
+              </section>
+            ) : null}
+            {showDeliveryCostSummary && order.deliveryCostSummary ? (
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold">{t('distribution.deliveryCostSummary')}</h3>
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <Info label={t('distribution.deliveryCost')} value={formatKgs(order.deliveryCostSummary.transportCostKgs)} />
+                  <Info label={t('distribution.shipmentWeight')} value={`${order.deliveryCostSummary.totalShipmentWeightKg.toLocaleString('ru-RU', { maximumFractionDigits: 3 })} кг`} />
+                  <Info label={t('distribution.costPerKg')} value={formatKgs(order.deliveryCostSummary.costPerKg)} />
+                  <Info label={t('distribution.productCost')} value={formatKgs(order.deliveryCostSummary.productCostTotal)} />
+                  <Info label={t('distribution.deliveryCostAllocated')} value={formatKgs(order.deliveryCostSummary.deliveryCostTotal)} />
+                  <Info label={t('distribution.landedCost')} value={formatKgs(order.deliveryCostSummary.landedCostTotal)} />
+                </div>
+                {order.transportCompany ? <p className="mt-4 text-sm text-slate-600">{t('branchProductRequest.transportCompany')}: {order.transportCompany}</p> : null}
+                {order.deliveryCostEnteredAt ? (
+                  <p className="mt-1 text-sm text-slate-500">
+                    {t('distribution.deliveryCostEnteredAt')}: {new Date(order.deliveryCostEnteredAt).toLocaleString()}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-bold">{t('distribution.items')}</h3>
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">SKU</th><th className="px-4 py-3">{t('sales.product')}</th><th className="px-4 py-3">{t('distribution.quantity')}</th>{showFinancials ? <><th className="px-4 py-3">{t('distribution.unitCost')}</th><th className="px-4 py-3">{t('distribution.unitPrice')}</th><th className="px-4 py-3">{t('distribution.profit')}</th></> : null}</tr></thead>
-                  <tbody className="divide-y divide-slate-100">{order.items?.map((item) => <tr key={item.id}><td className="px-4 py-3">{item.sku}</td><td className="px-4 py-3">{item.productName}</td><td className="px-4 py-3">{item.quantity}</td>{showFinancials ? <><td className="px-4 py-3">{formatKgs(item.unitCost)}</td><td className="px-4 py-3">{formatKgs(item.unitPrice)}</td><td className="px-4 py-3">{formatKgs(item.profit)}</td></> : null}</tr>)}</tbody>
+                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">SKU</th>
+                      <th className="px-4 py-3">{t('sales.product')}</th>
+                      <th className="px-4 py-3">{t('distribution.quantity')}</th>
+                      {showFinancials ? (
+                        <>
+                          <th className="px-4 py-3">{t('distribution.transferCost')}</th>
+                          {showDeliveryCostSummary ? (
+                            <>
+                              <th className="px-4 py-3">{t('distribution.deliveryCostAllocated')}</th>
+                              <th className="px-4 py-3">{t('distribution.landedUnitCost')}</th>
+                            </>
+                          ) : null}
+                          <th className="px-4 py-3">{t('distribution.unitPrice')}</th>
+                          <th className="px-4 py-3">{t('distribution.profit')}</th>
+                        </>
+                      ) : null}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {order.items?.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-4 py-3">{item.sku}</td>
+                        <td className="px-4 py-3">{item.productName}</td>
+                        <td className="px-4 py-3">{item.quantity}</td>
+                        {showFinancials ? (
+                          <>
+                            <td className="px-4 py-3">{formatKgs(item.transferCostKgs ?? item.unitCost)}</td>
+                            {showDeliveryCostSummary ? (
+                              <>
+                                <td className="px-4 py-3">{formatKgs(item.deliveryCostKgs ?? item.transportExpenseAllocation ?? 0)}</td>
+                                <td className="px-4 py-3 font-semibold">{formatKgs(item.landedUnitCostKgs ?? item.unitCost)}</td>
+                              </>
+                            ) : null}
+                            <td className="px-4 py-3">{formatKgs(item.unitPrice)}</td>
+                            <td className="px-4 py-3">{formatKgs(item.profit)}</td>
+                          </>
+                        ) : null}
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
               </div>
             </section>
             {canReceive && canReceiveAtBranch ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
                 <h3 className="text-lg font-bold">{t('distribution.receiveGoods')}</h3>
-                {!operatorView ? (
+                {hasPreallocatedDelivery && showFinancials ? (
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+                    <p className="font-bold">{t('distribution.deliveryCostPreAllocated')}</p>
+                    {order.deliveryCostSummary ? (
+                      <div className="mt-3 grid gap-3 md:grid-cols-3">
+                        <Info label={t('distribution.deliveryCost')} value={formatKgs(order.deliveryCostSummary.transportCostKgs)} />
+                        <Info label={t('distribution.shipmentWeight')} value={`${order.deliveryCostSummary.totalShipmentWeightKg.toLocaleString('ru-RU', { maximumFractionDigits: 3 })} кг`} />
+                        <Info label={t('distribution.landedCost')} value={formatKgs(order.deliveryCostSummary.landedCostTotal)} />
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {!operatorView && !hasPreallocatedDelivery ? (
                 <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
                   <p className="md:col-span-2 text-sm font-bold text-slate-800">{t('distribution.receivingTransportSection')}</p>
                   <label className="block">

@@ -14,6 +14,7 @@ import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
+import { SendDistributionOrderDto } from './dto/send-distribution-order.dto';
 import { DistributionService } from './distribution.service';
 
 const DISTRIBUTION_VIEW_ROLES = [
@@ -145,8 +146,12 @@ export class DistributionController {
 
   @Post('orders/:id/send')
   @Roles(...DISTRIBUTION_DISPATCH_ROLES)
-  send(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.distributionService.send(user, id);
+  send(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: SendDistributionOrderDto,
+  ) {
+    return this.distributionService.send(user, id, dto);
   }
 
   @Post('orders/:id/cancel')

@@ -1190,6 +1190,7 @@ model User {
   royaltyPayments RoyaltyPayment[] @relation("RoyaltyPaymentCreator")
   createdDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderCreator")
   approvedDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderApprover")
+  deliveryCostEnteredDistributionOrders BranchDistributionOrder[] @relation("DistributionDeliveryCostEnteredBy")
   goodsReceivings GoodsReceiving[] @relation("GoodsReceivingReceiver")
   shortageReports ShortageReport[] @relation("ShortageReportCreator")
   shortageResolutions ShortageResolution[] @relation("ShortageResolutionResolver")
@@ -2870,6 +2871,15 @@ model BranchDistributionOrder {
   totalAmount            Decimal                       @default(0) @db.Decimal(14, 2)
   totalCost              Decimal                       @default(0) @db.Decimal(14, 2)
   totalProfit            Decimal                       @default(0) @db.Decimal(14, 2)
+  transportCompany       String?
+  transportCostKgs       Decimal                       @default(0) @db.Decimal(14, 2)
+  driverName             String?
+  vehicleNumber          String?
+  transportNotes         String?
+  totalShipmentWeightKg  Decimal                       @default(0) @db.Decimal(14, 3)
+  deliveryCostEnteredAt  DateTime?
+  deliveryCostEnteredById String?
+  deliveryCostEnteredBy  User?                         @relation("DistributionDeliveryCostEnteredBy", fields: [deliveryCostEnteredById], references: [id])
   note                   String?
   createdById            String
   createdBy              User                          @relation("DistributionOrderCreator", fields: [createdById], references: [id])
@@ -2932,6 +2942,9 @@ model BranchDistributionOrderItem {
   totalCost   Decimal                 @db.Decimal(14, 2)
   totalPrice  Decimal                 @db.Decimal(14, 2)
   profit      Decimal                 @db.Decimal(14, 2)
+  transportExpenseAllocation Decimal  @default(0) @db.Decimal(14, 2)
+  transportCostPerUnit    Decimal     @default(0) @db.Decimal(14, 2)
+  landedUnitCostKgs       Decimal?    @db.Decimal(14, 2)
   pricingPolicyVersionId String?
   pricingProfileId     String?
   resolvedPriceKgs     Decimal? @db.Decimal(14, 2)
