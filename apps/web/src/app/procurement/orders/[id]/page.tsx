@@ -12,7 +12,7 @@ import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPay
 import { sumConfirmedSupplierPaymentsKgs } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
-import { buildHqReceivingValidationResult } from '@/lib/hq-receiving-validation';
+import { buildHqReceivingValidationResult, CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE } from '@/lib/hq-receiving-validation';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs, effectiveLocalTransportKgs, storedLocalTransportKgsFromOrder } from '@/lib/transport-logistics';
 import {
@@ -258,7 +258,7 @@ export default function ProcurementOrderDetailPage() {
   });
   const canUnlock = canUnlockProcurementOrder(user) && order?.editWindowStatus === 'LOCKED';
   const canSeePayments = canViewSupplierPayments(user);
-  const canUploadCargo = canCreateSupplierPayment(user);
+  const canUploadCargo = canCreateSupplierPayment(user) || canReceiveProcurementToHq(user);
   const readOnlyFinance = hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'HQ_ACCOUNTANT') || hasRole(user, 'ACCOUNTANT');
   const canReceive = canReceiveProcurementToHq(user);
   const readyForHqReceiving = order?.status === 'ARRIVED' || order?.status === 'ARRIVED_IN_KYRGYZSTAN' || order?.status === 'IN_TRANSIT';
@@ -291,6 +291,7 @@ export default function ProcurementOrderDetailPage() {
   const cargoReceiptCompleted = hqReceivingReadiness?.cargoReceiptCompleted ?? false;
   const svhTransportCompleted = hqReceivingReadiness?.svhToHqTransportCompleted ?? false;
   const canReceiveToHq = hqReceivingReadiness?.canReceiveToHq ?? false;
+  const missingCargoAttachment = (hqReceivingReadiness?.cargoReceipt.errors ?? []).includes('cargoAttachment');
   const canSaveSvh = canManageSvh || isCeoUser;
   const finalized = !!order?.hqStockMovementCreatedAt;
   const chinaDomesticEditable = order
@@ -730,7 +731,12 @@ export default function ProcurementOrderDetailPage() {
   }
 
   async function receiveGoods() {
-    if (!order || cargoValidationError || !canReceiveToHq) return;
+    if (!order || cargoValidationError) return;
+    if (missingCargoAttachment) {
+      setError(t('chinaReceiving.cargoReceiptRequired'));
+      return;
+    }
+    if (!canReceiveToHq) return;
     setError('');
     setSuccess('');
     try {
@@ -761,7 +767,12 @@ export default function ProcurementOrderDetailPage() {
       setSuccess(t('procurement.orders.received'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(
+        message === CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE
+          ? t('chinaReceiving.cargoReceiptRequired')
+          : message,
+      );
     }
   }
 
@@ -976,7 +987,11 @@ export default function ProcurementOrderDetailPage() {
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <EditableField label={t('procurement.orders.cargoReceiptNote')} value={logisticsForm.cargoReceiptNote} onChange={(v) => setLogistics('cargoReceiptNote', v)} disabled={finalized || readOnlyFinance} />
             </div>
-            <div className="mt-4 space-y-3">
+            <div className={`mt-4 space-y-3 rounded-2xl border p-4 ${
+              missingCargoAttachment && canReceive && readyForHqReceiving && !finalized
+                ? 'border-red-400 bg-red-50'
+                : 'border-transparent'
+            }`}>
               <div className="flex items-center justify-between gap-4">
                 <h4 className="font-semibold text-slate-900">{t('procurement.payments.cargoAttachments')}</h4>
                 {canUploadCargo && !finalized ? (
@@ -1002,8 +1017,15 @@ export default function ProcurementOrderDetailPage() {
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-slate-500">{t('procurement.payments.noCargoAttachments')}</p>
+                <p className={`text-sm ${missingCargoAttachment ? 'font-semibold text-red-700' : 'text-slate-500'}`}>
+                  {t('procurement.payments.noCargoAttachments')}
+                </p>
               )}
+              {missingCargoAttachment && canReceive && readyForHqReceiving && !finalized ? (
+                <p className="rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800">
+                  {t('chinaReceiving.cargoReceiptRequired')}
+                </p>
+              ) : null}
             </div>
             {cargoReceiptDirty && canEditOrder && !finalized && !readOnlyFinance ? (
               <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
@@ -1019,7 +1041,11 @@ export default function ProcurementOrderDetailPage() {
               </button>
             ) : null}
             {!cargoReceiptCompleted && canReceive && readyForHqReceiving && !finalized ? (
-              <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.receiving.warning.cargo')}</p>
+              <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {missingCargoAttachment
+                  ? t('chinaReceiving.cargoReceiptRequired')
+                  : t('procurement.receiving.warning.cargo')}
+              </p>
             ) : null}
           </section>
 
@@ -1296,7 +1322,11 @@ export default function ProcurementOrderDetailPage() {
                 })}
               </div>
               {!cargoReceiptCompleted ? (
-                <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.receiving.warning.cargo')}</p>
+                <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {missingCargoAttachment
+                    ? t('chinaReceiving.cargoReceiptRequired')
+                    : t('procurement.receiving.warning.cargo')}
+                </p>
               ) : null}
               {!svhTransportCompleted ? (
                 <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.receiving.warning.svh')}</p>

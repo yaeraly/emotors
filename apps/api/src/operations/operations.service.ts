@@ -2256,17 +2256,15 @@ export class OperationsService {
             where: { procurementOrderId: order.id },
             include: { lockedByUser: { select: { id: true, fullName: true } } },
           }),
-      isCompleted
-        ? this.prisma.fileAttachment.findMany({
-            where: {
-              entityId: order.id,
-              entityType: FileAttachmentEntityType.CARGO_RECEIPT,
-              deletedAt: null,
-            },
-            select: { id: true, fileName: true, fileUrl: true, mimeType: true },
-            orderBy: { createdAt: 'asc' },
-          })
-        : Promise.resolve([]),
+      this.prisma.fileAttachment.findMany({
+        where: {
+          entityId: order.id,
+          entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+          deletedAt: null,
+        },
+        select: { id: true, fileName: true, fileUrl: true, mimeType: true },
+        orderBy: { createdAt: 'asc' },
+      }),
     ]);
 
     if (draftRows.length > 0 && !isCompleted) {
@@ -2481,6 +2479,8 @@ export class OperationsService {
             })),
           }
         : null,
+      cargoAttachments,
+      cargoAttachmentCount: cargoAttachments.length,
       editSession: activeSession,
       landedCostStatus: order.landedCostStatus,
       landedCostPendingWeight: order.landedCostStatus === ProcurementLandedCostStatus.PENDING_WEIGHT,

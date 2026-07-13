@@ -34,6 +34,7 @@ import {
   canConfirmSvhToHqArrival,
   canApproveSvhTransportCostAdjustment,
   canDeleteProcurementOrder,
+  canReceiveProcurementToHq,
   hasAnyFullAccessRole,
   isFullAccessRole,
   resolveUserRoles,
@@ -1345,7 +1346,13 @@ export class ProcurementService {
     entityType: FileAttachmentEntityType,
     supplierPaymentId?: string,
   ) {
-    this.assertCanCreateSupplierPayment(user);
+    if (entityType === FileAttachmentEntityType.CARGO_RECEIPT) {
+      if (!canCreateSupplierPayment(user) && !canReceiveProcurementToHq(user)) {
+        throw new ForbiddenException('You do not have permission to upload cargo receipt attachments');
+      }
+    } else {
+      this.assertCanCreateSupplierPayment(user);
+    }
     const order = await this.getProcurementOrderForRead(orderId);
     if (supplierPaymentId) {
       const payment = await this.prisma.procurementSupplierPayment.findFirst({

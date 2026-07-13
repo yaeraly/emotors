@@ -4,6 +4,9 @@ import { isSvhTransportCompleted } from './svh-to-hq-transport.util';
 export const CARGO_RECEIPT_INCOMPLETE_MESSAGE =
   'Fill cargo receipt before receiving to HQ warehouse';
 
+export const CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE =
+  'Attach the cargo receipt before receiving goods into the HQ warehouse.';
+
 export const SVH_TRANSPORT_INCOMPLETE_MESSAGE =
   'Complete SVH to HQ transport before receiving';
 
@@ -101,6 +104,9 @@ export function buildHqReceivingValidationResult(params: {
 export function hqReceivingBlockedMessage(
   validation: ReturnType<typeof buildHqReceivingValidationResult>,
 ) {
+  if (validation.cargoReceipt.errors.includes('cargoAttachment')) {
+    return CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE;
+  }
   if (!validation.cargoReceipt.valid && !validation.svhTransport.valid) {
     return `${CARGO_RECEIPT_INCOMPLETE_MESSAGE}. ${SVH_TRANSPORT_INCOMPLETE_MESSAGE}.`;
   }

@@ -23,6 +23,9 @@ export type HqReceivingValidationResult = {
   errors: string[];
 };
 
+export const CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE =
+  'Attach the cargo receipt before receiving goods into the HQ warehouse.';
+
 export function validateCargoReceiptComplete(snapshot: CargoReceiptSnapshot): HqReceivingValidationResult {
   const errors: string[] = [];
   if (Number(snapshot.cargoTotalWeightKg ?? 0) <= 0) {

@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { PopupFilterButton } from '@/components/PopupFilterButton';
-import { apiFetch, API_URL } from '@/lib/api';
-import { canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
+import { apiFetch, API_URL, getToken } from '@/lib/api';
+import { canCreateSupplierPayment, canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -24,6 +24,7 @@ import {
   type ChinaReceivingFilters,
   type VerificationFilterStatus,
 } from '@/lib/china-receiving-filters';
+import { CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE } from '@/lib/hq-receiving-validation';
 
 type EditSession = {
   lockedByUserId: string;
@@ -31,6 +32,8 @@ type EditSession = {
   isCurrentUser: boolean;
   canTakeOver: boolean;
 };
+
+type CargoAttachment = { id: string; fileName: string; fileUrl: string; mimeType: string };
 
 type ReceivingSummary = {
   totalProducts: number;
@@ -50,7 +53,7 @@ type ReceivingSummary = {
 };
 
 type ReceivingDocuments = {
-  photos: Array<{ id: string; fileName: string; fileUrl: string; mimeType: string }>;
+  photos: CargoAttachment[];
   discrepancyActs: Array<{
     id: string;
     actNumber: string;
@@ -77,6 +80,8 @@ export type ChinaReceivingDetail = {
   progress?: ChinaReceivingProgress;
   receivingSummary?: ReceivingSummary | null;
   documents?: ReceivingDocuments | null;
+  cargoAttachments?: CargoAttachment[];
+  cargoAttachmentCount?: number;
   editSession?: EditSession | null;
   readOnly?: boolean;
   shipmentBatches?: Array<{
@@ -343,6 +348,9 @@ function ChinaReceivingEditableView({
   const { t, language } = useTranslation();
   const router = useRouter();
   const [error, setError] = useState('');
+  const [cargoReceiptError, setCargoReceiptError] = useState('');
+  const [highlightCargoAttachment, setHighlightCargoAttachment] = useState(false);
+  const [uploadingCargoReceipt, setUploadingCargoReceipt] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -372,6 +380,16 @@ function ChinaReceivingEditableView({
   const readOnly = Boolean(task.readOnly) || !canReceiveProcurementToHq(user);
   const canEdit = canReceiveProcurementToHq(user) && !readOnly;
   const isCeo = hasFullAccess(user);
+  const canUploadCargoReceipt = canCreateSupplierPayment(user) || canReceiveProcurementToHq(user);
+  const cargoAttachments = task.cargoAttachments ?? task.documents?.photos ?? [];
+  const hasCargoReceiptAttachment = cargoAttachments.length > 0 || (task.cargoAttachmentCount ?? 0) > 0;
+
+  useEffect(() => {
+    if (hasCargoReceiptAttachment) {
+      setCargoReceiptError('');
+      setHighlightCargoAttachment(false);
+    }
+  }, [hasCargoReceiptAttachment]);
 
   const {
     rows,
@@ -461,10 +479,58 @@ function ChinaReceivingEditableView({
     }
   }
 
+  function resolveReceiveErrorMessage(message: string) {
+    if (
+      message === CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE
+      || message.toLowerCase().includes('cargo receipt')
+      || message.toLowerCase().includes('квитанц')
+    ) {
+      return t('chinaReceiving.cargoReceiptRequired');
+    }
+    return message;
+  }
+
+  async function uploadCargoReceipt(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !canUploadCargoReceipt) return;
+    const token = getToken();
+    if (!token) return;
+    setUploadingCargoReceipt(true);
+    setError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(`${API_URL}/procurement/orders/${task.id}/attachments/cargo-receipt`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || t('common.error'));
+      }
+      setCargoReceiptError('');
+      setHighlightCargoAttachment(false);
+      await onReload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setUploadingCargoReceipt(false);
+    }
+  }
+
   async function receiveToHq() {
     if (!canEdit || !allSaved) return;
+    if (!hasCargoReceiptAttachment) {
+      setCargoReceiptError(t('chinaReceiving.cargoReceiptRequired'));
+      setHighlightCargoAttachment(true);
+      setError('');
+      return;
+    }
     setLoading(true);
     setError('');
+    setCargoReceiptError('');
     try {
       await apiFetch(`/procurement/orders/${task.id}/receive-to-hq`, {
         method: 'POST',
@@ -491,7 +557,15 @@ function ChinaReceivingEditableView({
       window.localStorage.setItem('emotors_china_receiving_success', t('chinaReceiving.receivedSuccess'));
       router.push('/hq-warehouses/china-receiving');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      const friendly = resolveReceiveErrorMessage(message);
+      if (friendly === t('chinaReceiving.cargoReceiptRequired')) {
+        setCargoReceiptError(friendly);
+        setHighlightCargoAttachment(true);
+        setError('');
+      } else {
+        setError(friendly);
+      }
     } finally {
       setLoading(false);
     }
@@ -798,6 +872,61 @@ function ChinaReceivingEditableView({
               {t('chinaReceiving.unsavedBlock').replace('{count}', String(unsavedCount))}
             </p>
           ) : null}
+          <section
+            className={`w-full rounded-2xl border p-4 shadow-sm ${
+              highlightCargoAttachment || cargoReceiptError
+                ? 'border-red-400 bg-red-50'
+                : 'border-slate-200 bg-white'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-950">{t('chinaReceiving.cargoReceiptSection')}</h3>
+                <p className="mt-1 text-xs text-slate-500">{t('chinaReceiving.cargoReceiptHint')}</p>
+              </div>
+              {canUploadCargoReceipt ? (
+                <label className={`cursor-pointer rounded-xl border px-4 py-2 text-sm font-semibold ${
+                  highlightCargoAttachment || cargoReceiptError
+                    ? 'border-red-300 bg-white text-red-700'
+                    : 'border-blue-200 text-blue-700'
+                }`}>
+                  {uploadingCargoReceipt ? t('common.loading') : t('procurement.payments.attachCargoReceipt')}
+                  <input
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    disabled={uploadingCargoReceipt}
+                    onChange={(e) => void uploadCargoReceipt(e)}
+                  />
+                </label>
+              ) : null}
+            </div>
+            {cargoAttachments.length ? (
+              <ul className="mt-3 space-y-2">
+                {cargoAttachments.map((attachment) => (
+                  <li key={attachment.id}>
+                    <a
+                      href={`${API_URL}${attachment.fileUrl}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm font-semibold text-blue-700"
+                    >
+                      {attachment.fileName}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className={`mt-3 text-sm ${cargoReceiptError ? 'font-semibold text-red-700' : 'text-slate-500'}`}>
+                {t('procurement.payments.noCargoAttachments')}
+              </p>
+            )}
+            {cargoReceiptError ? (
+              <p className="mt-3 rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800">
+                {cargoReceiptError}
+              </p>
+            ) : null}
+          </section>
           <button
             type="button"
             disabled={loading || !allSaved}

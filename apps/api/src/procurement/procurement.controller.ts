@@ -235,7 +235,7 @@ export class ProcurementController {
   }
 
   @Post('orders/:id/attachments/cargo-receipt')
-  @RequirePermissions('procurement.manage', 'finance.view')
+  @RequirePermissions('procurement.manage', 'finance.view', 'procurement.receive')
   uploadCargoReceipt(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

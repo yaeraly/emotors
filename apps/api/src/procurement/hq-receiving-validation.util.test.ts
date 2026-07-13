@@ -1,5 +1,7 @@
 import {
   buildHqReceivingValidationResult,
+  CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE,
+  hqReceivingBlockedMessage,
   validateCargoReceiptComplete,
   validateSvhToHqTransportComplete,
 } from './hq-receiving-validation.util';
@@ -33,5 +35,11 @@ console.assert(
   buildHqReceivingValidationResult({ cargo: { ...completeCargo, cargoAttachmentCount: 0 }, svh: completeSvh })
     .canReceiveToHq === false,
 );
+
+const missingAttachment = buildHqReceivingValidationResult({
+  cargo: { ...completeCargo, cargoAttachmentCount: 0 },
+  svh: completeSvh,
+});
+console.assert(hqReceivingBlockedMessage(missingAttachment) === CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE);
 
 console.log('hq-receiving-validation.util.test.ts passed');
