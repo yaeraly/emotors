@@ -149,6 +149,8 @@ export default function BranchPurchaseRequestsPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchWarehouses, setBranchWarehouses] = useState<Warehouse[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showForm, setShowForm] = useState(false);
@@ -159,28 +161,37 @@ export default function BranchPurchaseRequestsPage() {
     note: '',
   });
   async function load() {
-    const [list, me, branchList, bwList] = await Promise.all([
-      apiFetch<BranchPurchaseRequest[]>('/branch-purchase-requests'),
-      apiFetch<User>('/auth/me'),
-      apiFetch<Branch[]>('/branches'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'),
-    ]);
-    setRequests(list);
-    setUser(me);
-    setBranches(branchList);
-    setBranchWarehouses(bwList);
-    const branchId = me.branchId || branchList[0]?.id || '';
-    const branchWarehouseId =
-      bwList.find((warehouse) => warehouse.branchId === branchId)?.id ?? bwList[0]?.id ?? '';
-    setForm((current) => ({
-      ...current,
-      branchId: current.branchId || branchId,
-      branchWarehouseId: current.branchWarehouseId || branchWarehouseId,
-    }));
+    setLoading(true);
+    setListError('');
+    try {
+      const [list, me, branchList, bwList] = await Promise.all([
+        apiFetch<BranchPurchaseRequest[]>('/branch-purchase-requests'),
+        apiFetch<User>('/auth/me'),
+        apiFetch<Branch[]>('/branches'),
+        apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'),
+      ]);
+      setRequests(list);
+      setUser(me);
+      setBranches(branchList);
+      setBranchWarehouses(bwList);
+      const branchId = me.branchId || branchList[0]?.id || '';
+      const branchWarehouseId =
+        bwList.find((warehouse) => warehouse.branchId === branchId)?.id ?? bwList[0]?.id ?? '';
+      setForm((current) => ({
+        ...current,
+        branchId: current.branchId || branchId,
+        branchWarehouseId: current.branchWarehouseId || branchWarehouseId,
+      }));
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void load().catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t]);
 
   function addProductFromSearch(product: BranchProductOption) {
@@ -261,7 +272,14 @@ export default function BranchPurchaseRequestsPage() {
       await load();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
-      setError(localizeBranchRequestError(message));
+      const localized = localizeBranchRequestError(message);
+      setError(
+        localized !== message
+          ? localized
+          : asDraft
+            ? message
+            : t('branchProductRequest.submitFailed'),
+      );
     }
   }
 
@@ -272,7 +290,7 @@ export default function BranchPurchaseRequestsPage() {
       setSuccess(t('distribution.branchOrderSubmitted'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      setError(t('branchProductRequest.submitFailed'));
     }
   }
 
@@ -405,6 +423,11 @@ export default function BranchPurchaseRequestsPage() {
         {!branchSalesManagerView && !branchWarehouseView && !branchOwnerView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {listError ? (
+          <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+            {hqSalesView ? t('operations.hqBranchOrdersLoadError') : listError}
+          </p>
+        ) : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         {showForm ? (
@@ -559,6 +582,15 @@ export default function BranchPurchaseRequestsPage() {
         ) : null}
 
         <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+          {loading ? (
+            <p className="px-6 py-10 text-sm text-slate-600">
+              {hqSalesView ? t('operations.hqBranchOrdersLoading') : t('common.loading')}
+            </p>
+          ) : !listError && requests.length === 0 ? (
+            <p className="px-6 py-10 text-sm text-slate-600">
+              {hqSalesView ? t('operations.hqBranchOrdersEmpty') : t('operations.branchPurchaseRequestsEmpty')}
+            </p>
+          ) : (
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
@@ -639,6 +671,7 @@ export default function BranchPurchaseRequestsPage() {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </section>
     </ProtectedShell>

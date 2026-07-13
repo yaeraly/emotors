@@ -71,7 +71,7 @@ export class HqSalesManagerAssignmentService {
     warehouseIds: string[],
   ): Prisma.BranchPurchaseRequestWhereInput | null {
     if (!warehouseIds.length) {
-      return { id: '__none__' };
+      return null;
     }
     return {
       OR: [

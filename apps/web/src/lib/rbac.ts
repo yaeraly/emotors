@@ -1270,6 +1270,7 @@ export function canViewBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' 
   if (isBranchWarehouseOperator(user)) return false;
   if (hasFullAccess(user)) return true;
   if (canManageBranchPurchaseRequests(user)) return true;
+  if (isHqSalesManagerUser(user)) return true;
   return hasAnyRole(user, ['MANAGER', 'FRANCHISE_OWNER', 'MASTER']);
 }
 

@@ -52,7 +52,7 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   },
   BRANCH_ORDER_SUBMITTED: {
     title: 'Новый заказ филиала',
-    message: 'Получен новый заказ филиала.',
+    message: 'Филиал отправил новый заказ на проверку.',
   },
   BRANCH_ORDER_APPROVED: {
     title: 'Заказ подтверждён',

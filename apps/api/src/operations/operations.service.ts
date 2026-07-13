@@ -129,6 +129,13 @@ export class OperationsService {
   ) {}
 
   async branchPurchaseRequests(user: AuthUser) {
+    if (
+      !this.canViewAllBranchPurchaseRequests(user) &&
+      !canManageOwnBranchProductRequest(user) &&
+      !this.hasAnyRole(user, [Role.FRANCHISE_OWNER])
+    ) {
+      throw new ForbiddenException('У вас нет доступа к заказам филиалов');
+    }
     const visibilityWhere = await this.buildBranchPurchaseRequestVisibilityWhere(user);
     const rows = await this.prisma.branchPurchaseRequest.findMany({
       where: {
@@ -398,14 +405,7 @@ export class OperationsService {
       await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_SUBMITTED', 'BranchPurchaseRequest', request.id);
       await this.auditBranchRequest(user, branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
       await this.auditBranchRequest(user, branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', request.id);
-      await this.notificationsService.notify(user, {
-        type: AlertType.BRANCH_ORDER_SUBMITTED,
-        branchId,
-        entityType: 'BranchPurchaseRequest',
-        entityId: request.id,
-        referenceNumber: request.requestNumber,
-        message: `Branch purchase request ${request.requestNumber} submitted.`,
-      });
+      await this.notifyHqSalesBranchRequestSubmitted(user, request);
     }
     return request;
   }
@@ -512,14 +512,7 @@ export class OperationsService {
     await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_SUBMITTED', 'BranchPurchaseRequest', id);
     await this.auditBranchRequest(user, updated.branchId, 'BRANCH_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
     await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_SUBMITTED', 'BranchPurchaseRequest', id);
-    await this.notificationsService.notify(user, {
-      type: AlertType.BRANCH_ORDER_SUBMITTED,
-      branchId: updated.branchId,
-      entityType: 'BranchPurchaseRequest',
-      entityId: updated.id,
-      referenceNumber: updated.requestNumber,
-      message: `Branch purchase request ${updated.requestNumber} submitted.`,
-    });
+    await this.notifyHqSalesBranchRequestSubmitted(user, updated);
     return updated;
   }
 
@@ -4471,7 +4464,8 @@ export class OperationsService {
     }
 
     const warehouseIds = await this.salesManagerAssignmentService.getActiveAssignedWarehouseIds(user.id);
-    return this.salesManagerAssignmentService.buildAssignedRequestScope(warehouseIds) ?? { id: '__none__' };
+    const scope = this.salesManagerAssignmentService.buildAssignedRequestScope(warehouseIds);
+    return scope ?? {};
   }
 
   private async resolveRequestAssignedHqWarehouseId(request: {
@@ -4499,8 +4493,12 @@ export class OperationsService {
       return;
     }
 
-    const warehouseId = await this.resolveRequestAssignedHqWarehouseId(request);
     const assignedIds = await this.salesManagerAssignmentService.getActiveAssignedWarehouseIds(user.id);
+    if (!assignedIds.length) {
+      return;
+    }
+
+    const warehouseId = await this.resolveRequestAssignedHqWarehouseId(request);
     if (!warehouseId || !assignedIds.includes(warehouseId)) {
       await this.auditBranchRequest(user, request.branchId, 'HQ_SALES_REQUEST_ACCESS_DENIED', 'BranchPurchaseRequest', request.id, {
         hqWarehouseId: warehouseId,
@@ -4532,6 +4530,49 @@ export class OperationsService {
       throw new BadRequestException(INACTIVE_HQ_WAREHOUSE);
     }
     return assignedHqWarehouseId;
+  }
+
+  private async notifyHqSalesBranchRequestSubmitted(
+    user: AuthUser,
+    request: {
+      id: string;
+      requestNumber: string;
+      branchId: string;
+      totalQuantity?: number;
+      items: Array<{ quantity: number }>;
+    },
+  ) {
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: request.branchId, deletedAt: null },
+      select: { name: true },
+    });
+    const branchName = branch?.name ?? request.branchId;
+    const itemCount = request.items.length;
+    const totalQuantity =
+      request.totalQuantity ?? request.items.reduce((sum, item) => sum + item.quantity, 0);
+    const alerts = await this.notificationsService.notify(user, {
+      type: AlertType.BRANCH_ORDER_SUBMITTED,
+      branchId: request.branchId,
+      entityType: 'BranchPurchaseRequest',
+      entityId: request.id,
+      referenceNumber: request.requestNumber,
+      title: 'Новый заказ филиала',
+      message: `Филиал ${branchName} отправил новый заказ на проверку.`,
+    });
+    await this.auditBranchRequest(
+      user,
+      request.branchId,
+      'HQ_SALES_REQUEST_NOTIFICATION_CREATED',
+      'BranchPurchaseRequest',
+      request.id,
+      {
+        requestNumber: request.requestNumber,
+        branchName,
+        itemCount,
+        totalQuantity,
+        alertIds: alerts.map((alert) => alert.id),
+      },
+    );
   }
 
   private async resolveDefaultBranchWarehouseId(branchId: string) {
