@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DomesticTransportSection, type DomesticTransportForm } from '@/components/DomesticTransportSection';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
@@ -240,7 +240,9 @@ export default function ProcurementOrderDetailPage() {
   const [success, setSuccess] = useState('');
   const [savingChinaDomestic, setSavingChinaDomestic] = useState(false);
   const [savingCargoReceipt, setSavingCargoReceipt] = useState(false);
+  const [uploadingCargoReceipt, setUploadingCargoReceipt] = useState(false);
   const [savingImportCosts, setSavingImportCosts] = useState(false);
+  const cargoSaveRequestIdRef = useRef(0);
   const [savingSvh, setSavingSvh] = useState(false);
   const [svhForm, setSvhForm] = useState(emptySvhForm());
   const [chinaDomesticChangeReason, setChinaDomesticChangeReason] = useState('');
@@ -618,12 +620,13 @@ export default function ProcurementOrderDetailPage() {
   }
 
   async function saveCargoReceipt() {
-    if (!order || finalized || readOnlyFinance) return;
+    if (!order || finalized || readOnlyFinance || uploadingCargoReceipt) return;
+    const requestId = ++cargoSaveRequestIdRef.current;
     setSavingCargoReceipt(true);
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/procurement/orders/${id}/cargo-receipt`, {
+      const updated = await apiFetch<ProcurementOrder>(`/procurement/orders/${id}/cargo-receipt`, {
         method: 'PUT',
         body: JSON.stringify({
           chinaExportTransportCompanyId: logisticsForm.chinaExportTransportCompanyId || null,
@@ -635,13 +638,41 @@ export default function ProcurementOrderDetailPage() {
           cargoReceiptNote: logisticsForm.cargoReceiptNote || undefined,
         }),
       });
-      setSuccess(t('procurement.transport.saved'));
-      await load();
+      if (requestId !== cargoSaveRequestIdRef.current) return;
+      applyCargoPaymentSaveResult(updated);
+      setSuccess(t('procurement.orders.cargoPaymentSaved'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      if (requestId !== cargoSaveRequestIdRef.current) return;
+      setError(err instanceof Error ? err.message : t('procurement.orders.cargoPaymentSaveFailed'));
     } finally {
-      setSavingCargoReceipt(false);
+      if (requestId === cargoSaveRequestIdRef.current) {
+        setSavingCargoReceipt(false);
+      }
     }
+  }
+
+  function applyCargoPaymentSaveResult(updated: ProcurementOrder) {
+    setOrder((current) => {
+      if (!current) return updated;
+      return {
+        ...current,
+        ...updated,
+        cargoAttachments: updated.cargoAttachments ?? current.cargoAttachments,
+        items: updated.items ?? current.items,
+      };
+    });
+    // Sync only cargo-payment fields so unrelated dirty sections stay intact.
+    setLogisticsForm((current) => ({
+      ...current,
+      chinaExportTransportCompanyId: updated.chinaExportTransportCompanyId ?? '',
+      cargoTotalWeightKg: String(updated.cargoTotalWeightKg ?? 0),
+      cargoRateUsdPerKg: String(updated.cargoRateUsdPerKg ?? 0),
+      defaultUsdRate: String(updated.defaultUsdRate ?? 0),
+      cargoCompany: updated.cargoCompany ?? '',
+      cargoReceiptNumber: updated.cargoReceiptNumber ?? '',
+      cargoReceiptDate: updated.cargoReceiptDate ? updated.cargoReceiptDate.slice(0, 10) : '',
+      cargoReceiptNote: updated.cargoReceiptNote ?? '',
+    }));
   }
 
   async function saveImportCosts() {
@@ -709,6 +740,7 @@ export default function ProcurementOrderDetailPage() {
     if (!file) return;
     const token = getToken();
     if (!token) return;
+    setUploadingCargoReceipt(true);
     setError('');
     setSuccess('');
     const formData = new FormData();
@@ -721,12 +753,31 @@ export default function ProcurementOrderDetailPage() {
       });
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || t('common.error'));
+        throw new Error(payload.message || t('procurement.orders.cargoPaymentSaveFailed'));
       }
-      setSuccess(t('common.success'));
-      await load();
+      const attachment = await response.json() as {
+        id: string;
+        fileName: string;
+        fileUrl: string;
+        mimeType: string;
+      };
+      // Preserve unsaved cargo payment form values — only refresh attachment list.
+      setOrder((current) => {
+        if (!current) return current;
+        const existing = current.cargoAttachments ?? [];
+        const nextAttachments = existing.some((item) => item.id === attachment.id)
+          ? existing.map((item) => (item.id === attachment.id ? attachment : item))
+          : [...existing, attachment];
+        return {
+          ...current,
+          cargoAttachments: nextAttachments,
+        };
+      });
+      setSuccess(t('procurement.payments.cargoReceiptAttached'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      setError(err instanceof Error ? err.message : t('procurement.orders.cargoPaymentSaveFailed'));
+    } finally {
+      setUploadingCargoReceipt(false);
     }
   }
 
@@ -995,12 +1046,13 @@ export default function ProcurementOrderDetailPage() {
               <div className="flex items-center justify-between gap-4">
                 <h4 className="font-semibold text-slate-900">{t('procurement.payments.cargoAttachments')}</h4>
                 {canUploadCargo && !finalized ? (
-                  <label className="cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700">
-                    {t('procurement.payments.attachCargoReceipt')}
+                  <label className={`cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 ${uploadingCargoReceipt ? 'opacity-50' : ''}`}>
+                    {uploadingCargoReceipt ? t('common.loading') : t('procurement.payments.attachCargoReceipt')}
                     <input
                       type="file"
                       className="hidden"
                       accept=".pdf,.jpg,.jpeg,.png,.webp"
+                      disabled={uploadingCargoReceipt || savingCargoReceipt}
                       onChange={(e) => void uploadCargoReceipt(e)}
                     />
                   </label>
@@ -1033,7 +1085,7 @@ export default function ProcurementOrderDetailPage() {
             {canEditOrder && !finalized && !readOnlyFinance ? (
               <button
                 type="button"
-                disabled={savingCargoReceipt || !!cargoValidationError || !cargoReceiptDirty}
+                disabled={savingCargoReceipt || uploadingCargoReceipt || !!cargoValidationError || !cargoReceiptDirty}
                 onClick={() => void saveCargoReceipt()}
                 className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
               >
