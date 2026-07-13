@@ -68,6 +68,7 @@ enum PricingAppliedRuleType {
   TEMP_OVERRIDE
   PRODUCT_RULE
   CATEGORY_RULE
+  PRICING_PROFILE
   BASE_FRANCHISE
   HQ_COST
 }
@@ -3259,6 +3260,16 @@ model PartsConsumption {
   unitPrice      Decimal      @db.Decimal(14, 2)
   totalCost      Decimal      @db.Decimal(14, 2)
   totalPrice     Decimal      @db.Decimal(14, 2)
+  pricingPolicyVersionId String?
+  pricingProfileId     String?
+  resolvedPriceKgs     Decimal? @db.Decimal(14, 2)
+  baseCostKgs          Decimal? @db.Decimal(14, 2)
+  baseBranchPriceKgs   Decimal? @db.Decimal(14, 2)
+  appliedRuleType      PricingAppliedRuleType?
+  appliedRuleId        String?
+  appliedAdjustmentMode PricingAdjustmentMode?
+  appliedAdjustmentValue Decimal? @db.Decimal(14, 2)
+  priceResolvedAt      DateTime?
   createdById    String
   createdBy      User         @relation("PartsConsumptionCreator", fields: [createdById], references: [id])
   createdAt      DateTime     @default(now())
@@ -3268,6 +3279,7 @@ model PartsConsumption {
   @@index([productId])
   @@index([warehouseId])
   @@index([createdById])
+  @@index([pricingPolicyVersionId])
 }
 
 model Warranty {
@@ -4244,6 +4256,16 @@ model ReturnOrderItem {
   productName   String
   quantity      Int
   unitPrice     Decimal @default(0) @db.Decimal(14, 2)
+  pricingPolicyVersionId String?
+  pricingProfileId     String?
+  resolvedPriceKgs     Decimal? @db.Decimal(14, 2)
+  baseCostKgs          Decimal? @db.Decimal(14, 2)
+  baseBranchPriceKgs   Decimal? @db.Decimal(14, 2)
+  appliedRuleType      PricingAppliedRuleType?
+  appliedRuleId        String?
+  appliedAdjustmentMode PricingAdjustmentMode?
+  appliedAdjustmentValue Decimal? @db.Decimal(14, 2)
+  priceResolvedAt      DateTime?
   condition     String?
   defective     Boolean @default(false)
   createdAt     DateTime @default(now())
@@ -4251,6 +4273,7 @@ model ReturnOrderItem {
 
   @@index([returnOrderId])
   @@index([productId])
+  @@index([pricingPolicyVersionId])
 }
 
 model ExchangeOrder {

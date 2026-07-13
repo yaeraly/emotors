@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { PricingEnginePriceType, Prisma } from '@prisma/client';
+import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { toPriceFreezePayload } from './pricing-engine.types';
+import { toPriceFreezePayload, type PriceFreezePayload } from './pricing-engine.types';
 import { PricingEngineService } from './pricing-engine.service';
 
 @Injectable()
@@ -14,7 +15,7 @@ export class PricingResolutionService {
   async resolveBranchProductPrice(
     branchId: string,
     productId: string,
-    tx?: Prisma.TransactionClient,
+    _tx?: Prisma.TransactionClient,
   ) {
     const result = await this.pricingEngine.resolvePrice({ productId, branchId });
     return {
@@ -34,8 +35,78 @@ export class PricingResolutionService {
     return resolved.priceKgs;
   }
 
-  async resolveWithFreeze(branchId: string, productId: string) {
-    const result = await this.pricingEngine.resolvePrice({ productId, branchId });
-    return toPriceFreezePayload(result);
+  async resolveWithFreeze(
+    branchId: string,
+    productId: string,
+    options?: {
+      priceType?: PricingEnginePriceType;
+      documentDate?: Date;
+      pricingPolicyVersionId?: string | null;
+      auditUser?: AuthUser | null;
+      auditEntity?: string;
+      auditEntityId?: string;
+    },
+  ): Promise<PriceFreezePayload> {
+    const result = await this.pricingEngine.resolvePrice({
+      productId,
+      branchId,
+      priceType: options?.priceType,
+      documentDate: options?.documentDate,
+      pricingPolicyVersionId: options?.pricingPolicyVersionId,
+    });
+    const freeze = toPriceFreezePayload(result);
+
+    if (options?.auditUser) {
+      await this.auditPriceResolution(options.auditUser, freeze, {
+        branchId,
+        productId,
+        priceType: options.priceType ?? PricingEnginePriceType.BRANCH_PURCHASE,
+        entity: options.auditEntity,
+        entityId: options.auditEntityId,
+      });
+    }
+
+    return freeze;
+  }
+
+  private async auditPriceResolution(
+    user: AuthUser,
+    freeze: PriceFreezePayload,
+    meta: {
+      branchId: string;
+      productId: string;
+      priceType: PricingEnginePriceType;
+      entity?: string;
+      entityId?: string;
+    },
+  ) {
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'PRICE_RESOLVED',
+        entity: meta.entity ?? 'Product',
+        entityId: meta.entityId ?? meta.productId,
+        metadata: {
+          userId: user.id,
+          role: user.role,
+          branchId: meta.branchId,
+          productId: meta.productId,
+          priceType: meta.priceType,
+          pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+          pricingProfileId: freeze.pricingProfileId,
+          appliedRuleType: freeze.appliedRuleType,
+          appliedRuleId: freeze.appliedRuleId,
+          appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+          appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+          resolvedPriceKgs: freeze.resolvedPriceKgs,
+          baseCostKgs: freeze.baseCostKgs,
+          baseBranchPriceKgs: freeze.baseBranchPriceKgs,
+          resolutionSource: freeze.appliedRuleType,
+          priceResolvedAt: freeze.priceResolvedAt.toISOString(),
+          timestamp: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 }

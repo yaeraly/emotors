@@ -8,7 +8,6 @@ import {
   BranchRequestIssueType,
   BranchRequestLineRejectionReason,
   BranchRequestShortageStatus,
-  PricingPolicyStatus,
   SupplyAbsenceReason,
   SupplyInquiryStatus,
   FileAttachmentEntityType,
@@ -313,17 +312,11 @@ export class OperationsService {
       },
     });
 
-    const pricingPolicyMap = await this.loadActivePricingPolicyMap(catalogProducts.map((product) => product.sku));
     const entries = await Promise.all(
       catalogProducts.map(async (product) => {
-        const hasPricingPolicy = pricingPolicyMap.has(product.sku.trim().toUpperCase());
-        if (!hasPricingPolicy) {
-          return [product.id, null] as const;
-        }
         const pricing = await this.resolveBranchRequestProductPricing(
           resolvedBranchId,
           product.id,
-          product.sku,
         );
         return [product.id, pricing.branchPurchasePriceKgs] as const;
       }),
@@ -649,8 +642,15 @@ export class OperationsService {
       existing.items.map((item) => ({ productId: item.productId, sku: item.sku })),
       { branchId: existing.branchId },
     );
-    const pricingPolicyMap = await this.loadActivePricingPolicyMap(
-      existing.items.map((item) => item.sku),
+    const pricingAvailability = await this.resolveBranchRequestPricingAvailability(
+      existing.branchId,
+      existing.items.map((item) => ({
+        id: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+        hasPricingPolicyAtSubmit: item.hasPricingPolicyAtSubmit,
+      })),
     );
 
     const reviewInputs = this.normalizeLineReviewInputs(dto, existing.items);
@@ -677,7 +677,7 @@ export class OperationsService {
         }
 
         const available = stockMap.get(item.productId) ?? 0;
-        const hasPricingPolicy = pricingPolicyMap.has(item.sku.trim().toUpperCase());
+        const hasPricingPolicy = pricingAvailability.get(item.id) ?? false;
 
         let resolved;
         try {
@@ -3881,6 +3881,42 @@ export class OperationsService {
     const branchId = this.resolveBranchId(user, dto.branchId);
     const items = await this.resolveItems(dto.items ?? []);
     const totalAmount = items.reduce((sum, item) => sum + Number(item.quantity ?? 0) * Number(item.unitPrice ?? 0), 0);
+
+    const snapshotItems = await Promise.all(
+      items.map(async (item) => {
+        const base = {
+          productId: item.productId,
+          sku: item.sku,
+          productName: item.productName,
+          quantity: Number(item.quantity ?? 0),
+          unitPrice: Number(item.unitPrice ?? 0),
+          condition: item.condition,
+          defective: Boolean(item.defective),
+        };
+        try {
+          const freeze = await this.pricingResolution.resolveWithFreeze(branchId, item.productId, {
+            auditUser: user,
+            auditEntity: 'ReturnOrderItem',
+          });
+          return {
+            ...base,
+            pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+            pricingProfileId: freeze.pricingProfileId,
+            resolvedPriceKgs: freeze.resolvedPriceKgs,
+            baseCostKgs: freeze.baseCostKgs,
+            baseBranchPriceKgs: freeze.baseBranchPriceKgs,
+            appliedRuleType: freeze.appliedRuleType,
+            appliedRuleId: freeze.appliedRuleId,
+            appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+            appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+            priceResolvedAt: freeze.priceResolvedAt,
+          };
+        } catch {
+          return base;
+        }
+      }),
+    );
+
     const order = await this.prisma.returnOrder.create({
       data: {
         returnNumber: dto.returnNumber ?? `RET-${Date.now()}`,
@@ -3891,7 +3927,7 @@ export class OperationsService {
         totalAmount,
         createdById: user.id,
         note: dto.note,
-        items: { create: items.map((item) => ({ productId: item.productId, sku: item.sku, productName: item.productName, quantity: Number(item.quantity ?? 0), unitPrice: Number(item.unitPrice ?? 0), condition: item.condition, defective: Boolean(item.defective) })) },
+        items: { create: snapshotItems },
       },
       include: { items: true },
     });
@@ -4215,7 +4251,6 @@ export class OperationsService {
         const pricing = await this.resolveBranchRequestProductPricing(
           branchId,
           catalogProduct?.id ?? product.id,
-          product.sku,
         );
         const branchPurchasePriceKgs = pricing.branchPurchasePriceKgs ?? 0;
         const totalAmount =
@@ -4382,8 +4417,16 @@ export class OperationsService {
       request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
       { branchId: request.branchId },
     );
-    const pricingPolicyMap = await this.loadActivePricingPolicyMap(
-      request.items.map((item) => item.sku),
+    const pricingAvailability = await this.resolveBranchRequestPricingAvailability(
+      request.branchId,
+      request.items.map((item) => ({
+        id: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        resolvedBranchPriceKgs: (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
+        hasPricingPolicyAtSubmit: (item as { hasPricingPolicyAtSubmit?: boolean | null })
+          .hasPricingPolicyAtSubmit,
+      })),
     );
 
     return {
@@ -4397,7 +4440,7 @@ export class OperationsService {
           ...item,
           hqAvailableStock: available,
           missingQty,
-          pricingPolicyAvailable: pricingPolicyMap.has(item.sku.trim().toUpperCase()),
+          pricingPolicyAvailable: pricingAvailability.get(item.id) ?? false,
         };
       }),
     };
@@ -4538,40 +4581,39 @@ export class OperationsService {
       pricingPending: boolean;
     }>,
   ) {
-    const pricingPolicyMap = await this.loadActivePricingPolicyMap(products.map((product) => product.sku));
     return Promise.all(
       products.map(async (product) => {
-        const hasPricingPolicy = pricingPolicyMap.has(product.sku.trim().toUpperCase());
-        if (!hasPricingPolicy) {
-          return {
-            ...product,
-            branchPurchasePriceKgs: null,
-            hasPricingPolicy: false,
-            pricingPending: true,
-          };
-        }
         const pricing = await this.resolveBranchRequestProductPricing(
           branchId,
           product.catalogProductId,
-          product.sku,
         );
         return {
           ...product,
           branchPurchasePriceKgs: pricing.branchPurchasePriceKgs,
-          hasPricingPolicy: true,
-          pricingPending: false,
+          hasPricingPolicy: pricing.hasPricingPolicy,
+          pricingPending: !pricing.hasPricingPolicy,
         };
       }),
     );
   }
 
-  private async resolveBranchRequestProductPricing(
-    branchId: string,
-    catalogProductId: string,
-    sku: string,
-  ) {
-    const hasPricingPolicy = (await this.loadActivePricingPolicyMap([sku])).has(sku.trim().toUpperCase());
-    if (!hasPricingPolicy) {
+  private async resolveBranchRequestProductPricing(branchId: string, catalogProductId: string) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, catalogProductId);
+      const hasPricingPolicy = freeze.baseCostKgs > 0;
+      return {
+        hasPricingPolicy,
+        branchPurchasePriceKgs: hasPricingPolicy ? freeze.resolvedPriceKgs : null,
+        resolvedBranchPriceKgs: hasPricingPolicy ? freeze.resolvedPriceKgs : null,
+        pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+        pricingProfileId: freeze.pricingProfileId,
+        appliedRuleType: freeze.appliedRuleType,
+        appliedRuleId: freeze.appliedRuleId,
+        appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+        appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+        priceResolvedAt: freeze.priceResolvedAt,
+      };
+    } catch {
       return {
         hasPricingPolicy: false,
         branchPurchasePriceKgs: null as number | null,
@@ -4585,31 +4627,51 @@ export class OperationsService {
         priceResolvedAt: null as Date | null,
       };
     }
-
-    const freeze = await this.pricingResolution.resolveWithFreeze(branchId, catalogProductId);
-    return {
-      hasPricingPolicy: true,
-      branchPurchasePriceKgs: freeze.resolvedPriceKgs,
-      resolvedBranchPriceKgs: freeze.resolvedPriceKgs,
-      pricingPolicyVersionId: freeze.pricingPolicyVersionId,
-      pricingProfileId: freeze.pricingProfileId,
-      appliedRuleType: freeze.appliedRuleType,
-      appliedRuleId: freeze.appliedRuleId,
-      appliedAdjustmentMode: freeze.appliedAdjustmentMode,
-      appliedAdjustmentValue: freeze.appliedAdjustmentValue,
-      priceResolvedAt: freeze.priceResolvedAt,
-    };
   }
 
-  private async loadActivePricingPolicyMap(skus: string[]) {
-    const normalized = [...new Set(skus.map((sku) => sku.trim().toUpperCase()).filter(Boolean))];
-    if (!normalized.length) return new Set<string>();
+  private async resolveBranchRequestPricingAvailability(
+    branchId: string,
+    items: Array<{
+      id?: string;
+      productId: string;
+      sku: string;
+      resolvedBranchPriceKgs?: unknown;
+      hasPricingPolicyAtSubmit?: boolean | null;
+    }>,
+  ) {
+    const result = new Map<string, boolean>();
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
 
-    const policies = await this.prisma.productPricingPolicy.findMany({
-      where: { sku: { in: normalized }, status: PricingPolicyStatus.ACTIVE },
-      select: { sku: true },
-    });
-    return new Set(policies.map((policy) => policy.sku.toUpperCase()));
+    await Promise.all(
+      items.map(async (item) => {
+        const key = item.id ?? item.productId;
+        if (item.hasPricingPolicyAtSubmit === true) {
+          result.set(key, true);
+          return;
+        }
+        if (item.resolvedBranchPriceKgs != null && Number(item.resolvedBranchPriceKgs) > 0) {
+          result.set(key, true);
+          return;
+        }
+
+        const catalogProduct = await this.prisma.product.findFirst({
+          where: {
+            sku: item.sku,
+            branchId: hqBranch.id,
+            deletedAt: null,
+            isActive: true,
+          },
+          select: { id: true },
+        });
+        const pricing = await this.resolveBranchRequestProductPricing(
+          branchId,
+          catalogProduct?.id ?? item.productId,
+        );
+        result.set(key, pricing.hasPricingPolicy);
+      }),
+    );
+
+    return result;
   }
 
   private normalizeLineReviewInputs(

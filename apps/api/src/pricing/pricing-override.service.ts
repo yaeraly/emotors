@@ -9,23 +9,19 @@ import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
-import {
-  dateRangesOverlap,
-  isProductOverrideEffective,
-  resolveFinalBranchProductPrice,
-} from './pricing-calculator.util';
+import { dateRangesOverlap, isProductOverrideEffective } from './pricing-calculator.util';
 import {
   ProductPriceOverrideQueryDto,
   UpdateProductPriceOverrideDto,
   UpsertProductPriceOverrideDto,
 } from './dto/product-price-override.dto';
-import { PricingFifoService } from './pricing-fifo.service';
+import { PricingEngineService } from './pricing-engine.service';
 
 @Injectable()
 export class PricingOverrideService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly fifoService: PricingFifoService,
+    private readonly pricingEngine: PricingEngineService,
   ) {}
 
   async list(user: AuthUser, query: ProductPriceOverrideQueryDto = {}) {
@@ -91,7 +87,7 @@ export class PricingOverrideService {
 
     await this.assertNoOverlappingActiveOverride(dto.branchId, dto.productId, startDate, endDate);
 
-    const standardPrice = await this.resolveStandardBranchPrice(branch, product);
+    const standardPrice = await this.resolveStandardBranchPrice(branch.id, product.id);
     const created = await this.prisma.$transaction(async (tx) => {
       const override = await tx.productPriceOverride.create({
         data: {
@@ -260,7 +256,7 @@ export class PricingOverrideService {
       throw new BadRequestException('Only active overrides can be cancelled');
     }
 
-    const standardPrice = await this.resolveStandardBranchPrice(existing.branch, existing.product);
+    const standardPrice = await this.resolveStandardBranchPrice(existing.branchId, existing.productId);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const override = await tx.productPriceOverride.update({
@@ -333,7 +329,7 @@ export class PricingOverrideService {
       });
       const product = await client.product.findUnique({ where: { id: row.productId } });
       const standardPrice =
-        branch && product ? await this.resolveStandardBranchPrice(branch, product, client) : 0;
+        branch && product ? await this.resolveStandardBranchPrice(row.branchId, row.productId) : 0;
 
       await client.productPriceOverride.update({
         where: { id: row.id },
@@ -380,31 +376,9 @@ export class PricingOverrideService {
     return { expired: stale.length };
   }
 
-  private async resolveStandardBranchPrice(
-    branch: {
-      branchType: BranchType;
-      priceProfile?: {
-        categoryDiscounts?: Array<{ categoryId: string; discountPercent: { toString(): string } | number }>;
-      } | null;
-    },
-    product: {
-      id: string;
-      categoryId: string;
-      hqBranchWholesaleMarkupPercent: { toString(): string } | number;
-    },
-    tx?: Prisma.TransactionClient,
-  ) {
-    const cost = await this.fifoService.getLatestHqCostPrice(product.id, tx);
-    const categoryDiscount = branch.priceProfile?.categoryDiscounts?.find(
-      (row) => row.categoryId === product.categoryId,
-    );
-    const resolved = resolveFinalBranchProductPrice({
-      costPriceKgs: cost.costPriceKgs,
-      branchType: branch.branchType,
-      baseFranchiseMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
-      categoryDiscountPercent: categoryDiscount ? Number(categoryDiscount.discountPercent) : 0,
-    });
-    return resolved.priceKgs;
+  private async resolveStandardBranchPrice(branchId: string, productId: string) {
+    const result = await this.pricingEngine.resolvePrice({ branchId, productId });
+    return result.resolvedPriceKgs;
   }
 
   private validateDates(startDate: Date, endDate: Date) {

@@ -102,6 +102,7 @@ export type BranchProductPriceSource =
   | 'OVERRIDE'
   | 'PRODUCT_RULE'
   | 'CATEGORY_DISCOUNT'
+  | 'PRICING_PROFILE'
   | 'BASE_FRANCHISE'
   | 'HQ_COST';
 
@@ -225,6 +226,78 @@ export function resolveFinalBranchProductPrice(input: {
     return {
       priceKgs: applyCategoryDiscountRoundUp(baseFranchisePriceKgs, discountPercent),
       source: 'CATEGORY_DISCOUNT',
+      baseFranchisePriceKgs,
+    };
+  }
+
+  return {
+    priceKgs: baseFranchisePriceKgs,
+    source: 'BASE_FRANCHISE',
+    baseFranchisePriceKgs,
+  };
+}
+
+/**
+ * @deprecated Prefer PricingEngineService.resolvePrice — single source of truth.
+ * Kept for unit tests of pure formula helpers and transitional callers.
+ */
+export function resolveFinalBranchProductPriceWithProfile(input: {
+  costPriceKgs: number;
+  branchType: BranchTypeForPricing;
+  baseFranchiseMarkupPercent: number;
+  profileDiscountPercent?: number | null;
+  categoryDiscountPercent?: number | null;
+  productRule?: { mode: PricingAdjustmentMode; value: number } | null;
+  override?: { mode: PricingAdjustmentMode; value: number } | null;
+}): { priceKgs: number; source: BranchProductPriceSource; baseFranchisePriceKgs: number } {
+  const baseFranchisePriceKgs = resolveBaseFranchiseBranchPrice(
+    input.costPriceKgs,
+    input.branchType,
+    input.baseFranchiseMarkupPercent,
+  );
+
+  if (input.override) {
+    return {
+      priceKgs: applyPricingAdjustment(baseFranchisePriceKgs, input.override.mode, input.override.value),
+      source: 'OVERRIDE',
+      baseFranchisePriceKgs,
+    };
+  }
+
+  if (input.branchType === 'HQ_BRANCH') {
+    return {
+      priceKgs: roundMoney(input.costPriceKgs),
+      source: 'HQ_COST',
+      baseFranchisePriceKgs: roundMoney(input.costPriceKgs),
+    };
+  }
+
+  if (input.productRule) {
+    return {
+      priceKgs: applyPricingAdjustment(
+        baseFranchisePriceKgs,
+        input.productRule.mode,
+        input.productRule.value,
+      ),
+      source: 'PRODUCT_RULE',
+      baseFranchisePriceKgs,
+    };
+  }
+
+  const categoryDiscount = Math.max(0, input.categoryDiscountPercent ?? 0);
+  if (categoryDiscount > 0) {
+    return {
+      priceKgs: applyCategoryDiscountRoundUp(baseFranchisePriceKgs, categoryDiscount),
+      source: 'CATEGORY_DISCOUNT',
+      baseFranchisePriceKgs,
+    };
+  }
+
+  const profileDiscount = Math.max(0, input.profileDiscountPercent ?? 0);
+  if (profileDiscount > 0) {
+    return {
+      priceKgs: applyCategoryDiscountRoundUp(baseFranchisePriceKgs, profileDiscount),
+      source: 'PRICING_PROFILE',
       baseFranchisePriceKgs,
     };
   }

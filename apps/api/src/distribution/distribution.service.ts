@@ -1390,6 +1390,10 @@ export class DistributionService {
       const priceFreeze = await this.pricingResolutionService.resolveWithFreeze(
         dto.branchId,
         item.productId,
+        {
+          auditUser: user,
+          auditEntity: 'BranchDistributionOrderItem',
+        },
       );
 
       const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {

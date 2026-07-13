@@ -27,6 +27,7 @@ import { validateSellingPriceLimits } from './pricing-calculator.util';
 import {
   isMaximumPolicyActive,
   resolveRetailMaximumPolicy,
+  resolveWholesaleMaximumPolicy,
 } from './pricing-policy-resolution.util';
 import { PricingEngineService } from './pricing-engine.service';
 
@@ -36,6 +37,7 @@ type SaleItemInput = {
   productId?: string;
   productSku?: string;
   unitPrice: number;
+  pricingChannel?: 'RETAIL' | 'WHOLESALE';
   priceAboveRecommendedReasonCode?: PriceAboveRecommendedReasonCode;
   priceAboveRecommendedComment?: string;
 };
@@ -285,27 +287,38 @@ export class PricingService {
         defaultRetailMaximumMarkupPercent: 0,
         defaultWholesaleMaximumMarkupPercent: 0,
       };
-      const retailMaximumPolicy = resolveRetailMaximumPolicy(product, category);
+
+      const channel = item.pricingChannel ?? 'RETAIL';
+      const isWholesale = channel === 'WHOLESALE';
+      const maximumPolicy = isWholesale
+        ? resolveWholesaleMaximumPolicy(product, category)
+        : resolveRetailMaximumPolicy(product, category);
 
       const [minResult, recommendedResult] = await Promise.all([
         this.pricingEngine.resolvePrice({
           productId: item.productId,
           branchId,
-          priceType: PricingEnginePriceType.RETAIL_MINIMUM,
+          priceType: isWholesale
+            ? PricingEnginePriceType.WHOLESALE_MINIMUM
+            : PricingEnginePriceType.RETAIL_MINIMUM,
         }),
         this.pricingEngine.resolvePrice({
           productId: item.productId,
           branchId,
-          priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+          priceType: isWholesale
+            ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
+            : PricingEnginePriceType.RETAIL_RECOMMENDED,
         }),
       ]);
 
       let maximumPriceKgs: number | null = null;
-      if (isMaximumPolicyActive(retailMaximumPolicy)) {
+      if (isMaximumPolicyActive(maximumPolicy)) {
         const maxResult = await this.pricingEngine.resolvePrice({
           productId: item.productId,
           branchId,
-          priceType: PricingEnginePriceType.RETAIL_MAXIMUM,
+          priceType: isWholesale
+            ? PricingEnginePriceType.WHOLESALE_MAXIMUM
+            : PricingEnginePriceType.RETAIL_MAXIMUM,
         });
         maximumPriceKgs = maxResult.resolvedPriceKgs;
       }
@@ -315,7 +328,7 @@ export class PricingService {
         minimumPriceKgs: minResult.resolvedPriceKgs,
         recommendedPriceKgs: recommendedResult.resolvedPriceKgs,
         maximumPriceKgs,
-        maximumPolicy: retailMaximumPolicy,
+        maximumPolicy,
       });
 
       if (!validation.ok) {
@@ -323,6 +336,7 @@ export class PricingService {
         await this.audit(user, 'PRICE_CHANGE_DENIED', 'Product', product.id, {
           branchId,
           productId: product.id,
+          channel,
           reason,
           oldValue: {
             minimumPriceKgs: minResult.resolvedPriceKgs,
@@ -347,6 +361,7 @@ export class PricingService {
           userId: user.id,
           branchId,
           productId: product.id,
+          channel,
           sellingPrice: item.unitPrice,
           recommendedPrice: recommendedResult.resolvedPriceKgs,
           reasonCode: item.priceAboveRecommendedReasonCode,
@@ -363,6 +378,7 @@ export class PricingService {
           await this.audit(user, 'PRICE_CHANGE_DENIED', 'Product', product.id, {
             branchId,
             productId: product.id,
+            channel,
             reason: DISCOUNT_EXCEEDS_ALLOWED_LIMIT,
             oldValue: { maximumDiscountPercent: maxDiscount, listPrice },
             newValue: { unitPrice: item.unitPrice, discountPercent },

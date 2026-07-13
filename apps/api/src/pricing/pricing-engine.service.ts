@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PricingAppliedRuleType, PricingEnginePriceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import {
   applyPricingAdjustment,
   calculateBaseBranchPriceKgs,
@@ -9,7 +10,7 @@ import {
   type BranchTypeForPricing,
   type PricingAdjustmentMode,
 } from './pricing-calculator.util';
-import { PricingEngineResolveInput, PricingEngineResolveResult } from './pricing-engine.types';
+import { PricingEngineResolveInput, PricingEngineResolveResult, PricingCalculationStep } from './pricing-engine.types';
 import { PricingFifoService } from './pricing-fifo.service';
 import { PricingSchedulerService } from './pricing-scheduler.service';
 import {
@@ -20,6 +21,17 @@ import {
   resolveWholesaleMaximumPolicy,
 } from './pricing-policy-resolution.util';
 
+/**
+ * Single source of truth for price resolution.
+ *
+ * Priority (non-HQ):
+ * 1. Temporary Product Override
+ * 2. Product Rule (version + profile + product)
+ * 3. Category Rule (version + profile + category)
+ * 4. Pricing Profile category discount
+ * 5. Master Franchise Policy (product HQ markup)
+ * 6. FIFO Cost
+ */
 @Injectable()
 export class PricingEngineService {
   constructor(
@@ -36,7 +48,11 @@ export class PricingEngineService {
 
     const branch = await this.prisma.branch.findFirst({
       where: { id: input.branchId, deletedAt: null },
-      include: { priceProfile: true },
+      include: {
+        priceProfile: {
+          include: { categoryDiscounts: true },
+        },
+      },
     });
     if (!branch) {
       throw new Error(`Branch not found: ${input.branchId}`);
@@ -50,13 +66,18 @@ export class PricingEngineService {
       throw new Error(`Product not found: ${input.productId}`);
     }
 
-    const versionId =
-      input.pricingPolicyVersionId ?? (await this.getActiveVersionId());
+    const catalogProduct = await this.resolveHqCatalogProduct(product);
+    const pricingProduct = catalogProduct ?? product;
+    const pricingProductIds = Array.from(
+      new Set([product.id, pricingProduct.id].filter(Boolean)),
+    );
+
+    const versionId = input.pricingPolicyVersionId ?? (await this.getActiveVersionId());
 
     const branchType = branch.branchType as BranchTypeForPricing;
-    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const cost = await this.fifoService.getLatestHqCostPrice(pricingProduct.id);
     const baseCostKgs = cost.costPriceKgs;
-    const baseFranchiseMarkupPercent = Number(product.hqBranchWholesaleMarkupPercent ?? 0);
+    const baseFranchiseMarkupPercent = Number(pricingProduct.hqBranchWholesaleMarkupPercent ?? 0);
 
     const baseBranchPriceKgs = calculateBaseBranchPriceKgs({
       costPriceKgs: baseCostKgs,
@@ -64,9 +85,9 @@ export class PricingEngineService {
       branchType,
     });
 
-    const calculationSteps = [
-      { step: 'cost', valueKgs: baseCostKgs },
-      { step: 'baseBranch', valueKgs: baseBranchPriceKgs },
+    const calculationSteps: PricingCalculationStep[] = [
+      { step: 'fifoCost', valueKgs: baseCostKgs, detail: cost.source },
+      { step: 'masterFranchise', valueKgs: baseBranchPriceKgs, detail: `markup=${baseFranchiseMarkupPercent}` },
     ];
 
     let effectiveBranchPriceKgs = baseBranchPriceKgs;
@@ -84,7 +105,7 @@ export class PricingEngineService {
 
       const tempOverride = await this.findActiveTempOverride(
         input.branchId,
-        input.productId,
+        pricingProductIds,
         asOf,
         versionId,
       );
@@ -99,49 +120,86 @@ export class PricingEngineService {
         appliedAdjustmentMode = tempOverride.mode;
         appliedAdjustmentValue = tempOverride.value;
         calculationSteps.push({ step: 'tempOverride', valueKgs: effectiveBranchPriceKgs });
-      } else if (profileId && versionId) {
-        const productRule = await this.prisma.pricingProductRule.findFirst({
-          where: {
-            pricingPolicyVersionId: versionId,
-            pricingProfileId: profileId,
-            productId: input.productId,
-            status: 'ACTIVE',
-          },
-        });
-        if (productRule) {
-          const mode = productRule.adjustmentMode as PricingAdjustmentMode;
-          const value = Number(productRule.adjustmentValue);
-          effectiveBranchPriceKgs = applyPricingAdjustment(baseBranchPriceKgs, mode, value);
-          appliedRuleType = PricingAppliedRuleType.PRODUCT_RULE;
-          appliedRuleId = productRule.id;
-          appliedAdjustmentMode = mode;
-          appliedAdjustmentValue = value;
-          calculationSteps.push({ step: 'productRule', valueKgs: effectiveBranchPriceKgs });
-        } else if (product.categoryId) {
-          const categoryRule = await this.prisma.pricingCategoryRule.findFirst({
+      } else if (profileId) {
+        let resolvedByRule = false;
+
+        if (versionId) {
+          const productRule = await this.prisma.pricingProductRule.findFirst({
             where: {
               pricingPolicyVersionId: versionId,
               pricingProfileId: profileId,
-              categoryId: product.categoryId,
+              productId: { in: pricingProductIds },
               status: 'ACTIVE',
             },
           });
-          if (categoryRule) {
-            const value = Number(categoryRule.discountPercent);
+          if (productRule) {
+            const mode = productRule.adjustmentMode as PricingAdjustmentMode;
+            const value = Number(productRule.adjustmentValue);
+            effectiveBranchPriceKgs = applyPricingAdjustment(baseBranchPriceKgs, mode, value);
+            appliedRuleType = PricingAppliedRuleType.PRODUCT_RULE;
+            appliedRuleId = productRule.id;
+            appliedAdjustmentMode = mode;
+            appliedAdjustmentValue = value;
+            calculationSteps.push({ step: 'productRule', valueKgs: effectiveBranchPriceKgs });
+            resolvedByRule = true;
+          } else if (pricingProduct.categoryId) {
+            const categoryRule = await this.prisma.pricingCategoryRule.findFirst({
+              where: {
+                pricingPolicyVersionId: versionId,
+                pricingProfileId: profileId,
+                categoryId: pricingProduct.categoryId,
+                status: 'ACTIVE',
+              },
+            });
+            if (categoryRule) {
+              const value = Number(categoryRule.discountPercent);
+              effectiveBranchPriceKgs = applyPricingAdjustment(
+                baseBranchPriceKgs,
+                'PERCENTAGE_DISCOUNT',
+                value,
+              );
+              appliedRuleType = PricingAppliedRuleType.CATEGORY_RULE;
+              appliedRuleId = categoryRule.id;
+              appliedAdjustmentMode = 'PERCENTAGE_DISCOUNT';
+              appliedAdjustmentValue = value;
+              calculationSteps.push({ step: 'categoryRule', valueKgs: effectiveBranchPriceKgs });
+              resolvedByRule = true;
+            }
+          }
+        }
+
+        // Pricing Profile layer: live profile category discounts when no version rule matched
+        if (!resolvedByRule && pricingProduct.categoryId && branch.priceProfile) {
+          const profileDiscount = branch.priceProfile.categoryDiscounts.find(
+            (row) => row.categoryId === pricingProduct.categoryId,
+          );
+          const discountPercent = profileDiscount ? Number(profileDiscount.discountPercent) : 0;
+          if (discountPercent > 0) {
             effectiveBranchPriceKgs = applyPricingAdjustment(
               baseBranchPriceKgs,
               'PERCENTAGE_DISCOUNT',
-              value,
+              discountPercent,
             );
-            appliedRuleType = PricingAppliedRuleType.CATEGORY_RULE;
-            appliedRuleId = categoryRule.id;
+            appliedRuleType = PricingAppliedRuleType.PRICING_PROFILE;
+            appliedRuleId = profileDiscount?.id ?? profileId;
             appliedAdjustmentMode = 'PERCENTAGE_DISCOUNT';
-            appliedAdjustmentValue = value;
-            calculationSteps.push({ step: 'categoryRule', valueKgs: effectiveBranchPriceKgs });
+            appliedAdjustmentValue = discountPercent;
+            calculationSteps.push({
+              step: 'pricingProfile',
+              valueKgs: effectiveBranchPriceKgs,
+              detail: `discount=${discountPercent}%`,
+            });
           }
         }
       }
     }
+
+    const category = pricingProduct.productCategory ?? {
+      defaultRetailMaximumPolicy: 'DISABLED' as const,
+      defaultWholesaleMaximumPolicy: 'DISABLED' as const,
+      defaultRetailMaximumMarkupPercent: 0,
+      defaultWholesaleMaximumMarkupPercent: 0,
+    };
 
     let resolvedPriceKgs = effectiveBranchPriceKgs;
     switch (priceType) {
@@ -151,56 +209,48 @@ export class PricingEngineService {
       case PricingEnginePriceType.RETAIL_MINIMUM:
         resolvedPriceKgs = calculateRetailPriceKgs(
           effectiveBranchPriceKgs,
-          Number(product.minimumSellingMarkupPercent ?? 0),
+          Number(pricingProduct.minimumSellingMarkupPercent ?? 0),
         );
         break;
       case PricingEnginePriceType.RETAIL_RECOMMENDED:
         resolvedPriceKgs = calculateRetailPriceKgs(
           effectiveBranchPriceKgs,
-          Number(product.recommendedRetailMarkupPercent ?? 0),
+          Number(pricingProduct.recommendedRetailMarkupPercent ?? 0),
         );
         break;
       case PricingEnginePriceType.RETAIL_MAXIMUM: {
-        const category = product.productCategory ?? {
-          defaultRetailMaximumPolicy: 'DISABLED' as const,
-          defaultRetailMaximumMarkupPercent: 0,
-        };
-        const retailPolicy = resolveRetailMaximumPolicy(product, category);
-        const retailMarkup = resolveRetailMaximumMarkup(product, category);
+        const retailPolicy = resolveRetailMaximumPolicy(pricingProduct, category);
+        const retailMarkup = resolveRetailMaximumMarkup(pricingProduct, category);
         resolvedPriceKgs =
           isMaximumPolicyActive(retailPolicy) && retailMarkup > 0
             ? calculateRetailPriceKgs(effectiveBranchPriceKgs, retailMarkup)
             : calculateRetailPriceKgs(
                 effectiveBranchPriceKgs,
-                Number(product.recommendedRetailMarkupPercent ?? 0),
+                Number(pricingProduct.recommendedRetailMarkupPercent ?? 0),
               );
         break;
       }
       case PricingEnginePriceType.WHOLESALE_MINIMUM:
         resolvedPriceKgs = calculateWholesalePriceKgs(
           effectiveBranchPriceKgs,
-          Number(product.minimumWholesaleMarkupPercent ?? 0),
+          Number(pricingProduct.minimumWholesaleMarkupPercent ?? 0),
         );
         break;
       case PricingEnginePriceType.WHOLESALE_RECOMMENDED:
         resolvedPriceKgs = calculateWholesalePriceKgs(
           effectiveBranchPriceKgs,
-          Number(product.wholesaleMarkupPercent ?? 0),
+          Number(pricingProduct.wholesaleMarkupPercent ?? 0),
         );
         break;
       case PricingEnginePriceType.WHOLESALE_MAXIMUM: {
-        const category = product.productCategory ?? {
-          defaultWholesaleMaximumPolicy: 'DISABLED' as const,
-          defaultWholesaleMaximumMarkupPercent: 0,
-        };
-        const wholesalePolicy = resolveWholesaleMaximumPolicy(product, category);
-        const wholesaleMarkup = resolveWholesaleMaximumMarkup(product, category);
+        const wholesalePolicy = resolveWholesaleMaximumPolicy(pricingProduct, category);
+        const wholesaleMarkup = resolveWholesaleMaximumMarkup(pricingProduct, category);
         resolvedPriceKgs =
           isMaximumPolicyActive(wholesalePolicy) && wholesaleMarkup > 0
             ? calculateWholesalePriceKgs(effectiveBranchPriceKgs, wholesaleMarkup)
             : calculateWholesalePriceKgs(
                 effectiveBranchPriceKgs,
-                Number(product.wholesaleMarkupPercent ?? 0),
+                Number(pricingProduct.wholesaleMarkupPercent ?? 0),
               );
         break;
       }
@@ -230,20 +280,66 @@ export class PricingEngineService {
     return active?.id ?? null;
   }
 
+  private async resolveHqCatalogProduct(product: {
+    id: string;
+    sku: string;
+    branchId: string | null;
+    categoryId: string | null;
+    hqBranchWholesaleMarkupPercent: { toString(): string } | number;
+    minimumSellingMarkupPercent: { toString(): string } | number;
+    recommendedRetailMarkupPercent: { toString(): string } | number;
+    minimumWholesaleMarkupPercent: { toString(): string } | number;
+    wholesaleMarkupPercent: { toString(): string } | number;
+    retailMaximumPolicySource: import('@prisma/client').MaximumPricePolicySource;
+    wholesaleMaximumPolicySource: import('@prisma/client').MaximumPricePolicySource;
+    retailMaximumPolicy: import('@prisma/client').MaximumPricePolicy;
+    wholesaleMaximumPolicy: import('@prisma/client').MaximumPricePolicy;
+    maximumRetailMarkupPercent: { toString(): string } | number;
+    maximumWholesaleMarkupPercent: { toString(): string } | number;
+    productCategory: {
+      defaultRetailMaximumPolicy: import('@prisma/client').MaximumPricePolicy;
+      defaultWholesaleMaximumPolicy: import('@prisma/client').MaximumPricePolicy;
+      defaultRetailMaximumMarkupPercent: { toString(): string } | number;
+      defaultWholesaleMaximumMarkupPercent: { toString(): string } | number;
+    } | null;
+  }) {
+    const hqBranch = await this.prisma.branch.findFirst({
+      where: { code: HQ_CATALOG_BRANCH_CODE },
+      select: { id: true },
+    });
+    if (!hqBranch) return null;
+    if (product.branchId === hqBranch.id) return product;
+
+    const sku = product.sku?.trim();
+    if (!sku) return null;
+
+    return this.prisma.product.findFirst({
+      where: {
+        sku,
+        branchId: hqBranch.id,
+        deletedAt: null,
+        isActive: true,
+      },
+      include: { productCategory: true },
+    });
+  }
+
   private async findActiveTempOverride(
     branchId: string,
-    productId: string,
+    productIds: string[],
     asOf: Date,
     versionId: string | null,
   ): Promise<{ id: string; mode: PricingAdjustmentMode; value: number } | null> {
     const override = await this.prisma.productPriceOverride.findFirst({
       where: {
         branchId,
-        productId,
+        productId: { in: productIds },
         status: { in: ['ACTIVE', 'APPROVED'] },
         startDate: { lte: asOf },
         endDate: { gte: asOf },
-        ...(versionId ? { OR: [{ pricingPolicyVersionId: versionId }, { pricingPolicyVersionId: null }] } : {}),
+        ...(versionId
+          ? { OR: [{ pricingPolicyVersionId: versionId }, { pricingPolicyVersionId: null }] }
+          : {}),
       },
       orderBy: { createdAt: 'desc' },
     });

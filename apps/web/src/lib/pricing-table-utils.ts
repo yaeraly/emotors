@@ -2,6 +2,10 @@ export function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
+/**
+ * UI preview helper — must mirror backend pricing-calculator.util.ts exactly.
+ * Backend PricingEngineService remains authoritative.
+ */
 /** Google Sheets style: ROUNDUP(cost * markup% + cost, -1) → nearest 10 */
 export function applyMarkupRoundUp(costPrice: number, markupPercent: number) {
   if (costPrice <= 0) return 0;

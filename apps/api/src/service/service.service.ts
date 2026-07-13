@@ -9,6 +9,7 @@ import {
   CustomerStatus,
   PartsRequestStatus,
   PaymentMethod,
+  PricingEnginePriceType,
   Prisma,
   RepairStatus,
   Role,
@@ -19,6 +20,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole } from '../rbac/rbac';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
@@ -42,6 +44,7 @@ export class ServiceService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly commissionsService: CommissionsService,
+    private readonly pricingResolution: PricingResolutionService,
   ) {}
 
   async create(user: AuthUser, dto: CreateServiceOrderDto) {
@@ -384,7 +387,30 @@ export class ServiceService {
       });
       if (!warehouse) throw new NotFoundException('Warehouse not found');
       const unitCost = Number(product.finalCostKgs);
-      const unitPrice = Number(product.sellingPriceKgs);
+      let unitPrice = Number(product.sellingPriceKgs);
+      let freezeFields: Record<string, unknown> = {};
+      try {
+        const freeze = await this.pricingResolution.resolveWithFreeze(order.branchId, product.id, {
+          priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+          auditUser: user,
+          auditEntity: 'PartsConsumption',
+        });
+        unitPrice = dto.unitPrice != null ? Number(dto.unitPrice) : freeze.resolvedPriceKgs;
+        freezeFields = {
+          pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+          pricingProfileId: freeze.pricingProfileId,
+          resolvedPriceKgs: freeze.resolvedPriceKgs,
+          baseCostKgs: freeze.baseCostKgs,
+          baseBranchPriceKgs: freeze.baseBranchPriceKgs,
+          appliedRuleType: freeze.appliedRuleType,
+          appliedRuleId: freeze.appliedRuleId,
+          appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+          appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+          priceResolvedAt: freeze.priceResolvedAt,
+        };
+      } catch {
+        if (dto.unitPrice != null) unitPrice = Number(dto.unitPrice);
+      }
       const totalCost = this.roundMoney(unitCost * dto.quantity);
       const totalPrice = this.roundMoney(unitPrice * dto.quantity);
       await this.inventoryService.createStockMovementInTx(tx, user, {
@@ -408,6 +434,7 @@ export class ServiceService {
           totalCost,
           totalPrice,
           createdById: user.id,
+          ...freezeFields,
         },
       });
       const recalculated = await this.recalculateTotalsInTx(tx, order.id);
@@ -539,7 +566,34 @@ export class ServiceService {
         });
         if (!product) throw new NotFoundException(`Product ${item.sku} not found`);
         const unitCost = Number(product.finalCostKgs);
-        const unitPrice = Number(item.unitPrice ?? product.sellingPriceKgs);
+        let unitPrice = Number(item.unitPrice ?? product.sellingPriceKgs);
+        let freezeFields: Record<string, unknown> = {};
+        try {
+          const freeze = await this.pricingResolution.resolveWithFreeze(
+            request.branchId,
+            product.id,
+            {
+              priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+              auditUser: user,
+              auditEntity: 'PartsConsumption',
+            },
+          );
+          if (item.unitPrice == null) unitPrice = freeze.resolvedPriceKgs;
+          freezeFields = {
+            pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+            pricingProfileId: freeze.pricingProfileId,
+            resolvedPriceKgs: freeze.resolvedPriceKgs,
+            baseCostKgs: freeze.baseCostKgs,
+            baseBranchPriceKgs: freeze.baseBranchPriceKgs,
+            appliedRuleType: freeze.appliedRuleType,
+            appliedRuleId: freeze.appliedRuleId,
+            appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+            appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+            priceResolvedAt: freeze.priceResolvedAt,
+          };
+        } catch {
+          // keep fallback unitPrice
+        }
         try {
           await this.inventoryService.createStockMovementInTx(tx, user, {
             productId: product.id,
@@ -566,6 +620,7 @@ export class ServiceService {
             totalCost: this.roundMoney(unitCost * toIssue),
             totalPrice: this.roundMoney(unitPrice * toIssue),
             createdById: user.id,
+            ...freezeFields,
           },
         });
         const newIssued = item.issuedQuantity + toIssue;

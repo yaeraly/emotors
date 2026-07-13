@@ -10,6 +10,7 @@ import {
   resolveBranchHqMarkupPercent,
   resolveBranchPurchasePrice,
   resolveFinalBranchProductPrice,
+  resolveFinalBranchProductPriceWithProfile,
   resolveHqToBranchPrice,
   roundUpToTens,
   validateSellingPriceLimits,
@@ -263,5 +264,58 @@ describe('pricing-calculator.util', () => {
       warning: true,
       message: 'Цена выше максимальной. Укажите причину.',
     });
+  });
+});
+
+describe('unified pricing priority helpers', () => {
+  it('applies temporary override before product and category rules', () => {
+    const resolved = resolveFinalBranchProductPriceWithProfile({
+      costPriceKgs: 1000,
+      branchType: 'FRANCHISE',
+      baseFranchiseMarkupPercent: 20,
+      productRule: { mode: 'PERCENTAGE_DISCOUNT', value: 10 },
+      categoryDiscountPercent: 5,
+      profileDiscountPercent: 3,
+      override: { mode: 'FIXED_SELLING_PRICE', value: 999 },
+    });
+    expect(resolved.source).toBe('OVERRIDE');
+    expect(resolved.priceKgs).toBe(999);
+  });
+
+  it('applies product rule before category rule and profile', () => {
+    const resolved = resolveFinalBranchProductPriceWithProfile({
+      costPriceKgs: 1000,
+      branchType: 'FRANCHISE',
+      baseFranchiseMarkupPercent: 20,
+      productRule: { mode: 'PERCENTAGE_DISCOUNT', value: 10 },
+      categoryDiscountPercent: 5,
+      profileDiscountPercent: 3,
+    });
+    expect(resolved.source).toBe('PRODUCT_RULE');
+    expect(resolved.baseFranchisePriceKgs).toBe(1200);
+    expect(resolved.priceKgs).toBe(1080);
+  });
+
+  it('applies category rule before pricing profile discount', () => {
+    const resolved = resolveFinalBranchProductPriceWithProfile({
+      costPriceKgs: 1000,
+      branchType: 'FRANCHISE',
+      baseFranchiseMarkupPercent: 20,
+      categoryDiscountPercent: 5,
+      profileDiscountPercent: 10,
+    });
+    expect(resolved.source).toBe('CATEGORY_DISCOUNT');
+    expect(resolved.priceKgs).toBe(1140);
+  });
+
+  it('applies pricing profile discount when no category/product rules', () => {
+    const resolved = resolveFinalBranchProductPriceWithProfile({
+      costPriceKgs: 1000,
+      branchType: 'FRANCHISE',
+      baseFranchiseMarkupPercent: 20,
+      profileDiscountPercent: 10,
+    });
+    expect(resolved.source).toBe('PRICING_PROFILE');
+    expect(resolved.priceKgs).toBe(1080);
   });
 });

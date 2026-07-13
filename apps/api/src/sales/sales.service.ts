@@ -11,6 +11,7 @@ import {
   PaymentMethod,
   PaymentRecordStatus,
   PaymentStatus,
+  PricingEnginePriceType,
   Prisma,
   Role,
   SaleStatus,
@@ -20,6 +21,7 @@ import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { PricingCatalogService } from '../pricing/pricing-catalog.service';
+import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertBranchCashierCannotManageSales, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
@@ -39,6 +41,7 @@ export class SalesService {
     private readonly commissionsService: CommissionsService,
     private readonly pricingService: PricingService,
     private readonly pricingCatalogService: PricingCatalogService,
+    private readonly pricingResolution: PricingResolutionService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -54,7 +57,7 @@ export class SalesService {
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? new Date();
       const receiptNumber = await this.generateReceiptNumber(tx, saleDate);
-      const totals = this.calculateSale(dto);
+      const totals = await this.calculateSaleWithFreeze(user, customer.branchId, dto);
       const draftReceiptText = this.buildReceiptText({
         receiptNumber,
         customerName: customer.fullName,
@@ -74,6 +77,7 @@ export class SalesService {
           branchId: customer.branchId,
           customerId: customer.id,
           sellerId: user.id,
+          pricingPolicyVersionId: totals.pricingPolicyVersionId,
           receiptNumber,
           saleDate,
           totalAmount: totals.totalAmount,
@@ -327,7 +331,7 @@ export class SalesService {
       await this.validateSaleStock(user, customer.branchId, dto.items);
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? sale.saleDate;
-      const totals = this.calculateSale(dto);
+      const totals = await this.calculateSaleWithFreeze(user, customer.branchId, dto);
       const paymentAggregate = await tx.payment.aggregate({
         where: { saleId: sale.id, status: PaymentRecordStatus.ACTIVE },
         _sum: { amount: true },
@@ -361,6 +365,7 @@ export class SalesService {
         data: {
           customerId: customer.id,
           branchId: customer.branchId,
+          pricingPolicyVersionId: totals.pricingPolicyVersionId,
           saleDate,
           totalAmount: totals.totalAmount,
           totalCost: totals.totalCost,
@@ -761,6 +766,73 @@ export class SalesService {
         PaymentMethod.ELCART,
       ]),
       cardPayments: this.sumPayments(payments, [PaymentMethod.CARD]),
+    };
+  }
+
+  private async calculateSaleWithFreeze(user: AuthUser, branchId: string, dto: CreateSaleDto) {
+    const items = [];
+    let pricingPolicyVersionId: string | null = null;
+
+    for (const item of dto.items) {
+      const totalPrice = this.roundMoney(item.quantity * item.unitPrice);
+      const totalCost = this.roundMoney(item.quantity * item.unitCost);
+      const profitAmount = this.roundMoney(totalPrice - totalCost);
+
+      let freezeFields: Record<string, unknown> = {};
+      if (item.productId) {
+        try {
+          const channel = item.pricingChannel ?? 'RETAIL';
+          const freeze = await this.pricingResolution.resolveWithFreeze(branchId, item.productId, {
+            priceType:
+              channel === 'WHOLESALE'
+                ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
+                : PricingEnginePriceType.RETAIL_RECOMMENDED,
+            auditUser: user,
+            auditEntity: 'SaleItem',
+          });
+          pricingPolicyVersionId = pricingPolicyVersionId ?? freeze.pricingPolicyVersionId;
+          freezeFields = {
+            pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+            pricingProfileId: freeze.pricingProfileId,
+            resolvedPriceKgs: freeze.resolvedPriceKgs,
+            baseCostKgs: freeze.baseCostKgs,
+            baseBranchPriceKgs: freeze.baseBranchPriceKgs,
+            appliedRuleType: freeze.appliedRuleType,
+            appliedRuleId: freeze.appliedRuleId,
+            appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+            appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+            priceResolvedAt: freeze.priceResolvedAt,
+          };
+        } catch {
+          // Keep sale creatable even if pricing engine cannot resolve; unitPrice remains source of truth for charged amount.
+        }
+      }
+
+      items.push({
+        productId: item.productId,
+        productName: item.productName,
+        productSku: item.productSku,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        unitCost: item.unitCost,
+        totalPrice,
+        totalCost,
+        profitAmount,
+        priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? null,
+        priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? null,
+        ...freezeFields,
+      });
+    }
+
+    const totalAmount = this.roundMoney(items.reduce((sum, item) => sum + item.totalPrice, 0));
+    const totalCost = this.roundMoney(items.reduce((sum, item) => sum + item.totalCost, 0));
+
+    return {
+      items,
+      totalAmount,
+      totalCost,
+      profitAmount: this.roundMoney(totalAmount - totalCost),
+      pricingPolicyVersionId,
     };
   }
 

@@ -54,6 +54,10 @@ export class CreateSaleItemDto {
   @IsString()
   @MinLength(1)
   priceAboveRecommendedComment?: string;
+
+  @IsOptional()
+  @IsEnum({ RETAIL: 'RETAIL', WHOLESALE: 'WHOLESALE' })
+  pricingChannel?: 'RETAIL' | 'WHOLESALE';
 }
 
 export class CreateSaleDto {
