@@ -75,8 +75,9 @@ type DraftLine = {
   sku: string;
   unit: string;
   weightKg: number;
-  branchPurchasePriceKgs: number;
-  wholesalePriceKgs: number;
+  branchPurchasePriceKgs: number | null;
+  wholesalePriceKgs: number | null;
+  pricingPending: boolean;
   branchStock: number | null;
   hqStock: number | null;
   quantity: string;
@@ -85,8 +86,16 @@ type DraftLine = {
 
 function lineTotal(line: DraftLine) {
   const quantity = Number(line.quantity) || 0;
-  const price = line.branchPurchasePriceKgs || 0;
-  return Math.round((price * quantity + Number.EPSILON) * 100) / 100;
+  if (line.pricingPending || line.branchPurchasePriceKgs == null) return 0;
+  return Math.round((line.branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100;
+}
+
+function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
+  if (!line.productId) return '—';
+  if (line.pricingPending || line.branchPurchasePriceKgs == null) {
+    return t('branchProductRequest.pricingPending');
+  }
+  return line.branchPurchasePriceKgs.toFixed(2);
 }
 
 function emptyLine(): DraftLine {
@@ -97,8 +106,9 @@ function emptyLine(): DraftLine {
     sku: '',
     unit: 'pcs',
     weightKg: 0,
-    branchPurchasePriceKgs: 0,
-    wholesalePriceKgs: 0,
+    branchPurchasePriceKgs: null,
+    wholesalePriceKgs: null,
+    pricingPending: false,
     branchStock: 0,
     hqStock: null,
     quantity: '1',
@@ -173,6 +183,7 @@ export default function BranchPurchaseRequestsPage() {
                 quantity: String(Number(line.quantity) + 1),
                 branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
                 wholesalePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
+                pricingPending: product.pricingPending ?? product.branchPurchasePriceKgs == null,
               }
             : line,
         );
@@ -185,8 +196,9 @@ export default function BranchPurchaseRequestsPage() {
         sku: product.sku,
         unit: product.unit,
         weightKg: 0,
-        branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? 0,
-        wholesalePriceKgs: product.branchPurchasePriceKgs ?? 0,
+        branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? null,
+        wholesalePriceKgs: product.branchPurchasePriceKgs ?? null,
+        pricingPending: product.pricingPending ?? product.branchPurchasePriceKgs == null,
         branchStock: 0,
         hqStock: null,
         quantity: '1',
@@ -313,7 +325,7 @@ export default function BranchPurchaseRequestsPage() {
     if (!showForm || !branchOnlyView || !form.branchId || !draftProductIds) return;
 
     const params = new URLSearchParams({ branchId: form.branchId, productIds: draftProductIds });
-    void apiFetch<Record<string, number>>(`/branch-purchase-requests/product-prices?${params.toString()}`)
+    void apiFetch<Record<string, number | null>>(`/branch-purchase-requests/product-prices?${params.toString()}`)
       .then((prices) => {
         setLines((current) =>
           current.map((line) =>
@@ -322,6 +334,7 @@ export default function BranchPurchaseRequestsPage() {
                   ...line,
                   branchPurchasePriceKgs: prices[line.productId],
                   wholesalePriceKgs: prices[line.productId],
+                  pricingPending: prices[line.productId] == null,
                 }
               : line,
           ),
@@ -455,7 +468,7 @@ export default function BranchPurchaseRequestsPage() {
                       {!branchOnlyView ? <td className="px-3 py-2">{line.unit}</td> : null}
                       {!branchOnlyView ? <td className="px-3 py-2">{line.branchStock}</td> : null}
                       <td className="px-3 py-2">
-                        {line.productId ? line.branchPurchasePriceKgs.toFixed(2) : '—'}
+                        {formatBranchPrice(line, t)}
                       </td>
                       {branchOnlyView ? (
                         <td className="px-3 py-2 font-semibold text-slate-900">{lineTotal(line).toFixed(2)}</td>

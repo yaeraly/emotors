@@ -14,7 +14,9 @@ export type BranchProductOption = {
   category: string;
   productCode?: string | null;
   unit: string;
-  branchPurchasePriceKgs?: number;
+  branchPurchasePriceKgs?: number | null;
+  hasPricingPolicy?: boolean;
+  pricingPending?: boolean;
 };
 
 type Props = {

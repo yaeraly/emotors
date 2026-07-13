@@ -18,6 +18,7 @@ import {
   uniqueRoles,
   userHasPermission,
 } from '../rbac/rbac';
+import { EMPLOYEE_ID_GENERATION_FAILED, generateBranchEmployeeId } from './employee-id.util';
 
 const TEMP_PASSWORD = 'Emotors@2026';
 const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
@@ -105,7 +106,7 @@ export class UsersService {
 
     const hasLogin = dto.hasLogin !== false;
     const phone = this.normalizeOptionalString(dto.phone);
-    const employeeId = this.normalizeOptionalString(dto.employeeId);
+    let employeeId = this.normalizeOptionalString(dto.employeeId);
     const password = this.resolvePassword(dto.password);
 
     if (!hasLogin) {
@@ -135,9 +136,20 @@ export class UsersService {
       ? dto.email?.trim().toLowerCase() || `${username}@emotors.local`
       : dto.email?.trim().toLowerCase() || `no-login+${Date.now()}@emotors.internal`;
 
-    await this.assertUserIdentifiersAvailable({ email, username, phone, employeeId });
-
     const branchId = userType === 'HQ' ? null : this.resolveBranchId(user, normalizedBranchId ?? undefined, roles);
+
+    if (!employeeId && userType === 'BRANCH' && branchId) {
+      try {
+        employeeId = await this.prisma.$transaction((tx) => generateBranchEmployeeId(tx, branchId));
+      } catch (error) {
+        if (error instanceof Error && error.message === EMPLOYEE_ID_GENERATION_FAILED) {
+          throw new BadRequestException(EMPLOYEE_ID_GENERATION_FAILED);
+        }
+        throw error;
+      }
+    }
+
+    await this.assertUserIdentifiersAvailable({ email, username, phone, employeeId });
     const passwordHash = hasLogin
       ? await bcrypt.hash(password, 12)
       : await bcrypt.hash(`${NO_LOGIN_PASSWORD_PLACEHOLDER}:${Date.now()}:${Math.random()}`, 12);
@@ -190,6 +202,15 @@ export class UsersService {
         entityType: 'User',
         entityId: created.id,
       });
+      if (created.employeeId) {
+        await this.audit(user, 'EMPLOYEE_ID_GENERATED', 'User', created.id, {
+          userId: created.id,
+          employeeId: created.employeeId,
+          branchId: created.branchId ?? undefined,
+          createdById: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
     if (roles.includes(Role.HQ_ACCOUNTANT)) {
       await this.audit(user, 'HQ_ACCOUNTANT_CREATED', 'User', created.id, {

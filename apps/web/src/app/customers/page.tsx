@@ -112,6 +112,7 @@ function CustomersPageContent() {
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchOwnerView = isBranchOwnerUser(currentUser);
+  const listFirstCustomerView = branchSalesManagerView || branchOwnerView;
 
   useEffect(() => {
     setShowArchived(searchParams.get('archived') === '1');
@@ -438,13 +439,13 @@ function CustomersPageContent() {
             </p>
           </div>
 
-          {branchSalesManagerView ? (
+          {listFirstCustomerView ? (
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
               className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
             >
-              + {t('crm.createCustomer')}
+              {t('crm.createClientButton')}
             </button>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -505,7 +506,7 @@ function CustomersPageContent() {
           )}
         </div>
 
-        {branchSalesManagerView ? (
+        {listFirstCustomerView ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <input
               value={search}
@@ -561,8 +562,8 @@ function CustomersPageContent() {
           </p>
         ) : null}
 
-        <div className={branchSalesManagerView ? 'space-y-6' : 'grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]'}>
-          {!branchSalesManagerView ? (
+        <div className={listFirstCustomerView ? 'space-y-6' : 'grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]'}>
+          {!listFirstCustomerView ? (
           <form
             onSubmit={createCustomer}
             className="h-fit max-h-[calc(100vh-180px)] shrink-0 self-start overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:w-[380px]"
@@ -639,7 +640,7 @@ function CustomersPageContent() {
           </form>
           ) : null}
 
-          <div className={branchSalesManagerView ? 'overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm' : 'h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm'}>
+          <div className={listFirstCustomerView ? 'overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm' : 'h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm'}>
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white p-5">
               <div>
                 <h3 className="text-lg font-bold text-slate-950">
@@ -865,7 +866,7 @@ function CustomersPageContent() {
           />
         ) : null}
 
-        {showCreateModal && branchSalesManagerView ? (
+        {showCreateModal && listFirstCustomerView ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
             <form
               onSubmit={createCustomer}
@@ -874,10 +875,10 @@ function CustomersPageContent() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                    {t('crm.createCustomer')}
+                    {t('crm.createClientButton')}
                   </p>
                   <h3 className="mt-1 text-2xl font-bold text-slate-950">
-                    {t('crm.addCustomer')}
+                    {t('crm.createClientButton')}
                   </h3>
                 </div>
                 <button
@@ -917,7 +918,7 @@ function CustomersPageContent() {
                   className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                   type="submit"
                 >
-                  {saving ? t('common.loading') : t('crm.addCustomer')}
+                  {saving ? t('common.loading') : t('crm.createClientButton')}
                 </button>
               </div>
             </form>

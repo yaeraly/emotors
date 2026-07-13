@@ -34,7 +34,7 @@ const branchRoles: Role[] = [
   'ACCOUNTANT',
 ];
 
-const allFilterRoles: Role[] = [...hqRoles, ...branchRoles];
+const ceoUsersFilterRoles: Role[] = [...branchRoles];
 const pageSizeOptions = [10, 25, 50];
 
 export default function UsersPage() {
@@ -59,7 +59,13 @@ export default function UsersPage() {
   useEffect(() => {
     if (sessionStorage.getItem('users.createSuccess') === '1') {
       sessionStorage.removeItem('users.createSuccess');
-      setSuccessMessage(t('users.createSuccess'));
+      setSuccessMessage(t('users.employeeCreatedSuccess'));
+      window.setTimeout(() => setSuccessMessage(''), 5000);
+      return;
+    }
+    if (sessionStorage.getItem('users.branchOwnerCreatedSuccess') === '1') {
+      sessionStorage.removeItem('users.branchOwnerCreatedSuccess');
+      setSuccessMessage(t('users.branchOwnerCreatedSuccess'));
       window.setTimeout(() => setSuccessMessage(''), 5000);
     }
   }, [t]);
@@ -87,7 +93,7 @@ export default function UsersPage() {
     };
   }, [users]);
 
-  const roleFilterOptions = isBranchPanelUser(currentUser) ? branchRoles : allFilterRoles;
+  const roleFilterOptions = isBranchOwnerPanel ? branchRoles : ceoUsersFilterRoles;
 
   const filteredUsers = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -165,7 +171,9 @@ export default function UsersPage() {
                 {t('users.createBranchOwner')}
               </Link>
             ) : null}
-            <Link href="/users/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">{t('users.create')}</Link>
+            <Link href="/users/new" className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
+              {isBranchOwnerPanel ? t('users.createEmployee') : t('users.create')}
+            </Link>
           </div>
         </div>
 
@@ -272,7 +280,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3">{t('users.username')}</th>
                   <th className="px-4 py-3">{t('users.phone')}</th>
                   <th className="px-4 py-3">{t('crm.branch')}</th>
-                  <th className="px-4 py-3">{t('users.userType')}</th>
+                  {!isBranchOwnerPanel ? <th className="px-4 py-3">{t('users.userType')}</th> : null}
                   <th className="px-4 py-3">{t('users.assignedRoles')}</th>
                   <th className="px-4 py-3">{t('users.status')}</th>
                   <th className="px-4 py-3">{t('users.lastLogin')}</th>
@@ -286,7 +294,9 @@ export default function UsersPage() {
                     <td className="px-4 py-3">{user.username || (user.hasLogin === false ? t('users.noLoginBadge') : '-')}</td>
                     <td className="px-4 py-3">{user.phone || '-'}</td>
                     <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : user.branch?.name ?? user.branchId}</td>
-                    <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : t('users.branchEmployees')}</td>
+                    {!isBranchOwnerPanel ? (
+                      <td className="px-4 py-3">{isHqUser(user) ? t('users.hqEmployees') : t('users.branchEmployees')}</td>
+                    ) : null}
                     <td className="px-4 py-3"><RoleBadges roles={rolesForUser(user)} /></td>
                     <td className="px-4 py-3">{translateStatus(t, user.status)}</td>
                     <td className="px-4 py-3">{formatDate(user.lastLoginAt)}</td>

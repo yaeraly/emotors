@@ -19,7 +19,7 @@ export default function NewBranchOwnerPage() {
   const { t } = useTranslation();
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -62,18 +62,17 @@ export default function NewBranchOwnerPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    setSuccess('');
+    setSubmitting(true);
     try {
-      const created = await apiFetch<CreateBranchOwnerResponse>('/users/branch-owners', {
+      await apiFetch<CreateBranchOwnerResponse>('/users/branch-owners', {
         method: 'POST',
         body: JSON.stringify(form),
       });
-      setSuccess(
-        `${t('users.branchOwnerCreated')}: ${created.fullName} · ${created.branch?.name ?? ''} · ${created.warehouse?.name ?? ''}`,
-      );
-      setTimeout(() => router.push(`/users/${created.id}`), 1200);
+      sessionStorage.setItem('users.branchOwnerCreatedSuccess', '1');
+      router.replace('/users');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+      setSubmitting(false);
     }
   }
 
@@ -88,7 +87,6 @@ export default function NewBranchOwnerPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="mb-4 text-lg font-bold">{t('users.branchOwnerDetails')}</h3>
@@ -134,8 +132,12 @@ export default function NewBranchOwnerPage() {
           <p className="mt-4 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">{t('users.autoWarehouseHint')}</p>
         </section>
 
-        <button className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white" type="submit">
-          {t('users.createBranchOwner')}
+        <button
+          disabled={submitting}
+          className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-blue-300"
+          type="submit"
+        >
+          {submitting ? t('common.saving') : t('users.createBranchOwner')}
         </button>
       </form>
     </ProtectedShell>

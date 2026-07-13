@@ -17,6 +17,14 @@ type ProtectedShellProps = {
   children: ReactNode;
 };
 
+function sidebarNavClass(pathname: string, href: string) {
+  const base = 'block rounded-xl px-3 py-2 text-sm font-semibold';
+  const active =
+    pathname === href ||
+    (href !== '/' && pathname.startsWith(`${href}/`));
+  return active ? `${base} bg-blue-50 text-blue-700` : `${base} text-slate-700 hover:bg-slate-50`;
+}
+
 export function ProtectedShell({ children }: ProtectedShellProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -246,7 +254,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/supply-inquiries" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('supplyInquiries.title')}</Link>
                 ) : null}
                 {canSeeDistribution ? (
-                  <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
+                  <Link href="/distribution/orders" className={sidebarNavClass(pathname, '/distribution/orders')}>{t('nav.supplyBranchFulfillment')}</Link>
                 ) : null}
                 {canSeeBranchProductShortages ? (
                   <Link href="/branch-product-shortages" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('productShortages.title')}</Link>
@@ -278,7 +286,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             ) : hqSalesManagerView ? (
               <>
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.orders')}</Link>
-                <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.hqBranchRequests')}</Link>
+                <Link href="/branch-purchase-requests" className={sidebarNavClass(pathname, '/branch-purchase-requests')}>{t('nav.hqBranchOrders')}</Link>
                 <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link>
                 <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
                 {canSeeBranchWarehouses ? (
@@ -365,13 +373,13 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : branchSalesManagerView ? (
               <>
-                <Link href="/customers" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{t('nav.customers')}</Link>
-                <Link href="/crm" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.crm')}</Link>
-                <Link href="/sales" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.sales')}</Link>
-                <Link href="/installments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.installments')}</Link>
-                <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.inventory')}</Link>
-                <Link href="/branch-purchase-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
-                <Link href="/follow-ups" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.followUps')}</Link>
+                <Link href="/customers" className={sidebarNavClass(pathname, '/customers')}>{t('nav.customers')}</Link>
+                <Link href="/crm" className={sidebarNavClass(pathname, '/crm')}>{t('nav.crm')}</Link>
+                <Link href="/sales" className={sidebarNavClass(pathname, '/sales')}>{t('nav.sales')}</Link>
+                <Link href="/installments" className={sidebarNavClass(pathname, '/installments')}>{t('nav.installments')}</Link>
+                <Link href="/inventory" className={sidebarNavClass(pathname, '/inventory')}>{t('nav.inventory')}</Link>
+                <Link href="/branch-purchase-requests" className={sidebarNavClass(pathname, '/branch-purchase-requests')}>{t('nav.branchProductOrders')}</Link>
+                <Link href="/follow-ups" className={sidebarNavClass(pathname, '/follow-ups')}>{t('nav.followUps')}</Link>
               </>
             ) : branchOwnerView ? (
               <>

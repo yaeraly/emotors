@@ -3935,6 +3935,15 @@ model BranchPurchaseRequestItem {
   publicComment             String?
   unavailableQuantity       Int      @default(0)
   hasPricingPolicyAtReview  Boolean?
+  hasPricingPolicyAtSubmit  Boolean?
+  pricingPolicyVersionId    String?
+  pricingProfileId          String?
+  resolvedBranchPriceKgs    Decimal? @db.Decimal(14, 2)
+  appliedRuleType           PricingAppliedRuleType?
+  appliedRuleId             String?
+  appliedAdjustmentMode     PricingAdjustmentMode?
+  appliedAdjustmentValue    Decimal? @db.Decimal(14, 2)
+  priceResolvedAt           DateTime?
   shortages                 BranchRequestShortage[]
   issues                    BranchRequestIssue[]
   supplyInquiries           SupplyInquiry[]
@@ -3944,6 +3953,7 @@ model BranchPurchaseRequestItem {
   @@index([requestId])
   @@index([productId])
   @@index([lineStatus])
+  @@index([pricingPolicyVersionId])
 }
 
 model BranchRequestIssue {

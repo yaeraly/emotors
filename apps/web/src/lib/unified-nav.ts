@@ -122,7 +122,7 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
   },
   {
     id: 'distribution',
-    labelKey: 'distribution.title',
+    labelKey: 'nav.branchProductOrders',
     defaultHref: '/branch-purchase-requests',
     pathPrefixes: ['/branch-purchase-requests', '/distribution'],
     sidebarVisible: (user) => canViewBranchPurchaseRequests(user) || canViewDistribution(user),

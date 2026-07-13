@@ -67,6 +67,7 @@ import { LandedCostService } from '../procurement/landed-cost.service';
 import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
+import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import {
   isSubmittedBranchPurchaseStatus,
   resolveBranchPurchasePriceKgs,
@@ -125,6 +126,7 @@ export class OperationsService {
     private readonly salesManagerAssignmentService: HqSalesManagerAssignmentService,
     private readonly distributionService: DistributionService,
     private readonly landedCostService: LandedCostService,
+    private readonly pricingResolution: PricingResolutionService,
   ) {}
 
   async branchPurchaseRequests(user: AuthUser) {
@@ -259,7 +261,7 @@ export class OperationsService {
       orderBy: { name: 'asc' },
     });
 
-    return catalogProducts.map((catalogProduct) => ({
+    const baseProducts = catalogProducts.map((catalogProduct) => ({
       id: catalogProduct.id,
       catalogProductId: catalogProduct.id,
       name: catalogProduct.name,
@@ -268,8 +270,16 @@ export class OperationsService {
       category: catalogProduct.category,
       productCode: catalogProduct.productCategory?.code ?? null,
       unit: catalogProduct.unit,
-      branchPurchasePriceKgs: resolveBranchPurchasePriceKgs(catalogProduct, branch?.code),
+      branchPurchasePriceKgs: null as number | null,
+      hasPricingPolicy: false,
+      pricingPending: true,
     }));
+
+    if (!resolvedBranchId) {
+      return baseProducts;
+    }
+
+    return this.enrichBranchProductOptionsWithPricing(resolvedBranchId, baseProducts);
   }
 
   async branchProductPrices(user: AuthUser, branchId: string, productIds: string[]) {
@@ -289,10 +299,6 @@ export class OperationsService {
       return {};
     }
 
-    const branch = await this.prisma.branch.findUnique({
-      where: { id: resolvedBranchId },
-      select: { code: true },
-    });
     const hqBranch = await ensureHqCatalogBranch(this.prisma);
     const catalogProducts = await this.prisma.product.findMany({
       where: {
@@ -303,17 +309,27 @@ export class OperationsService {
       },
       select: {
         id: true,
-        wholesalePriceKgs: true,
-        hqBranchWholesalePriceKgs: true,
+        sku: true,
       },
     });
 
-    return Object.fromEntries(
-      catalogProducts.map((product) => [
-        product.id,
-        resolveBranchPurchasePriceKgs(product, branch?.code),
-      ]),
+    const pricingPolicyMap = await this.loadActivePricingPolicyMap(catalogProducts.map((product) => product.sku));
+    const entries = await Promise.all(
+      catalogProducts.map(async (product) => {
+        const hasPricingPolicy = pricingPolicyMap.has(product.sku.trim().toUpperCase());
+        if (!hasPricingPolicy) {
+          return [product.id, null] as const;
+        }
+        const pricing = await this.resolveBranchRequestProductPricing(
+          resolvedBranchId,
+          product.id,
+          product.sku,
+        );
+        return [product.id, pricing.branchPurchasePriceKgs] as const;
+      }),
     );
+
+    return Object.fromEntries(entries);
   }
 
   async createBranchPurchaseRequest(user: AuthUser, dto: any) {
@@ -367,6 +383,20 @@ export class OperationsService {
         productId: item.productId,
         quantity: item.quantity,
       });
+      if (item.hasPricingPolicyAtSubmit) {
+        await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_PRICE_RESOLVED', 'BranchPurchaseRequest', request.id, {
+          requestId: request.id,
+          requestLineId: item.id,
+          productId: item.productId,
+          branchId,
+          pricingPolicyVersionId: item.pricingPolicyVersionId,
+          pricingProfileId: item.pricingProfileId,
+          resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+          quantity: item.quantity,
+          lineTotalKgs: item.totalAmount,
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
     if (status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ) {
       await this.auditBranchRequest(user, branchId, 'BRANCH_REQUEST_SUBMITTED', 'BranchPurchaseRequest', request.id, {
@@ -4165,10 +4195,6 @@ export class OperationsService {
         )
       : new Map<string, number>();
 
-    const branch = await this.prisma.branch.findUnique({
-      where: { id: branchId },
-      select: { code: true },
-    });
     const hqBranch = await ensureHqCatalogBranch(this.prisma);
 
     return Promise.all(
@@ -4182,12 +4208,20 @@ export class OperationsService {
             isActive: true,
           },
           select: {
-            wholesalePriceKgs: true,
-            hqBranchWholesalePriceKgs: true,
+            id: true,
+            sku: true,
           },
         });
-        const priceSource = catalogProduct ?? product;
-        const branchPurchasePriceKgs = resolveBranchPurchasePriceKgs(priceSource, branch?.code);
+        const pricing = await this.resolveBranchRequestProductPricing(
+          branchId,
+          catalogProduct?.id ?? product.id,
+          product.sku,
+        );
+        const branchPurchasePriceKgs = pricing.branchPurchasePriceKgs ?? 0;
+        const totalAmount =
+          pricing.hasPricingPolicy && pricing.branchPurchasePriceKgs != null
+            ? Math.round((pricing.branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100
+            : 0;
 
         return {
           productId: product.id,
@@ -4198,10 +4232,19 @@ export class OperationsService {
           currentBranchStock: branchStockMap.get(product.id) ?? 0,
           hqAvailableStock: hqStockMap.get(product.id) ?? 0,
           wholesalePriceKgs: branchPurchasePriceKgs,
+          resolvedBranchPriceKgs: pricing.resolvedBranchPriceKgs,
+          pricingPolicyVersionId: pricing.pricingPolicyVersionId,
+          pricingProfileId: pricing.pricingProfileId,
+          appliedRuleType: pricing.appliedRuleType,
+          appliedRuleId: pricing.appliedRuleId,
+          appliedAdjustmentMode: pricing.appliedAdjustmentMode,
+          appliedAdjustmentValue: pricing.appliedAdjustmentValue,
+          priceResolvedAt: pricing.priceResolvedAt,
+          hasPricingPolicyAtSubmit: pricing.hasPricingPolicy,
           weightKg: Number(product.weightKg),
           transportExpenseAllocation: 0,
           estimatedUnitCost: branchPurchasePriceKgs,
-          totalAmount: Math.round((branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100,
+          totalAmount,
           note: item.note,
         };
       }),
@@ -4477,6 +4520,85 @@ export class OperationsService {
         } as Prisma.InputJsonValue,
       },
     });
+  }
+
+  private async enrichBranchProductOptionsWithPricing(
+    branchId: string,
+    products: Array<{
+      id: string;
+      catalogProductId: string;
+      name: string;
+      sku: string;
+      barcode: string | null;
+      category: string | null;
+      productCode: string | null;
+      unit: string;
+      branchPurchasePriceKgs: number | null;
+      hasPricingPolicy: boolean;
+      pricingPending: boolean;
+    }>,
+  ) {
+    const pricingPolicyMap = await this.loadActivePricingPolicyMap(products.map((product) => product.sku));
+    return Promise.all(
+      products.map(async (product) => {
+        const hasPricingPolicy = pricingPolicyMap.has(product.sku.trim().toUpperCase());
+        if (!hasPricingPolicy) {
+          return {
+            ...product,
+            branchPurchasePriceKgs: null,
+            hasPricingPolicy: false,
+            pricingPending: true,
+          };
+        }
+        const pricing = await this.resolveBranchRequestProductPricing(
+          branchId,
+          product.catalogProductId,
+          product.sku,
+        );
+        return {
+          ...product,
+          branchPurchasePriceKgs: pricing.branchPurchasePriceKgs,
+          hasPricingPolicy: true,
+          pricingPending: false,
+        };
+      }),
+    );
+  }
+
+  private async resolveBranchRequestProductPricing(
+    branchId: string,
+    catalogProductId: string,
+    sku: string,
+  ) {
+    const hasPricingPolicy = (await this.loadActivePricingPolicyMap([sku])).has(sku.trim().toUpperCase());
+    if (!hasPricingPolicy) {
+      return {
+        hasPricingPolicy: false,
+        branchPurchasePriceKgs: null as number | null,
+        resolvedBranchPriceKgs: null as number | null,
+        pricingPolicyVersionId: null as string | null,
+        pricingProfileId: null as string | null,
+        appliedRuleType: null,
+        appliedRuleId: null as string | null,
+        appliedAdjustmentMode: null,
+        appliedAdjustmentValue: null as number | null,
+        priceResolvedAt: null as Date | null,
+      };
+    }
+
+    const freeze = await this.pricingResolution.resolveWithFreeze(branchId, catalogProductId);
+    return {
+      hasPricingPolicy: true,
+      branchPurchasePriceKgs: freeze.resolvedPriceKgs,
+      resolvedBranchPriceKgs: freeze.resolvedPriceKgs,
+      pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+      pricingProfileId: freeze.pricingProfileId,
+      appliedRuleType: freeze.appliedRuleType,
+      appliedRuleId: freeze.appliedRuleId,
+      appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+      appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+      priceResolvedAt: freeze.priceResolvedAt,
+    };
   }
 
   private async loadActivePricingPolicyMap(skus: string[]) {

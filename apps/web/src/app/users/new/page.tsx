@@ -70,7 +70,7 @@ export default function NewUserPage() {
         method: 'POST',
         body: JSON.stringify({
           fullName: form.fullName,
-          employeeId: form.employeeId || undefined,
+          employeeId: isHqCreator ? form.employeeId || undefined : undefined,
           phone: form.phone || undefined,
           email: form.email || undefined,
           username: form.username || undefined,
@@ -96,7 +96,7 @@ export default function NewUserPage() {
       }
       if (!isHqCreator) {
         sessionStorage.setItem('users.createSuccess', '1');
-        router.push('/users');
+        router.replace('/users');
         return;
       }
       router.push(`/users/${created.id}`);
@@ -136,7 +136,9 @@ export default function NewUserPage() {
         {temporaryPassword ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{t('users.temporaryPassword')}: {temporaryPassword}</p> : null}
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
           <Input label={t('crm.fullName')} value={form.fullName} onChange={(value) => setField('fullName', value)} required />
-          <Input label={t('users.employeeId')} value={form.employeeId} onChange={(value) => setField('employeeId', value)} />
+          {isHqCreator ? (
+            <Input label={t('users.employeeId')} value={form.employeeId ?? ''} onChange={(value) => setField('employeeId', value)} />
+          ) : null}
           <Input label={t('users.phone')} value={form.phone} onChange={(value) => setField('phone', value)} required={!isHqCreator || !form.hasLogin} />
           {isHqCreator ? (
             <>
