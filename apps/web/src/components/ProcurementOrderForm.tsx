@@ -6,7 +6,6 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'reac
 import { apiFetch } from '@/lib/api';
 import { calculateLandedCosts } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
-import { LockedFieldHint } from '@/components/LockedFieldHint';
 import { ProcurementProductSearch } from '@/components/ProcurementProductSearch';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { canEditProcurementOrderItemsInWindow } from '@/lib/rbac';
@@ -17,7 +16,6 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 type Supplier = { id: string; name: string };
 type Factory = { id: string; name: string; supplierId: string };
-type TransportCompany = { id: string; name: string; companyCode: string };
 
 export type ProcurementLine = {
   key: string;
@@ -68,7 +66,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [factories, setFactories] = useState<Factory[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
-  const [transportCompanies, setTransportCompanies] = useState<TransportCompany[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const productSearchRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
@@ -111,7 +108,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       apiFetch<Factory[]>('/procurement/factories'),
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
       apiFetch<User>('/auth/me'),
-      apiFetch<TransportCompany[]>('/procurement/transport-companies?selectable=true').catch(() => []),
     ];
     if (mode === 'edit' && orderId) loaders.push(apiFetch<any>(`/procurement/orders/${orderId}`));
 
@@ -121,13 +117,11 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         const factoryResult = results[1] as Factory[];
         const warehouseResult = results[2] as Warehouse[];
         const me = results[3] as User;
-        const transportCompanyResult = results[4] as TransportCompany[];
-        const order = mode === 'edit' && orderId ? results[5] as any : undefined;
+        const order = mode === 'edit' && orderId ? results[4] as any : undefined;
         setUser(me);
         setSuppliers(supplierResult);
         setFactories(factoryResult);
         setWarehouses(warehouseResult);
-        setTransportCompanies(transportCompanyResult);
 
         if (mode === 'edit' && order) {
           const cachedProducts = (order.items ?? [])
@@ -221,11 +215,11 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
 
   const chinaDomesticTransportKgs = useMemo(
     () => resolveChinaDomesticTransportKgs({
-      chinaDomesticTransportYuan: Number(form.chinaDomesticTransportYuan || 0),
+      chinaDomesticTransportYuan: mode === 'create' ? 0 : Number(form.chinaDomesticTransportYuan || 0),
       chinaDomesticTransportKgs: 0,
       effectiveYuanRate: Number(form.exchangeRate || 0),
     }),
-    [form.chinaDomesticTransportYuan, form.exchangeRate],
+    [form.chinaDomesticTransportYuan, form.exchangeRate, mode],
   );
 
   const totals = useMemo(() => calculateLandedCosts(
@@ -236,22 +230,21 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       weightKg: line.netWeightKg,
     })),
     {
-      chinaDomesticTransportKgs,
+      chinaDomesticTransportKgs: mode === 'create' ? 0 : chinaDomesticTransportKgs,
       chinaExportTransportKgs: 0,
       localTransportKgs: 0,
       packagingCostKgs: 0,
-      customsCostKgs: Number(form.customsCostKgs || 0),
-      insuranceCostKgs: Number(form.insuranceCostKgs || 0),
-      bankFeeCostKgs: Number(form.bankFeeCostKgs || 0),
+      customsCostKgs: mode === 'create' ? 0 : Number(form.customsCostKgs || 0),
+      insuranceCostKgs: mode === 'create' ? 0 : Number(form.insuranceCostKgs || 0),
+      bankFeeCostKgs: mode === 'create' ? 0 : Number(form.bankFeeCostKgs || 0),
       otherExpenseKgs: Number(form.otherExpenseKgs || 0),
     },
-  ), [form, lineDetails, chinaDomesticTransportKgs]);
+  ), [form, lineDetails, chinaDomesticTransportKgs, mode]);
 
   const weightErrors = lineDetails.filter((line) => line.productId && line.missingWeight);
   const sentToSupplier = !!editWindow.sentToSupplierAt;
   const canEditItems = canEditProcurementOrderItemsInWindow(user, editWindow);
   const itemsLocked = mode === 'edit' && sentToSupplier && !canEditItems;
-  const chinaDomesticLocked = mode === 'edit' && !chinaDomesticTransportEditable;
 
   function setField<K extends keyof HeaderForm>(key: K, value: HeaderForm[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -336,10 +329,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       estimatedArrivalDate: form.estimatedArrivalDate || undefined,
       note: form.note || undefined,
       chinaExportTransportCompanyId: form.chinaExportTransportCompanyId || null,
-      customsCostKgs: Number(form.customsCostKgs || 0),
-      insuranceCostKgs: Number(form.insuranceCostKgs || 0),
-      bankFeeCostKgs: Number(form.bankFeeCostKgs || 0),
-      otherExpenseKgs: Number(form.otherExpenseKgs || 0),
       items: lines.map((line) => ({
         id: mode === 'edit' ? line.key : undefined,
         productId: line.productId,
@@ -348,9 +337,16 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         purchasePriceYuan: Number(line.purchasePriceYuan || 0),
       })),
     };
-    if (chinaDomesticTransportEditable) {
-      payload.chinaDomesticTransportYuan = Number(form.chinaDomesticTransportYuan || 0);
-      payload.chinaDomesticTransportCompanyId = form.chinaDomesticTransportCompanyId || null;
+    // Cost/logistics fields are entered later in the workflow (order detail), not on create.
+    if (mode === 'edit') {
+      payload.customsCostKgs = Number(form.customsCostKgs || 0);
+      payload.insuranceCostKgs = Number(form.insuranceCostKgs || 0);
+      payload.bankFeeCostKgs = Number(form.bankFeeCostKgs || 0);
+      payload.otherExpenseKgs = Number(form.otherExpenseKgs || 0);
+      if (chinaDomesticTransportEditable) {
+        payload.chinaDomesticTransportYuan = Number(form.chinaDomesticTransportYuan || 0);
+        payload.chinaDomesticTransportCompanyId = form.chinaDomesticTransportCompanyId || null;
+      }
     }
     try {
       if (mode === 'edit' && orderId) {
@@ -407,30 +403,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
           <Field label={t('procurement.orders.warehouse')}><select value={form.hqWarehouseId} onChange={(e) => setField('hqWarehouseId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
           <Field label={t('procurement.orders.purchaseDate')}><input type="date" value={form.purchaseDate} onChange={(e) => setField('purchaseDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.estimatedArrivalDate')}><input type="date" value={form.estimatedArrivalDate} onChange={(e) => setField('estimatedArrivalDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-3">
-          {mode === 'create' ? (
-            <>
-              {chinaDomesticLocked ? (
-                <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
-              ) : null}
-              <LockedFieldHint locked={chinaDomesticLocked} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
-                <Field label={t('procurement.orders.costInYuan')}>
-                  <input
-                    type="number"
-                    disabled={chinaDomesticLocked}
-                    value={form.chinaDomesticTransportYuan}
-                    onChange={(e) => setField('chinaDomesticTransportYuan', e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
-                  />
-                </Field>
-              </LockedFieldHint>
-              <Field label={t('procurement.orders.costInKgs')}><input type="number" readOnly value={chinaDomesticTransportKgs} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" /></Field>
-              <Field label={t('procurement.orders.customs')}><input type="number" value={form.customsCostKgs} onChange={(e) => setField('customsCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-              <Field label={t('procurement.orders.insurance')}><input type="number" value={form.insuranceCostKgs} onChange={(e) => setField('insuranceCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-              <Field label={t('procurement.orders.bankFees')}><input type="number" value={form.bankFeeCostKgs} onChange={(e) => setField('bankFeeCostKgs', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-            </>
-          ) : null}
         </div>
       </section>
 
