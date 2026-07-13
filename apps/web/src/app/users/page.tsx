@@ -105,21 +105,23 @@ export default function UsersPage() {
         [user.fullName, user.username, user.phone, user.email]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(normalizedSearch));
-      const matchesRole = !roleFilter || roles.includes(roleFilter as Role);
+      const matchesRole = isBranchOwnerPanel || !roleFilter || roles.includes(roleFilter as Role);
       const matchesMultiRole =
         multiRoleFilter.length === 0 || multiRoleFilter.every((role) => roles.includes(role));
       const matchesBranch =
+        isBranchOwnerPanel ||
         !branchFilter ||
         (branchFilter === 'HQ'
           ? isHq
           : user.branchId === branchFilter);
       const matchesType =
+        isBranchOwnerPanel ||
         !userTypeFilter ||
         (userTypeFilter === 'HQ' ? isHq : !isHq);
       const matchesStatus = !statusFilter || user.status === statusFilter;
       return matchesSearch && matchesRole && matchesMultiRole && matchesBranch && matchesType && matchesStatus;
     });
-  }, [branchFilter, multiRoleFilter, roleFilter, search, statusFilter, userTypeFilter, users]);
+  }, [branchFilter, isBranchOwnerPanel, multiRoleFilter, roleFilter, search, statusFilter, userTypeFilter, users]);
 
   const totalPages = Math.max(Math.ceil(filteredUsers.length / pageSize), 1);
   const visibleUsers = filteredUsers.slice((page - 1) * pageSize, page * pageSize);
@@ -156,7 +158,7 @@ export default function UsersPage() {
 
   return (
     <ProtectedShell>
-      <section className="space-y-6">
+      <section className={isBranchOwnerPanel ? 'space-y-4' : 'space-y-6'}>
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('users.title')}</p>
@@ -177,34 +179,16 @@ export default function UsersPage() {
           </div>
         </div>
 
-        <div className={isBranchOwnerPanel ? 'grid grid-cols-2 gap-2 sm:grid-cols-4' : 'grid gap-3 md:grid-cols-4'}>
-          <StatCard
-            compact={isBranchOwnerPanel}
-            label={isBranchOwnerPanel ? t('users.statsTotal') : t('users.totalUsers')}
-            title={isBranchOwnerPanel ? t('users.totalUsers') : undefined}
-            value={stats.total}
-          />
-          <StatCard
-            compact={isBranchOwnerPanel}
-            label={isBranchOwnerPanel ? t('users.statsHq') : t('users.hqUsers')}
-            title={isBranchOwnerPanel ? t('users.hqUsers') : undefined}
-            value={stats.hq}
-          />
-          <StatCard
-            compact={isBranchOwnerPanel}
-            label={isBranchOwnerPanel ? t('users.statsBranches') : t('users.branchUsers')}
-            title={isBranchOwnerPanel ? t('users.branchUsers') : undefined}
-            value={stats.branch}
-          />
-          <StatCard
-            compact={isBranchOwnerPanel}
-            label={isBranchOwnerPanel ? t('users.statsFound') : t('users.filteredUsers')}
-            title={isBranchOwnerPanel ? t('users.filteredUsers') : undefined}
-            value={filteredUsers.length}
-          />
-        </div>
+        {!isBranchOwnerPanel ? (
+          <div className="grid gap-3 md:grid-cols-4">
+            <StatCard label={t('users.totalUsers')} value={stats.total} />
+            <StatCard label={t('users.hqUsers')} value={stats.hq} />
+            <StatCard label={t('users.branchUsers')} value={stats.branch} />
+            <StatCard label={t('users.filteredUsers')} value={filteredUsers.length} />
+          </div>
+        ) : null}
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm ${isBranchOwnerPanel ? 'p-4' : 'p-5'}`}>
           <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
             <div>
               <h3 className="text-lg font-bold text-slate-950">{t('users.filters')}</h3>
@@ -214,7 +198,7 @@ export default function UsersPage() {
               {t('users.resetFilters')}
             </button>
           </div>
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className={`mt-4 grid gap-4 ${isBranchOwnerPanel ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-3'}`}>
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('common.search')}</span>
               <input
@@ -224,7 +208,9 @@ export default function UsersPage() {
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
-            <Select label={t('users.roleFilter')} value={roleFilter} onChange={setRoleFilter} options={[{ value: '', label: t('common.all') }, ...roleFilterOptions.map((role) => ({ value: role, label: roleLabel(role, t) }))]} />
+            {!isBranchOwnerPanel ? (
+              <Select label={t('users.roleFilter')} value={roleFilter} onChange={setRoleFilter} options={[{ value: '', label: t('common.all') }, ...roleFilterOptions.map((role) => ({ value: role, label: roleLabel(role, t) }))]} />
+            ) : null}
             {!isBranchOwnerPanel ? (
               <>
                 <Select
@@ -370,34 +356,10 @@ function formatDate(value?: string | null) {
 function StatCard({
   label,
   value,
-  compact = false,
-  title,
 }: {
   label: string;
   value: number;
-  compact?: boolean;
-  title?: string;
 }) {
-  if (compact) {
-    return (
-      <div
-        className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900"
-        title={title}
-        aria-label={title ? `${title}: ${value}` : undefined}
-      >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400" aria-hidden="true">
-          <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5">
-            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
-          </svg>
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-          <p className="text-lg font-bold leading-tight text-slate-950 dark:text-slate-50">{value}</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
