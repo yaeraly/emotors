@@ -6,6 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { canManageDistributionOrders, isBranchWarehouseOperator } from '@/lib/rbac';
 import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus, User } from '@/lib/types';
+import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
@@ -67,7 +68,7 @@ export default function DistributionOrdersPage() {
       <section className="space-y-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('distribution.title')}</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(currentUser))}</p>
             <h2 className="text-3xl font-bold text-slate-950">
               {operatorView ? t('distribution.receiveGoods') : t('distribution.orders')}
             </h2>

@@ -248,8 +248,8 @@ export class DistributionService {
       await this.createWorkflowAlert(tx, user, {
         branchId: updated.branchId,
         type: AlertType.BRANCH_INVOICE_CREATED,
-        title: 'Branch invoice created',
-        message: `Invoice ${invoice.invoiceNumber} created for order ${updated.orderNumber}`,
+        title: 'Счёт филиалу создан',
+        message: `Создан счёт ${invoice.invoiceNumber} по заказу ${updated.orderNumber}`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
       });
@@ -282,8 +282,8 @@ export class DistributionService {
       await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.BRANCH_INVOICE_CREATED,
-        title: 'Invoice sent to branch',
-        message: `Invoice ${invoice.invoiceNumber} sent for order ${order.orderNumber}`,
+        title: 'Счёт отправлен филиалу',
+        message: `Счёт ${invoice.invoiceNumber} отправлен по заказу ${order.orderNumber}`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
       });
@@ -338,16 +338,16 @@ export class DistributionService {
       await this.createWorkflowAlert(tx, user, {
         branchId: null,
         type: AlertType.ORDER_SENT_TO_WAREHOUSE,
-        title: 'Order sent to warehouse',
-        message: `Order ${order.orderNumber} assigned for picking`,
+        title: 'Заказ передан на склад HQ',
+        message: `Заказ ${order.orderNumber} передан на склад HQ для сборки`,
         entityType: 'BranchDistributionOrder',
         entityId: order.id,
       });
       await this.createWorkflowAlert(tx, user, {
         branchId: null,
         type: AlertType.PICKING_TASK_ASSIGNED,
-        title: 'Picking task assigned',
-        message: `Picking task created for order ${order.orderNumber}`,
+        title: 'Заказ готов к сборке',
+        message: `Заказ ${order.orderNumber} готов к сборке на складе HQ`,
         entityType: 'BranchDistributionOrder',
         entityId: order.id,
       });
@@ -622,8 +622,8 @@ export class DistributionService {
       await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.GOODS_SHIPPED,
-        title: 'Goods shipped to branch',
-        message: `Order ${order.orderNumber} has been shipped`,
+        title: 'Товар отгружен филиалу',
+        message: `Заказ ${order.orderNumber} отгружен филиалу`,
         entityType: 'BranchDistributionOrder',
         entityId: order.id,
       });
@@ -866,8 +866,8 @@ export class DistributionService {
       await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.BRANCH_GOODS_RECEIVED,
-        title: 'Goods received at branch',
-        message: `Order ${order.orderNumber} received at branch warehouse`,
+        title: 'Филиал подтвердил приёмку',
+        message: `Заказ ${order.orderNumber} принят на складе филиала`,
         entityType: 'BranchDistributionOrder',
         entityId: order.id,
       });

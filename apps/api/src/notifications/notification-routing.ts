@@ -51,20 +51,20 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
     message: 'CEO rejected the inventory count session.',
   },
   BRANCH_ORDER_SUBMITTED: {
-    title: 'New Branch Order',
-    message: 'A branch submitted a new purchase request.',
+    title: 'Новый заказ филиала',
+    message: 'Получен новый заказ филиала.',
   },
   BRANCH_ORDER_APPROVED: {
-    title: 'Заявка подтверждена',
-    message: 'HQ Sales подтвердил заявку филиала.',
+    title: 'Заказ подтверждён',
+    message: 'Ваш заказ товаров подтверждён.',
   },
   BRANCH_ORDER_PARTIALLY_APPROVED: {
-    title: 'Заявка частично подтверждена',
-    message: 'HQ Sales частично подтвердил заявку филиала. Проверьте позиции и причины отклонения.',
+    title: 'Заказ частично подтверждён',
+    message: 'Ваш заказ товаров частично подтверждён. Проверьте позиции и причины отклонения.',
   },
   BRANCH_ORDER_REJECTED: {
-    title: 'Заявка отклонена',
-    message: 'HQ Sales отклонил заявку филиала.',
+    title: 'Заказ отклонён',
+    message: 'Ваш заказ товаров отклонён.',
   },
   PROCUREMENT_CREATED: {
     title: 'Procurement Order Created',
@@ -87,32 +87,32 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
     message: 'Goods were received into the HQ warehouse.',
   },
   ORDER_SENT_TO_WAREHOUSE: {
-    title: 'Order Sent to Warehouse',
-    message: 'A branch distribution order was assigned to the warehouse.',
+    title: 'Заказ передан на склад HQ',
+    message: 'Заказ филиала передан на склад HQ для отгрузки.',
   },
   PICKING_TASK_ASSIGNED: {
-    title: 'Picking Task Assigned',
-    message: 'A new picking task is ready in the warehouse.',
+    title: 'Заказ готов к сборке',
+    message: 'Поступил заказ филиала, готовый к сборке на складе HQ.',
   },
   GOODS_SHIPPED: {
-    title: 'Goods Shipped to Branch',
-    message: 'Goods were shipped to a branch.',
+    title: 'Товар отгружен филиалу',
+    message: 'Товар по заказу филиала отгружен.',
   },
   BRANCH_GOODS_RECEIVED: {
-    title: 'Branch Confirmed Receiving',
-    message: 'A branch confirmed goods receiving.',
+    title: 'Филиал подтвердил приёмку',
+    message: 'Филиал подтвердил получение товара по заказу.',
   },
   DIFFERENCE_ACT_CREATED: {
-    title: 'Difference Act Created',
-    message: 'A difference act was created for a shipment.',
+    title: 'Создан акт расхождения',
+    message: 'По заказу филиала создан акт расхождения при приёмке.',
   },
   SHORTAGE_NEEDS_RESOLUTION: {
-    title: 'Shortage Detected',
-    message: 'A shortage report needs resolution.',
+    title: 'Требуется решение по недостаче',
+    message: 'По заказу филиала требуется решение по недостаче.',
   },
   REPLACEMENT_GOODS_SHIPPED: {
-    title: 'Replacement Shipment Created',
-    message: 'Replacement goods were shipped to a branch.',
+    title: 'Отправлена замена',
+    message: 'По заказу филиала отправлена замена товара.',
   },
   LOW_STOCK: {
     title: 'Low Stock Alert',

@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Branch, BranchDistributionOrder, Product, ProductListResponse, Warehouse } from '@/lib/types';
+import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type ItemForm = { productId: string; quantity: string; unitPrice: string };
@@ -87,7 +88,7 @@ export default function NewDistributionOrderPage() {
     <ProtectedShell>
       <form onSubmit={submit} className="space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('distribution.title')}</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(null))}</p>
           <h2 className="text-3xl font-bold text-slate-950">{t('distribution.newOrder')}</h2>
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}

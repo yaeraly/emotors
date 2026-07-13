@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Branch, BranchInvoice, BranchInvoiceStatus } from '@/lib/types';
+import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
@@ -40,7 +41,7 @@ export default function BranchInvoicesPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('distribution.title')}</p><h2 className="text-3xl font-bold">{t('distribution.invoices')}</h2></div>
+        <div><p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(null))}</p><h2 className="text-3xl font-bold">{t('distribution.invoices')}</h2></div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-3">
           <input value={filters.search} onChange={(event) => setFilters({ ...filters, search: event.target.value })} placeholder={t('distribution.invoiceNumber')} className="rounded-xl border border-slate-300 px-4 py-3" />

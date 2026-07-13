@@ -6,6 +6,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchRequestIssues, canViewSupplyInquiries, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, roleCodesForUser } from '@/lib/rbac';
+import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, visibleBranchOwnerSidebarModules } from '@/lib/unified-nav';
 import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
 import { LanguageSwitcher } from './LanguageSwitcher';
@@ -313,7 +314,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 {canViewChinaReceivingMenu(user) ? (
                   <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
                 ) : null}
-                <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.title')}</Link>
+                <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t(distributionModuleTitleKey(user))}</Link>
               </>
             ) : branchWarehouseOperatorView ? (
               <>
@@ -491,7 +492,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               {canSeeMarketing ? <Link href="/marketing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.marketing')}</Link> : null}
               {canSeeDistribution ? (
                 <div className="rounded-xl px-3 py-2">
-                  <Link href="/distribution/orders" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t('distribution.title')}</Link>
+                  <Link href="/distribution/orders" className="block text-sm font-semibold text-slate-700 hover:text-blue-700">{t(distributionModuleTitleKey(user))}</Link>
                   <div className="mt-2 space-y-1 pl-2">
                     <Link href="/distribution/orders" className="block text-xs font-semibold text-slate-500 hover:text-blue-700">{t('distribution.orders')}</Link>
                     {canManageDistribution ? (

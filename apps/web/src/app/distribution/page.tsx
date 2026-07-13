@@ -13,6 +13,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import { isHqCashierUser, isHqSalesManagerUser, isSupplyChainManagerUser, isWarehouseManagerUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
+import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function DistributionPage() {
@@ -38,7 +39,7 @@ export default function DistributionPage() {
       <section className="space-y-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('app.name')}</p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('distribution.title')}</h2>
+          <h2 className="text-3xl font-bold text-slate-950">{t(distributionModuleTitleKey(user))}</h2>
         </div>
         <ModuleSectionNav sections={sections} />
       </section>

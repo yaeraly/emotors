@@ -1351,7 +1351,7 @@ export class OperationsService {
         entityType: 'BranchDistributionOrder',
         entityId: order.id,
         referenceNumber: order.orderNumber,
-        message: `Picking task assigned for branch request ${request.requestNumber}.`,
+        message: `Заказ ${request.requestNumber} готов к сборке на складе HQ.`,
       });
       break;
     }
