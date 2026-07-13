@@ -2,11 +2,16 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { API_URL, apiFetch, clearToken, getToken } from '@/lib/api';
-import { canAssignBranchHqWarehouse, canManageBranches, canInspectAnyBranchWarehouse } from '@/lib/rbac';
-import type { Branch, User, Warehouse } from '@/lib/types';
+import {
+  canAssignBranchHqWarehouse,
+  canChangeBranchType,
+  canManageBranches,
+  canInspectAnyBranchWarehouse,
+} from '@/lib/rbac';
+import type { Branch, BranchType, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
@@ -18,9 +23,55 @@ type BranchForm = {
   phone: string;
   ownerName: string;
   status: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'SUSPENDED';
-  branchType: 'HQ_BRANCH' | 'FRANCHISE' | 'DEALER' | 'DISTRIBUTOR';
+  branchType: BranchType;
   assignedHqWarehouseId: string;
+  priceProfileId: string;
+  branchTypeChangeReasonCode: string;
+  branchTypeChangeReasonComment: string;
 };
+
+type PriceProfileOption = {
+  id: string;
+  name: string;
+  code: string;
+  profileType: string;
+  branchType: BranchType;
+  status: 'ACTIVE' | 'INACTIVE';
+};
+
+const FRANCHISE_PROFILE_TYPES = new Set([
+  'STANDARD_FRANCHISE',
+  'BRONZE_FRANCHISE',
+  'SILVER_FRANCHISE',
+  'GOLD_FRANCHISE',
+  'PLATINUM_FRANCHISE',
+  'VIP_FRANCHISE',
+]);
+const DEALER_PROFILE_TYPES = new Set(['DEALER', 'DEALER_PREMIUM']);
+const DISTRIBUTOR_PROFILE_TYPES = new Set(['DISTRIBUTOR', 'DISTRIBUTOR_PREMIUM']);
+
+function isProfileCompatibleWithBranch(branchType: BranchType, profileType: string) {
+  if (branchType === 'HQ_BRANCH') return profileType === 'HQ_BRANCH';
+  if (branchType === 'FRANCHISE') return FRANCHISE_PROFILE_TYPES.has(profileType);
+  if (branchType === 'DEALER') return DEALER_PROFILE_TYPES.has(profileType);
+  if (branchType === 'DISTRIBUTOR') return DISTRIBUTOR_PROFILE_TYPES.has(profileType);
+  return false;
+}
+
+function branchTypeLabel(branchType: BranchType | undefined, t: (key: string) => string) {
+  switch (branchType) {
+    case 'HQ_BRANCH':
+      return t('branches.branchTypeHq');
+    case 'FRANCHISE':
+      return t('branches.branchTypeFranchise');
+    case 'DEALER':
+      return t('branches.branchTypeDealer');
+    case 'DISTRIBUTOR':
+      return t('branches.branchTypeDistributor');
+    default:
+      return '-';
+  }
+}
 
 export default function BranchDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -42,7 +93,11 @@ export default function BranchDetailPage() {
     status: 'ACTIVE',
     branchType: 'FRANCHISE',
     assignedHqWarehouseId: '',
+    priceProfileId: '',
+    branchTypeChangeReasonCode: 'MANAGEMENT_DECISION',
+    branchTypeChangeReasonComment: '',
   });
+  const [priceProfiles, setPriceProfiles] = useState<PriceProfileOption[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
@@ -52,16 +107,18 @@ export default function BranchDetailPage() {
   const [branchWarehouseLoading, setBranchWarehouseLoading] = useState(false);
 
   async function load() {
-    const [dashboardData, me, branchData, warehouses] = await Promise.all([
+    const [dashboardData, me, branchData, warehouses, profiles] = await Promise.all([
       apiFetch<{ branch: Branch }>(`/branches/${id}/dashboard`),
       apiFetch<User>('/auth/me'),
       apiFetch<Branch>(`/branches/${id}`),
       apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=HQ&status=ACTIVE'),
+      apiFetch<PriceProfileOption[]>('/pricing/profiles').catch(() => [] as PriceProfileOption[]),
     ]);
     setDashboard(dashboardData);
     setBranch(branchData);
     setUser(me);
     setHqWarehouses(warehouses);
+    setPriceProfiles(profiles.filter((profile) => profile.status === 'ACTIVE'));
     setAssignedHqWarehouseId(branchData.assignedHqWarehouseId ?? '');
     setForm({
       name: branchData.name,
@@ -73,6 +130,9 @@ export default function BranchDetailPage() {
       status: branchData.status ?? 'ACTIVE',
       branchType: branchData.branchType ?? 'FRANCHISE',
       assignedHqWarehouseId: branchData.assignedHqWarehouseId ?? '',
+      priceProfileId: branchData.priceProfile?.id ?? '',
+      branchTypeChangeReasonCode: 'MANAGEMENT_DECISION',
+      branchTypeChangeReasonComment: '',
     });
   }
 
@@ -107,7 +167,35 @@ export default function BranchDetailPage() {
 
   const canManage = canManageBranches(user);
   const canAssign = canAssignBranchHqWarehouse(user);
+  const canEditBranchType = canChangeBranchType(user);
   const canInspectWarehouse = canInspectAnyBranchWarehouse(user);
+
+  const compatibleProfiles = useMemo(
+    () =>
+      priceProfiles.filter((profile) =>
+        isProfileCompatibleWithBranch(form.branchType, profile.profileType),
+      ),
+    [form.branchType, priceProfiles],
+  );
+
+  const branchTypeChanged = Boolean(branch && form.branchType !== (branch.branchType ?? 'FRANCHISE'));
+  const currentProfileCompatible = useMemo(() => {
+    if (!branch?.priceProfile?.profileType) return true;
+    return isProfileCompatibleWithBranch(form.branchType, branch.priceProfile.profileType);
+  }, [branch, form.branchType]);
+
+  useEffect(() => {
+    if (!branchTypeChanged) return;
+    if (form.priceProfileId && compatibleProfiles.some((profile) => profile.id === form.priceProfileId)) {
+      return;
+    }
+    const preferred =
+      compatibleProfiles.find((profile) => profile.profileType.includes('STANDARD') || profile.profileType === 'HQ_BRANCH' || profile.profileType === 'DEALER' || profile.profileType === 'DISTRIBUTOR')
+      ?? compatibleProfiles[0];
+    if (preferred) {
+      setForm((current) => ({ ...current, priceProfileId: preferred.id }));
+    }
+  }, [branchTypeChanged, compatibleProfiles, form.priceProfileId]);
 
   async function saveAssignment(event: FormEvent) {
     event.preventDefault();
@@ -133,21 +221,89 @@ export default function BranchDetailPage() {
 
   async function saveBranch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!branch) return;
+    if (!branch || saving) return;
+
+    if (branchTypeChanged) {
+      if (!canEditBranchType) {
+        setError(t('branches.branchTypeForbidden'));
+        return;
+      }
+      if (!currentProfileCompatible && !form.priceProfileId) {
+        setError(t('branches.branchTypeProfileIncompatible'));
+        return;
+      }
+      const confirmed = window.confirm(
+        [
+          t('branches.confirmBranchTypeChangeTitle'),
+          '',
+          t('branches.confirmBranchTypeChangeMessage'),
+          '',
+          `${t('branches.currentBranchType')}: ${branchTypeLabel(branch.branchType, t)}`,
+          `${t('branches.newBranchType')}: ${branchTypeLabel(form.branchType, t)}`,
+          `${t('branches.currentPricingProfile')}: ${branch.priceProfile?.name ?? '-'}`,
+          `${t('branches.newPricingProfile')}: ${
+            compatibleProfiles.find((profile) => profile.id === form.priceProfileId)?.name
+            ?? branch.priceProfile?.name
+            ?? '-'
+          }`,
+        ].join('\n'),
+      );
+      if (!confirmed) return;
+    }
+
     setSaving(true);
     setError('');
     setSuccess('');
     try {
-      const updated = await apiFetch<Branch>(`/branches/${branch.id}`, {
-        method: 'PUT',
-        body: JSON.stringify(form),
-      });
+      const payload: Record<string, unknown> = {
+        name: form.name,
+        code: form.code,
+        city: form.city || undefined,
+        address: form.address || undefined,
+        phone: form.phone || undefined,
+        ownerName: form.ownerName || undefined,
+        status: form.status,
+        branchType: form.branchType,
+      };
+      if (canAssign) {
+        payload.assignedHqWarehouseId = form.assignedHqWarehouseId || null;
+      }
+      if (branchTypeChanged || form.priceProfileId) {
+        payload.priceProfileId = form.priceProfileId || null;
+      }
+      if (branchTypeChanged) {
+        payload.branchTypeChangeReasonCode = form.branchTypeChangeReasonCode || 'MANAGEMENT_DECISION';
+        payload.branchTypeChangeReasonComment = form.branchTypeChangeReasonComment || undefined;
+      }
+
+      const updated = await apiFetch<Branch & { newBranchType?: BranchType; profileChanged?: boolean }>(
+        `/branches/${branch.id}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        },
+      );
       setBranch(updated);
+      setForm((current) => ({
+        ...current,
+        name: updated.name,
+        code: updated.code,
+        city: updated.city ?? '',
+        address: updated.address ?? '',
+        phone: updated.phone ?? '',
+        ownerName: updated.ownerName ?? '',
+        status: updated.status ?? 'ACTIVE',
+        branchType: updated.branchType ?? current.branchType,
+        assignedHqWarehouseId: updated.assignedHqWarehouseId ?? '',
+        priceProfileId: updated.priceProfile?.id ?? '',
+      }));
+      setAssignedHqWarehouseId(updated.assignedHqWarehouseId ?? '');
       setEditing(false);
-      setSuccess(t('branches.updated'));
-      await load();
+      setSuccess(
+        branchTypeChanged ? t('branches.branchTypeChangedSuccess') : t('branches.updated'),
+      );
     } catch (err) {
-      setError(localizeBranchError(err instanceof Error ? err.message : t('common.error'), t));
+      setError(localizeBranchError(err instanceof Error ? err.message : t('branches.branchTypeChangeFailed'), t));
     } finally {
       setSaving(false);
     }
@@ -245,50 +401,79 @@ export default function BranchDetailPage() {
             <BranchInput label={t('users.phone')} value={form.phone} onChange={(value) => setForm({ ...form, phone: value })} />
             <BranchInput label={t('branches.ownerName')} value={form.ownerName} onChange={(value) => setForm({ ...form, ownerName: value })} />
             <label className="block md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">{t('pricing.colBranchType')}</span>
+              <span className="text-sm font-semibold text-slate-700">{t('branches.branchType')}</span>
               <div className="mt-2 flex flex-wrap gap-4">
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="radio"
-                    name="branchType"
-                    value="HQ_BRANCH"
-                    checked={form.branchType === 'HQ_BRANCH'}
-                    onChange={() => setForm({ ...form, branchType: 'HQ_BRANCH' })}
-                  />
-                  {t('pricing.branchTypeHq')}
-                </label>
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="radio"
-                    name="branchType"
-                    value="FRANCHISE"
-                    checked={form.branchType === 'FRANCHISE'}
-                    onChange={() => setForm({ ...form, branchType: 'FRANCHISE' })}
-                  />
-                  {t('branches.branchTypeFranchise')}
-                </label>
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="radio"
-                    name="branchType"
-                    value="DEALER"
-                    checked={form.branchType === 'DEALER'}
-                    onChange={() => setForm({ ...form, branchType: 'DEALER' })}
-                  />
-                  {t('branches.branchTypeDealer')}
-                </label>
-                <label className="flex items-center gap-2 text-sm text-slate-700">
-                  <input
-                    type="radio"
-                    name="branchType"
-                    value="DISTRIBUTOR"
-                    checked={form.branchType === 'DISTRIBUTOR'}
-                    onChange={() => setForm({ ...form, branchType: 'DISTRIBUTOR' })}
-                  />
-                  {t('branches.branchTypeDistributor')}
-                </label>
+                {([
+                  ['HQ_BRANCH', 'branches.branchTypeHq'],
+                  ['FRANCHISE', 'branches.branchTypeFranchise'],
+                  ['DEALER', 'branches.branchTypeDealer'],
+                  ['DISTRIBUTOR', 'branches.branchTypeDistributor'],
+                ] as const).map(([value, labelKey]) => (
+                  <label key={value} className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="branchType"
+                      value={value}
+                      disabled={!canEditBranchType}
+                      checked={form.branchType === value}
+                      onChange={() => setForm({ ...form, branchType: value })}
+                    />
+                    {t(labelKey)}
+                  </label>
+                ))}
               </div>
+              {!canEditBranchType ? (
+                <p className="mt-2 text-xs text-slate-500">{t('branches.branchTypeCeoOnly')}</p>
+              ) : null}
             </label>
+            {canEditBranchType && branchTypeChanged ? (
+              <>
+                <label className="block md:col-span-2">
+                  <span className="text-sm font-semibold text-slate-700">{t('branches.pricingProfile')}</span>
+                  <select
+                    value={form.priceProfileId}
+                    onChange={(event) => setForm({ ...form, priceProfileId: event.target.value })}
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  >
+                    <option value="">{t('branches.selectPricingProfile')}</option>
+                    {compatibleProfiles.map((profile) => (
+                      <option key={profile.id} value={profile.id}>
+                        {profile.name}
+                      </option>
+                    ))}
+                  </select>
+                  {!currentProfileCompatible ? (
+                    <p className="mt-2 text-sm text-amber-700">{t('branches.branchTypeProfileIncompatible')}</p>
+                  ) : null}
+                </label>
+                <label className="block">
+                  <span className="text-sm font-semibold text-slate-700">{t('branches.branchTypeChangeReason')}</span>
+                  <select
+                    value={form.branchTypeChangeReasonCode}
+                    onChange={(event) => setForm({ ...form, branchTypeChangeReasonCode: event.target.value })}
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  >
+                    <option value="BUSINESS_MODEL_CHANGED">{t('branches.reason.BUSINESS_MODEL_CHANGED')}</option>
+                    <option value="FRANCHISE_CONVERTED">{t('branches.reason.FRANCHISE_CONVERTED')}</option>
+                    <option value="DEALER_CONVERTED">{t('branches.reason.DEALER_CONVERTED')}</option>
+                    <option value="DISTRIBUTOR_CONVERTED">{t('branches.reason.DISTRIBUTOR_CONVERTED')}</option>
+                    <option value="HQ_RESTRUCTURE">{t('branches.reason.HQ_RESTRUCTURE')}</option>
+                    <option value="MANAGEMENT_DECISION">{t('branches.reason.MANAGEMENT_DECISION')}</option>
+                    <option value="OTHER">{t('branches.reason.OTHER')}</option>
+                  </select>
+                </label>
+                {form.branchTypeChangeReasonCode === 'OTHER' ? (
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">{t('branches.branchTypeChangeComment')}</span>
+                    <input
+                      value={form.branchTypeChangeReasonComment}
+                      onChange={(event) => setForm({ ...form, branchTypeChangeReasonComment: event.target.value })}
+                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                    />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
               <select
@@ -392,10 +577,13 @@ export default function BranchDetailPage() {
 
         {branch && !editing ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-bold uppercase text-slate-400">{t('pricing.colBranchType')}</p>
-            <p className="mt-1 font-semibold text-slate-900">
-              {branch.branchType === 'HQ_BRANCH' ? t('pricing.branchTypeHq') : t('pricing.branchTypeFranchise')}
-            </p>
+            <p className="text-xs font-bold uppercase text-slate-400">{t('branches.branchType')}</p>
+            <p className="mt-1 font-semibold text-slate-900">{branchTypeLabel(branch.branchType, t)}</p>
+            {branch.priceProfile?.name ? (
+              <p className="mt-2 text-sm text-slate-600">
+                {t('branches.pricingProfile')}: {branch.priceProfile.name}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -441,8 +629,24 @@ function BranchInput({
 }
 
 function localizeBranchError(message: string, t: (key: string) => string) {
-  if (message.includes('already exists')) return t('branches.duplicateCode');
-  if (message.includes('Forbidden') || message.includes('permission')) return t('branches.noPermission');
-  if (message.includes('not found')) return t('branches.notFound');
-  return message;
+  if (message.includes('уже существует') || message.includes('already exists')) return t('branches.duplicateCode');
+  if (
+    message.includes('У вас нет прав для изменения типа филиала')
+    || message.includes('нет прав')
+    || message.includes('Forbidden')
+    || message.includes('permission')
+  ) {
+    return t('branches.branchTypeForbidden');
+  }
+  if (message.includes('не найден') || message.includes('not found')) return t('branches.notFound');
+  if (message.includes('несовместим') || message.includes('incompatible')) {
+    return t('branches.branchTypeProfileIncompatible');
+  }
+  if (message.includes('некорректный тип') || message.includes('incorrect')) {
+    return t('branches.invalidBranchType');
+  }
+  if (message.includes('Не удалось изменить тип филиала') || message.includes('Internal server error')) {
+    return t('branches.branchTypeChangeFailed');
+  }
+  return message || t('branches.branchTypeChangeFailed');
 }

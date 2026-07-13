@@ -2,6 +2,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
@@ -9,13 +10,22 @@ import {
 import { BranchStatus, BranchType, Prisma, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { assertBranchAccountantRestrictedRoute, canAssignBranchHqWarehouse, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import {
+  assertBranchAccountantRestrictedRoute,
+  canAssignBranchHqWarehouse,
+  canChangeBranchType,
+  hasAnyHqRole,
+  resolveUserRoles,
+} from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { BranchQueryDto } from './dto/branch-query.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
 import { UpdateBranchDto } from './dto/update-branch.dto';
 import { AssignBranchHqWarehouseDto } from './dto/assign-branch-hq-warehouse.dto';
-import { resolveDefaultPriceProfileId } from '../pricing/pricing-profile-defaults.util';
+import {
+  isProfileCompatibleWithBranch,
+  resolveDefaultPriceProfileId,
+} from '../pricing/pricing-profile-defaults.util';
 import { BRANCH_CODE_GENERATION_FAILED, generateBranchCode } from './branch-code.util';
 
 const branchInclude = {
@@ -41,8 +51,20 @@ const branchInclude = {
   },
 };
 
+const BRANCH_TYPE_CHANGE_REASON_CODES = new Set([
+  'BUSINESS_MODEL_CHANGED',
+  'FRANCHISE_CONVERTED',
+  'DEALER_CONVERTED',
+  'DISTRIBUTOR_CONVERTED',
+  'HQ_RESTRUCTURE',
+  'MANAGEMENT_DECISION',
+  'OTHER',
+]);
+
 @Injectable()
 export class BranchesService {
+  private readonly logger = new Logger(BranchesService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async create(user: AuthUser, dto: CreateBranchDto) {
@@ -194,50 +216,256 @@ export class BranchesService {
   async update(user: AuthUser, id: string, dto: UpdateBranchDto) {
     const branch = await this.prisma.branch.findFirst({
       where: { id, deletedAt: null },
+      include: { priceProfile: { select: { id: true, name: true, code: true, profileType: true } } },
     });
-    if (!branch) throw new NotFoundException('Branch not found');
+    if (!branch) throw new NotFoundException('Филиал не найден');
+
+    const requestedBranchType = dto.branchType;
+    const branchTypeChanging =
+      requestedBranchType !== undefined && requestedBranchType !== branch.branchType;
+
+    this.logger.log({
+      message: 'Branch update requested',
+      branchId: id,
+      oldBranchType: branch.branchType,
+      requestedBranchType: requestedBranchType ?? null,
+      oldPricingProfileId: branch.priceProfileId,
+      requestedPricingProfileId: dto.priceProfileId ?? null,
+      authenticatedUserId: user.id,
+      authenticatedRole: user.role,
+      validationStage: 'start',
+    });
+
+    if (branchTypeChanging && !canChangeBranchType(user)) {
+      throw new ForbiddenException('У вас нет прав для изменения типа филиала');
+    }
 
     if (dto.assignedHqWarehouseId !== undefined && !canAssignBranchHqWarehouse(user)) {
       throw new ForbiddenException('Only CEO can assign HQ warehouse to branch');
     }
 
-    if (dto.code && dto.code !== branch.code) {
-      const duplicate = await this.prisma.branch.findUnique({
-        where: { code: dto.code },
-      });
-      if (duplicate) throw new ConflictException('Branch code already exists');
+    if (requestedBranchType !== undefined && !Object.values(BranchType).includes(requestedBranchType)) {
+      throw new BadRequestException('Указан некорректный тип филиала');
+    }
+
+    // Branch code must remain stable unless CEO explicitly changes it to another unique value.
+    // Never regenerate code from branchType.
+    if (dto.code !== undefined) {
+      const nextCode = dto.code.trim().toUpperCase();
+      if (nextCode !== branch.code) {
+        const duplicate = await this.prisma.branch.findUnique({ where: { code: nextCode } });
+        if (duplicate) throw new ConflictException('Branch code already exists');
+      }
     }
 
     const nextWarehouseId =
-      dto.assignedHqWarehouseId !== undefined ? dto.assignedHqWarehouseId : branch.assignedHqWarehouseId;
+      dto.assignedHqWarehouseId !== undefined
+        ? dto.assignedHqWarehouseId || null
+        : branch.assignedHqWarehouseId;
     if (dto.assignedHqWarehouseId !== undefined && nextWarehouseId) {
       await this.assertActiveHqWarehouse(nextWarehouseId);
     }
 
-    const updated = await this.prisma.branch.update({
-      where: { id },
-      data: {
-        name: dto.name,
-        code: dto.code,
-        city: dto.city,
-        address: dto.address,
-        phone: dto.phone,
-        ownerName: dto.ownerName,
-        status: dto.status,
-        branchType: dto.branchType,
-        openedAt: dto.openedAt,
-        ...(dto.assignedHqWarehouseId !== undefined
-          ? { assignedHqWarehouseId: dto.assignedHqWarehouseId }
-          : {}),
-      },
-      include: branchInclude,
-    });
+    const nextBranchType = requestedBranchType ?? branch.branchType;
+    let nextPriceProfileId =
+      dto.priceProfileId !== undefined ? dto.priceProfileId || null : branch.priceProfileId;
 
-    if (dto.assignedHqWarehouseId !== undefined && dto.assignedHqWarehouseId !== branch.assignedHqWarehouseId) {
-      await this.auditHqWarehouseAssignment(user, id, branch.assignedHqWarehouseId, dto.assignedHqWarehouseId);
+    if (branchTypeChanging) {
+      const reasonCode = dto.branchTypeChangeReasonCode?.trim() || 'MANAGEMENT_DECISION';
+      if (!BRANCH_TYPE_CHANGE_REASON_CODES.has(reasonCode)) {
+        throw new BadRequestException('Указан некорректный тип филиала');
+      }
+      if (reasonCode === 'OTHER' && !dto.branchTypeChangeReasonComment?.trim()) {
+        throw new BadRequestException('Не удалось изменить тип филиала');
+      }
+
+      if (nextPriceProfileId) {
+        const profile = await this.prisma.branchPriceProfile.findFirst({
+          where: { id: nextPriceProfileId },
+          select: { id: true, profileType: true, status: true },
+        });
+        if (!profile || profile.status !== 'ACTIVE') {
+          throw new BadRequestException(
+            'Текущий ценовой профиль несовместим с новым типом филиала. Выберите подходящий профиль',
+          );
+        }
+        if (!isProfileCompatibleWithBranch(nextBranchType, profile.profileType)) {
+          throw new BadRequestException(
+            'Текущий ценовой профиль несовместим с новым типом филиала. Выберите подходящий профиль',
+          );
+        }
+      } else {
+        // Keep existing if compatible; otherwise require explicit compatible profile.
+        if (branch.priceProfile) {
+          if (isProfileCompatibleWithBranch(nextBranchType, branch.priceProfile.profileType)) {
+            nextPriceProfileId = branch.priceProfileId;
+          } else {
+            const defaultProfileId = await resolveDefaultPriceProfileId(this.prisma, nextBranchType);
+            if (!defaultProfileId) {
+              throw new BadRequestException(
+                'Текущий ценовой профиль несовместим с новым типом филиала. Выберите подходящий профиль',
+              );
+            }
+            // Prefer explicit selection; if none provided, auto-assign default compatible profile.
+            if (dto.priceProfileId === undefined) {
+              nextPriceProfileId = defaultProfileId;
+            } else {
+              throw new BadRequestException(
+                'Текущий ценовой профиль несовместим с новым типом филиала. Выберите подходящий профиль',
+              );
+            }
+          }
+        } else {
+          nextPriceProfileId = await resolveDefaultPriceProfileId(this.prisma, nextBranchType);
+        }
+      }
+    } else if (dto.priceProfileId !== undefined && nextPriceProfileId) {
+      const profile = await this.prisma.branchPriceProfile.findFirst({
+        where: { id: nextPriceProfileId },
+        select: { id: true, profileType: true, status: true },
+      });
+      if (!profile || profile.status !== 'ACTIVE') {
+        throw new BadRequestException(
+          'Текущий ценовой профиль несовместим с новым типом филиала. Выберите подходящий профиль',
+        );
+      }
+      if (!isProfileCompatibleWithBranch(nextBranchType, profile.profileType)) {
+        throw new BadRequestException(
+          'Текущий ценовой профиль несовместим с новым типом филиала. Выберите подходящий профиль',
+        );
+      }
     }
 
-    return updated;
+    const data: Prisma.BranchUpdateInput = {};
+    if (dto.name !== undefined) data.name = dto.name;
+    if (dto.code !== undefined) data.code = dto.code.trim().toUpperCase();
+    if (dto.city !== undefined) data.city = dto.city;
+    if (dto.address !== undefined) data.address = dto.address;
+    if (dto.phone !== undefined) data.phone = dto.phone;
+    if (dto.ownerName !== undefined) data.ownerName = dto.ownerName;
+    if (dto.status !== undefined) data.status = dto.status;
+    if (dto.openedAt !== undefined) data.openedAt = dto.openedAt;
+    if (branchTypeChanging) data.branchType = nextBranchType;
+    if (dto.assignedHqWarehouseId !== undefined) {
+      data.assignedHqWarehouse = nextWarehouseId
+        ? { connect: { id: nextWarehouseId } }
+        : { disconnect: true };
+    }
+    if (
+      branchTypeChanging
+      || (dto.priceProfileId !== undefined && nextPriceProfileId !== branch.priceProfileId)
+    ) {
+      data.priceProfile = nextPriceProfileId
+        ? { connect: { id: nextPriceProfileId } }
+        : { disconnect: true };
+    }
+
+    try {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const saved = await tx.branch.update({
+          where: { id },
+          data,
+          include: branchInclude,
+        });
+
+        if (branchTypeChanging) {
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              role: user.role,
+              action: 'BRANCH_TYPE_CHANGED',
+              entity: 'Branch',
+              entityId: id,
+              metadata: {
+                userId: user.id,
+                role: user.role,
+                branchId: id,
+                branchName: branch.name,
+                oldBranchType: branch.branchType,
+                newBranchType: nextBranchType,
+                oldPricingProfileId: branch.priceProfileId,
+                newPricingProfileId: nextPriceProfileId,
+                reasonCode: dto.branchTypeChangeReasonCode?.trim() || 'MANAGEMENT_DECISION',
+                reasonComment: dto.branchTypeChangeReasonComment?.trim() || null,
+                timestamp: new Date().toISOString(),
+              },
+            },
+          });
+        }
+
+        if (
+          dto.assignedHqWarehouseId !== undefined
+          && nextWarehouseId !== branch.assignedHqWarehouseId
+        ) {
+          await this.auditHqWarehouseAssignmentInTx(
+            tx,
+            user,
+            id,
+            branch.assignedHqWarehouseId,
+            nextWarehouseId,
+          );
+        }
+
+        return saved;
+      });
+
+      this.logger.log({
+        message: 'Branch update succeeded',
+        branchId: id,
+        oldBranchType: branch.branchType,
+        newBranchType: updated.branchType,
+        oldPricingProfileId: branch.priceProfileId,
+        newPricingProfileId: updated.priceProfileId,
+        authenticatedUserId: user.id,
+        validationStage: 'completed',
+      });
+
+      return {
+        ...updated,
+        oldBranchType: branch.branchType,
+        newBranchType: updated.branchType,
+        profileChanged: branch.priceProfileId !== updated.priceProfileId,
+      };
+    } catch (error) {
+      if (
+        error instanceof BadRequestException
+        || error instanceof ForbiddenException
+        || error instanceof NotFoundException
+        || error instanceof ConflictException
+      ) {
+        throw error;
+      }
+
+      const prismaCode =
+        error instanceof Prisma.PrismaClientKnownRequestError ? error.code : undefined;
+      this.logger.error({
+        message: 'Branch update failed',
+        branchId: id,
+        oldBranchType: branch.branchType,
+        requestedBranchType: requestedBranchType ?? null,
+        oldPricingProfileId: branch.priceProfileId,
+        requestedPricingProfileId: dto.priceProfileId ?? null,
+        authenticatedUserId: user.id,
+        authenticatedRole: user.role,
+        validationStage: 'prisma_update',
+        prismaErrorCode: prismaCode ?? null,
+        exceptionMessage: error instanceof Error ? error.message : String(error),
+      });
+
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2003') {
+          throw new BadRequestException('Не удалось изменить тип филиала');
+        }
+        if (error.code === 'P2002') {
+          throw new ConflictException('Branch code already exists');
+        }
+        if (error.code === 'P2025') {
+          throw new NotFoundException('Филиал не найден');
+        }
+      }
+
+      throw new BadRequestException('Не удалось изменить тип филиала');
+    }
   }
 
   async delete(user: AuthUser, id: string) {
@@ -377,6 +605,16 @@ export class BranchesService {
     oldWarehouseId: string | null | undefined,
     newWarehouseId: string | null | undefined,
   ) {
+    await this.auditHqWarehouseAssignmentInTx(this.prisma, user, branchId, oldWarehouseId, newWarehouseId);
+  }
+
+  private async auditHqWarehouseAssignmentInTx(
+    tx: Prisma.TransactionClient | PrismaService,
+    user: AuthUser,
+    branchId: string,
+    oldWarehouseId: string | null | undefined,
+    newWarehouseId: string | null | undefined,
+  ) {
     const action = !oldWarehouseId && newWarehouseId
       ? 'BRANCH_HQ_WAREHOUSE_ASSIGNED'
       : oldWarehouseId && !newWarehouseId
@@ -387,7 +625,7 @@ export class BranchesService {
 
     if (!action) return;
 
-    await this.prisma.auditLog.create({
+    await tx.auditLog.create({
       data: {
         userId: user.id,
         role: user.role,

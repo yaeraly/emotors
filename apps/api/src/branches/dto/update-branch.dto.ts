@@ -1,6 +1,11 @@
 import { BranchStatus, BranchType } from '@prisma/client';
-import { Type } from 'class-transformer';
-import { IsDate, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsDate, IsEnum, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+
+function emptyStringToNull({ value }: { value: unknown }) {
+  if (value === '') return null;
+  return value;
+}
 
 export class UpdateBranchDto {
   @IsOptional()
@@ -34,7 +39,7 @@ export class UpdateBranchDto {
   status?: BranchStatus;
 
   @IsOptional()
-  @IsEnum(BranchType)
+  @IsEnum(BranchType, { message: 'Указан некорректный тип филиала' })
   branchType?: BranchType;
 
   @IsOptional()
@@ -43,6 +48,22 @@ export class UpdateBranchDto {
   openedAt?: Date;
 
   @IsOptional()
+  @Transform(emptyStringToNull)
+  @ValidateIf((_, value) => value !== null && value !== undefined)
   @IsString()
   assignedHqWarehouseId?: string | null;
+
+  @IsOptional()
+  @Transform(emptyStringToNull)
+  @ValidateIf((_, value) => value !== null && value !== undefined)
+  @IsString()
+  priceProfileId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  branchTypeChangeReasonCode?: string;
+
+  @IsOptional()
+  @IsString()
+  branchTypeChangeReasonComment?: string;
 }

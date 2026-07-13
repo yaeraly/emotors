@@ -468,6 +468,11 @@ export function canAssignBranchHqWarehouse(user: Pick<AuthUser, 'role' | 'roles'
   return hasAnyFullAccessRole(resolveUserRoles(user));
 }
 
+/** Only full-access HQ roles (CEO/OWNER/SYSTEM_ADMIN) may change Branch Type. */
+export function canChangeBranchType(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return hasAnyFullAccessRole(resolveUserRoles(user));
+}
+
 /** Only Branch Manager (MANAGER) creates routine HQ orders; CEO/OWNER for exceptional cases. */
 export function canCreateBranchHqOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);

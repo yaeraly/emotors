@@ -1227,6 +1227,12 @@ export function canAssignBranchHqWarehouse(user: Pick<User, 'role' | 'roles' | '
   return hasFullAccess(user);
 }
 
+/** Only full-access HQ roles (CEO/OWNER/SYSTEM_ADMIN) may change Branch Type. */
+export function canChangeBranchType(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user);
+}
+
 export function canManageBranches(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   if (hasFullAccess(user)) return true;
