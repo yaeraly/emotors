@@ -190,6 +190,13 @@ export class OperationsService {
         hqWarehouseId,
         requestId: request.id,
         branchId: request.branchId,
+        requestNumber: request.requestNumber,
+      });
+      await this.auditBranchRequest(user, request.branchId, 'HQ_SALES_BRANCH_ORDER_OPENED', 'BranchPurchaseRequest', request.id, {
+        hqWarehouseId,
+        requestId: request.id,
+        branchId: request.branchId,
+        requestNumber: request.requestNumber,
       });
     }
     const canViewAll = this.canViewAllBranchPurchaseRequests(user);

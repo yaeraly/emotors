@@ -10,6 +10,7 @@ import {
   canManageOwnBranchProductRequest,
   canSeeHqStockInBranchRequests,
   canViewBranchPurchaseRequests,
+  isHqSalesManagerUser,
 } from '@/lib/rbac';
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -157,6 +158,9 @@ export default function BranchPurchaseRequestDetailPage() {
   const [user, setUser] = useState<User | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [lineDecisions, setLineDecisions] = useState<Record<string, LineDecision>>({});
@@ -169,24 +173,66 @@ export default function BranchPurchaseRequestDetailPage() {
     return message;
   }
 
+  function resolveLoadError(err: unknown) {
+    const message = err instanceof Error ? err.message : t('common.error');
+    if (message.includes('not found') || message.includes('Not Found') || message.includes('404')) {
+      setNotFound(true);
+      return;
+    }
+    if (
+      message.includes('Forbidden') ||
+      message.includes('HQ_SALES_MANAGER_ACCESS_DENIED') ||
+      message.includes('нет доступа')
+    ) {
+      setForbidden(true);
+      return;
+    }
+    setError(isHqSalesManagerUser(user) ? t('operations.hqBranchOrderLoadError') : message);
+  }
+
   async function load() {
-    const [detail, me, branchList, bwList] = await Promise.all([
-      apiFetch<RequestDetail>(`/branch-purchase-requests/${params.id}`),
-      apiFetch<User>('/auth/me'),
-      apiFetch<Branch[]>('/branches'),
-      apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'),
-    ]);
-    setRequest(detail);
-    setUser(me);
-    setBranches(branchList);
-    setWarehouses(bwList);
-    setLineDecisions(
-      Object.fromEntries(detail.items.map((item) => [item.id, defaultLineDecision(item)])),
-    );
+    if (!params.id) {
+      setNotFound(true);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setNotFound(false);
+    setForbidden(false);
+
+    try {
+      const [detail, me] = await Promise.all([
+        apiFetch<RequestDetail>(`/branch-purchase-requests/${params.id}`),
+        apiFetch<User>('/auth/me'),
+      ]);
+      setRequest(detail);
+      setUser(me);
+      setLineDecisions(
+        Object.fromEntries(detail.items.map((item) => [item.id, defaultLineDecision(item)])),
+      );
+
+      void Promise.all([
+        apiFetch<Branch[]>('/branches'),
+        apiFetch<Warehouse[]>('/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'),
+      ])
+        .then(([branchList, bwList]) => {
+          setBranches(branchList);
+          setWarehouses(bwList);
+        })
+        .catch(() => null);
+    } catch (err) {
+      setRequest(null);
+      resolveLoadError(err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void load().catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id, t]);
 
   function updateLineDecision(itemId: string, patch: Partial<LineDecision>) {
@@ -266,6 +312,9 @@ export default function BranchPurchaseRequestDetailPage() {
   const canView = canViewBranchPurchaseRequests(user);
   const canSeeHqStock = canSeeHqStockInBranchRequests(user);
   const branchOnlyView = !canSeeHqStock;
+  const hqSalesView = isHqSalesManagerUser(user);
+  const listHref = '/branch-purchase-requests';
+  const listLabel = hqSalesView ? t('operations.hqBranchRequests') : t('operations.branchPurchaseRequests');
 
   const reviewable = useMemo(() => request && isSubmittedStatus(request.status), [request]);
   const reviewed = useMemo(() => request && (Boolean(request.reviewedAt) || isReviewedStatus(request.status)), [request]);
@@ -287,7 +336,41 @@ export default function BranchPurchaseRequestDetailPage() {
   if (user && !canView) {
     return (
       <ProtectedShell>
-        <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t('common.forbiddenMessage')}</p>
+        <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t('operations.hqBranchOrderForbidden')}</p>
+      </ProtectedShell>
+    );
+  }
+
+  if (loading) {
+    return (
+      <ProtectedShell>
+        <p className="text-slate-600">{t('operations.hqBranchOrderLoading')}</p>
+      </ProtectedShell>
+    );
+  }
+
+  if (notFound) {
+    return (
+      <ProtectedShell>
+        <section className="space-y-4">
+          <Link href={listHref} className="text-sm font-semibold text-blue-600">
+            ← {listLabel}
+          </Link>
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('operations.hqBranchOrderNotFound')}</p>
+        </section>
+      </ProtectedShell>
+    );
+  }
+
+  if (forbidden) {
+    return (
+      <ProtectedShell>
+        <section className="space-y-4">
+          <Link href={listHref} className="text-sm font-semibold text-blue-600">
+            ← {listLabel}
+          </Link>
+          <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{t('operations.hqBranchOrderForbidden')}</p>
+        </section>
       </ProtectedShell>
     );
   }
@@ -295,7 +378,14 @@ export default function BranchPurchaseRequestDetailPage() {
   if (!request) {
     return (
       <ProtectedShell>
-        <p className="text-slate-600">{t('common.loading')}</p>
+        <section className="space-y-4">
+          <Link href={listHref} className="text-sm font-semibold text-blue-600">
+            ← {listLabel}
+          </Link>
+          <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error || t('operations.hqBranchOrderLoadError')}
+          </p>
+        </section>
       </ProtectedShell>
     );
   }
@@ -314,8 +404,8 @@ export default function BranchPurchaseRequestDetailPage() {
       <section className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <Link href="/branch-purchase-requests" className="text-sm font-semibold text-blue-600">
-              ← {t('operations.branchPurchaseRequests')}
+            <Link href={listHref} className="text-sm font-semibold text-blue-600">
+              ← {listLabel}
             </Link>
             <h2 className="mt-2 text-3xl font-bold text-slate-950">{request.requestNumber}</h2>
             <p className="mt-1 text-sm text-slate-500">{resolveRequestStatusLabel(t, request, branchOnlyView)}</p>

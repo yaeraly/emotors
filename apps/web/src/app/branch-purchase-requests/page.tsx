@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
@@ -144,6 +145,7 @@ function resolveRequestStatusLabel(
 
 export default function BranchPurchaseRequestsPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const productSearchRef = useRef<HTMLInputElement>(null);
   const [requests, setRequests] = useState<BranchPurchaseRequest[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -347,6 +349,12 @@ export default function BranchPurchaseRequestsPage() {
   const branchWarehouseView = isBranchWarehouseOperator(user);
   const branchOwnerView = isBranchOwnerUser(user);
   const hqSalesView = isHqSalesManagerUser(user);
+  const detailHref = (requestId: string) => `/branch-purchase-requests/${requestId}`;
+
+  function openRequest(requestId: string) {
+    if (!requestId) return;
+    router.push(detailHref(requestId));
+  }
   const draftProductIds = lines
     .map((line) => line.productId)
     .filter(Boolean)
@@ -614,8 +622,20 @@ export default function BranchPurchaseRequestsPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {requests.map((request) => (
-                <tr key={request.id}>
-                  <td className="px-4 py-3 font-bold">{request.requestNumber}</td>
+                <tr
+                  key={request.id}
+                  onClick={() => openRequest(request.id)}
+                  className="cursor-pointer hover:bg-slate-50"
+                >
+                  <td className="px-4 py-3 font-bold">
+                    <Link
+                      href={detailHref(request.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      className="text-blue-700 hover:underline"
+                    >
+                      {request.requestNumber}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3">{branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId}</td>
                   {hqSalesView ? <td className="px-4 py-3">{request.createdBy?.fullName ?? '-'}</td> : null}
                   {hqSalesView ? (
@@ -637,9 +657,9 @@ export default function BranchPurchaseRequestsPage() {
                     <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                   ) : null}
                   <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
                     <div className="flex flex-wrap gap-2">
-                      <Link href={`/branch-purchase-requests/${request.id}`} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">
+                      <Link href={detailHref(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">
                         {t('common.open')}
                       </Link>
                       {canCreate && request.status === 'DRAFT' ? (
@@ -653,7 +673,7 @@ export default function BranchPurchaseRequestsPage() {
                       ) : null}
                       {canManage && isSubmittedStatus(request.status) ? (
                         <>
-                          <Link href={`/branch-purchase-requests/${request.id}`} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+                          <Link href={detailHref(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
                             {t('branchProductRequest.reviewRequest')}
                           </Link>
                           <button type="button" onClick={() => void review(request.id, 'reject')} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('distribution.reject')}</button>

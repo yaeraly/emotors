@@ -217,6 +217,7 @@ export class InventoryController {
     Role.WAREHOUSE_MANAGER,
     Role.WAREHOUSE_OPERATOR,
     Role.SUPPLY_CHAIN_MANAGER,
+    Role.HQ_SALES_MANAGER,
   )
   warehouses(
     @CurrentUser() user: AuthUser,

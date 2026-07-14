@@ -2546,6 +2546,10 @@ export class InventoryService {
       })
     ).map((row) => row.warehouseId);
 
+    if (!assignedIds.length) {
+      return;
+    }
+
     if (!assignedIds.includes(warehouseId)) {
       await this.auditHqStockLookupDenied(user, warehouseId, branchId);
       throw new ForbiddenException({

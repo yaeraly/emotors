@@ -9,7 +9,7 @@ export const HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES = {
 export const HQ_SALES_MANAGER_ACCESS_DENIED = 'HQ_SALES_MANAGER_ACCESS_DENIED';
 
 export const HQ_SALES_MANAGER_ACCESS_DENIED_MESSAGES = {
-  ru: 'У вас нет доступа к заявкам этого HQ склада.',
-  ky: 'Бул HQ складдын заявкаларына кирүүгө укугуңуз жок.',
-  en: 'You do not have access to requests for this HQ warehouse.',
+  ru: 'У вас нет доступа к этому заказу филиала.',
+  ky: 'Бул филиал заказына кирүүгө укугуңуз жок.',
+  en: 'You do not have access to this branch order.',
 } as const;
