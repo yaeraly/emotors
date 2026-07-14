@@ -288,6 +288,9 @@ enum BranchPurchaseRequestLineStatus {
 enum BranchRequestLineRejectionReason {
   NO_PRICING_POLICY
   OUT_OF_STOCK
+  INSUFFICIENT_STOCK
+  PRODUCT_INACTIVE
+  PRODUCT_NOT_AVAILABLE_FOR_BRANCH
   OTHER
 }
 
@@ -332,6 +335,13 @@ enum BranchPurchaseRequestStatus {
   APPROVED
   PARTIALLY_APPROVED
   REJECTED
+  PENDING_BRANCH_CONFIRMATION
+  BRANCH_CONFIRMED
+  BRANCH_DECLINED
+  PENDING_PAYMENT
+  PAYMENT_SUBMITTED
+  PAYMENT_CONFIRMED
+  READY_FOR_HQ_WAREHOUSE
   CONVERTED_TO_DISTRIBUTION_ORDER
   SENT_TO_HQ_WAREHOUSE
   SHIPPED
@@ -339,6 +349,26 @@ enum BranchPurchaseRequestStatus {
   RECEIVED_WITH_DIFFERENCE
   COMPLETED
   CANCELLED
+}
+
+enum HqStockBookingStatus {
+  ACTIVE
+  CONFIRMED
+  RELEASED
+  EXPIRED
+  CONSUMED
+}
+
+enum HqStockBookingReleaseReason {
+  HQ_SALES_REJECTED
+  HQ_SALES_REMOVED
+  BRANCH_DECLINED
+  CANCELLED
+  EXPIRED
+  PAYMENT_EXPIRED
+  INSTALLMENT_REJECTED
+  PARTIAL_APPROVAL_EXCESS
+  OTHER
 }
 
 enum BranchRequestShortageStatus {
@@ -900,6 +930,7 @@ model Branch {
   branchPurchaseRequests BranchPurchaseRequest[]
   branchRequestShortages BranchRequestShortage[]
   branchRequestIssues    BranchRequestIssue[]
+  hqStockBookings        HqStockBooking[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1242,6 +1273,9 @@ model User {
   reviewedBranchRequestShortages BranchRequestShortage[] @relation("BranchRequestShortageReviewer")
   createdSupplyInquiries SupplyInquiry[] @relation("SupplyInquiryCreator")
   respondedSupplyInquiries SupplyInquiry[] @relation("SupplyInquiryResponder")
+  createdHqStockBookings HqStockBooking[] @relation("HqStockBookingCreator")
+  confirmedHqStockBookings HqStockBooking[] @relation("HqStockBookingConfirmer")
+  releasedHqStockBookings HqStockBooking[] @relation("HqStockBookingReleaser")
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   deletedAt      DateTime?
@@ -1580,6 +1614,7 @@ model Warehouse {
   assignedBranches Branch[] @relation("BranchAssignedHqWarehouse")
   assignedBranchRequests BranchPurchaseRequest[] @relation("BranchRequestAssignedHqWarehouse")
   branchRequestShortages BranchRequestShortage[] @relation("BranchRequestShortageWarehouse")
+  hqStockBookings        HqStockBooking[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -1710,6 +1745,7 @@ model Product {
   branchRequestShortages BranchRequestShortage[]
   branchRequestIssues    BranchRequestIssue[]
   supplyInquiries        SupplyInquiry[]
+  hqStockBookings        HqStockBooking[]
   stockMovements    StockMovement[]
   inventoryBalances InventoryBalance[]
   saleItems         SaleItem[]
@@ -2894,6 +2930,7 @@ model BranchDistributionOrder {
   shortageReports        ShortageReport[]
   branchInvoice          BranchInvoice?
   pickingTask            HqWarehousePickingTask?
+  stockBookings          HqStockBooking[]
   createdAt              DateTime                      @default(now())
   updatedAt              DateTime                      @updatedAt
   deletedAt              DateTime?
@@ -3949,6 +3986,10 @@ model BranchPurchaseRequest {
   shortages          BranchRequestShortage[]
   issues             BranchRequestIssue[]
   supplyInquiries    SupplyInquiry[]
+  stockBookings      HqStockBooking[]
+  bookingExpiresAt   DateTime?
+  branchConfirmedAt  DateTime?
+  branchDeclinedAt   DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
   deletedAt          DateTime?
@@ -3959,6 +4000,7 @@ model BranchPurchaseRequest {
   @@index([status])
   @@index([createdById])
   @@index([convertedOrderId])
+  @@index([bookingExpiresAt])
 }
 
 model BranchPurchaseRequestItem {
@@ -3973,6 +4015,10 @@ model BranchPurchaseRequestItem {
   unit                      String   @default("pcs")
   currentBranchStock        Int      @default(0)
   hqAvailableStock          Int?
+  hqPhysicalStock           Int?
+  bookedQuantity            Int      @default(0)
+  bookingExpiresAt          DateTime?
+  approvedLineTotalKgs      Decimal? @db.Decimal(14, 2)
   wholesalePriceKgs         Decimal  @default(0) @db.Decimal(14, 2)
   transportExpenseAllocation Decimal @default(0) @db.Decimal(14, 2)
   estimatedUnitCost         Decimal  @default(0) @db.Decimal(14, 2)
@@ -3996,6 +4042,7 @@ model BranchPurchaseRequestItem {
   shortages                 BranchRequestShortage[]
   issues                    BranchRequestIssue[]
   supplyInquiries           SupplyInquiry[]
+  stockBookings             HqStockBooking[]
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -4003,6 +4050,47 @@ model BranchPurchaseRequestItem {
   @@index([productId])
   @@index([lineStatus])
   @@index([pricingPolicyVersionId])
+}
+
+model HqStockBooking {
+  id                    String                      @id @default(cuid())
+  warehouseId           String
+  warehouse             Warehouse                   @relation(fields: [warehouseId], references: [id])
+  productId             String
+  product               Product                     @relation(fields: [productId], references: [id])
+  branchId              String
+  branch                Branch                      @relation(fields: [branchId], references: [id])
+  requestId             String
+  request               BranchPurchaseRequest       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requestLineId         String
+  requestLine           BranchPurchaseRequestItem   @relation(fields: [requestLineId], references: [id], onDelete: Cascade)
+  distributionOrderId   String?
+  distributionOrder     BranchDistributionOrder?    @relation(fields: [distributionOrderId], references: [id], onDelete: SetNull)
+  bookedQuantity        Int
+  confirmedQuantity     Int?
+  consumedQuantity      Int                         @default(0)
+  status                HqStockBookingStatus        @default(ACTIVE)
+  bookedAt              DateTime                    @default(now())
+  expiresAt             DateTime
+  confirmedAt           DateTime?
+  releasedAt            DateTime?
+  consumedAt            DateTime?
+  createdById           String
+  createdBy             User                        @relation("HqStockBookingCreator", fields: [createdById], references: [id])
+  confirmedById         String?
+  confirmedBy           User?                       @relation("HqStockBookingConfirmer", fields: [confirmedById], references: [id])
+  releasedById          String?
+  releasedBy            User?                       @relation("HqStockBookingReleaser", fields: [releasedById], references: [id])
+  releaseReason         HqStockBookingReleaseReason?
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+
+  @@index([warehouseId, productId, status])
+  @@index([requestId])
+  @@index([requestLineId])
+  @@index([status, expiresAt])
+  @@index([distributionOrderId])
+  @@index([branchId])
 }
 
 model BranchRequestIssue {

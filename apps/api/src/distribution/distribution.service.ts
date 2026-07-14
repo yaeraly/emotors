@@ -18,6 +18,7 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
+import { HqStockBookingService } from '../inventory/hq-stock-booking.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -65,6 +66,7 @@ export class DistributionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly hqStockBookingService: HqStockBookingService,
     private readonly notificationsService: NotificationsService,
     private readonly pricingFifoService: PricingFifoService,
     private readonly pricingResolutionService: PricingResolutionService,
@@ -181,8 +183,8 @@ export class DistributionService {
     });
   }
 
-  approve(user: AuthUser, id: string) {
-    if (!canManageDistributionOrders(user)) {
+  approve(user: AuthUser, id: string, options?: { skipStockReservation?: boolean; skipPermissionCheck?: boolean }) {
+    if (!options?.skipPermissionCheck && !canManageDistributionOrders(user)) {
       throw new ForbiddenException('Недостаточно прав для утверждения заказа распределения');
     }
     return this.prisma.$transaction(async (tx) => {
@@ -200,38 +202,40 @@ export class DistributionService {
       }
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
-      for (const item of order.items) {
-        const inventoryProduct = await this.resolveSourceInventoryProduct(
-          tx,
-          order.sourceWarehouseId,
-          item.productId,
-          item.sku,
-        );
-        const balance = await tx.inventoryBalance.findUnique({
-          where: {
-            branchId_warehouseId_productId: {
-              branchId: inventoryProduct.branchId,
-              warehouseId: order.sourceWarehouseId,
-              productId: inventoryProduct.productId,
-            },
-          },
-        });
-        const availableQuantity = (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0);
-        if (availableQuantity < item.quantity) {
-          throw new BadRequestException(
-            `Insufficient available stock for SKU ${item.sku}. Requested: ${item.quantity} Available: ${availableQuantity}`,
+      if (!options?.skipStockReservation) {
+        for (const item of order.items) {
+          const inventoryProduct = await this.resolveSourceInventoryProduct(
+            tx,
+            order.sourceWarehouseId,
+            item.productId,
+            item.sku,
           );
-        }
-        await tx.inventoryBalance.update({
-          where: {
-            branchId_warehouseId_productId: {
-              branchId: inventoryProduct.branchId,
-              warehouseId: order.sourceWarehouseId,
-              productId: inventoryProduct.productId,
+          const balance = await tx.inventoryBalance.findUnique({
+            where: {
+              branchId_warehouseId_productId: {
+                branchId: inventoryProduct.branchId,
+                warehouseId: order.sourceWarehouseId,
+                productId: inventoryProduct.productId,
+              },
             },
-          },
-          data: { reservedQuantity: { increment: item.quantity } },
-        });
+          });
+          const availableQuantity = (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0);
+          if (availableQuantity < item.quantity) {
+            throw new BadRequestException(
+              `Insufficient available stock for SKU ${item.sku}. Requested: ${item.quantity} Available: ${availableQuantity}`,
+            );
+          }
+          await tx.inventoryBalance.update({
+            where: {
+              branchId_warehouseId_productId: {
+                branchId: inventoryProduct.branchId,
+                warehouseId: order.sourceWarehouseId,
+                productId: inventoryProduct.productId,
+              },
+            },
+            data: { reservedQuantity: { increment: item.quantity } },
+          });
+        }
       }
 
       const updated = await tx.branchDistributionOrder.update({
@@ -258,8 +262,8 @@ export class DistributionService {
     });
   }
 
-  sendInvoice(user: AuthUser, id: string) {
-    if (!canManageDistributionOrders(user)) {
+  sendInvoice(user: AuthUser, id: string, options?: { skipPermissionCheck?: boolean }) {
+    if (!options?.skipPermissionCheck && !canManageDistributionOrders(user)) {
       throw new ForbiddenException('Недостаточно прав для отправки счёта');
     }
     return this.prisma.$transaction(async (tx) => {
@@ -577,7 +581,16 @@ export class DistributionService {
             },
           },
         });
-        const availableQuantity = (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0);
+        const booking = await tx.hqStockBooking.findFirst({
+          where: {
+            distributionOrderId: order.id,
+            productId: inventoryProduct.productId,
+            status: 'CONFIRMED',
+          },
+        });
+        const bookedForOrder = booking?.confirmedQuantity ?? booking?.bookedQuantity ?? 0;
+        const availableQuantity =
+          (balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0) + bookedForOrder;
         if (availableQuantity < item.quantity) {
           throw new BadRequestException(
             `Insufficient stock for SKU ${item.sku}. Requested: ${item.quantity} Available: ${availableQuantity}`,
@@ -645,6 +658,17 @@ export class DistributionService {
           data: { reservedQuantity: { decrement: item.quantity } },
         });
       }
+
+      await this.hqStockBookingService.consumeBookingsForDispatch(
+        tx,
+        user,
+        order.id,
+        order.items.map((item) => ({
+          productId: item.productId,
+          sku: item.sku,
+          quantity: item.quantity,
+        })),
+      );
 
       const updated = await tx.branchDistributionOrder.update({
         where: { id: order.id },
@@ -1308,6 +1332,33 @@ export class DistributionService {
         where: { id: invoice.id },
         include: this.invoiceInclude(),
       });
+
+      if (status === BranchInvoiceStatus.PAID && order) {
+        const linkedRequest = await tx.branchPurchaseRequest.findFirst({
+          where: { convertedOrderId: order.id, deletedAt: null },
+        });
+        if (linkedRequest) {
+          await tx.branchPurchaseRequest.update({
+            where: { id: linkedRequest.id },
+            data: { status: 'READY_FOR_HQ_WAREHOUSE' },
+          });
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              role: user.role,
+              action: 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE',
+              entity: 'BranchPurchaseRequest',
+              entityId: linkedRequest.id,
+              metadata: {
+                distributionOrderId: order.id,
+                invoiceId: invoice.id,
+                roles: user.roles ?? [user.role],
+              },
+            },
+          });
+        }
+      }
+
       return this.toInvoiceResponse(updated);
     });
   }

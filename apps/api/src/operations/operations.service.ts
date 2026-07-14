@@ -8,6 +8,7 @@ import {
   BranchRequestIssueType,
   BranchRequestLineRejectionReason,
   BranchRequestShortageStatus,
+  HqStockBookingReleaseReason,
   SupplyAbsenceReason,
   SupplyInquiryStatus,
   FileAttachmentEntityType,
@@ -29,6 +30,8 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
+import { HqStockBookingService } from '../inventory/hq-stock-booking.service';
+import { addBookingHours, BRANCH_CONFIRMATION_BOOKING_HOURS } from '../inventory/hq-stock-booking.constants';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NotificationQueryDto } from '../notifications/dto/notification-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -120,6 +123,7 @@ export class OperationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
+    private readonly hqStockBookingService: HqStockBookingService,
     private readonly notificationsService: NotificationsService,
     private readonly assignmentService: HqWarehouseAssignmentService,
     private readonly salesManagerAssignmentService: HqSalesManagerAssignmentService,
@@ -383,6 +387,35 @@ export class OperationsService {
       include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
     });
 
+    if (status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ && assignedHqWarehouseId) {
+      await this.prisma.$transaction(async (tx) => {
+        const bookingResults = await this.hqStockBookingService.createBookingsForRequestSubmit(tx, user, {
+          requestId: request.id,
+          branchId,
+          warehouseId: assignedHqWarehouseId,
+          lines: request.items.map((item) => ({
+            requestLineId: item.id,
+            productId: item.productId,
+            sku: item.sku,
+            requestedQuantity: item.quantity,
+          })),
+        });
+        const bookingExpiresAt = bookingResults.find((row) => row.expiresAt)?.expiresAt ?? null;
+        await tx.branchPurchaseRequest.update({
+          where: { id: request.id },
+          data: { bookingExpiresAt },
+        });
+        for (const result of bookingResults) {
+          if (!result.bookingId) continue;
+          await this.auditInTx(tx, user, branchId, 'HQ_STOCK_BOOKING_CREATED', 'HqStockBooking', result.bookingId, {
+            requestId: request.id,
+            requestLineId: result.requestLineId,
+            bookedQuantity: result.bookedQuantity,
+          });
+        }
+      });
+    }
+
     await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
     await this.auditBranchRequest(user, branchId, 'BRANCH_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
     for (const item of request.items) {
@@ -503,14 +536,48 @@ export class OperationsService {
         where: { requestId: id },
         data: { lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW },
       });
-      return tx.branchPurchaseRequest.update({
+
+      const requestWithItems = await tx.branchPurchaseRequest.findFirstOrThrow({
+        where: { id },
+        include: { items: true },
+      });
+
+      const bookingResults = await this.hqStockBookingService.createBookingsForRequestSubmit(tx, user, {
+        requestId: id,
+        branchId: existing.branchId,
+        warehouseId: assignedHqWarehouseId,
+        lines: requestWithItems.items.map((item) => ({
+          requestLineId: item.id,
+          productId: item.productId,
+          sku: item.sku,
+          requestedQuantity: item.quantity,
+        })),
+      });
+
+      const bookingExpiresAt = bookingResults.find((row) => row.expiresAt)?.expiresAt ?? null;
+
+      const request = await tx.branchPurchaseRequest.update({
         where: { id },
         data: {
           status: BranchPurchaseRequestStatus.SUBMITTED_TO_HQ,
           assignedHqWarehouseId,
+          bookingExpiresAt,
         },
         include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
       });
+
+      for (const result of bookingResults) {
+        if (!result.bookingId) continue;
+        await this.auditInTx(tx, user, existing.branchId, 'HQ_STOCK_BOOKING_CREATED', 'HqStockBooking', result.bookingId, {
+          requestId: id,
+          requestLineId: result.requestLineId,
+          bookedQuantity: result.bookedQuantity,
+          hqPhysicalStock: result.hqPhysicalStock,
+          hqAvailableStock: result.hqAvailableStock,
+        });
+      }
+
+      return request;
     });
 
     await this.auditBranchRequest(user, updated.branchId, 'BRANCH_REQUEST_SUBMITTED', 'BranchPurchaseRequest', id, {
@@ -547,10 +614,18 @@ export class OperationsService {
       throw new BadRequestException('Only draft or submitted HQ orders can be cancelled');
     }
 
-    const updated = await this.prisma.branchPurchaseRequest.update({
-      where: { id },
-      data: { status: BranchPurchaseRequestStatus.CANCELLED },
-      include: { items: true },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.releaseAllForRequestInTx(
+        tx,
+        user,
+        id,
+        HqStockBookingReleaseReason.CANCELLED,
+      );
+      return tx.branchPurchaseRequest.update({
+        where: { id },
+        data: { status: BranchPurchaseRequestStatus.CANCELLED },
+        include: { items: true },
+      });
     });
 
     await this.auditBranchRequest(user, updated.branchId, 'HQ_ORDER_CANCELLED', 'BranchPurchaseRequest', id);
@@ -587,6 +662,12 @@ export class OperationsService {
 
     if (status === BranchPurchaseRequestStatus.REJECTED) {
       const updated = await this.prisma.$transaction(async (tx) => {
+        await this.hqStockBookingService.releaseAllForRequestInTx(
+          tx,
+          user,
+          id,
+          HqStockBookingReleaseReason.HQ_SALES_REJECTED,
+        );
         for (const item of existing.items) {
           await tx.branchPurchaseRequestItem.update({
             where: { id: item.id },
@@ -596,12 +677,14 @@ export class OperationsService {
               unavailableQuantity: item.quantity,
               rejectionReasonCode: BranchRequestLineRejectionReason.OTHER,
               publicComment: dto?.publicComment?.trim() || 'Заявка отклонена',
+              bookedQuantity: 0,
+              bookingExpiresAt: null,
             },
           });
         }
         return tx.branchPurchaseRequest.update({
           where: { id },
-          data: { status, reviewedById: user.id, reviewedAt: new Date() },
+          data: { status, reviewedById: user.id, reviewedAt: new Date(), bookingExpiresAt: null },
           include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
         });
       });
@@ -643,6 +726,20 @@ export class OperationsService {
       existing.items.map((item) => ({ productId: item.productId, sku: item.sku })),
       { branchId: existing.branchId },
     );
+    const bookedMap = await this.hqStockBookingService.getActiveBookedQuantityByLine(existing.id);
+    const physicalStockMap = await this.getHqPhysicalStockMap(
+      assignedHqWarehouseId,
+      existing.items.map((item) => ({ productId: item.productId, sku: item.sku })),
+    );
+    const activeBookings = await this.prisma.hqStockBooking.findMany({
+      where: {
+        requestId: existing.id,
+        status: { in: ['ACTIVE', 'CONFIRMED'] },
+      },
+      select: { id: true, requestLineId: true },
+    });
+    const bookingIdByLine = new Map(activeBookings.map((row) => [row.requestLineId, row.id]));
+    const branchConfirmationExpiresAt = addBookingHours(new Date(), BRANCH_CONFIRMATION_BOOKING_HOURS);
     const pricingAvailability = await this.resolveBranchRequestPricingAvailability(
       existing.branchId,
       existing.items.map((item) => ({
@@ -669,6 +766,8 @@ export class OperationsService {
         publicComment: string | null;
         notifyCeoNoPricingPolicy: boolean;
         notifyCeoOutOfStock: boolean;
+        generalAvailable: number;
+        bookedQuantity: number;
       }> = [];
 
       for (const item of existing.items) {
@@ -677,19 +776,23 @@ export class OperationsService {
           throw new BadRequestException(`Missing review decision for line ${item.sku}`);
         }
 
-        const available = stockMap.get(item.productId) ?? 0;
+        const generalAvailable = stockMap.get(item.productId) ?? 0;
+        const bookedQuantity = bookedMap.get(item.id) ?? item.bookedQuantity ?? 0;
         const hasPricingPolicy = pricingAvailability.get(item.id) ?? false;
 
         let resolved;
         try {
           resolved = resolveLineReview(input, {
             requestedQuantity: item.quantity,
-            availableQuantity: available,
+            availableQuantity: generalAvailable,
+            bookedQuantity,
             hasPricingPolicy,
           });
         } catch (error) {
           if (error instanceof Error && error.message === 'APPROVED_QUANTITY_EXCEEDS_AVAILABLE') {
-            throw new BadRequestException(`Cannot approve more than available HQ stock for ${item.sku}`);
+            throw new BadRequestException(
+              `На складе HQ недостаточно товара для утверждения указанного количества (${item.sku})`,
+            );
           }
           throw error;
         }
@@ -707,13 +810,53 @@ export class OperationsService {
           data: {
             approvedQuantity: resolved.approvedQuantity,
             unavailableQuantity: resolved.unavailableQuantity,
-            hqAvailableStock: available,
+            hqAvailableStock: this.hqStockBookingService.availableForRequestLine(generalAvailable, bookedQuantity),
+            hqPhysicalStock: physicalStockMap.get(item.productId) ?? item.hqPhysicalStock ?? 0,
             lineStatus: resolved.lineStatus,
             rejectionReasonCode: resolved.rejectionReasonCode,
             publicComment: resolved.publicComment,
             hasPricingPolicyAtReview: hasPricingPolicy,
+            approvedLineTotalKgs:
+              resolved.approvedQuantity > 0 && item.resolvedBranchPriceKgs != null
+                ? Math.round(
+                    (Number(item.resolvedBranchPriceKgs) * resolved.approvedQuantity + Number.EPSILON) * 100,
+                  ) / 100
+                : null,
+            bookingExpiresAt:
+              resolved.approvedQuantity > 0 ? branchConfirmationExpiresAt : null,
+            bookedQuantity:
+              resolved.approvedQuantity > 0 ? resolved.approvedQuantity : 0,
           },
         });
+
+        const bookingId = bookingIdByLine.get(item.id);
+        if (bookingId) {
+          if (resolved.approvedQuantity > 0) {
+            await this.hqStockBookingService.confirmBookingInTx(
+              tx,
+              user,
+              bookingId,
+              resolved.approvedQuantity,
+              branchConfirmationExpiresAt,
+            );
+            await this.auditInTx(tx, user, existing.branchId, 'HQ_STOCK_BOOKING_CONFIRMED', 'HqStockBooking', bookingId, {
+              requestId: existing.id,
+              requestLineId: item.id,
+              approvedQuantity: resolved.approvedQuantity,
+            });
+          } else {
+            const releaseReason =
+              resolved.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES
+                ? HqStockBookingReleaseReason.HQ_SALES_REMOVED
+                : HqStockBookingReleaseReason.HQ_SALES_REJECTED;
+            await this.hqStockBookingService.releaseBookingInTx(tx, user, bookingId, releaseReason);
+            await this.auditInTx(tx, user, existing.branchId, 'HQ_STOCK_BOOKING_RELEASED', 'HqStockBooking', bookingId, {
+              requestId: existing.id,
+              requestLineId: item.id,
+              reason: releaseReason,
+            });
+          }
+        }
 
         if (resolved.unavailableQuantity > 0 || resolved.approvedQuantity < item.quantity) {
           const missingQty = Math.max(item.quantity - resolved.approvedQuantity, 0);
@@ -724,7 +867,7 @@ export class OperationsService {
               branchId: existing.branchId,
               productId: item.productId,
               requestedQty: item.quantity,
-              availableQty: available,
+              availableQty: generalAvailable + bookedQuantity,
               approvedQty: resolved.approvedQuantity,
               missingQty,
               assignedHqWarehouseId,
@@ -739,6 +882,8 @@ export class OperationsService {
         resolvedLines.push({
           itemId: item.id,
           ...resolved,
+          generalAvailable,
+          bookedQuantity,
         });
       }
 
@@ -750,18 +895,24 @@ export class OperationsService {
         })),
       );
 
+      const requestStatus =
+        derivedStatus === 'REJECTED'
+          ? BranchPurchaseRequestStatus.REJECTED
+          : derivedStatus === 'PARTIALLY_APPROVED'
+            ? BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION
+            : BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION;
+
       const request = await tx.branchPurchaseRequest.update({
         where: { id },
         data: {
-          status:
-            derivedStatus === 'REJECTED'
-              ? BranchPurchaseRequestStatus.REJECTED
-              : derivedStatus === 'PARTIALLY_APPROVED'
-                ? BranchPurchaseRequestStatus.PARTIALLY_APPROVED
-                : BranchPurchaseRequestStatus.APPROVED,
+          status: requestStatus,
           reviewedById: user.id,
           reviewedAt: new Date(),
           assignedHqWarehouseId,
+          bookingExpiresAt:
+            requestStatus === BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION
+              ? branchConfirmationExpiresAt
+              : null,
         },
         include: {
           items: true,
@@ -781,7 +932,7 @@ export class OperationsService {
             issueType: BranchRequestIssueType.NO_PRICING_POLICY,
             request,
             item,
-            availableQuantity: stockMap.get(item.productId) ?? 0,
+            availableQuantity: line.generalAvailable + line.bookedQuantity,
             unavailableQuantity: line.unavailableQuantity,
             publicComment: line.publicComment,
             hqWarehouseId: assignedHqWarehouseId,
@@ -797,24 +948,24 @@ export class OperationsService {
             issueType: BranchRequestIssueType.OUT_OF_STOCK,
             request,
             item,
-            availableQuantity: stockMap.get(item.productId) ?? 0,
+            availableQuantity: line.generalAvailable + line.bookedQuantity,
             unavailableQuantity: line.unavailableQuantity || item.quantity,
             publicComment: line.publicComment,
             hqWarehouseId: assignedHqWarehouseId,
             alertType: AlertType.BRANCH_REQUEST_OUT_OF_STOCK,
-            alertTitle: 'Недостаточно товара на складе HQ',
+            alertTitle: 'Товара недостаточно на складе HQ',
             alertMessage: `Филиал '${branchName}' заказал товар, но на складе HQ недостаточно остатков.`,
           });
         }
 
         const auditAction =
           line.lineStatus === BranchPurchaseRequestLineStatus.APPROVED
-            ? 'BRANCH_REQUEST_LINE_APPROVED'
+            ? 'HQ_SALES_LINE_APPROVED'
             : line.lineStatus === BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED
-              ? 'BRANCH_REQUEST_LINE_PARTIALLY_APPROVED'
+              ? 'HQ_SALES_LINE_PARTIALLY_APPROVED'
               : line.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES
                 ? 'BRANCH_REQUEST_LINE_REMOVED'
-                : 'BRANCH_REQUEST_LINE_REJECTED';
+                : 'HQ_SALES_LINE_REJECTED';
 
         await this.auditInTx(tx, user, existing.branchId, auditAction, 'BranchPurchaseRequestItem', item.id, {
           requestId: existing.id,
@@ -822,7 +973,8 @@ export class OperationsService {
           branchId: existing.branchId,
           productId: item.productId,
           requestedQuantity: item.quantity,
-          availableQuantity: stockMap.get(item.productId) ?? 0,
+          bookedQuantity: line.bookedQuantity,
+          availableQuantity: line.generalAvailable + line.bookedQuantity,
           approvedQuantity: line.approvedQuantity,
           unavailableQuantity: line.unavailableQuantity,
           reasonCode: line.rejectionReasonCode,
@@ -854,6 +1006,259 @@ export class OperationsService {
     await this.notifyBranchSalesReviewOutcome(user, updated);
 
     return updated;
+  }
+
+  async confirmBranchPurchaseRequest(user: AuthUser, id: string) {
+    if (!canManageOwnBranchProductRequest(user)) {
+      throw new ForbiddenException('Only Branch Sales Manager can confirm HQ-approved orders');
+    }
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
+      },
+      include: {
+        items: true,
+        branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
+      },
+    });
+    if (!existing) throw new NotFoundException('Branch purchase request not found');
+    if (existing.status !== BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION) {
+      throw new BadRequestException('Заказ не ожидает согласования филиалом');
+    }
+    if (existing.convertedOrderId) {
+      throw new BadRequestException('Invoice already created for this request');
+    }
+
+    const hasApprovedLines = existing.items.some((item) => (item.approvedQuantity ?? 0) > 0);
+    if (!hasApprovedLines) {
+      throw new BadRequestException('No approved quantity available to confirm');
+    }
+
+    const assignedHqWarehouseId =
+      existing.assignedHqWarehouseId ?? (await this.getBranchAssignedHqWarehouseId(existing.branchId));
+    if (!assignedHqWarehouseId) {
+      throw new BadRequestException(NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH);
+    }
+
+    const destinationWarehouse = await this.prisma.warehouse.findFirst({
+      where: {
+        deletedAt: null,
+        isActive: true,
+        warehouseType: 'BRANCH',
+        branchId: existing.branchId,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!destinationWarehouse) {
+      throw new BadRequestException('No active branch warehouse found for this branch');
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const orderItems = [];
+      let totalAmount = 0;
+      let totalCost = 0;
+
+      for (const item of existing.items) {
+        const quantity = item.approvedQuantity ?? 0;
+        if (quantity <= 0) continue;
+
+        const priceSnapshot = await this.pricingResolution.resolveWithFreeze(existing.branchId, item.productId, {
+          auditUser: user,
+          auditEntity: 'BranchPurchaseRequestItem',
+        });
+        const unitPrice = Number(
+          priceSnapshot.resolvedPriceKgs ?? item.resolvedBranchPriceKgs ?? item.wholesalePriceKgs,
+        );
+        const product = await tx.product.findFirst({
+          where: { id: item.productId, deletedAt: null },
+        });
+        if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
+        const unitCost = Number(product.finalCostKgs);
+        const lineCost = Math.round((unitCost * quantity + Number.EPSILON) * 100) / 100;
+        const linePrice = Math.round((unitPrice * quantity + Number.EPSILON) * 100) / 100;
+        totalCost += lineCost;
+        totalAmount += linePrice;
+
+        await tx.branchPurchaseRequestItem.update({
+          where: { id: item.id },
+          data: {
+            resolvedBranchPriceKgs: unitPrice,
+            pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId ?? item.pricingPolicyVersionId,
+            pricingProfileId: priceSnapshot.pricingProfileId ?? item.pricingProfileId,
+            appliedRuleType: priceSnapshot.appliedRuleType ?? item.appliedRuleType,
+            appliedRuleId: priceSnapshot.appliedRuleId ?? item.appliedRuleId,
+            appliedAdjustmentMode: priceSnapshot.appliedAdjustmentMode ?? item.appliedAdjustmentMode,
+            appliedAdjustmentValue: priceSnapshot.appliedAdjustmentValue ?? item.appliedAdjustmentValue,
+            priceResolvedAt: new Date(),
+            approvedLineTotalKgs: linePrice,
+          },
+        });
+
+        orderItems.push({
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+          quantity,
+          unitCost,
+          unitPrice,
+          totalCost: lineCost,
+          totalPrice: linePrice,
+          profit: Math.round((linePrice - lineCost + Number.EPSILON) * 100) / 100,
+          pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId,
+          pricingProfileId: priceSnapshot.pricingProfileId,
+          resolvedPriceKgs: unitPrice,
+          appliedRuleType: priceSnapshot.appliedRuleType,
+          appliedRuleId: priceSnapshot.appliedRuleId,
+          appliedAdjustmentMode: priceSnapshot.appliedAdjustmentMode,
+          appliedAdjustmentValue: priceSnapshot.appliedAdjustmentValue,
+          priceResolvedAt: new Date(),
+        });
+      }
+
+      if (!orderItems.length) {
+        throw new BadRequestException('No approved quantity available to confirm');
+      }
+
+      const createdOrder = await tx.branchDistributionOrder.create({
+        data: {
+          orderNumber: `DO-${existing.requestNumber}`,
+          branchId: existing.branchId,
+          sourceWarehouseId: assignedHqWarehouseId,
+          destinationWarehouseId: destinationWarehouse.id,
+          status: BranchDistributionOrderStatus.DRAFT,
+          createdById: user.id,
+          note: existing.note,
+          totalAmount,
+          totalCost,
+          totalProfit: Math.round((totalAmount - totalCost + Number.EPSILON) * 100) / 100,
+          items: { create: orderItems },
+        },
+        include: { items: true },
+      });
+
+      await this.hqStockBookingService.linkBookingsToDistributionOrder(tx, existing.id, createdOrder.id);
+      await this.hqStockBookingService.extendBookingsForPayment(existing.id, tx);
+
+      const request = await tx.branchPurchaseRequest.update({
+        where: { id: existing.id },
+        data: {
+          status: BranchPurchaseRequestStatus.BRANCH_CONFIRMED,
+          branchConfirmedAt: new Date(),
+          convertedOrderId: createdOrder.id,
+        },
+        include: {
+          items: true,
+          createdBy: { select: { id: true, fullName: true, role: true } },
+          branch: { select: { id: true, name: true } },
+        },
+      });
+
+      await this.auditInTx(tx, user, existing.branchId, 'BRANCH_ORDER_CONFIRMED', 'BranchPurchaseRequest', existing.id, {
+        distributionOrderId: createdOrder.id,
+      });
+
+      return { request, createdOrder };
+    });
+
+    const approvedOrder = await this.distributionService.approve(user, result.createdOrder.id, {
+      skipStockReservation: true,
+      skipPermissionCheck: true,
+    });
+    await this.distributionService.sendInvoice(user, result.createdOrder.id, { skipPermissionCheck: true });
+
+    await this.notificationsService.notify(user, {
+      type: AlertType.BRANCH_INVOICE_CREATED,
+      branchId: existing.branchId,
+      entityType: 'BranchInvoice',
+      entityId: approvedOrder.branchInvoice?.id ?? result.createdOrder.id,
+      referenceNumber: existing.requestNumber,
+      title: 'Новый счёт по заказу товаров',
+      message: `Создан счёт по заказу ${existing.requestNumber}.`,
+      recipientRoles: [Role.ACCOUNTANT],
+    });
+    await this.auditBranchRequest(user, existing.branchId, 'BRANCH_INVOICE_CREATED', 'BranchPurchaseRequest', existing.id, {
+      distributionOrderId: result.createdOrder.id,
+    });
+
+    return result.request;
+  }
+
+  async declineBranchPurchaseRequest(user: AuthUser, id: string, dto?: { publicComment?: string }) {
+    if (!canManageOwnBranchProductRequest(user)) {
+      throw new ForbiddenException('Only Branch Sales Manager can decline HQ-approved orders');
+    }
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canViewAllBranchPurchaseRequests(user) ? {} : { branchId: user.branchId }),
+      },
+      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+    });
+    if (!existing) throw new NotFoundException('Branch purchase request not found');
+    if (existing.status !== BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION) {
+      throw new BadRequestException('Заказ не ожидает согласования филиалом');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.releaseAllForRequestInTx(
+        tx,
+        user,
+        id,
+        HqStockBookingReleaseReason.BRANCH_DECLINED,
+      );
+      return tx.branchPurchaseRequest.update({
+        where: { id },
+        data: {
+          status: BranchPurchaseRequestStatus.BRANCH_DECLINED,
+          branchDeclinedAt: new Date(),
+          bookingExpiresAt: null,
+          note: dto?.publicComment?.trim() || existing.note,
+        },
+        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+      });
+    });
+
+    await this.auditBranchRequest(user, updated.branchId, 'BRANCH_ORDER_DECLINED', 'BranchPurchaseRequest', id);
+    await this.notificationsService.notify(user, {
+      type: AlertType.BRANCH_ORDER_REJECTED,
+      branchId: existing.branchId,
+      entityType: 'BranchPurchaseRequest',
+      entityId: id,
+      referenceNumber: existing.requestNumber,
+      title: 'Филиал отклонил заказ',
+      message: `Филиал отказался от согласования заказа ${existing.requestNumber}.`,
+      recipientRoles: [Role.HQ_SALES_MANAGER],
+    });
+
+    return updated;
+  }
+
+  async markBranchRequestPaymentConfirmed(user: AuthUser, requestId: string) {
+    const request = await this.prisma.branchPurchaseRequest.findFirst({
+      where: { id: requestId, deletedAt: null },
+    });
+    if (!request?.convertedOrderId) return null;
+
+    const order = await this.prisma.branchDistributionOrder.findFirst({
+      where: { id: request.convertedOrderId, deletedAt: null },
+      include: { branchInvoice: true },
+    });
+    if (!order?.branchInvoice || order.branchInvoice.status !== 'PAID') return null;
+
+    return this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.extendBookingsAfterPayment(request.id, tx);
+      return tx.branchPurchaseRequest.update({
+        where: { id: request.id },
+        data: {
+          status: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE,
+        },
+      });
+    });
   }
 
   async branchRequestIssues(user: AuthUser) {
@@ -1188,18 +1593,18 @@ export class OperationsService {
     if (!request) throw new NotFoundException('Branch purchase request not found');
     await this.assertBranchPurchaseRequestAccess(user, request);
     if (
+      request.status !== BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE &&
+      request.status !== BranchPurchaseRequestStatus.PAYMENT_CONFIRMED &&
       request.status !== BranchPurchaseRequestStatus.APPROVED &&
-      request.status !== BranchPurchaseRequestStatus.PARTIALLY_APPROVED
+      request.status !== BranchPurchaseRequestStatus.PARTIALLY_APPROVED &&
+      request.status !== BranchPurchaseRequestStatus.BRANCH_CONFIRMED
     ) {
-      throw new BadRequestException('Only approved requests can be sent to HQ warehouse');
+      throw new BadRequestException('Order must be financially cleared before HQ warehouse fulfillment');
     }
 
     const hasApprovedLines = request.items.some((item) => (item.approvedQuantity ?? 0) > 0);
     if (!hasApprovedLines) {
       throw new BadRequestException('No approved quantity available to send to HQ warehouse');
-    }
-    if (request.convertedOrderId) {
-      throw new BadRequestException('Request has already been routed to HQ warehouse');
     }
 
     const assignedHqWarehouseId =
@@ -1208,6 +1613,41 @@ export class OperationsService {
       await this.auditBranchRequest(user, request.branchId, 'ROUTING_DENIED_NO_HQ_WAREHOUSE', 'BranchPurchaseRequest', id);
       await this.auditBranchRequest(user, request.branchId, 'ROUTING_DENIED_NO_ASSIGNED_WAREHOUSE', 'BranchPurchaseRequest', id);
       throw new BadRequestException(NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH);
+    }
+
+    const managerAssignments = await this.prisma.hqWarehouseManagerAssignment.findMany({
+      where: {
+        warehouseId: assignedHqWarehouseId,
+        status: 'ACTIVE',
+      },
+      orderBy: { assignedAt: 'asc' },
+    });
+    const assignedWarehouseManagerId = managerAssignments[0]?.userId;
+
+    if (
+      request.convertedOrderId &&
+      (request.status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE ||
+        request.status === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED ||
+        request.status === BranchPurchaseRequestStatus.BRANCH_CONFIRMED)
+    ) {
+      if (!assignedWarehouseManagerId && !dto.confirmNoManager && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+        throw new BadRequestException(NO_HQ_WAREHOUSE_MANAGER_ASSIGNED);
+      }
+      const approvedOrder = await this.distributionService.sendToWarehouse(user, request.convertedOrderId, {
+        assignedWarehouseManagerId,
+      });
+      await this.prisma.branchPurchaseRequest.update({
+        where: { id: request.id },
+        data: { status: BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE },
+      });
+      await this.auditBranchRequest(user, request.branchId, 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE', 'BranchPurchaseRequest', request.id, {
+        distributionOrderId: request.convertedOrderId,
+      });
+      return approvedOrder;
+    }
+
+    if (request.convertedOrderId) {
+      throw new BadRequestException('Request has already been routed to HQ warehouse');
     }
 
     const sourceWarehouse = await this.prisma.warehouse.findFirst({
@@ -1233,14 +1673,6 @@ export class OperationsService {
       throw new BadRequestException('No active branch warehouse found for this branch');
     }
 
-    const managerAssignments = await this.prisma.hqWarehouseManagerAssignment.findMany({
-      where: {
-        warehouseId: assignedHqWarehouseId,
-        status: 'ACTIVE',
-      },
-      orderBy: { assignedAt: 'asc' },
-    });
-    const assignedWarehouseManagerId = managerAssignments[0]?.userId;
     if (!assignedWarehouseManagerId && !dto.confirmNoManager && !hasAnyFullAccessRole(resolveUserRoles(user))) {
       await this.auditBranchRequest(user, request.branchId, 'ROUTING_DENIED_NO_HQ_WAREHOUSE', 'BranchPurchaseRequest', id, {
         hqWarehouseId: assignedHqWarehouseId,
@@ -4395,8 +4827,35 @@ export class OperationsService {
     }
   }
 
+  private async getHqPhysicalStockMap(
+    warehouseId: string,
+    items: Array<{ productId: string; sku: string }>,
+  ) {
+    const stockMap = await this.inventoryService.getAvailableQuantityMap(
+      null,
+      warehouseId,
+      items,
+      { skipAccessCheck: true },
+    );
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: {
+        warehouseId,
+        product: { OR: items.map((item) => ({ id: item.productId, sku: item.sku })) },
+      },
+      select: { productId: true, quantity: true },
+    });
+    const physicalByProduct = new Map(balances.map((row) => [row.productId, row.quantity]));
+    const result = new Map<string, number>();
+    for (const item of items) {
+      const generalAvailable = stockMap.get(item.productId) ?? 0;
+      result.set(item.productId, physicalByProduct.get(item.productId) ?? generalAvailable);
+    }
+    return result;
+  }
+
   private async enrichBranchPurchaseRequestWithHqStock<
     T extends {
+      id: string;
       branchId: string;
       assignedHqWarehouseId?: string | null;
       branch?: { assignedHqWarehouseId?: string | null } | null;
@@ -4422,6 +4881,11 @@ export class OperationsService {
       request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
       { branchId: request.branchId },
     );
+    const bookedMap = await this.hqStockBookingService.getActiveBookedQuantityByLine(request.id);
+    const physicalStockMap = await this.getHqPhysicalStockMap(
+      assignedHqWarehouseId,
+      request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
+    );
     const pricingAvailability = await this.resolveBranchRequestPricingAvailability(
       request.branchId,
       request.items.map((item) => ({
@@ -4436,14 +4900,25 @@ export class OperationsService {
 
     return {
       ...request,
+      bookingExpiresAt: (request as { bookingExpiresAt?: Date | null }).bookingExpiresAt ?? null,
       items: request.items.map((item) => {
-        const available = stockMap.get(item.productId) ?? 0;
+        const generalAvailable = stockMap.get(item.productId) ?? 0;
+        const bookedQuantity = bookedMap.get(item.id) ?? (item as { bookedQuantity?: number }).bookedQuantity ?? 0;
+        const availableForThisRequest = this.hqStockBookingService.availableForRequestLine(
+          generalAvailable,
+          bookedQuantity,
+        );
         const approved = item.approvedQuantity ?? null;
         const missingQty =
-          approved !== null ? Math.max(item.quantity - approved, 0) : Math.max(item.quantity - available, 0);
+          approved !== null
+            ? Math.max(item.quantity - approved, 0)
+            : Math.max(item.quantity - availableForThisRequest, 0);
         return {
           ...item,
-          hqAvailableStock: available,
+          bookedQuantity,
+          hqPhysicalStock: physicalStockMap.get(item.productId) ?? (item as { hqPhysicalStock?: number | null }).hqPhysicalStock ?? null,
+          hqAvailableStock: generalAvailable,
+          availableForThisRequest,
           missingQty,
           pricingPolicyAvailable: pricingAvailability.get(item.id) ?? false,
         };

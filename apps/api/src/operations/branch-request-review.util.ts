@@ -15,8 +15,15 @@ export type LineReviewInput = {
 export type LineReviewContext = {
   requestedQuantity: number;
   availableQuantity: number;
+  bookedQuantity?: number;
   hasPricingPolicy: boolean;
 };
+
+function availableForApproval(context: LineReviewContext) {
+  const general = Math.max(context.availableQuantity, 0);
+  const booked = Math.max(context.bookedQuantity ?? 0, 0);
+  return general + booked;
+}
 
 export type ResolvedLineReview = {
   lineStatus: BranchPurchaseRequestLineStatus;
@@ -38,7 +45,7 @@ export function resolveLineReview(
   context: LineReviewContext,
 ): ResolvedLineReview {
   const requested = Math.max(context.requestedQuantity, 0);
-  const available = Math.max(context.availableQuantity, 0);
+  const available = availableForApproval(context);
   const comment = input.publicComment?.trim() || null;
 
   if (!context.hasPricingPolicy) {
@@ -125,6 +132,23 @@ export function resolveLineReview(
 
   if (requestedApproved > available) {
     throw new Error('APPROVED_QUANTITY_EXCEEDS_AVAILABLE');
+  }
+
+  if (
+    input.action === 'PARTIAL' &&
+    requestedApproved < requested &&
+    !comment
+  ) {
+    return {
+      lineStatus: BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED,
+      approvedQuantity: requestedApproved,
+      unavailableQuantity: requested - requestedApproved,
+      rejectionReasonCode: null,
+      publicComment: `На складе HQ доступно только ${requestedApproved} шт.`,
+      hasPricingPolicy: context.hasPricingPolicy,
+      notifyCeoNoPricingPolicy: false,
+      notifyCeoOutOfStock: false,
+    };
   }
 
   if (requestedApproved >= requested) {

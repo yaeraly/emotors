@@ -29,6 +29,10 @@ type RequestItem = {
   unit: string;
   currentBranchStock?: number;
   hqAvailableStock?: number | null;
+  hqPhysicalStock?: number | null;
+  bookedQuantity?: number | null;
+  availableForThisRequest?: number | null;
+  bookingExpiresAt?: string | null;
   missingQty?: number | null;
   pricingPolicyAvailable?: boolean;
   lineStatus?: string | null;
@@ -77,6 +81,7 @@ type RequestDetail = {
   totalEstimatedAmount?: number;
   convertedOrderId?: string | null;
   reviewedAt?: string | null;
+  bookingExpiresAt?: string | null;
   createdAt: string;
   createdBy?: { id: string; fullName: string; role: string };
   items: RequestItem[];
@@ -87,7 +92,24 @@ function isSubmittedStatus(status: string) {
 }
 
 function isReviewedStatus(status: string) {
-  return ['APPROVED', 'PARTIALLY_APPROVED', 'REJECTED', 'SENT_TO_HQ_WAREHOUSE', 'SHIPPED', 'RECEIVED', 'COMPLETED'].includes(status);
+  return [
+    'APPROVED',
+    'PARTIALLY_APPROVED',
+    'REJECTED',
+    'PENDING_BRANCH_CONFIRMATION',
+    'BRANCH_CONFIRMED',
+    'BRANCH_DECLINED',
+    'READY_FOR_HQ_WAREHOUSE',
+    'PAYMENT_CONFIRMED',
+    'SENT_TO_HQ_WAREHOUSE',
+    'SHIPPED',
+    'RECEIVED',
+    'COMPLETED',
+  ].includes(status);
+}
+
+function availableForLine(item: RequestItem) {
+  return item.availableForThisRequest ?? (item.hqAvailableStock ?? 0) + (item.bookedQuantity ?? 0);
 }
 
 function resolveRequestStatusLabel(
@@ -140,7 +162,7 @@ function translateRejectionReason(t: (key: string) => string, code?: string | nu
 }
 
 function defaultLineDecision(item: RequestItem): LineDecision {
-  const available = item.hqAvailableStock ?? 0;
+  const available = availableForLine(item);
   const hasPolicy = item.pricingPolicyAvailable !== false;
   if (!hasPolicy || available <= 0) {
     return { action: 'REJECT', approvedQuantity: 0, publicComment: '' };
@@ -243,13 +265,37 @@ export default function BranchPurchaseRequestDetailPage() {
   }
 
   function setLineAction(item: RequestItem, action: LineReviewAction) {
-    const available = item.hqAvailableStock ?? 0;
+    const available = availableForLine(item);
     if (action === 'APPROVE') {
       updateLineDecision(item.id, { action, approvedQuantity: Math.min(item.quantity, available), publicComment: '' });
     } else if (action === 'PARTIAL') {
       updateLineDecision(item.id, { action, approvedQuantity: Math.min(available, item.quantity - 1) || available, publicComment: '' });
     } else {
       updateLineDecision(item.id, { action, approvedQuantity: 0, publicComment: lineDecisions[item.id]?.publicComment ?? '' });
+    }
+  }
+
+  async function confirmBranchOrder() {
+    if (!request) return;
+    setError('');
+    try {
+      await apiFetch(`/branch-purchase-requests/${request.id}/confirm`, { method: 'POST', body: JSON.stringify({}) });
+      setSuccess(t('branchProductRequest.branchConfirmed'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function declineBranchOrder() {
+    if (!request) return;
+    setError('');
+    try {
+      await apiFetch(`/branch-purchase-requests/${request.id}/decline`, { method: 'POST', body: JSON.stringify({}) });
+      setSuccess(t('branchProductRequest.branchDeclined'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -424,7 +470,17 @@ export default function BranchPurchaseRequestDetailPage() {
                 </button>
               </>
             ) : null}
-            {canManage && (request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED' || request.status === 'CONFIRMED') ? (
+            {canCreate && request.status === 'PENDING_BRANCH_CONFIRMATION' ? (
+              <>
+                <button type="button" onClick={() => void confirmBranchOrder()} className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white">
+                  {t('branchProductRequest.confirmOrder')}
+                </button>
+                <button type="button" onClick={() => void declineBranchOrder()} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-600">
+                  {t('branchProductRequest.declineOrder')}
+                </button>
+              </>
+            ) : null}
+            {canManage && (request.status === 'READY_FOR_HQ_WAREHOUSE' || request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED') ? (
               <button type="button" onClick={() => void sendToHqWarehouse()} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
                 {t('branchHqRouting.sendToWarehouseManager')}
               </button>
@@ -502,7 +558,10 @@ export default function BranchPurchaseRequestDetailPage() {
                 <th className="px-4 py-3">{t('branchProductRequest.requestedQuantity')}</th>
                 {canSeeHqStock ? (
                   <>
+                    <th className="px-4 py-3">{t('branchProductRequest.bookedQuantity')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.physicalStock')}</th>
                     <th className="px-4 py-3">{t('branchProductRequest.availableQuantity')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.availableForRequest')}</th>
                     <th className="px-4 py-3">{t('branchProductRequest.pricingPolicyStatus')}</th>
                     <th className="px-4 py-3">{t('branchProductRequest.approvedQuantity')}</th>
                     <th className="px-4 py-3">{t('branchProductRequest.missingQuantity')}</th>
@@ -546,7 +605,8 @@ export default function BranchPurchaseRequestDetailPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {request.items.map((item) => {
-                const available = item.hqAvailableStock ?? 0;
+                const generalAvailable = item.hqAvailableStock ?? 0;
+                const available = availableForLine(item);
                 const decision = lineDecisions[item.id] ?? defaultLineDecision(item);
                 const hasPolicy = item.pricingPolicyAvailable !== false;
                 const approvedValue = reviewable
@@ -567,8 +627,15 @@ export default function BranchPurchaseRequestDetailPage() {
                     <td className="px-4 py-3">{item.quantity}</td>
                     {canSeeHqStock ? (
                       <>
+                        <td className="px-4 py-3">{item.bookedQuantity ?? 0}</td>
+                        <td className="px-4 py-3">{item.hqPhysicalStock ?? '—'}</td>
                         <td className="px-4 py-3">
-                          <span className={available <= 0 ? 'font-semibold text-red-600' : ''}>{available}</span>
+                          <span className={generalAvailable <= 0 ? 'font-semibold text-red-600' : ''}>{generalAvailable}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={available <= 0 ? 'font-semibold text-red-600' : 'font-semibold text-green-700'}>
+                            {available}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           {hasPolicy ? (

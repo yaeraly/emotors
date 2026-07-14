@@ -105,6 +105,18 @@ export class OperationsController {
     return this.service.submitBranchPurchaseRequestReview(user, id, dto);
   }
 
+  @Post('branch-purchase-requests/:id/confirm')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  confirmBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.confirmBranchPurchaseRequest(user, id);
+  }
+
+  @Post('branch-purchase-requests/:id/decline')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
+  declineBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
+    return this.service.declineBranchPurchaseRequest(user, id, dto);
+  }
+
   @Get('branch-request-issues')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
   branchRequestIssues(@CurrentUser() user: AuthUser) {

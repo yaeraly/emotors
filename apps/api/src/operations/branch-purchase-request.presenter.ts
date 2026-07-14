@@ -14,6 +14,10 @@ const REVIEWED_REQUEST_STATUSES = new Set<BranchPurchaseRequestStatus>([
   BranchPurchaseRequestStatus.APPROVED,
   BranchPurchaseRequestStatus.PARTIALLY_APPROVED,
   BranchPurchaseRequestStatus.REJECTED,
+  BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+  BranchPurchaseRequestStatus.BRANCH_CONFIRMED,
+  BranchPurchaseRequestStatus.BRANCH_DECLINED,
+  BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE,
   BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE,
   BranchPurchaseRequestStatus.SHIPPED,
   BranchPurchaseRequestStatus.RECEIVED,
@@ -37,6 +41,14 @@ export function resolveBranchDisplayStatus(
   if (status === BranchPurchaseRequestStatus.SUBMITTED || status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ) {
     return 'SUBMITTED';
   }
+  if (status === BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION) {
+    return 'PENDING_BRANCH_CONFIRMATION';
+  }
+  if (status === BranchPurchaseRequestStatus.BRANCH_CONFIRMED) return 'BRANCH_CONFIRMED';
+  if (status === BranchPurchaseRequestStatus.BRANCH_DECLINED) return 'BRANCH_DECLINED';
+  if (status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE) return 'READY_FOR_HQ_WAREHOUSE';
+  if (status === BranchPurchaseRequestStatus.PENDING_PAYMENT) return 'PENDING_PAYMENT';
+  if (status === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED) return 'PAYMENT_CONFIRMED';
   if (status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED || (status === BranchPurchaseRequestStatus.APPROVED && hasPartial)) {
     return 'PARTIALLY_APPROVED';
   }
