@@ -184,6 +184,23 @@ function defaultLineDecision(item: RequestItem, hqStockLoaded: boolean): LineDec
   return { action: 'PARTIAL', approvedQuantity: available, publicComment: '' };
 }
 
+function hqDetailThClass(compact: boolean) {
+  return compact ? 'px-2 py-1.5 text-[10px] whitespace-nowrap' : 'px-4 py-3';
+}
+
+function hqDetailTdClass(compact: boolean, extra = '') {
+  return compact ? `px-2 py-1.5 ${extra}`.trim() : `px-4 py-3 ${extra}`.trim();
+}
+
+function hqDetailLabel(
+  t: (key: string) => string,
+  compact: boolean,
+  compactKey: string,
+  fullKey: string,
+) {
+  return compact ? t(`branchProductRequest.hqCompact.${compactKey}`) : t(fullKey);
+}
+
 export default function BranchPurchaseRequestDetailPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
@@ -379,6 +396,7 @@ export default function BranchPurchaseRequestDetailPage() {
   const hqStockLoaded = request?.hqStockStatus !== 'unavailable';
   const branchOnlyView = !canSeeHqStock;
   const hqSalesView = isHqSalesManagerUser(user);
+  const hqCompactTable = hqSalesView && !executiveCompactView;
   const listHref = '/branch-purchase-requests';
   const listLabel = hqSalesView ? t('operations.hqBranchRequests') : t('operations.branchPurchaseRequests');
 
@@ -609,54 +627,54 @@ export default function BranchPurchaseRequestDetailPage() {
               </tbody>
             </table>
           ) : (
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+          <table className={`w-full divide-y divide-slate-200 ${hqCompactTable ? 'text-xs' : 'text-sm'}`}>
+            <thead className={`bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500 ${hqCompactTable ? 'text-[10px]' : 'text-xs'}`}>
               <tr>
-                <th className="px-4 py-3">{t('sales.product')}</th>
-                <th className="px-4 py-3">{t('branchProductRequest.requestedQuantity')}</th>
+                <th className={hqDetailThClass(hqCompactTable)}>{hqDetailLabel(t, hqCompactTable, 'product', 'sales.product')}</th>
+                <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'requested', 'branchProductRequest.requestedQuantity')}</th>
                 {canSeeHqStock ? (
                   <>
-                    <th className="px-4 py-3">{t('branchProductRequest.bookedQuantity')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.physicalStock')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.availableQuantity')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.availableForRequest')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.pricingPolicyStatus')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.approvedQuantity')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.missingQuantity')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'booked', 'branchProductRequest.bookedQuantity')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'hqPhysicalStock', 'branchProductRequest.physicalStock')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'available', 'branchProductRequest.availableQuantity')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'availableForRequest', 'branchProductRequest.availableForRequest')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{hqDetailLabel(t, hqCompactTable, 'pricingPolicy', 'branchProductRequest.pricingPolicyStatus')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'approved', 'branchProductRequest.approvedQuantity')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'missing', 'branchProductRequest.missingQuantity')}</th>
                   </>
                 ) : reviewed ? (
                   <>
-                    <th className="px-4 py-3">{t('branchProductRequest.approvedQuantity')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.missingQuantity')}</th>
-                    <th className="px-4 py-3">{t('distribution.status')}</th>
-                    <th className="px-4 py-3">{t('inventoryCount.rejectionReason')}</th>
-                    <th className="px-4 py-3">{t('crm.notes')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.approvedQuantity')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.missingQuantity')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('distribution.status')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('inventoryCount.rejectionReason')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('crm.notes')}</th>
                   </>
                 ) : (
-                  <th className="px-4 py-3">{t('distribution.quantity')}</th>
+                  <th className={hqDetailThClass(hqCompactTable)}>{t('distribution.quantity')}</th>
                 )}
-                <th className="px-4 py-3">{t('branchProductRequest.unit')}</th>
-                {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.branchStock')}</th> : null}
-                {canActOnRequest && reviewable ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
+                <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'unit', 'branchProductRequest.unit')}</th>
+                {!branchOnlyView ? <th className={`${hqDetailThClass(hqCompactTable)} text-center`}>{hqDetailLabel(t, hqCompactTable, 'branchStock', 'branchProductRequest.branchStock')}</th> : null}
+                {canActOnRequest && reviewable ? <th className={`${hqDetailThClass(hqCompactTable)} ${hqCompactTable ? 'sticky right-0 bg-slate-50' : ''}`}>{hqDetailLabel(t, hqCompactTable, 'actions', 'common.actions')}</th> : null}
                 {!branchOnlyView && reviewable ? (
                   <>
-                    <th className="px-4 py-3">{t('branchProductRequest.branchPurchasePrice')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.requestLineTotal')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.approvedLineTotal')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-right`}>{hqDetailLabel(t, hqCompactTable, 'branchPrice', 'branchProductRequest.branchPurchasePrice')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-right`}>{hqDetailLabel(t, hqCompactTable, 'requestTotal', 'branchProductRequest.requestLineTotal')}</th>
+                    <th className={`${hqDetailThClass(hqCompactTable)} text-right`}>{hqDetailLabel(t, hqCompactTable, 'approvedTotal', 'branchProductRequest.approvedLineTotal')}</th>
                   </>
                 ) : null}
                 {!branchOnlyView && !reviewable ? (
                   <>
-                    <th className="px-4 py-3">{t('branchProductRequest.wholesalePrice')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.transportAllocation')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.estimatedUnitCost')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.wholesalePrice')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.transportAllocation')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.estimatedUnitCost')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.totalAmount')}</th>
                   </>
                 ) : null}
                 {branchOnlyView && !reviewed ? (
                   <>
-                    <th className="px-4 py-3">{t('branchProductRequest.branchPurchasePrice')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.branchPurchasePrice')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.totalAmount')}</th>
                   </>
                 ) : null}
               </tr>
@@ -678,16 +696,16 @@ export default function BranchPurchaseRequestDetailPage() {
 
                 return (
                   <tr key={item.id}>
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">{item.productName}</p>
-                      <p className="text-xs text-slate-500">{item.sku}</p>
+                    <td className={hqDetailTdClass(hqCompactTable, 'max-w-[9rem]')}>
+                      <p className="truncate font-semibold text-slate-900" title={item.productName}>{item.productName}</p>
+                      <p className="truncate text-[10px] text-slate-500" title={item.sku}>{item.sku}</p>
                     </td>
-                    <td className="px-4 py-3">{item.quantity}</td>
+                    <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>{item.quantity}</td>
                     {canSeeHqStock ? (
                       <>
-                        <td className="px-4 py-3">{formatHqStockCell(item.bookedQuantity, hqStockLoaded, t)}</td>
-                        <td className="px-4 py-3">{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
-                        <td className="px-4 py-3">
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>{formatHqStockCell(item.bookedQuantity, hqStockLoaded, t)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>
                           {hqStockLoaded ? (
                             <span className={(generalAvailable ?? 0) <= 0 ? 'font-semibold text-red-600' : ''}>
                               {generalAvailable}
@@ -696,7 +714,7 @@ export default function BranchPurchaseRequestDetailPage() {
                             formatHqStockCell(null, false, t)
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>
                           {hqStockLoaded ? (
                             <span className={available <= 0 ? 'font-semibold text-red-600' : 'font-semibold text-green-700'}>
                               {available}
@@ -705,14 +723,14 @@ export default function BranchPurchaseRequestDetailPage() {
                             formatHqStockCell(null, false, t)
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className={hqDetailTdClass(hqCompactTable)}>
                           {hasPolicy ? (
                             <span className="text-green-700">{t('branchProductRequest.pricingPolicyOk')}</span>
                           ) : (
                             <span className="font-semibold text-amber-700">{t('branchProductRequest.pricingPolicyMissing')}</span>
                           )}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>
                           {canActOnRequest && reviewable ? (
                             decision.action === 'PARTIAL' || decision.action === 'APPROVE' ? (
                               <input
@@ -723,7 +741,7 @@ export default function BranchPurchaseRequestDetailPage() {
                                 onChange={(event) =>
                                   updateLineDecision(item.id, { approvedQuantity: Number(event.target.value) })
                                 }
-                                className="w-24 rounded-lg border border-slate-300 px-2 py-1"
+                                className={`rounded-lg border border-slate-300 ${hqCompactTable ? 'w-14 px-1 py-0.5 text-xs' : 'w-24 px-2 py-1'}`}
                               />
                             ) : (
                               '0'
@@ -732,34 +750,34 @@ export default function BranchPurchaseRequestDetailPage() {
                             item.approvedQuantity ?? '-'
                           )}
                         </td>
-                        <td className="px-4 py-3">{missing}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>{missing}</td>
                       </>
                     ) : reviewed ? (
                       <>
-                        <td className="px-4 py-3">{item.approvedQuantity ?? 0}</td>
-                        <td className="px-4 py-3">{missing}</td>
-                        <td className="px-4 py-3">
+                        <td className={hqDetailTdClass(hqCompactTable)}>{item.approvedQuantity ?? 0}</td>
+                        <td className={hqDetailTdClass(hqCompactTable)}>{missing}</td>
+                        <td className={hqDetailTdClass(hqCompactTable)}>
                           {translateStatus(t, item.lineStatus ?? request.status, 'branchRequestLine')}
                         </td>
-                        <td className="px-4 py-3 text-slate-700">
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-slate-700')}>
                           {translateRejectionReason(t, item.rejectionReasonCode)}
                         </td>
-                        <td className="px-4 py-3 text-slate-600">{item.publicComment ?? '—'}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-slate-600')}>{item.publicComment ?? '—'}</td>
                       </>
                     ) : (
-                      <td className="px-4 py-3">{item.quantity}</td>
+                      <td className={hqDetailTdClass(hqCompactTable)}>{item.quantity}</td>
                     )}
-                    <td className="px-4 py-3">{item.unit}</td>
-                    {!branchOnlyView ? <td className="px-4 py-3">{item.currentBranchStock ?? '-'}</td> : null}
+                    <td className={hqDetailTdClass(hqCompactTable, 'text-center')}>{item.unit}</td>
+                    {!branchOnlyView ? <td className={hqDetailTdClass(hqCompactTable, 'text-center tabular-nums')}>{item.currentBranchStock ?? '-'}</td> : null}
                     {canActOnRequest && reviewable ? (
-                      <td className="px-4 py-3">
-                        <div className="flex min-w-[12rem] flex-col gap-2">
-                          <div className="flex flex-wrap gap-1">
+                      <td className={hqDetailTdClass(hqCompactTable, hqCompactTable ? 'sticky right-0 bg-white' : '')}>
+                        <div className={`flex flex-col gap-1 ${hqCompactTable ? 'min-w-[8rem]' : 'min-w-[12rem] gap-2'}`}>
+                          <div className="flex flex-wrap gap-0.5">
                             <button
                               type="button"
                               disabled={!canApproveFull}
                               onClick={() => setLineAction(item, 'APPROVE')}
-                              className={`rounded-lg px-2 py-1 text-xs font-semibold ${decision.action === 'APPROVE' ? 'bg-green-600 text-white' : 'border border-slate-300'} disabled:opacity-40`}
+                              className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'APPROVE' ? 'bg-green-600 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
                               {t('branchProductRequest.actionApprove')}
                             </button>
@@ -767,21 +785,21 @@ export default function BranchPurchaseRequestDetailPage() {
                               type="button"
                               disabled={!canPartial}
                               onClick={() => setLineAction(item, 'PARTIAL')}
-                              className={`rounded-lg px-2 py-1 text-xs font-semibold ${decision.action === 'PARTIAL' ? 'bg-amber-500 text-white' : 'border border-slate-300'} disabled:opacity-40`}
+                              className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'PARTIAL' ? 'bg-amber-500 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
                               {t('branchProductRequest.actionPartial')}
                             </button>
                             <button
                               type="button"
                               onClick={() => setLineAction(item, 'REJECT')}
-                              className={`rounded-lg px-2 py-1 text-xs font-semibold ${decision.action === 'REJECT' ? 'bg-red-600 text-white' : 'border border-slate-300'}`}
+                              className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'REJECT' ? 'bg-red-600 text-white' : 'border border-slate-300'}`}
                             >
                               {t('branchProductRequest.actionReject')}
                             </button>
                             <button
                               type="button"
                               onClick={() => setLineAction(item, 'REMOVE')}
-                              className={`rounded-lg px-2 py-1 text-xs font-semibold ${decision.action === 'REMOVE' ? 'bg-slate-700 text-white' : 'border border-slate-300'}`}
+                              className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'REMOVE' ? 'bg-slate-700 text-white' : 'border border-slate-300'}`}
                             >
                               {t('branchProductRequest.actionRemove')}
                             </button>
@@ -792,7 +810,7 @@ export default function BranchPurchaseRequestDetailPage() {
                               onChange={(event) => updateLineDecision(item.id, { publicComment: event.target.value })}
                               placeholder={t('branchProductRequest.publicCommentPlaceholder')}
                               className="w-full rounded-lg border border-slate-300 px-2 py-1 text-xs"
-                              rows={2}
+                              rows={hqCompactTable ? 1 : 2}
                             />
                           ) : null}
                         </div>
@@ -800,25 +818,25 @@ export default function BranchPurchaseRequestDetailPage() {
                     ) : null}
                     {!branchOnlyView && reviewable ? (
                       <>
-                        <td className="px-4 py-3">{formatFrozenBranchPrice(item, t)}</td>
-                        <td className="px-4 py-3">{requestLineTotal(item).toFixed(2)}</td>
-                        <td className="px-4 py-3 font-semibold text-slate-900">
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatFrozenBranchPrice(item, t)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{requestLineTotal(item).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right font-semibold tabular-nums text-slate-900')}>
                           {approvedLineTotal(item, approvedValue).toFixed(2)}
                         </td>
                       </>
                     ) : null}
                     {!branchOnlyView && !reviewable ? (
                       <>
-                        <td className="px-4 py-3">{Number(item.wholesalePriceKgs ?? 0).toFixed(2)}</td>
-                        <td className="px-4 py-3">{Number(item.transportExpenseAllocation ?? 0).toFixed(2)}</td>
-                        <td className="px-4 py-3">{Number(item.estimatedUnitCost ?? 0).toFixed(2)}</td>
-                        <td className="px-4 py-3">{Number(item.totalAmount ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.wholesalePriceKgs ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.transportExpenseAllocation ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.estimatedUnitCost ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.totalAmount ?? 0).toFixed(2)}</td>
                       </>
                     ) : null}
                     {branchOnlyView && !reviewed ? (
                       <>
-                        <td className="px-4 py-3">{Number(item.branchPurchasePriceKgs ?? 0).toFixed(2)}</td>
-                        <td className="px-4 py-3">{Number(item.totalAmount ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.branchPurchasePriceKgs ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.totalAmount ?? 0).toFixed(2)}</td>
                       </>
                     ) : null}
                   </tr>

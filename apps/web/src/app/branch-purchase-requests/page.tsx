@@ -154,6 +154,14 @@ function matchesPaymentStatusFilter(status: string, filter: string) {
   return true;
 }
 
+function hqThClass(compact: boolean) {
+  return compact ? 'px-2 py-1.5 whitespace-nowrap' : 'px-4 py-3';
+}
+
+function hqTdClass(compact: boolean, extra = '') {
+  return compact ? `px-2 py-1.5 ${extra}`.trim() : `px-4 py-3 ${extra}`.trim();
+}
+
 function resolveRequestStatusLabel(
   t: (key: string) => string,
   request: Pick<BranchPurchaseRequest, 'status' | 'branchDisplayStatus'>,
@@ -712,7 +720,7 @@ export default function BranchPurchaseRequestsPage() {
           </form>
         ) : null}
 
-        <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+        <div className={`${hqSalesView ? 'rounded-xl' : 'rounded-3xl'} border border-slate-200 bg-white shadow-sm overflow-x-auto`}>
           {loading ? (
             <p className="px-6 py-10 text-sm text-slate-600">
               {hqSalesView ? t('operations.hqBranchOrdersLoading') : t('common.loading')}
@@ -722,45 +730,52 @@ export default function BranchPurchaseRequestsPage() {
               {hqSalesView ? t('operations.hqBranchOrdersEmpty') : t('operations.branchPurchaseRequestsEmpty')}
             </p>
           ) : (
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+          <table className={`w-full divide-y divide-slate-200 ${hqSalesView ? 'text-xs' : 'text-sm'}`}>
+            <thead className={`bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500 ${hqSalesView ? 'text-[10px]' : 'text-xs'}`}>
               <tr>
-                <th className="px-4 py-3">#</th>
-                <th className="px-4 py-3">{t('distribution.branch')}</th>
+                <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.number') : '#'}</th>
+                <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.branch') : t('distribution.branch')}</th>
                 {ceoInspectorView ? (
-                  <th className="px-4 py-3">{t('common.createdDate')}</th>
+                  <th className={hqThClass(hqSalesView)}>{t('common.createdDate')}</th>
                 ) : null}
-                {hqSalesView ? <th className="px-4 py-3">{t('branchProductRequest.requestedBy')}</th> : null}
-                {hqSalesView ? <th className="px-4 py-3">{t('branchHqRouting.assignedHqWarehouse')}</th> : null}
-                {!ceoInspectorView ? <th className="px-4 py-3">{t('distribution.status')}</th> : null}
-                <th className="px-4 py-3">{t('distribution.items')}</th>
+                {hqSalesView ? <th className={hqThClass(hqSalesView)}>{t('operations.hqBranchOrdersTable.requester')}</th> : null}
+                {hqSalesView ? <th className={hqThClass(hqSalesView)}>{t('operations.hqBranchOrdersTable.hqWarehouse')}</th> : null}
+                {!ceoInspectorView ? <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.status') : t('distribution.status')}</th> : null}
+                <th className={`${hqThClass(hqSalesView)} ${hqSalesView ? 'text-center' : ''}`}>{hqSalesView ? t('operations.hqBranchOrdersTable.positions') : t('distribution.items')}</th>
                 {ceoInspectorView ? (
                   <>
-                    <th className="px-4 py-3">{t('branchProductRequest.totalQuantity')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.approvedQuantity')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.estimatedAmount')}</th>
-                    <th className="px-4 py-3">{t('distribution.status')}</th>
+                    <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.totalQuantity')}</th>
+                    <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.approvedQuantity')}</th>
+                    <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.estimatedAmount')}</th>
+                    <th className={hqThClass(hqSalesView)}>{t('distribution.status')}</th>
                   </>
                 ) : hqSalesView ? (
                   <>
-                    <th className="px-4 py-3">{t('branchProductRequest.totalQuantity')}</th>
-                    <th className="px-4 py-3">{t('branchProductRequest.estimatedAmount')}</th>
+                    <th className={`${hqThClass(hqSalesView)} text-center`}>{t('operations.hqBranchOrdersTable.quantity')}</th>
+                    <th className={`${hqThClass(hqSalesView)} text-right`}>{t('operations.hqBranchOrdersTable.amount')}</th>
                   </>
                 ) : branchOnlyView ? (
-                  <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th>
+                  <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.totalAmount')}</th>
                 ) : null}
-                {!ceoInspectorView ? <th className="px-4 py-3">{t('common.createdDate')}</th> : null}
-                <th className="px-4 py-3">{t('common.actions')}</th>
+                {!ceoInspectorView ? <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.date') : t('common.createdDate')}</th> : null}
+                <th className={`${hqThClass(hqSalesView)} ${hqSalesView ? 'sticky right-0 bg-slate-50 text-right' : ''}`}>{hqSalesView ? t('operations.hqBranchOrdersTable.actions') : t('common.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {visibleRequests.map((request) => (
+              {visibleRequests.map((request) => {
+                const branchName = branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId;
+                const hqWarehouseName =
+                  request.assignedHqWarehouse?.name ??
+                  request.branch?.assignedHqWarehouse?.name ??
+                  branches.find((branch) => branch.id === request.branchId)?.assignedHqWarehouse?.name ??
+                  '—';
+                return (
                 <tr
                   key={request.id}
                   onClick={() => openRequest(request.id)}
                   className="cursor-pointer hover:bg-slate-50"
                 >
-                  <td className="px-4 py-3 font-bold">
+                  <td className={hqTdClass(hqSalesView, 'font-bold')}>
                     <Link
                       href={detailHref(request.id)}
                       onClick={(event) => event.stopPropagation()}
@@ -769,73 +784,77 @@ export default function BranchPurchaseRequestsPage() {
                       {request.requestNumber}
                     </Link>
                   </td>
-                  <td className="px-4 py-3">{branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId}</td>
+                  <td className={hqTdClass(hqSalesView, 'max-w-[7rem] truncate')} title={String(branchName)}>
+                    {branchName}
+                  </td>
                   {ceoInspectorView ? (
-                    <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
+                    <td className={hqTdClass(hqSalesView)}>{new Date(request.createdAt).toLocaleDateString()}</td>
                   ) : null}
-                  {hqSalesView ? <td className="px-4 py-3">{request.createdBy?.fullName ?? '-'}</td> : null}
                   {hqSalesView ? (
-                    <td className="px-4 py-3">
-                      {request.assignedHqWarehouse?.name ??
-                        request.branch?.assignedHqWarehouse?.name ??
-                        branches.find((branch) => branch.id === request.branchId)?.assignedHqWarehouse?.name ??
-                        '—'}
+                    <td className={hqTdClass(hqSalesView, 'max-w-[6rem] truncate')} title={request.createdBy?.fullName ?? undefined}>
+                      {request.createdBy?.fullName ?? '-'}
+                    </td>
+                  ) : null}
+                  {hqSalesView ? (
+                    <td className={hqTdClass(hqSalesView, 'max-w-[6rem] truncate')} title={hqWarehouseName}>
+                      {hqWarehouseName}
                     </td>
                   ) : null}
                   {!ceoInspectorView ? (
-                    <td className="px-4 py-3">{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
+                    <td className={hqTdClass(hqSalesView)}>{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
                   ) : null}
-                  <td className="px-4 py-3">{request.items.length}</td>
+                  <td className={hqTdClass(hqSalesView, 'text-center tabular-nums')}>{request.items.length}</td>
                   {ceoInspectorView ? (
                     <>
-                      <td className="px-4 py-3">{totalRequestedQuantity(request)}</td>
-                      <td className="px-4 py-3">{totalApprovedQuantity(request)}</td>
-                      <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
-                      <td className="px-4 py-3">{resolveRequestStatusLabel(t, request, false)}</td>
+                      <td className={hqTdClass(hqSalesView)}>{totalRequestedQuantity(request)}</td>
+                      <td className={hqTdClass(hqSalesView)}>{totalApprovedQuantity(request)}</td>
+                      <td className={hqTdClass(hqSalesView)}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                      <td className={hqTdClass(hqSalesView)}>{resolveRequestStatusLabel(t, request, false)}</td>
                     </>
                   ) : hqSalesView ? (
                     <>
-                      <td className="px-4 py-3">{totalRequestedQuantity(request)}</td>
-                      <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                      <td className={hqTdClass(hqSalesView, 'text-center tabular-nums')}>{totalRequestedQuantity(request)}</td>
+                      <td className={hqTdClass(hqSalesView, 'text-right tabular-nums')}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                     </>
                   ) : branchOnlyView ? (
-                    <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                    <td className={hqTdClass(hqSalesView)}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                   ) : null}
                   {!ceoInspectorView ? (
-                    <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
+                    <td className={hqTdClass(hqSalesView, 'whitespace-nowrap')}>{new Date(request.createdAt).toLocaleDateString()}</td>
                   ) : null}
-                  <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
-                    <div className="flex flex-wrap gap-2">
-                      <Link href={detailHref(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">
+                  <td className={`${hqTdClass(hqSalesView)} ${hqSalesView ? 'sticky right-0 bg-white' : ''}`} onClick={(event) => event.stopPropagation()}>
+                    <div className={`flex flex-wrap gap-1 ${hqSalesView ? 'justify-end' : 'gap-2'}`}>
+                      <Link href={detailHref(request.id)} className={`rounded-lg border border-slate-300 font-semibold ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>
                         {t('common.open')}
                       </Link>
                       {canCreate && request.status === 'DRAFT' ? (
                         <>
-                          <button type="button" onClick={() => void submitDraft(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">{t('distribution.submitOrder')}</button>
-                          <button type="button" onClick={() => void cancelRequest(request.id)} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('common.cancel')}</button>
+                          <button type="button" onClick={() => void submitDraft(request.id)} className={`rounded-lg bg-blue-600 font-semibold text-white ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('distribution.submitOrder')}</button>
+                          <button type="button" onClick={() => void cancelRequest(request.id)} className={`rounded-lg border border-red-200 font-semibold text-red-600 ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('common.cancel')}</button>
                         </>
                       ) : null}
                       {canCreate && isSubmittedStatus(request.status) ? (
-                        <button type="button" onClick={() => void cancelRequest(request.id)} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('common.cancel')}</button>
+                        <button type="button" onClick={() => void cancelRequest(request.id)} className={`rounded-lg border border-red-200 font-semibold text-red-600 ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('common.cancel')}</button>
                       ) : null}
                       {canActOnRequests && isSubmittedStatus(request.status) ? (
                         <>
-                          <Link href={detailHref(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+                          <Link href={detailHref(request.id)} className={`rounded-lg bg-blue-600 font-semibold text-white ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>
                             {t('branchProductRequest.reviewRequest')}
                           </Link>
-                          <button type="button" onClick={() => void review(request.id, 'reject')} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('distribution.reject')}</button>
+                          <button type="button" onClick={() => void review(request.id, 'reject')} className={`rounded-lg border border-red-200 font-semibold text-red-600 ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('distribution.reject')}</button>
                         </>
                       ) : null}
                       {canActOnRequests && (request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED' || request.status === 'CONFIRMED') ? (
-                        <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('branchHqRouting.sendToWarehouseManager')}</button>
+                        <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className={`rounded-lg border border-slate-300 font-semibold ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('branchHqRouting.sendToWarehouseManager')}</button>
                       ) : null}
                       {request.convertedOrderId && !branchSalesManagerView ? (
-                        <Link href={`/distribution/orders/${request.convertedOrderId}`} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('scm.hub.distribution.shipmentOrders')}</Link>
+                        <Link href={`/distribution/orders/${request.convertedOrderId}`} className={`rounded-lg border border-slate-300 font-semibold ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('scm.hub.distribution.shipmentOrders')}</Link>
                       ) : null}
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
           )}
