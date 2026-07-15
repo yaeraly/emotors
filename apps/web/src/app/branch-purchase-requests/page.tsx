@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { BranchProductSearch, type BranchProductOption } from '@/components/BranchProductSearch';
@@ -160,6 +160,12 @@ function hqThClass(compact: boolean) {
 
 function hqTdClass(compact: boolean, extra = '') {
   return compact ? `px-2 py-1.5 ${extra}`.trim() : `px-4 py-3 ${extra}`.trim();
+}
+
+function hqOrderRowHint(t: (key: string) => string, status: string) {
+  return isSubmittedStatus(status)
+    ? t('operations.hqBranchOrdersRow.reviewHint')
+    : t('operations.hqBranchOrdersRow.openHint');
 }
 
 function resolveRequestStatusLabel(
@@ -412,6 +418,13 @@ export default function BranchPurchaseRequestsPage() {
   function openRequest(requestId: string) {
     if (!requestId) return;
     router.push(detailHref(requestId));
+  }
+
+  function handleOrderRowKeyDown(event: KeyboardEvent, requestId: string) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openRequest(requestId);
+    }
   }
   const draftProductIds = lines
     .map((line) => line.productId)
@@ -739,9 +752,9 @@ export default function BranchPurchaseRequestsPage() {
                   <th className={hqThClass(hqSalesView)}>{t('common.createdDate')}</th>
                 ) : null}
                 {hqSalesView ? <th className={hqThClass(hqSalesView)}>{t('operations.hqBranchOrdersTable.requester')}</th> : null}
-                {hqSalesView ? <th className={hqThClass(hqSalesView)}>{t('operations.hqBranchOrdersTable.hqWarehouse')}</th> : null}
+                {hqSalesView ? <th className={hqThClass(hqSalesView)} title={t('operations.hqBranchOrdersTable.hqWarehouseTooltip')}>{t('operations.hqBranchOrdersTable.hqWarehouse')}</th> : null}
                 {!ceoInspectorView ? <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.status') : t('distribution.status')}</th> : null}
-                <th className={`${hqThClass(hqSalesView)} ${hqSalesView ? 'text-center' : ''}`}>{hqSalesView ? t('operations.hqBranchOrdersTable.positions') : t('distribution.items')}</th>
+                <th className={`${hqThClass(hqSalesView)} ${hqSalesView ? 'text-center' : ''}`} title={hqSalesView ? t('operations.hqBranchOrdersTable.positionsTooltip') : undefined}>{hqSalesView ? t('operations.hqBranchOrdersTable.positions') : t('distribution.items')}</th>
                 {ceoInspectorView ? (
                   <>
                     <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.totalQuantity')}</th>
@@ -751,14 +764,14 @@ export default function BranchPurchaseRequestsPage() {
                   </>
                 ) : hqSalesView ? (
                   <>
-                    <th className={`${hqThClass(hqSalesView)} text-center`}>{t('operations.hqBranchOrdersTable.quantity')}</th>
-                    <th className={`${hqThClass(hqSalesView)} text-right`}>{t('operations.hqBranchOrdersTable.amount')}</th>
+                    <th className={`${hqThClass(hqSalesView)} text-center`} title={t('operations.hqBranchOrdersTable.quantityTooltip')}>{t('operations.hqBranchOrdersTable.quantity')}</th>
+                    <th className={`${hqThClass(hqSalesView)} text-right`} title={t('operations.hqBranchOrdersTable.amountTooltip')}>{t('operations.hqBranchOrdersTable.amount')}</th>
                   </>
                 ) : branchOnlyView ? (
                   <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.totalAmount')}</th>
                 ) : null}
-                {!ceoInspectorView ? <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.date') : t('common.createdDate')}</th> : null}
-                <th className={`${hqThClass(hqSalesView)} ${hqSalesView ? 'sticky right-0 bg-slate-50 text-right' : ''}`}>{hqSalesView ? t('operations.hqBranchOrdersTable.actions') : t('common.actions')}</th>
+                {!ceoInspectorView ? <th className={hqThClass(hqSalesView)} title={hqSalesView ? t('operations.hqBranchOrdersTable.dateTooltip') : undefined}>{hqSalesView ? t('operations.hqBranchOrdersTable.date') : t('common.createdDate')}</th> : null}
+                {!hqSalesView ? <th className={hqThClass(hqSalesView)}>{t('common.actions')}</th> : null}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -773,16 +786,14 @@ export default function BranchPurchaseRequestsPage() {
                 <tr
                   key={request.id}
                   onClick={() => openRequest(request.id)}
-                  className="cursor-pointer hover:bg-slate-50"
+                  onKeyDown={(event) => handleOrderRowKeyDown(event, request.id)}
+                  tabIndex={0}
+                  role="link"
+                  title={hqSalesView ? hqOrderRowHint(t, request.status) : undefined}
+                  className={`cursor-pointer hover:bg-slate-50 ${hqSalesView ? 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500' : ''}`}
                 >
-                  <td className={hqTdClass(hqSalesView, 'font-bold')}>
-                    <Link
-                      href={detailHref(request.id)}
-                      onClick={(event) => event.stopPropagation()}
-                      className="text-blue-700 hover:underline"
-                    >
-                      {request.requestNumber}
-                    </Link>
+                  <td className={hqTdClass(hqSalesView, 'font-bold text-blue-700')}>
+                    {request.requestNumber}
                   </td>
                   <td className={hqTdClass(hqSalesView, 'max-w-[7rem] truncate')} title={String(branchName)}>
                     {branchName}
@@ -822,36 +833,38 @@ export default function BranchPurchaseRequestsPage() {
                   {!ceoInspectorView ? (
                     <td className={hqTdClass(hqSalesView, 'whitespace-nowrap')}>{new Date(request.createdAt).toLocaleDateString()}</td>
                   ) : null}
-                  <td className={`${hqTdClass(hqSalesView)} ${hqSalesView ? 'sticky right-0 bg-white' : ''}`} onClick={(event) => event.stopPropagation()}>
-                    <div className={`flex flex-wrap gap-1 ${hqSalesView ? 'justify-end' : 'gap-2'}`}>
-                      <Link href={detailHref(request.id)} className={`rounded-lg border border-slate-300 font-semibold ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>
+                  {!hqSalesView ? (
+                  <td className={hqTdClass(hqSalesView)} onClick={(event) => event.stopPropagation()}>
+                    <div className="flex flex-wrap gap-2">
+                      <Link href={detailHref(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">
                         {t('common.open')}
                       </Link>
                       {canCreate && request.status === 'DRAFT' ? (
                         <>
-                          <button type="button" onClick={() => void submitDraft(request.id)} className={`rounded-lg bg-blue-600 font-semibold text-white ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('distribution.submitOrder')}</button>
-                          <button type="button" onClick={() => void cancelRequest(request.id)} className={`rounded-lg border border-red-200 font-semibold text-red-600 ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('common.cancel')}</button>
+                          <button type="button" onClick={() => void submitDraft(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">{t('distribution.submitOrder')}</button>
+                          <button type="button" onClick={() => void cancelRequest(request.id)} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('common.cancel')}</button>
                         </>
                       ) : null}
                       {canCreate && isSubmittedStatus(request.status) ? (
-                        <button type="button" onClick={() => void cancelRequest(request.id)} className={`rounded-lg border border-red-200 font-semibold text-red-600 ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('common.cancel')}</button>
+                        <button type="button" onClick={() => void cancelRequest(request.id)} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('common.cancel')}</button>
                       ) : null}
                       {canActOnRequests && isSubmittedStatus(request.status) ? (
                         <>
-                          <Link href={detailHref(request.id)} className={`rounded-lg bg-blue-600 font-semibold text-white ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>
+                          <Link href={detailHref(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
                             {t('branchProductRequest.reviewRequest')}
                           </Link>
-                          <button type="button" onClick={() => void review(request.id, 'reject')} className={`rounded-lg border border-red-200 font-semibold text-red-600 ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('distribution.reject')}</button>
+                          <button type="button" onClick={() => void review(request.id, 'reject')} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('distribution.reject')}</button>
                         </>
                       ) : null}
                       {canActOnRequests && (request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED' || request.status === 'CONFIRMED') ? (
-                        <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className={`rounded-lg border border-slate-300 font-semibold ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('branchHqRouting.sendToWarehouseManager')}</button>
+                        <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('branchHqRouting.sendToWarehouseManager')}</button>
                       ) : null}
                       {request.convertedOrderId && !branchSalesManagerView ? (
-                        <Link href={`/distribution/orders/${request.convertedOrderId}`} className={`rounded-lg border border-slate-300 font-semibold ${hqSalesView ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1 text-xs'}`}>{t('scm.hub.distribution.shipmentOrders')}</Link>
+                        <Link href={`/distribution/orders/${request.convertedOrderId}`} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('scm.hub.distribution.shipmentOrders')}</Link>
                       ) : null}
                     </div>
                   </td>
+                  ) : null}
                 </tr>
               );
               })}

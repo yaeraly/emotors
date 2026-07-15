@@ -626,6 +626,126 @@ export default function BranchPurchaseRequestDetailPage() {
                 ))}
               </tbody>
             </table>
+          ) : hqCompactTable && canSeeHqStock ? (
+          <table className="w-full divide-y divide-slate-200 text-xs">
+            <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-2 py-1.5">{t('branchProductRequest.hqCompact.product')}</th>
+                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.requested')}>{t('branchProductRequest.hqCompact.requested')}</th>
+                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.hqPhysicalStock')}>{t('branchProductRequest.hqCompact.hqPhysicalStock')}</th>
+                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.available')}>{t('branchProductRequest.hqCompact.available')}</th>
+                <th className="px-2 py-1.5" title={t('branchProductRequest.hqCompact.tooltip.pricingPolicy')}>{t('branchProductRequest.hqCompact.pricingPolicy')}</th>
+                <th className="px-2 py-1.5 text-center" title={t('branchProductRequest.hqCompact.tooltip.approved')}>{t('branchProductRequest.hqCompact.approved')}</th>
+                <th className="px-2 py-1.5 text-center">{t('branchProductRequest.hqCompact.unit')}</th>
+                <th className="hidden px-2 py-1.5 text-center md:table-cell" title={t('branchProductRequest.hqCompact.tooltip.branchStock')}>{t('branchProductRequest.hqCompact.branchStock')}</th>
+                <th className="px-2 py-1.5 text-right" title={t('branchProductRequest.hqCompact.tooltip.requestTotal')}>{t('branchProductRequest.hqCompact.requestTotal')}</th>
+                {canActOnRequest && reviewable ? (
+                  <th className="sticky right-0 bg-slate-50 px-2 py-1.5">{t('branchProductRequest.hqCompact.actions')}</th>
+                ) : null}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {request.items.map((item) => {
+                const generalAvailable = hqStockLoaded ? (item.hqAvailableStock ?? 0) : null;
+                const available = availableForLine(item, hqStockLoaded);
+                const decision = lineDecisions[item.id] ?? defaultLineDecision(item, hqStockLoaded);
+                const hasPolicy = item.pricingPolicyAvailable !== false;
+                const canApproveFull = hasPolicy && available >= item.quantity;
+                const canPartial = hasPolicy && available > 0 && available < item.quantity;
+
+                return (
+                  <tr key={item.id}>
+                    <td className="max-w-[8rem] truncate px-2 py-1.5">
+                      <p className="truncate font-semibold text-slate-900" title={item.productName}>{item.productName}</p>
+                      <p className="truncate text-[10px] text-slate-500" title={item.sku}>{item.sku}</p>
+                    </td>
+                    <td className="px-2 py-1.5 text-center tabular-nums">{item.quantity}</td>
+                    <td className="px-2 py-1.5 text-center tabular-nums">{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
+                    <td className="px-2 py-1.5 text-center tabular-nums">
+                      {hqStockLoaded ? (
+                        <span className={(generalAvailable ?? 0) <= 0 ? 'font-semibold text-red-600' : ''}>
+                          {generalAvailable}
+                        </span>
+                      ) : (
+                        formatHqStockCell(null, false, t)
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {hasPolicy ? (
+                        <span className="text-green-700">{t('branchProductRequest.pricingPolicyOk')}</span>
+                      ) : (
+                        <span className="font-semibold text-amber-700">{t('branchProductRequest.pricingPolicyMissing')}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-center tabular-nums">
+                      {canActOnRequest && reviewable ? (
+                        decision.action === 'PARTIAL' || decision.action === 'APPROVE' ? (
+                          <input
+                            type="number"
+                            min="0"
+                            max={available}
+                            value={decision.approvedQuantity}
+                            onChange={(event) =>
+                              updateLineDecision(item.id, { approvedQuantity: Number(event.target.value) })
+                            }
+                            onClick={(event) => event.stopPropagation()}
+                            className="w-14 rounded border border-slate-300 px-1 py-0.5 text-xs"
+                          />
+                        ) : (
+                          '0'
+                        )
+                      ) : (
+                        item.approvedQuantity ?? '-'
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 text-center">{item.unit}</td>
+                    <td className="hidden px-2 py-1.5 text-center tabular-nums md:table-cell">{item.currentBranchStock ?? '-'}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{requestLineTotal(item).toFixed(2)}</td>
+                    {canActOnRequest && reviewable ? (
+                      <td className="sticky right-0 bg-white px-2 py-1.5" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex min-w-[7.5rem] flex-col gap-1">
+                          <div className="flex flex-wrap gap-0.5">
+                            <button
+                              type="button"
+                              disabled={!canApproveFull}
+                              onClick={() => setLineAction(item, 'APPROVE')}
+                              className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'APPROVE' ? 'bg-green-600 text-white' : 'border border-slate-300'} disabled:opacity-40`}
+                            >
+                              {t('branchProductRequest.hqCompact.actionApproveShort')}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={!canPartial}
+                              onClick={() => setLineAction(item, 'PARTIAL')}
+                              className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'PARTIAL' ? 'bg-amber-500 text-white' : 'border border-slate-300'} disabled:opacity-40`}
+                            >
+                              {t('branchProductRequest.hqCompact.actionPartialShort')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setLineAction(item, 'REJECT')}
+                              className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'REJECT' ? 'bg-red-600 text-white' : 'border border-slate-300'}`}
+                            >
+                              {t('branchProductRequest.hqCompact.actionRejectShort')}
+                            </button>
+                          </div>
+                          {(decision.action === 'REJECT' || decision.action === 'REMOVE' || decision.action === 'PARTIAL') ? (
+                            <textarea
+                              value={decision.publicComment}
+                              onChange={(event) => updateLineDecision(item.id, { publicComment: event.target.value })}
+                              placeholder={t('branchProductRequest.publicCommentPlaceholder')}
+                              className="w-full rounded border border-slate-300 px-1 py-0.5 text-[10px]"
+                              rows={1}
+                            />
+                          ) : null}
+                        </div>
+                      </td>
+                    ) : null}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
           ) : (
           <table className={`w-full divide-y divide-slate-200 ${hqCompactTable ? 'text-xs' : 'text-sm'}`}>
             <thead className={`bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500 ${hqCompactTable ? 'text-[10px]' : 'text-xs'}`}>
