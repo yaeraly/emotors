@@ -96,10 +96,6 @@ export default function BranchesPage() {
 
   const ceoView = hasFullAccess(user);
 
-  function resolveBranchHqManager(branch: Branch) {
-    return branch.assignedHqWarehouse?.hqManagerAssignments?.[0]?.user?.fullName ?? '—';
-  }
-
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -175,49 +171,49 @@ export default function BranchesPage() {
           </div>
         </section>
 
-        <div className="h-[calc(100vh-240px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-[960px] divide-y divide-slate-200 text-sm">
-              <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+            <table className="w-full divide-y divide-slate-200 text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">{t('branches.branchType')}</th>
-                  <th className="px-4 py-3">{t('branches.pricingProfile')}</th>
-                  <th className="px-4 py-3">City</th>
-                  <th className="px-4 py-3">Phone</th>
-                  <th className="px-4 py-3">Owner</th>
-                  <th className="px-4 py-3">{t('branchHqRouting.assignedHqWarehouse')}</th>
-                  {ceoView ? <th className="px-4 py-3">{t('branchHqRouting.hqWarehouseManager')}</th> : null}
-                  <th className="px-4 py-3">{t('common.status')}</th>
-                  {ceoView ? <th className="px-4 py-3">{t('common.lastUpdated')}</th> : null}
-                  <th className="px-4 py-3">{t('common.actions')}</th>
+                  <th className="px-3 py-2">{ceoView ? t('branches.name') : 'Name'}</th>
+                  {ceoView ? <th className="hidden px-3 py-2 sm:table-cell">{t('branches.code')}</th> : null}
+                  <th className="px-3 py-2">{t('branches.branchType')}</th>
+                  {!ceoView ? <th className="hidden px-3 py-2 lg:table-cell">{t('branches.pricingProfile')}</th> : null}
+                  {!ceoView ? <th className="hidden px-3 py-2 md:table-cell">{t('branches.city')}</th> : null}
+                  {!ceoView ? <th className="hidden px-3 py-2 lg:table-cell">{t('branches.phone')}</th> : null}
+                  <th className="px-3 py-2">{t('branches.ownerName')}</th>
+                  {!ceoView ? <th className="hidden px-3 py-2 xl:table-cell">{t('branchHqRouting.assignedHqWarehouse')}</th> : null}
+                  {ceoView ? <th className="hidden px-3 py-2 md:table-cell">{t('branches.city')}</th> : null}
+                  <th className="px-3 py-2">{t('common.status')}</th>
+                  <th className="px-3 py-2 text-right">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {branches.length === 0 ? (
                   <tr>
-                    <td colSpan={ceoView ? 9 : 7} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={ceoView ? 7 : 9} className="px-3 py-8 text-center text-slate-500">
                       {t('branches.noBranchesFound')}
                     </td>
                   </tr>
                 ) : branches.map((branch) => (
-                  <tr key={branch.id}>
-                    <td className="px-4 py-3 font-bold">{branch.name}</td>
-                    <td className="px-4 py-3">{branchTypeLabel(branch.branchType)}</td>
-                    <td className="px-4 py-3">{branch.priceProfile?.name ?? '—'}</td>
-                    <td className="px-4 py-3">{branch.city ?? '-'}</td>
-                    <td className="px-4 py-3">{branch.phone ?? '-'}</td>
-                    <td className="px-4 py-3">{branch.ownerName ?? '-'}</td>
-                    <td className="px-4 py-3">{branch.assignedHqWarehouse?.name ?? '—'}</td>
-                    {ceoView ? <td className="px-4 py-3">{resolveBranchHqManager(branch)}</td> : null}
-                    <td className="px-4 py-3">{branch.status ?? 'ACTIVE'}</td>
-                    {ceoView ? (
-                      <td className="px-4 py-3">
-                        {branch.updatedAt ? new Date(branch.updatedAt).toLocaleString() : '—'}
-                      </td>
-                    ) : null}
-                    <td className="px-4 py-3">
-                      <Link href={`/branches/${branch.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
+                  <tr key={branch.id} className="hover:bg-slate-50/80">
+                    <td className="max-w-[10rem] truncate px-3 py-2 font-semibold text-slate-900" title={branch.name}>
+                      {branch.name}
+                    </td>
+                    {ceoView ? <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">{branch.code}</td> : null}
+                    <td className="px-3 py-2">{branchTypeLabel(branch.branchType)}</td>
+                    {!ceoView ? <td className="hidden px-3 py-2 lg:table-cell">{branch.priceProfile?.name ?? '—'}</td> : null}
+                    {!ceoView ? <td className="hidden px-3 py-2 md:table-cell">{branch.city ?? '-'}</td> : null}
+                    {!ceoView ? <td className="hidden px-3 py-2 lg:table-cell">{branch.phone ?? '-'}</td> : null}
+                    <td className="max-w-[8rem] truncate px-3 py-2 text-slate-700" title={branch.ownerName ?? undefined}>
+                      {branch.ownerName ?? '-'}
+                    </td>
+                    {!ceoView ? <td className="hidden px-3 py-2 xl:table-cell">{branch.assignedHqWarehouse?.name ?? '—'}</td> : null}
+                    {ceoView ? <td className="hidden px-3 py-2 md:table-cell">{branch.city ?? '—'}</td> : null}
+                    <td className="px-3 py-2">{translateStatus(t, branch.status ?? 'ACTIVE', 'branch')}</td>
+                    <td className="px-3 py-2 text-right">
+                      <Link href={`/branches/${branch.id}`} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold">
                         {t('common.open')}
                       </Link>
                     </td>

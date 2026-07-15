@@ -372,6 +372,7 @@ export default function BranchPurchaseRequestDetailPage() {
 
   const canManage = canManageBranchPurchaseRequests(user);
   const canActOnRequest = canManage && !isExecutiveBranchOrderInspector(user);
+  const executiveCompactView = isExecutiveBranchOrderInspector(user);
   const canCreate = canManageOwnBranchProductRequest(user);
   const canView = canViewBranchPurchaseRequests(user);
   const canSeeHqStock = canSeeHqStockInBranchRequests(user);
@@ -573,7 +574,41 @@ export default function BranchPurchaseRequestDetailPage() {
           <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('branchProductRequest.hqStockLoadError')}</p>
         ) : null}
 
-        <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+          {executiveCompactView ? (
+            <table className="w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">{t('sales.product')}</th>
+                  <th className="hidden px-3 py-2 sm:table-cell">{t('inventory.sku')}</th>
+                  <th className="px-3 py-2">{t('branchProductRequest.requestedQuantity')}</th>
+                  <th className="px-3 py-2">{t('branchProductRequest.branchPurchasePrice')}</th>
+                  <th className="px-3 py-2">{t('branchProductRequest.totalAmount')}</th>
+                  <th className="px-3 py-2">{t('distribution.status')}</th>
+                  <th className="px-3 py-2">{t('branchProductRequest.hqComment')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {request.items.map((item) => (
+                  <tr key={item.id}>
+                    <td className="max-w-[10rem] truncate px-3 py-2 font-semibold text-slate-900" title={item.productName}>
+                      {item.productName}
+                    </td>
+                    <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">{item.sku}</td>
+                    <td className="px-3 py-2">{item.quantity}</td>
+                    <td className="px-3 py-2">{formatFrozenBranchPrice(item, t)}</td>
+                    <td className="px-3 py-2">{Number(item.totalAmount ?? requestLineTotal(item)).toFixed(2)}</td>
+                    <td className="px-3 py-2">
+                      {translateStatus(t, item.lineStatus ?? request.status, 'branchRequestLine')}
+                    </td>
+                    <td className="max-w-[12rem] truncate px-3 py-2 text-slate-600" title={item.publicComment ?? undefined}>
+                      {item.publicComment ?? '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
@@ -791,6 +826,7 @@ export default function BranchPurchaseRequestDetailPage() {
               })}
             </tbody>
           </table>
+          )}
         </div>
       </section>
     </ProtectedShell>

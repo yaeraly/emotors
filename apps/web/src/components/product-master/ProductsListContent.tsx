@@ -18,6 +18,7 @@ export function ProductsListContent() {
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
@@ -31,6 +32,7 @@ export function ProductsListContent() {
   }, [categoryId, search]);
 
   async function loadProducts() {
+    setLoading(true);
     setError('');
     try {
       const [productsResult, categoryResult] = await Promise.all([
@@ -41,7 +43,11 @@ export function ProductsListContent() {
       setCategories(categoryResult);
       void apiFetch<User>('/auth/me').then(setCurrentUser).catch(() => null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      setData(null);
+      const message = err instanceof Error ? err.message : t('inventory.loadProductsFailed');
+      setError(message.includes('справочнику товаров') ? message : t('inventory.loadProductsFailed'));
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -140,25 +146,32 @@ export function ProductsListContent() {
         <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p>
       ) : null}
 
-      <div className="h-[calc(100vh-250px)] min-h-[420px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="h-[calc(100vh-250px)] min-h-[420px] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        {loading ? (
+          <p className="px-4 py-8 text-center text-sm text-slate-500">{t('inventory.loadingProducts')}</p>
+        ) : null}
+        {!loading && !error && data && data.items.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-slate-500">{t('inventory.noProductsFound')}</p>
+        ) : null}
+        {!loading && !error && data && data.items.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="min-w-[960px] divide-y divide-slate-200 text-sm">
-            <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+          <table className="w-full divide-y divide-slate-200 text-sm">
+            <thead className="sticky top-0 bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-4 py-3">{t('inventory.photo')}</th>
-                <th className="px-4 py-3">{t('inventory.name')}</th>
-                <th className="px-4 py-3">{t('inventory.category')}</th>
-                <th className="px-4 py-3">{t('inventory.unit')}</th>
-                <th className="px-4 py-3">{t('inventory.quantity')}</th>
-                <th className="px-4 py-3">{t('inventory.finalCost')}</th>
-                <th className="px-4 py-3">{t('inventory.lowStock')}</th>
-                <th className="px-4 py-3">{t('common.actions')}</th>
+                <th className="hidden px-3 py-2 sm:table-cell">{t('inventory.photo')}</th>
+                <th className="px-3 py-2">{t('inventory.name')}</th>
+                <th className="hidden px-3 py-2 md:table-cell">{t('inventory.category')}</th>
+                <th className="hidden px-3 py-2 lg:table-cell">{t('inventory.unit')}</th>
+                <th className="px-3 py-2">{t('inventory.quantity')}</th>
+                <th className="hidden px-3 py-2 lg:table-cell">{t('inventory.finalCost')}</th>
+                <th className="px-3 py-2">{t('inventory.lowStock')}</th>
+                <th className="px-3 py-2 text-right">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {data?.items.map((product) => (
+              {data.items.map((product) => (
                 <tr key={product.id} className="hover:bg-blue-50/40">
-                  <td className="px-4 py-3">
+                  <td className="hidden px-3 py-2 sm:table-cell">
                     {product.photoUrl ? (
                       <button
                         onClick={() => setPreviewProduct(product)}
@@ -175,23 +188,26 @@ export function ProductsListContent() {
                       <div className="h-12 w-12 rounded-xl bg-slate-100" />
                     )}
                   </td>
-                  <td className="px-4 py-3">{product.name}</td>
-                  <td className="px-4 py-3">
+                  <td className="max-w-[12rem] truncate px-3 py-2">
+                    <p className="font-semibold text-slate-900" title={product.name}>{product.name}</p>
+                    <p className="text-xs text-slate-500">{product.sku}</p>
+                  </td>
+                  <td className="hidden px-3 py-2 md:table-cell">
                     {product.productCategory
                       ? categoryName(product.productCategory, language)
                       : product.category}
                   </td>
-                  <td className="px-4 py-3">{formatProductUnit(product.unit, language, t)}</td>
-                  <td className="px-4 py-3">{product.quantity}</td>
-                  <td className="px-4 py-3">{formatKgs(product.finalCostKgs)}</td>
-                  <td className="px-4 py-3">
+                  <td className="hidden px-3 py-2 lg:table-cell">{formatProductUnit(product.unit, language, t)}</td>
+                  <td className="px-3 py-2">{product.quantity}</td>
+                  <td className="hidden px-3 py-2 lg:table-cell">{formatKgs(product.finalCostKgs)}</td>
+                  <td className="px-3 py-2">
                     <StockBadge quantity={product.quantity} lowStock={product.lowStock} />
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2">
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex justify-end gap-2">
                       <Link
                         href={`/products/${product.id}`}
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
+                        className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold"
                       >
                         {t('common.open')}
                       </Link>
@@ -199,7 +215,7 @@ export function ProductsListContent() {
                         <button
                           onClick={() => void deleteProduct(product)}
                           disabled={deletingProductId === product.id}
-                          className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                          className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
                           type="button"
                         >
                           {deletingProductId === product.id ? t('common.loading') : t('common.delete')}
@@ -212,6 +228,7 @@ export function ProductsListContent() {
             </tbody>
           </table>
         </div>
+        ) : null}
       </div>
       {previewProduct?.photoUrl ? (
         <ImagePreviewModal

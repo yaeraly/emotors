@@ -592,9 +592,11 @@ export default function BranchDetailPage() {
             {Object.entries(dashboard)
               .filter(([key]) => key !== 'branch')
               .map(([key, value]) => (
-                <div key={key} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{key}</p>
-                  <p className="mt-2 text-lg font-bold text-slate-950">{String(value)}</p>
+                <div key={key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {branchMetricLabel(key, t)}
+                  </p>
+                  <p className="mt-2 text-lg font-bold text-slate-950">{formatBranchMetricValue(key, value)}</p>
                 </div>
               ))}
           </div>
@@ -627,6 +629,33 @@ function BranchInput({
     </label>
   );
 }
+
+function branchMetricLabel(key: string, t: (key: string) => string) {
+  const translationKey = BRANCH_METRIC_KEYS[key] ?? BRANCH_METRIC_KEYS[key.charAt(0).toUpperCase() + key.slice(1)];
+  return translationKey ? t(translationKey) : key;
+}
+
+function formatBranchMetricValue(key: string, value: unknown) {
+  if (typeof value === 'number') {
+    const moneyKeys = new Set(['totalSales', 'totalProfit', 'debtAmount', 'inventoryValue']);
+    if (moneyKeys.has(key)) {
+      return `${value.toLocaleString('ru-RU', { maximumFractionDigits: 2 })} KGS`;
+    }
+    return value.toLocaleString('ru-RU');
+  }
+  return String(value ?? '—');
+}
+
+const BRANCH_METRIC_KEYS: Record<string, string> = {
+  customerCount: 'branchProfile.customerCount',
+  CustomerCount: 'branchProfile.customerCount',
+  totalSales: 'branchProfile.totalSales',
+  totalProfit: 'branchProfile.totalProfit',
+  debtAmount: 'branchProfile.debtAmount',
+  inventoryQuantity: 'branchProfile.inventoryQuantity',
+  inventoryValue: 'branchProfile.inventoryValue',
+  lowStockCount: 'branchProfile.lowStockCount',
+};
 
 function localizeBranchError(message: string, t: (key: string) => string) {
   if (message.includes('уже существует') || message.includes('already exists')) return t('branches.duplicateCode');

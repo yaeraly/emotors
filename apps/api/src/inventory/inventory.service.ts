@@ -1925,7 +1925,12 @@ export class InventoryService {
     if (this.canAccessAllInventory(user)) {
       return requested
         ? { branchId: requested }
-        : { branch: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null } };
+        : {
+            OR: [
+              { branch: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null } },
+              { warehouse: activeHqWarehouseWhere },
+            ],
+          };
     }
 
     if (canViewProductCatalog(user) && userBranch) {
@@ -2547,7 +2552,7 @@ export class InventoryService {
 
   private assertCanViewProductCatalog(user: AuthUser) {
     if (!canViewProductCatalog(user)) {
-      throw new ForbiddenException('You do not have permission to view product catalog');
+      throw new ForbiddenException('У вас нет доступа к справочнику товаров');
     }
   }
 
