@@ -197,8 +197,14 @@ export default function HqWarehouseDetailPage() {
   const canManageWarehouse = canManageHqWarehouse(user);
   const isWmScopedView = isWarehouseManagerUser(user) && !hasFullAccess(user);
   const visibleTabs: Tab[] = isWmScopedView
-    ? ['inventory', 'receivings', 'transfers']
+    ? ['inventory', 'transfers']
     : ['details', 'inventory', 'receivings', 'transfers', 'history'];
+
+  useEffect(() => {
+    if (isWmScopedView && tab === 'receivings') {
+      setTab('inventory');
+    }
+  }, [isWmScopedView, tab]);
 
   if (!warehouse) {
     return <ProtectedShell><p className="p-6">{t('common.loading')}</p></ProtectedShell>;
@@ -327,7 +333,7 @@ export default function HqWarehouseDetailPage() {
           )
         ) : null}
 
-        {tab === 'inventory' ? <SimpleTable headers={[t('inventory.products'), 'SKU', t('hqWarehouse.quantity'), t('hqWarehouse.reserved'), t('hqWarehouse.available'), t('hqWarehouse.landedCost'), t('hqWarehouse.lastReceiving')]} rows={inventory.map((row) => [row.product.name, row.sku, row.quantity, row.reservedQuantity, row.availableQuantity, row.landedCostKgs, row.lastReceivingAt ? new Date(row.lastReceivingAt).toLocaleDateString() : '—'])} /> : null}
+        {tab === 'inventory' ? <SimpleTable headers={[t('inventory.products'), 'SKU', t('hqWarehouse.quantity'), t('hqWarehouse.reserved'), t('hqWarehouse.available'), t('hqWarehouse.lastReceiving')]} rows={inventory.map((row) => [row.product.name, row.sku, row.quantity, row.reservedQuantity, row.availableQuantity, row.lastReceivingAt ? new Date(row.lastReceivingAt).toLocaleDateString() : '—'])} /> : null}
         {tab === 'receivings' ? (
           <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200 text-sm">

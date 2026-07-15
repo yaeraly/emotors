@@ -33,8 +33,6 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   BRANCH_INVOICE_CREATED: { module: NotificationModule.FINANCE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER] },
   BRANCH_REQUEST_NO_PRICING_POLICY: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
   BRANCH_REQUEST_OUT_OF_STOCK: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
-  SUPPLY_INQUIRY_CREATED: { module: NotificationModule.PROCUREMENT, roles: [Role.SUPPLY_CHAIN_MANAGER] },
-  SUPPLY_INQUIRY_RESPONDED: { module: NotificationModule.PROCUREMENT, roles: [Role.CEO, Role.OWNER] },
 };
 
 export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: string; message: string }>> = {
@@ -133,14 +131,6 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   BRANCH_REQUEST_OUT_OF_STOCK: {
     title: 'Недостаточно товара на складе HQ',
     message: 'Филиал заказал товар, но на складе HQ недостаточно остатков.',
-  },
-  SUPPLY_INQUIRY_CREATED: {
-    title: 'Вопрос CEO по отсутствующему товару',
-    message: 'CEO задал вопрос Supply Manager по отсутствующему товару.',
-  },
-  SUPPLY_INQUIRY_RESPONDED: {
-    title: 'Supply Manager ответил по отсутствующему товару',
-    message: 'Supply Manager ответил по отсутствующему товару.',
   },
 };
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { BranchProductSearch, type BranchProductOption } from '@/components/BranchProductSearch';
@@ -17,6 +17,7 @@ import {
   isBranchOwnerUser,
   isBranchSalesManagerUser,
   isBranchWarehouseOperator,
+  isExecutiveBranchOrderInspector,
   isHqSalesManagerUser,
 } from '@/lib/rbac';
 import type { Branch, User, Warehouse } from '@/lib/types';
@@ -29,6 +30,7 @@ type RequestItem = {
   sku: string;
   productName: string;
   quantity: number;
+  approvedQuantity?: number | null;
   unit: string;
   currentBranchStock: number;
   hqAvailableStock?: number | null;
@@ -132,6 +134,26 @@ function isSubmittedStatus(status: string) {
   return status === 'SUBMITTED' || status === 'SUBMITTED_TO_HQ';
 }
 
+function totalRequestedQuantity(request: BranchPurchaseRequest) {
+  return request.totalQuantity ?? request.items.reduce((sum, item) => sum + item.quantity, 0);
+}
+
+function totalApprovedQuantity(request: BranchPurchaseRequest) {
+  return request.items.reduce((sum, item) => sum + (item.approvedQuantity ?? 0), 0);
+}
+
+function matchesPaymentStatusFilter(status: string, filter: string) {
+  if (!filter) return true;
+  if (filter === 'PENDING_PAYMENT') return status === 'PENDING_PAYMENT';
+  if (filter === 'PAYMENT_CONFIRMED') {
+    return status === 'PAYMENT_CONFIRMED' || status === 'READY_FOR_HQ_WAREHOUSE' || status === 'SENT_TO_HQ_WAREHOUSE';
+  }
+  if (filter === 'UNPAID') {
+    return !['PENDING_PAYMENT', 'PAYMENT_CONFIRMED', 'READY_FOR_HQ_WAREHOUSE', 'SENT_TO_HQ_WAREHOUSE', 'COMPLETED', 'RECEIVED'].includes(status);
+  }
+  return true;
+}
+
 function resolveRequestStatusLabel(
   t: (key: string) => string,
   request: Pick<BranchPurchaseRequest, 'status' | 'branchDisplayStatus'>,
@@ -161,6 +183,14 @@ export default function BranchPurchaseRequestsPage() {
     branchId: '',
     branchWarehouseId: '',
     note: '',
+  });
+  const [listFilters, setListFilters] = useState({
+    search: '',
+    branchId: '',
+    status: '',
+    paymentStatus: '',
+    dateFrom: '',
+    dateTo: '',
   });
   async function load() {
     setLoading(true);
@@ -341,6 +371,7 @@ export default function BranchPurchaseRequestsPage() {
   }
 
   const canManage = canManageBranchPurchaseRequests(user);
+  const canActOnRequests = canManage && !isExecutiveBranchOrderInspector(user);
   const canCreate = canManageOwnBranchProductRequest(user);
   const canView = canViewBranchPurchaseRequests(user);
   const canSeeHqStock = canSeeHqStockInBranchRequests(user);
@@ -349,7 +380,26 @@ export default function BranchPurchaseRequestsPage() {
   const branchWarehouseView = isBranchWarehouseOperator(user);
   const branchOwnerView = isBranchOwnerUser(user);
   const hqSalesView = isHqSalesManagerUser(user);
+  const ceoInspectorView = isExecutiveBranchOrderInspector(user);
   const detailHref = (requestId: string) => `/branch-purchase-requests/${requestId}`;
+
+  const visibleRequests = useMemo(() => {
+    if (!ceoInspectorView) return requests;
+    const search = listFilters.search.trim().toLowerCase();
+    return requests.filter((request) => {
+      const matchesSearch =
+        !search ||
+        request.requestNumber.toLowerCase().includes(search) ||
+        (branches.find((branch) => branch.id === request.branchId)?.name ?? '').toLowerCase().includes(search);
+      const matchesBranch = !listFilters.branchId || request.branchId === listFilters.branchId;
+      const matchesStatus = !listFilters.status || request.status === listFilters.status;
+      const matchesPayment = matchesPaymentStatusFilter(request.status, listFilters.paymentStatus);
+      const createdAt = new Date(request.createdAt);
+      const matchesFrom = !listFilters.dateFrom || createdAt >= new Date(`${listFilters.dateFrom}T00:00:00`);
+      const matchesTo = !listFilters.dateTo || createdAt <= new Date(`${listFilters.dateTo}T23:59:59`);
+      return matchesSearch && matchesBranch && matchesStatus && matchesPayment && matchesFrom && matchesTo;
+    });
+  }, [branches, ceoInspectorView, listFilters, requests]);
 
   function openRequest(requestId: string) {
     if (!requestId) return;
@@ -418,7 +468,7 @@ export default function BranchPurchaseRequestsPage() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(branchPurchaseRequestsTitleKey(user))}</p>
             <h2 className="text-3xl font-bold text-slate-950">
-              {hqSalesView ? t('operations.hqBranchRequests') : t('operations.branchPurchaseRequests')}
+              {ceoInspectorView ? t('nav.hqBranchOrders') : hqSalesView ? t('operations.hqBranchRequests') : t('operations.branchPurchaseRequests')}
             </h2>
           </div>
           {canCreate ? (
@@ -428,7 +478,80 @@ export default function BranchPurchaseRequestsPage() {
           ) : null}
         </div>
 
-        {!branchSalesManagerView && !branchWarehouseView && !branchOwnerView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
+        {!branchSalesManagerView && !branchWarehouseView && !branchOwnerView && !ceoInspectorView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
+
+        {ceoInspectorView ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="min-w-[10rem] flex-1">
+                <span className="text-xs font-semibold uppercase text-slate-500">{t('common.search')}</span>
+                <input
+                  value={listFilters.search}
+                  onChange={(e) => setListFilters((current) => ({ ...current, search: e.target.value }))}
+                  placeholder={t('branchProductRequest.requestNumber')}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="min-w-[10rem]">
+                <span className="text-xs font-semibold uppercase text-slate-500">{t('distribution.branch')}</span>
+                <select
+                  value={listFilters.branchId}
+                  onChange={(e) => setListFilters((current) => ({ ...current, branchId: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">{t('common.all')}</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="min-w-[10rem]">
+                <span className="text-xs font-semibold uppercase text-slate-500">{t('distribution.status')}</span>
+                <select
+                  value={listFilters.status}
+                  onChange={(e) => setListFilters((current) => ({ ...current, status: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">{t('common.all')}</option>
+                  {['DRAFT', 'SUBMITTED_TO_HQ', 'PENDING_BRANCH_CONFIRMATION', 'PAYMENT_CONFIRMED', 'READY_FOR_HQ_WAREHOUSE', 'COMPLETED', 'REJECTED', 'CANCELLED'].map((status) => (
+                    <option key={status} value={status}>{translateStatus(t, status)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="min-w-[10rem]">
+                <span className="text-xs font-semibold uppercase text-slate-500">{t('procurement.payments.paymentStatus')}</span>
+                <select
+                  value={listFilters.paymentStatus}
+                  onChange={(e) => setListFilters((current) => ({ ...current, paymentStatus: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">{t('common.all')}</option>
+                  <option value="UNPAID">{t('paymentStatus.DEBT')}</option>
+                  <option value="PENDING_PAYMENT">{translateStatus(t, 'PENDING_PAYMENT')}</option>
+                  <option value="PAYMENT_CONFIRMED">{translateStatus(t, 'PAYMENT_CONFIRMED')}</option>
+                </select>
+              </label>
+              <label className="min-w-[9rem]">
+                <span className="text-xs font-semibold uppercase text-slate-500">{t('chinaReceiving.dateFrom')}</span>
+                <input
+                  type="date"
+                  value={listFilters.dateFrom}
+                  onChange={(e) => setListFilters((current) => ({ ...current, dateFrom: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="min-w-[9rem]">
+                <span className="text-xs font-semibold uppercase text-slate-500">{t('chinaReceiving.dateTo')}</span>
+                <input
+                  type="date"
+                  value={listFilters.dateTo}
+                  onChange={(e) => setListFilters((current) => ({ ...current, dateTo: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+          </div>
+        ) : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {listError ? (
@@ -594,7 +717,7 @@ export default function BranchPurchaseRequestsPage() {
             <p className="px-6 py-10 text-sm text-slate-600">
               {hqSalesView ? t('operations.hqBranchOrdersLoading') : t('common.loading')}
             </p>
-          ) : !listError && requests.length === 0 ? (
+          ) : !listError && visibleRequests.length === 0 ? (
             <p className="px-6 py-10 text-sm text-slate-600">
               {hqSalesView ? t('operations.hqBranchOrdersEmpty') : t('operations.branchPurchaseRequestsEmpty')}
             </p>
@@ -604,11 +727,21 @@ export default function BranchPurchaseRequestsPage() {
               <tr>
                 <th className="px-4 py-3">#</th>
                 <th className="px-4 py-3">{t('distribution.branch')}</th>
+                {ceoInspectorView ? (
+                  <th className="px-4 py-3">{t('common.createdDate')}</th>
+                ) : null}
                 {hqSalesView ? <th className="px-4 py-3">{t('branchProductRequest.requestedBy')}</th> : null}
                 {hqSalesView ? <th className="px-4 py-3">{t('branchHqRouting.assignedHqWarehouse')}</th> : null}
-                <th className="px-4 py-3">{t('distribution.status')}</th>
+                {!ceoInspectorView ? <th className="px-4 py-3">{t('distribution.status')}</th> : null}
                 <th className="px-4 py-3">{t('distribution.items')}</th>
-                {hqSalesView ? (
+                {ceoInspectorView ? (
+                  <>
+                    <th className="px-4 py-3">{t('branchProductRequest.totalQuantity')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.approvedQuantity')}</th>
+                    <th className="px-4 py-3">{t('branchProductRequest.estimatedAmount')}</th>
+                    <th className="px-4 py-3">{t('distribution.status')}</th>
+                  </>
+                ) : hqSalesView ? (
                   <>
                     <th className="px-4 py-3">{t('branchProductRequest.totalQuantity')}</th>
                     <th className="px-4 py-3">{t('branchProductRequest.estimatedAmount')}</th>
@@ -616,12 +749,12 @@ export default function BranchPurchaseRequestsPage() {
                 ) : branchOnlyView ? (
                   <th className="px-4 py-3">{t('branchProductRequest.totalAmount')}</th>
                 ) : null}
-                <th className="px-4 py-3">{t('common.createdDate')}</th>
+                {!ceoInspectorView ? <th className="px-4 py-3">{t('common.createdDate')}</th> : null}
                 <th className="px-4 py-3">{t('common.actions')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {requests.map((request) => (
+              {visibleRequests.map((request) => (
                 <tr
                   key={request.id}
                   onClick={() => openRequest(request.id)}
@@ -637,6 +770,9 @@ export default function BranchPurchaseRequestsPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">{branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId}</td>
+                  {ceoInspectorView ? (
+                    <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
+                  ) : null}
                   {hqSalesView ? <td className="px-4 py-3">{request.createdBy?.fullName ?? '-'}</td> : null}
                   {hqSalesView ? (
                     <td className="px-4 py-3">
@@ -646,17 +782,28 @@ export default function BranchPurchaseRequestsPage() {
                         '—'}
                     </td>
                   ) : null}
-                  <td className="px-4 py-3">{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
+                  {!ceoInspectorView ? (
+                    <td className="px-4 py-3">{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
+                  ) : null}
                   <td className="px-4 py-3">{request.items.length}</td>
-                  {hqSalesView ? (
+                  {ceoInspectorView ? (
                     <>
-                      <td className="px-4 py-3">{request.totalQuantity ?? request.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
+                      <td className="px-4 py-3">{totalRequestedQuantity(request)}</td>
+                      <td className="px-4 py-3">{totalApprovedQuantity(request)}</td>
+                      <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                      <td className="px-4 py-3">{resolveRequestStatusLabel(t, request, false)}</td>
+                    </>
+                  ) : hqSalesView ? (
+                    <>
+                      <td className="px-4 py-3">{totalRequestedQuantity(request)}</td>
                       <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                     </>
                   ) : branchOnlyView ? (
                     <td className="px-4 py-3">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                   ) : null}
-                  <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
+                  {!ceoInspectorView ? (
+                    <td className="px-4 py-3">{new Date(request.createdAt).toLocaleDateString()}</td>
+                  ) : null}
                   <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
                     <div className="flex flex-wrap gap-2">
                       <Link href={detailHref(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">
@@ -671,7 +818,7 @@ export default function BranchPurchaseRequestsPage() {
                       {canCreate && isSubmittedStatus(request.status) ? (
                         <button type="button" onClick={() => void cancelRequest(request.id)} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('common.cancel')}</button>
                       ) : null}
-                      {canManage && isSubmittedStatus(request.status) ? (
+                      {canActOnRequests && isSubmittedStatus(request.status) ? (
                         <>
                           <Link href={detailHref(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
                             {t('branchProductRequest.reviewRequest')}
@@ -679,7 +826,7 @@ export default function BranchPurchaseRequestsPage() {
                           <button type="button" onClick={() => void review(request.id, 'reject')} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('distribution.reject')}</button>
                         </>
                       ) : null}
-                      {canManage && (request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED' || request.status === 'CONFIRMED') ? (
+                      {canActOnRequests && (request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED' || request.status === 'CONFIRMED') ? (
                         <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('branchHqRouting.sendToWarehouseManager')}</button>
                       ) : null}
                       {request.convertedOrderId && !branchSalesManagerView ? (

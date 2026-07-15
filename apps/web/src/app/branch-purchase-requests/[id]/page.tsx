@@ -10,6 +10,7 @@ import {
   canManageOwnBranchProductRequest,
   canSeeHqStockInBranchRequests,
   canViewBranchPurchaseRequests,
+  isExecutiveBranchOrderInspector,
   isHqSalesManagerUser,
 } from '@/lib/rbac';
 import type { Branch, User, Warehouse } from '@/lib/types';
@@ -370,6 +371,7 @@ export default function BranchPurchaseRequestDetailPage() {
   }
 
   const canManage = canManageBranchPurchaseRequests(user);
+  const canActOnRequest = canManage && !isExecutiveBranchOrderInspector(user);
   const canCreate = canManageOwnBranchProductRequest(user);
   const canView = canViewBranchPurchaseRequests(user);
   const canSeeHqStock = canSeeHqStockInBranchRequests(user);
@@ -477,7 +479,7 @@ export default function BranchPurchaseRequestDetailPage() {
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {canManage && reviewable ? (
+            {canActOnRequest && reviewable ? (
               <>
                 <button type="button" onClick={() => void submitReview()} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
                   {t('branchProductRequest.submitReview')}
@@ -497,7 +499,7 @@ export default function BranchPurchaseRequestDetailPage() {
                 </button>
               </>
             ) : null}
-            {canManage && (request.status === 'READY_FOR_HQ_WAREHOUSE' || request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED') ? (
+            {canActOnRequest && (request.status === 'READY_FOR_HQ_WAREHOUSE' || request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED') ? (
               <button type="button" onClick={() => void sendToHqWarehouse()} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
                 {t('branchHqRouting.sendToWarehouseManager')}
               </button>
@@ -600,7 +602,7 @@ export default function BranchPurchaseRequestDetailPage() {
                 )}
                 <th className="px-4 py-3">{t('branchProductRequest.unit')}</th>
                 {!branchOnlyView ? <th className="px-4 py-3">{t('branchProductRequest.branchStock')}</th> : null}
-                {canManage && reviewable ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
+                {canActOnRequest && reviewable ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
                 {!branchOnlyView && reviewable ? (
                   <>
                     <th className="px-4 py-3">{t('branchProductRequest.branchPurchasePrice')}</th>
@@ -676,7 +678,7 @@ export default function BranchPurchaseRequestDetailPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          {canManage && reviewable ? (
+                          {canActOnRequest && reviewable ? (
                             decision.action === 'PARTIAL' || decision.action === 'APPROVE' ? (
                               <input
                                 type="number"
@@ -714,7 +716,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     )}
                     <td className="px-4 py-3">{item.unit}</td>
                     {!branchOnlyView ? <td className="px-4 py-3">{item.currentBranchStock ?? '-'}</td> : null}
-                    {canManage && reviewable ? (
+                    {canActOnRequest && reviewable ? (
                       <td className="px-4 py-3">
                         <div className="flex min-w-[12rem] flex-col gap-2">
                           <div className="flex flex-wrap gap-1">

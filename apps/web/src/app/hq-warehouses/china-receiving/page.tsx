@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -23,8 +23,6 @@ type Filters = {
   search: string;
   purchaseDate: string;
   orderNumber: string;
-  supplyManagerId: string;
-  hqWarehouseId: string;
   status: string;
 };
 
@@ -32,8 +30,6 @@ const EMPTY_FILTERS: Filters = {
   search: '',
   purchaseDate: '',
   orderNumber: '',
-  supplyManagerId: '',
-  hqWarehouseId: '',
   status: '',
 };
 
@@ -53,8 +49,6 @@ function isEmptyFilters(filters: Filters) {
   return !filters.search.trim()
     && !filters.purchaseDate
     && !filters.orderNumber.trim()
-    && !filters.supplyManagerId
-    && !filters.hqWarehouseId
     && !filters.status;
 }
 
@@ -63,8 +57,6 @@ function buildQuery(filters: Filters) {
   if (filters.search.trim()) params.set('search', filters.search.trim());
   if (filters.purchaseDate) params.set('purchaseDate', filters.purchaseDate);
   if (filters.orderNumber.trim()) params.set('orderNumber', filters.orderNumber.trim());
-  if (filters.supplyManagerId) params.set('supplyManagerId', filters.supplyManagerId);
-  if (filters.hqWarehouseId) params.set('hqWarehouseId', filters.hqWarehouseId);
   if (filters.status) params.set('status', filters.status);
   const query = params.toString();
   return query ? `?${query}` : '';
@@ -73,7 +65,6 @@ function buildQuery(filters: Filters) {
 export default function ChinaReceivingListPage() {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<ChinaReceivingTask[]>([]);
-  const [filterOptions, setFilterOptions] = useState<ChinaReceivingTask[]>([]);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -87,9 +78,6 @@ export default function ChinaReceivingListPage() {
         `/procurement/china-receiving${buildQuery(nextFilters)}`,
       );
       setTasks(list);
-      if (isEmptyFilters(nextFilters)) {
-        setFilterOptions(list);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -105,26 +93,6 @@ export default function ChinaReceivingListPage() {
     }
     void loadTasks(EMPTY_FILTERS);
   }, [loadTasks]);
-
-  const supplyManagers = useMemo(() => {
-    const map = new Map<string, string>();
-    filterOptions.forEach((task) => {
-      if (task.supplyManager?.id) {
-        map.set(task.supplyManager.id, task.supplyManager.fullName);
-      }
-    });
-    return Array.from(map.entries()).map(([id, fullName]) => ({ id, fullName }));
-  }, [filterOptions]);
-
-  const warehouses = useMemo(() => {
-    const map = new Map<string, string>();
-    filterOptions.forEach((task) => {
-      if (task.hqWarehouse?.id) {
-        map.set(task.hqWarehouse.id, task.hqWarehouse.name);
-      }
-    });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [filterOptions]);
 
   function updateFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -178,32 +146,6 @@ export default function ChinaReceivingListPage() {
                 onChange={(e) => updateFilter('orderNumber', e.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
               />
-            </label>
-            <label className="min-w-[10rem]">
-              <span className="text-xs font-semibold uppercase text-slate-500">{t('chinaReceiving.filterSupplyManager')}</span>
-              <select
-                value={filters.supplyManagerId}
-                onChange={(e) => updateFilter('supplyManagerId', e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="">{t('common.all')}</option>
-                {supplyManagers.map((manager) => (
-                  <option key={manager.id} value={manager.id}>{manager.fullName}</option>
-                ))}
-              </select>
-            </label>
-            <label className="min-w-[10rem]">
-              <span className="text-xs font-semibold uppercase text-slate-500">{t('chinaReceiving.targetWarehouse')}</span>
-              <select
-                value={filters.hqWarehouseId}
-                onChange={(e) => updateFilter('hqWarehouseId', e.target.value)}
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="">{t('common.all')}</option>
-                {warehouses.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>{warehouse.name}</option>
-                ))}
-              </select>
             </label>
             <label className="min-w-[10rem]">
               <span className="text-xs font-semibold uppercase text-slate-500">{t('chinaReceiving.filterStatus')}</span>
