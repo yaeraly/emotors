@@ -82,6 +82,7 @@ type RequestDetail = {
   convertedOrderId?: string | null;
   reviewedAt?: string | null;
   bookingExpiresAt?: string | null;
+  hqStockStatus?: 'loaded' | 'unavailable';
   createdAt: string;
   createdBy?: { id: string; fullName: string; role: string };
   items: RequestItem[];
@@ -108,8 +109,17 @@ function isReviewedStatus(status: string) {
   ].includes(status);
 }
 
-function availableForLine(item: RequestItem) {
+function availableForLine(item: RequestItem, hqStockLoaded: boolean) {
+  if (!hqStockLoaded) return 0;
   return item.availableForThisRequest ?? (item.hqAvailableStock ?? 0) + (item.bookedQuantity ?? 0);
+}
+
+function formatHqStockCell(value: number | null | undefined, hqStockLoaded: boolean, t: (key: string) => string) {
+  if (!hqStockLoaded) {
+    return <span className="text-slate-400">{t('branchProductRequest.hqStockLoading')}</span>;
+  }
+  if (value == null) return '—';
+  return value;
 }
 
 function resolveRequestStatusLabel(
@@ -161,8 +171,8 @@ function translateRejectionReason(t: (key: string) => string, code?: string | nu
   return translated !== key ? translated : code;
 }
 
-function defaultLineDecision(item: RequestItem): LineDecision {
-  const available = availableForLine(item);
+function defaultLineDecision(item: RequestItem, hqStockLoaded: boolean): LineDecision {
+  const available = availableForLine(item, hqStockLoaded);
   const hasPolicy = item.pricingPolicyAvailable !== false;
   if (!hasPolicy || available <= 0) {
     return { action: 'REJECT', approvedQuantity: 0, publicComment: '' };
@@ -232,7 +242,12 @@ export default function BranchPurchaseRequestDetailPage() {
       setRequest(detail);
       setUser(me);
       setLineDecisions(
-        Object.fromEntries(detail.items.map((item) => [item.id, defaultLineDecision(item)])),
+        Object.fromEntries(
+          detail.items.map((item) => [
+            item.id,
+            defaultLineDecision(item, detail.hqStockStatus !== 'unavailable'),
+          ]),
+        ),
       );
 
       void Promise.all([
@@ -265,7 +280,8 @@ export default function BranchPurchaseRequestDetailPage() {
   }
 
   function setLineAction(item: RequestItem, action: LineReviewAction) {
-    const available = availableForLine(item);
+    const hqStockLoaded = request?.hqStockStatus !== 'unavailable';
+    const available = availableForLine(item, hqStockLoaded);
     if (action === 'APPROVE') {
       updateLineDecision(item.id, { action, approvedQuantity: Math.min(item.quantity, available), publicComment: '' });
     } else if (action === 'PARTIAL') {
@@ -305,7 +321,7 @@ export default function BranchPurchaseRequestDetailPage() {
     try {
       const body = {
         items: request.items.map((item) => {
-          const decision = lineDecisions[item.id] ?? defaultLineDecision(item);
+          const decision = lineDecisions[item.id] ?? defaultLineDecision(item, hqStockLoaded);
           return {
             id: item.id,
             action: decision.action,
@@ -357,6 +373,7 @@ export default function BranchPurchaseRequestDetailPage() {
   const canCreate = canManageOwnBranchProductRequest(user);
   const canView = canViewBranchPurchaseRequests(user);
   const canSeeHqStock = canSeeHqStockInBranchRequests(user);
+  const hqStockLoaded = request?.hqStockStatus !== 'unavailable';
   const branchOnlyView = !canSeeHqStock;
   const hqSalesView = isHqSalesManagerUser(user);
   const listHref = '/branch-purchase-requests';
@@ -550,6 +567,10 @@ export default function BranchPurchaseRequestDetailPage() {
           ) : null}
         </div>
 
+        {request.hqStockStatus === 'unavailable' && canSeeHqStock ? (
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('branchProductRequest.hqStockLoadError')}</p>
+        ) : null}
+
         <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
@@ -605,9 +626,9 @@ export default function BranchPurchaseRequestDetailPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {request.items.map((item) => {
-                const generalAvailable = item.hqAvailableStock ?? 0;
-                const available = availableForLine(item);
-                const decision = lineDecisions[item.id] ?? defaultLineDecision(item);
+                const generalAvailable = hqStockLoaded ? (item.hqAvailableStock ?? 0) : null;
+                const available = availableForLine(item, hqStockLoaded);
+                const decision = lineDecisions[item.id] ?? defaultLineDecision(item, hqStockLoaded);
                 const hasPolicy = item.pricingPolicyAvailable !== false;
                 const approvedValue = reviewable
                   ? decision.approvedQuantity
@@ -627,15 +648,25 @@ export default function BranchPurchaseRequestDetailPage() {
                     <td className="px-4 py-3">{item.quantity}</td>
                     {canSeeHqStock ? (
                       <>
-                        <td className="px-4 py-3">{item.bookedQuantity ?? 0}</td>
-                        <td className="px-4 py-3">{item.hqPhysicalStock ?? '—'}</td>
+                        <td className="px-4 py-3">{formatHqStockCell(item.bookedQuantity, hqStockLoaded, t)}</td>
+                        <td className="px-4 py-3">{formatHqStockCell(item.hqPhysicalStock, hqStockLoaded, t)}</td>
                         <td className="px-4 py-3">
-                          <span className={generalAvailable <= 0 ? 'font-semibold text-red-600' : ''}>{generalAvailable}</span>
+                          {hqStockLoaded ? (
+                            <span className={(generalAvailable ?? 0) <= 0 ? 'font-semibold text-red-600' : ''}>
+                              {generalAvailable}
+                            </span>
+                          ) : (
+                            formatHqStockCell(null, false, t)
+                          )}
                         </td>
                         <td className="px-4 py-3">
-                          <span className={available <= 0 ? 'font-semibold text-red-600' : 'font-semibold text-green-700'}>
-                            {available}
-                          </span>
+                          {hqStockLoaded ? (
+                            <span className={available <= 0 ? 'font-semibold text-red-600' : 'font-semibold text-green-700'}>
+                              {available}
+                            </span>
+                          ) : (
+                            formatHqStockCell(null, false, t)
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {hasPolicy ? (

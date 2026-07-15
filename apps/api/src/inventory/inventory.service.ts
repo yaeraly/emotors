@@ -1465,9 +1465,10 @@ export class InventoryService {
 
     const normalizedSku = (sku ?? product.sku)?.trim();
     if (isHqWarehouse(warehouse) && normalizedSku) {
+      const hqBranch = await ensureHqCatalogBranch(tx);
       const hqProduct = await tx.product.findFirst({
         where: {
-          warehouseId,
+          branchId: hqBranch.id,
           sku: normalizedSku,
           deletedAt: null,
           isActive: true,
@@ -1526,13 +1527,20 @@ export class InventoryService {
 
     const hqProductsBySku = new Map<string, string>();
     if (skusToResolve.size) {
+      const warehouse = await this.prisma.warehouse.findFirst({
+        where: { id: warehouseId, deletedAt: null },
+        select: { warehouseType: true, branchId: true },
+      });
+      const productWhere: Prisma.ProductWhereInput = {
+        sku: { in: Array.from(skusToResolve) },
+        deletedAt: null,
+        isActive: true,
+        ...(warehouse && isHqWarehouse(warehouse)
+          ? { branch: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null } }
+          : { warehouseId }),
+      };
       const hqProducts = await this.prisma.product.findMany({
-        where: {
-          warehouseId,
-          sku: { in: Array.from(skusToResolve) },
-          deletedAt: null,
-          isActive: true,
-        },
+        where: productWhere,
         select: { id: true, sku: true },
       });
       for (const hqProduct of hqProducts) {
@@ -1574,6 +1582,94 @@ export class InventoryService {
       await this.auditHqStockLookup(user, warehouseId, options?.branchId, items, result);
     }
 
+    return result;
+  }
+
+  async getHqWarehouseStockMetricsMap(
+    warehouseId: string,
+    items: Array<{ productId: string; sku?: string }>,
+  ): Promise<
+    Map<
+      string,
+      {
+        resolvedProductId: string;
+        physicalQuantity: number;
+        generalAvailableQuantity: number;
+        totalActiveBookedQuantity: number;
+      }
+    >
+  > {
+    if (!items.length) {
+      return new Map();
+    }
+
+    const productIds = items.map((item) => item.productId);
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, sku: true, warehouseId: true, branchId: true },
+    });
+    const productById = new Map(products.map((product) => [product.id, product]));
+    const resolvedProductIdBySource = new Map<string, string>();
+
+    for (const item of items) {
+      const product = productById.get(item.productId);
+      const sku = (item.sku ?? product?.sku)?.trim();
+      if (product?.warehouseId === warehouseId) {
+        resolvedProductIdBySource.set(item.productId, item.productId);
+        continue;
+      }
+      if (sku) {
+        const hqBranch = await ensureHqCatalogBranch(this.prisma);
+        const catalogProduct = await this.prisma.product.findFirst({
+          where: {
+            branchId: hqBranch.id,
+            sku,
+            deletedAt: null,
+            isActive: true,
+          },
+          select: { id: true },
+        });
+        resolvedProductIdBySource.set(item.productId, catalogProduct?.id ?? item.productId);
+      } else {
+        resolvedProductIdBySource.set(item.productId, item.productId);
+      }
+    }
+
+    const resolvedIds = Array.from(new Set(resolvedProductIdBySource.values()));
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: { warehouseId, productId: { in: resolvedIds } },
+      select: { productId: true, quantity: true, reservedQuantity: true },
+    });
+    const balanceByProductId = new Map(
+      balances.map((balance) => [
+        balance.productId,
+        {
+          physicalQuantity: balance.quantity,
+          generalAvailableQuantity: Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0),
+          totalActiveBookedQuantity: balance.reservedQuantity ?? 0,
+        },
+      ]),
+    );
+
+    const result = new Map<
+      string,
+      {
+        resolvedProductId: string;
+        physicalQuantity: number;
+        generalAvailableQuantity: number;
+        totalActiveBookedQuantity: number;
+      }
+    >();
+    for (const item of items) {
+      const resolvedId = resolvedProductIdBySource.get(item.productId) ?? item.productId;
+      const metrics = balanceByProductId.get(resolvedId);
+      result.set(item.productId, {
+        resolvedProductId: resolvedId,
+        physicalQuantity: metrics?.physicalQuantity ?? 0,
+        generalAvailableQuantity: metrics?.generalAvailableQuantity ?? 0,
+        totalActiveBookedQuantity: metrics?.totalActiveBookedQuantity ?? 0,
+      });
+    }
     return result;
   }
 
@@ -1827,7 +1923,9 @@ export class InventoryService {
     }
 
     if (this.canAccessAllInventory(user)) {
-      return requested ? { branchId: requested } : {};
+      return requested
+        ? { branchId: requested }
+        : { branch: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null } };
     }
 
     if (canViewProductCatalog(user) && userBranch) {

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   AlertType,
   BranchDistributionOrderStatus,
@@ -120,6 +120,8 @@ type PrismaTx = Prisma.TransactionClient;
 
 @Injectable()
 export class OperationsService {
+  private readonly logger = new Logger(OperationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
@@ -423,6 +425,12 @@ export class OperationsService {
         productId: item.productId,
         quantity: item.quantity,
       });
+      await this.auditBranchRequest(user, branchId, 'BRANCH_REQUEST_ITEM_LINKED_TO_PRODUCT', 'BranchPurchaseRequestItem', item.id, {
+        requestId: request.id,
+        requestLineId: item.id,
+        productId: item.productId,
+        productCode: item.sku,
+      });
       if (item.hasPricingPolicyAtSubmit) {
         await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_PRICE_RESOLVED', 'BranchPurchaseRequest', request.id, {
           requestId: request.id,
@@ -439,6 +447,21 @@ export class OperationsService {
       }
     }
     if (status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ) {
+      this.logger.log({
+        message: 'BRANCH_REQUEST_SUBMITTED',
+        requestId: request.id,
+        branchId,
+        hqWarehouseId: assignedHqWarehouseId,
+        userId: user.id,
+        lines: request.items.map((item) => ({
+          requestLineId: item.id,
+          productId: item.productId,
+          productCode: item.sku,
+          requestedQuantity: item.quantity,
+          bookedQuantity: item.bookedQuantity,
+          physicalQuantity: item.hqPhysicalStock,
+        })),
+      });
       await this.auditBranchRequest(user, branchId, 'BRANCH_REQUEST_SUBMITTED', 'BranchPurchaseRequest', request.id, {
         hqWarehouseId: assignedHqWarehouseId,
       });
@@ -4646,57 +4669,50 @@ export class OperationsService {
     items: any[],
   ) {
     if (!items.length) throw new BadRequestException('At least one product line is required');
+    if (items.some((item) => !item?.productId)) {
+      throw new BadRequestException('Заявка должна ссылаться на существующий товар');
+    }
 
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
     const resolvedProducts = [];
     for (const item of items) {
-      const product = await this.ensureBranchProductFromCatalog(branchId, item.productId);
+      const product = await this.validateCatalogProductForRequest(item.productId, hqBranch.id);
       resolvedProducts.push({ item, product });
     }
 
-    const productIds = resolvedProducts.map(({ product }) => product.id);
-    const branchBalances = branchWarehouseId
-      ? await this.prisma.inventoryBalance.findMany({
-          where: { warehouseId: branchWarehouseId, productId: { in: productIds } },
-        })
-      : [];
-    const branchStockMap = new Map(branchBalances.map((balance) => [balance.productId, balance.quantity]));
+    const branchStockBySku = new Map<string, number>();
+    if (branchWarehouseId) {
+      const skus = resolvedProducts.map(({ product }) => product.sku);
+      const branchBalances = await this.prisma.inventoryBalance.findMany({
+        where: {
+          warehouseId: branchWarehouseId,
+          product: { branchId, sku: { in: skus }, deletedAt: null },
+        },
+        select: { quantity: true, product: { select: { sku: true } } },
+      });
+      for (const balance of branchBalances) {
+        branchStockBySku.set(balance.product.sku, balance.quantity);
+      }
+    }
 
     const assignedHqWarehouseId = await this.getBranchAssignedHqWarehouseId(branchId);
-    const hqStockMap = assignedHqWarehouseId
-      ? await this.inventoryService.getAvailableQuantityMap(
-          null,
+    const hqStockMetrics = assignedHqWarehouseId
+      ? await this.inventoryService.getHqWarehouseStockMetricsMap(
           assignedHqWarehouseId,
           resolvedProducts.map(({ product }) => ({ productId: product.id, sku: product.sku })),
-          { branchId, skipAccessCheck: true },
         )
-      : new Map<string, number>();
-
-    const hqBranch = await ensureHqCatalogBranch(this.prisma);
+      : new Map();
 
     return Promise.all(
       resolvedProducts.map(async ({ item, product }) => {
         const quantity = Number(item.quantity ?? 0);
-        const catalogProduct = await this.prisma.product.findFirst({
-          where: {
-            sku: product.sku,
-            branchId: hqBranch.id,
-            deletedAt: null,
-            isActive: true,
-          },
-          select: {
-            id: true,
-            sku: true,
-          },
-        });
-        const pricing = await this.resolveBranchRequestProductPricing(
-          branchId,
-          catalogProduct?.id ?? product.id,
-        );
+        const pricing = await this.resolveBranchRequestProductPricing(branchId, product.id);
         const branchPurchasePriceKgs = pricing.branchPurchasePriceKgs ?? 0;
         const totalAmount =
           pricing.hasPricingPolicy && pricing.branchPurchasePriceKgs != null
             ? Math.round((pricing.branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100
             : 0;
+        const stockMetrics = hqStockMetrics.get(product.id);
 
         return {
           productId: product.id,
@@ -4704,8 +4720,9 @@ export class OperationsService {
           productName: product.name,
           quantity,
           unit: product.unit,
-          currentBranchStock: branchStockMap.get(product.id) ?? 0,
-          hqAvailableStock: hqStockMap.get(product.id) ?? 0,
+          currentBranchStock: branchStockBySku.get(product.sku) ?? 0,
+          hqAvailableStock: stockMetrics?.generalAvailableQuantity ?? null,
+          hqPhysicalStock: stockMetrics?.physicalQuantity ?? null,
           wholesalePriceKgs: branchPurchasePriceKgs,
           resolvedBranchPriceKgs: pricing.resolvedBranchPriceKgs,
           pricingPolicyVersionId: pricing.pricingPolicyVersionId,
@@ -4726,132 +4743,164 @@ export class OperationsService {
     );
   }
 
-  private async ensureBranchProductFromCatalog(branchId: string, catalogOrBranchProductId: string) {
-    const direct = await this.prisma.product.findFirst({
-      where: { id: catalogOrBranchProductId, branchId, deletedAt: null },
+  private async validateCatalogProductForRequest(productId: string, hqCatalogBranchId: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, deletedAt: null },
     });
-    if (direct) return direct;
+    if (!product) {
+      throw new NotFoundException('Товар не найден');
+    }
+    if (!product.isActive) {
+      throw new BadRequestException('Товар недоступен для заказа');
+    }
+    if (product.branchId !== hqCatalogBranchId) {
+      throw new NotFoundException('Товар из заявки не найден в справочнике товаров');
+    }
+    return product;
+  }
 
-    const hqBranch = await ensureHqCatalogBranch(this.prisma);
-
-    const catalogProduct = await this.prisma.product.findFirst({
-      where: {
-        id: catalogOrBranchProductId,
-        branchId: hqBranch.id,
-        deletedAt: null,
-        isActive: true,
-      },
-    });
-    if (!catalogProduct) {
-      throw new NotFoundException(`Product not found: ${catalogOrBranchProductId}`);
+  async diagnoseBranchRequestProductDuplicates(user: AuthUser) {
+    if (!this.hasAnyRole(user, [Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER])) {
+      throw new ForbiddenException('Forbidden resource');
     }
 
-    const sku = catalogProduct.sku?.trim();
-    if (sku) {
-      const existingBySku = await this.prisma.product.findFirst({
-        where: { branchId, sku },
-        orderBy: [{ deletedAt: 'asc' }, { updatedAt: 'desc' }],
-      });
-      if (existingBySku) {
-        if (existingBySku.deletedAt || !existingBySku.isActive) {
-          return this.prisma.product.update({
-            where: { id: existingBySku.id },
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
+    const catalogProducts = await this.prisma.product.findMany({
+      where: { branchId: hqBranch.id, deletedAt: null },
+      select: { id: true, sku: true, name: true, createdAt: true, isActive: true },
+    });
+    const catalogBySku = new Map(
+      catalogProducts
+        .filter((product) => product.sku?.trim())
+        .map((product) => [product.sku.trim().toUpperCase(), product]),
+    );
+
+    const branchCopies = await this.prisma.product.findMany({
+      where: {
+        deletedAt: null,
+        NOT: { branchId: hqBranch.id },
+      },
+      include: {
+        _count: {
+          select: {
+            stockMovements: true,
+            inventoryBalances: true,
+            saleItems: true,
+          },
+        },
+        inventoryBalances: { select: { quantity: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+
+    const requestLineCounts = await this.prisma.branchPurchaseRequestItem.groupBy({
+      by: ['productId'],
+      _count: { _all: true },
+    });
+    const requestLinesByProduct = new Map(requestLineCounts.map((row) => [row.productId, row._count._all]));
+
+    return branchCopies
+      .map((product) => {
+        const normalizedSku = product.sku?.trim().toUpperCase() ?? '';
+        const canonical = normalizedSku ? catalogBySku.get(normalizedSku) : undefined;
+        const inventoryQty = product.inventoryBalances.reduce((sum, row) => sum + row.quantity, 0);
+        return {
+          productId: product.id,
+          sku: product.sku,
+          name: product.name,
+          branchId: product.branchId,
+          createdAt: product.createdAt,
+          isActive: product.isActive,
+          requestLineReferences: requestLinesByProduct.get(product.id) ?? 0,
+          inventoryReferences: product._count.inventoryBalances,
+          salesReferences: product._count.saleItems,
+          stockMovementReferences: product._count.stockMovements,
+          totalInventoryQuantity: inventoryQty,
+          duplicatesCanonicalProduct: canonical
+            ? { id: canonical.id, sku: canonical.sku, name: canonical.name }
+            : null,
+          likelyRequestProvisioningDuplicate: Boolean(canonical && inventoryQty === 0),
+          safeToArchive:
+            Boolean(canonical) &&
+            inventoryQty === 0 &&
+            product._count.saleItems === 0 &&
+            product._count.stockMovements === 0,
+        };
+      })
+      .filter((row) => row.likelyRequestProvisioningDuplicate || row.duplicatesCanonicalProduct);
+  }
+
+  async repairBranchRequestProductDuplicates(user: AuthUser) {
+    if (!this.hasAnyRole(user, [Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR])) {
+      throw new ForbiddenException('Forbidden resource');
+    }
+
+    const report = await this.diagnoseBranchRequestProductDuplicates(user);
+    const repairs: Array<{ duplicateProductId: string; canonicalProductId: string; archived: boolean }> = [];
+
+    for (const row of report) {
+      if (!row.duplicatesCanonicalProduct || !row.safeToArchive) continue;
+
+      await this.prisma.$transaction(async (tx) => {
+        const updatedLines = await tx.branchPurchaseRequestItem.updateMany({
+          where: { productId: row.productId },
+          data: { productId: row.duplicatesCanonicalProduct!.id },
+        });
+        if (updatedLines.count > 0) {
+          await tx.auditLog.create({
             data: {
-              deletedAt: null,
-              isActive: true,
-              name: catalogProduct.name,
-              barcode: catalogProduct.barcode,
-              category: catalogProduct.category,
-              categoryId: catalogProduct.categoryId,
-              unit: catalogProduct.unit,
-              weightKg: catalogProduct.weightKg,
+              userId: user.id,
+              role: user.role,
+              action: 'REQUEST_PRODUCT_RELATION_REPAIRED',
+              entity: 'Product',
+              entityId: row.productId,
+              metadata: {
+                duplicateProductId: row.productId,
+                canonicalProductId: row.duplicatesCanonicalProduct!.id,
+                repairedLineCount: updatedLines.count,
+              },
             },
           });
         }
-        return existingBySku;
-      }
-    }
 
-    const branchWarehouse = await this.prisma.warehouse.findFirst({
-      where: { branchId, warehouseType: 'BRANCH', isActive: true, deletedAt: null },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (!branchWarehouse) {
-      throw new BadRequestException('No active branch warehouse found for product provisioning');
-    }
-
-    try {
-      return await this.prisma.product.create({
-        data: {
-          branchId,
-          warehouseId: branchWarehouse.id,
-          categoryId: catalogProduct.categoryId,
-          name: catalogProduct.name,
-          sku: catalogProduct.sku,
-          barcode: catalogProduct.barcode,
-          category: catalogProduct.category,
-          unit: catalogProduct.unit,
-          weightKg: catalogProduct.weightKg,
-          purchasePriceYuan: 0,
-          latestYuanRate: 0,
-          purchaseCostKgs: 0,
-          transportCostKgs: 0,
-          finalCostKgs: catalogProduct.wholesalePriceKgs,
-          costPriceKgs: catalogProduct.wholesalePriceKgs,
-          sellingPriceKgs: catalogProduct.sellingPriceKgs,
-          wholesalePriceKgs: catalogProduct.sellingPriceKgs,
-          hqBranchWholesalePriceKgs: catalogProduct.wholesalePriceKgs,
-          recommendedRetailPriceKgs: catalogProduct.recommendedRetailPriceKgs,
-          minimumSellingPriceKgs: catalogProduct.minimumSellingPriceKgs,
-          pricingMode: catalogProduct.pricingMode,
-          isActive: true,
-        },
-      });
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002' &&
-        sku
-      ) {
-        const raced = await this.prisma.product.findFirst({
-          where: { branchId, sku },
+        await tx.product.update({
+          where: { id: row.productId },
+          data: { isActive: false, deletedAt: new Date() },
         });
-        if (raced) {
-          if (raced.deletedAt || !raced.isActive) {
-            return this.prisma.product.update({
-              where: { id: raced.id },
-              data: { deletedAt: null, isActive: true },
-            });
-          }
-          return raced;
-        }
-      }
-      throw error;
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'DUPLICATE_PRODUCT_ARCHIVED',
+            entity: 'Product',
+            entityId: row.productId,
+            metadata: {
+              canonicalProductId: row.duplicatesCanonicalProduct!.id,
+              sku: row.sku,
+            },
+          },
+        });
+      });
+
+      repairs.push({
+        duplicateProductId: row.productId,
+        canonicalProductId: row.duplicatesCanonicalProduct.id,
+        archived: true,
+      });
     }
+
+    return { repairedCount: repairs.length, repairs };
   }
 
   private async getHqPhysicalStockMap(
     warehouseId: string,
     items: Array<{ productId: string; sku: string }>,
   ) {
-    const stockMap = await this.inventoryService.getAvailableQuantityMap(
-      null,
-      warehouseId,
-      items,
-      { skipAccessCheck: true },
-    );
-    const balances = await this.prisma.inventoryBalance.findMany({
-      where: {
-        warehouseId,
-        product: { OR: items.map((item) => ({ id: item.productId, sku: item.sku })) },
-      },
-      select: { productId: true, quantity: true },
-    });
-    const physicalByProduct = new Map(balances.map((row) => [row.productId, row.quantity]));
+    const metrics = await this.inventoryService.getHqWarehouseStockMetricsMap(warehouseId, items);
     const result = new Map<string, number>();
     for (const item of items) {
-      const generalAvailable = stockMap.get(item.productId) ?? 0;
-      result.set(item.productId, physicalByProduct.get(item.productId) ?? generalAvailable);
+      result.set(item.productId, metrics.get(item.productId)?.physicalQuantity ?? 0);
     }
     return result;
   }
@@ -4876,36 +4925,31 @@ export class OperationsService {
       request.assignedHqWarehouseId ??
       request.branch?.assignedHqWarehouseId ??
       (await this.getBranchAssignedHqWarehouseId(request.branchId));
-    if (!assignedHqWarehouseId) return request;
+    if (!assignedHqWarehouseId) {
+      return { ...request, hqStockStatus: 'unavailable' as const };
+    }
 
-    const stockMap = await this.inventoryService.getAvailableQuantityMap(
-      user,
-      assignedHqWarehouseId,
-      request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
-      { branchId: request.branchId },
-    );
-    const bookedMap = await this.hqStockBookingService.getActiveBookedQuantityByLine(request.id);
-    const physicalStockMap = await this.getHqPhysicalStockMap(
-      assignedHqWarehouseId,
-      request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
-    );
-    const pricingAvailability = await this.resolveBranchRequestPricingAvailability(
-      request.branchId,
-      request.items.map((item) => ({
-        id: item.id,
-        productId: item.productId,
-        sku: item.sku,
-        resolvedBranchPriceKgs: (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
-        hasPricingPolicyAtSubmit: (item as { hasPricingPolicyAtSubmit?: boolean | null })
-          .hasPricingPolicyAtSubmit,
-      })),
-    );
+    try {
+      const stockMetrics = await this.inventoryService.getHqWarehouseStockMetricsMap(
+        assignedHqWarehouseId,
+        request.items.map((item) => ({ productId: item.productId, sku: item.sku })),
+      );
+      const bookedMap = await this.hqStockBookingService.getActiveBookedQuantityByLine(request.id);
+      const pricingAvailability = await this.resolveBranchRequestPricingAvailability(
+        request.branchId,
+        request.items.map((item) => ({
+          id: item.id,
+          productId: item.productId,
+          sku: item.sku,
+          resolvedBranchPriceKgs: (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs,
+          hasPricingPolicyAtSubmit: (item as { hasPricingPolicyAtSubmit?: boolean | null })
+            .hasPricingPolicyAtSubmit,
+        })),
+      );
 
-    return {
-      ...request,
-      bookingExpiresAt: (request as { bookingExpiresAt?: Date | null }).bookingExpiresAt ?? null,
-      items: request.items.map((item) => {
-        const generalAvailable = stockMap.get(item.productId) ?? 0;
+      const enrichedItems = request.items.map((item) => {
+        const metrics = stockMetrics.get(item.productId);
+        const generalAvailable = metrics?.generalAvailableQuantity ?? 0;
         const bookedQuantity = bookedMap.get(item.id) ?? (item as { bookedQuantity?: number }).bookedQuantity ?? 0;
         const availableForThisRequest = this.hqStockBookingService.availableForRequestLine(
           generalAvailable,
@@ -4916,17 +4960,47 @@ export class OperationsService {
           approved !== null
             ? Math.max(item.quantity - approved, 0)
             : Math.max(item.quantity - availableForThisRequest, 0);
+
+        this.logger.log({
+          message: 'HQ_STOCK_RESOLVED_FOR_REQUEST',
+          requestId: request.id,
+          requestLineId: item.id,
+          productId: item.productId,
+          resolvedProductId: metrics?.resolvedProductId,
+          hqWarehouseId: assignedHqWarehouseId,
+          physicalQuantity: metrics?.physicalQuantity ?? 0,
+          totalBookedQuantity: metrics?.totalActiveBookedQuantity ?? 0,
+          thisRequestBookedQuantity: bookedQuantity,
+          availableForThisRequest,
+        });
+
         return {
           ...item,
           bookedQuantity,
-          hqPhysicalStock: physicalStockMap.get(item.productId) ?? (item as { hqPhysicalStock?: number | null }).hqPhysicalStock ?? null,
+          hqPhysicalStock: metrics?.physicalQuantity ?? null,
+          totalActiveBookedQuantity: metrics?.totalActiveBookedQuantity ?? 0,
           hqAvailableStock: generalAvailable,
           availableForThisRequest,
           missingQty,
           pricingPolicyAvailable: pricingAvailability.get(item.id) ?? false,
         };
-      }),
-    };
+      });
+
+      return {
+        ...request,
+        hqStockStatus: 'loaded' as const,
+        bookingExpiresAt: (request as { bookingExpiresAt?: Date | null }).bookingExpiresAt ?? null,
+        items: enrichedItems,
+      };
+    } catch (error) {
+      this.logger.error({
+        message: 'HQ stock resolution failed for branch request',
+        requestId: request.id,
+        hqWarehouseId: assignedHqWarehouseId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new BadRequestException('Не удалось получить остатки склада HQ');
+    }
   }
 
   private async getBranchAssignedHqWarehouseId(branchId: string) {

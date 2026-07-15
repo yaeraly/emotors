@@ -47,6 +47,18 @@ export class OperationsController {
     return this.service.branchProductPrices(user, branchId, ids);
   }
 
+  @Get('branch-purchase-requests/diagnostics/duplicate-products')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.SUPPLY_CHAIN_MANAGER)
+  diagnoseBranchRequestProductDuplicates(@CurrentUser() user: AuthUser) {
+    return this.service.diagnoseBranchRequestProductDuplicates(user);
+  }
+
+  @Post('branch-purchase-requests/diagnostics/duplicate-products/repair')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR)
+  repairBranchRequestProductDuplicates(@CurrentUser() user: AuthUser) {
+    return this.service.repairBranchRequestProductDuplicates(user);
+  }
+
   @Get('branch-purchase-requests/:id')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER, Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER)
   branchPurchaseRequestById(@CurrentUser() user: AuthUser, @Param('id') id: string) {
