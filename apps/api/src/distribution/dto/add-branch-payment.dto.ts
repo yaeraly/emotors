@@ -14,4 +14,8 @@ export class AddBranchPaymentDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  receiptReference?: string;
 }

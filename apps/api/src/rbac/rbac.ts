@@ -456,8 +456,36 @@ export function canRecordHqDistributionPayment(user: Pick<AuthUser, 'role' | 'ro
   );
 }
 
+/** Branch Cashier / Accountant submits payment with receipt for HQ confirmation. */
+export function canSubmitBranchInvoicePayment(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'> & { branchId?: string | null },
+) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  if (roles.includes(Role.HQ_CASHIER) || roles.includes(Role.HQ_ACCOUNTANT) || roles.includes(Role.FINANCE_MANAGER)) {
+    return false;
+  }
+  return roles.includes(Role.CASHIER) || roles.includes(Role.ACCOUNTANT) || userHasPermission(user, 'payments.manage');
+}
+
+/** HQ Finance confirms or rejects branch-submitted payments. */
+export function canConfirmBranchInvoicePayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canRecordHqDistributionPayment(user);
+}
+
+export function canRequestBranchOrderInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  return roles.includes(Role.ACCOUNTANT) || userHasPermission(user, 'finance.view');
+}
+
+export function canApproveBranchOrderInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO) || roles.includes(Role.OWNER);
+}
+
 export function canRecordDistributionPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return canRecordHqDistributionPayment(user) || userHasPermission(user, 'payments.manage');
+  return canRecordHqDistributionPayment(user) || canSubmitBranchInvoicePayment(user) || userHasPermission(user, 'payments.manage');
 }
 
 export function canManageBranchPurchaseRequests(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

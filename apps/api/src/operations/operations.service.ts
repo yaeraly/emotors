@@ -532,6 +532,7 @@ export class OperationsService {
     const assignedHqWarehouseId = await this.requireBranchAssignedHqWarehouse(user, existing.branchId);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
       await tx.branchPurchaseRequestItem.updateMany({
         where: { requestId: id },
         data: { lineStatus: BranchPurchaseRequestLineStatus.PENDING_REVIEW },
@@ -757,6 +758,7 @@ export class OperationsService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
       const resolvedLines: Array<{
         itemId: string;
         lineStatus: BranchPurchaseRequestLineStatus;
@@ -1057,6 +1059,7 @@ export class OperationsService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
       const orderItems = [];
       let totalAmount = 0;
       let totalCost = 0;

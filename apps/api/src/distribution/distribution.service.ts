@@ -8,6 +8,10 @@ import {
   AlertType,
   BranchDistributionOrderStatus,
   BranchInvoiceStatus,
+  BranchOrderInstallmentStatus,
+  BranchPaymentConfirmationStatus,
+  BranchPurchaseRequestStatus,
+  HqStockBookingReleaseReason,
   HqWarehousePickingTaskStatus,
   Prisma,
   Role,
@@ -23,11 +27,15 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   canCreateDistributionOrder,
+  canConfirmBranchInvoicePayment,
   canDispatchFromHq,
   canManageDistributionOrders,
   canReceiveBranchDistribution,
   canRecordDistributionPayment,
   canRecordHqDistributionPayment,
+  canRequestBranchOrderInstallment,
+  canApproveBranchOrderInstallment,
+  canSubmitBranchInvoicePayment,
   canViewDistribution,
   canViewBranchDiscrepancyReports,
   hasAnyFullAccessRole,
@@ -42,6 +50,7 @@ import {
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
+import { RejectBranchInstallmentDto, RequestBranchInstallmentDto } from './dto/request-branch-installment.dto';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
@@ -860,15 +869,16 @@ export class DistributionService {
         const receivedQuantity = Number(received.receivedQuantity);
         const sentQuantity = Number(orderItem.quantity);
         const difference = receivedQuantity - sentQuantity;
+        const inventoryQuantity = difference > 0 ? sentQuantity : receivedQuantity;
         const transportCost = transportByProductId.get(orderItem.productId);
         const unitCostWithTransport = transportCost?.finalUnitCostKgs ?? Number(orderItem.unitCost);
 
-        if (receivedQuantity > 0) {
+        if (inventoryQuantity > 0) {
           await this.inventoryService.createStockMovementInTx(tx, user, {
             productId: orderItem.productId,
             warehouseId: warehouse.id,
             type: StockMovementType.IN,
-            quantity: receivedQuantity,
+            quantity: inventoryQuantity,
             unitCostKgs: unitCostWithTransport,
             referenceType: 'GOODS_RECEIVING',
             referenceId: receiving.id,
@@ -959,6 +969,15 @@ export class DistributionService {
       if (shortageItems.length > 0 && shortageReport) {
         await this.createWorkflowAlert(tx, user, {
           branchId: order.branchId,
+          type: AlertType.BRANCH_RECEIVE_DISCREPANCY,
+          title: 'При приёмке заказа филиалом обнаружено расхождение',
+          message: `Акт расхождения ${shortageReport.reportNumber} по заказу ${order.orderNumber}`,
+          entityType: 'ShortageReport',
+          entityId: shortageReport.id,
+          recipientRoles: [Role.FRANCHISE_OWNER, Role.WAREHOUSE_MANAGER, Role.HQ_SALES_MANAGER],
+        });
+        await this.createWorkflowAlert(tx, user, {
+          branchId: null,
           type: AlertType.DIFFERENCE_ACT_CREATED,
           title: 'Receiving difference act created',
           message: `Difference act ${shortageReport.reportNumber} created for order ${order.orderNumber}`,
@@ -1238,15 +1257,196 @@ export class DistributionService {
   }
 
   async addInvoicePayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
+    if (canSubmitBranchInvoicePayment(user) && !canConfirmBranchInvoicePayment(user)) {
+      return this.submitInvoicePayment(user, id, dto);
+    }
     if (!canRecordDistributionPayment(user)) {
       throw new ForbiddenException('Недостаточно прав для записи оплаты');
     }
+    return this.confirmInvoicePaymentDirect(user, id, dto);
+  }
+
+  async submitInvoicePayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
+    if (!canSubmitBranchInvoicePayment(user)) {
+      throw new ForbiddenException('Недостаточно прав для отправки оплаты на подтверждение');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: { id, deletedAt: null, branchId: user.branchId! },
+        include: { distributionOrder: true },
+      });
+      if (!invoice) throw new NotFoundException('Branch invoice not found');
+      if (invoice.status === BranchInvoiceStatus.CANCELLED) {
+        throw new BadRequestException('Cannot pay cancelled invoice');
+      }
+      const pending = await tx.branchPayment.findFirst({
+        where: {
+          invoiceId: invoice.id,
+          deletedAt: null,
+          confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
+        },
+      });
+      if (pending) {
+        throw new BadRequestException('Оплата уже отправлена на подтверждение');
+      }
+      const amount = this.roundMoney(Number(dto.amount));
+      if (amount <= 0) throw new BadRequestException('Payment amount must be greater than 0');
+      if (amount > Number(invoice.debtAmount)) {
+        throw new BadRequestException('Payment amount cannot exceed invoice debt');
+      }
+
+      const payment = await tx.branchPayment.create({
+        data: {
+          branchId: invoice.branchId,
+          invoiceId: invoice.id,
+          amount,
+          method: dto.method,
+          note: dto.note,
+          receiptReference: dto.receiptReference,
+          confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
+          submittedAt: new Date(),
+          createdById: user.id,
+        },
+      });
+
+      await this.syncBranchPurchaseRequestPaymentStatus(tx, invoice.distributionOrderId, 'PAYMENT_SUBMITTED', user);
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_PAYMENT_SUBMITTED',
+          entity: 'BranchPayment',
+          entityId: payment.id,
+          metadata: { invoiceId: invoice.id, amount, method: dto.method, roles: user.roles ?? [user.role] },
+        },
+      });
+      await this.createWorkflowAlert(tx, user, {
+        branchId: invoice.branchId,
+        type: AlertType.BRANCH_PAYMENT_SUBMITTED,
+        title: 'Оплата ожидает подтверждения',
+        message: `Оплата по счёту ${invoice.invoiceNumber} отправлена на подтверждение HQ Finance`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+        recipientRoles: [Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT, Role.HQ_CASHIER],
+      });
+
+      const updated = await tx.branchInvoice.findUniqueOrThrow({
+        where: { id: invoice.id },
+        include: this.invoiceInclude(),
+      });
+      return this.toInvoiceResponse(updated);
+    });
+  }
+
+  async confirmInvoicePayment(user: AuthUser, invoiceId: string, paymentId: string) {
+    if (!canConfirmBranchInvoicePayment(user)) {
+      throw new ForbiddenException('Недостаточно прав для подтверждения оплаты');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const payment = await tx.branchPayment.findFirst({
+        where: {
+          id: paymentId,
+          invoiceId,
+          deletedAt: null,
+          confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
+        },
+        include: { invoice: true },
+      });
+      if (!payment) throw new NotFoundException('Pending payment not found');
+
+      await tx.branchPayment.update({
+        where: { id: payment.id },
+        data: {
+          confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
+          confirmedAt: new Date(),
+          confirmedById: user.id,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_PAYMENT_CONFIRMED',
+          entity: 'BranchPayment',
+          entityId: payment.id,
+          metadata: { invoiceId, amount: Number(payment.amount), roles: user.roles ?? [user.role] },
+        },
+      });
+
+      return this.applyConfirmedPaymentTotals(tx, user, payment.invoice);
+    });
+  }
+
+  async rejectInvoicePayment(user: AuthUser, invoiceId: string, paymentId: string, comment?: string) {
+    if (!canConfirmBranchInvoicePayment(user)) {
+      throw new ForbiddenException('Недостаточно прав для отклонения оплаты');
+    }
+    if (!comment?.trim()) {
+      throw new BadRequestException('Требуется комментарий при отклонении оплаты');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const payment = await tx.branchPayment.findFirst({
+        where: {
+          id: paymentId,
+          invoiceId,
+          deletedAt: null,
+          confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
+        },
+        include: { invoice: true },
+      });
+      if (!payment) throw new NotFoundException('Pending payment not found');
+
+      await tx.branchPayment.update({
+        where: { id: payment.id },
+        data: {
+          confirmationStatus: BranchPaymentConfirmationStatus.REJECTED,
+          rejectedAt: new Date(),
+          rejectedById: user.id,
+          rejectionComment: comment.trim(),
+        },
+      });
+
+      await this.syncBranchPurchaseRequestPaymentStatus(tx, payment.invoice.distributionOrderId, 'PAYMENT_REJECTED', user);
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_PAYMENT_REJECTED',
+          entity: 'BranchPayment',
+          entityId: payment.id,
+          metadata: { invoiceId, comment: comment.trim(), roles: user.roles ?? [user.role] },
+        },
+      });
+      await this.createWorkflowAlert(tx, user, {
+        branchId: payment.branchId,
+        type: AlertType.BRANCH_PAYMENT_REJECTED,
+        title: 'Оплата отклонена',
+        message: `Оплата по счёту ${payment.invoice.invoiceNumber} отклонена: ${comment.trim()}`,
+        entityType: 'BranchInvoice',
+        entityId: payment.invoice.id,
+        recipientRoles: [Role.ACCOUNTANT, Role.CASHIER],
+      });
+
+      const updated = await tx.branchInvoice.findUniqueOrThrow({
+        where: { id: payment.invoice.id },
+        include: this.invoiceInclude(),
+      });
+      return this.toInvoiceResponse(updated);
+    });
+  }
+
+  private async confirmInvoicePaymentDirect(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.branchInvoice.findFirst({
         where: {
           id,
           deletedAt: null,
-          ...(this.canAccessAllDistributionBranches(user) || canRecordHqDistributionPayment(user) ? {} : { branchId: user.branchId }),
+          ...(this.canAccessAllDistributionBranches(user) || canRecordHqDistributionPayment(user)
+            ? {}
+            : { branchId: user.branchId }),
         },
       });
       if (!invoice) throw new NotFoundException('Branch invoice not found');
@@ -1266,99 +1466,428 @@ export class DistributionService {
           amount,
           method: dto.method,
           note: dto.note,
+          receiptReference: dto.receiptReference,
           createdById: user.id,
           paidAt: new Date(),
+          confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
+          submittedAt: new Date(),
+          confirmedAt: new Date(),
+          confirmedById: user.id,
         },
       });
 
-      const paidAggregate = await tx.branchPayment.aggregate({
-        where: { invoiceId: invoice.id, deletedAt: null },
-        _sum: { amount: true },
-      });
-      const paidAmount = this.roundMoney(Number(paidAggregate._sum.amount ?? 0));
-      const totalAmount = Number(invoice.totalAmount);
-      const debtAmount = this.roundMoney(Math.max(totalAmount - paidAmount, 0));
-      const status =
-        debtAmount === 0
-          ? BranchInvoiceStatus.PAID
-          : paidAmount > 0
-            ? BranchInvoiceStatus.PARTIALLY_PAID
-            : BranchInvoiceStatus.ISSUED;
-
-      await tx.branchInvoice.update({
-        where: { id: invoice.id },
-        data: { paidAmount, debtAmount, status },
-      });
-
-      const order = await tx.branchDistributionOrder.findFirst({
-        where: { id: invoice.distributionOrderId, deletedAt: null },
-      });
-      if (order) {
-        const orderStatus =
-          status === BranchInvoiceStatus.PAID
-            ? BranchDistributionOrderStatus.PAID
-            : status === BranchInvoiceStatus.PARTIALLY_PAID
-              ? BranchDistributionOrderStatus.PAYMENT_PENDING
-              : order.status;
-        if (orderStatus !== order.status) {
-          await tx.branchDistributionOrder.update({
-            where: { id: order.id },
-            data: { status: orderStatus },
-          });
-        }
-      }
-
-      await this.refreshBranchAccountBalance(tx, invoice.branchId);
       await tx.auditLog.create({
         data: {
           userId: user.id,
           role: user.role,
-          action: 'PAYMENT_RECEIVED',
+          action: 'BRANCH_PAYMENT_CONFIRMED',
           entity: 'BranchInvoice',
           entityId: invoice.id,
           metadata: { amount, method: dto.method, roles: user.roles ?? [user.role] },
         },
       });
+
+      return this.applyConfirmedPaymentTotals(tx, user, invoice);
+    });
+  }
+
+  private async applyConfirmedPaymentTotals(
+    tx: PrismaTx,
+    user: AuthUser,
+    invoice: {
+      id: string;
+      branchId: string;
+      distributionOrderId: string;
+      totalAmount: Prisma.Decimal;
+      invoiceNumber: string;
+    },
+  ) {
+    const paidAggregate = await tx.branchPayment.aggregate({
+      where: {
+        invoiceId: invoice.id,
+        deletedAt: null,
+        confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
+      },
+      _sum: { amount: true },
+    });
+    const paidAmount = this.roundMoney(Number(paidAggregate._sum.amount ?? 0));
+    const totalAmount = Number(invoice.totalAmount);
+    const debtAmount = this.roundMoney(Math.max(totalAmount - paidAmount, 0));
+    const status =
+      debtAmount === 0
+        ? BranchInvoiceStatus.PAID
+        : paidAmount > 0
+          ? BranchInvoiceStatus.PARTIALLY_PAID
+          : BranchInvoiceStatus.ISSUED;
+
+    await tx.branchInvoice.update({
+      where: { id: invoice.id },
+      data: { paidAmount, debtAmount, status },
+    });
+
+    const order = await tx.branchDistributionOrder.findFirst({
+      where: { id: invoice.distributionOrderId, deletedAt: null },
+    });
+    if (order) {
+      const orderStatus =
+        status === BranchInvoiceStatus.PAID
+          ? BranchDistributionOrderStatus.PAID
+          : status === BranchInvoiceStatus.PARTIALLY_PAID
+            ? BranchDistributionOrderStatus.PAYMENT_PENDING
+            : order.status;
+      if (orderStatus !== order.status) {
+        await tx.branchDistributionOrder.update({
+          where: { id: order.id },
+          data: { status: orderStatus },
+        });
+      }
+    }
+
+    await this.refreshBranchAccountBalance(tx, invoice.branchId);
+
+    const installment = await tx.branchOrderInstallment.findFirst({
+      where: { invoiceId: invoice.id, status: BranchOrderInstallmentStatus.APPROVED },
+    });
+    if (
+      installment?.firstPaymentRequired &&
+      !installment.firstPaymentConfirmed &&
+      paidAmount >= Number(installment.firstPaymentAmount)
+    ) {
+      await tx.branchOrderInstallment.update({
+        where: { id: installment.id },
+        data: { firstPaymentConfirmed: true },
+      });
+    }
+
+    if (status === BranchInvoiceStatus.PAID) {
+      await this.syncBranchPurchaseRequestPaymentStatus(
+        tx,
+        invoice.distributionOrderId,
+        'PAYMENT_CONFIRMED',
+        user,
+      );
       await this.createWorkflowAlert(tx, user, {
         branchId: invoice.branchId,
         type: AlertType.PAYMENT_RECEIVED,
-        title: 'Payment received',
-        message: `Payment of ${amount} received for invoice ${invoice.invoiceNumber}`,
+        title: 'Оплата подтверждена',
+        message: `Оплата по счёту ${invoice.invoiceNumber} подтверждена`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
+      });
+    }
+
+    const updated = await tx.branchInvoice.findUniqueOrThrow({
+      where: { id: invoice.id },
+      include: this.invoiceInclude(),
+    });
+    return this.toInvoiceResponse(updated);
+  }
+
+  private async syncBranchPurchaseRequestPaymentStatus(
+    tx: PrismaTx,
+    distributionOrderId: string | null,
+    event:
+      | 'PAYMENT_SUBMITTED'
+      | 'PAYMENT_REJECTED'
+      | 'PAYMENT_CONFIRMED'
+      | 'INSTALLMENT_PENDING'
+      | 'INSTALLMENT_APPROVED'
+      | 'INSTALLMENT_REJECTED',
+    user: AuthUser,
+  ) {
+    if (!distributionOrderId) return;
+
+    const linkedRequest = await tx.branchPurchaseRequest.findFirst({
+      where: { convertedOrderId: distributionOrderId, deletedAt: null },
+    });
+    if (!linkedRequest) return;
+
+    const invoice = await tx.branchInvoice.findFirst({
+      where: { distributionOrderId, deletedAt: null },
+      include: { branchOrderInstallment: true },
+    });
+    const installment = invoice?.branchOrderInstallment ?? null;
+
+    let nextStatus: BranchPurchaseRequestStatus | null = null;
+
+    switch (event) {
+      case 'PAYMENT_SUBMITTED':
+        nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
+        break;
+      case 'PAYMENT_REJECTED':
+        nextStatus = BranchPurchaseRequestStatus.PAYMENT_REJECTED;
+        break;
+      case 'PAYMENT_CONFIRMED':
+        if (installment?.status === BranchOrderInstallmentStatus.APPROVED) {
+          if (installment.firstPaymentRequired && !installment.firstPaymentConfirmed) {
+            nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
+          } else {
+            nextStatus = BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE;
+          }
+        } else if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
+          nextStatus = BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL;
+        } else if (!installment) {
+          nextStatus = BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE;
+        }
+        break;
+      case 'INSTALLMENT_PENDING':
+        nextStatus = BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL;
+        break;
+      case 'INSTALLMENT_APPROVED':
+        if (installment?.firstPaymentRequired && !installment.firstPaymentConfirmed) {
+          nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
+        } else {
+          nextStatus = BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE;
+        }
+        break;
+      case 'INSTALLMENT_REJECTED':
+        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
+        break;
+    }
+
+    if (!nextStatus || nextStatus === linkedRequest.status) return;
+
+    await tx.branchPurchaseRequest.update({
+      where: { id: linkedRequest.id },
+      data: { status: nextStatus },
+    });
+
+    if (nextStatus === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE) {
+      await this.hqStockBookingService.extendBookingsAfterPayment(linkedRequest.id, tx);
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE',
+          entity: 'BranchPurchaseRequest',
+          entityId: linkedRequest.id,
+          metadata: {
+            distributionOrderId,
+            oldStatus: linkedRequest.status,
+            newStatus: nextStatus,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+      await this.createWorkflowAlert(tx, user, {
+        branchId: linkedRequest.branchId,
+        type: AlertType.BRANCH_ORDER_READY_FOR_WAREHOUSE,
+        title: 'Заказ готов к комплектации на складе HQ',
+        message: `Заказ ${linkedRequest.requestNumber} готов к комплектации после финансового оформления`,
+        entityType: 'BranchPurchaseRequest',
+        entityId: linkedRequest.id,
+        recipientRoles: [Role.WAREHOUSE_MANAGER],
+      });
+    }
+  }
+
+  async requestInvoiceInstallment(user: AuthUser, invoiceId: string, dto: RequestBranchInstallmentDto) {
+    if (!canRequestBranchOrderInstallment(user)) {
+      throw new ForbiddenException('Недостаточно прав для запроса рассрочки');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: { id: invoiceId, deletedAt: null, branchId: user.branchId! },
+        include: { branchOrderInstallment: true, distributionOrder: true },
+      });
+      if (!invoice) throw new NotFoundException('Branch invoice not found');
+      if (invoice.branchOrderInstallment) {
+        throw new BadRequestException('Рассрочка по этому счёту уже запрошена');
+      }
+
+      const linkedRequest = await tx.branchPurchaseRequest.findFirst({
+        where: { convertedOrderId: invoice.distributionOrderId, deletedAt: null },
+      });
+
+      const installment = await tx.branchOrderInstallment.create({
+        data: {
+          branchId: invoice.branchId,
+          invoiceId: invoice.id,
+          branchPurchaseRequestId: linkedRequest?.id,
+          totalAmount: invoice.totalAmount,
+          firstPaymentAmount: dto.firstPaymentAmount,
+          termMonths: dto.termMonths,
+          firstPaymentRequired: dto.firstPaymentRequired ?? true,
+          requestedById: user.id,
+        },
+      });
+
+      if (linkedRequest) {
+        await this.syncBranchPurchaseRequestPaymentStatus(
+          tx,
+          invoice.distributionOrderId,
+          'INSTALLMENT_PENDING',
+          user,
+        );
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_INSTALLMENT_REQUESTED',
+          entity: 'BranchOrderInstallment',
+          entityId: installment.id,
+          metadata: {
+            invoiceId,
+            firstPaymentAmount: dto.firstPaymentAmount,
+            termMonths: dto.termMonths,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+
+      await this.createWorkflowAlert(tx, user, {
+        branchId: invoice.branchId,
+        type: AlertType.BRANCH_INSTALLMENT_REQUESTED,
+        title: 'Запрос рассрочки по заказу филиала',
+        message: `Филиал запросил рассрочку по счёту ${invoice.invoiceNumber}`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+        recipientRoles: [Role.CEO, Role.OWNER],
       });
 
       const updated = await tx.branchInvoice.findUniqueOrThrow({
         where: { id: invoice.id },
         include: this.invoiceInclude(),
       });
+      return this.toInvoiceResponse(updated);
+    });
+  }
 
-      if (status === BranchInvoiceStatus.PAID && order) {
-        const linkedRequest = await tx.branchPurchaseRequest.findFirst({
-          where: { convertedOrderId: order.id, deletedAt: null },
-        });
-        if (linkedRequest) {
-          await tx.branchPurchaseRequest.update({
-            where: { id: linkedRequest.id },
-            data: { status: 'READY_FOR_HQ_WAREHOUSE' },
-          });
-          await tx.auditLog.create({
-            data: {
-              userId: user.id,
-              role: user.role,
-              action: 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE',
-              entity: 'BranchPurchaseRequest',
-              entityId: linkedRequest.id,
-              metadata: {
-                distributionOrderId: order.id,
-                invoiceId: invoice.id,
-                roles: user.roles ?? [user.role],
-              },
-            },
-          });
-        }
+  async approveInvoiceInstallment(user: AuthUser, invoiceId: string) {
+    if (!canApproveBranchOrderInstallment(user)) {
+      throw new ForbiddenException('Недостаточно прав для утверждения рассрочки');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: { id: invoiceId, deletedAt: null },
+        include: { branchOrderInstallment: true },
+      });
+      if (!invoice?.branchOrderInstallment) {
+        throw new NotFoundException('Запрос рассрочки не найден');
+      }
+      if (invoice.branchOrderInstallment.status !== BranchOrderInstallmentStatus.PENDING) {
+        throw new BadRequestException('Рассрочка уже рассмотрена');
       }
 
+      await tx.branchOrderInstallment.update({
+        where: { id: invoice.branchOrderInstallment.id },
+        data: {
+          status: BranchOrderInstallmentStatus.APPROVED,
+          approvedById: user.id,
+          decidedAt: new Date(),
+        },
+      });
+
+      await this.syncBranchPurchaseRequestPaymentStatus(
+        tx,
+        invoice.distributionOrderId,
+        'INSTALLMENT_APPROVED',
+        user,
+      );
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_INSTALLMENT_APPROVED',
+          entity: 'BranchOrderInstallment',
+          entityId: invoice.branchOrderInstallment.id,
+          metadata: { invoiceId, roles: user.roles ?? [user.role] },
+        },
+      });
+
+      await this.createWorkflowAlert(tx, user, {
+        branchId: invoice.branchId,
+        type: AlertType.BRANCH_INSTALLMENT_APPROVED,
+        title: 'Рассрочка утверждена',
+        message: `CEO утвердил рассрочку по счёту ${invoice.invoiceNumber}`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+        recipientRoles: [Role.ACCOUNTANT, Role.MANAGER],
+      });
+
+      const updated = await tx.branchInvoice.findUniqueOrThrow({
+        where: { id: invoice.id },
+        include: this.invoiceInclude(),
+      });
+      return this.toInvoiceResponse(updated);
+    });
+  }
+
+  async rejectInvoiceInstallment(user: AuthUser, invoiceId: string, dto: RejectBranchInstallmentDto) {
+    if (!canApproveBranchOrderInstallment(user)) {
+      throw new ForbiddenException('Недостаточно прав для отклонения рассрочки');
+    }
+    if (!dto.comment?.trim()) {
+      throw new BadRequestException('Требуется комментарий при отклонении рассрочки');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: { id: invoiceId, deletedAt: null },
+        include: { branchOrderInstallment: true },
+      });
+      if (!invoice?.branchOrderInstallment) {
+        throw new NotFoundException('Запрос рассрочки не найден');
+      }
+      if (invoice.branchOrderInstallment.status !== BranchOrderInstallmentStatus.PENDING) {
+        throw new BadRequestException('Рассрочка уже рассмотрена');
+      }
+
+      await tx.branchOrderInstallment.update({
+        where: { id: invoice.branchOrderInstallment.id },
+        data: {
+          status: BranchOrderInstallmentStatus.REJECTED,
+          rejectedById: user.id,
+          rejectionComment: dto.comment.trim(),
+          decidedAt: new Date(),
+        },
+      });
+
+      const linkedRequest = await tx.branchPurchaseRequest.findFirst({
+        where: { convertedOrderId: invoice.distributionOrderId, deletedAt: null },
+      });
+      if (linkedRequest) {
+        await this.hqStockBookingService.releaseAllForRequestInTx(
+          tx,
+          user,
+          linkedRequest.id,
+          HqStockBookingReleaseReason.INSTALLMENT_REJECTED,
+        );
+        await this.syncBranchPurchaseRequestPaymentStatus(
+          tx,
+          invoice.distributionOrderId,
+          'INSTALLMENT_REJECTED',
+          user,
+        );
+      }
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_INSTALLMENT_REJECTED',
+          entity: 'BranchOrderInstallment',
+          entityId: invoice.branchOrderInstallment.id,
+          metadata: { invoiceId, comment: dto.comment.trim(), roles: user.roles ?? [user.role] },
+        },
+      });
+
+      await this.createWorkflowAlert(tx, user, {
+        branchId: invoice.branchId,
+        type: AlertType.BRANCH_INSTALLMENT_REJECTED,
+        title: 'Рассрочка отклонена',
+        message: `CEO отклонил рассрочку по счёту ${invoice.invoiceNumber}: ${dto.comment.trim()}`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+        recipientRoles: [Role.ACCOUNTANT, Role.MANAGER],
+      });
+
+      const updated = await tx.branchInvoice.findUniqueOrThrow({
+        where: { id: invoice.id },
+        include: this.invoiceInclude(),
+      });
       return this.toInvoiceResponse(updated);
     });
   }
@@ -1641,9 +2170,12 @@ export class DistributionService {
       payments: {
         include: {
           createdBy: { select: { id: true, fullName: true, role: true } },
+          confirmedBy: { select: { id: true, fullName: true, role: true } },
+          rejectedBy: { select: { id: true, fullName: true, role: true } },
         },
         orderBy: { paidAt: 'desc' as const },
       },
+      branchOrderInstallment: true,
       createdBy: { select: { id: true, fullName: true, role: true } },
     };
   }
@@ -1722,6 +2254,7 @@ export class DistributionService {
       entityType?: string;
       entityId?: string;
       referenceNumber?: string;
+      recipientRoles?: Role[];
     },
   ) {
     return this.notificationsService.notifyInTx(tx, user, {
@@ -1732,6 +2265,7 @@ export class DistributionService {
       entityType: data.entityType,
       entityId: data.entityId,
       referenceNumber: data.referenceNumber,
+      recipientRoles: data.recipientRoles,
     });
   }
 
@@ -1926,6 +2460,13 @@ export class DistributionService {
         ...payment,
         amount: Number(payment.amount),
       })),
+      branchOrderInstallment: invoice.branchOrderInstallment
+        ? {
+            ...invoice.branchOrderInstallment,
+            totalAmount: Number(invoice.branchOrderInstallment.totalAmount),
+            firstPaymentAmount: Number(invoice.branchOrderInstallment.firstPaymentAmount),
+          }
+        : null,
     };
   }
 

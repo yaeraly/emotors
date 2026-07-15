@@ -797,11 +797,23 @@ export type BranchPayment = {
   amount: number;
   method: BranchPaymentMethod;
   note?: string | null;
+  receiptReference?: string | null;
+  confirmationStatus?: 'PENDING_CONFIRMATION' | 'CONFIRMED' | 'REJECTED';
   paidAt: string;
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   createdAt: string;
   updatedAt: string;
+};
+
+export type BranchOrderInstallment = {
+  id: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  totalAmount: number;
+  firstPaymentAmount: number;
+  termMonths: number;
+  firstPaymentRequired: boolean;
+  firstPaymentConfirmed: boolean;
 };
 
 export type BranchInvoice = {
@@ -823,6 +835,7 @@ export type BranchInvoice = {
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   payments?: BranchPayment[];
+  branchOrderInstallment?: BranchOrderInstallment | null;
   createdAt: string;
   updatedAt: string;
 };

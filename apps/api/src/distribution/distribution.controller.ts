@@ -13,6 +13,7 @@ import { DistributionReportQueryDto } from './dto/distribution-report-query.dto'
 import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
+import { RejectBranchInstallmentDto, RequestBranchInstallmentDto } from './dto/request-branch-installment.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 import { SendDistributionOrderDto } from './dto/send-distribution-order.dto';
 import { DistributionService } from './distribution.service';
@@ -230,6 +231,53 @@ export class DistributionController {
     @Body() dto: AddBranchPaymentDto,
   ) {
     return this.distributionService.addInvoicePayment(user, id, dto);
+  }
+
+  @Post('invoices/:invoiceId/payments/:paymentId/confirm')
+  @Roles(Role.OWNER, Role.CEO, Role.HQ_CASHIER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER)
+  confirmInvoicePayment(
+    @CurrentUser() user: AuthUser,
+    @Param('invoiceId') invoiceId: string,
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.distributionService.confirmInvoicePayment(user, invoiceId, paymentId);
+  }
+
+  @Post('invoices/:invoiceId/payments/:paymentId/reject')
+  @Roles(Role.OWNER, Role.CEO, Role.HQ_CASHIER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER)
+  rejectInvoicePayment(
+    @CurrentUser() user: AuthUser,
+    @Param('invoiceId') invoiceId: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: { comment: string },
+  ) {
+    return this.distributionService.rejectInvoicePayment(user, invoiceId, paymentId, dto.comment);
+  }
+
+  @Post('invoices/:id/installment')
+  @Roles(Role.OWNER, Role.CEO, Role.ACCOUNTANT, Role.FRANCHISE_OWNER)
+  requestInvoiceInstallment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: RequestBranchInstallmentDto,
+  ) {
+    return this.distributionService.requestInvoiceInstallment(user, id, dto);
+  }
+
+  @Post('invoices/:id/installment/approve')
+  @Roles(Role.OWNER, Role.CEO)
+  approveInvoiceInstallment(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.approveInvoiceInstallment(user, id);
+  }
+
+  @Post('invoices/:id/installment/reject')
+  @Roles(Role.OWNER, Role.CEO)
+  rejectInvoiceInstallment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: RejectBranchInstallmentDto,
+  ) {
+    return this.distributionService.rejectInvoiceInstallment(user, id, dto);
   }
 
   @Get('branches/:branchId/account-balance')

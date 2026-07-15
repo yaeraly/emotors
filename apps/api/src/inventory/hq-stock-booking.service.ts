@@ -478,4 +478,45 @@ export class HqStockBookingService {
       },
     });
   }
+
+  async expireOverdueBookingsInTx(tx: PrismaTx, user: AuthUser) {
+    const now = new Date();
+    const expired = await tx.hqStockBooking.findMany({
+      where: {
+        status: { in: ACTIVE_BOOKING_STATUSES },
+        expiresAt: { lte: now },
+      },
+    });
+    for (const booking of expired) {
+      await this.releaseQuantityInTx(
+        tx,
+        user,
+        booking,
+        booking.bookedQuantity,
+        HqStockBookingReleaseReason.EXPIRED,
+        true,
+      );
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'HQ_STOCK_BOOKING_EXPIRED',
+          entity: 'HqStockBooking',
+          entityId: booking.id,
+          metadata: {
+            requestId: booking.requestId,
+            requestLineId: booking.requestLineId,
+            productId: booking.productId,
+            bookedQuantity: booking.bookedQuantity,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+    }
+    return expired.length;
+  }
+
+  async expireOverdueBookings(user: AuthUser) {
+    return this.prisma.$transaction(async (tx) => this.expireOverdueBookingsInTx(tx, user));
+  }
 }
