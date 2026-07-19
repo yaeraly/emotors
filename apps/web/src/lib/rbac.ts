@@ -930,6 +930,15 @@ export function canAllowSupplierOverpayment(user: Pick<User, 'role' | 'roles' | 
   return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER');
 }
 
+export function canCreateCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  return (
+    hasFullAccess(user) ||
+    hasRole(user, 'SYSTEM_ADMINISTRATOR') ||
+    hasRole(user, 'FRANCHISE_OWNER') ||
+    hasRole(user, 'MANAGER')
+  );
+}
+
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
 }

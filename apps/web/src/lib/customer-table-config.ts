@@ -11,7 +11,6 @@ export type CustomerListColumnKey =
   | 'totalProfit'
   | 'totalDebt'
   | 'purchaseHistory'
-  | 'lastPurchaseDate'
   | 'createdAt'
   | 'actions';
 
@@ -25,7 +24,6 @@ const hqColumns: CustomerListColumnKey[] = [
   'totalProfit',
   'totalDebt',
   'purchaseHistory',
-  'lastPurchaseDate',
   'createdAt',
   'actions',
 ];
@@ -36,7 +34,6 @@ const branchScopedColumns: CustomerListColumnKey[] = [
   'totalPurchases',
   'totalProfit',
   'totalDebt',
-  'lastPurchaseDate',
   'createdAt',
   'actions',
 ];

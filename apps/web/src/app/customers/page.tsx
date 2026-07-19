@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canArchiveCustomer, canCreateCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
 import {
   getCustomerListColumns,
   shouldShowCustomerListEditButton,
@@ -51,7 +51,6 @@ type SortKey =
   | 'totalProfit'
   | 'totalDebt'
   | 'purchaseCount'
-  | 'lastPurchaseDate'
   | 'createdAt';
 
 type SortDirection = 'asc' | 'desc';
@@ -108,6 +107,7 @@ function CustomersPageContent() {
   const [error, setError] = useState('');
   const [editError, setEditError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('createdAt');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [page, setPage] = useState(1);
@@ -118,6 +118,7 @@ function CustomersPageContent() {
   const branchOwnerView = isBranchOwnerUser(currentUser);
   const visibleColumns = getCustomerListColumns(currentUser);
   const showListEditButton = shouldShowCustomerListEditButton(currentUser);
+  const canCreate = canCreateCustomer(currentUser);
   const columnVisible = (key: CustomerListColumnKey) => visibleColumns.includes(key);
 
   useEffect(() => {
@@ -230,6 +231,7 @@ function CustomersPageContent() {
         }),
       });
       setForm(initialCreateState);
+      closeCreateCustomer();
       await loadCustomers();
       showSuccess(t('crm.customerCreated'));
     } catch (err) {
@@ -237,6 +239,17 @@ function CustomersPageContent() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function openCreateCustomer() {
+    setError('');
+    setForm(initialCreateState);
+    setShowCreateModal(true);
+  }
+
+  function closeCreateCustomer() {
+    setShowCreateModal(false);
+    setForm(initialCreateState);
   }
 
   function openEditCustomer(customer: Customer) {
@@ -433,7 +446,7 @@ function CustomersPageContent() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
               {t('crm.intelligenceTitle')}
@@ -444,7 +457,19 @@ function CustomersPageContent() {
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {canCreate ? (
+            <button
+              onClick={openCreateCustomer}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
+              type="button"
+            >
+              <PlusIcon />
+              {t('crm.createClientButton')}
+            </button>
+          ) : null}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -498,7 +523,6 @@ function CustomersPageContent() {
                 </option>
               ))}
             </select>
-          </div>
         </div>
 
         {error ? (
@@ -513,86 +537,8 @@ function CustomersPageContent() {
           </p>
         ) : null}
 
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]">
-          <form
-            onSubmit={createCustomer}
-            className="h-fit max-h-[calc(100vh-180px)] shrink-0 self-start overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:w-[380px]"
-          >
-            <h3 className="text-lg font-bold text-slate-950">
-              {t('crm.createCustomer')}
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              This card keeps a fixed width while the customer table scrolls.
-            </p>
-
-            <div className="mt-5 space-y-4">
-              <CustomerForm
-                form={form}
-                onChange={(updates) => setForm({ ...form, ...updates })}
-              />
-              {branches.length > 1 && !isBranchPanel ? (
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700">
-                    {t('crm.branch')}
-                  </span>
-                  <select
-                    value={form.branchId}
-                    onChange={(event) =>
-                      setForm({ ...form, branchId: event.target.value })
-                    }
-                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                  >
-                    <option value="">My branch</option>
-                    {branches.map((branch) => (
-                      <option key={branch.id} value={branch.id}>
-                        {branch.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-
-              {!isBranchPanel ? (
-              <div className="grid grid-cols-1 gap-3">
-                <CustomerInput
-                  label="Purchase amount"
-                  type="number"
-                  value={form.totalPurchaseAmount}
-                  onChange={(value) =>
-                    setForm({ ...form, totalPurchaseAmount: value })
-                  }
-                />
-                <CustomerInput
-                  label="Profit amount"
-                  type="number"
-                  value={form.totalProfitAmount}
-                  onChange={(value) =>
-                    setForm({ ...form, totalProfitAmount: value })
-                  }
-                />
-                <CustomerInput
-                  label="Debt amount"
-                  type="number"
-                  value={form.totalDebtAmount}
-                  onChange={(value) =>
-                    setForm({ ...form, totalDebtAmount: value })
-                  }
-                />
-              </div>
-              ) : null}
-            </div>
-
-            <button
-              disabled={saving}
-              className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-              type="submit"
-            >
-              {saving ? t('common.loading') : t('crm.addCustomer')}
-            </button>
-          </form>
-
-          <div className="h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white p-5">
+        <div className="h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white p-5">
               <div>
                 <h3 className="text-lg font-bold text-slate-950">
                   {t('crm.customerList')}
@@ -699,15 +645,6 @@ function CustomersPageContent() {
                             onSort={changeSort}
                           />
                         ) : null}
-                        {columnVisible('lastPurchaseDate') ? (
-                          <SortableHeader
-                            label={t('crm.previousPurchasedProducts')}
-                            sortKey="lastPurchaseDate"
-                            activeKey={sortKey}
-                            direction={sortDirection}
-                            onSort={changeSort}
-                          />
-                        ) : null}
                         {columnVisible('createdAt') ? (
                           <SortableHeader
                             label={t('common.createdDate')}
@@ -782,11 +719,6 @@ function CustomersPageContent() {
                               </button>
                             </td>
                           ) : null}
-                          {columnVisible('lastPurchaseDate') ? (
-                            <td className="px-4 py-3 text-slate-700">
-                              {formatDate(customer.lastPurchaseDate)}
-                            </td>
-                          ) : null}
                           {columnVisible('createdAt') ? (
                             <td className="px-4 py-3 text-slate-700">
                               {formatDate(customer.createdAt)}
@@ -857,8 +789,110 @@ function CustomersPageContent() {
                 </div>
               </>
             )}
-          </div>
         </div>
+
+        {showCreateModal ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+            <form
+              onSubmit={createCustomer}
+              className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                    {t('crm.title')}
+                  </p>
+                  <h3 className="mt-1 text-2xl font-bold text-slate-950">
+                    {t('crm.createClientButton')}
+                  </h3>
+                </div>
+                <button
+                  onClick={closeCreateCustomer}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-sm font-bold text-slate-500 hover:bg-slate-50"
+                  type="button"
+                  aria-label="Close create form"
+                >
+                  x
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-4">
+                <CustomerForm
+                  form={form}
+                  onChange={(updates) => setForm({ ...form, ...updates })}
+                />
+                {branches.length > 1 && !isBranchPanel ? (
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {t('crm.branch')}
+                    </span>
+                    <select
+                      value={form.branchId}
+                      onChange={(event) =>
+                        setForm({ ...form, branchId: event.target.value })
+                      }
+                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                    >
+                      <option value="">My branch</option>
+                      {branches.map((branch) => (
+                        <option key={branch.id} value={branch.id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                {!isBranchPanel ? (
+                  <div className="grid grid-cols-1 gap-3">
+                    <CustomerInput
+                      label="Purchase amount"
+                      type="number"
+                      value={form.totalPurchaseAmount}
+                      onChange={(value) =>
+                        setForm({ ...form, totalPurchaseAmount: value })
+                      }
+                    />
+                    <CustomerInput
+                      label="Profit amount"
+                      type="number"
+                      value={form.totalProfitAmount}
+                      onChange={(value) =>
+                        setForm({ ...form, totalProfitAmount: value })
+                      }
+                    />
+                    <CustomerInput
+                      label="Debt amount"
+                      type="number"
+                      value={form.totalDebtAmount}
+                      onChange={(value) =>
+                        setForm({ ...form, totalDebtAmount: value })
+                      }
+                    />
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  onClick={closeCreateCustomer}
+                  className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+                  type="button"
+                  disabled={saving}
+                >
+                  {t('common.cancel')}
+                </button>
+                <button
+                  disabled={saving || !form.fullName.trim() || !form.phone.trim()}
+                  className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                  type="submit"
+                >
+                  {saving ? t('common.loading') : t('crm.createClientButton')}
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : null}
 
         {selectedCustomer ? (
           <CustomerProfileDrawer
@@ -1193,6 +1227,21 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
+function PlusIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+  );
+}
+
 function PencilIcon() {
   return (
     <svg
@@ -1221,10 +1270,6 @@ function getSortValue(customer: Customer, key: SortKey) {
   switch (key) {
     case 'branch':
       return customer.branch?.name ?? '';
-    case 'lastPurchaseDate':
-      return customer.lastPurchaseDate
-        ? new Date(customer.lastPurchaseDate).getTime()
-        : 0;
     case 'createdAt':
       return new Date(customer.createdAt).getTime();
     case 'totalPurchases':
