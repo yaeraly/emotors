@@ -45,6 +45,7 @@ import {
   resolveInventoryApproverRoles,
   resolveInventoryCountingFeedbackRoles,
 } from './inventory-count-approver.util';
+import { resolveInventoryCountWarehouseScope } from './inventory-count-warehouse-scope.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -78,7 +79,8 @@ export class InventoryCountService {
 
   async detail(user: AuthUser, id: string) {
     const session = await this.getSession(user, id);
-    return this.toSessionResponse(user, session);
+    const repaired = await this.ensureResumableSessionItems(user, session);
+    return this.toSessionResponse(user, repaired);
   }
 
   async summary(user: AuthUser, id: string) {
@@ -906,24 +908,90 @@ export class InventoryCountService {
   }
 
   private buildWarehouseScope(user: AuthUser): Prisma.WarehouseWhereInput | null {
-    const assignmentScope = this.assignmentService.buildAssignedWarehouseScope(user);
-    if (assignmentScope) {
-      return assignmentScope;
+    return resolveInventoryCountWarehouseScope(
+      user,
+      this.assignmentService.buildAssignedWarehouseScope(user),
+    );
+  }
+
+  private async ensureResumableSessionItems(
+    user: AuthUser,
+    session: Awaited<ReturnType<typeof this.getSession>>,
+  ) {
+    const resumableStatuses: InventoryCountStatus[] = [
+      InventoryCountStatus.DRAFT,
+      InventoryCountStatus.COUNTING,
+      InventoryCountStatus.REJECTED,
+    ];
+    if (!resumableStatuses.includes(session.status) || session.items.length > 0) {
+      return session;
     }
-    const roles = resolveUserRoles(user);
-    if (isHqInventoryExecutive(roles, user.branchId)) {
-      return activeHqWarehouseWhere;
+
+    try {
+      this.assertCanCount(user);
+      await this.assertCanCountWarehouse(user, session.warehouse);
+    } catch {
+      return session;
     }
-    if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
-      return null;
-    }
-    if (roles.includes(Role.FRANCHISE_OWNER) || roles.includes(Role.WAREHOUSE_OPERATOR)) {
-      if (!user.branchId) {
-        throw new ForbiddenException('Branch is required');
+
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.inventoryCountSession.findUnique({
+        where: { id: session.id },
+        include: { items: true, warehouse: true },
+      });
+      if (!locked || locked.items.length > 0) {
+        return locked ?? session;
       }
-      return { ...activeBranchWarehouseWhere, branchId: user.branchId };
-    }
-    return { id: '__none__' };
+
+      const items = await this.buildSessionItems(tx, locked, this.sessionFiltersToDto(locked));
+      if (items.length === 0) {
+        return locked;
+      }
+
+      await tx.inventoryCountItem.createMany({ data: items });
+      await this.audit(tx, user, 'INVENTORY_ITEMS_RESTORED', locked.id, {
+        warehouseId: locked.warehouseId,
+        branchId: locked.warehouse.branchId ?? undefined,
+        newValue: { itemCount: items.length },
+      });
+
+      return tx.inventoryCountSession.findUniqueOrThrow({
+        where: { id: locked.id },
+        include: this.sessionInclude(),
+      });
+    });
+  }
+
+  private sessionFiltersToDto(session: {
+    warehouseId: string;
+    inventoryType: InventoryCountType;
+    categoryId?: string | null;
+    shelf?: string | null;
+    zone?: string | null;
+    filterCategoryId?: string | null;
+    filterShelf?: string | null;
+    filterZone?: string | null;
+    filterBrand?: string | null;
+    filterSupplierId?: string | null;
+    filterProductIds?: unknown;
+  }): CreateInventoryCountDto {
+    const filterProductIds = Array.isArray(session.filterProductIds)
+      ? session.filterProductIds.filter((value): value is string => typeof value === 'string')
+      : undefined;
+
+    return {
+      warehouseId: session.warehouseId,
+      inventoryType: session.inventoryType,
+      categoryId: session.categoryId ?? undefined,
+      shelf: session.shelf ?? undefined,
+      zone: session.zone ?? undefined,
+      filterCategoryId: session.filterCategoryId ?? undefined,
+      filterShelf: session.filterShelf ?? undefined,
+      filterZone: session.filterZone ?? undefined,
+      filterBrand: session.filterBrand ?? undefined,
+      filterSupplierId: session.filterSupplierId ?? undefined,
+      filterProductIds,
+    };
   }
 
   private async assertInventoryApproversExist(

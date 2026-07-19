@@ -10,7 +10,7 @@ export default function BranchCeoWarehouseInventoryPage() {
     <ProtectedShell>
       <section className="space-y-6">
         <BranchCeoWarehouseSection activeTab="inventory" />
-        <InventoryCountListContent basePath={BRANCH_CEO_WAREHOUSE_INVENTORY_BASE} hideFinancials />
+        <InventoryCountListContent basePath={BRANCH_CEO_WAREHOUSE_INVENTORY_BASE} />
       </section>
     </ProtectedShell>
   );

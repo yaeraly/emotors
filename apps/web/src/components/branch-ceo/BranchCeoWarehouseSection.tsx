@@ -14,9 +14,10 @@ type BranchCeoWarehouseSectionTab = 'warehouse' | 'inventory';
 type Props = {
   activeTab: BranchCeoWarehouseSectionTab;
   action?: ReactNode;
+  showHeading?: boolean;
 };
 
-export function BranchCeoWarehouseSection({ activeTab, action }: Props) {
+export function BranchCeoWarehouseSection({ activeTab, action, showHeading = true }: Props) {
   const router = useRouter();
   const { t } = useTranslation();
 
@@ -27,13 +28,15 @@ export function BranchCeoWarehouseSection({ activeTab, action }: Props) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-          {t('hqWarehouse.title')}
-        </p>
-        <h2 className="text-3xl font-bold text-slate-950">{t('branchCeo.warehouseTitle')}</h2>
-        <p className="mt-2 text-slate-500">{t('branchCeo.warehouseDescription')}</p>
-      </div>
+      {showHeading ? (
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+            {t('hqWarehouse.title')}
+          </p>
+          <h2 className="text-3xl font-bold text-slate-950">{t('branchCeo.warehouseTitle')}</h2>
+          <p className="mt-2 text-slate-500">{t('branchCeo.warehouseDescription')}</p>
+        </div>
+      ) : null}
       <SectionTopNav
         tabs={tabs}
         activeTab={activeTab}

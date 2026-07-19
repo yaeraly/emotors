@@ -19,7 +19,10 @@ export function notificationHref(alert: NotificationItem): string | null {
       if (alert.recipientRole === 'WAREHOUSE_OPERATOR') {
         return `/branch-warehouse/warehouse/inventory/${alert.entityId}`;
       }
-      return `/inventory/count/${alert.entityId}`;
+      if (alert.recipientRole === 'FRANCHISE_OWNER') {
+        return `/branch-ceo/warehouse/inventory/${alert.entityId}`;
+      }
+      return `/branch-ceo/warehouse/inventory/${alert.entityId}`;
     }
     return `/inventory/count/${alert.entityId}`;
   }

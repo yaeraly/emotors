@@ -14,6 +14,7 @@ import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { BRANCH_CEO_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-ceo-warehouse';
 import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventory';
 import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
+import { BranchCeoWarehouseSection } from '@/components/branch-ceo/BranchCeoWarehouseSection';
 import { usePathname } from 'next/navigation';
 
 type SearchResult = {
@@ -295,12 +296,19 @@ export default function InventoryCountDetailPage() {
   const summary = session.summary;
   const isCounting = session.status === 'COUNTING';
   const isDraft = session.status === 'DRAFT';
+  const isRejected = session.status === 'REJECTED';
   const isSubmitted = session.status === 'SUBMITTED';
 
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        {branchInventoryFlow ? <BranchWarehouseSection activeTab="inventory" showHeading={false} /> : null}
+        {branchInventoryFlow ? (
+          pathname.startsWith(BRANCH_CEO_WAREHOUSE_INVENTORY_BASE) ? (
+            <BranchCeoWarehouseSection activeTab="inventory" showHeading={false} />
+          ) : (
+            <BranchWarehouseSection activeTab="inventory" showHeading={false} />
+          )
+        ) : null}
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
             <Link href={inventoryListHref} className="text-sm font-semibold text-blue-600">
@@ -313,13 +321,13 @@ export default function InventoryCountDetailPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {isDraft && canManage ? (
+            {(isDraft || isRejected) && canManage ? (
               <button
                 type="button"
                 onClick={() => void startCounting()}
                 className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white"
               >
-                {t('inventoryCount.startCounting')}
+                {isRejected ? t('inventoryCount.continueInventory') : t('inventoryCount.startCounting')}
               </button>
             ) : null}
             {isCounting && canManage ? (

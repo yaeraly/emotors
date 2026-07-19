@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { apiFetch } from '@/lib/api';
@@ -22,29 +22,42 @@ export function InventoryCountListContent({
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [sessions, setSessions] = useState<InventoryCountSession[]>([]);
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<InventoryCountSession | null>(null);
   const [deleteRequireReason, setDeleteRequireReason] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
 
-  async function loadSessions() {
-    return apiFetch<InventoryCountSession[]>('/inventory-count/sessions').then(setSessions);
-  }
+  const loadSessions = useCallback(async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const [me, data] = await Promise.all([
+        apiFetch<User>('/auth/me'),
+        apiFetch<InventoryCountSession[]>('/inventory-count/sessions'),
+      ]);
+      setUser(me);
+      setSessions(data);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : t('inventoryCount.loadError'));
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
 
   useEffect(() => {
-    Promise.all([apiFetch<User>('/auth/me'), loadSessions()])
-      .then(([me]) => setUser(me))
-      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
-  }, [t]);
+    void loadSessions();
+  }, [loadSessions]);
 
   const activeSessions = sessions.filter((session) => activeStatuses.has(session.status));
   const historySessions = sessions.filter((session) => historyStatuses.has(session.status));
+  const branchOwnerView = isBranchOwnerUser(user) && !hideFinancials;
 
   async function confirmDelete(reason?: string) {
     if (!deleteTarget) return;
     setDeleting(true);
-    setError('');
+    setLoadError('');
     try {
       const result = await apiFetch<{ archived?: boolean }>(`/inventory-count/sessions/${deleteTarget.id}`, {
         method: 'DELETE',
@@ -58,7 +71,7 @@ export function InventoryCountListContent({
       if (message.toLowerCase().includes('reason is required')) {
         setDeleteRequireReason(true);
       }
-      setError(message);
+      setLoadError(message);
     } finally {
       setDeleting(false);
     }
@@ -66,34 +79,54 @@ export function InventoryCountListContent({
 
   return (
     <div className="space-y-6">
-      {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {successMessage ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p> : null}
+      {loadError ? (
+        <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p>{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void loadSessions()}
+            className="mt-2 font-semibold text-red-800 underline"
+          >
+            {t('common.retry')}
+          </button>
+        </div>
+      ) : null}
+      {successMessage ? (
+        <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{successMessage}</p>
+      ) : null}
 
       <section className="space-y-4">
         <h3 className="text-lg font-bold text-slate-950">{t('inventoryCount.continueInventory')}</h3>
-        {activeSessions.length === 0 ? (
+        {loading ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+            {t('inventoryCount.loading')}
+          </p>
+        ) : activeSessions.length === 0 ? (
           <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
             {t('inventoryCount.noActiveSessions')}
           </p>
         ) : (
-          <SessionTable
-            sessions={activeSessions}
-            t={t}
-            user={user}
-            branchOwnerView={isBranchOwnerUser(user) && !hideFinancials}
-            basePath={basePath}
-            onDelete={(session) => {
-              setDeleteTarget(session);
-              setDeleteRequireReason(!['DRAFT', 'COUNTING'].includes(session.status));
-              setError('');
-            }}
-          />
+          <div className="grid gap-4">
+            {activeSessions.map((session) => (
+              <ActiveInventoryCard
+                key={session.id}
+                session={session}
+                t={t}
+                basePath={basePath}
+                branchOwnerView={branchOwnerView}
+              />
+            ))}
+          </div>
         )}
       </section>
 
       <section className="space-y-4">
         <h3 className="text-lg font-bold text-slate-950">{t('inventoryCount.inventoryHistory')}</h3>
-        {historySessions.length === 0 ? (
+        {loading ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+            {t('inventoryCount.loadingHistory')}
+          </p>
+        ) : historySessions.length === 0 ? (
           <p className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
             {t('inventoryCount.noHistory')}
           </p>
@@ -102,12 +135,12 @@ export function InventoryCountListContent({
             sessions={historySessions}
             t={t}
             user={user}
-            branchOwnerView={isBranchOwnerUser(user) && !hideFinancials}
+            branchOwnerView={branchOwnerView}
             basePath={basePath}
             onDelete={(session) => {
               setDeleteTarget(session);
               setDeleteRequireReason(true);
-              setError('');
+              setLoadError('');
             }}
           />
         )}
@@ -122,6 +155,87 @@ export function InventoryCountListContent({
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDelete}
       />
+    </div>
+  );
+}
+
+function completionPercentage(session: InventoryCountSession) {
+  const total = session.summary?.totalProducts ?? 0;
+  const counted = session.summary?.countedProducts ?? 0;
+  if (total <= 0) return 0;
+  return Math.round((counted / total) * 100);
+}
+
+function ActiveInventoryCard({
+  session,
+  t,
+  basePath,
+  branchOwnerView,
+}: {
+  session: InventoryCountSession;
+  t: (key: string) => string;
+  basePath: string;
+  branchOwnerView: boolean;
+}) {
+  const summary = session.summary;
+  const progress = completionPercentage(session);
+  const differencePositions = (summary?.shortages ?? 0) + (summary?.overages ?? 0);
+
+  return (
+    <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-lg font-bold text-slate-950">{session.sessionNumber}</h4>
+            <StatusBadge status={session.status} t={t} />
+          </div>
+          <p className="text-sm text-slate-600">
+            {session.warehouse?.name ?? '—'}
+            {session.startDate
+              ? ` · ${new Date(session.startDate).toLocaleString()}`
+              : ` · ${new Date(session.createdAt).toLocaleString()}`}
+          </p>
+          <p className="text-sm text-slate-500">
+            {t('inventoryCount.createdBy')}: {session.createdBy?.fullName ?? '—'}
+          </p>
+        </div>
+        <Link
+          href={`${basePath}/${session.id}`}
+          className="inline-flex h-fit shrink-0 items-center justify-center rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          {t('inventoryCount.continueInventory')}
+        </Link>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+        <Metric label={t('inventoryCount.totalProducts')} value={String(summary?.totalProducts ?? 0)} />
+        <Metric label={t('inventoryCount.countedProducts')} value={String(summary?.countedProducts ?? 0)} />
+        <Metric label={t('inventoryCount.remainingProducts')} value={String(summary?.remainingProducts ?? 0)} />
+        <Metric label={t('inventoryCount.differencePositions')} value={String(differencePositions)} />
+        <Metric label={t('inventoryCount.completionPercentage')} value={`${progress}%`} />
+        {branchOwnerView ? (
+          <Metric
+            label={t('inventoryCount.totalDifferenceValue')}
+            value={Number(summary?.totalDifferenceValueKgs ?? 0).toFixed(2)}
+          />
+        ) : null}
+      </div>
+
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className="h-full rounded-full bg-blue-600 transition-all"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+    </article>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-lg font-bold text-slate-950">{value}</p>
     </div>
   );
 }
@@ -148,7 +262,8 @@ function SessionTable({
           <tr>
             <th className="px-4 py-3">{t('inventoryCount.sessionNumber')}</th>
             <th className="px-4 py-3">{t('inventory.warehouse')}</th>
-            {branchOwnerView ? <th className="px-4 py-3">{t('common.createdDate')}</th> : null}
+            {branchOwnerView ? <th className="px-4 py-3">{t('inventoryCount.startedAt')}</th> : null}
+            {branchOwnerView ? <th className="px-4 py-3">{t('inventoryCount.completedAt')}</th> : null}
             {branchOwnerView ? <th className="px-4 py-3">{t('inventoryCount.createdBy')}</th> : null}
             <th className="px-4 py-3">{t('inventoryCount.inventoryType')}</th>
             <th className="px-4 py-3">{t('inventoryCount.status')}</th>
@@ -166,7 +281,22 @@ function SessionTable({
               <td className="px-4 py-3 font-bold">{session.sessionNumber}</td>
               <td className="px-4 py-3">{session.warehouse?.name}</td>
               {branchOwnerView ? (
-                <td className="px-4 py-3">{new Date(session.createdAt).toLocaleDateString()}</td>
+                <td className="px-4 py-3">
+                  {session.startDate
+                    ? new Date(session.startDate).toLocaleString()
+                    : new Date(session.createdAt).toLocaleString()}
+                </td>
+              ) : null}
+              {branchOwnerView ? (
+                <td className="px-4 py-3">
+                  {session.completedAt
+                    ? new Date(session.completedAt).toLocaleString()
+                    : session.approvedAt
+                      ? new Date(session.approvedAt).toLocaleString()
+                      : session.finishDate
+                        ? new Date(session.finishDate).toLocaleString()
+                        : '—'}
+                </td>
               ) : null}
               {branchOwnerView ? (
                 <td className="px-4 py-3">{session.createdBy?.fullName ?? '—'}</td>
