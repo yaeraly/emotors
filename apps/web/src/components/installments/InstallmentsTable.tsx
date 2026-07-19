@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import type { SaleInstallmentApproval } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
-import { installmentStatusLabelKey } from '@/lib/sale-installment';
+import { getStatusLabel } from '@/lib/translate-status';
 import { formatCompactDate, formatMoneyKgs } from '@/components/sales/SaleFormPrimitives';
 
 export type InstallmentRow = SaleInstallmentApproval & {
@@ -110,7 +110,7 @@ function InstallmentDesktopRow({
   showFinanced: boolean;
   t: (key: string) => string;
 }) {
-  const statusKey = installmentStatusLabelKey(installment.status);
+  const statusLabel = getStatusLabel({ module: 'installmentApproval', status: installment.status, t });
   const paid = Number(installment.installmentPaidAmount ?? installment.paidAmount ?? 0);
   const financed = Number(installment.financedAmount ?? 0);
 
@@ -134,7 +134,7 @@ function InstallmentDesktopRow({
         <td className="whitespace-nowrap px-2 py-2.5">{formatMoneyKgs(paid)}</td>
       )}
       <td className="whitespace-nowrap px-2 py-2.5">{formatCompactDate(installment.dueDate)}</td>
-      <td className="px-2 py-2.5 text-xs">{statusKey ? t(statusKey) : installment.status}</td>
+      <td className="px-2 py-2.5 text-xs">{statusLabel}</td>
       <td className="px-2 py-2.5">
         <Link
           href={`/installments/${installment.id}`}
@@ -156,7 +156,7 @@ function InstallmentMobileCard({
   showFinanced: boolean;
   t: (key: string) => string;
 }) {
-  const statusKey = installmentStatusLabelKey(installment.status);
+  const statusLabel = getStatusLabel({ module: 'installmentApproval', status: installment.status, t });
   const paid = Number(installment.installmentPaidAmount ?? installment.paidAmount ?? 0);
 
   return (
@@ -210,7 +210,7 @@ function InstallmentMobileCard({
         </div>
         <div className="col-span-2">
           <dt className="text-xs text-slate-400">{t('common.status')}</dt>
-          <dd>{statusKey ? t(statusKey) : installment.status}</dd>
+          <dd>{statusLabel}</dd>
         </div>
       </dl>
     </article>

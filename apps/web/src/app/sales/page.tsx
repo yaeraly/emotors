@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { canCreateSale, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIAL', 'DEBT'];
 
@@ -240,13 +241,7 @@ function PaymentStatusPill({ status }: { status: PaymentStatus }) {
 }
 
 function SaleStatusPill({ status }: { status: SaleStatus }) {
-  const labels: Record<SaleStatus, string> = {
-    DRAFT: 'Draft',
-    SENT_TO_CUSTOMER: 'Sent',
-    APPROVED_BY_CUSTOMER: 'Approved',
-    FINALIZED: 'Finalized',
-    CANCELLED: 'Cancelled',
-  };
+  const { t } = useTranslation();
   const tone =
     status === 'FINALIZED'
       ? 'bg-emerald-100 text-emerald-700'
@@ -260,7 +255,7 @@ function SaleStatusPill({ status }: { status: SaleStatus }) {
 
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
-      {labels[status]}
+      {getStatusLabel({ module: 'sale', status, t })}
     </span>
   );
 }

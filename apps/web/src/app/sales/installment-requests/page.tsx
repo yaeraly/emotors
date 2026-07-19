@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { canApproveSaleInstallmentRequest } from '@/lib/rbac';
 import type { Sale, SaleInstallmentApproval, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 type InstallmentRequestRow = SaleInstallmentApproval & {
   sale: Pick<Sale, 'id' | 'receiptNumber' | 'totalAmount' | 'paidAmount' | 'debtAmount'> & {
@@ -19,19 +20,6 @@ function formatKgs(value: number) {
   return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KGS`;
 }
 
-function translateStatus(t: (key: string) => string, status: string) {
-  switch (status) {
-    case 'PENDING_APPROVAL':
-    case 'PENDING_BRANCH_CEO_APPROVAL':
-      return t('sales.installmentPendingCeo');
-    case 'APPROVED':
-      return t('sales.installmentApproved');
-    case 'REJECTED':
-      return t('sales.installmentRejected');
-    default:
-      return status;
-  }
-}
 
 function isPendingApproval(status: string) {
   return status === 'PENDING_APPROVAL' || status === 'PENDING_BRANCH_CEO_APPROVAL';
@@ -141,7 +129,6 @@ export default function SaleInstallmentRequestsPage() {
                 <th className="px-4 py-3">{t('sales.seller')}</th>
                 <th className="px-4 py-3">{t('sales.totalAmount')}</th>
                 <th className="px-4 py-3">{t('sales.downPayment')}</th>
-                <th className="px-4 py-3">{t('sales.installmentFinancedAmount')}</th>
                 <th className="px-4 py-3">{t('sales.finalPaymentDate')}</th>
                 <th className="px-4 py-3">{t('sales.sentForApprovalAt')}</th>
                 <th className="px-4 py-3">{t('common.status')}</th>
@@ -151,13 +138,13 @@ export default function SaleInstallmentRequestsPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
                     {t('common.loading')}
                   </td>
                 </tr>
               ) : requests.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
                     {t('sales.noInstallmentRequests')}
                   </td>
                 </tr>
@@ -172,7 +159,6 @@ export default function SaleInstallmentRequestsPage() {
                     <td className="px-4 py-3">{request.submittedBy?.fullName ?? request.sale.seller.fullName}</td>
                     <td className="px-4 py-3">{formatKgs(request.totalAmount)}</td>
                     <td className="px-4 py-3">{formatKgs(request.downPayment ?? request.initialPayment)}</td>
-                    <td className="px-4 py-3">{formatKgs(request.remainingDebt ?? request.financedAmount)}</td>
                     <td className="px-4 py-3">
                       {request.dueDate
                         ? new Date(request.dueDate).toLocaleDateString()
@@ -183,7 +169,9 @@ export default function SaleInstallmentRequestsPage() {
                         ? new Date(request.submittedAt).toLocaleString()
                         : '—'}
                     </td>
-                    <td className="px-4 py-3">{translateStatus(t, request.status)}</td>
+                    <td className="px-4 py-3">
+                      {getStatusLabel({ module: 'installmentApproval', status: request.status, t })}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-2">
                         <Link

@@ -9,6 +9,7 @@ import { isHqSalesManagerUser, shouldShowBranchColumnForBranchScopedTables } fro
 import type { GoodsReceiving, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 export default function ReceivingsPage() {
   const { t } = useTranslation();
@@ -55,7 +56,7 @@ export default function ReceivingsPage() {
                 <td className="px-4 py-3">{receiving.distributionOrder?.orderNumber}</td>
                 {showBranchColumn ? <td className="px-4 py-3">{receiving.branch?.name}</td> : null}
                 <td className="px-4 py-3">{receiving.warehouse?.name}</td>
-                <td className="px-4 py-3">{receiving.status}</td>
+                <td className="px-4 py-3">{getStatusLabel({ module: 'goodsReceiving', status: receiving.status, t })}</td>
                 <td className="px-4 py-3">{receiving.receivedBy?.fullName}</td>
                 <td className="px-4 py-3">{new Date(receiving.receivedAt).toLocaleString()}</td>
                 <td className="px-4 py-3"><Link href={`/distribution/receivings/${receiving.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td>

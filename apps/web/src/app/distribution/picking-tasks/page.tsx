@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { canDispatchFromHq } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 type PickingTask = {
   id: string;
@@ -73,7 +74,10 @@ export default function PickingTasksPage() {
                   <td className="px-4 py-3 font-bold">{task.distributionOrder.orderNumber}</td>
                   <td className="px-4 py-3">{task.distributionOrder.branch?.name}</td>
                   <td className="px-4 py-3">{task.sourceHqWarehouse?.name}</td>
-                  <td className="px-4 py-3">{task.status} / {task.distributionOrder.status}</td>
+                  <td className="px-4 py-3">
+                    {getStatusLabel({ module: 'pickingTask', status: task.status, t })} /{' '}
+                    {getStatusLabel({ module: 'distribution', status: task.distributionOrder.status, t })}
+                  </td>
                   <td className="px-4 py-3">
                     <Link href={`/distribution/orders/${task.distributionOrder.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
                       {t('common.open')}

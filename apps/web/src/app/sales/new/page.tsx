@@ -28,6 +28,7 @@ import {
 } from '@/lib/sale-payment-parts';
 import type { Customer, PaymentMethod, Sale, User, WhatsAppDraftResponse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 type SaleItemForm = {
   productId: string;
@@ -1263,7 +1264,7 @@ export default function NewSalePage() {
           </pre>
           {draftSale ? (
             <p className="mt-3 inline-flex rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
-              {draftSale.status}
+              {getStatusLabel({ module: 'sale', status: draftSale.status, t })}
             </p>
           ) : null}
         </section>

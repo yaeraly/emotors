@@ -5,6 +5,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import type { Warranty } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 export default function WarrantiesPage() {
   const { t } = useTranslation();
@@ -25,7 +26,7 @@ export default function WarrantiesPage() {
         <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">{t('service.warranty')}</th><th className="px-4 py-3">{t('service.customer')}</th><th className="px-4 py-3">{t('sales.product')}</th><th className="px-4 py-3">{t('crm.branch')}</th><th className="px-4 py-3">Starts</th><th className="px-4 py-3">Expires</th><th className="px-4 py-3">{t('service.status')}</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">{warranties.map((warranty) => <tr key={warranty.id}><td className="px-4 py-3 font-bold">{warranty.warrantyNumber}</td><td className="px-4 py-3">{warranty.customer?.fullName}</td><td className="px-4 py-3">{warranty.product?.name ?? '-'}</td><td className="px-4 py-3">{warranty.branch?.name}</td><td className="px-4 py-3">{new Date(warranty.startsAt).toLocaleDateString()}</td><td className="px-4 py-3">{new Date(warranty.expiresAt).toLocaleDateString()}</td><td className="px-4 py-3">{warranty.status}</td></tr>)}</tbody>
+            <tbody className="divide-y divide-slate-100">{warranties.map((warranty) => <tr key={warranty.id}><td className="px-4 py-3 font-bold">{warranty.warrantyNumber}</td><td className="px-4 py-3">{warranty.customer?.fullName}</td><td className="px-4 py-3">{warranty.product?.name ?? '-'}</td><td className="px-4 py-3">{warranty.branch?.name}</td><td className="px-4 py-3">{new Date(warranty.startsAt).toLocaleDateString()}</td><td className="px-4 py-3">{new Date(warranty.expiresAt).toLocaleDateString()}</td><td className="px-4 py-3">{getStatusLabel({ module: 'warranty', status: warranty.status, t })}</td></tr>)}</tbody>
           </table>
         </div>
       </section>

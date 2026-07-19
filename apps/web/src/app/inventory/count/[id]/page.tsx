@@ -10,11 +10,11 @@ import { apiFetch } from '@/lib/api';
 import { canApproveInventoryCountForWarehouse, canDeleteInventoryCount, canManageInventoryCountForWarehouse, isBranchOwnerUser, isBranchWarehouseOperator } from '@/lib/rbac';
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { BRANCH_CEO_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-ceo-warehouse';
 import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventory';
 import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
-import { BranchCeoWarehouseSection } from '@/components/branch-ceo/BranchCeoWarehouseSection';
 import { usePathname } from 'next/navigation';
 
 type SearchResult = {
@@ -302,12 +302,8 @@ export default function InventoryCountDetailPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        {branchInventoryFlow ? (
-          pathname.startsWith(BRANCH_CEO_WAREHOUSE_INVENTORY_BASE) ? (
-            <BranchCeoWarehouseSection activeTab="inventory" showHeading={false} />
-          ) : (
-            <BranchWarehouseSection activeTab="inventory" showHeading={false} />
-          )
+        {branchInventoryFlow && !pathname.startsWith(BRANCH_CEO_WAREHOUSE_INVENTORY_BASE) ? (
+          <BranchWarehouseSection activeTab="inventory" showHeading={false} />
         ) : null}
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
@@ -317,7 +313,7 @@ export default function InventoryCountDetailPage() {
             <h2 className="mt-2 text-3xl font-bold text-slate-950">{session.sessionNumber}</h2>
             <p className="mt-2 text-slate-500">
               {session.warehouse?.name} · {inventoryTypeLabel(session.inventoryType, t)} ·{' '}
-              {t(`inventoryCount.status.${session.status}`)}
+              {getStatusLabel({ module: 'inventoryCount', status: session.status, t })}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

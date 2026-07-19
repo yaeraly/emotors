@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 type PolicyVersion = {
   id: string;
@@ -161,7 +162,7 @@ export default function PricingVersionsPage() {
             {versions.map((version) => (
               <tr key={version.id}>
                 <td className="px-3 py-2 font-semibold">{version.label}</td>
-                <td className="px-3 py-2">{version.status}</td>
+                <td className="px-3 py-2">{getStatusLabel({ module: 'pricing', status: version.status, t })}</td>
                 <td className="px-3 py-2">
                   {version.productSnapshotCount} / {version.categoryDiscountSnapshotCount}
                 </td>

@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { canManageDistributionOrders } from '@/lib/rbac';
 import type { ShortageReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 const resolutionTypes = [
   'SEND_IMMEDIATELY',
@@ -73,7 +74,7 @@ export default function ShortageReportDetailPage() {
           <>
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-center justify-between">
-                <p className="font-bold">{report.status}</p>
+                <p className="font-bold">{getStatusLabel({ module: 'shortageReport', status: report.status, t })}</p>
               </div>
               {report.status === 'OPEN' && canResolve ? (
                 <div className="mt-4 grid gap-4 md:grid-cols-2">

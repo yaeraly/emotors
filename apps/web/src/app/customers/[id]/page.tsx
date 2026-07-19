@@ -8,6 +8,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { CenteredDialog } from '@/components/CenteredDialog';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 import type {
   Customer,
   CustomerEvent,
@@ -225,7 +226,7 @@ export default function CustomerDetailPage() {
                   </div>
                   <div className="flex flex-col items-start gap-2 sm:items-end">
                     <span className="h-fit rounded-full bg-blue-100 px-4 py-2 text-sm font-bold text-blue-700">
-                      {customer.status}
+                      {getStatusLabel({ module: 'customer', status: customer.status, t })}
                     </span>
                     {canEditProfile ? (
                       <button
@@ -509,7 +510,7 @@ export default function CustomerDetailPage() {
                             </p>
                           </div>
                           <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">
-                            {followUp.status}
+                            {getStatusLabel({ module: 'followUp', status: followUp.status, t })}
                           </span>
                         </div>
                         {followUp.description ? (

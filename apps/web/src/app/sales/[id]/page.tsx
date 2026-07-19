@@ -26,6 +26,7 @@ import {
 } from '@/lib/sale-payment-methods';
 import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 export default function SaleDetailPage() {
   const { t } = useTranslation();
@@ -245,7 +246,8 @@ export default function SaleDetailPage() {
                   </p>
                 </div>
                 <span className="h-fit rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
-                  {sale.status} · {t(`paymentStatus.${sale.paymentStatus}`)}
+                  {getStatusLabel({ module: 'sale', status: sale.status, t })} ·{' '}
+                  {t(`paymentStatus.${sale.paymentStatus}`)}
                 </span>
               </div>
 
@@ -593,7 +595,7 @@ export default function SaleDetailPage() {
                             {formatKgs(installment.amount)}
                           </p>
                           <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                            {installment.status}
+                            {getStatusLabel({ module: 'installment', status: installment.status, t })}
                           </span>
                         </div>
                         <p className="mt-1 text-sm text-slate-500">

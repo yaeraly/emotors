@@ -9,6 +9,7 @@ import { isHqSalesManagerUser, shouldShowBranchColumnForBranchScopedTables } fro
 import type { ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 export default function ShortageReportsPage() {
   const { t } = useTranslation();
@@ -53,7 +54,7 @@ export default function ShortageReportsPage() {
                 <td className="px-4 py-3 font-bold">{report.reportNumber}</td>
                 <td className="px-4 py-3">{report.distributionOrder?.orderNumber}</td>
                 {showBranchColumn ? <td className="px-4 py-3">{report.branch?.name}</td> : null}
-                <td className="px-4 py-3">{report.status}</td>
+                <td className="px-4 py-3">{getStatusLabel({ module: 'shortageReport', status: report.status, t })}</td>
                 <td className="px-4 py-3">{report.items?.length ?? 0}</td>
                 <td className="px-4 py-3">{new Date(report.createdAt).toLocaleDateString()}</td>
                 <td className="px-4 py-3"><Link href={`/distribution/shortage-reports/${report.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td>

@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/api';
 import { canAssignHqWarehouseManager, canDeleteEmployee, canResetUserPassword } from '@/lib/rbac';
 import type { Branch, Role, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 export default function UserDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -218,7 +219,7 @@ export default function UserDetailPage() {
           ) : (
             <label className="block"><span className="text-sm font-semibold text-slate-700">{t('crm.branch')}</span><select value={form.branchId} onChange={(event) => setField('branchId', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
           )}
-          <label className="block"><span className="text-sm font-semibold text-slate-700">{t('users.status')}</span><select value={form.status} onChange={(event) => setField('status', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"><option value="ACTIVE">ACTIVE</option><option value="INACTIVE">INACTIVE</option><option value="SUSPENDED">SUSPENDED</option></select></label>
+          <label className="block"><span className="text-sm font-semibold text-slate-700">{t('users.status')}</span><select value={form.status} onChange={(event) => setField('status', event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"><option value="ACTIVE">{getStatusLabel({ module: 'user', status: 'ACTIVE', t })}</option><option value="INACTIVE">{getStatusLabel({ module: 'user', status: 'INACTIVE', t })}</option><option value="SUSPENDED">{getStatusLabel({ module: 'user', status: 'SUSPENDED', t })}</option></select></label>
           {canEditAssignments ? (
             <HqWarehouseMultiSelect
               warehouses={hqWarehouses}

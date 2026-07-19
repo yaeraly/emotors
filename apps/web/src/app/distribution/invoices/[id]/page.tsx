@@ -13,6 +13,7 @@ import {
 } from '@/lib/rbac';
 import type { BranchInvoice, BranchPayment, BranchPaymentMethod, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { getStatusLabel } from '@/lib/translate-status';
 
 const methods: BranchPaymentMethod[] = ['CASH', 'QR', 'BANK', 'TRANSFER', 'INSTALLMENT', 'BALANCE'];
 
@@ -180,7 +181,7 @@ export default function BranchInvoiceDetailPage() {
               <Info label={t('distribution.totalAmount')} value={formatKgs(invoice.totalAmount)} />
               <Info label={t('distribution.paidAmount')} value={formatKgs(invoice.paidAmount)} />
               <Info label={t('distribution.debtAmount')} value={formatKgs(invoice.debtAmount)} />
-              <Info label={t('distribution.status')} value={invoice.status} />
+              <Info label={t('distribution.status')} value={getStatusLabel({ module: 'invoice', status: invoice.status, t })} />
               <Info label={t('distribution.dueDate')} value={new Date(invoice.dueDate).toLocaleDateString()} />
               <Info label={t('distribution.issuedAt')} value={new Date(invoice.issuedAt).toLocaleDateString()} />
             </section>

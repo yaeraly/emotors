@@ -14,8 +14,16 @@ import {
   LANGUAGE_STORAGE_KEY,
   Language,
   languages,
-  translations,
+  translations as baseTranslations,
 } from './translations';
+import { statusTranslationSupplement } from './status-translations';
+
+const translations = Object.fromEntries(
+  languages.map((lang) => [
+    lang,
+    { ...baseTranslations[lang], ...statusTranslationSupplement[lang] },
+  ]),
+) as typeof baseTranslations;
 
 const LANGUAGE_CHANGE_EVENT = 'emotors-language-change';
 
@@ -66,7 +74,12 @@ function useTranslationState(): I18nContextValue {
   }, []);
 
   const t = useCallback(
-    (key: string) => translations[language][key] ?? translations.en[key] ?? key,
+    (key: string) =>
+      translations[language][key] ??
+      translations[DEFAULT_LANGUAGE][key] ??
+      translations.ru[key] ??
+      translations.en[key] ??
+      key,
     [language],
   );
 
