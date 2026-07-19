@@ -16,13 +16,8 @@ import {
   installmentStatusLabelKey,
   saleIsInstallment,
 } from '@/lib/sale-installment';
-import type {
-  Customer,
-  PaymentMethod,
-  Sale,
-  User,
-  WhatsAppDraftResponse,
-} from '@/lib/types';
+import { SALE_PAYMENT_METHODS, formatPaymentMethodLabel } from '@/lib/sale-payment-methods';
+import type { Customer, PaymentMethod, Sale, User, WhatsAppDraftResponse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type SaleItemForm = {
@@ -56,21 +51,9 @@ const PRICE_ABOVE_REASONS = [
   'OTHER',
 ] as const;
 
-const paymentMethods: PaymentMethod[] = [
-  'CASH',
-  'QR',
-  'CARD',
-  'BANK_TRANSFER',
-  'MBANK',
-  'ELCART',
-  'BALANCE',
-];
-
-const branchSalesPaymentMethods: PaymentMethod[] = ['CASH', 'CARD', 'BANK_TRANSFER'];
-
 type PaymentRow = {
   amount: string;
-  method: PaymentMethod;
+  method: PaymentMethod | '';
   note: string;
 };
 
@@ -82,11 +65,6 @@ function priceFromDiscount(listPrice: number, discountPercent: number) {
   return roundMoney(listPrice * (1 - discountPercent / 100));
 }
 
-function paymentMethodLabel(method: PaymentMethod, t: (key: string) => string) {
-  const key = `sales.paymentMethods.${method}`;
-  const label = t(key);
-  return label === key ? method : label;
-}
 
 export default function NewSalePage() {
   const router = useRouter();
@@ -98,7 +76,7 @@ export default function NewSalePage() {
   const [items, setItems] = useState<SaleItemForm[]>([]);
   const [paymentType, setPaymentType] = useState<PaymentType>('FULL_PAYMENT');
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
-    { amount: '0', method: 'CASH', note: '' },
+    { amount: '0', method: '', note: '' },
   ]);
   const [cashReceived, setCashReceived] = useState('');
   const [showCreateCustomer, setShowCreateCustomer] = useState(false);
@@ -117,7 +95,6 @@ export default function NewSalePage() {
   const canApprove = canApproveSale(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
   const canCreateCustomerAction = canCreateCustomer(user);
-  const visiblePaymentMethods = branchSalesManagerView ? branchSalesPaymentMethods : paymentMethods;
 
   useEffect(() => {
     apiFetch<User>('/auth/me')
@@ -161,9 +138,8 @@ export default function NewSalePage() {
     const down = Number(downPayment || 0);
     setPaymentRows((current) => [
       {
-        ...(current[0] ?? { method: 'CASH' as PaymentMethod, note: '' }),
+        ...(current[0] ?? { method: '' as const, note: '' }),
         amount: down > 0 ? String(down) : '0',
-        method: 'CASH',
       },
     ]);
     setPaymentsSynced(false);
@@ -419,6 +395,11 @@ export default function NewSalePage() {
 
     if (hasMissingPricing) {
       setError(t('sales.noPricingPolicy'));
+      return null;
+    }
+
+    if (!paymentRows[0]?.method) {
+      setError(t('sales.paymentMethodRequired'));
       return null;
     }
 
@@ -977,15 +958,17 @@ export default function NewSalePage() {
                 <label className="block min-w-0">
                   <span className="text-sm font-semibold text-slate-700">{t('sales.paymentMethod')}</span>
                   <select
-                    value={paymentRows[0]?.method ?? 'CASH'}
+                    value={paymentRows[0]?.method ?? ''}
                     onChange={(event) =>
                       updatePayment(0, { method: event.target.value as PaymentMethod })
                     }
+                    required
                     className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
                   >
-                    {visiblePaymentMethods.map((method) => (
+                    <option value="">{t('sales.paymentMethodRequired')}</option>
+                    {SALE_PAYMENT_METHODS.map((method) => (
                       <option key={method} value={method}>
-                        {paymentMethodLabel(method, t)}
+                        {formatPaymentMethodLabel(method, t)}
                       </option>
                     ))}
                   </select>
@@ -1054,15 +1037,17 @@ export default function NewSalePage() {
                 <label className="block min-w-0">
                   <span className="text-sm font-semibold text-slate-700">{t('sales.downPaymentMethod')}</span>
                   <select
-                    value={paymentRows[0]?.method ?? 'CASH'}
+                    value={paymentRows[0]?.method ?? ''}
                     onChange={(event) =>
                       updatePayment(0, { method: event.target.value as PaymentMethod })
                     }
+                    required
                     className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
                   >
-                    {visiblePaymentMethods.map((method) => (
+                    <option value="">{t('sales.paymentMethodRequired')}</option>
+                    {SALE_PAYMENT_METHODS.map((method) => (
                       <option key={method} value={method}>
-                        {paymentMethodLabel(method, t)}
+                        {formatPaymentMethodLabel(method, t)}
                       </option>
                     ))}
                   </select>
@@ -1225,7 +1210,7 @@ function SaleInput({
   error,
 }: {
   label: string;
-  labelAccessory?: React.ReactNode;
+  labelAccessory?: ReactNode;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;

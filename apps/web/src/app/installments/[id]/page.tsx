@@ -5,11 +5,10 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { SALE_PAYMENT_METHODS, formatPaymentMethodLabel } from '@/lib/sale-payment-methods';
 import type { PaymentMethod, SaleInstallmentApproval } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { installmentStatusLabelKey } from '@/lib/sale-installment';
-
-const paymentMethods: PaymentMethod[] = ['CASH', 'CARD', 'BANK_TRANSFER'];
 
 type InstallmentDetail = SaleInstallmentApproval & {
   sale: {
@@ -41,7 +40,7 @@ export default function InstallmentDetailPage() {
   const params = useParams<{ id: string }>();
   const [installment, setInstallment] = useState<InstallmentDetail | null>(null);
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<PaymentMethod>('CASH');
+  const [method, setMethod] = useState<PaymentMethod | ''>('');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -72,6 +71,10 @@ export default function InstallmentDetailPage() {
     setError('');
     setSuccess('');
     try {
+      if (!method) {
+        setError(t('sales.paymentMethodRequired'));
+        return;
+      }
       await apiFetch(`/sales/installments/${params.id}/payments`, {
         method: 'POST',
         body: JSON.stringify({
@@ -189,11 +192,13 @@ export default function InstallmentDetailPage() {
                     <select
                       value={method}
                       onChange={(e) => setMethod(e.target.value as PaymentMethod)}
+                      required
                       className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                     >
-                      {paymentMethods.map((item) => (
+                      <option value="">{t('sales.paymentMethodRequired')}</option>
+                      {SALE_PAYMENT_METHODS.map((item) => (
                         <option key={item} value={item}>
-                          {item}
+                          {formatPaymentMethodLabel(item, t)}
                         </option>
                       ))}
                     </select>
@@ -238,7 +243,7 @@ export default function InstallmentDetailPage() {
                         <tr key={payment.id} className="border-t border-slate-100">
                           <td className="px-3 py-2">{new Date(payment.createdAt).toLocaleString()}</td>
                           <td className="px-3 py-2">{formatKgs(payment.amount)}</td>
-                          <td className="px-3 py-2">{payment.method}</td>
+                          <td className="px-3 py-2">{formatPaymentMethodLabel(payment.method, t)}</td>
                           <td className="px-3 py-2">{payment.createdBy?.fullName ?? '—'}</td>
                           <td className="px-3 py-2">{payment.note ?? '—'}</td>
                           <td className="px-3 py-2">{formatKgs(payment.paidAfterTotal)}</td>

@@ -19,18 +19,13 @@ import {
   installmentStatusLabelKey,
   saleIsInstallment,
 } from '@/lib/sale-installment';
+import { SaleReceipt } from '@/components/sales/SaleReceipt';
+import {
+  SALE_PAYMENT_METHODS,
+  formatPaymentMethodLabel,
+} from '@/lib/sale-payment-methods';
 import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
-
-const paymentMethods: PaymentMethod[] = [
-  'CASH',
-  'QR',
-  'CARD',
-  'BANK_TRANSFER',
-  'MBANK',
-  'ELCART',
-  'BALANCE',
-];
 
 export default function SaleDetailPage() {
   const { t } = useTranslation();
@@ -39,7 +34,7 @@ export default function SaleDetailPage() {
   const [sale, setSale] = useState<Sale | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<PaymentMethod>('CASH');
+  const [method, setMethod] = useState<PaymentMethod | ''>('');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingPayment, setSavingPayment] = useState(false);
@@ -74,6 +69,10 @@ export default function SaleDetailPage() {
 
   async function addPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!method) {
+      setError(t('sales.paymentMethodRequired'));
+      return;
+    }
     setSavingPayment(true);
     setError('');
     setSuccess('');
@@ -90,6 +89,7 @@ export default function SaleDetailPage() {
       setSale(result);
       setAmount('');
       setNote('');
+      setMethod('');
       setSuccess('Payment added successfully');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -204,9 +204,12 @@ export default function SaleDetailPage() {
     sale?.status !== 'CANCELLED' &&
     !installmentBlocksCompletion(sale);
 
+  const primaryPaymentMethod =
+    sale?.payments?.find((payment) => payment.status !== 'VOID')?.method ?? null;
+
   return (
     <ProtectedShell>
-      <section className="space-y-6">
+      <section className="sale-details-page w-full min-w-0 space-y-6 print:hidden">
         <Link
           href="/sales"
           className="inline-flex text-sm font-semibold text-blue-700 hover:text-blue-800"
@@ -231,41 +234,55 @@ export default function SaleDetailPage() {
           </p>
         ) : sale ? (
           <>
-            <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
-              <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col justify-between gap-4 md:flex-row">
-                  <div>
-                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                      {t('sales.title')}
-                    </p>
-                    <h2 className="mt-2 text-3xl font-bold text-slate-950">
-                      {sale.receiptNumber}
-                    </h2>
-                    <p className="mt-2 text-slate-500">
-                      {new Date(sale.saleDate).toLocaleString()}
-                    </p>
-                  </div>
-                  <span className="h-fit rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
-                    {sale.status} · {t(`paymentStatus.${sale.paymentStatus}`)}
-                  </span>
+            <article className="w-full min-w-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="flex flex-col justify-between gap-4 md:flex-row">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                    {t('sales.title')}
+                  </p>
+                  <h2 className="mt-2 text-3xl font-bold text-slate-950">
+                    {sale.receiptNumber}
+                  </h2>
+                  <p className="mt-2 text-slate-500">
+                    {new Date(sale.saleDate).toLocaleString()}
+                  </p>
                 </div>
+                <span className="h-fit rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
+                  {sale.status} · {t(`paymentStatus.${sale.paymentStatus}`)}
+                </span>
+              </div>
 
-                <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Info label={t('sales.customer')} value={sale.customer?.fullName ?? ''} />
-                  <Info label={t('crm.phone')} value={sale.customer?.phone ?? ''} />
-                  <Info label={t('sales.seller')} value={sale.seller?.fullName ?? ''} />
-                  <Info label={t('crm.branch')} value={sale.branch?.name ?? ''} />
-                </div>
+              <div className="mt-6 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+                <Info label={t('sales.customer')} value={sale.customer?.fullName ?? ''} />
+                <Info label={t('crm.phone')} value={sale.customer?.phone ?? ''} />
+                <Info label={t('sales.seller')} value={sale.seller?.fullName ?? ''} />
+                <Info label={t('crm.branch')} value={sale.branch?.name ?? ''} />
+                <Info
+                  label={t('sales.paymentType')}
+                  value={
+                    isInstallment ? t('sales.installment') : t('sales.fullPayment')
+                  }
+                />
+                <Info
+                  label={t('sales.paymentMethod')}
+                  value={
+                    primaryPaymentMethod
+                      ? formatPaymentMethodLabel(primaryPaymentMethod, t)
+                      : '—'
+                  }
+                />
+              </div>
 
-                <div className={`mt-6 grid gap-4 ${branchSalesView ? 'md:grid-cols-3' : 'md:grid-cols-4'}`}>
-                  <Metric label={t('sales.totalAmount')} value={formatKgs(sale.totalAmount)} />
-                  <Metric label={t('sales.paidAmount')} value={formatKgs(sale.paidAmount)} />
-                  <Metric label={t('sales.debtAmount')} value={formatKgs(sale.debtAmount)} />
-                  {!branchSalesView ? (
-                    <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
-                  ) : null}
-                </div>
-                <div className="mt-6 flex flex-wrap gap-2 print:hidden">
+              <div className={`mt-6 grid min-w-0 gap-4 sm:grid-cols-2 ${branchSalesView ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
+                <Metric label={t('sales.totalAmount')} value={formatKgs(sale.totalAmount)} />
+                <Metric label={t('sales.paidAmount')} value={formatKgs(sale.paidAmount)} />
+                <Metric label={t('sales.debtAmount')} value={formatKgs(sale.debtAmount)} />
+                {!branchSalesView ? (
+                  <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
+                ) : null}
+              </div>
+
+              <div className="mt-6 flex flex-wrap gap-2">
                   {canManageSaleWorkflow(currentUser) ? (
                     <>
                   <button
@@ -346,75 +363,76 @@ export default function SaleDetailPage() {
                   ) : null}
                     </>
                   ) : null}
+              </div>
+            </article>
+
+            {canVoidPayment(currentUser) ? (
+              <form
+                onSubmit={addPayment}
+                className="w-full min-w-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+              >
+                <h3 className="text-lg font-bold text-slate-950">{t('sales.addPayment')}</h3>
+                <div className="mt-4 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className="block min-w-0">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {t('sales.paidAmount')}
+                    </span>
+                    <input
+                      value={amount}
+                      onChange={(event) => setAmount(event.target.value)}
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      max={sale.debtAmount}
+                      required
+                      className="mt-2 w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                    />
+                  </label>
+                  <label className="block min-w-0">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {t('sales.paymentMethod')}
+                    </span>
+                    <select
+                      value={method}
+                      onChange={(event) =>
+                        setMethod(event.target.value as PaymentMethod)
+                      }
+                      required
+                      className="mt-2 w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                    >
+                      <option value="">{t('sales.paymentMethodRequired')}</option>
+                      {SALE_PAYMENT_METHODS.map((paymentMethod) => (
+                        <option key={paymentMethod} value={paymentMethod}>
+                          {formatPaymentMethodLabel(paymentMethod, t)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block min-w-0 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {t('crm.notes')}
+                    </span>
+                    <textarea
+                      value={note}
+                      onChange={(event) => setNote(event.target.value)}
+                      className="mt-2 min-h-20 w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                    />
+                  </label>
                 </div>
-              </article>
-
-              {canVoidPayment(currentUser) ? (
-                <form
-                  onSubmit={addPayment}
-                  className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+                <button
+                  disabled={savingPayment || sale.debtAmount <= 0}
+                  className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 sm:w-auto"
+                  type="submit"
                 >
-                  <h3 className="text-lg font-bold text-slate-950">{t('sales.addPayment')}</h3>
-                  <div className="mt-4 space-y-3">
-                    <label className="block">
-                      <span className="text-sm font-semibold text-slate-700">
-                        {t('sales.paidAmount')}
-                      </span>
-                      <input
-                        value={amount}
-                        onChange={(event) => setAmount(event.target.value)}
-                        type="number"
-                        min="0.01"
-                        step="0.01"
-                        max={sale.debtAmount}
-                        required
-                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="text-sm font-semibold text-slate-700">
-                        {t('sales.paymentMethod')}
-                      </span>
-                      <select
-                        value={method}
-                        onChange={(event) =>
-                          setMethod(event.target.value as PaymentMethod)
-                        }
-                        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                      >
-                        {paymentMethods.map((paymentMethod) => (
-                          <option key={paymentMethod} value={paymentMethod}>
-                            {paymentMethod}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block">
-                      <span className="text-sm font-semibold text-slate-700">
-                        {t('crm.notes')}
-                      </span>
-                      <textarea
-                        value={note}
-                        onChange={(event) => setNote(event.target.value)}
-                        className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                      />
-                    </label>
-                  </div>
-                  <button
-                    disabled={savingPayment || sale.debtAmount <= 0}
-                    className="mt-5 w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                    type="submit"
-                  >
-                    {savingPayment ? t('common.loading') : t('sales.addPayment')}
-                  </button>
-                </form>
-              ) : null}
-            </div>
+                  {savingPayment ? t('common.loading') : t('sales.addPayment')}
+                </button>
+              </form>
+            ) : null}
 
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <section className="w-full min-w-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-bold text-slate-950">{t('sales.saleItems')}</h3>
-              <div className="mt-4 overflow-x-auto">
-                <table className={`divide-y divide-slate-200 text-sm ${branchSalesView ? 'min-w-[720px]' : 'min-w-[860px]'}`}>
+              <div className="mt-4 w-full min-w-0 overflow-x-auto">
+                <table className="w-full min-w-full table-auto divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-4 py-3">{t('sales.product')}</th>
@@ -429,7 +447,7 @@ export default function SaleDetailPage() {
                   <tbody className="divide-y divide-slate-100">
                     {sale.items?.map((item) => (
                       <tr key={item.id}>
-                        <td className="px-4 py-3 font-semibold">
+                        <td className="min-w-0 px-4 py-3 font-semibold break-words">
                           {item.productName}
                         </td>
                         <td className="px-4 py-3">{item.productSku ?? '-'}</td>
@@ -460,7 +478,9 @@ export default function SaleDetailPage() {
                           </p>
                           <div className="flex items-center gap-2">
                             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
-                              {payment.status === 'VOID' ? 'VOID' : payment.method}
+                              {payment.status === 'VOID'
+                                ? 'VOID'
+                                : formatPaymentMethodLabel(payment.method, t)}
                             </span>
                             {payment.status !== 'VOID' && canVoidPayment(currentUser) ? (
                               <button
@@ -592,43 +612,7 @@ export default function SaleDetailPage() {
               </Panel>
             </div>
 
-            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm print:shadow-none">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-950">{t('sales.receipt')}</h3>
-                <button
-                  onClick={() => window.print()}
-                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 print:hidden"
-                  type="button"
-                >
-                  {t('sales.printReceipt')}
-                </button>
-              </div>
-              <div className="mt-4 rounded-2xl border border-dashed border-slate-300 p-5">
-                <p className="text-2xl font-black text-slate-950">EMOTORS</p>
-                <p className="mt-2 font-bold">{sale.receiptNumber}</p>
-                <p>Date: {new Date(sale.saleDate).toLocaleString()}</p>
-                <p>{t('sales.seller')}: {sale.seller?.fullName}</p>
-                <p>{t('sales.customer')}: {sale.customer?.fullName}</p>
-                <p>{t('crm.phone')}: {sale.customer?.phone}</p>
-                <div className="my-4 border-t border-slate-200 pt-4">
-                  {sale.items?.map((item) => (
-                    <div key={item.id} className="flex justify-between text-sm">
-                      <span>
-                        {item.productName} x {item.quantity}
-                      </span>
-                      <span>{formatKgs(item.totalPrice)}</span>
-                    </div>
-                  ))}
-                </div>
-                <p>{t('sales.totalAmount')}: {formatKgs(sale.totalAmount)}</p>
-                <p>{t('sales.paidAmount')}: {formatKgs(sale.paidAmount)}</p>
-                <p>{t('sales.debtAmount')}: {formatKgs(sale.debtAmount)}</p>
-                <p>{t('common.status')}: {t(`paymentStatus.${sale.paymentStatus}`)}</p>
-                <pre className="mt-4 whitespace-pre-wrap rounded-xl bg-slate-100 p-4 text-xs">
-                  {sale.receipt?.qrCodeData ?? 'QR placeholder'}
-                </pre>
-              </div>
-            </section>
+            <SaleReceipt sale={sale} />
           </>
         ) : null}
       </section>
@@ -638,11 +622,11 @@ export default function SaleDetailPage() {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-slate-50 p-4">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
         {label}
       </p>
-      <p className="mt-1 font-bold text-slate-900">{value}</p>
+      <p className="mt-1 break-words font-bold text-slate-900">{value}</p>
     </div>
   );
 }
