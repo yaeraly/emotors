@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { CenteredDialog } from '@/components/CenteredDialog';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import type {
@@ -56,7 +57,6 @@ export default function CustomerDetailPage() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [eventType, setEventType] = useState<CustomerEventType>('NOTE');
   const [eventMessage, setEventMessage] = useState('');
-  const [whatsappMessage, setWhatsappMessage] = useState('');
   const [followUpTitle, setFollowUpTitle] = useState('');
   const [followUpDescription, setFollowUpDescription] = useState('');
   const [followUpDueAt, setFollowUpDueAt] = useState('');
@@ -72,6 +72,9 @@ export default function CustomerDetailPage() {
     status: 'ACTIVE',
     notes: '',
   });
+  const [activeDialog, setActiveDialog] = useState<'reminder' | 'event' | 'whatsapp' | null>(
+    null,
+  );
   const [currentUser, setCurrentUser] = useState<{ role: string; roles?: string[]; branchId?: string | null } | null>(null);
 
   useEffect(() => {
@@ -127,19 +130,7 @@ export default function CustomerDetailPage() {
       }),
     });
     setEventMessage('');
-    await loadDetail();
-  }
-
-  async function addWhatsAppEvent(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await apiFetch(`/customers/${customerId}/events`, {
-      method: 'POST',
-      body: JSON.stringify({
-        type: 'WHATSAPP',
-        message: whatsappMessage,
-      }),
-    });
-    setWhatsappMessage('');
+    setActiveDialog(null);
     await loadDetail();
   }
 
@@ -156,6 +147,7 @@ export default function CustomerDetailPage() {
     setFollowUpTitle('');
     setFollowUpDescription('');
     setFollowUpDueAt('');
+    setActiveDialog(null);
     await loadDetail();
   }
 
@@ -220,8 +212,7 @@ export default function CustomerDetailPage() {
           </p>
         ) : customer ? (
           <>
-            <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-              <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-col justify-between gap-4 lg:flex-row">
                   <div>
                     <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
@@ -246,6 +237,30 @@ export default function CustomerDetailPage() {
                       </button>
                     ) : null}
                   </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveDialog('reminder')}
+                    className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                  >
+                    {t('crm.addFollowUp')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDialog('event')}
+                    className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    {t('crm.addEvent')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveDialog('whatsapp')}
+                    className="rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50"
+                  >
+                    {t('crm.whatsappHistory')}
+                  </button>
                 </div>
 
                 {isEditing ? (
@@ -360,100 +375,6 @@ export default function CustomerDetailPage() {
                 </div>
               </article>
 
-              <aside className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-bold text-slate-950">
-                  {t('crm.addFollowUp')}
-                </h3>
-                <form onSubmit={addFollowUp} className="mt-4 space-y-3">
-                  <input
-                    value={followUpTitle}
-                    onChange={(event) => setFollowUpTitle(event.target.value)}
-                    placeholder="Title"
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    required
-                  />
-                  <textarea
-                    value={followUpDescription}
-                    onChange={(event) =>
-                      setFollowUpDescription(event.target.value)
-                    }
-                    placeholder="Description"
-                    className="min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                  />
-                  <input
-                    value={followUpDueAt}
-                    onChange={(event) => setFollowUpDueAt(event.target.value)}
-                    type="datetime-local"
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    required
-                  />
-                  <button
-                    className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
-                    type="submit"
-                  >
-                    {t('crm.addFollowUp')}
-                  </button>
-                </form>
-              </aside>
-            </div>
-
-            <div className="grid gap-6 xl:grid-cols-2">
-              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-bold text-slate-950">
-                  {t('crm.addEvent')}
-                </h3>
-                <form onSubmit={addEvent} className="mt-4 space-y-3">
-                  <select
-                    value={eventType}
-                    onChange={(event) =>
-                      setEventType(event.target.value as CustomerEventType)
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                  >
-                    {eventTypes.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                  <textarea
-                    value={eventMessage}
-                    onChange={(event) => setEventMessage(event.target.value)}
-                    placeholder="Write event details"
-                    className="min-h-28 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    required
-                  />
-                  <button
-                    className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800"
-                    type="submit"
-                  >
-                    {t('crm.addEvent')}
-                  </button>
-                </form>
-              </section>
-
-              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h3 className="text-lg font-bold text-slate-950">
-                  {t('crm.whatsappHistory')}
-                </h3>
-                <form onSubmit={addWhatsAppEvent} className="mt-4 space-y-3">
-                  <textarea
-                    value={whatsappMessage}
-                    onChange={(event) => setWhatsappMessage(event.target.value)}
-                    placeholder="Paste or summarize WhatsApp communication"
-                    className="min-h-28 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    required
-                  />
-                  <button
-                    className="rounded-xl bg-green-600 px-4 py-3 font-semibold text-white hover:bg-green-700"
-                    type="submit"
-                  >
-                    {t('common.save')}
-                  </button>
-                </form>
-              </section>
-            </div>
-
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
                 <div>
@@ -550,8 +471,8 @@ export default function CustomerDetailPage() {
               </div>
             </section>
 
-            <div className="grid gap-6 xl:grid-cols-3">
-              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-2">
+            <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-slate-950">{t('crm.timeline')}</h3>
                 <div className="mt-4 max-h-[520px] space-y-3 overflow-y-auto pr-2">
                   {timeline.length === 0 ? (
@@ -566,27 +487,7 @@ export default function CustomerDetailPage() {
                 </div>
               </section>
 
-              <section className="space-y-6">
-                <Panel title={t('crm.whatsappHistory')}>
-                  {whatsappEvents.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      {t('crm.whatsappHistory')}
-                    </p>
-                  ) : (
-                    whatsappEvents.map((event) => (
-                      <div
-                        key={event.id}
-                        className="rounded-2xl bg-green-50 p-4 text-sm text-green-950"
-                      >
-                        <p>{event.message}</p>
-                        <p className="mt-2 text-xs text-green-700">
-                          {new Date(event.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </Panel>
-
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <Panel title={t('crm.followUps')}>
                   {followUps.length === 0 ? (
                     <p className="text-sm text-slate-500">
@@ -635,6 +536,103 @@ export default function CustomerDetailPage() {
             <section className="hidden">
               {events.length}
             </section>
+
+            <CenteredDialog
+              open={activeDialog === 'reminder'}
+              title={t('crm.addFollowUp')}
+              onClose={() => setActiveDialog(null)}
+            >
+              <form onSubmit={addFollowUp} className="space-y-3">
+                <input
+                  value={followUpTitle}
+                  onChange={(event) => setFollowUpTitle(event.target.value)}
+                  placeholder="Title"
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                  required
+                />
+                <textarea
+                  value={followUpDescription}
+                  onChange={(event) => setFollowUpDescription(event.target.value)}
+                  placeholder="Description"
+                  className="min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                />
+                <input
+                  value={followUpDueAt}
+                  onChange={(event) => setFollowUpDueAt(event.target.value)}
+                  type="datetime-local"
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                  required
+                />
+                <button
+                  className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
+                  type="submit"
+                >
+                  {t('crm.addFollowUp')}
+                </button>
+              </form>
+            </CenteredDialog>
+
+            <CenteredDialog
+              open={activeDialog === 'event'}
+              title={t('crm.addEvent')}
+              onClose={() => setActiveDialog(null)}
+            >
+              <form onSubmit={addEvent} className="space-y-3">
+                <select
+                  value={eventType}
+                  onChange={(event) =>
+                    setEventType(event.target.value as CustomerEventType)
+                  }
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                >
+                  {eventTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+                <textarea
+                  value={eventMessage}
+                  onChange={(event) => setEventMessage(event.target.value)}
+                  placeholder="Write event details"
+                  className="min-h-28 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                  required
+                />
+                <button
+                  className="w-full rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800"
+                  type="submit"
+                >
+                  {t('crm.addEvent')}
+                </button>
+              </form>
+            </CenteredDialog>
+
+            <CenteredDialog
+              open={activeDialog === 'whatsapp'}
+              title={t('crm.whatsappHistory')}
+              onClose={() => setActiveDialog(null)}
+              wide
+            >
+              <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+                {whatsappEvents.length === 0 ? (
+                  <p className="rounded-2xl bg-slate-50 p-6 text-center text-sm text-slate-500">
+                    {t('crm.whatsappHistory')}
+                  </p>
+                ) : (
+                  whatsappEvents.map((event) => (
+                    <div
+                      key={event.id}
+                      className="rounded-2xl border border-green-100 bg-green-50 p-4 text-sm text-green-950"
+                    >
+                      <p>{event.message}</p>
+                      <p className="mt-2 text-xs text-green-700">
+                        {new Date(event.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CenteredDialog>
           </>
         ) : null}
       </section>

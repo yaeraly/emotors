@@ -600,7 +600,7 @@ export function canBranchSalesManagerModifyStock(user: Pick<AuthUser, 'role' | '
 }
 
 export function shouldStripSaleFinancialFields(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
-  return isBranchCashierUser(user) || isBranchSalesManagerUser(user);
+  return isBranchCashierUser(user);
 }
 
 export function shouldStripSaleWorkflowStatus(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {

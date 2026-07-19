@@ -368,6 +368,14 @@ export function shouldHideSaleProfitColumn(
   return isBranchSalesManagerUser(user) || isBranchCashierUser(user);
 }
 
+/** Branch Cashier must not see product cost or sale profit anywhere in the panel. */
+export function canViewCostAndProfit(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  if (!user) return false;
+  return !isBranchCashierUser(user);
+}
+
 const BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES = [
   '/finance',
   '/reports',
@@ -880,11 +888,7 @@ export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'
 
 export function canViewProductCost(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   if (!user) return false;
-  if (isBranchOwnerUser(user)) return false;
-  if (isBranchWarehouseOperator(user)) return false;
-  if (isBranchCashierUser(user)) return false;
-  if (isHqWarehouseLogisticsOnlyUser(user)) return false;
-  return true;
+  return canViewCostAndProfit(user) && !isBranchOwnerUser(user) && !isBranchWarehouseOperator(user) && !isHqWarehouseLogisticsOnlyUser(user);
 }
 
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {

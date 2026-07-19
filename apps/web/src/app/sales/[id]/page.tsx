@@ -12,7 +12,7 @@ import {
   canManageSaleWorkflow,
   canSubmitSaleInstallmentRequest,
   canVoidPayment,
-  isBranchSalesManagerUser,
+  shouldHideSaleProfitColumn,
 } from '@/lib/rbac';
 import {
   installmentBlocksCompletion,
@@ -189,7 +189,7 @@ export default function SaleDetailPage() {
     }
   }
 
-  const branchSalesView = isBranchSalesManagerUser(currentUser);
+  const hideCostAndProfit = shouldHideSaleProfitColumn(currentUser);
   const isInstallment = saleIsInstallment(sale);
   const installmentApproval = sale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
@@ -203,10 +203,6 @@ export default function SaleDetailPage() {
     sale?.status !== 'FINALIZED' &&
     sale?.status !== 'CANCELLED' &&
     !installmentBlocksCompletion(sale);
-
-  const activeSalePayments =
-    sale?.payments?.filter((payment) => payment.status !== 'VOID') ?? [];
-  const primaryPaymentMethod = activeSalePayments[0]?.method ?? null;
 
   return (
     <ProtectedShell>
@@ -266,52 +262,11 @@ export default function SaleDetailPage() {
                 />
               </div>
 
-              {activeSalePayments.length > 0 ? (
-                <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-sm font-semibold text-slate-700">{t('sales.paymentBreakdown')}</p>
-                  <div className="mt-3 space-y-2 text-sm text-slate-800">
-                    {activeSalePayments.map((payment) => (
-                      <p key={payment.id}>
-                        {formatPaymentMethodLabel(payment.method, t)} — {formatKgs(payment.amount)}
-                      </p>
-                    ))}
-                    <p className="font-semibold">
-                      {t('sales.totalPaid')} — {formatKgs(sale.paidAmount)}
-                    </p>
-                    {activeSalePayments
-                      .filter((payment) => payment.method === 'CASH')
-                      .map((payment) => (
-                        <div key={`${payment.id}-cash-meta`} className="text-slate-600">
-                          {payment.cashReceived != null ? (
-                            <p>
-                              {t('sales.cashReceived')} — {formatKgs(payment.cashReceived)}
-                            </p>
-                          ) : null}
-                          {payment.changeAmount != null && Number(payment.changeAmount) > 0 ? (
-                            <p>
-                              {t('sales.changeAmount')} — {formatKgs(payment.changeAmount)}
-                            </p>
-                          ) : null}
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              ) : (
-                <Info
-                  label={t('sales.paymentMethod')}
-                  value={
-                    primaryPaymentMethod
-                      ? formatPaymentMethodLabel(primaryPaymentMethod, t)
-                      : '—'
-                  }
-                />
-              )}
-
-              <div className={`mt-6 grid min-w-0 gap-4 sm:grid-cols-2 ${branchSalesView ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
+              <div className={`mt-6 grid min-w-0 gap-4 sm:grid-cols-2 ${hideCostAndProfit ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
                 <Metric label={t('sales.totalAmount')} value={formatKgs(sale.totalAmount)} />
                 <Metric label={t('sales.paidAmount')} value={formatKgs(sale.paidAmount)} />
                 <Metric label={t('sales.debtAmount')} value={formatKgs(sale.debtAmount)} />
-                {!branchSalesView ? (
+                {!hideCostAndProfit ? (
                   <Metric label={t('sales.profitAmount')} value={formatKgs(sale.profitAmount)} />
                 ) : null}
               </div>
@@ -473,9 +428,9 @@ export default function SaleDetailPage() {
                       <th className="px-4 py-3">{t('sales.sku')}</th>
                       <th className="px-4 py-3">{t('sales.quantity')}</th>
                       <th className="px-4 py-3">{t('sales.unitPrice')}</th>
-                      {!branchSalesView ? <th className="px-4 py-3">{t('sales.unitCost')}</th> : null}
+                      {!hideCostAndProfit ? <th className="px-4 py-3">{t('sales.unitCost')}</th> : null}
                       <th className="px-4 py-3">{t('sales.totalAmount')}</th>
-                      {!branchSalesView ? <th className="px-4 py-3">{t('sales.profitAmount')}</th> : null}
+                      {!hideCostAndProfit ? <th className="px-4 py-3">{t('sales.profitAmount')}</th> : null}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -487,9 +442,9 @@ export default function SaleDetailPage() {
                         <td className="px-4 py-3">{item.productSku ?? '-'}</td>
                         <td className="px-4 py-3">{item.quantity}</td>
                         <td className="px-4 py-3">{formatKgs(item.unitPrice)}</td>
-                        {!branchSalesView ? <td className="px-4 py-3">{formatKgs(item.unitCost)}</td> : null}
+                        {!hideCostAndProfit ? <td className="px-4 py-3">{formatKgs(item.unitCost)}</td> : null}
                         <td className="px-4 py-3">{formatKgs(item.totalPrice)}</td>
-                        {!branchSalesView ? <td className="px-4 py-3">{formatKgs(item.profitAmount)}</td> : null}
+                        {!hideCostAndProfit ? <td className="px-4 py-3">{formatKgs(item.profitAmount)}</td> : null}
                       </tr>
                     ))}
                   </tbody>
