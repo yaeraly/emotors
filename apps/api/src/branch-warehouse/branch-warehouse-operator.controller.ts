@@ -31,4 +31,10 @@ export class BranchWarehouseOperatorController {
   listStock(@CurrentUser() user: AuthUser) {
     return this.service.listOperationalStock(user);
   }
+
+  @Get('warehouse/summary')
+  @Roles(...BRANCH_WAREHOUSE_OPERATOR_ROLES)
+  warehouseSummary(@CurrentUser() user: AuthUser) {
+    return this.service.warehouseSummary(user);
+  }
 }

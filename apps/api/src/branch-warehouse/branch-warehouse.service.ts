@@ -330,6 +330,31 @@ export class BranchWarehouseService {
     };
   }
 
+  async warehouseSummary(user: AuthUser) {
+    this.assertBranchWarehouseOperator(user);
+    const warehouse = await this.getOperatorWarehouse(user);
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: { warehouseId: warehouse.id, branchId: user.branchId! },
+      select: {
+        productId: true,
+        quantity: true,
+        reservedQuantity: true,
+      },
+    });
+
+    const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
+    const reservedQuantity = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
+    const skuCount = new Set(balances.filter((item) => item.quantity > 0).map((item) => item.productId)).size;
+
+    return {
+      warehouse: { id: warehouse.id, name: warehouse.name, code: warehouse.code },
+      skuCount,
+      totalQuantity,
+      reservedQuantity,
+      availableQuantity: Math.max(totalQuantity - reservedQuantity, 0),
+    };
+  }
+
   private async loadConvertedOrdersForRequests(
     requests: Array<{ convertedOrderId: string | null }>,
   ) {
@@ -388,7 +413,7 @@ export class BranchWarehouseService {
       orderBy: { createdAt: 'asc' },
     });
     if (!warehouse || !isBranchWarehouse(warehouse)) {
-      throw new NotFoundException('Склад филиала не найден');
+      throw new NotFoundException('Для вашего филиала склад не настроен');
     }
     return warehouse;
   }

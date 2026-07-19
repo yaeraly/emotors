@@ -12,6 +12,7 @@ import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/type
 import { useTranslation } from '@/i18n/useTranslation';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventory';
+import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
 import { usePathname } from 'next/navigation';
 
 type SearchResult = {
@@ -61,6 +62,7 @@ export default function InventoryCountDetailPage() {
   const inventoryDetailBase = pathname.startsWith(BRANCH_WAREHOUSE_INVENTORY_BASE)
     ? BRANCH_WAREHOUSE_INVENTORY_BASE
     : '/inventory/count';
+  const branchInventoryFlow = pathname.startsWith(BRANCH_WAREHOUSE_INVENTORY_BASE);
 
   async function confirmDelete(reason?: string) {
     if (!session) return;
@@ -291,6 +293,7 @@ export default function InventoryCountDetailPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
+        {branchInventoryFlow ? <BranchWarehouseSection activeTab="inventory" showHeading={false} /> : null}
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
             <Link href={inventoryListHref} className="text-sm font-semibold text-blue-600">

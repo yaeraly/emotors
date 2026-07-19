@@ -61,7 +61,7 @@ export default function InventoryPage() {
 
   useEffect(() => {
     if (branchWarehouseOperatorView) {
-      router.replace('/branch-warehouse/stock');
+      router.replace('/branch-warehouse/warehouse');
     }
   }, [branchWarehouseOperatorView, router]);
 

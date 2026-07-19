@@ -17,7 +17,7 @@ export function notificationHref(alert: NotificationItem): string | null {
   if (alert.entityType === 'InventoryCountSession' && alert.entityId) {
     if (alert.branchId) {
       if (alert.recipientRole === 'WAREHOUSE_OPERATOR') {
-        return `/branch-warehouse/inventory/${alert.entityId}`;
+        return `/branch-warehouse/warehouse/inventory/${alert.entityId}`;
       }
       return `/inventory/count/${alert.entityId}`;
     }

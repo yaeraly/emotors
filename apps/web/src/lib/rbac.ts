@@ -578,7 +578,7 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/hq-warehouses';
-  if (isBranchWarehouseOperator(user)) return '/branch-warehouse/stock';
+  if (isBranchWarehouseOperator(user)) return '/branch-warehouse/warehouse';
   if (isBranchCashierUser(user)) return '/branch-cashier/invoices';
   if (isBranchAccountantUser(user)) return '/branch-accountant/invoices';
   if (hasPermission(user, 'payments.manage')) return '/payments';

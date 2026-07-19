@@ -17,6 +17,7 @@ import type {
   Warehouse,
 } from '@/lib/types';
 import { BRANCH_WAREHOUSE_INVENTORY_BASE, branchWarehouseInventoryPath } from '@/lib/branch-warehouse-inventory';
+import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const inventoryTypes: InventoryCountType[] = [
@@ -180,6 +181,7 @@ export default function NewInventoryCountPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
+        {branchInventoryFlow ? <BranchWarehouseSection activeTab="inventory" showHeading={false} /> : null}
         <div>
           <Link href={inventoryListHref} className="text-sm font-semibold text-blue-600">
             ← {t('inventoryCount.title')}
