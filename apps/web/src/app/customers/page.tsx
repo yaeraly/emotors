@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
 import { canArchiveCustomer, canCreateCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
@@ -82,6 +82,8 @@ export default function CustomersPage() {
 }
 
 function CustomersPageContent() {
+  const pathname = usePathname();
+  const archiveView = pathname === '/customers/archive';
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useTranslation();
@@ -116,27 +118,25 @@ function CustomersPageContent() {
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchOwnerView = isBranchOwnerUser(currentUser);
+  const usesRouteArchiveNav = branchSalesManagerView || branchOwnerView;
   const visibleColumns = getCustomerListColumns(currentUser);
-  const showListEditButton = shouldShowCustomerListEditButton(currentUser);
-  const canCreate = canCreateCustomer(currentUser);
+  const showListEditButton = shouldShowCustomerListEditButton(currentUser) && !archiveView;
+  const canCreate = canCreateCustomer(currentUser) && !archiveView;
   const columnVisible = (key: CustomerListColumnKey) => visibleColumns.includes(key);
+  const statusFilterOptions = archiveView
+    ? (['ARCHIVED'] as CustomerStatus[])
+    : businessStatuses.filter((item) => item !== 'ARCHIVED');
 
   useEffect(() => {
-    setShowArchived(searchParams.get('archived') === '1');
-  }, [searchParams]);
-
-  function setArchivedView(archived: boolean) {
-    setShowArchived(archived);
-    if (!branchOwnerView) return;
-    const params = new URLSearchParams(searchParams.toString());
-    if (archived) {
-      params.set('archived', '1');
-    } else {
-      params.delete('archived');
+    if (!usesRouteArchiveNav) {
+      setShowArchived(searchParams.get('archived') === '1');
     }
-    const nextQuery = params.toString();
-    router.replace(nextQuery ? `/customers?${nextQuery}` : '/customers');
-  }
+  }, [searchParams, usesRouteArchiveNav]);
+
+  useEffect(() => {
+    if (!usesRouteArchiveNav || !searchParams.get('archived')) return;
+    router.replace('/customers/archive');
+  }, [router, searchParams, usesRouteArchiveNav]);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -149,13 +149,15 @@ function CustomersPageContent() {
     if (!isBranchPanel && branchId) {
       params.set('branchId', branchId);
     }
-    if (showArchived) {
+    if (usesRouteArchiveNav || archiveView) {
+      params.set('scope', archiveView ? 'archived' : 'active');
+    } else if (showArchived) {
       params.set('includeArchived', 'true');
     }
 
     const value = params.toString();
     return value ? `?${value}` : '';
-  }, [branchId, isBranchPanel, search, showArchived, status]);
+  }, [archiveView, branchId, isBranchPanel, search, showArchived, status, usesRouteArchiveNav]);
 
   const sortedCustomers = useMemo(() => {
     return [...customers].sort((a, b) => {
@@ -179,7 +181,7 @@ function CustomersPageContent() {
 
   useEffect(() => {
     setPage(1);
-  }, [branchId, pageSize, search, showArchived, status]);
+  }, [archiveView, branchId, pageSize, search, showArchived, status]);
 
   useEffect(() => {
     void loadCustomers();
@@ -496,18 +498,18 @@ function CustomersPageContent() {
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             >
               <option value="">{t('common.all')} {t('common.status')}</option>
-              {businessStatuses.map((item) => (
+              {statusFilterOptions.map((item) => (
                 <option key={item} value={item}>
                   {t(`status.${item}`)}
                 </option>
               ))}
             </select>
-            {!branchOwnerView ? (
+            {!usesRouteArchiveNav ? (
               <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
                 <input
                   type="checkbox"
                   checked={showArchived}
-                  onChange={(event) => setArchivedView(event.target.checked)}
+                  onChange={(event) => setShowArchived(event.target.checked)}
                 />
                 {t('crm.showArchived')}
               </label>
@@ -556,7 +558,11 @@ function CustomersPageContent() {
               <p className="p-5 text-slate-500">{t('common.loading')}</p>
             ) : sortedCustomers.length === 0 ? (
               <p className="m-5 rounded-2xl bg-slate-50 p-6 text-center text-slate-500">
-                {t('crm.noCustomers')}
+                {archiveView
+                  ? t('crm.noArchivedCustomers')
+                  : usesRouteArchiveNav
+                    ? t('crm.noActiveCustomers')
+                    : t('crm.noCustomers')}
               </p>
             ) : (
               <>

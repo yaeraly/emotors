@@ -58,9 +58,11 @@ export class CustomersService {
       ...this.buildBranchWhere(user, query.branchId),
     };
 
-    if (query.status) {
+    if (query.scope === 'archived') {
+      where.status = CustomerStatus.ARCHIVED;
+    } else if (query.status) {
       where.status = query.status;
-    } else if (!query.includeArchived) {
+    } else if (query.scope === 'active' || !query.includeArchived) {
       where.status = { not: CustomerStatus.ARCHIVED };
     }
 

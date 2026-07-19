@@ -85,7 +85,7 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     sidebarVisible: crmVisible,
     pages: [
       { href: '/customers', labelKey: 'nav.customers', isVisible: crmVisible },
-      { href: '/customers?archived=1', labelKey: 'nav.customersArchive', isVisible: crmVisible },
+      { href: '/customers/archive', labelKey: 'nav.customersArchive', isVisible: crmVisible },
     ],
   },
   {
@@ -213,7 +213,10 @@ export const branchSalesManagerNavModules: UnifiedNavModule[] = [
     defaultHref: '/customers',
     pathPrefixes: ['/customers'],
     sidebarVisible: crmVisible,
-    pages: [{ href: '/customers', labelKey: 'nav.customers', isVisible: crmVisible }],
+    pages: [
+      { href: '/customers', labelKey: 'nav.customers', isVisible: crmVisible },
+      { href: '/customers/archive', labelKey: 'nav.customersArchive', isVisible: crmVisible },
+    ],
   },
   {
     id: 'crm',

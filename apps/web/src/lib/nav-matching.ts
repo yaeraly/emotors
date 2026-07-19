@@ -6,7 +6,10 @@ export function isRouteActive(pathname: string, href: string, search = '') {
   if (!pathMatches) return false;
   if (!pageQuery) {
     if (pagePath === '/customers') {
-      return !search.includes('archived=1');
+      return pathname === '/customers';
+    }
+    if (pagePath === '/customers/archive') {
+      return pathname === '/customers/archive';
     }
     if (pagePath === '/sales') {
       return pathname === '/sales' || pathname.startsWith('/sales/');
