@@ -7,16 +7,27 @@ export class EnterReceivingTransportDto {
 
   @IsOptional()
   @IsString()
+  deliveryMethod?: string;
+
+  @IsOptional()
+  @IsString()
   deliveryDocument?: string;
+
+  @IsOptional()
+  @IsString()
+  documentNumber?: string;
 
   @Type(() => Number)
   @IsNumber()
-  @Min(0)
+  @Min(0.01)
   transportCostKgs!: number;
 
   @IsOptional()
+  @IsString()
+  currency?: string;
+
   @IsDateString()
-  deliveryDate?: string;
+  deliveryDate!: string;
 
   @IsOptional()
   @IsString()

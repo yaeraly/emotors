@@ -9,6 +9,7 @@ import {
   BranchDistributionOrderStatus,
   BranchInvoiceStatus,
   BranchInvoicePaymentType,
+  BranchInvoiceCategory,
   BranchOrderInstallmentStatus,
   BranchPaymentConfirmationStatus,
   BranchPurchaseRequestStatus,
@@ -283,17 +284,18 @@ export class DistributionService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: { id, deletedAt: null },
-        include: { branchInvoice: true },
+        include: { branchInvoices: true },
       });
       if (!order) throw new NotFoundException('Distribution order not found');
       if (order.status !== BranchDistributionOrderStatus.INVOICED) {
         throw new BadRequestException('Invoice can only be sent for invoiced orders');
       }
-      if (!order.branchInvoice) {
+      const productInvoice = this.resolveProductBranchInvoice(order);
+      if (!productInvoice) {
         throw new BadRequestException('Invoice not found for this order');
       }
       const invoice = await tx.branchInvoice.update({
-        where: { id: order.branchInvoice.id },
+        where: { id: productInvoice.id },
         data: { sentToBranchAt: new Date() },
         include: this.invoiceInclude(),
       });
@@ -409,7 +411,7 @@ export class DistributionService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: { id, deletedAt: null },
-        include: { branchInvoice: true, items: true },
+        include: { branchInvoices: true, items: true },
       });
       if (!order) throw new NotFoundException('Distribution order not found');
       if (order.status !== BranchDistributionOrderStatus.PAID) {
@@ -417,7 +419,7 @@ export class DistributionService {
           'Order must be fully paid or installment-approved before sending to warehouse',
         );
       }
-      if (!order.branchInvoice?.sentToBranchAt) {
+      if (!this.resolveProductBranchInvoice(order)?.sentToBranchAt) {
         throw new BadRequestException('Invoice must be sent to branch first');
       }
 
@@ -521,7 +523,7 @@ export class DistributionService {
             branch: true,
             items: { include: { product: true } },
             destinationWarehouse: true,
-            branchInvoice: true,
+            branchInvoices: true,
           },
         },
         sourceHqWarehouse: true,
@@ -627,6 +629,25 @@ export class DistributionService {
       }
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
+      const weightSnapshot = await this.buildDispatchWeightSnapshot(tx, order.items);
+      if (weightSnapshot.missingWeightProducts.length > 0) {
+        const productName = weightSnapshot.missingWeightProducts[0]!;
+        throw new BadRequestException(
+          `Невозможно рассчитать общий вес партии. Для товара ${productName} не указан вес.`,
+        );
+      }
+
+      for (const line of weightSnapshot.lines) {
+        await tx.branchDistributionOrderItem.update({
+          where: { id: line.itemId },
+          data: {
+            dispatchedQuantity: line.dispatchedQuantity,
+            unitWeightKgSnapshot: line.unitWeightKg,
+            lineWeightKgSnapshot: line.lineWeightKg,
+          },
+        });
+      }
+
       await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
@@ -634,7 +655,17 @@ export class DistributionService {
           driverName: dto.driverName?.trim() || null,
           vehicleNumber: dto.vehicleNumber?.trim() || null,
           transportNotes: dto.transportNotes?.trim() || null,
+          totalShipmentWeightKg: weightSnapshot.totalShipmentWeightKg,
+          weightSnapshotAt: new Date(),
+          weightFinalizedById: user.id,
         },
+      });
+      await this.auditTransfer(tx, user, 'SHIPMENT_WEIGHT_CALCULATED', order, {
+        totalShipmentWeightKg: weightSnapshot.totalShipmentWeightKg,
+        lineCount: weightSnapshot.lines.length,
+      });
+      await this.auditTransfer(tx, user, 'SHIPMENT_WEIGHT_SNAPSHOT_FINALIZED', order, {
+        totalShipmentWeightKg: weightSnapshot.totalShipmentWeightKg,
       });
 
       for (const item of order.items) {
@@ -756,6 +787,7 @@ export class DistributionService {
       });
       await this.auditTransfer(tx, user, 'INVENTORY_SHIPPED', updated);
       await this.auditTransfer(tx, user, 'GOODS_SHIPPED', updated);
+      await this.auditTransfer(tx, user, 'SHIPMENT_DISPATCHED', updated);
       await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.GOODS_SHIPPED,
@@ -1169,6 +1201,9 @@ export class DistributionService {
       if (Number(order.transportCostKgs ?? 0) > 0 || order.deliveryCostEnteredAt) {
         throw new BadRequestException('Транспортные расходы по этой поставке уже внесены');
       }
+      if (Number(order.totalShipmentWeightKg ?? 0) <= 0) {
+        throw new BadRequestException('Для распределения транспортных расходов требуется снимок веса партии');
+      }
 
       const receiving = await tx.goodsReceiving.findFirst({
         where: { distributionOrderId: order.id, deletedAt: null },
@@ -1181,19 +1216,24 @@ export class DistributionService {
 
       const transportLines = [];
       for (const orderItem of order.items) {
-        const receivingItem = receiving.items.find((row) => row.distributionOrderItemId === orderItem.id);
+        const receivingItem = receiving?.items.find((row) => row.distributionOrderItemId === orderItem.id);
         const receivedQuantity = Number(receivingItem?.receivedQuantity ?? 0);
         if (receivedQuantity <= 0) continue;
-        const product = await tx.product.findFirst({
-          where: { id: orderItem.productId, deletedAt: null },
-          select: { weightKg: true },
-        });
+        const snapshotWeight = Number(orderItem.unitWeightKgSnapshot ?? 0);
+        if (snapshotWeight <= 0) {
+          throw new BadRequestException(
+            `Невозможно рассчитать общий вес партии. Для товара ${orderItem.productName} не указан вес.`,
+          );
+        }
         transportLines.push({
           productId: orderItem.productId,
           receivedQuantity,
-          weightKg: Number(product?.weightKg ?? 0),
+          weightKg: snapshotWeight,
           unitCostKgs: Number(orderItem.unitCost),
         });
+      }
+      if (!transportLines.length) {
+        throw new BadRequestException('Нет принятых позиций для распределения транспортных расходов');
       }
 
       const transportAllocations = allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
@@ -1202,28 +1242,33 @@ export class DistributionService {
         (sum, line) => sum + line.receivedQuantity * line.weightKg,
         0,
       );
+      if (totalShipmentWeightKg <= 0) {
+        throw new BadRequestException('Общий вес партии должен быть больше нуля');
+      }
 
       await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
           transportCompany: dto.transportCompany.trim(),
           transportCostKgs,
-          transportNotes: dto.comment?.trim() || dto.deliveryDocument?.trim() || null,
+          transportNotes: dto.comment?.trim() || dto.deliveryDocument?.trim() || dto.documentNumber?.trim() || null,
           totalShipmentWeightKg,
           deliveryCostEnteredAt: dto.deliveryDate ? new Date(dto.deliveryDate) : new Date(),
           deliveryCostEnteredById: user.id,
         },
       });
 
-      await tx.goodsReceiving.update({
-        where: { id: receiving.id },
-        data: {
-          transportCompany: dto.transportCompany.trim(),
-          transportCostKgs,
-          transportNotes: dto.comment?.trim() || null,
-          arrivalDate: dto.deliveryDate ? new Date(dto.deliveryDate) : receiving.arrivalDate,
-        },
-      });
+      if (receiving) {
+        await tx.goodsReceiving.update({
+          where: { id: receiving.id },
+          data: {
+            transportCompany: dto.transportCompany.trim(),
+            transportCostKgs,
+            transportNotes: dto.comment?.trim() || null,
+            arrivalDate: dto.deliveryDate ? new Date(dto.deliveryDate) : receiving.arrivalDate,
+          },
+        });
+      }
 
       for (const orderItem of order.items) {
         const transportCost = transportByProductId.get(orderItem.productId);
@@ -1295,18 +1340,63 @@ export class DistributionService {
         });
       }
 
+      await this.auditTransfer(tx, user, 'TRANSPORT_COST_ENTERED', order, {
+        transportCostKgs,
+        receivingId: receiving.id,
+      });
+      await this.auditTransfer(tx, user, 'TRANSPORT_COST_CONFIRMED', order, {
+        transportCostKgs,
+        receivingId: receiving.id,
+      });
+      await this.auditTransfer(tx, user, 'TRANSPORT_COST_ALLOCATED', order, {
+        transportCostKgs,
+        allocations: transportAllocations,
+      });
       await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_TRANSPORT_ALLOCATED', order, {
         transportCostKgs,
         allocations: transportAllocations,
       });
+      await this.auditTransfer(tx, user, 'BRANCH_LANDED_COST_UPDATED', order, {
+        transportCostKgs,
+        receivingId: receiving.id,
+      });
       await this.auditTransfer(tx, user, 'BRANCH_LANDED_COST_CALCULATED', order, {
         transportCostKgs,
+        receivingId: receiving.id,
+      });
+      await this.auditTransfer(tx, user, 'FIFO_LAYER_UPDATED', order, {
         receivingId: receiving.id,
       });
       await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_COST_UPDATED', order, {
         receivingId: receiving.id,
       });
       await this.syncBranchPurchaseRequestPaymentStatus(tx, order.id, 'TRANSPORT_COST_ENTERED', user);
+
+      const transportInvoice = await this.createTransportExpenseInvoice(tx, user, order, receiving, transportCostKgs);
+      if (transportInvoice) {
+        await this.auditTransfer(tx, user, 'TRANSPORT_EXPENSE_INVOICE_CREATED', order, {
+          invoiceId: transportInvoice.id,
+          invoiceNumber: transportInvoice.invoiceNumber,
+        });
+        await this.createWorkflowAlert(tx, user, {
+          branchId: order.branchId,
+          type: AlertType.BRANCH_INVOICE_CREATED,
+          title: 'Счёт на транспортные расходы',
+          message: `Создан счёт ${transportInvoice.invoiceNumber} на транспортные расходы по заказу ${order.orderNumber}`,
+          entityType: 'BranchInvoice',
+          entityId: transportInvoice.id,
+          recipientRoles: [Role.ACCOUNTANT],
+        });
+      }
+      await this.createWorkflowAlert(tx, user, {
+        branchId: order.branchId,
+        type: AlertType.BRANCH_GOODS_RECEIVED,
+        title: 'Транспортные расходы внесены',
+        message: `По заказу ${order.orderNumber} внесены транспортные расходы`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+        recipientRoles: [Role.ACCOUNTANT],
+      });
 
       const updated = await tx.branchDistributionOrder.findFirst({
         where: { id: order.id },
@@ -2420,6 +2510,15 @@ export class DistributionService {
     return `SR-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
   }
 
+  private resolveProductBranchInvoice(order: { branchInvoices?: any[]; branchInvoice?: any }) {
+    const invoices = order.branchInvoices ?? (order.branchInvoice ? [order.branchInvoice] : []);
+    return (
+      invoices.find(
+        (invoice) => !invoice.invoiceCategory || invoice.invoiceCategory === BranchInvoiceCategory.PRODUCT_ORDER,
+      ) ?? null
+    );
+  }
+
   private include() {
     return {
       branch: true,
@@ -2428,7 +2527,7 @@ export class DistributionService {
       createdBy: { select: { id: true, fullName: true, role: true } },
       approvedBy: { select: { id: true, fullName: true, role: true } },
       items: { include: { product: true } },
-      branchInvoice: true,
+      branchInvoices: true,
       pickingTask: {
         include: {
           assignedWarehouseManager: { select: { id: true, fullName: true, role: true } },
@@ -2445,7 +2544,7 @@ export class DistributionService {
       receivedBy: { select: { id: true, fullName: true, role: true } },
       items: true,
       shortageReport: { include: { items: true } },
-      branchInvoice: true,
+      branchInvoices: true,
     };
   }
 
@@ -2499,13 +2598,121 @@ export class DistributionService {
     return `BI-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
   }
 
+  private async createTransportExpenseInvoice(
+    tx: PrismaTx,
+    user: AuthUser,
+    order: { id: string; branchId: string; orderNumber: string },
+    receiving: { id: string },
+    transportCostKgs: number,
+  ) {
+    const existing = await tx.branchInvoice.findFirst({
+      where: {
+        distributionOrderId: order.id,
+        invoiceCategory: BranchInvoiceCategory.TRANSPORT_EXPENSE,
+        deletedAt: null,
+      },
+    });
+    if (existing) return this.toInvoiceResponse(existing);
+
+    const totalAmount = this.roundMoney(transportCostKgs);
+    const issuedAt = new Date();
+    const invoice = await tx.branchInvoice.create({
+      data: {
+        invoiceNumber: await this.generateInvoiceNumber(tx),
+        branchId: order.branchId,
+        distributionOrderId: order.id,
+        goodsReceivingId: receiving.id,
+        invoiceCategory: BranchInvoiceCategory.TRANSPORT_EXPENSE,
+        totalAmount,
+        paidAmount: 0,
+        debtAmount: totalAmount,
+        dueDate: new Date(issuedAt.getTime() + 15 * 24 * 60 * 60 * 1000),
+        issuedAt,
+        sentToBranchAt: issuedAt,
+        createdById: user.id,
+      },
+      include: this.invoiceInclude(),
+    });
+    await this.refreshBranchAccountBalance(tx, order.branchId);
+    return this.toInvoiceResponse(invoice);
+  }
+
+  private async buildDispatchWeightSnapshot(
+    tx: PrismaTx,
+    items: Array<{ id: string; productId: string; productName: string; quantity: number }>,
+  ) {
+    const lines: Array<{
+      itemId: string;
+      productId: string;
+      productName: string;
+      dispatchedQuantity: number;
+      unitWeightKg: number;
+      lineWeightKg: number;
+    }> = [];
+    const missingWeightProducts: string[] = [];
+
+    for (const item of items) {
+      const product = await tx.product.findFirst({
+        where: { id: item.productId, deletedAt: null },
+        select: { weightKg: true, name: true },
+      });
+      const unitWeightKg = Number(product?.weightKg ?? 0);
+      const dispatchedQuantity = item.quantity;
+      if (unitWeightKg <= 0) {
+        missingWeightProducts.push(product?.name ?? item.productName);
+        continue;
+      }
+      const lineWeightKg = Math.round((unitWeightKg * dispatchedQuantity + Number.EPSILON) * 1000) / 1000;
+      lines.push({
+        itemId: item.id,
+        productId: item.productId,
+        productName: item.productName,
+        dispatchedQuantity,
+        unitWeightKg,
+        lineWeightKg,
+      });
+    }
+
+    const totalShipmentWeightKg =
+      Math.round((lines.reduce((sum, line) => sum + line.lineWeightKg, 0) + Number.EPSILON) * 1000) / 1000;
+
+    return { lines, missingWeightProducts, totalShipmentWeightKg };
+  }
+
+  private buildShipmentWeightSummary(order: any) {
+    const items = order.items ?? [];
+    const lineCount = items.length;
+    const totalQuantity = items.reduce((sum: number, item: any) => sum + Number(item.quantity ?? 0), 0);
+    const hasSnapshot = Boolean(order.weightSnapshotAt) || items.some((item: any) => item.unitWeightKgSnapshot != null);
+    let totalWeightKg = Number(order.totalShipmentWeightKg ?? 0);
+    if (!hasSnapshot) {
+      totalWeightKg = items.reduce((sum: number, item: any) => {
+        const unitWeight = Number(item.product?.weightKg ?? 0);
+        return sum + unitWeight * Number(item.quantity ?? 0);
+      }, 0);
+      totalWeightKg = Math.round((totalWeightKg + Number.EPSILON) * 1000) / 1000;
+    }
+    return {
+      lineCount,
+      totalQuantity,
+      totalWeightKg,
+      unit: 'kg',
+      hasSnapshot,
+      weightSnapshotAt: order.weightSnapshotAt ?? null,
+    };
+  }
+
   private async createInvoiceForOrder(
     tx: PrismaTx,
     user: AuthUser,
     order: { id: string; branchId: string; totalAmount: Prisma.Decimal },
   ) {
     const existing = await tx.branchInvoice.findFirst({
-      where: { distributionOrderId: order.id, deletedAt: null },
+      where: {
+        distributionOrderId: order.id,
+        invoiceCategory: BranchInvoiceCategory.PRODUCT_ORDER,
+        deletedAt: null,
+      },
       include: this.invoiceInclude(),
     });
     if (existing) return this.toInvoiceResponse(existing);
@@ -2517,6 +2724,7 @@ export class DistributionService {
         invoiceNumber: await this.generateInvoiceNumber(tx),
         branchId: order.branchId,
         distributionOrderId: order.id,
+        invoiceCategory: BranchInvoiceCategory.PRODUCT_ORDER,
         totalAmount,
         paidAmount: 0,
         debtAmount: totalAmount,
@@ -2722,6 +2930,7 @@ export class DistributionService {
       totalProfit: Number(order.totalProfit),
       transportCostKgs,
       totalShipmentWeightKg,
+      shipmentWeightSummary: this.buildShipmentWeightSummary({ ...order, items }),
       deliveryCostSummary: {
         transportCostKgs,
         totalShipmentWeightKg,
@@ -2731,9 +2940,9 @@ export class DistributionService {
         landedCostTotal: Math.round((landedCostTotal + Number.EPSILON) * 100) / 100,
       },
       items,
-      branchInvoice: order.branchInvoice
-        ? this.toInvoiceResponse(order.branchInvoice)
-        : order.branchInvoice,
+      branchInvoice: this.resolveProductBranchInvoice(order)
+        ? this.toInvoiceResponse(this.resolveProductBranchInvoice(order))
+        : null,
     };
 
     if (user && isHqWarehouseLogisticsOnlyUser(user)) {
@@ -2743,6 +2952,7 @@ export class DistributionService {
   }
 
   private sanitizeDistributionOrderForHqWarehouse(order: any) {
+    const shipmentWeightSummary = this.buildShipmentWeightSummary(order);
     return {
       id: order.id,
       orderNumber: order.orderNumber,
@@ -2765,6 +2975,8 @@ export class DistributionService {
       driverName: order.driverName,
       vehicleNumber: order.vehicleNumber,
       transportNotes: order.transportNotes,
+      totalShipmentWeightKg: shipmentWeightSummary.totalWeightKg,
+      shipmentWeightSummary,
       pickingTask: order.pickingTask,
       items: order.items?.map((item: any) => ({
         id: item.id,
@@ -2772,9 +2984,15 @@ export class DistributionService {
         sku: item.sku,
         productName: item.productName,
         quantity: item.quantity,
+        dispatchedQuantity: item.dispatchedQuantity ?? item.quantity,
+        unitWeightKg: item.unitWeightKgSnapshot != null ? Number(item.unitWeightKgSnapshot) : Number(item.product?.weightKg ?? 0),
+        lineWeightKg:
+          item.lineWeightKgSnapshot != null
+            ? Number(item.lineWeightKgSnapshot)
+            : Number(item.product?.weightKg ?? 0) * Number(item.quantity ?? 0),
         unit: item.unit,
         product: item.product
-          ? { id: item.product.id, sku: item.product.sku, name: item.product.name, unit: item.product.unit }
+          ? { id: item.product.id, sku: item.product.sku, name: item.product.name, unit: item.product.unit, weightKg: item.product.weightKg }
           : item.product,
       })),
     };

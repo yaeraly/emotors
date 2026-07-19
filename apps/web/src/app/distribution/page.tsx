@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
+import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import {
   distributionHubSections,
   hqCashierDistributionHubSections,
-  hqSalesDistributionHubSections,
   scmDistributionHubSections,
   warehouseManagerDistributionHubSections,
 } from '@/lib/scm-hub-sections';
@@ -18,21 +19,35 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 export default function DistributionPage() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    void apiFetch<User>('/auth/me').then(setUser).catch(() => null);
-  }, []);
+    void apiFetch<User>('/auth/me')
+      .then((currentUser) => {
+        setUser(currentUser);
+        if (isHqSalesManagerUser(currentUser)) {
+          router.replace('/branch-purchase-requests');
+        }
+      })
+      .catch(() => null);
+  }, [router]);
+
+  if (isHqSalesManagerUser(user)) {
+    return (
+      <ProtectedShell>
+        <main className="flex min-h-[40vh] items-center justify-center text-slate-600">{t('common.loading')}</main>
+      </ProtectedShell>
+    );
+  }
 
   const sections = isWarehouseManagerUser(user)
     ? warehouseManagerDistributionHubSections
-    : isHqSalesManagerUser(user)
-      ? hqSalesDistributionHubSections
-      : isHqCashierUser(user)
-        ? hqCashierDistributionHubSections
-        : isSupplyChainManagerUser(user)
-          ? scmDistributionHubSections
-          : distributionHubSections;
+    : isHqCashierUser(user)
+      ? hqCashierDistributionHubSections
+      : isSupplyChainManagerUser(user)
+        ? scmDistributionHubSections
+        : distributionHubSections;
 
   return (
     <ProtectedShell>

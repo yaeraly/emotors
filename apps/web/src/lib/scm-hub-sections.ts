@@ -40,6 +40,9 @@ export const hqSalesDistributionHubSections: ModuleSectionLink[] = [
   { href: '/distribution/shortage-reports', labelKey: 'scm.hub.distribution.shortageActs' },
 ];
 
+/** Persistent sub-navigation inside HQ Sales «Заказы филиалов» section. */
+export const hqSalesBranchOrdersSubNavSections: ModuleSectionLink[] = hqSalesDistributionHubSections;
+
 export const hqCashierDistributionHubSections: ModuleSectionLink[] = [
   { href: '/distribution/invoices', labelKey: 'distribution.invoices' },
   { href: '/distribution/branch-balances', labelKey: 'distribution.branchBalances' },

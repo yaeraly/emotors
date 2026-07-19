@@ -89,6 +89,7 @@ export function sanitizeAccountantInvoice(invoice: any) {
   return {
     id: invoice.id,
     invoiceNumber: invoice.invoiceNumber,
+    invoiceCategory: invoice.invoiceCategory ?? 'PRODUCT_ORDER',
     branchId: invoice.branchId,
     branch: invoice.branch ? { id: invoice.branch.id, name: invoice.branch.name, code: invoice.branch.code } : null,
     distributionOrderId: invoice.distributionOrderId,

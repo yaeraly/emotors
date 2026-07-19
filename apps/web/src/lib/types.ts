@@ -721,6 +721,15 @@ export type StockValueReport = {
   byCategory: Array<{ name: string; quantity: number; totalStockValueKgs: number }>;
 };
 
+export type DistributionShipmentWeightSummary = {
+  lineCount: number;
+  totalQuantity: number;
+  totalWeightKg: number;
+  unit: string;
+  hasSnapshot?: boolean;
+  weightSnapshotAt?: string | null;
+};
+
 export type DistributionDeliveryCostSummary = {
   transportCostKgs: number;
   totalShipmentWeightKg: number;
@@ -749,6 +758,9 @@ export type BranchDistributionOrderItem = {
   transferCostKgs?: number;
   deliveryCostKgs?: number;
   totalLandedCostKgs?: number;
+  dispatchedQuantity?: number;
+  unitWeightKg?: number;
+  lineWeightKg?: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -776,6 +788,7 @@ export type BranchDistributionOrder = {
   deliveryCostEnteredAt?: string | null;
   deliveryCostEnteredById?: string | null;
   deliveryCostSummary?: DistributionDeliveryCostSummary;
+  shipmentWeightSummary?: DistributionShipmentWeightSummary;
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   approvedById?: string | null;

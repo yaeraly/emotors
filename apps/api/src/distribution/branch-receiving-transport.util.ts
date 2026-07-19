@@ -32,7 +32,7 @@ export function allocateBranchReceivingTransportCost(
   const totalWeight = lineWeights.reduce((sum, row) => sum + row.lineWeight, 0);
   const totalQuantity = receivedLines.reduce((sum, item) => sum + item.receivedQuantity, 0);
 
-  return receivedLines.map((item) => {
+  const rawAllocations = receivedLines.map((item) => {
     const weightRow = lineWeights.find((row) => row.productId === item.productId);
     const lineWeight = weightRow?.lineWeight ?? 0;
     let share = 0;
@@ -54,6 +54,36 @@ export function allocateBranchReceivingTransportCost(
       transportExpenseAllocation,
       transportCostPerUnit: roundMoney(transportCostPerUnit),
       finalUnitCostKgs,
+      lineWeight,
     };
   });
+
+  if (safeTransport <= 0) {
+    return rawAllocations.map(({ lineWeight: _lineWeight, ...row }) => row);
+  }
+
+  const allocatedTotal = rawAllocations.reduce((sum, row) => sum + row.transportExpenseAllocation, 0);
+  const remainder = roundMoney(safeTransport - allocatedTotal);
+  if (remainder !== 0) {
+    const largestLine = [...rawAllocations].sort((a, b) => {
+      if (b.lineWeight !== a.lineWeight) return b.lineWeight - a.lineWeight;
+      return a.productId.localeCompare(b.productId);
+    })[0];
+    if (largestLine) {
+      const sourceLine = receivedLines.find((line) => line.productId === largestLine.productId);
+      largestLine.transportExpenseAllocation = roundMoney(
+        largestLine.transportExpenseAllocation + remainder,
+      );
+      largestLine.transportCostPerUnit = roundMoney(
+        sourceLine && sourceLine.receivedQuantity > 0
+          ? largestLine.transportExpenseAllocation / sourceLine.receivedQuantity
+          : 0,
+      );
+      largestLine.finalUnitCostKgs = roundMoney(
+        Number(sourceLine?.unitCostKgs ?? 0) + largestLine.transportCostPerUnit,
+      );
+    }
+  }
+
+  return rawAllocations.map(({ lineWeight: _lineWeight, ...row }) => row);
 }

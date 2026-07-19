@@ -812,6 +812,11 @@ enum BranchInvoicePaymentType {
   INSTALLMENT
 }
 
+enum BranchInvoiceCategory {
+  PRODUCT_ORDER
+  TRANSPORT_EXPENSE
+}
+
 enum BranchPaymentMethod {
   CASH
   QR
@@ -1255,6 +1260,7 @@ model User {
   createdDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderCreator")
   approvedDistributionOrders BranchDistributionOrder[] @relation("DistributionOrderApprover")
   deliveryCostEnteredDistributionOrders BranchDistributionOrder[] @relation("DistributionDeliveryCostEnteredBy")
+  weightFinalizedDistributionOrders BranchDistributionOrder[] @relation("DistributionWeightFinalizedBy")
   goodsReceivings GoodsReceiving[] @relation("GoodsReceivingReceiver")
   shortageReports ShortageReport[] @relation("ShortageReportCreator")
   shortageResolutions ShortageResolution[] @relation("ShortageResolutionResolver")
@@ -2954,6 +2960,9 @@ model BranchDistributionOrder {
   deliveryCostEnteredAt  DateTime?
   deliveryCostEnteredById String?
   deliveryCostEnteredBy  User?                         @relation("DistributionDeliveryCostEnteredBy", fields: [deliveryCostEnteredById], references: [id])
+  weightSnapshotAt       DateTime?
+  weightFinalizedById    String?
+  weightFinalizedBy      User?                         @relation("DistributionWeightFinalizedBy", fields: [weightFinalizedById], references: [id])
   note                   String?
   createdById            String
   createdBy              User                          @relation("DistributionOrderCreator", fields: [createdById], references: [id])
@@ -2966,7 +2975,7 @@ model BranchDistributionOrder {
   distributionFifoAllocations DistributionFifoAllocation[]
   goodsReceivings        GoodsReceiving[]
   shortageReports        ShortageReport[]
-  branchInvoice          BranchInvoice?
+  branchInvoices          BranchInvoice[]
   pickingTask            HqWarehousePickingTask?
   stockBookings          HqStockBooking[]
   createdAt              DateTime                      @default(now())
@@ -3020,6 +3029,9 @@ model BranchDistributionOrderItem {
   transportExpenseAllocation Decimal  @default(0) @db.Decimal(14, 2)
   transportCostPerUnit    Decimal     @default(0) @db.Decimal(14, 2)
   landedUnitCostKgs       Decimal?    @db.Decimal(14, 2)
+  dispatchedQuantity      Int?
+  unitWeightKgSnapshot    Decimal?    @db.Decimal(14, 3)
+  lineWeightKgSnapshot    Decimal?    @db.Decimal(14, 3)
   pricingPolicyVersionId String?
   pricingProfileId     String?
   resolvedPriceKgs     Decimal? @db.Decimal(14, 2)
@@ -3171,10 +3183,11 @@ model BranchInvoice {
   invoiceNumber       String              @unique
   branchId            String
   branch              Branch              @relation(fields: [branchId], references: [id])
-  distributionOrderId String              @unique
+  distributionOrderId String
   distributionOrder   BranchDistributionOrder @relation(fields: [distributionOrderId], references: [id])
   goodsReceivingId    String?             @unique
   goodsReceiving      GoodsReceiving?     @relation(fields: [goodsReceivingId], references: [id])
+  invoiceCategory     BranchInvoiceCategory @default(PRODUCT_ORDER)
   status              BranchInvoiceStatus @default(ISSUED)
   paymentType         BranchInvoicePaymentType?
   totalAmount         Decimal             @default(0) @db.Decimal(14, 2)
@@ -3196,6 +3209,8 @@ model BranchInvoice {
   @@index([status])
   @@index([dueDate])
   @@index([createdById])
+  @@index([distributionOrderId])
+  @@unique([distributionOrderId, invoiceCategory])
 }
 
 model BranchPayment {

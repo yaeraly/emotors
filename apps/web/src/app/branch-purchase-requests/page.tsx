@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
+import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import { BranchProductSearch, type BranchProductOption } from '@/components/BranchProductSearch';
 import { branchPurchaseRequestsTitleKey } from '@/lib/distribution-labels';
 import { distributionHubSections } from '@/lib/scm-hub-sections';
@@ -499,7 +500,8 @@ export default function BranchPurchaseRequestsPage() {
           ) : null}
         </div>
 
-        {!branchSalesManagerView && !branchWarehouseView && !branchOwnerView && !ceoInspectorView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
+        <HqSalesBranchOrdersNav />
+        {!hqSalesView && !branchSalesManagerView && !branchWarehouseView && !branchOwnerView && !ceoInspectorView ? <ModuleSectionNav sections={distributionHubSections} /> : null}
 
         {ceoInspectorView ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

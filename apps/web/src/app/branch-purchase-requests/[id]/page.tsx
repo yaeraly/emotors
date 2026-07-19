@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import { apiFetch } from '@/lib/api';
 import {
   canManageBranchPurchaseRequests,
@@ -486,6 +487,7 @@ export default function BranchPurchaseRequestDetailPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
+        <HqSalesBranchOrdersNav />
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <Link href={listHref} className="text-sm font-semibold text-blue-600">

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import { apiFetch } from '@/lib/api';
 import { canManageDistributionOrders, isBranchWarehouseOperator } from '@/lib/rbac';
 import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus, User } from '@/lib/types';
@@ -66,6 +67,7 @@ export default function DistributionOrdersPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
+        <HqSalesBranchOrdersNav />
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(currentUser))}</p>

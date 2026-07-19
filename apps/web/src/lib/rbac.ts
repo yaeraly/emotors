@@ -537,7 +537,7 @@ const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
 export function getDefaultRoute(role: Role) {
   if (role === 'OWNER' || role === 'CEO' || role === 'SYSTEM_ADMINISTRATOR') return '/dashboard';
   if (role === 'SUPPLY_CHAIN_MANAGER') return '/procurement';
-  if (role === 'HQ_SALES_MANAGER') return '/distribution';
+  if (role === 'HQ_SALES_MANAGER') return '/branch-purchase-requests';
   if (role === 'HQ_CASHIER') return '/distribution/invoices';
   if (role === 'WAREHOUSE_MANAGER') return '/hq-warehouses';
   if (role === 'FINANCE_MANAGER' || role === 'HQ_ACCOUNTANT' || role === 'ACCOUNTANT') return '/finance';
@@ -557,7 +557,7 @@ export function getDefaultRoute(role: Role) {
 export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasFullAccess(user)) return '/dashboard';
   if (isSupplyChainManagerUser(user)) return '/procurement';
-  if (isHqSalesManagerUser(user)) return '/distribution';
+  if (isHqSalesManagerUser(user)) return '/branch-purchase-requests';
   if (isHqCashierUser(user)) return '/distribution/invoices';
   if (isWarehouseManagerUser(user)) return '/hq-warehouses';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';

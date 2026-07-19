@@ -1270,9 +1270,12 @@ export class OperationsService {
 
     const order = await this.prisma.branchDistributionOrder.findFirst({
       where: { id: request.convertedOrderId, deletedAt: null },
-      include: { branchInvoice: true },
+      include: { branchInvoices: true },
     });
-    if (!order?.branchInvoice || order.branchInvoice.status !== 'PAID') return null;
+    const productInvoice = order?.branchInvoices?.find(
+      (invoice) => !invoice.invoiceCategory || invoice.invoiceCategory === 'PRODUCT_ORDER',
+    );
+    if (!productInvoice || productInvoice.status !== 'PAID') return null;
 
     return this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.extendBookingsAfterPayment(request.id, tx);
