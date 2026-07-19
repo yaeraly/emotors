@@ -1,12 +1,26 @@
 'use client';
 
-import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
+import { WarehouseDataTable } from '@/components/warehouse/WarehouseDataTable';
+import { WarehousePageHeader } from '@/components/warehouse/WarehousePageHeader';
+import { WarehousePagination } from '@/components/warehouse/WarehousePagination';
+import { WarehouseProfileCard } from '@/components/warehouse/WarehouseProfileCard';
+import { WarehouseStockToolbar } from '@/components/warehouse/WarehouseStockToolbar';
+import { WarehouseSummaryGrid } from '@/components/warehouse/WarehouseSummaryGrid';
 import { apiFetch } from '@/lib/api';
 import { canEditBranchWarehouseProfile } from '@/lib/rbac';
+import {
+  filterStockRows,
+  paginateRows,
+  sortStockRows,
+  uniqueSortedValues,
+  type StockRow,
+} from '@/lib/warehouse-stock-utils';
+import type { SortDirection } from '@/lib/warehouse-list-utils';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+
+const PAGE_SIZE = 10;
 
 type WarehouseDetail = {
   id: string;
@@ -17,13 +31,14 @@ type WarehouseDetail = {
   address?: string | null;
   branchId?: string | null;
   branchName?: string | null;
+  warehouseType?: string;
   contactPerson?: string | null;
   phone?: string | null;
   notes?: string | null;
   isActive: boolean;
   totalSkuCount: number;
   totalProductQuantity: number;
-  totalStockValueKgs: number;
+  totalStockValueKgs?: number;
   reservedQuantity: number;
   availableQuantity: number;
   lowStockSkuCount?: number;
@@ -33,26 +48,17 @@ type WarehouseDetail = {
   updatedAt?: string;
 };
 
-type ProductRow = {
-  id: string;
-  sku: string;
-  product: { name: string };
-  categoryName?: string | null;
-  quantity: number;
-  reservedQuantity: number;
-  availableQuantity: number;
-  landedCostKgs?: number;
-  totalValueKgs?: number;
-  lastMovementAt?: string | null;
-  status: string;
-};
-
 export function BranchCeoWarehousePanel() {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [warehouse, setWarehouse] = useState<WarehouseDetail | null>(null);
-  const [products, setProducts] = useState<ProductRow[]>([]);
+  const [products, setProducts] = useState<StockRow[]>([]);
   const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('');
+  const [stockStatus, setStockStatus] = useState<'all' | 'low' | 'out'>('all');
+  const [sortKey, setSortKey] = useState('product');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -85,7 +91,7 @@ export function BranchCeoWarehousePanel() {
         phone: warehouseResult.phone ?? '',
         notes: warehouseResult.notes ?? '',
       });
-      const stock = await apiFetch<ProductRow[]>(`/branch-ceo/warehouse/${warehouseResult.id}/products`);
+      const stock = await apiFetch<StockRow[]>(`/branch-ceo/warehouse/${warehouseResult.id}/products`);
       setProducts(stock);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -99,16 +105,72 @@ export function BranchCeoWarehousePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredProducts = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return products;
-    return products.filter(
-      (row) =>
-        row.product.name.toLowerCase().includes(query) ||
-        row.sku.toLowerCase().includes(query) ||
-        (row.categoryName ?? '').toLowerCase().includes(query),
-    );
-  }, [products, search]);
+  const categoryOptions = useMemo(
+    () => uniqueSortedValues(products.map((row) => row.categoryName)),
+    [products],
+  );
+
+  const filteredProducts = useMemo(
+    () =>
+      sortStockRows(
+        filterStockRows(products, { search, category, stockStatus }),
+        sortKey,
+        sortDirection,
+      ),
+    [products, search, category, stockStatus, sortKey, sortDirection],
+  );
+
+  const pagination = useMemo(
+    () => paginateRows(filteredProducts, page, PAGE_SIZE),
+    [filteredProducts, page],
+  );
+
+  const summaryItems = useMemo(
+    () => [
+      { label: t('hqWarehouse.totalProducts'), value: String(warehouse?.totalSkuCount ?? 0) },
+      {
+        label: t('hqWarehouse.totalValue'),
+        value: `${(warehouse?.totalStockValueKgs ?? 0).toLocaleString()} KGS`,
+      },
+      { label: t('inventory.lowStock'), value: String(warehouse?.lowStockSkuCount ?? 0) },
+      { label: t('hqWarehouse.totalStock'), value: String(warehouse?.totalProductQuantity ?? 0) },
+    ],
+    [t, warehouse],
+  );
+
+  const profileFields = useMemo(() => {
+    if (!warehouse) return [];
+    return [
+      { label: t('warehouse.name'), value: warehouse.name },
+      { label: t('warehouse.code'), value: warehouse.code },
+      { label: t('warehouse.type'), value: t('warehouse.branchType') },
+      { label: t('common.status'), value: warehouse.isActive ? t('warehouse.active') : t('warehouse.inactive') },
+      { label: t('hqWarehouse.contactPerson'), value: warehouse.contactPerson ?? '—' },
+      { label: t('hqWarehouse.phone'), value: warehouse.phone ?? '—' },
+      { label: t('warehouse.address'), value: warehouse.address ?? '—' },
+      { label: t('hqWarehouse.city'), value: warehouse.city ?? '—' },
+      { label: t('branchWarehouse.skuCount'), value: String(warehouse.totalSkuCount) },
+      { label: t('hqWarehouse.totalStock'), value: String(warehouse.totalProductQuantity) },
+      { label: t('branchWarehouse.totalReserved'), value: String(warehouse.reservedQuantity) },
+      { label: t('branchWarehouse.totalAvailable'), value: String(warehouse.availableQuantity) },
+      {
+        label: t('branchWarehouse.lastInventory'),
+        value: warehouse.lastInventoryDate ? new Date(warehouse.lastInventoryDate).toLocaleString() : '—',
+      },
+      {
+        label: t('branchWarehouse.lastMovement'),
+        value: warehouse.lastMovementAt ? new Date(warehouse.lastMovementAt).toLocaleString() : '—',
+      },
+      {
+        label: t('common.createdDate'),
+        value: warehouse.createdAt ? new Date(warehouse.createdAt).toLocaleString() : '—',
+      },
+      {
+        label: t('common.lastUpdated'),
+        value: warehouse.updatedAt ? new Date(warehouse.updatedAt).toLocaleString() : '—',
+      },
+    ];
+  }, [t, warehouse]);
 
   async function saveWarehouse(event: FormEvent) {
     event.preventDefault();
@@ -130,204 +192,213 @@ export function BranchCeoWarehousePanel() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:gap-3">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="animate-pulse rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-              <div className="h-3 w-16 rounded bg-slate-200" />
-              <div className="mt-2 h-6 w-12 rounded bg-slate-200" />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+  function handleSort(nextKey: string) {
+    if (sortKey === nextKey) {
+      setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection('asc');
   }
 
-  if (!warehouse) {
-    return <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error || t('branchWarehouseOperator.emptyStock')}</p>;
+  function stockStatusLabel(status?: string) {
+    if (status === 'OUT_OF_STOCK') return t('warehouse.outOfStock');
+    if (status === 'LOW_STOCK') return t('inventory.lowStock');
+    return t('warehouse.inStock');
+  }
+
+  if (!loading && !warehouse) {
+    return <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error || t('branchWarehouse.noWarehouseAssigned')}</p>;
   }
 
   return (
     <div className="space-y-6">
+      <WarehousePageHeader
+        eyebrow={t('hqWarehouse.title')}
+        title={t('branchCeo.warehouseTitle')}
+        description={t('branchCeo.warehouseDescription')}
+      />
+
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
       {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:gap-3">
-        <WarehouseSummaryCard compact label={t('inventory.totalProducts')} value={String(warehouse.totalSkuCount)} />
-        <WarehouseSummaryCard
-          compact
-          label={t('inventory.totalStockValue')}
-          value={`${warehouse.totalStockValueKgs.toLocaleString()} KGS`}
-        />
-        <WarehouseSummaryCard compact label={t('inventory.lowStockCount')} value={String(warehouse.lowStockSkuCount ?? 0)} />
-        <WarehouseSummaryCard compact label={t('inventory.totalQuantity')} value={String(warehouse.totalProductQuantity)} />
-      </div>
+      <WarehouseSummaryGrid loading={loading} items={summaryItems} skeletonCount={4} />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder={t('common.search')}
-          className="w-full max-w-md rounded-xl border border-slate-300 px-4 py-2 text-sm"
-        />
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/inventory/count"
-            className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700"
-          >
-            {t('inventoryCount.submittedForApproval')}
-          </Link>
-          {canEditBranchWarehouseProfile(user) ? (
+      <WarehouseStockToolbar
+        search={search}
+        category={category}
+        stockStatus={stockStatus}
+        categoryOptions={categoryOptions}
+        searchPlaceholder={t('warehouse.searchStockPlaceholder')}
+        onSearchChange={(value) => {
+          setSearch(value);
+          setPage(1);
+        }}
+        onCategoryChange={(value) => {
+          setCategory(value);
+          setPage(1);
+        }}
+        onStockStatusChange={(value) => {
+          setStockStatus(value);
+          setPage(1);
+        }}
+      />
+
+      <WarehouseProfileCard
+        fields={profileFields}
+        action={
+          canEditBranchWarehouseProfile(user) ? (
             <button
               type="button"
               onClick={() => setEditing((current) => !current)}
               className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
             >
-              {t('branchCeo.editWarehouse')}
+              {t('hqWarehouse.editWarehouse')}
             </button>
-          ) : null}
-        </div>
-      </div>
+          ) : null
+        }
+      >
+        {editing ? (
+          <form onSubmit={saveWarehouse} className="mt-6 grid gap-4 border-t border-slate-200 pt-6 md:grid-cols-2">
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('warehouse.name')}</span>
+              <input
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                required
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('warehouse.city')}</span>
+              <input
+                value={form.city}
+                onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="text-sm font-semibold text-slate-700">{t('warehouse.address')}</span>
+              <input
+                value={form.address}
+                onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.contactPerson')}</span>
+              <input
+                value={form.contactPerson}
+                onChange={(event) => setForm((current) => ({ ...current, contactPerson: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.phone')}</span>
+              <input
+                value={form.phone}
+                onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.notes')}</span>
+              <textarea
+                value={form.notes}
+                onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
+                className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <div className="flex gap-2 md:col-span-2">
+              <button type="submit" disabled={saving} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">
+                {saving ? t('common.saving') : t('common.save')}
+              </button>
+              <button type="button" onClick={() => setEditing(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">
+                {t('common.cancel')}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </WarehouseProfileCard>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <InfoItem label={t('warehouse.name')} value={warehouse.name} />
-          <InfoItem label={t('branchWarehouse.productCode')} value={warehouse.code} />
-          <InfoItem label={t('branchWarehouse.branchName')} value={warehouse.branchName ?? '—'} />
-          <InfoItem label={t('branchWarehouse.status')} value={warehouse.isActive ? t('common.active') : t('common.inactive')} />
-          <InfoItem label={t('hqWarehouse.contactPerson')} value={warehouse.contactPerson ?? '—'} />
-          <InfoItem label={t('hqWarehouse.phone')} value={warehouse.phone ?? '—'} />
-          <InfoItem label={t('warehouse.address')} value={warehouse.address ?? '—'} />
-          <InfoItem label={t('warehouse.city')} value={warehouse.city ?? '—'} />
-          <InfoItem label={t('hqWarehouse.totalProducts')} value={String(warehouse.totalSkuCount)} />
-          <InfoItem label={t('hqWarehouse.totalStock')} value={String(warehouse.totalProductQuantity)} />
-          <InfoItem label={t('branchWarehouse.totalReserved')} value={String(warehouse.reservedQuantity)} />
-          <InfoItem label={t('branchWarehouse.totalAvailable')} value={String(warehouse.availableQuantity)} />
-          <InfoItem
-            label={t('branchWarehouse.lastInventory')}
-            value={warehouse.lastInventoryDate ? new Date(warehouse.lastInventoryDate).toLocaleString() : '—'}
-          />
-          <InfoItem
-            label={t('branchWarehouse.lastMovement')}
-            value={warehouse.lastMovementAt ? new Date(warehouse.lastMovementAt).toLocaleString() : '—'}
-          />
-        </div>
-      </div>
+      <WarehouseDataTable
+        columns={[
+          {
+            key: 'product',
+            label: t('inventory.products'),
+            sortable: true,
+            render: (row) => <span className="font-bold">{row.product.name}</span>,
+          },
+          {
+            key: 'sku',
+            label: t('branchWarehouse.productCode'),
+            sortable: true,
+            render: (row) => row.sku,
+          },
+          {
+            key: 'categoryName',
+            label: t('inventory.category'),
+            sortable: true,
+            render: (row) => row.categoryName ?? '—',
+          },
+          {
+            key: 'quantity',
+            label: t('branchWarehouse.onHand'),
+            sortable: true,
+            render: (row) => row.quantity,
+          },
+          {
+            key: 'reservedQuantity',
+            label: t('branchWarehouse.reserved'),
+            sortable: true,
+            render: (row) => row.reservedQuantity,
+          },
+          {
+            key: 'availableQuantity',
+            label: t('branchWarehouse.available'),
+            sortable: true,
+            render: (row) => row.availableQuantity,
+          },
+          {
+            key: 'minStockLevel',
+            label: t('inventory.minStockLevel'),
+            sortable: true,
+            render: (row) => row.minStockLevel ?? 0,
+          },
+          {
+            key: 'status',
+            label: t('warehouse.stockStatus'),
+            sortable: true,
+            render: (row) => stockStatusLabel(row.stockStatus),
+          },
+          {
+            key: 'totalValueKgs',
+            label: t('branchWarehouse.stockValue'),
+            sortable: true,
+            render: (row) => `${(row.totalValueKgs ?? 0).toLocaleString()} KGS`,
+          },
+          {
+            key: 'lastMovementAt',
+            label: t('branchWarehouse.lastMovement'),
+            sortable: true,
+            render: (row) => (row.lastMovementAt ? new Date(row.lastMovementAt).toLocaleDateString() : '—'),
+          },
+        ]}
+        rows={pagination.items}
+        rowKey={(row) => row.id}
+        sortKey={sortKey}
+        sortDirection={sortDirection}
+        onSort={handleSort}
+        emptyLabel={t('branchWarehouseOperator.emptyStock')}
+      />
 
-      {editing ? (
-        <form onSubmit={saveWarehouse} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">{t('warehouse.name')}</span>
-            <input
-              value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">{t('warehouse.city')}</span>
-            <input
-              value={form.city}
-              onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="block md:col-span-2">
-            <span className="text-sm font-semibold text-slate-700">{t('warehouse.address')}</span>
-            <input
-              value={form.address}
-              onChange={(event) => setForm((current) => ({ ...current, address: event.target.value }))}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.contactPerson')}</span>
-            <input
-              value={form.contactPerson}
-              onChange={(event) => setForm((current) => ({ ...current, contactPerson: event.target.value }))}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-slate-700">{t('hqWarehouse.phone')}</span>
-            <input
-              value={form.phone}
-              onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <label className="block md:col-span-2">
-            <span className="text-sm font-semibold text-slate-700">{t('inventoryCount.notes')}</span>
-            <textarea
-              value={form.notes}
-              onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-              className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2"
-            />
-          </label>
-          <div className="flex gap-2 md:col-span-2">
-            <button type="submit" disabled={saving} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">
-              {saving ? t('common.saving') : t('common.save')}
-            </button>
-            <button type="button" onClick={() => setEditing(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">
-              {t('common.cancel')}
-            </button>
-          </div>
-        </form>
-      ) : null}
-
-      <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3">{t('sales.product')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.productCode')}</th>
-              <th className="px-4 py-3">{t('inventory.category')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.onHand')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.reserved')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.available')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.averageCost')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.stockValue')}</th>
-              <th className="px-4 py-3">{t('branchWarehouse.lastMovement')}</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredProducts.map((row) => (
-              <tr key={row.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3 font-semibold text-slate-900">{row.product.name}</td>
-                <td className="px-4 py-3">{row.sku}</td>
-                <td className="px-4 py-3">{row.categoryName ?? '—'}</td>
-                <td className="px-4 py-3">{row.quantity}</td>
-                <td className="px-4 py-3">{row.reservedQuantity}</td>
-                <td className="px-4 py-3">{row.availableQuantity}</td>
-                <td className="px-4 py-3">{row.landedCostKgs ?? '—'}</td>
-                <td className="px-4 py-3">{row.totalValueKgs ?? '—'}</td>
-                <td className="px-4 py-3">
-                  {row.lastMovementAt ? new Date(row.lastMovementAt).toLocaleDateString() : '—'}
-                </td>
-              </tr>
-            ))}
-            {!filteredProducts.length ? (
-              <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
-                  {t('branchWarehouseOperator.emptyStock')}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function InfoItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-sm font-medium text-slate-900">{value}</p>
+      <WarehousePagination
+        currentPage={pagination.currentPage}
+        totalPages={pagination.totalPages}
+        total={pagination.total}
+        pageSize={PAGE_SIZE}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

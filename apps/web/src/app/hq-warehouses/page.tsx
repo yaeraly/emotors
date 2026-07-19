@@ -6,10 +6,11 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { SectionTopNav } from '@/components/SectionTopNav';
 import { InventoryCountListContent } from '@/components/inventory/InventoryCountListContent';
+import { WarehousePageHeader } from '@/components/warehouse/WarehousePageHeader';
+import { WarehouseSummaryGrid } from '@/components/warehouse/WarehouseSummaryGrid';
 import { WarehouseDataTable } from '@/components/warehouse/WarehouseDataTable';
 import { WarehouseListToolbar } from '@/components/warehouse/WarehouseListToolbar';
 import { WarehousePagination } from '@/components/warehouse/WarehousePagination';
-import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { apiFetch } from '@/lib/api';
 import { canCreateHqInventoryCount, canManageHqWarehouse, hasFullAccess, isWarehouseManagerUser } from '@/lib/rbac';
 import { formatHqWarehouseContactPerson } from '@/lib/hq-warehouse';
@@ -209,10 +210,11 @@ function HqWarehousesPageContent() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('hqWarehouse.title')}</p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('hqWarehouse.list')}</h2>
-        </div>
+        <WarehousePageHeader
+          eyebrow={t('hqWarehouse.title')}
+          title={t('hqWarehouse.list')}
+          description={t('hqWarehouse.listDescription')}
+        />
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
@@ -235,34 +237,25 @@ function HqWarehousesPageContent() {
         ) : (
           <>
         {loading ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <div key={index} className="animate-pulse rounded-xl border border-slate-200 bg-white px-2.5 py-2 sm:px-3 sm:py-2.5">
-                <div className="h-3 w-16 rounded bg-slate-200" />
-                <div className="mt-2 h-6 w-12 rounded bg-slate-200" />
-              </div>
-            ))}
-          </div>
+          <WarehouseSummaryGrid loading skeletonCount={6} items={[]} />
         ) : wmHasNoAssignment ? (
           <p className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-600">
             {t('hqWarehouse.noWarehouseAssigned')}
           </p>
         ) : (
           <>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 lg:gap-3">
-          <WarehouseSummaryCard compact label={t('hqWarehouse.totalWarehouses')} value={String(displaySummary.totalHqWarehouses)} />
-          <WarehouseSummaryCard compact label={t('hqWarehouse.totalProducts')} value={String(displaySummary.totalProducts)} />
-          <WarehouseSummaryCard compact label={t('hqWarehouse.totalStock')} value={String(displaySummary.totalStock)} />
-          {!isWmScopedView ? (
-            <WarehouseSummaryCard
-              compact
-              label={t('hqWarehouse.totalValue')}
-              value={`${(displaySummary.totalInventoryValueKgs ?? 0).toLocaleString()} KGS`}
-            />
-          ) : null}
-          <WarehouseSummaryCard compact label={t('branchWarehouse.totalReserved')} value={String(displaySummary.totalReserved)} />
-          <WarehouseSummaryCard compact label={t('branchWarehouse.totalAvailable')} value={String(displaySummary.totalAvailable)} />
-        </div>
+        <WarehouseSummaryGrid
+          items={[
+            { label: t('hqWarehouse.totalWarehouses'), value: String(displaySummary.totalHqWarehouses) },
+            { label: t('hqWarehouse.totalProducts'), value: String(displaySummary.totalProducts) },
+            { label: t('hqWarehouse.totalStock'), value: String(displaySummary.totalStock) },
+            ...(!isWmScopedView
+              ? [{ label: t('hqWarehouse.totalValue'), value: `${(displaySummary.totalInventoryValueKgs ?? 0).toLocaleString()} KGS` }]
+              : []),
+            { label: t('branchWarehouse.totalReserved'), value: String(displaySummary.totalReserved) },
+            { label: t('branchWarehouse.totalAvailable'), value: String(displaySummary.totalAvailable) },
+          ]}
+        />
 
         {!isWmScopedView && dashboard ? (
           <p className="text-sm text-slate-500">

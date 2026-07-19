@@ -13,6 +13,7 @@ import {
   sanitizeBranchCeoProductDetail,
   sanitizeBranchCeoProductRow,
 } from './branch-ceo-product.presenter';
+import { sanitizeBranchCeoStockRow } from './branch-ceo-warehouse.presenter';
 import { UpdateBranchCeoWarehouseDto } from './dto/update-branch-ceo-warehouse.dto';
 
 @Injectable()
@@ -66,10 +67,7 @@ export class BranchCeoService {
   async warehouseProducts(user: AuthUser, warehouseId: string) {
     this.assertBranchCeo(user);
     const products = await this.branchWarehouseService.products(user, warehouseId);
-    return products.map((product) => {
-      const { supplierName, sellingPriceKgs, finalCostKgs, ...rest } = product as Record<string, unknown>;
-      return rest;
-    });
+    return products.map((product) => sanitizeBranchCeoStockRow(product as Parameters<typeof sanitizeBranchCeoStockRow>[0]));
   }
 
   async updateWarehouse(user: AuthUser, dto: UpdateBranchCeoWarehouseDto) {
