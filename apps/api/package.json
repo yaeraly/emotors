@@ -14,7 +14,10 @@
     "prisma:db:push": "prisma db push --schema prisma/schema.prisma",
     "prisma:seed": "ts-node prisma/seed.ts",
     "product-code:migrate:preview": "ts-node prisma/scripts/product-code-migration.ts preview",
-    "product-code:migrate:apply": "ts-node prisma/scripts/product-code-migration.ts apply"
+    "product-code:migrate:apply": "ts-node prisma/scripts/product-code-migration.ts apply",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "test:receiving": "node --import tsx --test src/distribution/branch-receiving.integration.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.build.json"
   },
   "dependencies": {
     "@fastify/cors": "latest",
@@ -41,6 +44,7 @@
     "@types/passport-jwt": "latest",
     "prisma": "^6.19.3",
     "ts-node": "latest",
+    "tsx": "latest",
     "typescript": "5.8.3"
   }
 }

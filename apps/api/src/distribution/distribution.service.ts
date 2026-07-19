@@ -2774,7 +2774,7 @@ export class DistributionService {
       receivedBy: { select: { id: true, fullName: true, role: true } },
       items: true,
       shortageReport: { include: { items: true } },
-      branchInvoices: true,
+      branchInvoice: true,
     };
   }
 
