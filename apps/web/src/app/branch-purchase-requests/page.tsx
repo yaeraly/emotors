@@ -856,8 +856,8 @@ export default function BranchPurchaseRequestsPage() {
                           <button type="button" onClick={() => void review(request.id, 'reject')} className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600">{t('distribution.reject')}</button>
                         </>
                       ) : null}
-                      {canActOnRequests && (request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED' || request.status === 'CONFIRMED') ? (
-                        <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('branchHqRouting.sendToWarehouseManager')}</button>
+                      {canActOnRequests && (request.status === 'PAYMENT_CONFIRMED' || request.status === 'READY_FOR_HQ_WAREHOUSE') ? (
+                        <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{t('branchHqRouting.sendToWarehouseAfterPayment')}</button>
                       ) : null}
                       {request.convertedOrderId && !branchSalesManagerView ? (
                         <Link href={`/distribution/orders/${request.convertedOrderId}`} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('scm.hub.distribution.shipmentOrders')}</Link>

@@ -39,27 +39,29 @@ export function resolveBranchDisplayStatus(
       : false;
 
   if (status === BranchPurchaseRequestStatus.SUBMITTED || status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ) {
-    return 'SUBMITTED';
+    return 'PENDING_HQ_SALES_REVIEW';
   }
   if (status === BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION) {
     return 'PENDING_BRANCH_CONFIRMATION';
   }
-  if (status === BranchPurchaseRequestStatus.BRANCH_CONFIRMED) return 'BRANCH_CONFIRMED';
+  if (status === BranchPurchaseRequestStatus.BRANCH_CONFIRMED) return 'INVOICE_CREATED';
   if (status === BranchPurchaseRequestStatus.BRANCH_DECLINED) return 'BRANCH_DECLINED';
   if (status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE) return 'READY_FOR_HQ_WAREHOUSE';
-  if (status === BranchPurchaseRequestStatus.PENDING_PAYMENT) return 'PENDING_PAYMENT';
-  if (status === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED) return 'PAYMENT_CONFIRMED';
+  if (status === BranchPurchaseRequestStatus.PENDING_PAYMENT) return 'WAITING_FOR_PAYMENT';
+  if (status === BranchPurchaseRequestStatus.PAYMENT_SUBMITTED) return 'PAYMENT_SUBMITTED';
+  if (status === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED) return 'PAID';
+  if (status === BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL) return 'INSTALLMENT_REQUESTED';
   if (status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED || (status === BranchPurchaseRequestStatus.APPROVED && hasPartial)) {
-    return 'PARTIALLY_APPROVED';
+    return 'HQ_APPROVED';
   }
-  if (status === BranchPurchaseRequestStatus.APPROVED) return 'ACCEPTED';
+  if (status === BranchPurchaseRequestStatus.APPROVED) return 'HQ_APPROVED';
   if (status === BranchPurchaseRequestStatus.REJECTED) return 'REJECTED';
-  if (status === BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE || status === BranchPurchaseRequestStatus.SHIPPED) {
-    return 'SENT_TO_WAREHOUSE';
+  if (status === BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE) return 'PICKING';
+  if (status === BranchPurchaseRequestStatus.SHIPPED) return 'DISPATCHED';
+  if (status === BranchPurchaseRequestStatus.RECEIVED || status === BranchPurchaseRequestStatus.RECEIVED_WITH_DIFFERENCE) {
+    return 'RECEIVED_BY_BRANCH';
   }
-  if (status === BranchPurchaseRequestStatus.COMPLETED || status === BranchPurchaseRequestStatus.RECEIVED) {
-    return 'COMPLETED';
-  }
+  if (status === BranchPurchaseRequestStatus.COMPLETED) return 'COMPLETED';
   if (status === BranchPurchaseRequestStatus.CANCELLED) return 'CANCELLED';
   if (status === BranchPurchaseRequestStatus.DRAFT) return 'DRAFT';
   return status;
@@ -107,7 +109,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
 
   const branchDisplayStatus = resolveBranchDisplayStatus(request.status, request.items);
   const partialFulfillmentMessage =
-    branchDisplayStatus === 'PARTIALLY_APPROVED' ? 'PARTIAL_FULFILLMENT_LATER' : null;
+    branchDisplayStatus === 'HQ_APPROVED' && status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED
+      ? 'PARTIAL_FULFILLMENT_LATER'
+      : null;
   const reviewed = Boolean(request.reviewedAt) || REVIEWED_REQUEST_STATUSES.has(request.status);
 
   return {

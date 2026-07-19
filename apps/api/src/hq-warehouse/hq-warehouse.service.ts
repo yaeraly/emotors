@@ -13,7 +13,7 @@ import {
   hqWarehouseWhere,
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
-import { canCreateHqWarehouse, canDeactivateHqWarehouse, canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
+import { canCreateHqWarehouse, canDeactivateHqWarehouse, canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, hasAnyFullAccessRole, isHqWarehouseLogisticsOnlyUser, resolveUserRoles } from '../rbac/rbac';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 import { hasHqReceivingDownstreamUsage, HQ_RECEIVING_ARCHIVED_MESSAGE } from './hq-receiving-delete.util';
@@ -76,7 +76,8 @@ export class HqWarehouseService {
       });
       const results = [];
       for (const warehouse of warehouses) {
-        results.push(await this.buildWarehouseMetrics(tx, warehouse));
+        const metrics = await this.buildWarehouseMetrics(tx, warehouse);
+        results.push(isHqWarehouseLogisticsOnlyUser(user) ? this.sanitizeWarehouseMetrics(metrics) : metrics);
       }
       return results;
     });
@@ -184,6 +185,18 @@ export class HqWarehouseService {
       pendingOutgoingOrders: pendingOutgoing,
       pendingReceivingOrders: pendingReceiving,
     };
+  }
+
+  private sanitizeWarehouseMetrics(metrics: Record<string, unknown>) {
+    const {
+      totalStockValueKgs: _totalStockValueKgs,
+      totalPurchaseCostKgs: _totalPurchaseCostKgs,
+      totalDistributedValueKgs: _totalDistributedValueKgs,
+      availableStockValueKgs: _availableStockValueKgs,
+      reservedStockValueKgs: _reservedStockValueKgs,
+      ...rest
+    } = metrics;
+    return rest;
   }
 
   async detail(user: AuthUser, id: string) {

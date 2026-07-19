@@ -6,10 +6,11 @@ export class SendDistributionOrderDto {
   @IsString()
   transportCompany?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  transportCostKgs!: number;
+  transportCostKgs?: number;
 
   @IsOptional()
   @IsString()

@@ -832,6 +832,7 @@ export type BranchInvoice = {
   dueDate: string;
   issuedAt: string;
   sentToBranchAt?: string | null;
+  sentToCashierAt?: string | null;
   createdById: string;
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
   payments?: BranchPayment[];

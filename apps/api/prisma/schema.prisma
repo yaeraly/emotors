@@ -3177,6 +3177,7 @@ model BranchInvoice {
   dueDate             DateTime
   issuedAt            DateTime            @default(now())
   sentToBranchAt      DateTime?
+  sentToCashierAt     DateTime?
   createdById         String
   createdBy           User                @relation("BranchInvoiceCreator", fields: [createdById], references: [id])
   payments            BranchPayment[]

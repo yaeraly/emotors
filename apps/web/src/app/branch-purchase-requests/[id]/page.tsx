@@ -518,10 +518,15 @@ export default function BranchPurchaseRequestDetailPage() {
                 </button>
               </>
             ) : null}
-            {canActOnRequest && (request.status === 'READY_FOR_HQ_WAREHOUSE' || request.status === 'APPROVED' || request.status === 'PARTIALLY_APPROVED') ? (
-              <button type="button" onClick={() => void sendToHqWarehouse()} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
-                {t('branchHqRouting.sendToWarehouseManager')}
+            {canActOnRequest && (request.status === 'PAYMENT_CONFIRMED' || request.status === 'READY_FOR_HQ_WAREHOUSE') ? (
+              <button type="button" onClick={() => void sendToHqWarehouse()} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
+                {t('branchHqRouting.sendToWarehouseAfterPayment')}
               </button>
+            ) : null}
+            {canActOnRequest && request.status === 'PAYMENT_CONFIRMED' ? (
+              <p className="rounded-xl bg-green-50 px-4 py-2 text-sm font-semibold text-green-700">
+                {t('branchHqRouting.paymentConfirmedBanner')}
+              </p>
             ) : null}
           </div>
         </div>

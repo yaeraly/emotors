@@ -1279,7 +1279,7 @@ export class OperationsService {
       return tx.branchPurchaseRequest.update({
         where: { id: request.id },
         data: {
-          status: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE,
+          status: BranchPurchaseRequestStatus.PAYMENT_CONFIRMED,
         },
       });
     });
@@ -1410,13 +1410,10 @@ export class OperationsService {
     if (!request) throw new NotFoundException('Branch purchase request not found');
     await this.assertBranchPurchaseRequestAccess(user, request);
     if (
-      request.status !== BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE &&
       request.status !== BranchPurchaseRequestStatus.PAYMENT_CONFIRMED &&
-      request.status !== BranchPurchaseRequestStatus.APPROVED &&
-      request.status !== BranchPurchaseRequestStatus.PARTIALLY_APPROVED &&
-      request.status !== BranchPurchaseRequestStatus.BRANCH_CONFIRMED
+      request.status !== BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE
     ) {
-      throw new BadRequestException('Order must be financially cleared before HQ warehouse fulfillment');
+      throw new BadRequestException('Order must be paid and financially cleared before HQ warehouse fulfillment');
     }
 
     const hasApprovedLines = request.items.some((item) => (item.approvedQuantity ?? 0) > 0);
@@ -1444,8 +1441,7 @@ export class OperationsService {
     if (
       request.convertedOrderId &&
       (request.status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE ||
-        request.status === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED ||
-        request.status === BranchPurchaseRequestStatus.BRANCH_CONFIRMED)
+        request.status === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED)
     ) {
       if (!assignedWarehouseManagerId && !dto.confirmNoManager && !hasAnyFullAccessRole(resolveUserRoles(user))) {
         throw new BadRequestException(NO_HQ_WAREHOUSE_MANAGER_ASSIGNED);

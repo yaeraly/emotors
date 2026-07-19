@@ -456,7 +456,7 @@ export function canRecordHqDistributionPayment(user: Pick<AuthUser, 'role' | 'ro
   );
 }
 
-/** Branch Cashier / Accountant submits payment with receipt for HQ confirmation. */
+/** Branch Cashier submits payment after accountant handoff. */
 export function canSubmitBranchInvoicePayment(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions'> & { branchId?: string | null },
 ) {
@@ -465,12 +465,40 @@ export function canSubmitBranchInvoicePayment(
   if (roles.includes(Role.HQ_CASHIER) || roles.includes(Role.HQ_ACCOUNTANT) || roles.includes(Role.FINANCE_MANAGER)) {
     return false;
   }
-  return roles.includes(Role.CASHIER) || roles.includes(Role.ACCOUNTANT) || userHasPermission(user, 'payments.manage');
+  return roles.includes(Role.CASHIER) || userHasPermission(user, 'payments.manage');
 }
 
-/** HQ Finance confirms or rejects branch-submitted payments. */
+/** Branch Accountant sends invoice to cashier after choosing payment type. */
+export function canSendInvoiceToCashier(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  return roles.includes(Role.ACCOUNTANT) || userHasPermission(user, 'finance.view');
+}
+
+/** HQ Finance confirms or rejects exceptional branch payments only. */
 export function canConfirmBranchInvoicePayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   return canRecordHqDistributionPayment(user);
+}
+
+export function canEnterBranchReceivingTransportCost(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
+) {
+  const roles = resolveUserRoles(user);
+  if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
+  return roles.includes(Role.WAREHOUSE_OPERATOR) || userHasPermission(user, 'warehouse.view');
+}
+
+/** HQ Warehouse Manager must not see financial order data. */
+export function isHqWarehouseLogisticsOnlyUser(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    roles.includes(Role.WAREHOUSE_MANAGER) &&
+    !hasAnyFullAccessRole(roles) &&
+    !roles.includes(Role.HQ_SALES_MANAGER) &&
+    !roles.includes(Role.SUPPLY_CHAIN_MANAGER) &&
+    !roles.includes(Role.FINANCE_MANAGER) &&
+    !roles.includes(Role.HQ_ACCOUNTANT)
+  );
 }
 
 export function canRequestBranchOrderInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {

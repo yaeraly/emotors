@@ -36,6 +36,9 @@ import {
   canRequestBranchOrderInstallment,
   canApproveBranchOrderInstallment,
   canSubmitBranchInvoicePayment,
+  canSendInvoiceToCashier,
+  canEnterBranchReceivingTransportCost,
+  isHqWarehouseLogisticsOnlyUser,
   canViewDistribution,
   canViewBranchDiscrepancyReports,
   hasAnyFullAccessRole,
@@ -58,6 +61,7 @@ import { DistributionReportQueryDto } from './dto/distribution-report-query.dto'
 import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
 import { SendDistributionOrderDto } from './dto/send-distribution-order.dto';
+import { EnterReceivingTransportDto } from './dto/enter-receiving-transport.dto';
 import { allocateBranchReceivingTransportCost } from './branch-receiving-transport.util';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
@@ -151,7 +155,7 @@ export class DistributionService {
       include: this.include(),
       orderBy: { createdAt: 'desc' },
     });
-    return orders.map((order) => this.toResponse(order));
+    return orders.map((order) => this.toResponse(order, user));
   }
 
   async detail(user: AuthUser, id: string) {
@@ -159,7 +163,7 @@ export class DistributionService {
       throw new ForbiddenException('Недостаточно прав для просмотра заказа распределения');
     }
     const order = await this.getAccessibleOrder(user, id);
-    return this.toResponse(order);
+    return this.toResponse(order, user);
   }
 
   update(user: AuthUser, id: string, dto: CreateDistributionOrderDto) {
@@ -292,16 +296,75 @@ export class DistributionService {
         data: { sentToBranchAt: new Date() },
         include: this.invoiceInclude(),
       });
+      await this.syncBranchPurchaseRequestPaymentStatus(tx, order.id, 'INVOICE_SENT', user);
       await this.auditTransfer(tx, user, 'INVOICE_SENT', order);
       await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.BRANCH_INVOICE_CREATED,
         title: 'Счёт отправлен филиалу',
-        message: `Счёт ${invoice.invoiceNumber} отправлен по заказу ${order.orderNumber}`,
+        message: `Счёт ${invoice.invoiceNumber} отправлен бухгалтеру филиала по заказу ${order.orderNumber}`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
+        recipientRoles: [Role.ACCOUNTANT],
       });
       return this.toInvoiceResponse(invoice);
+    });
+  }
+
+  sendInvoiceToCashier(user: AuthUser, invoiceId: string) {
+    if (!canSendInvoiceToCashier(user)) {
+      throw new ForbiddenException('Только бухгалтер филиала может передать счёт кассиру');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: { id: invoiceId, deletedAt: null, branchId: user.branchId! },
+        include: { branchOrderInstallment: true, distributionOrder: true },
+      });
+      if (!invoice) throw new NotFoundException('Branch invoice not found');
+      if (!invoice.sentToBranchAt) {
+        throw new BadRequestException('Счёт ещё не доступен бухгалтеру филиала');
+      }
+      if (invoice.sentToCashierAt) {
+        throw new BadRequestException('Счёт уже передан кассиру');
+      }
+      if (invoice.status === BranchInvoiceStatus.PAID || invoice.status === BranchInvoiceStatus.CANCELLED) {
+        throw new BadRequestException('Счёт уже оплачен или отменён');
+      }
+      const installment = invoice.branchOrderInstallment;
+      if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
+        throw new BadRequestException('Рассрочка ожидает утверждения CEO');
+      }
+
+      const updated = await tx.branchInvoice.update({
+        where: { id: invoice.id },
+        data: { sentToCashierAt: new Date() },
+        include: this.invoiceInclude(),
+      });
+
+      await this.syncBranchPurchaseRequestPaymentStatus(tx, invoice.distributionOrderId, 'SENT_TO_CASHIER', user);
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_INVOICE_SENT_TO_CASHIER',
+          entity: 'BranchInvoice',
+          entityId: invoice.id,
+          metadata: { roles: user.roles ?? [user.role] },
+        },
+      });
+
+      await this.createWorkflowAlert(tx, user, {
+        branchId: invoice.branchId,
+        type: AlertType.BRANCH_INVOICE_CREATED,
+        title: 'Счёт передан кассиру',
+        message: `Счёт ${invoice.invoiceNumber} передан кассиру на оплату`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+        recipientRoles: [Role.CASHIER],
+      });
+
+      return this.toInvoiceResponse(updated);
     });
   }
 
@@ -510,7 +573,6 @@ export class DistributionService {
     if (!canDispatchFromHq(user)) {
       throw new ForbiddenException('Only Warehouse Manager can dispatch goods from HQ warehouse');
     }
-    const transportCostKgs = Math.max(Number(dto.transportCostKgs ?? 0), 0);
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: {
@@ -531,47 +593,14 @@ export class DistributionService {
       }
       this.assertHqSourceWarehouse(order.sourceWarehouse);
 
-      const { allocations, totalShipmentWeightKg } = await this.allocateOrderDeliveryCost(
-        tx,
-        order.items,
-        transportCostKgs,
-      );
-      const allocationByProductId = new Map(allocations.map((row) => [row.productId, row]));
-
       await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
           transportCompany: dto.transportCompany?.trim() || null,
-          transportCostKgs,
           driverName: dto.driverName?.trim() || null,
           vehicleNumber: dto.vehicleNumber?.trim() || null,
           transportNotes: dto.transportNotes?.trim() || null,
-          totalShipmentWeightKg,
-          deliveryCostEnteredAt: new Date(),
-          deliveryCostEnteredById: user.id,
         },
-      });
-
-      for (const item of order.items) {
-        const allocation = allocationByProductId.get(item.productId);
-        await tx.branchDistributionOrderItem.update({
-          where: { id: item.id },
-          data: {
-            transportExpenseAllocation: allocation?.transportExpenseAllocation ?? 0,
-            transportCostPerUnit: allocation?.transportCostPerUnit ?? 0,
-            landedUnitCostKgs: allocation?.finalUnitCostKgs ?? Number(item.unitCost),
-          },
-        });
-      }
-
-      await this.auditTransfer(tx, user, 'BRANCH_DELIVERY_COST_ADDED', order, {
-        transportCostKgs,
-        totalShipmentWeightKg,
-        transportCompany: dto.transportCompany ?? null,
-      });
-      await this.auditTransfer(tx, user, 'DELIVERY_COST_ALLOCATED', order, {
-        transportCostKgs,
-        allocations,
       });
 
       for (const item of order.items) {
@@ -803,13 +832,8 @@ export class DistributionService {
         }
       }
 
-      const transportCostKgs =
-        Number(order.transportCostKgs ?? 0) > 0
-          ? Number(order.transportCostKgs)
-          : Math.max(Number(dto.transportCostKgs ?? 0), 0);
-      const hasPreallocatedDelivery = order.items.some(
-        (item) => Number(item.landedUnitCostKgs ?? 0) > 0 || Number(item.transportExpenseAllocation ?? 0) > 0,
-      );
+      const transportCostKgs = 0;
+      const hasPreallocatedDelivery = false;
       const transportLines = [];
       for (const orderItem of order.items) {
         const received = receivedMap.get(orderItem.id)!;
@@ -852,12 +876,12 @@ export class DistributionService {
           receivedById: user.id,
           receivedAt: new Date(),
           note: dto.note,
-          transportCompany: order.transportCompany ?? dto.transportCompany,
-          transportCostKgs,
-          driverName: order.driverName ?? dto.driverName,
-          vehicleNumber: order.vehicleNumber ?? dto.vehicleNumber,
+          transportCompany: dto.transportCompany,
+          transportCostKgs: 0,
+          driverName: dto.driverName,
+          vehicleNumber: dto.vehicleNumber,
           arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date(),
-          transportNotes: order.transportNotes ?? dto.transportNotes,
+          transportNotes: dto.transportNotes,
         },
       });
 
@@ -1058,24 +1082,19 @@ export class DistributionService {
       await this.auditTransfer(tx, user, 'BRANCH_RECEIVED_GOODS', order);
       await this.auditTransfer(tx, user, 'BRANCH_GOODS_RECEIVED', order);
       await this.auditTransfer(tx, user, 'GOODS_RECEIVED', order);
-      if (transportCostKgs > 0) {
-        await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_TRANSPORT_ALLOCATED', order, {
-          transportCostKgs,
-          allocations: hasPreallocatedDelivery
-            ? order.items.map((item) => ({
-                productId: item.productId,
-                transportExpenseAllocation: Number(item.transportExpenseAllocation ?? 0),
-                transportCostPerUnit: Number(item.transportCostPerUnit ?? 0),
-                finalUnitCostKgs: Number(item.landedUnitCostKgs ?? item.unitCost),
-              }))
-            : transportAllocations,
-        });
-        await this.auditTransfer(tx, user, 'BRANCH_LANDED_COST_CALCULATED', order, {
-          transportCostKgs,
-          receivingId: receiving.id,
-        });
-        await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_COST_UPDATED', order, {
-          receivingId: receiving.id,
+
+      const linkedRequest = await tx.branchPurchaseRequest.findFirst({
+        where: { convertedOrderId: order.id, deletedAt: null },
+      });
+      if (linkedRequest) {
+        await tx.branchPurchaseRequest.update({
+          where: { id: linkedRequest.id },
+          data: {
+            status:
+              shortageItems.length > 0
+                ? BranchPurchaseRequestStatus.RECEIVED_WITH_DIFFERENCE
+                : BranchPurchaseRequestStatus.RECEIVED,
+          },
         });
       }
 
@@ -1084,6 +1103,182 @@ export class DistributionService {
         shortageReport,
         invoice: existingInvoice ? this.toInvoiceResponse(existingInvoice) : null,
       };
+    });
+  }
+
+  async enterReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {
+    if (!canEnterBranchReceivingTransportCost(user)) {
+      throw new ForbiddenException('Только склад филиала может внести транспортные расходы');
+    }
+    const transportCostKgs = Math.max(Number(dto.transportCostKgs ?? 0), 0);
+    if (transportCostKgs <= 0) {
+      throw new BadRequestException('Стоимость доставки должна быть больше нуля');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: {
+          id: orderId,
+          deletedAt: null,
+          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
+        },
+        include: { items: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      if (
+        order.status !== BranchDistributionOrderStatus.RECEIVED_BY_BRANCH &&
+        order.status !== BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE &&
+        order.status !== BranchDistributionOrderStatus.RECEIVED
+      ) {
+        throw new BadRequestException('Транспортные расходы можно внести только после приёмки');
+      }
+      if (Number(order.transportCostKgs ?? 0) > 0 || order.deliveryCostEnteredAt) {
+        throw new BadRequestException('Транспортные расходы по этой поставке уже внесены');
+      }
+
+      const receiving = await tx.goodsReceiving.findFirst({
+        where: { distributionOrderId: order.id, deletedAt: null },
+        include: { items: true },
+        orderBy: { receivedAt: 'desc' },
+      });
+      if (!receiving) {
+        throw new BadRequestException('Приёмка не найдена');
+      }
+
+      const transportLines = [];
+      for (const orderItem of order.items) {
+        const receivingItem = receiving.items.find((row) => row.distributionOrderItemId === orderItem.id);
+        const receivedQuantity = Number(receivingItem?.receivedQuantity ?? 0);
+        if (receivedQuantity <= 0) continue;
+        const product = await tx.product.findFirst({
+          where: { id: orderItem.productId, deletedAt: null },
+          select: { weightKg: true },
+        });
+        transportLines.push({
+          productId: orderItem.productId,
+          receivedQuantity,
+          weightKg: Number(product?.weightKg ?? 0),
+          unitCostKgs: Number(orderItem.unitCost),
+        });
+      }
+
+      const transportAllocations = allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
+      const transportByProductId = new Map(transportAllocations.map((row) => [row.productId, row]));
+      const totalShipmentWeightKg = transportLines.reduce(
+        (sum, line) => sum + line.receivedQuantity * line.weightKg,
+        0,
+      );
+
+      await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: {
+          transportCompany: dto.transportCompany.trim(),
+          transportCostKgs,
+          transportNotes: dto.comment?.trim() || dto.deliveryDocument?.trim() || null,
+          totalShipmentWeightKg,
+          deliveryCostEnteredAt: dto.deliveryDate ? new Date(dto.deliveryDate) : new Date(),
+          deliveryCostEnteredById: user.id,
+        },
+      });
+
+      await tx.goodsReceiving.update({
+        where: { id: receiving.id },
+        data: {
+          transportCompany: dto.transportCompany.trim(),
+          transportCostKgs,
+          transportNotes: dto.comment?.trim() || null,
+          arrivalDate: dto.deliveryDate ? new Date(dto.deliveryDate) : receiving.arrivalDate,
+        },
+      });
+
+      for (const orderItem of order.items) {
+        const transportCost = transportByProductId.get(orderItem.productId);
+        if (!transportCost) continue;
+        await tx.branchDistributionOrderItem.update({
+          where: { id: orderItem.id },
+          data: {
+            transportExpenseAllocation: transportCost.transportExpenseAllocation,
+            transportCostPerUnit: transportCost.transportCostPerUnit,
+            landedUnitCostKgs: transportCost.finalUnitCostKgs,
+          },
+        });
+        const receivingItem = receiving.items.find((row) => row.distributionOrderItemId === orderItem.id);
+        if (receivingItem) {
+          await tx.goodsReceivingItem.update({
+            where: { id: receivingItem.id },
+            data: {
+              unitCost: transportCost.finalUnitCostKgs,
+              transportExpenseAllocation: transportCost.transportExpenseAllocation,
+              transportCostPerUnit: transportCost.transportCostPerUnit,
+            },
+          });
+        }
+
+        const receivedQuantity = Number(receivingItem?.receivedQuantity ?? 0);
+        if (receivedQuantity <= 0) continue;
+
+        const balance = await tx.inventoryBalance.findFirst({
+          where: {
+            warehouseId: receiving.warehouseId,
+            productId: orderItem.productId,
+          },
+        });
+        if (!balance) continue;
+
+        const transportDelta = transportCost.transportExpenseAllocation;
+        const currentQty = balance.quantity;
+        const currentTotalValue = Number(balance.totalValueKgs);
+        const newTotalValue = this.roundMoney(currentTotalValue + transportDelta);
+        const newAverageCost =
+          currentQty > 0 ? this.roundMoney(newTotalValue / currentQty) : Number(balance.averageCostKgs);
+        const newLandedCost = this.roundMoney(
+          Number(balance.landedCostKgs || balance.averageCostKgs) + transportCost.transportCostPerUnit,
+        );
+
+        await tx.inventoryBalance.update({
+          where: { id: balance.id },
+          data: {
+            averageCostKgs: newAverageCost,
+            landedCostKgs: newLandedCost,
+            totalValueKgs: newTotalValue,
+          },
+        });
+
+        await tx.stockMovement.create({
+          data: {
+            branchId: order.branchId,
+            warehouseId: receiving.warehouseId,
+            productId: orderItem.productId,
+            type: StockMovementType.ADJUSTMENT,
+            quantity: 0,
+            unitCostKgs: transportCost.transportCostPerUnit,
+            totalCostKgs: transportDelta,
+            note: `Transport cost allocation for ${order.orderNumber}`,
+            referenceType: 'GOODS_RECEIVING',
+            referenceId: receiving.id,
+            createdById: user.id,
+          },
+        });
+      }
+
+      await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_TRANSPORT_ALLOCATED', order, {
+        transportCostKgs,
+        allocations: transportAllocations,
+      });
+      await this.auditTransfer(tx, user, 'BRANCH_LANDED_COST_CALCULATED', order, {
+        transportCostKgs,
+        receivingId: receiving.id,
+      });
+      await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_COST_UPDATED', order, {
+        receivingId: receiving.id,
+      });
+      await this.syncBranchPurchaseRequestPaymentStatus(tx, order.id, 'TRANSPORT_COST_ENTERED', user);
+
+      const updated = await tx.branchDistributionOrder.findFirst({
+        where: { id: order.id },
+        include: this.include(),
+      });
+      return this.toResponse(updated!, user);
     });
   }
 
@@ -1268,14 +1463,17 @@ export class DistributionService {
 
   async submitInvoicePayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
     if (!canSubmitBranchInvoicePayment(user)) {
-      throw new ForbiddenException('Недостаточно прав для отправки оплаты на подтверждение');
+      throw new ForbiddenException('Недостаточно прав для отправки оплаты');
     }
     return this.prisma.$transaction(async (tx) => {
       const invoice = await tx.branchInvoice.findFirst({
         where: { id, deletedAt: null, branchId: user.branchId! },
-        include: { distributionOrder: true },
+        include: { distributionOrder: true, branchOrderInstallment: true },
       });
       if (!invoice) throw new NotFoundException('Branch invoice not found');
+      if (!invoice.sentToCashierAt) {
+        throw new BadRequestException('Счёт ещё не передан кассиру бухгалтером');
+      }
       if (invoice.status === BranchInvoiceStatus.CANCELLED) {
         throw new BadRequestException('Cannot pay cancelled invoice');
       }
@@ -1295,6 +1493,16 @@ export class DistributionService {
         throw new BadRequestException('Payment amount cannot exceed invoice debt');
       }
 
+      const installment = invoice.branchOrderInstallment;
+      if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
+        throw new BadRequestException('Рассрочка ожидает утверждения CEO');
+      }
+
+      const autoValidate = this.shouldAutoValidatePayment(invoice, amount, installment);
+      const confirmationStatus = autoValidate
+        ? BranchPaymentConfirmationStatus.CONFIRMED
+        : BranchPaymentConfirmationStatus.PENDING_CONFIRMATION;
+
       const payment = await tx.branchPayment.create({
         data: {
           branchId: invoice.branchId,
@@ -1303,32 +1511,39 @@ export class DistributionService {
           method: dto.method,
           note: dto.note,
           receiptReference: dto.receiptReference,
-          confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
+          confirmationStatus,
           submittedAt: new Date(),
+          ...(autoValidate
+            ? { confirmedAt: new Date(), confirmedById: user.id, paidAt: new Date() }
+            : {}),
           createdById: user.id,
         },
       });
-
-      await this.syncBranchPurchaseRequestPaymentStatus(tx, invoice.distributionOrderId, 'PAYMENT_SUBMITTED', user);
 
       await tx.auditLog.create({
         data: {
           userId: user.id,
           role: user.role,
-          action: 'BRANCH_PAYMENT_SUBMITTED',
+          action: autoValidate ? 'BRANCH_PAYMENT_AUTO_CONFIRMED' : 'BRANCH_PAYMENT_SUBMITTED',
           entity: 'BranchPayment',
           entityId: payment.id,
-          metadata: { invoiceId: invoice.id, amount, method: dto.method, roles: user.roles ?? [user.role] },
+          metadata: { invoiceId: invoice.id, amount, method: dto.method, autoValidate, roles: user.roles ?? [user.role] },
         },
       });
+
+      if (autoValidate) {
+        return this.applyConfirmedPaymentTotals(tx, user, invoice);
+      }
+
+      await this.syncBranchPurchaseRequestPaymentStatus(tx, invoice.distributionOrderId, 'PAYMENT_SUBMITTED', user);
       await this.createWorkflowAlert(tx, user, {
         branchId: invoice.branchId,
         type: AlertType.BRANCH_PAYMENT_SUBMITTED,
-        title: 'Оплата ожидает подтверждения',
-        message: `Оплата по счёту ${invoice.invoiceNumber} отправлена на подтверждение HQ Finance`,
+        title: 'Оплата требует проверки HQ Finance',
+        message: `Оплата по счёту ${invoice.invoiceNumber} требует ручной проверки HQ Finance`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
-        recipientRoles: [Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT, Role.HQ_CASHIER],
+        recipientRoles: [Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT],
       });
 
       const updated = await tx.branchInvoice.findUniqueOrThrow({
@@ -1337,6 +1552,26 @@ export class DistributionService {
       });
       return this.toInvoiceResponse(updated);
     });
+  }
+
+  private shouldAutoValidatePayment(
+    invoice: { debtAmount: Prisma.Decimal; totalAmount: Prisma.Decimal },
+    amount: number,
+    installment: {
+      status: BranchOrderInstallmentStatus;
+      firstPaymentRequired: boolean;
+      firstPaymentConfirmed: boolean;
+      firstPaymentAmount: Prisma.Decimal;
+    } | null,
+  ) {
+    if (installment?.status === BranchOrderInstallmentStatus.PENDING) return false;
+    if (installment?.status === BranchOrderInstallmentStatus.APPROVED && installment.firstPaymentRequired) {
+      const expected = installment.firstPaymentConfirmed
+        ? Number(invoice.debtAmount)
+        : Number(installment.firstPaymentAmount);
+      return Math.abs(amount - expected) < 0.01;
+    }
+    return Math.abs(amount - Number(invoice.debtAmount)) < 0.01;
   }
 
   async confirmInvoicePayment(user: AuthUser, invoiceId: string, paymentId: string) {
@@ -1574,6 +1809,15 @@ export class DistributionService {
         entityType: 'BranchInvoice',
         entityId: invoice.id,
       });
+      await this.createWorkflowAlert(tx, user, {
+        branchId: null,
+        type: AlertType.PAYMENT_RECEIVED,
+        title: 'Оплата подтверждена',
+        message: `Оплата по заказу филиала подтверждена. Можно передать на склад HQ.`,
+        entityType: 'BranchInvoice',
+        entityId: invoice.id,
+        recipientRoles: [Role.HQ_SALES_MANAGER],
+      });
     }
 
     const updated = await tx.branchInvoice.findUniqueOrThrow({
@@ -1587,12 +1831,15 @@ export class DistributionService {
     tx: PrismaTx,
     distributionOrderId: string | null,
     event:
+      | 'INVOICE_SENT'
+      | 'SENT_TO_CASHIER'
       | 'PAYMENT_SUBMITTED'
       | 'PAYMENT_REJECTED'
       | 'PAYMENT_CONFIRMED'
       | 'INSTALLMENT_PENDING'
       | 'INSTALLMENT_APPROVED'
-      | 'INSTALLMENT_REJECTED',
+      | 'INSTALLMENT_REJECTED'
+      | 'TRANSPORT_COST_ENTERED',
     user: AuthUser,
   ) {
     if (!distributionOrderId) return;
@@ -1611,6 +1858,12 @@ export class DistributionService {
     let nextStatus: BranchPurchaseRequestStatus | null = null;
 
     switch (event) {
+      case 'INVOICE_SENT':
+        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
+        break;
+      case 'SENT_TO_CASHIER':
+        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
+        break;
       case 'PAYMENT_SUBMITTED':
         nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
         break;
@@ -1622,26 +1875,25 @@ export class DistributionService {
           if (installment.firstPaymentRequired && !installment.firstPaymentConfirmed) {
             nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
           } else {
-            nextStatus = BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE;
+            nextStatus = BranchPurchaseRequestStatus.PAYMENT_CONFIRMED;
           }
         } else if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
           nextStatus = BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL;
         } else if (!installment) {
-          nextStatus = BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE;
+          nextStatus = BranchPurchaseRequestStatus.PAYMENT_CONFIRMED;
         }
         break;
       case 'INSTALLMENT_PENDING':
         nextStatus = BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL;
         break;
       case 'INSTALLMENT_APPROVED':
-        if (installment?.firstPaymentRequired && !installment.firstPaymentConfirmed) {
-          nextStatus = BranchPurchaseRequestStatus.PAYMENT_SUBMITTED;
-        } else {
-          nextStatus = BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE;
-        }
+        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
         break;
       case 'INSTALLMENT_REJECTED':
         nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
+        break;
+      case 'TRANSPORT_COST_ENTERED':
+        nextStatus = BranchPurchaseRequestStatus.COMPLETED;
         break;
     }
 
@@ -1652,13 +1904,13 @@ export class DistributionService {
       data: { status: nextStatus },
     });
 
-    if (nextStatus === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE) {
+    if (nextStatus === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED) {
       await this.hqStockBookingService.extendBookingsAfterPayment(linkedRequest.id, tx);
       await tx.auditLog.create({
         data: {
           userId: user.id,
           role: user.role,
-          action: 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE',
+          action: 'BRANCH_ORDER_PAYMENT_CONFIRMED',
           entity: 'BranchPurchaseRequest',
           entityId: linkedRequest.id,
           metadata: {
@@ -1668,15 +1920,6 @@ export class DistributionService {
             roles: user.roles ?? [user.role],
           },
         },
-      });
-      await this.createWorkflowAlert(tx, user, {
-        branchId: linkedRequest.branchId,
-        type: AlertType.BRANCH_ORDER_READY_FOR_WAREHOUSE,
-        title: 'Заказ готов к комплектации на складе HQ',
-        message: `Заказ ${linkedRequest.requestNumber} готов к комплектации после финансового оформления`,
-        entityType: 'BranchPurchaseRequest',
-        entityId: linkedRequest.id,
-        recipientRoles: [Role.WAREHOUSE_MANAGER],
       });
     }
   }
@@ -2395,7 +2638,7 @@ export class DistributionService {
     };
   }
 
-  private toResponse(order: any) {
+  private toResponse(order: any, user?: AuthUser) {
     const transportCostKgs = Number(order.transportCostKgs ?? 0);
     const totalShipmentWeightKg = Number(order.totalShipmentWeightKg ?? 0);
     const items = order.items?.map((item: any) => {
@@ -2428,7 +2671,7 @@ export class DistributionService {
         ? Math.round((transportCostKgs / totalShipmentWeightKg + Number.EPSILON) * 100) / 100
         : 0;
 
-    return {
+    const response = {
       ...order,
       totalAmount: Number(order.totalAmount),
       totalCost: Number(order.totalCost),
@@ -2447,6 +2690,49 @@ export class DistributionService {
       branchInvoice: order.branchInvoice
         ? this.toInvoiceResponse(order.branchInvoice)
         : order.branchInvoice,
+    };
+
+    if (user && isHqWarehouseLogisticsOnlyUser(user)) {
+      return this.sanitizeDistributionOrderForHqWarehouse(response);
+    }
+    return response;
+  }
+
+  private sanitizeDistributionOrderForHqWarehouse(order: any) {
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      branchId: order.branchId,
+      branch: order.branch ? { id: order.branch.id, name: order.branch.name, code: order.branch.code } : order.branch,
+      sourceWarehouseId: order.sourceWarehouseId,
+      sourceWarehouse: order.sourceWarehouse
+        ? { id: order.sourceWarehouse.id, name: order.sourceWarehouse.name, code: order.sourceWarehouse.code }
+        : order.sourceWarehouse,
+      destinationWarehouseId: order.destinationWarehouseId,
+      destinationWarehouse: order.destinationWarehouse
+        ? { id: order.destinationWarehouse.id, name: order.destinationWarehouse.name, code: order.destinationWarehouse.code }
+        : order.destinationWarehouse,
+      status: order.status,
+      note: order.note,
+      sentAt: order.sentAt,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      transportCompany: order.transportCompany,
+      driverName: order.driverName,
+      vehicleNumber: order.vehicleNumber,
+      transportNotes: order.transportNotes,
+      pickingTask: order.pickingTask,
+      items: order.items?.map((item: any) => ({
+        id: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        productName: item.productName,
+        quantity: item.quantity,
+        unit: item.unit,
+        product: item.product
+          ? { id: item.product.id, sku: item.product.sku, name: item.product.name, unit: item.product.unit }
+          : item.product,
+      })),
     };
   }
 

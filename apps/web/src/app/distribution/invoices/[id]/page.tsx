@@ -8,6 +8,7 @@ import {
   canApproveBranchOrderInstallment,
   canConfirmBranchInvoicePayment,
   canRequestBranchOrderInstallment,
+  canSendInvoiceToCashier,
   canSubmitBranchInvoicePayment,
 } from '@/lib/rbac';
 import type { BranchInvoice, BranchPayment, BranchPaymentMethod, User } from '@/lib/types';
@@ -69,7 +70,7 @@ export default function BranchInvoiceDetailPage() {
       setReceiptReference('');
       setSuccess(
         canSubmitBranchInvoicePayment(currentUser) && !canConfirmBranchInvoicePayment(currentUser)
-          ? t('distribution.paymentSubmitted')
+          ? t('distribution.paymentSubmittedAuto')
           : t('distribution.paymentAdded'),
       );
     } catch (err) {
@@ -144,11 +145,24 @@ export default function BranchInvoiceDetailPage() {
     }
   }
 
+  async function sendToCashier() {
+    setError('');
+    setSuccess('');
+    try {
+      setInvoice(await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/send-to-cashier`, { method: 'POST' }));
+      setSuccess(t('distribution.sentToCashier'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   const canSubmitPayment = canSubmitBranchInvoicePayment(currentUser);
   const canConfirmPayment = canConfirmBranchInvoicePayment(currentUser);
   const canRequestInstallment = canRequestBranchOrderInstallment(currentUser);
   const canApproveInstallment = canApproveBranchOrderInstallment(currentUser);
+  const canHandoffToCashier = canSendInvoiceToCashier(currentUser);
   const pendingPayment = invoice?.payments?.find((payment) => payment.confirmationStatus === 'PENDING_CONFIRMATION');
+  const waitingForCashier = Boolean(invoice?.sentToBranchAt && !invoice?.sentToCashierAt);
 
   return (
     <ProtectedShell>
@@ -171,8 +185,23 @@ export default function BranchInvoiceDetailPage() {
               <Info label={t('distribution.issuedAt')} value={new Date(invoice.issuedAt).toLocaleDateString()} />
             </section>
 
-            {canSubmitPayment && Number(invoice.debtAmount) > 0 ? (
+            {canHandoffToCashier && waitingForCashier ? (
+              <section className="rounded-3xl border border-blue-200 bg-blue-50 p-6 shadow-sm">
+                <h3 className="text-lg font-bold">{t('distribution.accountantReview')}</h3>
+                <p className="mt-2 text-sm text-slate-700">{t('distribution.accountantReviewHint')}</p>
+                <button
+                  className="mt-4 rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white"
+                  type="button"
+                  onClick={() => void sendToCashier()}
+                >
+                  {t('distribution.sendToCashier')}
+                </button>
+              </section>
+            ) : null}
+
+            {canSubmitPayment && invoice.sentToCashierAt && Number(invoice.debtAmount) > 0 ? (
               <form onSubmit={submitPayment} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
+                <h3 className="md:col-span-2 text-lg font-bold">{t('distribution.cashierPayment')}</h3>
                 <label className="block">
                   <span className="text-sm font-semibold text-slate-700">{t('distribution.paidAmount')}</span>
                   <input value={amount} onChange={(event) => setAmount(event.target.value)} type="number" min="0.01" step="0.01" className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" required />
@@ -196,7 +225,7 @@ export default function BranchInvoiceDetailPage() {
                   <input value={note} onChange={(event) => setNote(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
                 </label>
                 <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">
-                  {t('distribution.submitPayment')}
+                  {t('distribution.submitPaymentCashier')}
                 </button>
               </form>
             ) : null}
@@ -223,7 +252,7 @@ export default function BranchInvoiceDetailPage() {
               </section>
             ) : null}
 
-            {canRequestInstallment && !invoice.branchOrderInstallment ? (
+            {canRequestInstallment && !invoice.branchOrderInstallment && waitingForCashier ? (
               <form onSubmit={requestInstallment} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-3">
                 <h3 className="md:col-span-3 text-lg font-bold">{t('distribution.requestInstallment')}</h3>
                 <label className="block">

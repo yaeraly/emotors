@@ -16,6 +16,7 @@ import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { RejectBranchInstallmentDto, RequestBranchInstallmentDto } from './dto/request-branch-installment.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 import { SendDistributionOrderDto } from './dto/send-distribution-order.dto';
+import { EnterReceivingTransportDto } from './dto/enter-receiving-transport.dto';
 import { DistributionService } from './distribution.service';
 
 const DISTRIBUTION_VIEW_ROLES = [
@@ -278,6 +279,22 @@ export class DistributionController {
     @Body() dto: RejectBranchInstallmentDto,
   ) {
     return this.distributionService.rejectInvoiceInstallment(user, id, dto);
+  }
+
+  @Post('invoices/:id/send-to-cashier')
+  @Roles(Role.OWNER, Role.CEO, Role.ACCOUNTANT, Role.FRANCHISE_OWNER)
+  sendInvoiceToCashier(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.distributionService.sendInvoiceToCashier(user, id);
+  }
+
+  @Post('orders/:id/transport-cost')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_OPERATOR)
+  enterReceivingTransportCost(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: EnterReceivingTransportDto,
+  ) {
+    return this.distributionService.enterReceivingTransportCost(user, id, dto);
   }
 
   @Get('branches/:branchId/account-balance')

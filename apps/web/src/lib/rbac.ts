@@ -1222,7 +1222,33 @@ export function canSubmitBranchInvoicePayment(
 ) {
   if (!user?.branchId || hasFullAccess(user)) return false;
   if (hasRole(user, 'HQ_CASHIER') || hasRole(user, 'HQ_ACCOUNTANT') || hasRole(user, 'FINANCE_MANAGER')) return false;
-  return hasRole(user, 'CASHIER') || hasRole(user, 'ACCOUNTANT') || hasPermission(user, 'payments.manage');
+  return hasRole(user, 'CASHIER') || hasPermission(user, 'payments.manage');
+}
+
+export function canSendInvoiceToCashier(
+  user: (Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) | null | undefined,
+) {
+  if (!user?.branchId || hasFullAccess(user)) return false;
+  return hasRole(user, 'ACCOUNTANT') || hasPermission(user, 'finance.view');
+}
+
+export function canEnterBranchReceivingTransportCost(
+  user: (Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) | null | undefined,
+) {
+  if (!user?.branchId || hasFullAccess(user)) return false;
+  return hasRole(user, 'WAREHOUSE_OPERATOR');
+}
+
+export function isHqWarehouseLogisticsOnlyUser(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return (
+    hasRole(user, 'WAREHOUSE_MANAGER') &&
+    !hasFullAccess(user) &&
+    !hasRole(user, 'HQ_SALES_MANAGER') &&
+    !hasRole(user, 'SUPPLY_CHAIN_MANAGER') &&
+    !hasRole(user, 'FINANCE_MANAGER') &&
+    !hasRole(user, 'HQ_ACCOUNTANT')
+  );
 }
 
 export function canConfirmBranchInvoicePayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
