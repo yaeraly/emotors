@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsInt, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 export class RequestBranchInstallmentDto {
   @Type(() => Number)
@@ -15,6 +15,14 @@ export class RequestBranchInstallmentDto {
   @IsOptional()
   @IsBoolean()
   firstPaymentRequired?: boolean;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
 }
 
 export class RejectBranchInstallmentDto {

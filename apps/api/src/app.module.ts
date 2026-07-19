@@ -9,6 +9,7 @@ import { CommissionsModule } from './commissions/commissions.module';
 import { CustomersModule } from './customers/customers.module';
 import { DistributionModule } from './distribution/distribution.module';
 import { ExpansionModule } from './expansion/expansion.module';
+import { BranchAccountantModule } from './branch-accountant/branch-accountant.module';
 import { BranchWarehouseModule } from './branch-warehouse/branch-warehouse.module';
 import { HqWarehouseModule } from './hq-warehouse/hq-warehouse.module';
 import { InventoryCountModule } from './inventory-count/inventory-count.module';
@@ -45,6 +46,7 @@ import { UsersModule } from './users/users.module';
     InventoryCountModule,
     HqWarehouseModule,
     BranchWarehouseModule,
+    BranchAccountantModule,
     SalesModule,
     ServiceModule,
     KpiModule,

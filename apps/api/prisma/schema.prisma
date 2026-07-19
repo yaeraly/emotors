@@ -807,6 +807,11 @@ enum BranchInvoiceStatus {
   CANCELLED
 }
 
+enum BranchInvoicePaymentType {
+  FULL_PAYMENT
+  INSTALLMENT
+}
+
 enum BranchPaymentMethod {
   CASH
   QR
@@ -3171,6 +3176,7 @@ model BranchInvoice {
   goodsReceivingId    String?             @unique
   goodsReceiving      GoodsReceiving?     @relation(fields: [goodsReceivingId], references: [id])
   status              BranchInvoiceStatus @default(ISSUED)
+  paymentType         BranchInvoicePaymentType?
   totalAmount         Decimal             @default(0) @db.Decimal(14, 2)
   paidAmount          Decimal             @default(0) @db.Decimal(14, 2)
   debtAmount          Decimal             @default(0) @db.Decimal(14, 2)
@@ -3248,6 +3254,8 @@ model BranchOrderInstallment {
   rejectedById          String?
   rejectedBy            User?                       @relation("BranchInstallmentRejecter", fields: [rejectedById], references: [id])
   rejectionComment      String?
+  requestComment        String?
+  installmentDueDate    DateTime?
   requestedAt           DateTime                    @default(now())
   decidedAt             DateTime?
   createdAt             DateTime                    @default(now())

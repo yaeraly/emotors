@@ -816,6 +816,57 @@ export type BranchOrderInstallment = {
   firstPaymentConfirmed: boolean;
 };
 
+export type BranchInvoicePaymentType = 'FULL_PAYMENT' | 'INSTALLMENT';
+
+export type AccountantInvoiceWorkflowStatus =
+  | 'PENDING_ACCOUNTANT_REVIEW'
+  | 'INSTALLMENT_APPROVAL_PENDING'
+  | 'READY_FOR_CASHIER'
+  | 'WAITING_FOR_PAYMENT'
+  | 'PAYMENT_SUBMITTED'
+  | 'PAID'
+  | 'PARTIALLY_PAID'
+  | 'REJECTED'
+  | 'CANCELLED';
+
+export type BranchAccountantInvoice = {
+  id: string;
+  invoiceNumber: string;
+  branchId: string;
+  branch?: Pick<Branch, 'id' | 'name' | 'code'> | null;
+  distributionOrderId: string;
+  orderNumber?: string | null;
+  branchPurchaseRequestId?: string | null;
+  branchPurchaseRequestNumber?: string | null;
+  workflowStatus: AccountantInvoiceWorkflowStatus;
+  paymentType?: BranchInvoicePaymentType | null;
+  status: BranchInvoiceStatus;
+  totalAmount: number;
+  paidAmount: number;
+  debtAmount: number;
+  remainingAmount: number;
+  requiredPaymentAmount: number;
+  dueDate: string;
+  issuedAt: string;
+  sentToBranchAt?: string | null;
+  sentToCashierAt?: string | null;
+  itemCount: number;
+  items: Array<{
+    id: string;
+    productId: string;
+    sku: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    unit?: string | null;
+  }>;
+  branchOrderInstallment?: BranchOrderInstallment | null;
+  payments?: BranchPayment[];
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type BranchInvoice = {
   id: string;
   invoiceNumber: string;

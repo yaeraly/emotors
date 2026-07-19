@@ -405,6 +405,7 @@ const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
 
 const BRANCH_CASHIER_ALLOWED_PREFIXES = [
   '/change-password',
+  '/branch-cashier',
   '/payments',
   '/sales',
   '/service/cashier',
@@ -446,6 +447,7 @@ const BRANCH_CASHIER_FORBIDDEN_PREFIXES = [
 
 const BRANCH_ACCOUNTANT_ALLOWED_PREFIXES = [
   '/change-password',
+  '/branch-accountant',
   '/payments',
   '/tax',
   '/payroll',
@@ -562,8 +564,8 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/hq-warehouses';
   if (isBranchWarehouseOperator(user)) return '/inventory';
-  if (isBranchCashierUser(user)) return '/payments';
-  if (isBranchAccountantUser(user)) return '/payments';
+  if (isBranchCashierUser(user)) return '/branch-cashier/invoices';
+  if (isBranchAccountantUser(user)) return '/branch-accountant/invoices';
   if (hasPermission(user, 'payments.manage')) return '/payments';
   if (hasPermission(user, 'finance.view') && !isBranchAccountantUser(user)) return '/finance';
   if (hasPermission(user, 'users.manage') && !user.branchId) return '/users';

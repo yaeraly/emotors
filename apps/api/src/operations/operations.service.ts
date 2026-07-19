@@ -1199,8 +1199,8 @@ export class OperationsService {
       entityType: 'BranchInvoice',
       entityId: approvedOrder.branchInvoice?.id ?? result.createdOrder.id,
       referenceNumber: existing.requestNumber,
-      title: 'Новый счёт по заказу товаров',
-      message: `Создан счёт по заказу ${existing.requestNumber}.`,
+      title: 'Новый счёт на оплату',
+      message: `Новый счет на оплату №${approvedOrder.branchInvoice?.invoiceNumber ?? existing.requestNumber}`,
       recipientRoles: [Role.ACCOUNTANT],
     });
     await this.auditBranchRequest(user, existing.branchId, 'BRANCH_INVOICE_CREATED', 'BranchPurchaseRequest', existing.id, {

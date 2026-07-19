@@ -319,25 +319,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/distribution/receivings" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.orders.receivingHistory')}</Link>
                 <Link href="/service/parts-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.partsRequests')}</Link>
               </>
-            ) : branchCashierView ? (
-              <>
-                <Link href="/payments" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
-                  {t('nav.payments')}
-                </Link>
-                <Link href="/sales" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                  {t('sales.salesAndPayments')}
-                </Link>
-                <Link href="/service/cashier" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                  Сервис — оплата
-                </Link>
-                <Link href="/returns" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                  {t('operations.returns')}
-                </Link>
-              </>
             ) : branchAccountantView ? (
               <>
-                <Link href="/payments" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
-                  {t('nav.payments')}
+                <Link href="/branch-accountant/invoices" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                  {t('branchAccountant.invoicesToPay')}
                 </Link>
                 <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                   {t('tax.title')}
@@ -350,6 +335,21 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 </Link>
                 <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                   {t('compensation.rules')}
+                </Link>
+              </>
+            ) : branchCashierView ? (
+              <>
+                <Link href="/branch-cashier/invoices" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                  {t('branchCashier.invoicesToPay')}
+                </Link>
+                <Link href="/sales" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('sales.salesAndPayments')}
+                </Link>
+                <Link href="/service/cashier" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  Сервис — оплата
+                </Link>
+                <Link href="/returns" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  {t('operations.returns')}
                 </Link>
               </>
             ) : branchMasterView ? (

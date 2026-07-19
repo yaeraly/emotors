@@ -8,6 +8,7 @@ import {
   AlertType,
   BranchDistributionOrderStatus,
   BranchInvoiceStatus,
+  BranchInvoicePaymentType,
   BranchOrderInstallmentStatus,
   BranchPaymentConfirmationStatus,
   BranchPurchaseRequestStatus,
@@ -298,11 +299,40 @@ export class DistributionService {
       });
       await this.syncBranchPurchaseRequestPaymentStatus(tx, order.id, 'INVOICE_SENT', user);
       await this.auditTransfer(tx, user, 'INVOICE_SENT', order);
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'INVOICE_AUTO_CREATED',
+          entity: 'BranchInvoice',
+          entityId: invoice.id,
+          metadata: {
+            invoiceNumber: invoice.invoiceNumber,
+            branchId: order.branchId,
+            distributionOrderId: order.id,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'INVOICE_ASSIGNED_TO_BRANCH_ACCOUNTANT',
+          entity: 'BranchInvoice',
+          entityId: invoice.id,
+          metadata: {
+            invoiceNumber: invoice.invoiceNumber,
+            branchId: order.branchId,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
       await this.createWorkflowAlert(tx, user, {
         branchId: order.branchId,
         type: AlertType.BRANCH_INVOICE_CREATED,
-        title: 'Счёт отправлен филиалу',
-        message: `Счёт ${invoice.invoiceNumber} отправлен бухгалтеру филиала по заказу ${order.orderNumber}`,
+        title: 'Новый счёт на оплату',
+        message: `Новый счет на оплату №${invoice.invoiceNumber}`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
         recipientRoles: [Role.ACCOUNTANT],
@@ -350,7 +380,11 @@ export class DistributionService {
           action: 'BRANCH_INVOICE_SENT_TO_CASHIER',
           entity: 'BranchInvoice',
           entityId: invoice.id,
-          metadata: { roles: user.roles ?? [user.role] },
+          metadata: {
+            invoiceNumber: invoice.invoiceNumber,
+            branchId: invoice.branchId,
+            roles: user.roles ?? [user.role],
+          },
         },
       });
 
@@ -1952,6 +1986,16 @@ export class DistributionService {
           termMonths: dto.termMonths,
           firstPaymentRequired: dto.firstPaymentRequired ?? true,
           requestedById: user.id,
+          requestComment: dto.comment?.trim() || null,
+          installmentDueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        },
+      });
+
+      await tx.branchInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          paymentType: BranchInvoicePaymentType.INSTALLMENT,
+          ...(dto.dueDate ? { dueDate: new Date(dto.dueDate) } : {}),
         },
       });
 
@@ -1968,7 +2012,7 @@ export class DistributionService {
         data: {
           userId: user.id,
           role: user.role,
-          action: 'BRANCH_INSTALLMENT_REQUESTED',
+          action: 'INSTALLMENT_REQUESTED',
           entity: 'BranchOrderInstallment',
           entityId: installment.id,
           metadata: {

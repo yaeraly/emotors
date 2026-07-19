@@ -9,6 +9,7 @@ export type StatusDomain =
   | 'branchShortage'
   | 'branchRequestLine'
   | 'branchRequestIssue'
+  | 'branchAccountant'
   | 'supplyInquiry'
   | 'supplyAbsenceReason'
   | 'service'
