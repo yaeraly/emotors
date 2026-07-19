@@ -6,7 +6,13 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { SaleCustomerSearch, type SaleCustomerOption } from '@/components/SaleCustomerSearch';
 import { SaleProductSearch, type SaleProductOption } from '@/components/SaleProductSearch';
 import { apiFetch } from '@/lib/api';
-import { canApproveSale, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canApproveSale, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser } from '@/lib/rbac';
+import {
+  draftLooksLikeInstallment,
+  installmentBlocksCompletion,
+  installmentStatusLabelKey,
+  saleIsInstallment,
+} from '@/lib/sale-installment';
 import type {
   PaymentMethod,
   Sale,
@@ -80,10 +86,12 @@ export default function NewSalePage() {
   const [dueDate, setDueDate] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [submittingInstallment, setSubmittingInstallment] = useState(false);
   const [error, setError] = useState('');
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const canApprove = canApproveSale(user);
+  const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
 
   useEffect(() => {
     apiFetch<User>('/auth/me')
@@ -109,6 +117,23 @@ export default function NewSalePage() {
 
     return { totalAmount, totalCost, profit, paid, debt };
   }, [items, paymentRows]);
+
+  const isInstallmentDraft = useMemo(
+    () => draftLooksLikeInstallment(totals.debt, installmentDays, dueDate),
+    [totals.debt, installmentDays, dueDate],
+  );
+
+  const isInstallmentSale = saleIsInstallment(draftSale) || isInstallmentDraft;
+  const installmentApproval = draftSale?.installmentApproval;
+  const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
+  const installmentPending = installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
+  const installmentApproved = installmentApproval?.status === 'APPROVED';
+  const installmentRejected = installmentApproval?.status === 'REJECTED';
+  const canFinalize =
+    Boolean(draftSale) &&
+    draftSale?.status !== 'FINALIZED' &&
+    draftSale?.status !== 'CANCELLED' &&
+    (!isInstallmentSale || installmentApproved);
 
   function handleCustomerSelect(customer: SaleCustomerOption) {
     setSelectedCustomer(customer);
@@ -367,23 +392,43 @@ export default function NewSalePage() {
     }
   }
 
-  async function finalizeSale() {
-    if (!draftSale) {
-      setError(t('sales.finalizeBeforeApproval'));
+  async function submitInstallmentRequest() {
+    if (!isInstallmentDraft) {
+      setError(t('sales.installmentTermsRequired'));
       return;
     }
 
-    if (
-      !branchSalesManagerView &&
-      draftSale.status !== 'APPROVED_BY_CUSTOMER' &&
-      draftSale.status !== 'SENT_TO_CUSTOMER'
-    ) {
-      setError(t('sales.finalizeBeforeApproval'));
+    const sale = await saveDraft();
+    if (!sale) return;
+
+    setSubmittingInstallment(true);
+    setError('');
+
+    try {
+      await apiFetch(`/sales/${sale.id}/installment-request/submit`, { method: 'POST' });
+      const updated = await apiFetch<Sale>(`/sales/${sale.id}`);
+      setDraftSale(updated);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmittingInstallment(false);
+    }
+  }
+
+  async function finalizeSale() {
+    if (!draftSale) {
+      setError(t('sales.saveDraftFirst'));
       return;
     }
 
     if (draftSale.status === 'FINALIZED' || draftSale.status === 'CANCELLED') {
-      setError(t('sales.finalizeBeforeApproval'));
+      setError(t('sales.saleAlreadyCompleted'));
+      return;
+    }
+
+    if (installmentBlocksCompletion(draftSale) || (isInstallmentDraft && !installmentApproved)) {
+      setError(t('sales.installmentRequiresCeoApproval'));
       return;
     }
 
@@ -699,6 +744,22 @@ export default function NewSalePage() {
                 className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
               />
             </label>
+            {isInstallmentSale && installmentStatusKey ? (
+              <p
+                className={`mt-4 rounded-xl px-4 py-3 text-sm font-semibold ${
+                  installmentApproved
+                    ? 'bg-green-50 text-green-800'
+                    : installmentRejected
+                      ? 'bg-red-50 text-red-700'
+                      : 'bg-amber-50 text-amber-800'
+                }`}
+              >
+                {t(installmentStatusKey)}
+                {installmentRejected && installmentApproval?.rejectionReason
+                  ? `: ${installmentApproval.rejectionReason}`
+                  : ''}
+              </p>
+            ) : null}
           </section>
         </div>
 
@@ -744,10 +805,23 @@ export default function NewSalePage() {
                   {t('sales.markApproved')}
                 </button>
               ) : null}
+              {canSubmitInstallment && isInstallmentSale ? (
+                <button
+                  onClick={() => void submitInstallmentRequest()}
+                  disabled={submittingInstallment || installmentPending || installmentApproved}
+                  type="button"
+                  className="rounded-xl border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {submittingInstallment
+                    ? t('common.loading')
+                    : t('sales.submitInstallmentRequest')}
+                </button>
+              ) : null}
               <button
                 onClick={() => void finalizeSale()}
+                disabled={!canFinalize}
                 type="button"
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
                 {t('sales.finalizeSale')}
               </button>

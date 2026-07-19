@@ -18,6 +18,8 @@ import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
 import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
+import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
+import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 import { SalesService } from './sales.service';
 
 @Controller('sales')
@@ -33,7 +35,10 @@ import { SalesService } from './sales.service';
   Role.FINANCE_MANAGER,
 )
 export class SalesController {
-  constructor(private readonly salesService: SalesService) {}
+  constructor(
+    private readonly salesService: SalesService,
+    private readonly saleInstallmentApprovalService: SaleInstallmentApprovalService,
+  ) {}
 
   @Post()
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
@@ -55,6 +60,34 @@ export class SalesController {
   @Get('installments')
   listInstallments(@CurrentUser() user: AuthUser) {
     return this.salesService.listInstallments(user);
+  }
+
+  @Get('installment-requests')
+  @Roles(Role.FRANCHISE_OWNER)
+  listInstallmentRequests(@CurrentUser() user: AuthUser) {
+    return this.saleInstallmentApprovalService.listInstallmentRequests(user);
+  }
+
+  @Post(':id/installment-request/submit')
+  @Roles(Role.MANAGER)
+  submitInstallmentRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.saleInstallmentApprovalService.submitInstallmentRequest(user, id);
+  }
+
+  @Post(':id/installment-request/approve')
+  @Roles(Role.FRANCHISE_OWNER)
+  approveInstallmentRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.saleInstallmentApprovalService.approveInstallmentRequest(user, id);
+  }
+
+  @Post(':id/installment-request/reject')
+  @Roles(Role.FRANCHISE_OWNER)
+  rejectInstallmentRequest(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: RejectSaleInstallmentDto,
+  ) {
+    return this.saleInstallmentApprovalService.rejectInstallmentRequest(user, id, dto);
   }
 
   @Get('customer-options')

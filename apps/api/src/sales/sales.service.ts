@@ -30,6 +30,7 @@ import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
 import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
+import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -42,6 +43,7 @@ export class SalesService {
     private readonly pricingService: PricingService,
     private readonly pricingCatalogService: PricingCatalogService,
     private readonly pricingResolution: PricingResolutionService,
+    private readonly saleInstallmentApprovalService: SaleInstallmentApprovalService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -414,6 +416,21 @@ export class SalesService {
       });
 
       await this.refreshInstallments(tx, sale.id, paidAmount);
+      const saleForInvalidation = await tx.sale.findUniqueOrThrow({
+        where: { id: sale.id },
+        include: {
+          items: { select: { productId: true, quantity: true, unitPrice: true } },
+          installments: { orderBy: { dueDate: 'asc' } },
+          installmentApproval: true,
+          customer: { select: { fullName: true } },
+          seller: { select: { fullName: true } },
+        },
+      });
+      await this.saleInstallmentApprovalService.invalidateApprovalIfTermsChanged(
+        tx,
+        user,
+        saleForInvalidation as any,
+      );
       return this.toSaleResponse(updated);
     });
   }
@@ -599,27 +616,55 @@ export class SalesService {
   async finalize(user: AuthUser, id: string) {
     assertBranchCashierCannotManageSales(user);
     await this.prisma.$transaction(async (tx) => {
-      let sale = await this.getAccessibleSaleInTx(tx, user, id);
+      const sale = await tx.sale.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+        },
+        include: {
+          items: true,
+          installments: { orderBy: { dueDate: 'asc' } },
+          installmentApproval: true,
+          customer: true,
+          seller: true,
+        },
+      });
 
-      if (isBranchSalesManagerUser(user) && sale.status === SaleStatus.DRAFT) {
-        sale = await tx.sale.update({
-          where: { id: sale.id },
-          data: {
-            status: SaleStatus.APPROVED_BY_CUSTOMER,
-            approvedAt: new Date(),
-          },
-          include: this.saleInclude(),
-        });
+      if (!sale) {
+        throw new NotFoundException('Sale not found');
       }
 
-      if (
-        sale.status !== SaleStatus.APPROVED_BY_CUSTOMER &&
-        sale.status !== SaleStatus.SENT_TO_CUSTOMER
-      ) {
-        throw new BadRequestException('Cannot finalize sale before approval');
+      if (sale.status === SaleStatus.FINALIZED || sale.status === SaleStatus.CANCELLED) {
+        throw new BadRequestException('Sale is already completed or cancelled');
       }
 
       await this.refreshSalePaymentState(tx, sale.id);
+      const refreshedSale = await tx.sale.findUniqueOrThrow({
+        where: { id: sale.id },
+        include: {
+          items: true,
+          installments: { orderBy: { dueDate: 'asc' } },
+          installmentApproval: true,
+          customer: true,
+          seller: true,
+        },
+      });
+
+      const requiresInstallmentApproval =
+        this.saleInstallmentApprovalService.saleRequiresInstallmentApproval(refreshedSale);
+      const isFullPayment =
+        this.saleInstallmentApprovalService.saleIsFullPayment(refreshedSale);
+
+      if (requiresInstallmentApproval) {
+        await this.saleInstallmentApprovalService.assertCanFinalizeInstallmentSale(
+          tx,
+          refreshedSale as any,
+        );
+      } else if (!isFullPayment) {
+        throw new BadRequestException('Укажите условия рассрочки или полную оплату');
+      }
+
       const refreshed = await tx.sale.findUniqueOrThrow({
         where: { id: sale.id },
         include: { payments: true, customer: true, seller: true, items: true },
@@ -963,6 +1008,13 @@ export class SalesService {
       installments: {
         orderBy: { dueDate: 'asc' as const },
       },
+      installmentApproval: {
+        include: {
+          submittedBy: { select: { id: true, fullName: true, role: true } },
+          approvedBy: { select: { id: true, fullName: true, role: true } },
+          rejectedBy: { select: { id: true, fullName: true, role: true } },
+        },
+      },
       receipt: true,
     };
   }
@@ -1278,6 +1330,9 @@ export class SalesService {
         amount: Number(installment.amount),
         paidAmount: Number(installment.paidAmount),
       })),
+      installmentApproval: sale.installmentApproval
+        ? this.saleInstallmentApprovalService.serializeApproval(sale.installmentApproval)
+        : null,
     };
   }
 

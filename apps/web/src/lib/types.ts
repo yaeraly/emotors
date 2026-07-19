@@ -1024,6 +1024,36 @@ export type Payment = {
   createdBy?: Pick<User, 'id' | 'fullName' | 'role'>;
 };
 
+export type SaleInstallmentApprovalStatus =
+  | 'DRAFT'
+  | 'PENDING_BRANCH_CEO_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CANCELLED';
+
+export type SaleInstallmentApproval = {
+  id: string;
+  saleId: string;
+  branchId: string;
+  requestNumber: string;
+  status: SaleInstallmentApprovalStatus;
+  requestVersion: number;
+  totalAmount: number;
+  initialPayment: number;
+  financedAmount: number;
+  installmentDays?: number | null;
+  dueDate?: string | null;
+  paymentCount: number;
+  notes?: string | null;
+  submittedAt?: string | null;
+  approvedAt?: string | null;
+  rejectedAt?: string | null;
+  rejectionReason?: string | null;
+  submittedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;
+  approvedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;
+  rejectedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;
+};
+
 export type InstallmentSchedule = {
   id: string;
   branchId: string;
@@ -1074,6 +1104,7 @@ export type Sale = {
   items?: SaleItem[];
   payments?: Payment[];
   installments?: InstallmentSchedule[];
+  installmentApproval?: SaleInstallmentApproval | null;
   receipt?: Receipt | null;
   createdAt: string;
   updatedAt: string;

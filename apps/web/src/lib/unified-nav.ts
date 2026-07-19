@@ -96,6 +96,7 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     sidebarVisible: salesVisible,
     pages: [
       { href: '/sales', labelKey: 'nav.sales', isVisible: salesVisible },
+      { href: '/sales/installment-requests', labelKey: 'nav.installmentRequests', isVisible: isBranchOwnerUser },
       { href: '/installments', labelKey: 'nav.installments', isVisible: salesVisible },
       { href: '/reservations', labelKey: 'operations.reservations', isVisible: salesVisible },
       { href: '/returns', labelKey: 'operations.returns', isVisible: (user) => salesVisible(user) || hasPermission(user, 'payments.manage') },

@@ -247,6 +247,14 @@ enum InstallmentStatus {
   OVERDUE
 }
 
+enum SaleInstallmentApprovalStatus {
+  DRAFT
+  PENDING_BRANCH_CEO_APPROVAL
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
 enum StockMovementType {
   IN
   OUT
@@ -597,6 +605,9 @@ enum AlertType {
   BRANCH_REQUEST_OUT_OF_STOCK
   SUPPLY_INQUIRY_CREATED
   SUPPLY_INQUIRY_RESPONDED
+  SALE_INSTALLMENT_REQUESTED
+  SALE_INSTALLMENT_APPROVED
+  SALE_INSTALLMENT_REJECTED
 }
 
 enum NotificationModule {
@@ -916,6 +927,7 @@ model Branch {
   sales                     Sale[]
   payments                  Payment[]
   installments              InstallmentSchedule[]
+  saleInstallmentApprovals  SaleInstallmentApproval[]
   receipts                  Receipt[]
   warehouses                Warehouse[]
   products                  Product[]
@@ -1287,6 +1299,9 @@ model User {
   partsConsumptions                               PartsConsumption[]                  @relation("PartsConsumptionCreator")
   compensationRules                               EmployeeCompensationRule[]          @relation("EmployeeCompensationRuleEmployee")
   salesCommissions                                SalesCommission[]                   @relation("SalesCommissionEmployee")
+  saleInstallmentRequestsSubmitted                SaleInstallmentApproval[]           @relation("SaleInstallmentSubmittedBy")
+  saleInstallmentRequestsApproved                 SaleInstallmentApproval[]           @relation("SaleInstallmentApprovedBy")
+  saleInstallmentRequestsRejected                 SaleInstallmentApproval[]           @relation("SaleInstallmentRejectedBy")
   repairCommissions                               RepairCommission[]                  @relation("RepairCommissionEmployee")
   payrollRecords                                  PayrollRecord[]                     @relation("PayrollRecordEmployee")
   employeeKpis                                    EmployeeKPI[]                       @relation("EmployeeKPIEmployee")
@@ -1513,6 +1528,7 @@ model Sale {
   items                  SaleItem[]
   payments               Payment[]
   installments           InstallmentSchedule[]
+  installmentApproval    SaleInstallmentApproval?
   receipt                Receipt?
   salesCommissions       SalesCommission[]
   createdAt              DateTime              @default(now())
@@ -1608,6 +1624,41 @@ model InstallmentSchedule {
   @@index([customerId])
   @@index([status])
   @@index([dueDate])
+}
+
+model SaleInstallmentApproval {
+  id              String                        @id @default(cuid())
+  saleId          String                        @unique
+  sale            Sale                          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  branchId        String
+  branch          Branch                        @relation(fields: [branchId], references: [id])
+  requestNumber   String                        @unique
+  status          SaleInstallmentApprovalStatus @default(DRAFT)
+  requestVersion  Int                           @default(1)
+  termsSnapshot   Json
+  totalAmount     Decimal                       @db.Decimal(14, 2)
+  initialPayment  Decimal                       @default(0) @db.Decimal(14, 2)
+  financedAmount  Decimal                       @db.Decimal(14, 2)
+  installmentDays Int?
+  dueDate         DateTime?
+  paymentCount    Int                           @default(1)
+  notes           String?
+  submittedById   String?
+  submittedBy     User?                         @relation("SaleInstallmentSubmittedBy", fields: [submittedById], references: [id])
+  submittedAt     DateTime?
+  approvedById    String?
+  approvedBy      User?                         @relation("SaleInstallmentApprovedBy", fields: [approvedById], references: [id])
+  approvedAt      DateTime?
+  rejectedById    String?
+  rejectedBy      User?                         @relation("SaleInstallmentRejectedBy", fields: [rejectedById], references: [id])
+  rejectedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
+
+  @@index([branchId])
+  @@index([status])
+  @@index([submittedAt])
 }
 
 model Receipt {

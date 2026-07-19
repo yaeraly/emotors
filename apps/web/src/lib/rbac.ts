@@ -1053,6 +1053,18 @@ export function canApproveSale(user: Pick<User, 'role' | 'roles' | 'permissions'
   return canCreateSale(user) && !isBranchSalesManagerUser(user);
 }
 
+export function canSubmitSaleInstallmentRequest(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+) {
+  return isBranchSalesManagerUser(user) && hasPermission(user, 'sales.manage');
+}
+
+export function canApproveSaleInstallmentRequest(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+) {
+  return isBranchOwnerUser(user);
+}
+
 export function isBranchCashierForbiddenPath(pathname: string) {
   return BRANCH_CASHIER_FORBIDDEN_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

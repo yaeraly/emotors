@@ -5,7 +5,20 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canApproveSale, canCancelSale, canManageSaleWorkflow, canVoidPayment, isBranchSalesManagerUser } from '@/lib/rbac';
+import {
+  canApproveSale,
+  canApproveSaleInstallmentRequest,
+  canCancelSale,
+  canManageSaleWorkflow,
+  canSubmitSaleInstallmentRequest,
+  canVoidPayment,
+  isBranchSalesManagerUser,
+} from '@/lib/rbac';
+import {
+  installmentBlocksCompletion,
+  installmentStatusLabelKey,
+  saleIsInstallment,
+} from '@/lib/sale-installment';
 import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -30,6 +43,9 @@ export default function SaleDetailPage() {
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(true);
   const [savingPayment, setSavingPayment] = useState(false);
+  const [submittingInstallment, setSubmittingInstallment] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [showRejectForm, setShowRejectForm] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -119,7 +135,72 @@ export default function SaleDetailPage() {
     }
   }
 
+  async function submitInstallmentRequest() {
+    setSubmittingInstallment(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/sales/${saleId}/installment-request/submit`, { method: 'POST' });
+      await loadSale();
+      setSuccess(t('sales.installmentRequestSubmitted'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmittingInstallment(false);
+    }
+  }
+
+  async function approveInstallmentRequest() {
+    setSubmittingInstallment(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/sales/${saleId}/installment-request/approve`, { method: 'POST' });
+      await loadSale();
+      setSuccess(t('sales.installmentRequestApproved'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmittingInstallment(false);
+    }
+  }
+
+  async function rejectInstallmentRequest() {
+    if (!rejectionReason.trim()) {
+      setError(t('sales.installmentRejectionReasonRequired'));
+      return;
+    }
+    setSubmittingInstallment(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/sales/${saleId}/installment-request/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ rejectionReason: rejectionReason.trim() }),
+      });
+      setShowRejectForm(false);
+      setRejectionReason('');
+      await loadSale();
+      setSuccess(t('sales.installmentRequestRejected'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmittingInstallment(false);
+    }
+  }
+
   const branchSalesView = isBranchSalesManagerUser(currentUser);
+  const isInstallment = saleIsInstallment(sale);
+  const installmentApproval = sale?.installmentApproval;
+  const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
+  const installmentPending = installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
+  const installmentApproved = installmentApproval?.status === 'APPROVED';
+  const installmentRejected = installmentApproval?.status === 'REJECTED';
+  const canFinalize =
+    Boolean(sale) &&
+    sale?.status !== 'FINALIZED' &&
+    sale?.status !== 'CANCELLED' &&
+    !installmentBlocksCompletion(sale);
 
   return (
     <ProtectedShell>
@@ -191,7 +272,7 @@ export default function SaleDetailPage() {
                     className="rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-50"
                     type="button"
                   >
-                    Send WhatsApp
+                    {t('sales.sendWhatsApp')}
                   </button>
                   {canApproveSale(currentUser) ? (
                     <button
@@ -200,16 +281,56 @@ export default function SaleDetailPage() {
                       className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
                       type="button"
                     >
-                      Approve
+                      {t('sales.markApproved')}
                     </button>
+                  ) : null}
+                  {canSubmitSaleInstallmentRequest(currentUser) && isInstallment ? (
+                    <button
+                      onClick={() => void submitInstallmentRequest()}
+                      disabled={
+                        submittingInstallment ||
+                        installmentPending ||
+                        installmentApproved ||
+                        sale.status === 'FINALIZED' ||
+                        sale.status === 'CANCELLED'
+                      }
+                      type="button"
+                      className="rounded-xl border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                    >
+                      {submittingInstallment
+                        ? t('common.loading')
+                        : t('sales.submitInstallmentRequest')}
+                    </button>
+                  ) : null}
+                  {canApproveSaleInstallmentRequest(currentUser) &&
+                  isInstallment &&
+                  installmentPending ? (
+                    <>
+                      <button
+                        onClick={() => void approveInstallmentRequest()}
+                        disabled={submittingInstallment}
+                        type="button"
+                        className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {t('sales.approveInstallment')}
+                      </button>
+                      <button
+                        onClick={() => setShowRejectForm((value) => !value)}
+                        disabled={submittingInstallment}
+                        type="button"
+                        className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {t('sales.rejectInstallment')}
+                      </button>
+                    </>
                   ) : null}
                   <button
                     onClick={() => void runSaleAction('finalize')}
-                    disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
+                    disabled={!canFinalize}
                     className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                     type="button"
                   >
-                    Finalize
+                    {t('sales.finalizeSale')}
                   </button>
                   {canCancelSale(currentUser) ? (
                     <button
@@ -367,6 +488,64 @@ export default function SaleDetailPage() {
               </Panel>
 
               <Panel title={t('sales.installment')}>
+                {isInstallment && installmentStatusKey ? (
+                  <p
+                    className={`mb-4 rounded-xl px-4 py-3 text-sm font-semibold ${
+                      installmentApproved
+                        ? 'bg-green-50 text-green-800'
+                        : installmentRejected
+                          ? 'bg-red-50 text-red-700'
+                          : 'bg-amber-50 text-amber-800'
+                    }`}
+                  >
+                    {t(installmentStatusKey)}
+                    {installmentRejected && installmentApproval?.rejectionReason
+                      ? `: ${installmentApproval.rejectionReason}`
+                      : ''}
+                  </p>
+                ) : null}
+                {showRejectForm ? (
+                  <div className="mb-4 space-y-2 rounded-xl border border-red-200 bg-red-50 p-4">
+                    <label className="block text-sm font-semibold text-red-800">
+                      {t('sales.installmentRejectionReason')}
+                      <textarea
+                        value={rejectionReason}
+                        onChange={(event) => setRejectionReason(event.target.value)}
+                        className="mt-2 w-full rounded-xl border border-red-200 px-3 py-2 text-sm text-slate-900"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={submittingInstallment}
+                      onClick={() => void rejectInstallmentRequest()}
+                      className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {t('sales.confirmRejectInstallment')}
+                    </button>
+                  </div>
+                ) : null}
+                {installmentApproval ? (
+                  <div className="mb-4 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+                    <p>
+                      <span className="font-semibold">{t('sales.installmentRequestNumber')}:</span>{' '}
+                      {installmentApproval.requestNumber}
+                    </p>
+                    <p>
+                      <span className="font-semibold">{t('sales.installmentInitialPayment')}:</span>{' '}
+                      {formatKgs(installmentApproval.initialPayment)}
+                    </p>
+                    <p>
+                      <span className="font-semibold">{t('sales.installmentFinancedAmount')}:</span>{' '}
+                      {formatKgs(installmentApproval.financedAmount)}
+                    </p>
+                    {installmentApproval.submittedAt ? (
+                      <p>
+                        <span className="font-semibold">{t('sales.sentForApprovalAt')}:</span>{' '}
+                        {new Date(installmentApproval.submittedAt).toLocaleString()}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 {sale.installments?.length ? (
                   <div className="space-y-3">
                     {sale.installments.map((installment) => (
