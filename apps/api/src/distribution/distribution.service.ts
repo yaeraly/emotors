@@ -20,7 +20,9 @@ import {
   ShortageReportItemType,
   ShortageReportStatus,
   ShortageResolutionType,
+  StockMovementStatus,
   StockMovementType,
+  WarehouseType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
@@ -74,6 +76,11 @@ import {
   differenceAuditAction,
   resolveDifferenceType,
 } from '../operations/discrepancy-act.util';
+import {
+  normalizeReceivingLine,
+  resolveReceivingDifferenceQuantity,
+  resolveShipmentItemId,
+} from './branch-receiving.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -866,221 +873,281 @@ export class DistributionService {
     if (!canReceiveBranchDistribution(user)) {
       throw new ForbiddenException('Only Branch Warehouse Operator can receive goods at branch');
     }
-    return this.prisma.$transaction(async (tx) => {
-      const order = await tx.branchDistributionOrder.findFirst({
-        where: {
-          id,
-          deletedAt: null,
-          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
-        },
-        include: { items: true },
-      });
-      if (!order) {
-        if (user.branchId) {
-          throw new ForbiddenException('You do not have access to this shipment');
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const order = await tx.branchDistributionOrder.findFirst({
+          where: {
+            id,
+            deletedAt: null,
+            ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
+          },
+          include: { items: true },
+        });
+        if (!order) {
+          if (user.branchId) {
+            throw new ForbiddenException('You do not have access to this shipment');
+          }
+          throw new NotFoundException('Shipment not found');
         }
-        throw new NotFoundException('Distribution order not found');
-      }
-      if (
-        order.status === BranchDistributionOrderStatus.RECEIVED_BY_BRANCH ||
-        order.status === BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE ||
-        order.status === BranchDistributionOrderStatus.RECEIVED ||
-        order.status === BranchDistributionOrderStatus.COMPLETED
-      ) {
-        throw new BadRequestException('Shipment has already been received');
-      }
-      if (order.status !== BranchDistributionOrderStatus.SENT && order.status !== BranchDistributionOrderStatus.SHIPPED) {
-        throw new BadRequestException('Order must be SHIPPED before receiving');
-      }
-
-      const existingReceiving = await tx.goodsReceiving.findFirst({
-        where: { distributionOrderId: order.id, deletedAt: null },
-        select: { id: true },
-      });
-      if (existingReceiving) {
-        throw new BadRequestException('Shipment has already been received');
-      }
-
-      const warehouse = await tx.warehouse.findFirst({
-        where: { id: dto.warehouseId, branchId: order.branchId, deletedAt: null },
-      });
-      if (!warehouse) {
-        throw new BadRequestException('Branch warehouse not configured');
-      }
-
-      await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_STARTED', order, {
-        branchId: order.branchId,
-        warehouseId: warehouse.id,
-      });
-
-      const receivedMap = new Map(
-        dto.items.map((item) => [item.distributionOrderItemId, item]),
-      );
-      if (receivedMap.size !== order.items.length) {
-        throw new BadRequestException('All order items must be included');
-      }
-      for (const item of order.items) {
-        if (!receivedMap.has(item.id)) {
-          throw new BadRequestException('Shipment item not found');
+        if (
+          order.status === BranchDistributionOrderStatus.RECEIVED_BY_BRANCH ||
+          order.status === BranchDistributionOrderStatus.RECEIVED_WITH_DIFFERENCE ||
+          order.status === BranchDistributionOrderStatus.RECEIVED ||
+          order.status === BranchDistributionOrderStatus.COMPLETED
+        ) {
+          throw new BadRequestException('Shipment has already been received');
         }
-        if (!item.productId) {
-          throw new BadRequestException('Product reference is missing from shipment item');
+        if (
+          order.status !== BranchDistributionOrderStatus.SENT &&
+          order.status !== BranchDistributionOrderStatus.SHIPPED
+        ) {
+          throw new BadRequestException('Order must be SHIPPED before receiving');
         }
-      }
 
-      const transportCostKgs = 0;
-      const hasPreallocatedDelivery = false;
-      const transportLines = [];
-      const resolvedProducts = new Map<string, { productId: string; created: boolean }>();
+        const existingReceiving = await tx.goodsReceiving.findFirst({
+          where: { distributionOrderId: order.id, deletedAt: null },
+          select: { id: true },
+        });
+        if (existingReceiving) {
+          throw new BadRequestException('Shipment has already been received');
+        }
 
-      for (const orderItem of order.items) {
-        const received = receivedMap.get(orderItem.id)!;
-        const receivedQuantity = Number(received.receivedQuantity);
-        if (receivedQuantity <= 0) continue;
+        const warehouse = await tx.warehouse.findFirst({
+          where: {
+            id: dto.warehouseId,
+            branchId: order.branchId,
+            deletedAt: null,
+            isActive: true,
+            warehouseType: WarehouseType.BRANCH,
+          },
+        });
+        if (!warehouse) {
+          throw new BadRequestException('Branch warehouse is not configured');
+        }
 
-        const resolved = await this.inventoryService.ensureBranchWarehouseProductInTx(tx, {
+        await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_STARTED', order, {
           branchId: order.branchId,
           warehouseId: warehouse.id,
-          catalogProductId: orderItem.productId,
-          sku: orderItem.sku,
-          productName: orderItem.productName,
-          unitCostKgs: Number(orderItem.unitCost),
+          sourceWarehouseId: order.sourceWarehouseId,
         });
-        resolvedProducts.set(orderItem.id, resolved);
 
-        await this.auditTransfer(tx, user, 'BRANCH_PRODUCT_REFERENCE_VALIDATED', order, {
-          shipmentItemId: orderItem.id,
-          catalogProductId: orderItem.productId,
-          branchProductId: resolved.productId,
-          branchId: order.branchId,
-        });
-        if (resolved.created) {
-          await this.auditTransfer(tx, user, 'BRANCH_STOCK_RECORD_CREATED', order, {
-            shipmentItemId: orderItem.id,
-            productId: resolved.productId,
+        const receivedMap = new Map<string, ReturnType<typeof normalizeReceivingLine>>();
+        for (const item of dto.items) {
+          const shipmentItemId = resolveShipmentItemId(item);
+          if (!shipmentItemId) {
+            throw new BadRequestException('Shipment item not found');
+          }
+          const orderItem = order.items.find((line) => line.id === shipmentItemId);
+          if (!orderItem) {
+            throw new BadRequestException('Shipment item not found');
+          }
+          if (!orderItem.productId) {
+            throw new BadRequestException('Product reference is missing from shipment item');
+          }
+          const dispatchedQuantity = Number(orderItem.dispatchedQuantity ?? orderItem.quantity);
+          receivedMap.set(orderItem.id, normalizeReceivingLine(item, dispatchedQuantity));
+        }
+
+        if (receivedMap.size !== order.items.length) {
+          throw new BadRequestException('All order items must be included');
+        }
+        for (const item of order.items) {
+          if (!receivedMap.has(item.id)) {
+            throw new BadRequestException('Shipment item not found');
+          }
+          if (!item.productId) {
+            throw new BadRequestException('Product reference is missing from shipment item');
+          }
+        }
+
+        const transportCostKgs = 0;
+        const hasPreallocatedDelivery = false;
+        const transportLines = [];
+        const resolvedProducts = new Map<string, { productId: string; created: boolean }>();
+
+        for (const orderItem of order.items) {
+          const received = receivedMap.get(orderItem.id)!;
+          const acceptedQuantity = received.acceptedQuantity;
+          if (acceptedQuantity <= 0) continue;
+
+          const resolved = await this.inventoryService.ensureBranchWarehouseProductInTx(tx, {
             branchId: order.branchId,
             warehouseId: warehouse.id,
+            catalogProductId: orderItem.productId,
+            sku: orderItem.sku,
+            productName: orderItem.productName,
+            unitCostKgs: Number(orderItem.unitCost),
+          });
+          resolvedProducts.set(orderItem.id, resolved);
+
+          await this.auditTransfer(tx, user, 'BRANCH_PRODUCT_REFERENCE_VALIDATED', order, {
+            shipmentItemId: orderItem.id,
+            catalogProductId: orderItem.productId,
+            branchProductId: resolved.productId,
+            branchId: order.branchId,
+          });
+          if (resolved.created) {
+            await this.auditTransfer(tx, user, 'BRANCH_STOCK_RECORD_CREATED', order, {
+              shipmentItemId: orderItem.id,
+              productId: resolved.productId,
+              branchId: order.branchId,
+              warehouseId: warehouse.id,
+            });
+          }
+
+          const product = await tx.product.findFirst({
+            where: { id: resolved.productId, deletedAt: null },
+            select: { weightKg: true },
+          });
+          transportLines.push({
+            productId: orderItem.productId,
+            receivedQuantity: acceptedQuantity,
+            weightKg: Number(product?.weightKg ?? orderItem.unitWeightKgSnapshot ?? 0),
+            unitCostKgs: Number(orderItem.unitCost),
           });
         }
+        const transportAllocations = hasPreallocatedDelivery
+          ? []
+          : allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
+        const transportByProductId = hasPreallocatedDelivery
+          ? new Map(
+              order.items.map((item) => [
+                item.productId,
+                {
+                  productId: item.productId,
+                  transportExpenseAllocation: Number(item.transportExpenseAllocation ?? 0),
+                  transportCostPerUnit: Number(item.transportCostPerUnit ?? 0),
+                  finalUnitCostKgs: Number(item.landedUnitCostKgs ?? item.unitCost),
+                },
+              ]),
+            )
+          : new Map(transportAllocations.map((row) => [row.productId, row]));
 
-        const product = await tx.product.findFirst({
-          where: { id: resolved.productId, deletedAt: null },
-          select: { weightKg: true },
+        const receiving = await tx.goodsReceiving.create({
+          data: {
+            receivingNumber: await this.generateReceivingNumber(tx),
+            distributionOrderId: order.id,
+            branchId: order.branchId,
+            warehouseId: warehouse.id,
+            receivedById: user.id,
+            receivedAt: new Date(),
+            note: dto.note,
+            transportCompany: dto.transportCompany,
+            transportCostKgs: 0,
+            driverName: dto.driverName,
+            vehicleNumber: dto.vehicleNumber,
+            arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date(),
+            transportNotes: dto.transportNotes,
+          },
         });
-        transportLines.push({
-          productId: orderItem.productId,
-          receivedQuantity,
-          weightKg: Number(product?.weightKg ?? orderItem.unitWeightKgSnapshot ?? 0),
-          unitCostKgs: Number(orderItem.unitCost),
-        });
-      }
-      const transportAllocations = hasPreallocatedDelivery
-        ? []
-        : allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
-      const transportByProductId = hasPreallocatedDelivery
-        ? new Map(
-            order.items.map((item) => [
-              item.productId,
-              {
-                productId: item.productId,
-                transportExpenseAllocation: Number(item.transportExpenseAllocation ?? 0),
-                transportCostPerUnit: Number(item.transportCostPerUnit ?? 0),
-                finalUnitCostKgs: Number(item.landedUnitCostKgs ?? item.unitCost),
+
+        const receivingItems = [];
+        const shortageItems = [];
+
+        for (const orderItem of order.items) {
+          const received = receivedMap.get(orderItem.id)!;
+          const acceptedQuantity = received.acceptedQuantity;
+          const damagedQuantity = received.damagedQuantity;
+          const missingQuantity = received.missingQuantity;
+          const sentQuantity = Number(orderItem.dispatchedQuantity ?? orderItem.quantity);
+          const receivedQuantity = acceptedQuantity + damagedQuantity;
+          const difference = resolveReceivingDifferenceQuantity(
+            sentQuantity,
+            acceptedQuantity,
+            damagedQuantity,
+            missingQuantity,
+          );
+          const transportCost = transportByProductId.get(orderItem.productId);
+          const unitCostWithTransport = transportCost?.finalUnitCostKgs ?? Number(orderItem.unitCost);
+          const resolved = resolvedProducts.get(orderItem.id);
+          if (!resolved) continue;
+          const branchProductId = resolved.productId;
+
+          if (acceptedQuantity > 0) {
+            const existingMovement = await tx.stockMovement.findFirst({
+              where: {
+                referenceType: 'GOODS_RECEIVING_ITEM',
+                referenceId: orderItem.id,
+                productId: branchProductId,
+                warehouseId: warehouse.id,
+                type: StockMovementType.IN,
+                status: StockMovementStatus.ACTIVE,
               },
-            ]),
-          )
-        : new Map(transportAllocations.map((row) => [row.productId, row]));
+            });
+            if (existingMovement) {
+              throw new BadRequestException('This shipment item has already been received');
+            }
 
-      const receiving = await tx.goodsReceiving.create({
-        data: {
-          receivingNumber: await this.generateReceivingNumber(tx),
-          distributionOrderId: order.id,
-          branchId: order.branchId,
-          warehouseId: warehouse.id,
-          receivedById: user.id,
-          receivedAt: new Date(),
-          note: dto.note,
-          transportCompany: dto.transportCompany,
-          transportCostKgs: 0,
-          driverName: dto.driverName,
-          vehicleNumber: dto.vehicleNumber,
-          arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date(),
-          transportNotes: dto.transportNotes,
-        },
-      });
+            const movement = await this.inventoryService.createStockMovementInTx(
+              tx,
+              user,
+              {
+                productId: branchProductId,
+                warehouseId: warehouse.id,
+                type: StockMovementType.IN,
+                quantity: acceptedQuantity,
+                unitCostKgs: unitCostWithTransport,
+                referenceType: 'GOODS_RECEIVING_ITEM',
+                referenceId: orderItem.id,
+                note: `Receiving ${receiving.receivingNumber}`,
+              },
+              { branchReceiving: true, branchId: order.branchId },
+            );
+            const fifoBatch = await this.pricingFifoService.ensureBranchFifoBatchFromMovementInTx(tx, movement);
+            await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_RECEIVED', order, {
+              shipmentItemId: orderItem.id,
+              productId: branchProductId,
+              stockMovementId: movement.id,
+              acceptedQuantity,
+              warehouseId: warehouse.id,
+              sourceWarehouseId: order.sourceWarehouseId,
+              destinationWarehouseId: warehouse.id,
+              dispatchedQuantity: sentQuantity,
+            });
+            await this.auditTransfer(tx, user, 'BRANCH_FIFO_LAYER_CREATED', order, {
+              shipmentItemId: orderItem.id,
+              productId: branchProductId,
+              stockMovementId: movement.id,
+              fifoLayerId: fifoBatch.batchId,
+              acceptedQuantity,
+            });
+          }
 
-      const receivingItems = [];
-      const shortageItems = [];
-
-      for (const orderItem of order.items) {
-        const received = receivedMap.get(orderItem.id)!;
-        const receivedQuantity = Number(received.receivedQuantity);
-        const sentQuantity = Number(orderItem.dispatchedQuantity ?? orderItem.quantity);
-        const difference = receivedQuantity - sentQuantity;
-        const inventoryQuantity = difference > 0 ? sentQuantity : receivedQuantity;
-        const transportCost = transportByProductId.get(orderItem.productId);
-        const unitCostWithTransport = transportCost?.finalUnitCostKgs ?? Number(orderItem.unitCost);
-        const resolved = resolvedProducts.get(orderItem.id);
-        if (!resolved) continue;
-        const branchProductId = resolved.productId;
-
-        if (inventoryQuantity > 0) {
-          const movement = await this.inventoryService.createStockMovementInTx(tx, user, {
-            productId: branchProductId,
-            warehouseId: warehouse.id,
-            type: StockMovementType.IN,
-            quantity: inventoryQuantity,
-            unitCostKgs: unitCostWithTransport,
-            referenceType: 'GOODS_RECEIVING',
-            referenceId: receiving.id,
-            note: `Receiving ${receiving.receivingNumber}`,
-          });
-          await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_RECEIVED', order, {
-            shipmentItemId: orderItem.id,
-            productId: branchProductId,
-            stockMovementId: movement.id,
-            acceptedQuantity: inventoryQuantity,
-            warehouseId: warehouse.id,
-          });
-          await this.auditTransfer(tx, user, 'BRANCH_FIFO_LAYER_CREATED', order, {
-            shipmentItemId: orderItem.id,
-            productId: branchProductId,
-            stockMovementId: movement.id,
-            acceptedQuantity: inventoryQuantity,
-          });
-        }
-
-        receivingItems.push({
-          receivingId: receiving.id,
-          distributionOrderItemId: orderItem.id,
-          productId: branchProductId,
-          sku: orderItem.sku,
-          productName: orderItem.productName,
-          sentQuantity,
-          receivedQuantity,
-          differenceQuantity: difference,
-          unitCost: unitCostWithTransport,
-          unitPrice: orderItem.unitPrice,
-          transportExpenseAllocation: transportCost?.transportExpenseAllocation ?? 0,
-          transportCostPerUnit: transportCost?.transportCostPerUnit ?? 0,
-          note: received.note,
-        });
-
-        if (difference !== 0) {
-          const differenceType = resolveDifferenceType(sentQuantity, receivedQuantity, received.note);
-          if (!differenceType) continue;
-          shortageItems.push({
+          receivingItems.push({
+            receivingId: receiving.id,
+            distributionOrderItemId: orderItem.id,
             productId: branchProductId,
             sku: orderItem.sku,
             productName: orderItem.productName,
-            expectedQuantity: sentQuantity,
+            sentQuantity,
             receivedQuantity,
-            differenceQuantity: Math.abs(difference),
-            type: differenceType,
+            differenceQuantity: difference,
+            unitCost: unitCostWithTransport,
+            unitPrice: orderItem.unitPrice,
+            transportExpenseAllocation: transportCost?.transportExpenseAllocation ?? 0,
+            transportCostPerUnit: transportCost?.transportCostPerUnit ?? 0,
             note: received.note,
           });
+
+          if (difference !== 0 || damagedQuantity > 0 || missingQuantity > 0) {
+            const differenceType = resolveDifferenceType(
+              sentQuantity,
+              receivedQuantity,
+              received.discrepancyReason ?? received.note,
+            );
+            if (!differenceType) continue;
+            shortageItems.push({
+              productId: branchProductId,
+              sku: orderItem.sku,
+              productName: orderItem.productName,
+              expectedQuantity: sentQuantity,
+              receivedQuantity,
+              differenceQuantity: Math.abs(difference),
+              type: differenceType,
+              note: received.discrepancyReason ?? received.note,
+            });
+          }
         }
-      }
 
       await tx.goodsReceivingItem.createMany({ data: receivingItems });
 
@@ -1258,7 +1325,25 @@ export class DistributionService {
         shortageReport,
         invoice: existingInvoice ? this.toInvoiceResponse(existingInvoice) : null,
       };
-    });
+      });
+    } catch (error) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_RECEIVING_FAILED',
+          entity: 'BranchDistributionOrder',
+          entityId: id,
+          metadata: {
+            shipmentId: id,
+            branchId: user.branchId,
+            message: error instanceof Error ? error.message : 'Receiving failed',
+            timestamp: new Date().toISOString(),
+          },
+        },
+      }).catch(() => null);
+      throw error;
+    }
   }
 
   async enterReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {

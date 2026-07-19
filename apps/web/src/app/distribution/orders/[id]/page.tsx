@@ -20,10 +20,12 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
 type ReceiveItemForm = {
-  distributionOrderItemId: string;
+  shipmentItemId: string;
   sentQuantity: number;
-  receivedQuantity: string;
-  note: string;
+  acceptedQuantity: string;
+  damagedQuantity: string;
+  missingQuantity: string;
+  discrepancyReason: string;
 };
 
 export default function DistributionOrderDetailPage() {
@@ -54,10 +56,12 @@ export default function DistributionOrderDetailPage() {
       setOrder(result);
       setReceiveItems(
         result.items?.map((item) => ({
-          distributionOrderItemId: item.id,
-          sentQuantity: item.quantity,
-          receivedQuantity: String(item.quantity),
-          note: '',
+          shipmentItemId: item.id,
+          sentQuantity: Number(item.dispatchedQuantity ?? item.quantity),
+          acceptedQuantity: String(item.dispatchedQuantity ?? item.quantity),
+          damagedQuantity: '0',
+          missingQuantity: '0',
+          discrepancyReason: '',
         })) ?? [],
       );
     } catch (err) {
@@ -134,9 +138,11 @@ export default function DistributionOrderDetailPage() {
           warehouseId: order.destinationWarehouseId,
           note: '',
           items: receiveItems.map((item) => ({
-            distributionOrderItemId: item.distributionOrderItemId,
-            receivedQuantity: Number(item.receivedQuantity || 0),
-            note: item.note || undefined,
+            shipmentItemId: item.shipmentItemId,
+            acceptedQuantity: Number(item.acceptedQuantity || 0),
+            damagedQuantity: Number(item.damagedQuantity || 0),
+            missingQuantity: Number(item.missingQuantity || 0),
+            discrepancyReason: item.discrepancyReason || undefined,
           })),
         }),
       });
@@ -165,8 +171,9 @@ export default function DistributionOrderDetailPage() {
 
   const invoiceSent = Boolean(order?.branchInvoice?.sentToBranchAt);
   const canReceive =
-    order?.status === 'SHIPPED' ||
-    order?.status === 'SENT';
+    (order?.status === 'SHIPPED' || order?.status === 'SENT') &&
+    !receiving &&
+    !['RECEIVED', 'RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE', 'COMPLETED'].includes(order?.status ?? '');
   const showDeliveryCostSummary =
     showFinancials &&
     Boolean(order?.deliveryCostSummary && Number(order.deliveryCostSummary.transportCostKgs) > 0);
@@ -388,29 +395,33 @@ export default function DistributionOrderDetailPage() {
                     <tbody className="divide-y divide-slate-100">
                       {order.items?.map((item, index) => {
                         const form = receiveItems[index];
-                        const receivedQuantity = Number(form?.receivedQuantity || 0);
+                        const sentQuantity = Number(item.dispatchedQuantity ?? item.quantity);
+                        const acceptedQuantity = Number(form?.acceptedQuantity || 0);
+                        const damagedQuantity = Number(form?.damagedQuantity || 0);
+                        const missingQuantity = Number(form?.missingQuantity || 0);
                         return (
                           <tr key={item.id}>
                             <td className="px-4 py-3">{item.sku}</td>
                             <td className="px-4 py-3">{item.productName}</td>
-                            <td className="px-4 py-3">{item.quantity}</td>
+                            <td className="px-4 py-3">{sentQuantity}</td>
                             <td className="px-4 py-3">
                               <input
-                                value={form?.receivedQuantity ?? ''}
-                                onChange={(event) => updateReceiveItem(index, { receivedQuantity: event.target.value })}
+                                value={form?.acceptedQuantity ?? ''}
+                                onChange={(event) => updateReceiveItem(index, { acceptedQuantity: event.target.value })}
                                 type="number"
                                 min="0"
                                 className="w-28 rounded-xl border border-slate-300 px-3 py-2"
                               />
                             </td>
                             <td className="px-4 py-3 font-semibold">
-                              {receivedQuantity - item.quantity}
+                              {acceptedQuantity + damagedQuantity + missingQuantity - sentQuantity}
                             </td>
                             <td className="px-4 py-3">
                               <input
-                                value={form?.note ?? ''}
-                                onChange={(event) => updateReceiveItem(index, { note: event.target.value })}
+                                value={form?.discrepancyReason ?? ''}
+                                onChange={(event) => updateReceiveItem(index, { discrepancyReason: event.target.value })}
                                 className="min-w-40 rounded-xl border border-slate-300 px-3 py-2"
+                                placeholder={t('crm.notes')}
                               />
                             </td>
                           </tr>

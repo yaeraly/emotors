@@ -445,4 +445,71 @@ export class PricingFifoService {
     });
     return products.map((row) => row.id);
   }
+
+  async ensureBranchFifoBatchFromMovementInTx(
+    tx: PrismaTx,
+    movement: {
+      id: string;
+      productId: string;
+      warehouseId: string;
+      quantity: number;
+      unitCostKgs: Prisma.Decimal | number;
+      createdAt: Date;
+      referenceType?: string | null;
+      referenceId?: string | null;
+    },
+  ) {
+    const existing = await tx.fifoInventoryBatch.findFirst({
+      where: { stockMovementId: movement.id },
+      select: { id: true },
+    });
+    if (existing) {
+      return { batchId: existing.id, created: false };
+    }
+
+    const product = await tx.product.findFirst({
+      where: { id: movement.productId, deletedAt: null },
+      select: {
+        id: true,
+        wholesaleMarkupPercent: true,
+        hqBranchWholesaleMarkupPercent: true,
+        recommendedRetailMarkupPercent: true,
+        minimumSellingMarkupPercent: true,
+      },
+    });
+    const markups: BatchMarkups = {
+      wholesaleMarkupPercent: Number(product?.wholesaleMarkupPercent ?? 0),
+      hqBranchWholesaleMarkupPercent: Number(product?.hqBranchWholesaleMarkupPercent ?? 0),
+      recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
+      minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
+    };
+    const unitCostKgs = Number(movement.unitCostKgs);
+    const batchPrices = this.calculateBatchPrices(unitCostKgs, markups);
+    const quantity = Math.max(movement.quantity, 0);
+
+    const batch = await tx.fifoInventoryBatch.create({
+      data: {
+        productId: movement.productId,
+        warehouseId: movement.warehouseId,
+        stockMovementId: movement.id,
+        receivedAt: movement.createdAt,
+        unitCostKgs,
+        wholesaleMarkupPercent: markups.wholesaleMarkupPercent,
+        wholesalePriceKgs: batchPrices.wholesalePriceKgs,
+        hqBranchWholesaleMarkupPercent: markups.hqBranchWholesaleMarkupPercent,
+        hqBranchWholesalePriceKgs: batchPrices.hqBranchWholesalePriceKgs,
+        recommendedRetailMarkupPercent: markups.recommendedRetailMarkupPercent,
+        recommendedRetailPriceKgs: batchPrices.recommendedRetailPriceKgs,
+        minimumSellingMarkupPercent: markups.minimumSellingMarkupPercent,
+        minimumSellingPriceKgs: batchPrices.minimumSellingPriceKgs,
+        initialQuantity: quantity,
+        remainingQuantity: quantity,
+        referenceType: movement.referenceType,
+        referenceId: movement.referenceId,
+      },
+      select: { id: true },
+    });
+
+    return { batchId: batch.id, created: true };
+  }
 }

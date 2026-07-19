@@ -13,14 +13,43 @@ import {
 } from 'class-validator';
 
 export class ReceiveDistributionOrderItemDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
-  distributionOrderItemId!: string;
+  shipmentItemId?: string;
 
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  distributionOrderItemId?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
-  receivedQuantity!: number;
+  acceptedQuantity?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  receivedQuantity?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  damagedQuantity?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  missingQuantity?: number;
+
+  @IsOptional()
+  @IsString()
+  discrepancyReason?: string;
 
   @IsOptional()
   @IsString()

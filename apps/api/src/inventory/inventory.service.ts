@@ -1510,7 +1510,7 @@ export class InventoryService {
       select: { id: true, branchId: true, warehouseType: true },
     });
     if (!warehouse || warehouse.warehouseType !== WarehouseType.BRANCH) {
-      throw new BadRequestException('Branch warehouse not configured');
+      throw new BadRequestException('Branch warehouse is not configured');
     }
 
     const catalogProduct = await tx.product.findFirst({
@@ -1790,9 +1790,44 @@ export class InventoryService {
     tx: PrismaTx,
     user: AuthUser,
     dto: CreateStockMovementDto,
+    options?: {
+      branchReceiving?: boolean;
+      branchId?: string;
+    },
   ) {
-    const product = await this.getProductForWrite(tx, user, dto.productId);
-    const warehouse = await this.getWarehouseForWrite(tx, user, dto.warehouseId);
+    const product =
+      options?.branchReceiving && options.branchId
+        ? await tx.product.findFirst({
+            where: {
+              id: dto.productId,
+              branchId: options.branchId,
+              deletedAt: null,
+            },
+          })
+        : await this.getProductForWrite(tx, user, dto.productId);
+
+    if (!product) {
+      throw new NotFoundException(
+        `Referenced product was not found. Product ID: ${dto.productId}`,
+      );
+    }
+
+    const warehouse =
+      options?.branchReceiving && options.branchId
+        ? await tx.warehouse.findFirst({
+            where: {
+              id: dto.warehouseId,
+              branchId: options.branchId,
+              deletedAt: null,
+              warehouseType: WarehouseType.BRANCH,
+              isActive: true,
+            },
+          })
+        : await this.getWarehouseForWrite(tx, user, dto.warehouseId);
+
+    if (!warehouse) {
+      throw new BadRequestException('Branch warehouse is not configured');
+    }
 
     assertProductWarehouseBranchMatch(warehouse, product.branchId);
 
