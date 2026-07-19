@@ -62,8 +62,22 @@ export default function CustomerDetailPage() {
   const [followUpDueAt, setFollowUpDueAt] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editForm, setEditForm] = useState({
+    fullName: '',
+    phone: '',
+    whatsappPhone: '',
+    status: 'ACTIVE',
+    notes: '',
+  });
+  const [currentUser, setCurrentUser] = useState<{ role: string; roles?: string[]; branchId?: string | null } | null>(null);
 
   useEffect(() => {
+    void apiFetch<{ role: string; roles?: string[]; branchId?: string | null }>('/auth/me')
+      .then(setCurrentUser)
+      .catch(() => null);
     void loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
@@ -77,6 +91,13 @@ export default function CustomerDetailPage() {
         `/customers/${customerId}/timeline`,
       );
       setCustomer(result.customer);
+      setEditForm({
+        fullName: result.customer.fullName,
+        phone: result.customer.phone,
+        whatsappPhone: result.customer.whatsappPhone ?? '',
+        status: result.customer.status,
+        notes: result.customer.notes ?? '',
+      });
       setEvents(result.events);
       setWhatsappEvents(result.whatsappEvents);
       setFollowUps(result.followUps);
@@ -145,6 +166,38 @@ export default function CustomerDetailPage() {
     await loadDetail();
   }
 
+  async function saveCustomerEdits(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editForm.fullName.trim() || !editForm.phone.trim()) {
+      setEditError('Full name and phone are required');
+      return;
+    }
+
+    setEditSaving(true);
+    setEditError('');
+
+    try {
+      await apiFetch(`/customers/${customerId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          fullName: editForm.fullName.trim(),
+          phone: editForm.phone.trim(),
+          whatsappPhone: editForm.whatsappPhone.trim() || undefined,
+          status: editForm.status,
+          notes: editForm.notes.trim() || undefined,
+        }),
+      });
+      setIsEditing(false);
+      await loadDetail();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
+  const canEditProfile = Boolean(currentUser);
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -179,10 +232,86 @@ export default function CustomerDetailPage() {
                     </h2>
                     <p className="mt-2 text-slate-500">{customer.notes}</p>
                   </div>
-                  <span className="h-fit rounded-full bg-blue-100 px-4 py-2 text-sm font-bold text-blue-700">
-                    {customer.status}
-                  </span>
+                  <div className="flex flex-col items-start gap-2 sm:items-end">
+                    <span className="h-fit rounded-full bg-blue-100 px-4 py-2 text-sm font-bold text-blue-700">
+                      {customer.status}
+                    </span>
+                    {canEditProfile ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsEditing((value) => !value)}
+                        className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                      >
+                        {isEditing ? t('common.cancel') : t('common.edit')}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
+
+                {isEditing ? (
+                  <form onSubmit={saveCustomerEdits} className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="block">
+                        <span className="text-sm font-semibold text-slate-700">{t('crm.fullName')}</span>
+                        <input
+                          value={editForm.fullName}
+                          onChange={(event) => setEditForm({ ...editForm, fullName: event.target.value })}
+                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                          required
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm font-semibold text-slate-700">{t('crm.phone')}</span>
+                        <input
+                          value={editForm.phone}
+                          onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })}
+                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                          required
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm font-semibold text-slate-700">{t('crm.whatsappPhone')}</span>
+                        <input
+                          value={editForm.whatsappPhone}
+                          onChange={(event) => setEditForm({ ...editForm, whatsappPhone: event.target.value })}
+                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-sm font-semibold text-slate-700">{t('crm.status')}</span>
+                        <select
+                          value={editForm.status}
+                          onChange={(event) => setEditForm({ ...editForm, status: event.target.value })}
+                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                        >
+                          {['ACTIVE', 'VIP', 'RISK', 'INACTIVE', 'NEW', 'SLEEPING'].map((item) => (
+                            <option key={item} value={item}>
+                              {t(`status.${item}`)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
+                      <textarea
+                        value={editForm.notes}
+                        onChange={(event) => setEditForm({ ...editForm, notes: event.target.value })}
+                        className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2"
+                      />
+                    </label>
+                    {editError ? (
+                      <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{editError}</p>
+                    ) : null}
+                    <button
+                      type="submit"
+                      disabled={editSaving}
+                      className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                    >
+                      {editSaving ? t('common.loading') : t('common.save')}
+                    </button>
+                  </form>
+                ) : null}
 
                 <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <Info label={t('crm.fullName')} value={customer.fullName} />

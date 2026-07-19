@@ -309,6 +309,7 @@ export function assertBranchAccountantRestrictedRoute(user: Pick<AuthUser, 'role
 }
 
 export function canViewProductCost(user: Pick<AuthUser, 'role' | 'roles' | 'branchId' | 'permissions'>) {
+  if (isBranchOwnerUser(user)) return false;
   if (isBranchWarehouseOperator(user)) return false;
   if (isBranchCashierUser(user)) return false;
   if (isHqWarehouseLogisticsOnlyUser(user)) return false;
@@ -585,7 +586,7 @@ export function isBranchSalesManagerUser(user: Pick<AuthUser, 'role' | 'roles' |
 
 export function canArchiveCustomer(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
   const roles = resolveUserRoles(user);
-  return hasAnyFullAccessRole(roles) || roles.includes(Role.FRANCHISE_OWNER) || isBranchSalesManagerUser(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FRANCHISE_OWNER);
 }
 
 export function canBranchSalesManagerModifyStock(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {

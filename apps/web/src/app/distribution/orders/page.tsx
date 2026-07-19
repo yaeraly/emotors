@@ -102,7 +102,7 @@ export default function DistributionOrdersPage() {
             <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3">{t('distribution.orderNumber')}</th>
-                <th className="px-4 py-3">{t('distribution.branch')}</th>
+                {!operatorView ? <th className="px-4 py-3">{t('distribution.branch')}</th> : null}
                 <th className="px-4 py-3">{t('distribution.sourceWarehouse')}</th>
                 <th className="px-4 py-3">{t('distribution.destinationWarehouse')}</th>
                 <th className="px-4 py-3">{t('distribution.status')}</th>
@@ -116,7 +116,7 @@ export default function DistributionOrdersPage() {
               {orders.map((order) => (
                 <tr key={order.id}>
                   <td className="px-4 py-3 font-bold">{order.orderNumber}</td>
-                  <td className="px-4 py-3">{order.branch?.name}</td>
+                  {!operatorView ? <td className="px-4 py-3">{order.branch?.name}</td> : null}
                   <td className="px-4 py-3">{order.sourceWarehouse?.name}</td>
                   <td className="px-4 py-3">{order.destinationWarehouse?.name}</td>
                   <td className="px-4 py-3">{translateStatus(t, order.status, 'distribution')}</td>

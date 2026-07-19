@@ -5,6 +5,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
 import { canArchiveCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
+import {
+  getCustomerListColumns,
+  shouldShowCustomerListEditButton,
+  type CustomerListColumnKey,
+} from '@/lib/customer-table-config';
 import type { Branch, Customer, CustomerStatus, User } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -107,12 +112,13 @@ function CustomersPageContent() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [showCreateModal, setShowCreateModal] = useState(false);
 
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchOwnerView = isBranchOwnerUser(currentUser);
-  const listFirstCustomerView = branchSalesManagerView || branchOwnerView;
+  const visibleColumns = getCustomerListColumns(currentUser);
+  const showListEditButton = shouldShowCustomerListEditButton(currentUser);
+  const columnVisible = (key: CustomerListColumnKey) => visibleColumns.includes(key);
 
   useEffect(() => {
     setShowArchived(searchParams.get('archived') === '1');
@@ -224,7 +230,6 @@ function CustomersPageContent() {
         }),
       });
       setForm(initialCreateState);
-      setShowCreateModal(false);
       await loadCustomers();
       showSuccess(t('crm.customerCreated'));
     } catch (err) {
@@ -439,74 +444,6 @@ function CustomersPageContent() {
             </p>
           </div>
 
-          {listFirstCustomerView ? (
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700"
-            >
-              {t('crm.createClientButton')}
-            </button>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={t('crm.searchPlaceholder')}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-              />
-              {!isBranchPanel ? (
-                <select
-                  value={branchId}
-                  onChange={(event) => setBranchId(event.target.value)}
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-                >
-                  <option value="">{t('common.all')} {t('crm.branch')}</option>
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
-              <select
-                value={status}
-                onChange={(event) => setStatus(event.target.value)}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-              >
-                <option value="">{t('common.all')} {t('common.status')}</option>
-                {businessStatuses.map((item) => (
-                  <option key={item} value={item}>
-                    {t(`status.${item}`)}
-                  </option>
-                ))}
-              </select>
-              {!branchOwnerView ? (
-                <label className="flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={showArchived}
-                    onChange={(event) => setArchivedView(event.target.checked)}
-                  />
-                  {t('crm.showArchived')}
-                </label>
-              ) : null}
-              <select
-                value={pageSize}
-                onChange={(event) => setPageSize(Number(event.target.value))}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
-              >
-                {pageSizeOptions.map((size) => (
-                  <option key={size} value={size}>
-                    {size} per page
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {listFirstCustomerView ? (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <input
               value={search}
@@ -514,6 +451,20 @@ function CustomersPageContent() {
               placeholder={t('crm.searchPlaceholder')}
               className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
             />
+            {!isBranchPanel ? (
+              <select
+                value={branchId}
+                onChange={(event) => setBranchId(event.target.value)}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none ring-blue-500 focus:ring-2"
+              >
+                <option value="">{t('common.all')} {t('crm.branch')}</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
             <select
               value={status}
               onChange={(event) => setStatus(event.target.value)}
@@ -548,7 +499,7 @@ function CustomersPageContent() {
               ))}
             </select>
           </div>
-        ) : null}
+        </div>
 
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -562,8 +513,7 @@ function CustomersPageContent() {
           </p>
         ) : null}
 
-        <div className={listFirstCustomerView ? 'space-y-6' : 'grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]'}>
-          {!listFirstCustomerView ? (
+        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[380px_1fr]">
           <form
             onSubmit={createCustomer}
             className="h-fit max-h-[calc(100vh-180px)] shrink-0 self-start overflow-y-auto rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:w-[380px]"
@@ -602,6 +552,7 @@ function CustomersPageContent() {
                 </label>
               ) : null}
 
+              {!isBranchPanel ? (
               <div className="grid grid-cols-1 gap-3">
                 <CustomerInput
                   label="Purchase amount"
@@ -628,6 +579,7 @@ function CustomersPageContent() {
                   }
                 />
               </div>
+              ) : null}
             </div>
 
             <button
@@ -638,9 +590,8 @@ function CustomersPageContent() {
               {saving ? t('common.loading') : t('crm.addCustomer')}
             </button>
           </form>
-          ) : null}
 
-          <div className={listFirstCustomerView ? 'overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm' : 'h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm'}>
+          <div className="h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white p-5">
               <div>
                 <h3 className="text-lg font-bold text-slate-950">
@@ -664,167 +615,217 @@ function CustomersPageContent() {
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="min-w-[1320px] divide-y divide-slate-200 text-sm">
+                  <table className={`min-w-full divide-y divide-slate-200 text-sm ${visibleColumns.length <= 8 ? '' : 'min-w-[1320px]'}`}>
                     <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                       <tr>
-                        <SortableHeader
-                          label={t('crm.fullName')}
-                          sortKey="fullName"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.phone')}
-                          sortKey="phone"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.whatsappPhone')}
-                          sortKey="whatsappPhone"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.branch')}
-                          sortKey="branch"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.status')}
-                          sortKey="status"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.totalPurchaseAmount')}
-                          sortKey="totalPurchases"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.totalProfitAmount')}
-                          sortKey="totalProfit"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.totalDebtAmount')}
-                          sortKey="totalDebt"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.purchaseHistory')}
-                          sortKey="purchaseCount"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('crm.previousPurchasedProducts')}
-                          sortKey="lastPurchaseDate"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <SortableHeader
-                          label={t('common.createdDate')}
-                          sortKey="createdAt"
-                          activeKey={sortKey}
-                          direction={sortDirection}
-                          onSort={changeSort}
-                        />
-                        <th className="px-4 py-3">{t('common.actions')}</th>
+                        {columnVisible('fullName') ? (
+                          <SortableHeader
+                            label={t('crm.fullName')}
+                            sortKey="fullName"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('phone') ? (
+                          <SortableHeader
+                            label={t('crm.phone')}
+                            sortKey="phone"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('whatsappPhone') ? (
+                          <SortableHeader
+                            label={t('crm.whatsappPhone')}
+                            sortKey="whatsappPhone"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('branch') ? (
+                          <SortableHeader
+                            label={t('crm.branch')}
+                            sortKey="branch"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('status') ? (
+                          <SortableHeader
+                            label={t('crm.status')}
+                            sortKey="status"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('totalPurchases') ? (
+                          <SortableHeader
+                            label={t('crm.totalPurchaseAmount')}
+                            sortKey="totalPurchases"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('totalProfit') ? (
+                          <SortableHeader
+                            label={t('crm.totalProfitAmount')}
+                            sortKey="totalProfit"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('totalDebt') ? (
+                          <SortableHeader
+                            label={t('crm.totalDebtAmount')}
+                            sortKey="totalDebt"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('purchaseHistory') ? (
+                          <SortableHeader
+                            label={t('crm.purchaseHistory')}
+                            sortKey="purchaseCount"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('lastPurchaseDate') ? (
+                          <SortableHeader
+                            label={t('crm.previousPurchasedProducts')}
+                            sortKey="lastPurchaseDate"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('createdAt') ? (
+                          <SortableHeader
+                            label={t('common.createdDate')}
+                            sortKey="createdAt"
+                            activeKey={sortKey}
+                            direction={sortDirection}
+                            onSort={changeSort}
+                          />
+                        ) : null}
+                        {columnVisible('actions') ? (
+                          <th className="px-4 py-3">{t('common.actions')}</th>
+                        ) : null}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {visibleCustomers.map((customer) => (
                         <tr key={customer.id} className="hover:bg-blue-50/40">
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => setSelectedCustomer(customer)}
-                              className="font-bold text-blue-700 hover:text-blue-900"
-                              type="button"
-                            >
-                              {customer.fullName}
-                            </button>
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {customer.phone}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {customer.whatsappPhone || '-'}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {customer.branch?.name ?? customer.branchId}
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusPill status={customer.status} />
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-900">
-                            {formatKgs(customer.totalPurchases)}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-emerald-700">
-                            {formatKgs(customer.totalProfit)}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-red-700">
-                            {formatKgs(customer.totalDebt)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => setSelectedCustomer(customer)}
-                              className="rounded-lg bg-slate-100 px-3 py-1 font-semibold text-slate-700 hover:bg-slate-200"
-                              type="button"
-                            >
-                              {customer.purchaseCount} {t('crm.purchaseHistory')}
-                            </button>
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatDate(customer.lastPurchaseDate)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-700">
-                            {formatDate(customer.createdAt)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <Link
-                                href={`/customers/${customer.id}`}
-                                className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                              >
-                                {t('common.open')}
-                              </Link>
+                          {columnVisible('fullName') ? (
+                            <td className="px-4 py-3">
                               <button
-                                onClick={() => openEditCustomer(customer)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                                onClick={() => setSelectedCustomer(customer)}
+                                className="font-bold text-blue-700 hover:text-blue-900"
                                 type="button"
                               >
-                                <PencilIcon />
-                                {t('common.edit')}
+                                {customer.fullName}
                               </button>
-                              {canArchiveCustomer(currentUser) ? (
-                                <button
-                                  onClick={() => void archiveCustomer(customer)}
-                                  disabled={deletingCustomerId === customer.id}
-                                  className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
-                                  type="button"
+                            </td>
+                          ) : null}
+                          {columnVisible('phone') ? (
+                            <td className="px-4 py-3 text-slate-700">
+                              {customer.phone}
+                            </td>
+                          ) : null}
+                          {columnVisible('whatsappPhone') ? (
+                            <td className="px-4 py-3 text-slate-700">
+                              {customer.whatsappPhone || '-'}
+                            </td>
+                          ) : null}
+                          {columnVisible('branch') ? (
+                            <td className="px-4 py-3 text-slate-700">
+                              {customer.branch?.name ?? customer.branchId}
+                            </td>
+                          ) : null}
+                          {columnVisible('status') ? (
+                            <td className="px-4 py-3">
+                              <StatusPill status={customer.status} />
+                            </td>
+                          ) : null}
+                          {columnVisible('totalPurchases') ? (
+                            <td className="px-4 py-3 font-semibold text-slate-900">
+                              {formatKgs(customer.totalPurchases)}
+                            </td>
+                          ) : null}
+                          {columnVisible('totalProfit') ? (
+                            <td className="px-4 py-3 font-semibold text-emerald-700">
+                              {formatKgs(customer.totalProfit)}
+                            </td>
+                          ) : null}
+                          {columnVisible('totalDebt') ? (
+                            <td className="px-4 py-3 font-semibold text-red-700">
+                              {formatKgs(customer.totalDebt)}
+                            </td>
+                          ) : null}
+                          {columnVisible('purchaseHistory') ? (
+                            <td className="px-4 py-3">
+                              <button
+                                onClick={() => setSelectedCustomer(customer)}
+                                className="rounded-lg bg-slate-100 px-3 py-1 font-semibold text-slate-700 hover:bg-slate-200"
+                                type="button"
+                              >
+                                {customer.purchaseCount} {t('crm.purchaseHistory')}
+                              </button>
+                            </td>
+                          ) : null}
+                          {columnVisible('lastPurchaseDate') ? (
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatDate(customer.lastPurchaseDate)}
+                            </td>
+                          ) : null}
+                          {columnVisible('createdAt') ? (
+                            <td className="px-4 py-3 text-slate-700">
+                              {formatDate(customer.createdAt)}
+                            </td>
+                          ) : null}
+                          {columnVisible('actions') ? (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <Link
+                                  href={`/customers/${customer.id}`}
+                                  className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                                 >
-                                  {deletingCustomerId === customer.id
-                                    ? t('common.loading')
-                                    : t('common.delete')}
-                                </button>
-                              ) : null}
-                            </div>
-                          </td>
+                                  {t('common.open')}
+                                </Link>
+                                {showListEditButton ? (
+                                  <button
+                                    onClick={() => openEditCustomer(customer)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                                    type="button"
+                                  >
+                                    <PencilIcon />
+                                    {t('common.edit')}
+                                  </button>
+                                ) : null}
+                                {canArchiveCustomer(currentUser) ? (
+                                  <button
+                                    onClick={() => void archiveCustomer(customer)}
+                                    disabled={deletingCustomerId === customer.id}
+                                    className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
+                                    type="button"
+                                  >
+                                    {deletingCustomerId === customer.id
+                                      ? t('common.loading')
+                                      : t('common.delete')}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          ) : null}
                         </tr>
                       ))}
                     </tbody>
@@ -864,65 +865,6 @@ function CustomersPageContent() {
             customer={selectedCustomer}
             onClose={() => setSelectedCustomer(null)}
           />
-        ) : null}
-
-        {showCreateModal && listFirstCustomerView ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-4 py-6">
-            <form
-              onSubmit={createCustomer}
-              className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                    {t('crm.createClientButton')}
-                  </p>
-                  <h3 className="mt-1 text-2xl font-bold text-slate-950">
-                    {t('crm.createClientButton')}
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="rounded-full border border-slate-200 px-3 py-1 text-sm font-bold text-slate-500 hover:bg-slate-50"
-                  type="button"
-                  aria-label="Close create form"
-                >
-                  x
-                </button>
-              </div>
-
-              <div className="mt-5 space-y-4">
-                <CustomerForm
-                  form={form}
-                  onChange={(updates) => setForm({ ...form, ...updates })}
-                />
-              </div>
-
-              {error ? (
-                <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </p>
-              ) : null}
-
-              <div className="mt-6 flex justify-end gap-3">
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
-                  type="button"
-                  disabled={saving}
-                >
-                  {t('common.cancel')}
-                </button>
-                <button
-                  disabled={saving || !form.fullName.trim() || !form.phone.trim()}
-                  className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                  type="submit"
-                >
-                  {saving ? t('common.loading') : t('crm.createClientButton')}
-                </button>
-              </div>
-            </form>
-          </div>
         ) : null}
 
         {editingCustomer ? (

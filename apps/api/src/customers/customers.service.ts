@@ -20,6 +20,7 @@ import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { canArchiveCustomer } from '../rbac/rbac';
+import { toRoleAwareCustomerListItem } from './customer-list.presenter';
 
 type CustomerSaleHistory = {
   id: string;
@@ -106,7 +107,10 @@ export class CustomersService {
     });
 
     return customers.map((customer) =>
-      this.toCustomerListItem(customer, customer.sales),
+      toRoleAwareCustomerListItem(
+        user,
+        this.toCustomerListItem(customer, customer.sales),
+      ),
     );
   }
 
@@ -162,7 +166,7 @@ export class CustomersService {
 
   async softDelete(user: AuthUser, id: string) {
     if (!canArchiveCustomer(user)) {
-      throw new ForbiddenException('You do not have permission to archive this customer');
+      throw new ForbiddenException('У вас нет прав удалять клиентов');
     }
 
     const existing = await this.getAccessibleCustomer(user, id);

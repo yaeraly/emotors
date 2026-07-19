@@ -849,7 +849,7 @@ export default function BranchPurchaseRequestsPage() {
                       {canActOnRequests && (request.status === 'PAYMENT_CONFIRMED' || request.status === 'READY_FOR_HQ_WAREHOUSE') ? (
                         <button type="button" onClick={() => void sendToHqWarehouse(request.id)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{t('branchHqRouting.sendToWarehouseAfterPayment')}</button>
                       ) : null}
-                      {request.convertedOrderId && !branchSalesManagerView ? (
+                      {request.convertedOrderId && !branchSalesManagerView && !branchOwnerView ? (
                         <Link href={`/distribution/orders/${request.convertedOrderId}`} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">{t('scm.hub.distribution.shipmentOrders')}</Link>
                       ) : null}
                     </div>

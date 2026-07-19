@@ -45,6 +45,7 @@ import {
   canEnterBranchTransportCost,
   canViewProductCost,
   isHqWarehouseLogisticsOnlyUser,
+  isBranchOwnerUser,
   canViewDistribution,
   canViewBranchDiscrepancyReports,
   hasAnyFullAccessRole,
@@ -83,6 +84,7 @@ import {
   resolveShipmentItemId,
 } from './branch-receiving.util';
 import { resolveMasterProductForReceivingInTx } from './branch-receiving-product.util';
+import { sanitizeDistributionOrderForBranchCeo } from './branch-ceo-distribution.presenter';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -3204,6 +3206,9 @@ export class DistributionService {
 
     if (user && isHqWarehouseLogisticsOnlyUser(user)) {
       return this.sanitizeDistributionOrderForHqWarehouse(response);
+    }
+    if (user && isBranchOwnerUser(user)) {
+      return sanitizeDistributionOrderForBranchCeo(response);
     }
     return response;
   }

@@ -350,7 +350,7 @@ export function isBranchOwnerProcurementForbiddenPath(pathname: string) {
 export function shouldShowBranchColumnForBranchScopedTables(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ) {
-  return !isBranchOwnerUser(user);
+  return !isBranchOwnerUser(user) && !isBranchWarehouseOperator(user);
 }
 
 /** Branch CEO sales list keeps localized payment status only. */
@@ -880,6 +880,7 @@ export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'
 
 export function canViewProductCost(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   if (!user) return false;
+  if (isBranchOwnerUser(user)) return false;
   if (isBranchWarehouseOperator(user)) return false;
   if (isBranchCashierUser(user)) return false;
   if (isHqWarehouseLogisticsOnlyUser(user)) return false;
@@ -930,7 +931,7 @@ export function canAllowSupplierOverpayment(user: Pick<User, 'role' | 'roles' | 
 }
 
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
-  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER') || isBranchSalesManagerUser(user);
+  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
 }
 
 export function canCancelSale(user: Pick<User, 'role' | 'roles'> | null | undefined) {

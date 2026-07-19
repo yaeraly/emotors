@@ -38,7 +38,7 @@ import {
   HQ_SALES_MANAGER_ACCESS_DENIED_MESSAGES,
   HQ_WAREHOUSE_ACCESS_DENIED,
 } from '../hq-warehouse/hq-warehouse-assignment.constants';
-import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, resolveUserRoles } from '../rbac/rbac';
 import { activeHqWarehouseWhere, HQ_CATALOG_BRANCH_CODE, isHqWarehouse } from '../warehouse/warehouse.util';
 import {
   INACTIVE_HQ_WAREHOUSE,
@@ -1389,11 +1389,17 @@ export class OperationsService {
   }
 
   async routeBranchRequestToHqWarehouse(user: AuthUser, id: string, dto: any = {}) {
+    if (isBranchOwnerUser(user)) {
+      throw new ForbiddenException('У вас нет прав создавать заказ на отправку');
+    }
     if (!canManageBranchPurchaseRequests(user)) throw new ForbiddenException('Forbidden resource');
     return this.sendBranchRequestToHqWarehouse(user, id, dto);
   }
 
   async convertBranchPurchaseRequest(user: AuthUser, id: string, dto: any) {
+    if (isBranchOwnerUser(user)) {
+      throw new ForbiddenException('У вас нет прав создавать заказ на отправку');
+    }
     if (dto?.sourceWarehouseId && !hasAnyFullAccessRole(resolveUserRoles(user))) {
       throw new BadRequestException(MANUAL_HQ_WAREHOUSE_SELECTION_FORBIDDEN);
     }
@@ -1401,6 +1407,9 @@ export class OperationsService {
   }
 
   private async sendBranchRequestToHqWarehouse(user: AuthUser, id: string, dto: any) {
+    if (isBranchOwnerUser(user)) {
+      throw new ForbiddenException('У вас нет прав создавать заказ на отправку');
+    }
     if (!canManageBranchPurchaseRequests(user)) throw new ForbiddenException('Forbidden resource');
 
     const request = await this.prisma.branchPurchaseRequest.findFirst({
