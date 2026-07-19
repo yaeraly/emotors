@@ -19,9 +19,10 @@ import {
 import { SALE_PAYMENT_METHODS, formatPaymentMethodLabel } from '@/lib/sale-payment-methods';
 import {
   availableMethodsForRow,
-  cashChangeForRow,
+  buildPaymentPayloads,
+  computePaymentAllocation,
   createPaymentPartRow,
-  sumPaymentParts,
+  isPaymentComplete,
   validatePaymentParts,
   type PaymentPartRow,
 } from '@/lib/sale-payment-parts';
@@ -67,7 +68,9 @@ export default function NewSalePage() {
   const [includeArchivedCustomers, setIncludeArchivedCustomers] = useState(false);
   const [items, setItems] = useState<SaleItemForm[]>([]);
   const [paymentType, setPaymentType] = useState<PaymentType>('FULL_PAYMENT');
-  const [paymentRows, setPaymentRows] = useState<PaymentPartRow[]>([createPaymentPartRow()]);
+  const [paymentRows, setPaymentRows] = useState<PaymentPartRow[]>([
+    createPaymentPartRow({ method: 'CASH' }),
+  ]);
   const [showCreateCustomer, setShowCreateCustomer] = useState(false);
   const [createCustomerForm, setCreateCustomerForm] = useState({ fullName: '', phone: '', whatsappPhone: '' });
   const [creatingCustomer, setCreatingCustomer] = useState(false);
@@ -103,13 +106,17 @@ export default function NewSalePage() {
       0,
     );
     const profit = totalAmount - totalCost;
-    const paidTotal = sumPaymentParts(paymentRows);
-    const remainingAmount = roundMoney(Math.max(totalAmount - paidTotal, 0));
-    const totalCashChange = roundMoney(
-      paymentRows.reduce((sum, row) => sum + cashChangeForRow(row), 0),
-    );
+    const allocation = computePaymentAllocation(paymentRows, totalAmount);
 
-    return { totalAmount, totalCost, profit, paidTotal, remainingAmount, totalCashChange };
+    return {
+      totalAmount,
+      totalCost,
+      profit,
+      paidTotal: allocation.appliedTotal,
+      remainingAmount: allocation.remainingAmount,
+      totalCashChange: allocation.changeAmount,
+      cashShortage: allocation.cashShortage,
+    };
   }, [items, paymentRows]);
 
   useEffect(() => {
@@ -158,10 +165,22 @@ export default function NewSalePage() {
         : { ok: true as const },
     [paymentType, paymentRows, totals.totalAmount],
   );
-  const paymentExact =
+  const paymentComplete =
     paymentType !== 'FULL_PAYMENT' ||
-    (totals.paidTotal >= totals.totalAmount - 0.009 &&
-      totals.paidTotal <= totals.totalAmount + 0.009);
+    isPaymentComplete(paymentRows, totals.totalAmount);
+
+  function formatPaymentError(
+    validation: ReturnType<typeof validatePaymentParts>,
+  ) {
+    if (validation.ok) return '';
+    if (validation.messageKey === 'sales.insufficientCash' && validation.amount != null) {
+      return t('sales.insufficientCash').replace(
+        '{amount}',
+        validation.amount.toLocaleString('ru-RU'),
+      );
+    }
+    return t(validation.messageKey);
+  }
 
   const isInstallmentSale =
     paymentType === 'INSTALLMENT' && (saleIsInstallment(draftSale) || isInstallmentDraft);
@@ -183,7 +202,7 @@ export default function NewSalePage() {
     (paymentType === 'FULL_PAYMENT'
       ? totals.totalAmount > 0 &&
         paymentValidation.ok &&
-        paymentExact &&
+        paymentComplete &&
         !hasBlockingPriceError &&
         !hasMissingPricing
       : installmentApproved || installmentApproval?.status === 'ACTIVE');
@@ -279,15 +298,42 @@ export default function NewSalePage() {
   function updatePayment(index: number, updates: Partial<PaymentPartRow>) {
     setPaymentsSynced(false);
     setPaymentRows((current) =>
-      current.map((row, rowIndex) =>
-        rowIndex === index ? { ...row, ...updates } : row,
-      ),
+      current.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+        const next = { ...row, ...updates };
+        if ('method' in updates) {
+          if (updates.method === 'CASH') {
+            next.amount = '';
+          } else if (updates.method) {
+            next.cashReceived = '';
+          }
+        }
+        return next;
+      }),
     );
   }
 
   function addPaymentRow() {
     setPaymentsSynced(false);
-    setPaymentRows((current) => [...current, createPaymentPartRow()]);
+    setPaymentRows((current) => {
+      const allocation = computePaymentAllocation(current, totals.totalAmount);
+      const usedMethods = new Set(
+        current
+          .map((row) => row.method)
+          .filter((method): method is PaymentMethod => Boolean(method)),
+      );
+      const nextMethod =
+        SALE_PAYMENT_METHODS.find((method) => !usedMethods.has(method) && method !== 'CASH') ??
+        SALE_PAYMENT_METHODS.find((method) => !usedMethods.has(method));
+      if (!nextMethod) return current;
+      return [
+        ...current,
+        createPaymentPartRow({
+          method: nextMethod,
+          amount: allocation.remainingAmount > 0 ? String(allocation.remainingAmount) : '',
+        }),
+      ];
+    });
   }
 
   function removePaymentRow(index: number) {
@@ -346,18 +392,11 @@ export default function NewSalePage() {
 
     if (paymentType === 'FULL_PAYMENT') {
       if (!paymentValidation.ok) {
-        setError(t(paymentValidation.messageKey));
+        setError(formatPaymentError(paymentValidation));
         return null;
       }
-      if (!paymentExact) {
-        setError(
-          totals.remainingAmount > 0.009
-            ? t('sales.remainingToPay').replace(
-                '{amount}',
-                totals.remainingAmount.toLocaleString('ru-RU'),
-              )
-            : t('sales.nonCashOverpayment'),
-        );
+      if (!paymentComplete) {
+        setError(formatPaymentError(paymentValidation));
         return null;
       }
     }
@@ -417,24 +456,8 @@ export default function NewSalePage() {
           });
         }
 
-        for (const row of paymentRows) {
-          const amount = Number(row.amount || 0);
-          if (amount <= 0 || !row.method) continue;
-
-          const payload: Record<string, unknown> = {
-            amount,
-            method: row.method,
-            note: row.note.trim() || undefined,
-          };
-
-          if (row.method === 'CASH') {
-            const received = Number(row.cashReceived || 0);
-            if (received > 0) {
-              payload.cashReceived = received;
-              payload.changeAmount = cashChangeForRow(row);
-            }
-          }
-
+        const payloads = buildPaymentPayloads(paymentRows, totals.totalAmount);
+        for (const payload of payloads) {
           sale = await apiFetch<Sale>(`/sales/${sale.id}/payments`, {
             method: 'POST',
             body: JSON.stringify(payload),
@@ -589,20 +612,13 @@ export default function NewSalePage() {
       return;
     }
 
-    if (paymentType === 'FULL_PAYMENT' && !paymentExact) {
-      setError(
-        totals.remainingAmount > 0.009
-          ? t('sales.remainingToPay').replace(
-              '{amount}',
-              totals.remainingAmount.toLocaleString('ru-RU'),
-            )
-          : t('sales.nonCashOverpayment'),
-      );
+    if (paymentType === 'FULL_PAYMENT' && !paymentValidation.ok) {
+      setError(formatPaymentError(paymentValidation));
       return;
     }
 
-    if (paymentType === 'FULL_PAYMENT' && !paymentValidation.ok) {
-      setError(t(paymentValidation.messageKey));
+    if (paymentType === 'FULL_PAYMENT' && !paymentComplete) {
+      setError(formatPaymentError(paymentValidation));
       return;
     }
 
@@ -904,8 +920,12 @@ export default function NewSalePage() {
               <select
                 value={paymentType}
                 onChange={(event) => {
-                  setPaymentType(event.target.value as PaymentType);
+                  const next = event.target.value as PaymentType;
+                  setPaymentType(next);
                   setPaymentsSynced(false);
+                  if (next === 'FULL_PAYMENT') {
+                    setPaymentRows([createPaymentPartRow({ method: 'CASH' })]);
+                  }
                 }}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               >
@@ -914,12 +934,7 @@ export default function NewSalePage() {
               </select>
             </label>
 
-            {paymentType === 'FULL_PAYMENT' ? (
-              <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm sm:col-span-2 lg:col-span-3">
-                <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.saleTotal')}</p>
-                <p className="mt-1 text-lg font-bold text-slate-900">{formatKgs(totals.totalAmount)}</p>
-              </div>
-            ) : (
+            {paymentType === 'FULL_PAYMENT' ? null : (
               <>
                 <SaleInput
                   label={t('sales.downPayment')}
@@ -976,65 +991,95 @@ export default function NewSalePage() {
 
           {paymentType === 'FULL_PAYMENT' ? (
             <div className="mt-6 space-y-4">
-              {paymentRows.map((row, index) => {
-                const methods = availableMethodsForRow(
-                  paymentRows,
-                  index,
-                  SALE_PAYMENT_METHODS,
-                );
-                const rowChange = cashChangeForRow(row);
+              {paymentRows.length === 1 ? (
+                <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  <label className="block min-w-0">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {t('sales.paymentMethod')}
+                    </span>
+                    <select
+                      value={paymentRows[0]?.method ?? 'CASH'}
+                      onChange={(event) =>
+                        updatePayment(0, { method: event.target.value as PaymentMethod })
+                      }
+                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                    >
+                      {SALE_PAYMENT_METHODS.map((method) => (
+                        <option key={method} value={method}>
+                          {formatPaymentMethodLabel(method, t)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {paymentRows[0]?.method === 'CASH' ? (
+                    <SaleInput
+                      label={t('sales.cashReceived')}
+                      type="number"
+                      value={paymentRows[0].cashReceived}
+                      onChange={(value) => updatePayment(0, { cashReceived: value })}
+                      required
+                    />
+                  ) : (
+                    <SaleInput
+                      label={t('sales.paidAmount')}
+                      type="number"
+                      value={paymentRows[0]?.amount ?? ''}
+                      onChange={(value) => updatePayment(0, { amount: value })}
+                      required
+                    />
+                  )}
+                </div>
+              ) : (
+                paymentRows.map((row, index) => {
+                  const methods = availableMethodsForRow(
+                    paymentRows,
+                    index,
+                    SALE_PAYMENT_METHODS,
+                  );
 
-                return (
-                  <div
-                    key={row.id}
-                    className="rounded-2xl border border-slate-200 p-4"
-                  >
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <p className="text-sm font-bold text-slate-900">
-                        {t('sales.paymentPart')} {index + 1}
-                      </p>
-                      {paymentRows.length > 1 ? (
-                        <button
-                          type="button"
-                          onClick={() => removePaymentRow(index)}
-                          className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
-                        >
-                          {t('common.delete')}
-                        </button>
-                      ) : null}
-                    </div>
-                    <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <label className="block min-w-0">
-                        <span className="text-sm font-semibold text-slate-700">
-                          {t('sales.paymentMethod')}
-                        </span>
-                        <select
-                          value={row.method}
-                          onChange={(event) =>
-                            updatePayment(index, {
-                              method: event.target.value as PaymentMethod,
-                            })
-                          }
-                          required
-                          className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                        >
-                          <option value="">{t('sales.paymentMethodRequired')}</option>
-                          {methods.map((method) => (
-                            <option key={method} value={method}>
-                              {formatPaymentMethodLabel(method, t)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {row.method === 'CASH' ? (
-                        <>
-                          <SaleInput
-                            label={t('sales.cashAmountToPay')}
-                            type="number"
-                            value={row.amount}
-                            onChange={(value) => updatePayment(index, { amount: value })}
+                  return (
+                    <div
+                      key={row.id}
+                      className="rounded-2xl border border-slate-200 p-4"
+                    >
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="text-sm font-bold text-slate-900">
+                          {t('sales.paymentPart')} {index + 1}
+                        </p>
+                        {paymentRows.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => removePaymentRow(index)}
+                            className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
+                          >
+                            {t('common.delete')}
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+                        <label className="block min-w-0">
+                          <span className="text-sm font-semibold text-slate-700">
+                            {t('sales.paymentMethod')}
+                          </span>
+                          <select
+                            value={row.method}
+                            onChange={(event) =>
+                              updatePayment(index, {
+                                method: event.target.value as PaymentMethod,
+                              })
+                            }
                             required
-                          />
+                            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                          >
+                            <option value="">{t('sales.paymentMethodRequired')}</option>
+                            {methods.map((method) => (
+                              <option key={method} value={method}>
+                                {formatPaymentMethodLabel(method, t)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {row.method === 'CASH' ? (
                           <SaleInput
                             label={t('sales.cashReceived')}
                             type="number"
@@ -1042,41 +1087,65 @@ export default function NewSalePage() {
                             onChange={(value) =>
                               updatePayment(index, { cashReceived: value })
                             }
+                            required
                           />
-                          <div className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 text-sm">
-                            <p className="text-xs font-semibold uppercase text-slate-400">
-                              {t('sales.changeAmount')}
-                            </p>
-                            <p className="mt-1 text-lg font-bold text-green-700">
-                              {formatKgs(rowChange)}
-                            </p>
-                          </div>
-                        </>
-                      ) : (
-                        <SaleInput
-                          label={t('sales.paidAmount')}
-                          type="number"
-                          value={row.amount}
-                          onChange={(value) => updatePayment(index, { amount: value })}
-                          required
-                        />
-                      )}
-                      {!branchSalesManagerView ? (
-                        <SaleInput
-                          label={t('crm.notes')}
-                          value={row.note}
-                          onChange={(value) => updatePayment(index, { note: value })}
-                        />
-                      ) : null}
+                        ) : (
+                          <SaleInput
+                            label={t('sales.paidAmount')}
+                            type="number"
+                            value={row.amount}
+                            onChange={(value) => updatePayment(index, { amount: value })}
+                            required
+                          />
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
+
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-800">
+                <p>
+                  <span className="font-semibold">{t('sales.paymentSummaryTotal')}:</span>{' '}
+                  {formatKgs(totals.totalAmount)}
+                </p>
+                {totals.paidTotal > 0.009 ? (
+                  <p className="mt-1">
+                    <span className="font-semibold">{t('sales.paymentSummaryPaid')}:</span>{' '}
+                    {formatKgs(totals.paidTotal)}
+                  </p>
+                ) : null}
+                {totals.remainingAmount > 0.009 ? (
+                  <p className="mt-1 font-semibold text-amber-800">
+                    {t('sales.paymentSummaryRemaining')}: {formatKgs(totals.remainingAmount)}
+                  </p>
+                ) : null}
+                {totals.cashShortage > 0.009 ? (
+                  <p className="mt-1 font-semibold text-red-700">
+                    {t('sales.insufficientCash').replace(
+                      '{amount}',
+                      totals.cashShortage.toLocaleString('ru-RU'),
+                    )}
+                  </p>
+                ) : null}
+                {paymentComplete && totals.totalCashChange > 0.009 ? (
+                  <p className="mt-1 font-semibold text-green-700">
+                    {t('sales.changeAmount')}: {formatKgs(totals.totalCashChange)}
+                  </p>
+                ) : null}
+                {paymentComplete &&
+                paymentRows.some((row) => row.method === 'CASH') &&
+                totals.totalCashChange <= 0.009 &&
+                totals.totalAmount > 0 ? (
+                  <p className="mt-1 font-semibold text-green-700">{t('sales.noChange')}</p>
+                ) : null}
+              </div>
+
               {paymentRows.length < SALE_PAYMENT_METHODS.length ? (
                 <button
                   type="button"
                   onClick={addPaymentRow}
-                  className="w-full rounded-xl border border-dashed border-blue-300 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
+                  className="w-full rounded-xl border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 sm:w-auto"
                 >
                   {t('sales.addPaymentMethod')}
                 </button>
@@ -1084,24 +1153,9 @@ export default function NewSalePage() {
             </div>
           ) : null}
 
-          {paymentType === 'FULL_PAYMENT' && totals.remainingAmount > 0.009 ? (
-            <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-              {t('sales.remainingToPay').replace(
-                '{amount}',
-                totals.remainingAmount.toLocaleString('ru-RU'),
-              )}
-            </p>
-          ) : null}
-
-          {paymentType === 'FULL_PAYMENT' && paymentExact && totals.totalAmount > 0 ? (
-            <p className="mt-4 rounded-xl bg-green-50 px-4 py-3 text-sm font-semibold text-green-800">
-              {t('sales.paymentFullyPaid')}
-            </p>
-          ) : null}
-
           {paymentType === 'FULL_PAYMENT' && !paymentValidation.ok ? (
             <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-              {t(paymentValidation.messageKey)}
+              {formatPaymentError(paymentValidation)}
             </p>
           ) : null}
 
@@ -1122,33 +1176,16 @@ export default function NewSalePage() {
             </p>
           ) : null}
 
-          <div className="mt-6 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Summary label={t('sales.paymentSummaryTotal')} value={formatKgs(totals.totalAmount)} />
-            {paymentType === 'FULL_PAYMENT' ? (
-              <>
-                <Summary
-                  label={t('sales.paymentSummaryPaid')}
-                  value={formatKgs(totals.paidTotal)}
-                />
-                <Summary
-                  label={t('sales.paymentSummaryRemaining')}
-                  value={formatKgs(totals.remainingAmount)}
-                />
-                <Summary
-                  label={t('sales.changeAmount')}
-                  value={formatKgs(totals.totalCashChange)}
-                />
-              </>
-            ) : (
-              <>
-                <Summary label={t('sales.downPayment')} value={formatKgs(Number(downPayment || 0))} />
-                <Summary
-                  label={t('sales.installmentFinancedAmount')}
-                  value={formatKgs(installmentRemainingDebt)}
-                />
-              </>
-            )}
-          </div>
+          {paymentType !== 'FULL_PAYMENT' ? (
+            <div className="mt-6 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <Summary label={t('sales.paymentSummaryTotal')} value={formatKgs(totals.totalAmount)} />
+              <Summary label={t('sales.downPayment')} value={formatKgs(Number(downPayment || 0))} />
+              <Summary
+                label={t('sales.installmentFinancedAmount')}
+                value={formatKgs(installmentRemainingDebt)}
+              />
+            </div>
+          ) : null}
 
           <div className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
             <button

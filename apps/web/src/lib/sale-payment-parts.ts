@@ -8,6 +8,17 @@ export type PaymentPartRow = {
   note: string;
 };
 
+export type PaymentAllocation = {
+  nonCashTotal: number;
+  cashRequired: number;
+  cashApplied: number;
+  cashReceived: number;
+  changeAmount: number;
+  appliedTotal: number;
+  remainingAmount: number;
+  cashShortage: number;
+};
+
 function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -17,17 +28,51 @@ export function createPaymentPartRow(
 ): PaymentPartRow {
   return {
     id: crypto.randomUUID(),
-    method: partial?.method ?? '',
+    method: partial?.method ?? 'CASH',
     amount: partial?.amount ?? '',
     cashReceived: partial?.cashReceived ?? '',
     note: partial?.note ?? '',
   };
 }
 
-export function sumPaymentParts(rows: PaymentPartRow[]) {
-  return roundMoney(
-    rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+export function computePaymentAllocation(
+  rows: PaymentPartRow[],
+  saleTotal: number,
+): PaymentAllocation {
+  const nonCashTotal = roundMoney(
+    rows
+      .filter((row) => row.method && row.method !== 'CASH')
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0),
   );
+
+  const cashRow = rows.find((row) => row.method === 'CASH');
+  const cashReceived = cashRow ? Number(cashRow.cashReceived || 0) : 0;
+  const cashRequired = roundMoney(Math.max(saleTotal - nonCashTotal, 0));
+  const cashApplied = cashRow ? roundMoney(Math.min(cashReceived, cashRequired)) : 0;
+  const changeAmount = cashRow
+    ? roundMoney(Math.max(cashReceived - cashRequired, 0))
+    : 0;
+  const appliedTotal = roundMoney(nonCashTotal + cashApplied);
+  const remainingAmount = roundMoney(Math.max(saleTotal - appliedTotal, 0));
+  const cashShortage =
+    cashRow && cashRequired > 0
+      ? roundMoney(Math.max(cashRequired - cashReceived, 0))
+      : remainingAmount;
+
+  return {
+    nonCashTotal,
+    cashRequired,
+    cashApplied,
+    cashReceived,
+    changeAmount,
+    appliedTotal,
+    remainingAmount,
+    cashShortage,
+  };
+}
+
+export function sumPaymentParts(rows: PaymentPartRow[], saleTotal: number) {
+  return computePaymentAllocation(rows, saleTotal).appliedTotal;
 }
 
 export function availableMethodsForRow(
@@ -43,55 +88,55 @@ export function availableMethodsForRow(
   return allMethods.filter((method) => !used.has(method));
 }
 
-export function cashChangeForRow(row: PaymentPartRow) {
+export function cashChangeForRow(row: PaymentPartRow, saleTotal: number, rows: PaymentPartRow[]) {
   if (row.method !== 'CASH') return 0;
-  const applied = Number(row.amount || 0);
-  const received = Number(row.cashReceived || 0);
-  if (!received) return 0;
-  return roundMoney(Math.max(received - applied, 0));
+  return computePaymentAllocation(rows, saleTotal).changeAmount;
+}
+
+export function buildPaymentPayloads(rows: PaymentPartRow[], saleTotal: number) {
+  const allocation = computePaymentAllocation(rows, saleTotal);
+
+  return rows
+    .map((row) => {
+      if (!row.method) return null;
+
+      if (row.method === 'CASH') {
+        if (allocation.cashApplied <= 0 && allocation.cashReceived <= 0) {
+          return null;
+        }
+
+        return {
+          method: row.method,
+          amount: allocation.cashApplied,
+          cashReceived: allocation.cashReceived > 0 ? allocation.cashReceived : undefined,
+          changeAmount: allocation.changeAmount > 0 ? allocation.changeAmount : undefined,
+          note: row.note.trim() || undefined,
+        };
+      }
+
+      const amount = Number(row.amount || 0);
+      if (amount <= 0) return null;
+
+      return {
+        method: row.method,
+        amount,
+        note: row.note.trim() || undefined,
+      };
+    })
+    .filter((payload): payload is NonNullable<typeof payload> => Boolean(payload))
+    .sort((left, right) => {
+      if (left.method === 'CASH') return 1;
+      if (right.method === 'CASH') return -1;
+      return 0;
+    });
 }
 
 export function validatePaymentParts(
   rows: PaymentPartRow[],
   saleTotal: number,
-): { ok: true } | { ok: false; messageKey: string } {
+): { ok: true } | { ok: false; messageKey: string; amount?: number } {
   if (!rows.length) {
     return { ok: false, messageKey: 'sales.paymentMethodRequired' };
-  }
-
-  for (const row of rows) {
-    if (!row.method) {
-      return { ok: false, messageKey: 'sales.paymentMethodRequired' };
-    }
-    const amount = Number(row.amount || 0);
-    if (!row.amount.trim()) {
-      return { ok: false, messageKey: 'sales.paymentAmountRequired' };
-    }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return { ok: false, messageKey: 'sales.paymentAmountPositive' };
-    }
-    if (row.method !== 'CASH') {
-      const otherNonCash = roundMoney(
-        rows
-          .filter((part) => part.method && part.method !== 'CASH')
-          .reduce((sum, part) => sum + Number(part.amount || 0), 0),
-      );
-      const cashApplied = roundMoney(
-        rows
-          .filter((part) => part.method === 'CASH')
-          .reduce((sum, part) => sum + Number(part.amount || 0), 0),
-      );
-      const nonCashCap = roundMoney(Math.max(saleTotal - cashApplied, 0));
-      if (otherNonCash > nonCashCap + 0.009) {
-        return { ok: false, messageKey: 'sales.nonCashOverpayment' };
-      }
-    }
-    if (row.method === 'CASH') {
-      const received = Number(row.cashReceived || 0);
-      if (received > 0 && received + 0.009 < amount) {
-        return { ok: false, messageKey: 'sales.cashReceivedTooLow' };
-      }
-    }
   }
 
   const methods = rows.map((row) => row.method).filter(Boolean);
@@ -99,10 +144,68 @@ export function validatePaymentParts(
     return { ok: false, messageKey: 'sales.duplicatePaymentMethod' };
   }
 
-  const paidTotal = sumPaymentParts(rows);
-  if (paidTotal > saleTotal + 0.009) {
+  const allocation = computePaymentAllocation(rows, saleTotal);
+
+  for (const row of rows) {
+    if (!row.method) {
+      return { ok: false, messageKey: 'sales.paymentMethodRequired' };
+    }
+
+    if (row.method === 'CASH') {
+      if (allocation.cashRequired <= 0) {
+        continue;
+      }
+      const received = Number(row.cashReceived || 0);
+      if (!row.cashReceived.trim()) {
+        return { ok: false, messageKey: 'sales.cashReceivedRequired' };
+      }
+      if (!Number.isFinite(received) || received < 0) {
+        return { ok: false, messageKey: 'sales.cashReceivedRequired' };
+      }
+      continue;
+    }
+
+    const amount = Number(row.amount || 0);
+    if (!row.amount.trim()) {
+      return { ok: false, messageKey: 'sales.paymentAmountRequired' };
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { ok: false, messageKey: 'sales.paymentAmountPositive' };
+    }
+  }
+
+  if (allocation.nonCashTotal > saleTotal + 0.009) {
+    return { ok: false, messageKey: 'sales.nonCashOverpayment' };
+  }
+
+  const cashRow = rows.find((row) => row.method === 'CASH');
+  if (cashRow && allocation.cashRequired > 0 && allocation.cashShortage > 0.009) {
+    return {
+      ok: false,
+      messageKey: 'sales.insufficientCash',
+      amount: allocation.cashShortage,
+    };
+  }
+
+  if (!cashRow && allocation.remainingAmount > 0.009) {
+    return {
+      ok: false,
+      messageKey: 'sales.insufficientCash',
+      amount: allocation.remainingAmount,
+    };
+  }
+
+  if (allocation.appliedTotal > saleTotal + 0.009) {
     return { ok: false, messageKey: 'sales.nonCashOverpayment' };
   }
 
   return { ok: true };
+}
+
+export function isPaymentComplete(rows: PaymentPartRow[], saleTotal: number) {
+  if (saleTotal <= 0) return false;
+  const validation = validatePaymentParts(rows, saleTotal);
+  if (!validation.ok) return false;
+  const allocation = computePaymentAllocation(rows, saleTotal);
+  return Math.abs(allocation.appliedTotal - saleTotal) <= 0.009;
 }

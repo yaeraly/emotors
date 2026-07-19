@@ -643,28 +643,74 @@ export class SalesService {
         throw new BadRequestException('Cannot add payment to cancelled sale');
       }
 
-      const amount = this.roundMoney(dto.amount);
+      const saleRecord = await tx.sale.findUniqueOrThrow({
+        where: { id: sale.id },
+        select: { totalAmount: true },
+      });
+      const saleTotal = Number(saleRecord.totalAmount);
 
-      if (amount <= 0) {
-        throw new BadRequestException('Payment amount must be greater than 0');
-      }
-
-      const cashReceived =
+      let amount = this.roundMoney(dto.amount);
+      let cashReceived =
         dto.cashReceived != null ? this.roundMoney(dto.cashReceived) : null;
-      const changeAmount =
+      let changeAmount =
         dto.changeAmount != null ? this.roundMoney(dto.changeAmount) : null;
 
-      if (dto.method === PaymentMethod.CASH && cashReceived != null && cashReceived + 0.009 < amount) {
-        throw new BadRequestException('Полученная сумма наличными меньше суммы оплаты');
-      }
-
-      const existingActivePayments = await tx.payment.count({
+      const existingPayments = await tx.payment.findMany({
         where: {
           saleId: sale.id,
           branchId: sale.branchId,
           status: PaymentRecordStatus.ACTIVE,
         },
+        select: { amount: true, method: true },
       });
+
+      const existingNonCashTotal = this.roundMoney(
+        existingPayments
+          .filter((payment) => payment.method !== PaymentMethod.CASH)
+          .reduce((sum, payment) => sum + Number(payment.amount), 0),
+      );
+      const existingCashApplied = this.roundMoney(
+        existingPayments
+          .filter((payment) => payment.method === PaymentMethod.CASH)
+          .reduce((sum, payment) => sum + Number(payment.amount), 0),
+      );
+
+      if (dto.method === PaymentMethod.CASH) {
+        const received = cashReceived ?? amount;
+        if (received == null || received < 0) {
+          throw new BadRequestException('Введите полученную сумму');
+        }
+        const cashRequired = this.roundMoney(
+          Math.max(saleTotal - existingNonCashTotal, 0),
+        );
+        amount = this.roundMoney(Math.min(received, cashRequired));
+        changeAmount = this.roundMoney(Math.max(received - cashRequired, 0));
+        cashReceived = received;
+      } else {
+        const projectedNonCash = this.roundMoney(existingNonCashTotal + amount);
+        if (projectedNonCash > saleTotal - existingCashApplied + 0.009) {
+          throw new BadRequestException(
+            'Сумма безналичной оплаты превышает остаток к оплате',
+          );
+        }
+        if (amount <= 0) {
+          throw new BadRequestException('Payment amount must be greater than 0');
+        }
+      }
+
+      if (amount <= 0) {
+        throw new BadRequestException('Payment amount must be greater than 0');
+      }
+
+      if (
+        dto.method === PaymentMethod.CASH &&
+        cashReceived != null &&
+        cashReceived + 0.009 < amount
+      ) {
+        throw new BadRequestException('Полученная сумма наличными меньше суммы оплаты');
+      }
+
+      const existingActivePayments = existingPayments.length;
 
       const payment = await tx.payment.create({
         data: {
