@@ -20,7 +20,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import {
   activeBranchWarehouseWhere,
-  activeHqWarehouseWhere,
   inventoryBranchIdForWarehouse,
   isBranchWarehouse,
   isHqWarehouse,
