@@ -9,6 +9,7 @@ import { apiFetch } from '@/lib/api';
 import { canApproveSale, canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser } from '@/lib/rbac';
 import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
+  computeRemainingDebt,
   draftLooksLikeInstallment,
   installmentBlocksCompletion,
   installmentStatusLabelKey,
@@ -103,8 +104,8 @@ export default function NewSalePage() {
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [draftSale, setDraftSale] = useState<Sale | null>(null);
   const [paymentsSynced, setPaymentsSynced] = useState(false);
-  const [installmentDays, setInstallmentDays] = useState('');
-  const [dueDate, setDueDate] = useState('');
+  const [downPayment, setDownPayment] = useState('');
+  const [finalPaymentDate, setFinalPaymentDate] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [submittingInstallment, setSubmittingInstallment] = useState(false);
@@ -153,11 +154,28 @@ export default function NewSalePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentType, totals.totalAmount, paymentRows.length]);
 
+  useEffect(() => {
+    if (paymentType !== 'INSTALLMENT') return;
+    const down = Number(downPayment || 0);
+    setPaymentRows((current) => [
+      {
+        ...(current[0] ?? { method: 'CASH' as PaymentMethod, note: '' }),
+        amount: down > 0 ? String(down) : '0',
+        method: 'CASH',
+      },
+    ]);
+    setPaymentsSynced(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentType, downPayment]);
+
+  const installmentRemainingDebt = useMemo(
+    () => computeRemainingDebt(totals.totalAmount, Number(downPayment || 0)),
+    [totals.totalAmount, downPayment],
+  );
+
   const isInstallmentDraft = useMemo(
-    () =>
-      paymentType === 'INSTALLMENT' &&
-      draftLooksLikeInstallment(totals.debt, installmentDays, dueDate),
-    [paymentType, totals.debt, installmentDays, dueDate],
+    () => draftLooksLikeInstallment(paymentType, finalPaymentDate, totals.totalAmount),
+    [paymentType, finalPaymentDate, totals.totalAmount],
   );
 
   const linePriceStates = useMemo(
@@ -186,7 +204,9 @@ export default function NewSalePage() {
     paymentType === 'INSTALLMENT' && (saleIsInstallment(draftSale) || isInstallmentDraft);
   const installmentApproval = draftSale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
-  const installmentPending = installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
+  const installmentPending =
+    installmentApproval?.status === 'PENDING_APPROVAL' ||
+    installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
   const installmentApproved = installmentApproval?.status === 'APPROVED';
   const installmentRejected = installmentApproval?.status === 'REJECTED';
   const canFinalize =
@@ -198,7 +218,7 @@ export default function NewSalePage() {
     draftSale?.status !== 'CANCELLED' &&
     (paymentType === 'FULL_PAYMENT'
       ? totals.totalAmount > 0 && totals.debt <= 0.009
-      : installmentApproved);
+      : installmentApproved || installmentApproval?.status === 'ACTIVE');
 
   function handleCustomerSelect(customer: SaleCustomerOption) {
     setSelectedCustomer(customer);
@@ -397,10 +417,11 @@ export default function NewSalePage() {
       items: validItems,
       ...(paymentType === 'INSTALLMENT'
         ? {
-            installmentDays: installmentDays ? Number(installmentDays) : undefined,
-            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+            paymentType: 'INSTALLMENT' as const,
+            downPayment: Number(downPayment || 0),
+            dueDate: new Date(finalPaymentDate).toISOString(),
           }
-        : {}),
+        : { paymentType: 'FULL_PAYMENT' as const }),
       notes: notes.trim() || undefined,
     };
   }
@@ -604,7 +625,7 @@ export default function NewSalePage() {
       return;
     }
 
-    if (installmentBlocksCompletion(draftSale) || (isInstallmentSale && !installmentApproved)) {
+    if (installmentBlocksCompletion(draftSale, paymentType) && !installmentApproved) {
       setError(t('sales.installmentRequiresCeoApproval'));
       return;
     }
@@ -1043,20 +1064,31 @@ export default function NewSalePage() {
             <h3 className="text-lg font-bold text-slate-950">{t('sales.installment')}</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <SaleInput
-                label={t('sales.installment')}
+                label={t('sales.downPayment')}
                 type="number"
-                value={installmentDays}
-                onChange={setInstallmentDays}
+                value={downPayment}
+                onChange={(value) => {
+                  setDownPayment(value);
+                  setPaymentsSynced(false);
+                }}
               />
+              <div className="rounded-xl bg-slate-50 p-3 text-sm">
+                <p className="text-xs font-semibold uppercase text-slate-400">
+                  {t('sales.installmentFinancedAmount')}
+                </p>
+                <p className="mt-1 text-lg font-bold text-slate-900">
+                  {formatKgs(installmentRemainingDebt)}
+                </p>
+              </div>
               <SaleInput
-                label={t('common.date')}
+                label={t('sales.finalPaymentDate')}
                 type="date"
-                value={dueDate}
-                onChange={setDueDate}
+                value={finalPaymentDate}
+                onChange={setFinalPaymentDate}
               />
             </div>
             <label className="mt-4 block">
-              <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
+              <span className="text-sm font-semibold text-slate-700">{t('sales.installmentComment')}</span>
               <textarea
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}

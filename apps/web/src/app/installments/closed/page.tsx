@@ -22,14 +22,14 @@ function formatKgs(value: number) {
   return `${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KGS`;
 }
 
-export default function InstallmentsPage() {
+export default function ClosedInstallmentsPage() {
   const { t } = useTranslation();
   const [installments, setInstallments] = useState<InstallmentRow[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    void apiFetch<InstallmentRow[]>('/sales/installments?scope=active')
+    void apiFetch<InstallmentRow[]>('/sales/installments?scope=closed')
       .then(setInstallments)
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
@@ -40,9 +40,9 @@ export default function InstallmentsPage() {
       <section className="space-y-6">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-            {t('nav.installments')}
+            {t('nav.closedInstallments')}
           </p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('sales.installmentListTitle')}</h2>
+          <h2 className="text-3xl font-bold text-slate-950">{t('sales.closedInstallmentListTitle')}</h2>
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -55,9 +55,7 @@ export default function InstallmentsPage() {
                 <th className="px-4 py-3">{t('sales.customer')}</th>
                 <th className="px-4 py-3">{t('sales.receipt')}</th>
                 <th className="px-4 py-3">{t('sales.totalAmount')}</th>
-                <th className="px-4 py-3">{t('sales.downPayment')}</th>
                 <th className="px-4 py-3">{t('sales.paidAmount')}</th>
-                <th className="px-4 py-3">{t('sales.installmentFinancedAmount')}</th>
                 <th className="px-4 py-3">{t('sales.finalPaymentDate')}</th>
                 <th className="px-4 py-3">{t('common.status')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
@@ -66,14 +64,14 @@ export default function InstallmentsPage() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                     {t('common.loading')}
                   </td>
                 </tr>
               ) : installments.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
-                    {t('sales.noInstallments')}
+                  <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                    {t('sales.noClosedInstallments')}
                   </td>
                 </tr>
               ) : (
@@ -90,9 +88,7 @@ export default function InstallmentsPage() {
                       </td>
                       <td className="px-4 py-3">{installment.sale.receiptNumber}</td>
                       <td className="px-4 py-3">{formatKgs(installment.totalAmount)}</td>
-                      <td className="px-4 py-3">{formatKgs(installment.downPayment ?? installment.initialPayment)}</td>
                       <td className="px-4 py-3">{formatKgs(installment.paidAmount ?? installment.installmentPaidAmount ?? 0)}</td>
-                      <td className="px-4 py-3">{formatKgs(installment.remainingDebt ?? installment.financedAmount)}</td>
                       <td className="px-4 py-3">
                         {installment.dueDate
                           ? new Date(installment.dueDate).toLocaleDateString()

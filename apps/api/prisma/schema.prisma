@@ -250,8 +250,11 @@ enum InstallmentStatus {
 enum SaleInstallmentApprovalStatus {
   DRAFT
   PENDING_BRANCH_CEO_APPROVAL
+  PENDING_APPROVAL
   APPROVED
   REJECTED
+  ACTIVE
+  PAID
   CANCELLED
 }
 
@@ -608,6 +611,7 @@ enum AlertType {
   SALE_INSTALLMENT_REQUESTED
   SALE_INSTALLMENT_APPROVED
   SALE_INSTALLMENT_REJECTED
+  SALE_INSTALLMENT_PAID
 }
 
 enum NotificationModule {
@@ -928,6 +932,7 @@ model Branch {
   payments                  Payment[]
   installments              InstallmentSchedule[]
   saleInstallmentApprovals  SaleInstallmentApproval[]
+  saleInstallmentPayments   SaleInstallmentPayment[]
   receipts                  Receipt[]
   warehouses                Warehouse[]
   products                  Product[]
@@ -1302,6 +1307,7 @@ model User {
   saleInstallmentRequestsSubmitted                SaleInstallmentApproval[]           @relation("SaleInstallmentSubmittedBy")
   saleInstallmentRequestsApproved                 SaleInstallmentApproval[]           @relation("SaleInstallmentApprovedBy")
   saleInstallmentRequestsRejected                 SaleInstallmentApproval[]           @relation("SaleInstallmentRejectedBy")
+  saleInstallmentPaymentsRecorded                 SaleInstallmentPayment[]            @relation("SaleInstallmentPaymentCreator")
   repairCommissions                               RepairCommission[]                  @relation("RepairCommissionEmployee")
   payrollRecords                                  PayrollRecord[]                     @relation("PayrollRecordEmployee")
   employeeKpis                                    EmployeeKPI[]                       @relation("EmployeeKPIEmployee")
@@ -1652,13 +1658,36 @@ model SaleInstallmentApproval {
   rejectedById    String?
   rejectedBy      User?                         @relation("SaleInstallmentRejectedBy", fields: [rejectedById], references: [id])
   rejectedAt      DateTime?
-  rejectionReason String?
-  createdAt       DateTime                      @default(now())
-  updatedAt       DateTime                      @updatedAt
+  rejectionReason       String?
+  installmentPaidAmount Decimal                       @default(0) @db.Decimal(14, 2)
+  remainingDebt         Decimal?                      @db.Decimal(14, 2)
+  payments              SaleInstallmentPayment[]
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
 
   @@index([branchId])
   @@index([status])
   @@index([submittedAt])
+}
+
+model SaleInstallmentPayment {
+  id                    String                  @id @default(cuid())
+  installmentApprovalId String
+  installmentApproval   SaleInstallmentApproval @relation(fields: [installmentApprovalId], references: [id], onDelete: Cascade)
+  branchId              String
+  branch                Branch                  @relation(fields: [branchId], references: [id])
+  amount                Decimal                 @db.Decimal(14, 2)
+  method                PaymentMethod
+  note                  String?
+  paidAfterTotal        Decimal                 @db.Decimal(14, 2)
+  remainingAfter        Decimal                 @db.Decimal(14, 2)
+  createdById           String
+  createdBy             User                    @relation("SaleInstallmentPaymentCreator", fields: [createdById], references: [id])
+  createdAt             DateTime                @default(now())
+
+  @@index([installmentApprovalId])
+  @@index([branchId])
+  @@index([createdAt])
 }
 
 model Receipt {

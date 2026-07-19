@@ -110,7 +110,22 @@ export class SalesService {
         include: this.saleInclude(),
       });
 
-      return this.toSaleResponse(sale);
+      if (dto.paymentType === 'INSTALLMENT') {
+        await this.saleInstallmentApprovalService.syncInstallmentDraftFromSale(
+          tx,
+          user,
+          sale,
+          dto,
+          totals.totalAmount,
+        );
+      }
+
+      const withApproval = await tx.sale.findUniqueOrThrow({
+        where: { id: sale.id },
+        include: this.saleInclude(),
+      });
+
+      return this.toSaleResponse(withApproval);
     }).then(async (sale) => {
       if (sale.installments?.length) {
         await this.audit(user, sale.branchId, 'INSTALLMENT_CREATED', 'Sale', sale.id);
@@ -119,7 +134,15 @@ export class SalesService {
     });
   }
 
-  async listInstallments(user: AuthUser) {
+  async listInstallments(user: AuthUser, scope?: 'active' | 'closed') {
+    const simplified = await this.saleInstallmentApprovalService.listBranchInstallments(
+      user,
+      scope === 'closed' ? 'closed' : 'active',
+    );
+    if (simplified.length > 0 || scope) {
+      return simplified;
+    }
+
     const where: Prisma.InstallmentScheduleWhereInput = {
       ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
     };
@@ -468,7 +491,22 @@ export class SalesService {
         user,
         saleForInvalidation as any,
       );
-      return this.toSaleResponse(updated);
+
+      if (dto.paymentType === 'INSTALLMENT') {
+        await this.saleInstallmentApprovalService.syncInstallmentDraftFromSale(
+          tx,
+          user,
+          { id: sale.id, branchId: customer.branchId },
+          dto,
+          totals.totalAmount,
+        );
+      }
+
+      const refreshed = await tx.sale.findUniqueOrThrow({
+        where: { id: sale.id },
+        include: this.saleInclude(),
+      });
+      return this.toSaleResponse(refreshed);
     });
   }
 
@@ -796,6 +834,10 @@ export class SalesService {
 
       await this.refreshCustomerFinancials(tx, sale.customerId);
       await this.commissionsService.createSalesCommission(tx, sale.id);
+
+      if (requiresInstallmentApproval) {
+        await this.saleInstallmentApprovalService.activateOnSaleFinalize(tx, user, sale.id);
+      }
     });
 
     const finalized = await this.findOne(user, id);
@@ -1025,6 +1067,10 @@ export class SalesService {
     debtAmount: number,
     saleDate: Date,
   ) {
+    if (dto.paymentType === 'INSTALLMENT') {
+      return undefined;
+    }
+
     if (!(debtAmount > 0 && (dto.installmentDays || dto.dueDate))) {
       return undefined;
     }

@@ -100,4 +100,14 @@ export class CreateSaleDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsEnum({ FULL_PAYMENT: 'FULL_PAYMENT', INSTALLMENT: 'INSTALLMENT' })
+  paymentType?: 'FULL_PAYMENT' | 'INSTALLMENT';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  downPayment?: number;
 }

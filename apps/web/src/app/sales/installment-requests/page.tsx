@@ -21,6 +21,7 @@ function formatKgs(value: number) {
 
 function translateStatus(t: (key: string) => string, status: string) {
   switch (status) {
+    case 'PENDING_APPROVAL':
     case 'PENDING_BRANCH_CEO_APPROVAL':
       return t('sales.installmentPendingCeo');
     case 'APPROVED':
@@ -30,6 +31,10 @@ function translateStatus(t: (key: string) => string, status: string) {
     default:
       return status;
   }
+}
+
+function isPendingApproval(status: string) {
+  return status === 'PENDING_APPROVAL' || status === 'PENDING_BRANCH_CEO_APPROVAL';
 }
 
 export default function SaleInstallmentRequestsPage() {
@@ -135,9 +140,9 @@ export default function SaleInstallmentRequestsPage() {
                 <th className="px-4 py-3">{t('sales.customer')}</th>
                 <th className="px-4 py-3">{t('sales.seller')}</th>
                 <th className="px-4 py-3">{t('sales.totalAmount')}</th>
-                <th className="px-4 py-3">{t('sales.installmentInitialPayment')}</th>
+                <th className="px-4 py-3">{t('sales.downPayment')}</th>
                 <th className="px-4 py-3">{t('sales.installmentFinancedAmount')}</th>
-                <th className="px-4 py-3">{t('sales.installment')}</th>
+                <th className="px-4 py-3">{t('sales.finalPaymentDate')}</th>
                 <th className="px-4 py-3">{t('sales.sentForApprovalAt')}</th>
                 <th className="px-4 py-3">{t('common.status')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
@@ -166,15 +171,12 @@ export default function SaleInstallmentRequestsPage() {
                     </td>
                     <td className="px-4 py-3">{request.submittedBy?.fullName ?? request.sale.seller.fullName}</td>
                     <td className="px-4 py-3">{formatKgs(request.totalAmount)}</td>
-                    <td className="px-4 py-3">{formatKgs(request.initialPayment)}</td>
-                    <td className="px-4 py-3">{formatKgs(request.financedAmount)}</td>
+                    <td className="px-4 py-3">{formatKgs(request.downPayment ?? request.initialPayment)}</td>
+                    <td className="px-4 py-3">{formatKgs(request.remainingDebt ?? request.financedAmount)}</td>
                     <td className="px-4 py-3">
-                      {request.installmentDays
-                        ? `${request.installmentDays} ${t('common.days')}`
+                      {request.dueDate
+                        ? new Date(request.dueDate).toLocaleDateString()
                         : '—'}
-                      <span className="block text-xs text-slate-500">
-                        {request.paymentCount} {t('sales.paymentsCount')}
-                      </span>
                     </td>
                     <td className="px-4 py-3">
                       {request.submittedAt
@@ -190,7 +192,7 @@ export default function SaleInstallmentRequestsPage() {
                         >
                           {t('common.open')}
                         </Link>
-                        {canReview && request.status === 'PENDING_BRANCH_CEO_APPROVAL' ? (
+                        {canReview && isPendingApproval(request.status) ? (
                           <>
                             <button
                               type="button"

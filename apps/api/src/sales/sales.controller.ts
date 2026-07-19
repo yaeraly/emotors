@@ -19,6 +19,7 @@ import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
 import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
 import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
+import { ReceiveInstallmentPaymentDto } from './dto/receive-installment-payment.dto';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 import { SalesService } from './sales.service';
 
@@ -58,8 +59,29 @@ export class SalesController {
   }
 
   @Get('installments')
-  listInstallments(@CurrentUser() user: AuthUser) {
-    return this.salesService.listInstallments(user);
+  listInstallments(
+    @CurrentUser() user: AuthUser,
+    @Query('scope') scope?: 'active' | 'closed',
+  ) {
+    return this.salesService.listInstallments(user, scope);
+  }
+
+  @Get('installments/:installmentId')
+  findInstallment(
+    @CurrentUser() user: AuthUser,
+    @Param('installmentId') installmentId: string,
+  ) {
+    return this.saleInstallmentApprovalService.findInstallment(user, installmentId);
+  }
+
+  @Post('installments/:installmentId/payments')
+  @Roles(Role.FRANCHISE_OWNER, Role.MANAGER)
+  receiveInstallmentPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('installmentId') installmentId: string,
+    @Body() dto: ReceiveInstallmentPaymentDto,
+  ) {
+    return this.saleInstallmentApprovalService.receiveInstallmentPayment(user, installmentId, dto);
   }
 
   @Get('installment-requests')

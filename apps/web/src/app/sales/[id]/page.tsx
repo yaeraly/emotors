@@ -193,7 +193,9 @@ export default function SaleDetailPage() {
   const isInstallment = saleIsInstallment(sale);
   const installmentApproval = sale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
-  const installmentPending = installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
+  const installmentPending =
+    installmentApproval?.status === 'PENDING_APPROVAL' ||
+    installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
   const installmentApproved = installmentApproval?.status === 'APPROVED';
   const installmentRejected = installmentApproval?.status === 'REJECTED';
   const canFinalize =
@@ -531,13 +533,25 @@ export default function SaleDetailPage() {
                       {installmentApproval.requestNumber}
                     </p>
                     <p>
-                      <span className="font-semibold">{t('sales.installmentInitialPayment')}:</span>{' '}
-                      {formatKgs(installmentApproval.initialPayment)}
+                      <span className="font-semibold">{t('sales.downPayment')}:</span>{' '}
+                      {formatKgs(installmentApproval.downPayment ?? installmentApproval.initialPayment)}
                     </p>
                     <p>
                       <span className="font-semibold">{t('sales.installmentFinancedAmount')}:</span>{' '}
-                      {formatKgs(installmentApproval.financedAmount)}
+                      {formatKgs(installmentApproval.remainingDebt ?? installmentApproval.financedAmount)}
                     </p>
+                    {installmentApproval.dueDate ? (
+                      <p>
+                        <span className="font-semibold">{t('sales.finalPaymentDate')}:</span>{' '}
+                        {new Date(installmentApproval.dueDate).toLocaleDateString()}
+                      </p>
+                    ) : null}
+                    {installmentApproval.notes ? (
+                      <p className="md:col-span-2">
+                        <span className="font-semibold">{t('sales.installmentComment')}:</span>{' '}
+                        {installmentApproval.notes}
+                      </p>
+                    ) : null}
                     {installmentApproval.submittedAt ? (
                       <p>
                         <span className="font-semibold">{t('sales.sentForApprovalAt')}:</span>{' '}
