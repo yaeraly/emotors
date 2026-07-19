@@ -12,6 +12,18 @@ export class AddPaymentDto {
   method!: PaymentMethod;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  cashReceived?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  changeAmount?: number;
+
+  @IsOptional()
   @Type(() => Date)
   @IsDate()
   paidAt?: Date;

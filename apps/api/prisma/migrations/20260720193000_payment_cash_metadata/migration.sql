@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "cashReceived" DECIMAL(14,2);
+ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "changeAmount" DECIMAL(14,2);

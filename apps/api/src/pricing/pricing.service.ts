@@ -350,27 +350,43 @@ export class PricingService {
         throw new BadRequestException(reason);
       }
 
-      if (validation.warning) {
-        if (!item.priceAboveRecommendedReasonCode) {
-          throw new BadRequestException(PRICE_ABOVE_RECOMMENDED_REASON_REQUIRED);
-        }
-        if (
-          item.priceAboveRecommendedReasonCode === PriceAboveRecommendedReasonCode.OTHER &&
-          !item.priceAboveRecommendedComment?.trim()
-        ) {
-          throw new BadRequestException(PRICE_ABOVE_RECOMMENDED_REASON_REQUIRED);
-        }
-        await this.audit(user, 'PRICE_ABOVE_RECOMMENDED', 'Product', product.id, {
+      const recommendedPriceKgs = recommendedResult.resolvedPriceKgs;
+      const priceDiff = Math.abs(this.roundMoney(item.unitPrice - recommendedPriceKgs));
+      if (priceDiff > 0.01) {
+        await this.audit(user, 'SELLING_PRICE_CHANGED_FROM_RECOMMENDED', 'Product', product.id, {
           userId: user.id,
           branchId,
           productId: product.id,
           channel,
           sellingPrice: item.unitPrice,
-          recommendedPrice: recommendedResult.resolvedPriceKgs,
-          reasonCode: item.priceAboveRecommendedReasonCode,
-          comment: item.priceAboveRecommendedComment ?? null,
+          recommendedPrice: recommendedPriceKgs,
+          minimumPrice: minResult.resolvedPriceKgs,
+          maximumPrice: maximumPriceKgs,
+          differenceFromRecommended: priceDiff,
           timestamp: new Date().toISOString(),
         });
+      }
+
+      if (validation.warning) {
+        if (item.priceAboveRecommendedReasonCode) {
+          if (
+            item.priceAboveRecommendedReasonCode === PriceAboveRecommendedReasonCode.OTHER &&
+            !item.priceAboveRecommendedComment?.trim()
+          ) {
+            throw new BadRequestException(PRICE_ABOVE_RECOMMENDED_REASON_REQUIRED);
+          }
+          await this.audit(user, 'PRICE_ABOVE_RECOMMENDED', 'Product', product.id, {
+            userId: user.id,
+            branchId,
+            productId: product.id,
+            channel,
+            sellingPrice: item.unitPrice,
+            recommendedPrice: recommendedPriceKgs,
+            reasonCode: item.priceAboveRecommendedReasonCode,
+            comment: item.priceAboveRecommendedComment ?? null,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
 
       const listPrice = recommendedResult.resolvedPriceKgs;

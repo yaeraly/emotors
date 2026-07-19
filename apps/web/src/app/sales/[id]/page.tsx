@@ -204,8 +204,9 @@ export default function SaleDetailPage() {
     sale?.status !== 'CANCELLED' &&
     !installmentBlocksCompletion(sale);
 
-  const primaryPaymentMethod =
-    sale?.payments?.find((payment) => payment.status !== 'VOID')?.method ?? null;
+  const activeSalePayments =
+    sale?.payments?.filter((payment) => payment.status !== 'VOID') ?? [];
+  const primaryPaymentMethod = activeSalePayments[0]?.method ?? null;
 
   return (
     <ProtectedShell>
@@ -263,6 +264,39 @@ export default function SaleDetailPage() {
                     isInstallment ? t('sales.installment') : t('sales.fullPayment')
                   }
                 />
+              </div>
+
+              {activeSalePayments.length > 0 ? (
+                <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-700">{t('sales.paymentBreakdown')}</p>
+                  <div className="mt-3 space-y-2 text-sm text-slate-800">
+                    {activeSalePayments.map((payment) => (
+                      <p key={payment.id}>
+                        {formatPaymentMethodLabel(payment.method, t)} — {formatKgs(payment.amount)}
+                      </p>
+                    ))}
+                    <p className="font-semibold">
+                      {t('sales.totalPaid')} — {formatKgs(sale.paidAmount)}
+                    </p>
+                    {activeSalePayments
+                      .filter((payment) => payment.method === 'CASH')
+                      .map((payment) => (
+                        <div key={`${payment.id}-cash-meta`} className="text-slate-600">
+                          {payment.cashReceived != null ? (
+                            <p>
+                              {t('sales.cashReceived')} — {formatKgs(payment.cashReceived)}
+                            </p>
+                          ) : null}
+                          {payment.changeAmount != null && Number(payment.changeAmount) > 0 ? (
+                            <p>
+                              {t('sales.changeAmount')} — {formatKgs(payment.changeAmount)}
+                            </p>
+                          ) : null}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ) : (
                 <Info
                   label={t('sales.paymentMethod')}
                   value={
@@ -271,7 +305,7 @@ export default function SaleDetailPage() {
                       : '—'
                   }
                 />
-              </div>
+              )}
 
               <div className={`mt-6 grid min-w-0 gap-4 sm:grid-cols-2 ${branchSalesView ? 'lg:grid-cols-3' : 'lg:grid-cols-4'}`}>
                 <Metric label={t('sales.totalAmount')} value={formatKgs(sale.totalAmount)} />
@@ -499,6 +533,18 @@ export default function SaleDetailPage() {
                         {payment.note ? (
                           <p className="mt-2 text-sm text-slate-700">
                             {payment.note}
+                          </p>
+                        ) : null}
+                        {payment.method === 'CASH' && payment.cashReceived != null ? (
+                          <p className="mt-2 text-sm text-slate-600">
+                            {t('sales.cashReceived')}: {formatKgs(payment.cashReceived)}
+                          </p>
+                        ) : null}
+                        {payment.method === 'CASH' &&
+                        payment.changeAmount != null &&
+                        Number(payment.changeAmount) > 0 ? (
+                          <p className="mt-1 text-sm text-slate-600">
+                            {t('sales.changeAmount')}: {formatKgs(payment.changeAmount)}
                           </p>
                         ) : null}
                       </div>

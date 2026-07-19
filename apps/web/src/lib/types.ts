@@ -1015,6 +1015,8 @@ export type Payment = {
   customerId: string;
   amount: number;
   method: PaymentMethod;
+  cashReceived?: number | null;
+  changeAmount?: number | null;
   paidAt: string;
   note?: string | null;
   status?: PaymentRecordStatus;

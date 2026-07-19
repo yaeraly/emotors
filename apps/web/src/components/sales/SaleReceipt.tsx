@@ -21,11 +21,6 @@ function activePayments(sale: Sale) {
   return (sale.payments ?? []).filter((payment) => payment.status !== 'VOID');
 }
 
-function primaryPaymentMethod(sale: Sale) {
-  const payments = activePayments(sale);
-  return payments[0]?.method ?? null;
-}
-
 function ReceiptBody({
   sale,
   copyLabel,
@@ -34,8 +29,17 @@ function ReceiptBody({
   copyLabel?: string;
 }) {
   const { t } = useTranslation();
-  const method = primaryPaymentMethod(sale);
+  const payments = activePayments(sale);
   const isInstallment = Boolean(sale.installmentApproval);
+  const cashPayments = payments.filter((payment) => payment.method === 'CASH');
+  const totalCashReceived = cashPayments.reduce(
+    (sum, payment) => sum + Number(payment.cashReceived ?? payment.amount ?? 0),
+    0,
+  );
+  const totalChange = cashPayments.reduce(
+    (sum, payment) => sum + Number(payment.changeAmount ?? 0),
+    0,
+  );
 
   return (
     <div className="sale-receipt-copy">
@@ -90,11 +94,32 @@ function ReceiptBody({
             <strong>{formatKgs(sale.debtAmount)}</strong>
           </p>
         ) : null}
-        {method ? (
-          <p>
-            <span>{t('sales.paymentMethod')}</span>
-            <strong>{formatPaymentMethodLabel(method, t)}</strong>
-          </p>
+        {payments.length > 0 ? (
+          <div className="sale-receipt-payments">
+            <p className="sale-receipt-payments-title">{t('sales.paymentMethod')}:</p>
+            {payments.map((payment) => (
+              <p key={payment.id}>
+                <span>{formatPaymentMethodLabel(payment.method, t)}</span>
+                <strong> — {formatKgs(payment.amount)}</strong>
+              </p>
+            ))}
+            <p>
+              <span>{t('sales.totalPaid')}</span>
+              <strong> — {formatKgs(sale.paidAmount)}</strong>
+            </p>
+            {totalCashReceived > 0 ? (
+              <p>
+                <span>{t('sales.cashReceived')}</span>
+                <strong> — {formatKgs(totalCashReceived)}</strong>
+              </p>
+            ) : null}
+            {totalChange > 0.009 ? (
+              <p>
+                <span>{t('sales.changeAmount')}</span>
+                <strong> — {formatKgs(totalChange)}</strong>
+              </p>
+            ) : null}
+          </div>
         ) : null}
         {isInstallment ? (
           <p>

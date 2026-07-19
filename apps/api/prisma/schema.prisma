@@ -1593,6 +1593,8 @@ model Payment {
   customer    Customer            @relation(fields: [customerId], references: [id])
   amount      Decimal             @db.Decimal(14, 2)
   method      PaymentMethod
+  cashReceived Decimal?           @db.Decimal(14, 2)
+  changeAmount Decimal?           @db.Decimal(14, 2)
   paidAt      DateTime            @default(now())
   note        String?
   status      PaymentRecordStatus @default(ACTIVE)

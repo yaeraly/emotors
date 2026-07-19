@@ -425,6 +425,16 @@ export class SalesService {
         Math.max(totals.totalAmount - paidAmount, 0),
       );
       const paymentStatus = this.getPaymentStatus(totals.totalAmount, paidAmount);
+      const activePayments = await tx.payment.findMany({
+        where: { saleId: sale.id, status: PaymentRecordStatus.ACTIVE },
+        select: {
+          method: true,
+          amount: true,
+          cashReceived: true,
+          changeAmount: true,
+          status: true,
+        },
+      });
       const draftReceiptText = this.buildReceiptText({
         receiptNumber: sale.receiptNumber,
         customerName: customer.fullName,
@@ -437,6 +447,7 @@ export class SalesService {
         debtAmount,
         paymentStatus,
         receiptStatus: 'DRAFT',
+        payments: activePayments,
       });
 
       await tx.saleItem.deleteMany({ where: { saleId: sale.id } });
@@ -638,17 +649,53 @@ export class SalesService {
         throw new BadRequestException('Payment amount must be greater than 0');
       }
 
-      await tx.payment.create({
+      const cashReceived =
+        dto.cashReceived != null ? this.roundMoney(dto.cashReceived) : null;
+      const changeAmount =
+        dto.changeAmount != null ? this.roundMoney(dto.changeAmount) : null;
+
+      if (dto.method === PaymentMethod.CASH && cashReceived != null && cashReceived + 0.009 < amount) {
+        throw new BadRequestException('Полученная сумма наличными меньше суммы оплаты');
+      }
+
+      const existingActivePayments = await tx.payment.count({
+        where: {
+          saleId: sale.id,
+          branchId: sale.branchId,
+          status: PaymentRecordStatus.ACTIVE,
+        },
+      });
+
+      const payment = await tx.payment.create({
         data: {
           branchId: sale.branchId,
           saleId: sale.id,
           customerId: sale.customerId,
           amount,
           method: dto.method,
+          cashReceived: dto.method === PaymentMethod.CASH ? cashReceived : null,
+          changeAmount: dto.method === PaymentMethod.CASH ? changeAmount : null,
           paidAt: dto.paidAt ?? new Date(),
           note: dto.note,
           createdById: user.id,
         },
+      });
+
+      if (existingActivePayments > 0) {
+        await this.auditInTx(tx, user, sale.branchId, 'MIXED_PAYMENT_CREATED', 'Sale', sale.id, {
+          saleId: sale.id,
+          paymentId: payment.id,
+          method: dto.method,
+          amount,
+        });
+      }
+
+      await this.auditInTx(tx, user, sale.branchId, 'PAYMENT_PART_CREATED', 'Payment', payment.id, {
+        saleId: sale.id,
+        method: dto.method,
+        amount,
+        cashReceived,
+        changeAmount,
       });
 
       await this.refreshSalePaymentState(tx, sale.id);
@@ -779,6 +826,7 @@ export class SalesService {
         debtAmount: Number(refreshed.debtAmount),
         paymentStatus: refreshed.paymentStatus,
         receiptStatus: 'FINAL',
+        payments: refreshed.payments,
       });
 
       await tx.sale.update({
@@ -1270,6 +1318,7 @@ export class SalesService {
     action: string,
     entity: string,
     entityId: string,
+    metadata: Record<string, unknown> = {},
   ) {
     return tx.auditLog.create({
       data: {
@@ -1281,6 +1330,7 @@ export class SalesService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
+          ...metadata,
         },
       },
     });
@@ -1389,6 +1439,13 @@ export class SalesService {
     debtAmount: number;
     paymentStatus: PaymentStatus;
     receiptStatus: 'DRAFT' | 'FINAL';
+    payments?: Array<{
+      method: PaymentMethod;
+      amount: number | Prisma.Decimal;
+      cashReceived?: number | Prisma.Decimal | null;
+      changeAmount?: number | Prisma.Decimal | null;
+      status?: PaymentRecordStatus;
+    }>;
   }) {
     const itemLines = input.items
       .map((item) => {
@@ -1399,6 +1456,37 @@ export class SalesService {
         return `- ${item.productName} x ${item.quantity}: ${total.toFixed(2)} KGS`;
       })
       .join('\n');
+
+    const activePayments = (input.payments ?? []).filter(
+      (payment) => payment.status !== PaymentRecordStatus.VOID,
+    );
+    const paymentLines =
+      activePayments.length > 0
+        ? [
+            'Payment methods:',
+            ...activePayments.map(
+              (payment) =>
+                `- ${payment.method}: ${Number(payment.amount).toFixed(2)} KGS`,
+            ),
+            `Total paid: ${input.paidAmount.toFixed(2)} KGS`,
+            ...activePayments
+              .filter((payment) => payment.method === PaymentMethod.CASH)
+              .flatMap((payment) => {
+                const lines: string[] = [];
+                if (payment.cashReceived != null) {
+                  lines.push(
+                    `Cash received: ${Number(payment.cashReceived).toFixed(2)} KGS`,
+                  );
+                }
+                if (payment.changeAmount != null && Number(payment.changeAmount) > 0) {
+                  lines.push(
+                    `Change: ${Number(payment.changeAmount).toFixed(2)} KGS`,
+                  );
+                }
+                return lines;
+              }),
+          ]
+        : [];
 
     return [
       `EMOTORS ${input.receiptStatus} RECEIPT`,
@@ -1413,6 +1501,7 @@ export class SalesService {
       `Total: ${input.totalAmount.toFixed(2)} KGS`,
       `Paid: ${input.paidAmount.toFixed(2)} KGS`,
       `Debt: ${input.debtAmount.toFixed(2)} KGS`,
+      ...paymentLines,
       `Status: ${input.paymentStatus}`,
     ].join('\n');
   }
@@ -1436,6 +1525,10 @@ export class SalesService {
       payments: sale.payments?.map((payment: any) => ({
         ...payment,
         amount: Number(payment.amount),
+        cashReceived:
+          payment.cashReceived != null ? Number(payment.cashReceived) : null,
+        changeAmount:
+          payment.changeAmount != null ? Number(payment.changeAmount) : null,
       })),
       installments: sale.installments?.map((installment: any) => ({
         ...installment,
