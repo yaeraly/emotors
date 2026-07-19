@@ -6,7 +6,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { SaleCustomerSearch, type SaleCustomerOption } from '@/components/SaleCustomerSearch';
 import { SaleProductSearch, type SaleProductOption } from '@/components/SaleProductSearch';
 import { apiFetch } from '@/lib/api';
-import { canApproveSale, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canApproveSale, canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser } from '@/lib/rbac';
+import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
   draftLooksLikeInstallment,
   installmentBlocksCompletion,
@@ -14,6 +15,7 @@ import {
   saleIsInstallment,
 } from '@/lib/sale-installment';
 import type {
+  Customer,
   PaymentMethod,
   Sale,
   User,
@@ -28,6 +30,10 @@ type SaleItemForm = {
   unit: string;
   quantity: string;
   listPrice: number;
+  minimumPrice: number;
+  recommendedPrice: number;
+  maximumPrice: number | null;
+  hasMaximumPrice: boolean;
   discountPercent: string;
   unitPrice: string;
   unitCost: string;
@@ -36,6 +42,8 @@ type SaleItemForm = {
   priceAboveRecommendedReasonCode: string;
   priceAboveRecommendedComment: string;
 };
+
+type PaymentType = 'FULL_PAYMENT' | 'INSTALLMENT';
 
 const PRICE_ABOVE_REASONS = [
   'HIGH_TRANSPORTATION_COST',
@@ -55,6 +63,8 @@ const paymentMethods: PaymentMethod[] = [
   'BALANCE',
 ];
 
+const branchSalesPaymentMethods: PaymentMethod[] = ['CASH', 'CARD', 'BANK_TRANSFER'];
+
 type PaymentRow = {
   amount: string;
   method: PaymentMethod;
@@ -69,6 +79,12 @@ function priceFromDiscount(listPrice: number, discountPercent: number) {
   return roundMoney(listPrice * (1 - discountPercent / 100));
 }
 
+function paymentMethodLabel(method: PaymentMethod, t: (key: string) => string) {
+  const key = `sales.paymentMethods.${method}`;
+  const label = t(key);
+  return label === key ? method : label;
+}
+
 export default function NewSalePage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -77,9 +93,14 @@ export default function NewSalePage() {
   const [selectedCustomer, setSelectedCustomer] = useState<SaleCustomerOption | null>(null);
   const [includeArchivedCustomers, setIncludeArchivedCustomers] = useState(false);
   const [items, setItems] = useState<SaleItemForm[]>([]);
+  const [paymentType, setPaymentType] = useState<PaymentType>('FULL_PAYMENT');
   const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([
     { amount: '0', method: 'CASH', note: '' },
   ]);
+  const [cashReceived, setCashReceived] = useState('');
+  const [showCreateCustomer, setShowCreateCustomer] = useState(false);
+  const [createCustomerForm, setCreateCustomerForm] = useState({ fullName: '', phone: '', whatsappPhone: '' });
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [draftSale, setDraftSale] = useState<Sale | null>(null);
   const [paymentsSynced, setPaymentsSynced] = useState(false);
   const [installmentDays, setInstallmentDays] = useState('');
@@ -92,6 +113,8 @@ export default function NewSalePage() {
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const canApprove = canApproveSale(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
+  const canCreateCustomerAction = canCreateCustomer(user);
+  const visiblePaymentMethods = branchSalesManagerView ? branchSalesPaymentMethods : paymentMethods;
 
   useEffect(() => {
     apiFetch<User>('/auth/me')
@@ -118,12 +141,49 @@ export default function NewSalePage() {
     return { totalAmount, totalCost, profit, paid, debt };
   }, [items, paymentRows]);
 
+  useEffect(() => {
+    if (paymentType !== 'FULL_PAYMENT' || paymentRows.length !== 1) return;
+    const total = totals.totalAmount;
+    if (total <= 0) return;
+    const current = Number(paymentRows[0]?.amount || 0);
+    if (Math.abs(current - total) > 0.009) {
+      setPaymentRows([{ ...paymentRows[0], amount: String(total) }]);
+      setPaymentsSynced(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentType, totals.totalAmount, paymentRows.length]);
+
   const isInstallmentDraft = useMemo(
-    () => draftLooksLikeInstallment(totals.debt, installmentDays, dueDate),
-    [totals.debt, installmentDays, dueDate],
+    () =>
+      paymentType === 'INSTALLMENT' &&
+      draftLooksLikeInstallment(totals.debt, installmentDays, dueDate),
+    [paymentType, totals.debt, installmentDays, dueDate],
   );
 
-  const isInstallmentSale = saleIsInstallment(draftSale) || isInstallmentDraft;
+  const linePriceStates = useMemo(
+    () =>
+      items.map((item) =>
+        evaluateSaleLinePrice({
+          unitPrice: Number(item.unitPrice || 0),
+          minimumPrice: item.minimumPrice,
+          recommendedPrice: item.recommendedPrice,
+          maximumPrice: item.maximumPrice,
+          hasMaximumPrice: item.hasMaximumPrice,
+        }),
+      ),
+    [items],
+  );
+
+  const hasBlockingPriceError = linePriceStates.some((state) => state.level === 'error');
+  const cashChange = useMemo(() => {
+    if (paymentType !== 'FULL_PAYMENT') return 0;
+    const received = Number(cashReceived || 0);
+    if (!received) return 0;
+    return roundMoney(Math.max(received - totals.totalAmount, 0));
+  }, [cashReceived, paymentType, totals.totalAmount]);
+
+  const isInstallmentSale =
+    paymentType === 'INSTALLMENT' && (saleIsInstallment(draftSale) || isInstallmentDraft);
   const installmentApproval = draftSale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
   const installmentPending = installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
@@ -131,9 +191,14 @@ export default function NewSalePage() {
   const installmentRejected = installmentApproval?.status === 'REJECTED';
   const canFinalize =
     Boolean(draftSale) &&
+    Boolean(selectedCustomer) &&
+    items.length > 0 &&
+    !hasBlockingPriceError &&
     draftSale?.status !== 'FINALIZED' &&
     draftSale?.status !== 'CANCELLED' &&
-    (!isInstallmentSale || installmentApproved);
+    (paymentType === 'FULL_PAYMENT'
+      ? totals.totalAmount > 0 && totals.debt <= 0.009
+      : installmentApproved);
 
   function handleCustomerSelect(customer: SaleCustomerOption) {
     setSelectedCustomer(customer);
@@ -141,14 +206,26 @@ export default function NewSalePage() {
   }
 
   function handleProductSelect(product: SaleProductOption) {
-    if (items.some((item) => item.productId === product.id)) {
-      setError(t('sales.productSearch.alreadyAdded'));
-      return;
-    }
-
     const recommendedPrice = product.recommendedRetailPriceKgs ?? product.sellingPriceKgs;
     if (branchSalesManagerView && (product.hasRecommendedPrice === false || recommendedPrice <= 0)) {
       setError(t('sales.noRecommendedPrice'));
+      return;
+    }
+
+    const minimumPrice =
+      product.minimumRetailPriceKgs ?? product.minimumSellingPriceKgs ?? recommendedPrice;
+    const maximumPrice = product.maximumRetailPriceKgs ?? null;
+
+    const existingIndex = items.findIndex((item) => item.productId === product.id);
+    if (existingIndex >= 0) {
+      const existing = items[existingIndex];
+      const nextQuantity = Number(existing.quantity || 0) + 1;
+      if (nextQuantity > product.availableQty) {
+        setError(`${t('sales.insufficientStockDetail')} ${product.availableQty}.`);
+        return;
+      }
+      updateItem(existingIndex, { quantity: String(nextQuantity) });
+      setError('');
       return;
     }
 
@@ -161,6 +238,10 @@ export default function NewSalePage() {
         unit: product.unit,
         quantity: '1',
         listPrice: recommendedPrice,
+        minimumPrice,
+        recommendedPrice,
+        maximumPrice,
+        hasMaximumPrice: Boolean(product.hasMaximumRetailPrice && maximumPrice),
         discountPercent: '0',
         unitPrice: String(recommendedPrice),
         unitCost: '0',
@@ -273,7 +354,7 @@ export default function NewSalePage() {
     for (const [index, item] of items.entries()) {
       const quantity = Number(item.quantity || 0);
       if (quantity > item.availableQty) {
-        setError(`${t('sales.productSearch.insufficientStock')} ${item.availableQty}`);
+        setError(`${t('sales.insufficientStockDetail')} ${item.availableQty}.`);
         return null;
       }
       const discount = Number(item.discountPercent || 0);
@@ -301,11 +382,25 @@ export default function NewSalePage() {
       }
     }
 
+    if (paymentType === 'FULL_PAYMENT' && totals.debt > 0.009) {
+      setError(t('sales.fullPaymentRequired'));
+      return null;
+    }
+
+    if (hasBlockingPriceError) {
+      setError(t('sales.priceOutOfRangeBlocked'));
+      return null;
+    }
+
     return {
       customerId: selectedCustomer.id,
       items: validItems,
-      installmentDays: installmentDays ? Number(installmentDays) : undefined,
-      dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+      ...(paymentType === 'INSTALLMENT'
+        ? {
+            installmentDays: installmentDays ? Number(installmentDays) : undefined,
+            dueDate: dueDate ? new Date(dueDate).toISOString() : undefined,
+          }
+        : {}),
       notes: notes.trim() || undefined,
     };
   }
@@ -327,7 +422,15 @@ export default function NewSalePage() {
       );
 
       if (!paymentsSynced) {
-        for (const row of paymentRows) {
+        const paymentPayloads =
+          paymentType === 'FULL_PAYMENT' &&
+          paymentRows.length === 1 &&
+          paymentRows[0]?.method === 'CASH' &&
+          Number(cashReceived || 0) >= totals.totalAmount
+            ? [{ ...paymentRows[0], amount: String(totals.totalAmount) }]
+            : paymentRows;
+
+        for (const row of paymentPayloads) {
           const amount = Number(row.amount || 0);
           if (amount > 0) {
             sale = await apiFetch<Sale>(`/sales/${sale.id}/payments`, {
@@ -416,6 +519,64 @@ export default function NewSalePage() {
     }
   }
 
+  async function createCustomer() {
+    if (!createCustomerForm.fullName.trim() || !createCustomerForm.phone.trim()) {
+      setError(t('sales.createCustomerRequired'));
+      return;
+    }
+
+    setCreatingCustomer(true);
+    setError('');
+    try {
+      const customer = await apiFetch<Customer>('/customers', {
+        method: 'POST',
+        body: JSON.stringify({
+          fullName: createCustomerForm.fullName.trim(),
+          phone: createCustomerForm.phone.trim(),
+          whatsappPhone: createCustomerForm.whatsappPhone.trim() || undefined,
+          status: 'ACTIVE',
+        }),
+      });
+      setSelectedCustomer({
+        id: customer.id,
+        fullName: customer.fullName,
+        phone: customer.phone,
+        whatsappPhone: customer.whatsappPhone,
+        status: customer.status,
+        totalDebtAmount: Number(customer.totalDebtAmount ?? 0),
+        hasOverdueInstallment: false,
+      });
+      setShowCreateCustomer(false);
+      setCreateCustomerForm({ fullName: '', phone: '', whatsappPhone: '' });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setCreatingCustomer(false);
+    }
+  }
+
+  function priceWarningMessage(state: ReturnType<typeof evaluateSaleLinePrice>) {
+    if (state.level === 'ok') return t('sales.priceAtRecommended');
+    if (state.kind === 'below-recommended') {
+      return t('sales.priceBelowRecommendedWarning')
+        .replace('{difference}', state.difference.toLocaleString('ru-RU'))
+        .replace('{minimumPrice}', state.boundary.toLocaleString('ru-RU'));
+    }
+    if (state.kind === 'above-recommended') {
+      return t('sales.priceAboveRecommendedRangeWarning')
+        .replace('{difference}', state.difference.toLocaleString('ru-RU'))
+        .replace('{maximumPrice}', state.boundary.toLocaleString('ru-RU'));
+    }
+    if (state.kind === 'below-minimum') {
+      return t('sales.priceBelowMinimumError')
+        .replace('{difference}', state.difference.toLocaleString('ru-RU'))
+        .replace('{minimumPrice}', state.boundary.toLocaleString('ru-RU'));
+    }
+    return t('sales.priceAboveMaximumError')
+      .replace('{difference}', state.difference.toLocaleString('ru-RU'))
+      .replace('{maximumPrice}', state.boundary.toLocaleString('ru-RU'));
+  }
+
   async function finalizeSale() {
     if (!draftSale) {
       setError(t('sales.saveDraftFirst'));
@@ -427,7 +588,23 @@ export default function NewSalePage() {
       return;
     }
 
-    if (installmentBlocksCompletion(draftSale) || (isInstallmentDraft && !installmentApproved)) {
+    if (paymentType === 'FULL_PAYMENT' && totals.debt > 0.009) {
+      setError(t('sales.fullPaymentRequired'));
+      return;
+    }
+
+    if (
+      paymentType === 'FULL_PAYMENT' &&
+      paymentRows.length === 1 &&
+      paymentRows[0]?.method === 'CASH' &&
+      Number(cashReceived || 0) > 0 &&
+      Number(cashReceived) + 0.009 < totals.totalAmount
+    ) {
+      setError(t('sales.cashReceivedTooLow'));
+      return;
+    }
+
+    if (installmentBlocksCompletion(draftSale) || (isInstallmentSale && !installmentApproved)) {
       setError(t('sales.installmentRequiresCeoApproval'));
       return;
     }
@@ -488,7 +665,18 @@ export default function NewSalePage() {
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-slate-950">{t('sales.customer')}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-lg font-bold text-slate-950">{t('sales.customer')}</h3>
+                {canCreateCustomerAction && !selectedCustomer ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateCustomer(true)}
+                    className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                  >
+                    {t('sales.createCustomer')}
+                  </button>
+                ) : null}
+              </div>
               <div className="mt-4">
                 <SaleCustomerSearch
                   disabled={!!selectedCustomer}
@@ -541,6 +729,49 @@ export default function NewSalePage() {
               </div>
             ) : null}
           </div>
+          {showCreateCustomer ? (
+            <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <h4 className="font-bold text-slate-900">{t('sales.createCustomer')}</h4>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <SaleInput
+                  label={t('crm.fullName')}
+                  value={createCustomerForm.fullName}
+                  onChange={(value) => setCreateCustomerForm((current) => ({ ...current, fullName: value }))}
+                  required
+                />
+                <SaleInput
+                  label={t('crm.phone')}
+                  value={createCustomerForm.phone}
+                  onChange={(value) => setCreateCustomerForm((current) => ({ ...current, phone: value }))}
+                  required
+                />
+                <SaleInput
+                  label={t('crm.whatsappPhone')}
+                  value={createCustomerForm.whatsappPhone}
+                  onChange={(value) =>
+                    setCreateCustomerForm((current) => ({ ...current, whatsappPhone: value }))
+                  }
+                />
+              </div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  disabled={creatingCustomer}
+                  onClick={() => void createCustomer()}
+                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {creatingCustomer ? t('common.loading') : t('common.save')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateCustomer(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-white"
+                >
+                  {t('common.cancel')}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -565,11 +796,12 @@ export default function NewSalePage() {
                 const itemTotal =
                   Number(item.quantity || 0) * Number(item.unitPrice || 0);
                 const quantityError = Number(item.quantity || 0) > item.availableQty;
+                const priceState = linePriceStates[index];
 
                 return (
                   <div
                     key={`${item.productId}-${index}`}
-                    className="grid gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-8"
+                    className="grid gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-12"
                   >
                     <div className="lg:col-span-2">
                       <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.product')}</p>
@@ -587,9 +819,39 @@ export default function NewSalePage() {
                       value={item.quantity}
                       onChange={(value) => updateItem(index, { quantity: value })}
                       required
-                      error={quantityError ? `${t('sales.productSearch.insufficientStock')} ${item.availableQty}` : undefined}
+                      error={
+                        quantityError
+                          ? `${t('sales.insufficientStockDetail')} ${item.availableQty}.`
+                          : undefined
+                      }
                     />
-                    {item.maxDiscountPercent > 0 ? (
+                    <div className="text-sm">
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {t('pricing.minimumSellingPrice')}
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700">
+                        {formatKgs(item.minimumPrice)}
+                      </p>
+                    </div>
+                    <div className="text-sm">
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {t('pricing.recommendedRetailPrice')}
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700">
+                        {formatKgs(item.recommendedPrice)}
+                      </p>
+                    </div>
+                    <div className="text-sm">
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {t('sales.maximumPrice')}
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-700">
+                        {item.hasMaximumPrice && item.maximumPrice
+                          ? formatKgs(item.maximumPrice)
+                          : '—'}
+                      </p>
+                    </div>
+                    {item.maxDiscountPercent > 0 && !branchSalesManagerView ? (
                       <SaleInput
                         label={t('sales.discountPercent')}
                         type="number"
@@ -598,18 +860,29 @@ export default function NewSalePage() {
                       />
                     ) : null}
                     <SaleInput
-                      label={
-                        branchSalesManagerView
-                          ? t('pricing.recommendedRetailPrice')
-                          : t('sales.unitPrice')
-                      }
+                      label={t('sales.unitPrice')}
                       type="number"
                       value={item.unitPrice}
                       onChange={(value) => updateItem(index, { unitPrice: value })}
                       required
                       readOnly={branchSalesManagerView}
                     />
-                    {Number(item.unitPrice) > item.listPrice + 0.01 ? (
+                    {priceState && priceState.level !== 'ok' ? (
+                      <div
+                        className={`lg:col-span-3 rounded-xl p-3 text-sm font-semibold ${
+                          priceState.level === 'error'
+                            ? 'border border-red-200 bg-red-50 text-red-700'
+                            : 'border border-amber-200 bg-amber-50 text-amber-800'
+                        }`}
+                      >
+                        {priceWarningMessage(priceState)}
+                      </div>
+                    ) : priceState?.level === 'ok' ? (
+                      <div className="lg:col-span-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+                        {priceWarningMessage(priceState)}
+                      </div>
+                    ) : null}
+                    {Number(item.unitPrice) > item.recommendedPrice + 0.01 ? (
                       <div className="lg:col-span-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
                         <p className="text-sm font-semibold text-amber-800">
                           {t('sales.priceAboveRecommendedWarning')}
@@ -665,7 +938,25 @@ export default function NewSalePage() {
 
         <div className="grid gap-6 xl:grid-cols-2">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">{t('sales.payments')}</h3>
+            <h3 className="text-lg font-bold text-slate-950">{t('sales.paymentSection')}</h3>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('sales.paymentType')}</span>
+                <select
+                  value={paymentType}
+                  onChange={(event) => {
+                    setPaymentType(event.target.value as PaymentType);
+                    setPaymentsSynced(false);
+                  }}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                >
+                  <option value="FULL_PAYMENT">{t('sales.fullPayment')}</option>
+                  <option value="INSTALLMENT">{t('sales.installment')}</option>
+                </select>
+              </label>
+            </div>
+
+            {paymentType === 'FULL_PAYMENT' ? (
             <div className="mt-4 space-y-3">
               {paymentRows.map((row, index) => (
                 <div key={index} className="grid gap-3 rounded-2xl bg-slate-50 p-3 md:grid-cols-4">
@@ -688,9 +979,9 @@ export default function NewSalePage() {
                       }
                       className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
                     >
-                      {paymentMethods.map((method) => (
+                      {visiblePaymentMethods.map((method) => (
                         <option key={method} value={method}>
-                          {method}
+                          {paymentMethodLabel(method, t)}
                         </option>
                       ))}
                     </select>
@@ -710,6 +1001,23 @@ export default function NewSalePage() {
                   </button>
                 </div>
               ))}
+              {paymentRows.length === 1 && paymentRows[0]?.method === 'CASH' ? (
+                <div className="grid gap-3 rounded-2xl border border-green-100 bg-green-50 p-3 md:grid-cols-2">
+                  <SaleInput
+                    label={t('sales.cashReceived')}
+                    type="number"
+                    value={cashReceived}
+                    onChange={(value) => {
+                      setCashReceived(value);
+                      setPaymentsSynced(false);
+                    }}
+                  />
+                  <div className="rounded-xl bg-white p-3 text-sm">
+                    <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.changeAmount')}</p>
+                    <p className="mt-1 text-lg font-bold text-green-700">{formatKgs(cashChange)}</p>
+                  </div>
+                </div>
+              ) : null}
               <button
                 onClick={addPaymentRow}
                 type="button"
@@ -717,9 +1025,20 @@ export default function NewSalePage() {
               >
                 {t('sales.addPayment')}
               </button>
+              {totals.debt > 0.009 ? (
+                <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+                  {t('sales.fullPaymentRequired')}
+                </p>
+              ) : null}
             </div>
+            ) : (
+              <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                {t('sales.installmentSectionHint')}
+              </p>
+            )}
           </section>
 
+          {paymentType === 'INSTALLMENT' ? (
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-lg font-bold text-slate-950">{t('sales.installment')}</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -761,6 +1080,7 @@ export default function NewSalePage() {
               </p>
             ) : null}
           </section>
+          ) : null}
         </div>
 
         <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
@@ -805,7 +1125,7 @@ export default function NewSalePage() {
                   {t('sales.markApproved')}
                 </button>
               ) : null}
-              {canSubmitInstallment && isInstallmentSale ? (
+              {canSubmitInstallment && paymentType === 'INSTALLMENT' && isInstallmentSale ? (
                 <button
                   onClick={() => void submitInstallmentRequest()}
                   disabled={submittingInstallment || installmentPending || installmentApproved}

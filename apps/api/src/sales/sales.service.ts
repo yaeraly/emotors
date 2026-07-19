@@ -299,6 +299,14 @@ export class SalesService {
           branchId,
           balance.product.id,
         );
+        const minimumRetailPriceKgs = await this.resolveRetailMinimumPrice(
+          branchId,
+          balance.product.id,
+        );
+        const maximumRetailPriceKgs = await this.resolveRetailMaximumPrice(
+          branchId,
+          balance.product.id,
+        );
         const sellingPriceKgs = recommendedRetailPriceKgs ?? 0;
 
         return {
@@ -312,7 +320,12 @@ export class SalesService {
           sellingPriceKgs,
           recommendedRetailPriceKgs,
           hasRecommendedPrice: recommendedRetailPriceKgs !== null,
-          minimumSellingPriceKgs: Number(balance.product.minimumSellingPriceKgs || 0),
+          minimumRetailPriceKgs,
+          maximumRetailPriceKgs,
+          hasMaximumRetailPrice: maximumRetailPriceKgs !== null,
+          minimumSellingPriceKgs:
+            minimumRetailPriceKgs ??
+            Number(balance.product.minimumSellingPriceKgs || 0),
           maximumDiscountPercent: Number(balance.product.maximumDiscountPercent || 0),
           enableMaximumRetailPrice: Boolean(balance.product.enableMaximumRetailPrice),
         };
@@ -328,6 +341,30 @@ export class SalesService {
     try {
       const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
         priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+      });
+      const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveRetailMinimumPrice(branchId: string, productId: string) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: PricingEnginePriceType.RETAIL_MINIMUM,
+      });
+      const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveRetailMaximumPrice(branchId: string, productId: string) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: PricingEnginePriceType.RETAIL_MAXIMUM,
       });
       const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
       return price > 0 ? price : null;
@@ -663,6 +700,29 @@ export class SalesService {
         );
       } else if (!isFullPayment) {
         throw new BadRequestException('Укажите условия рассрочки или полную оплату');
+      } else {
+        if (Number(refreshedSale.debtAmount) > 0.009) {
+          throw new BadRequestException(
+            'Для полной оплаты сумма платежа должна покрывать стоимость продажи',
+          );
+        }
+        if (Number(refreshedSale.paidAmount) + 0.009 < Number(refreshedSale.totalAmount)) {
+          throw new BadRequestException('Недостаточная сумма оплаты для завершения продажи');
+        }
+
+        const finalizeItems = refreshedSale.items.map((item) => ({
+          productId: item.productId ?? undefined,
+          productName: item.productName,
+          productSku: item.productSku ?? undefined,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          unitCost: Number(item.unitCost),
+          priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? undefined,
+          priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? undefined,
+        }));
+
+        await this.validateSaleStock(user, refreshedSale.branchId, finalizeItems);
+        await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems);
       }
 
       const refreshed = await tx.sale.findUniqueOrThrow({
@@ -739,7 +799,13 @@ export class SalesService {
     });
 
     const finalized = await this.findOne(user, id);
-    await this.audit(user, finalized.branchId, 'SALE_CREATED', 'Sale', id);
+    const isFullPayment = this.saleInstallmentApprovalService.saleIsFullPayment(finalized);
+    await this.audit(user, finalized.branchId, 'SALE_FINALIZED', 'Sale', id, {
+      paymentStatus: finalized.paymentStatus,
+      totalAmount: finalized.totalAmount,
+      paidAmount: finalized.paidAmount,
+      isFullPayment,
+    });
     return finalized;
   }
 
@@ -1459,7 +1525,14 @@ export class SalesService {
     }
   }
 
-  private audit(user: AuthUser, branchId: string, action: string, entity: string, entityId: string) {
+  private audit(
+    user: AuthUser,
+    branchId: string,
+    action: string,
+    entity: string,
+    entityId: string,
+    metadata: Record<string, unknown> = {},
+  ) {
     return this.prisma.auditLog.create({
       data: {
         userId: user.id,
@@ -1470,6 +1543,7 @@ export class SalesService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
+          ...metadata,
         },
       },
     });

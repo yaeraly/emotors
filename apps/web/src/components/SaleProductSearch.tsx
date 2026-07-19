@@ -16,6 +16,9 @@ export type SaleProductOption = {
   sellingPriceKgs: number;
   recommendedRetailPriceKgs?: number | null;
   hasRecommendedPrice?: boolean;
+  minimumRetailPriceKgs?: number | null;
+  maximumRetailPriceKgs?: number | null;
+  hasMaximumRetailPrice?: boolean;
   minimumSellingPriceKgs: number;
   maximumDiscountPercent: number;
 };
