@@ -7,7 +7,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canApproveInventoryCount, canDeleteInventoryCount, canManageInventoryCountForWarehouse, isBranchOwnerUser, isBranchWarehouseOperator } from '@/lib/rbac';
+import { canApproveInventoryCountForWarehouse, canDeleteInventoryCount, canManageInventoryCountForWarehouse, isBranchOwnerUser, isBranchWarehouseOperator } from '@/lib/rbac';
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
@@ -47,7 +47,7 @@ export default function InventoryCountDetailPage() {
   const barcodeRef = useRef<HTMLInputElement>(null);
 
   const canManage = canManageInventoryCountForWarehouse(currentUser, session?.warehouseId);
-  const canApprove = canApproveInventoryCount(currentUser);
+  const canApprove = canApproveInventoryCountForWarehouse(currentUser, session?.warehouse ?? null);
   const canDelete = canDeleteInventoryCount(currentUser);
   const branchScopedView =
     currentUser &&
@@ -318,7 +318,9 @@ export default function InventoryCountDetailPage() {
                 onClick={() => void submitInventory()}
                 className="rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white"
               >
-                {t('inventoryCount.submit')}
+                {isBranchWarehouseOperator(currentUser)
+                  ? t('inventoryCount.submitToBranchCeo')
+                  : t('inventoryCount.submit')}
               </button>
             ) : null}
             {isSubmitted && canApprove ? (
@@ -346,6 +348,10 @@ export default function InventoryCountDetailPage() {
             ) : null}
           </div>
         </div>
+
+        {isCounting && canManage && isBranchWarehouseOperator(currentUser) ? (
+          <p className="text-sm text-slate-500">{t('inventoryCount.submitToBranchCeoHint')}</p>
+        ) : null}
 
         <DeleteConfirmModal
           open={deleteModalOpen}

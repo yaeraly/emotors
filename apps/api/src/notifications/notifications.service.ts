@@ -19,6 +19,12 @@ import { NotificationQueryDto } from './dto/notification-query.dto';
 
 type PrismaTx = Prisma.TransactionClient;
 
+const INVENTORY_ALERT_TYPES: AlertType[] = [
+  AlertType.INVENTORY_SUBMITTED,
+  AlertType.INVENTORY_APPROVED,
+  AlertType.INVENTORY_REJECTED,
+];
+
 export type NotifyInput = {
   type: AlertType;
   branchId?: string | null;
@@ -154,6 +160,22 @@ export class NotificationsService {
     };
 
     if (isExecutive) {
+      if (!user.branchId) {
+        return {
+          AND: [
+            filters,
+            {
+              OR: [
+                { type: { notIn: INVENTORY_ALERT_TYPES } },
+                {
+                  type: { in: INVENTORY_ALERT_TYPES },
+                  branchId: null,
+                },
+              ],
+            },
+          ],
+        };
+      }
       return filters;
     }
 

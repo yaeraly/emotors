@@ -1036,7 +1036,21 @@ export function canManageInventoryCount(user: Pick<User, 'role' | 'roles' | 'per
 }
 
 export function canApproveInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
-  return hasFullAccess(user) || (hasAnyRole(user, ['FRANCHISE_OWNER', 'MANAGER']) && !!user?.branchId);
+  return hasFullAccess(user) || isBranchOwnerUser(user);
+}
+
+export function canApproveInventoryCountForWarehouse(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+  warehouse?: { warehouseType?: string; branchId?: string | null } | null,
+) {
+  if (!user || !warehouse) return false;
+  if (isBranchOwnerUser(user)) {
+    return warehouse.warehouseType === 'BRANCH' && warehouse.branchId === user.branchId;
+  }
+  if (hasFullAccess(user) && !user.branchId) {
+    return warehouse.warehouseType !== 'BRANCH';
+  }
+  return false;
 }
 
 export function canManageProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

@@ -6,7 +6,7 @@ export type NotificationRouting = {
 };
 
 export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting>> = {
-  INVENTORY_SUBMITTED: { module: NotificationModule.INVENTORY, roles: [Role.CEO, Role.OWNER, Role.FRANCHISE_OWNER] },
+  INVENTORY_SUBMITTED: { module: NotificationModule.INVENTORY, roles: [Role.FRANCHISE_OWNER, Role.CEO, Role.OWNER] },
   INVENTORY_APPROVED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR] },
   INVENTORY_REJECTED: { module: NotificationModule.INVENTORY, roles: [Role.WAREHOUSE_MANAGER, Role.WAREHOUSE_OPERATOR] },
   BRANCH_ORDER_SUBMITTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER, Role.SUPPLY_CHAIN_MANAGER] },

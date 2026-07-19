@@ -110,13 +110,13 @@ export class InventoryCountController {
   }
 
   @Post('sessions/:id/approve')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.approve(user, id);
   }
 
   @Post('sessions/:id/reject')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
   reject(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

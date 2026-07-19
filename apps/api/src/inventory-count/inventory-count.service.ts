@@ -7,6 +7,7 @@ import {
 import {
   InventoryCountStatus,
   InventoryCountType,
+  AlertStatus,
   AlertType,
   Prisma,
   Role,
@@ -37,6 +38,13 @@ import {
   sanitizeInventoryCountSearchResultForUser,
   sanitizeInventoryCountSessionForUser,
 } from './inventory-count.presenter';
+import {
+  canUserApproveInventoryForWarehouse,
+  isHqInventoryExecutive,
+  resolveInventoryApprovalScope,
+  resolveInventoryApproverRoles,
+  resolveInventoryCountingFeedbackRoles,
+} from './inventory-count-approver.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -405,24 +413,42 @@ export class InventoryCountService {
         include: this.sessionInclude(),
       });
 
+      const summary = this.buildSummary(updated);
+      const scope = resolveInventoryApprovalScope(session.warehouse);
+      const approverRoles = resolveInventoryApproverRoles(session.warehouse);
+      await this.assertInventoryApproversExist(tx, session.warehouse);
+      await this.archiveMisroutedInventorySubmissionAlerts(tx, id, scope);
+
       await this.audit(tx, user, this.inventorySubmittedAction(session.warehouse), id, {
         warehouseId: session.warehouseId,
         branchId: session.warehouse.branchId ?? undefined,
-        newValue: this.buildSummary(updated),
+        newValue: {
+          ...this.buildSummary(updated),
+          inventoryScope: scope,
+          requiredApproverRole: approverRoles[0],
+        },
       });
-      const summary = this.buildSummary(updated);
+      await this.audit(tx, user, scope === 'BRANCH' ? 'BRANCH_INVENTORY_SUBMITTED_TO_BRANCH_CEO' : 'HQ_INVENTORY_SUBMITTED_TO_HQ_CEO', id, {
+        warehouseId: session.warehouseId,
+        branchId: session.warehouse.branchId ?? undefined,
+        newValue: {
+          inventoryScope: scope,
+          requiredApproverRoles: approverRoles,
+        },
+      });
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.INVENTORY_SUBMITTED,
-        branchId: session.warehouse.branchId ?? undefined,
+        branchId: scope === 'BRANCH' ? session.warehouse.branchId ?? undefined : null,
         entityType: 'InventoryCountSession',
         entityId: id,
         referenceNumber: updated.sessionNumber,
-        title: isBranchWarehouse(session.warehouse)
-          ? 'Инвентаризация филиала ожидает проверки'
-          : undefined,
-        message: isBranchWarehouse(session.warehouse)
-          ? `Филиал ${session.warehouse.name}: инвентаризация ${updated.sessionNumber} ожидает проверки BR_CEO. Расхождений: ${summary.shortages + summary.overages}, сумма: ${summary.totalDifferenceValueKgs} KGS.`
-          : `Warehouse Manager submitted inventory ${updated.sessionNumber} for approval.`,
+        recipientRoles: approverRoles,
+        title: scope === 'BRANCH'
+          ? 'Инвентаризация филиала ожидает утверждения'
+          : 'Инвентаризация HQ ожидает утверждения',
+        message: scope === 'BRANCH'
+          ? `Инвентаризация ${updated.sessionNumber} отправлена CEO филиала на утверждение. Расхождений: ${summary.shortages + summary.overages}.`
+          : `Инвентаризация ${updated.sessionNumber} отправлена HQ CEO на утверждение.`,
       });
       return this.toSessionResponse(user, updated);
     });
@@ -520,14 +546,15 @@ export class InventoryCountService {
       });
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.INVENTORY_APPROVED,
-        branchId: session.warehouse.branchId ?? undefined,
+        branchId: isBranchWarehouse(session.warehouse) ? session.warehouse.branchId ?? undefined : null,
         entityType: 'InventoryCountSession',
         entityId: id,
         referenceNumber: updated.sessionNumber,
+        recipientRoles: resolveInventoryCountingFeedbackRoles(session.warehouse),
         title: isBranchWarehouse(session.warehouse) ? 'Инвентаризация утверждена' : undefined,
         message: isBranchWarehouse(session.warehouse)
-          ? `Инвентаризация ${updated.sessionNumber} утверждена BR_CEO.`
-          : `Inventory ${updated.sessionNumber} was approved.`,
+          ? `Инвентаризация ${updated.sessionNumber} утверждена CEO филиала.`
+          : `Inventory ${updated.sessionNumber} was approved by HQ CEO.`,
       });
       return this.toSessionResponse(user, updated);
     });
@@ -572,13 +599,14 @@ export class InventoryCountService {
       });
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.INVENTORY_REJECTED,
-        branchId: session.warehouse.branchId ?? undefined,
+        branchId: isBranchWarehouse(session.warehouse) ? session.warehouse.branchId ?? undefined : null,
         entityType: 'InventoryCountSession',
         entityId: id,
         referenceNumber: updated.sessionNumber,
+        recipientRoles: resolveInventoryCountingFeedbackRoles(session.warehouse),
         title: isBranchWarehouse(session.warehouse) ? 'Инвентаризация отклонена' : undefined,
         message: isBranchWarehouse(session.warehouse)
-          ? `Инвентаризация ${updated.sessionNumber} отклонена BR_CEO: ${dto.reason}`
+          ? `Инвентаризация ${updated.sessionNumber} отклонена CEO филиала: ${dto.reason}`
           : dto.reason
             ? `Inventory ${updated.sessionNumber} was rejected: ${dto.reason}`
             : `Inventory ${updated.sessionNumber} was rejected.`,
@@ -813,16 +841,18 @@ export class InventoryCountService {
     warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
   ) {
     const roles = resolveUserRoles(user);
-    if (hasAnyFullAccessRole(roles)) {
-      return;
-    }
-    if (isBranchWarehouse(warehouse) && (roles.includes(Role.FRANCHISE_OWNER) || roles.includes(Role.MANAGER))) {
-      if (warehouse.branchId !== user.branchId) {
-        throw new ForbiddenException('Branch managers can approve only their own branch inventory');
+    if (!canUserApproveInventoryForWarehouse(roles, user.branchId, warehouse)) {
+      if (isBranchWarehouse(warehouse) && isHqInventoryExecutive(roles, user.branchId)) {
+        throw new ForbiddenException('HQ CEO не может утверждать инвентаризацию филиала');
       }
-      return;
+      if (isBranchWarehouse(warehouse) && user.branchId && warehouse.branchId !== user.branchId) {
+        throw new ForbiddenException('У вас нет доступа к инвентаризации другого филиала');
+      }
+      if (isHqWarehouse(warehouse) && roles.includes(Role.FRANCHISE_OWNER)) {
+        throw new ForbiddenException('Инвентаризация HQ склада не может быть отправлена Branch CEO');
+      }
+      throw new ForbiddenException('You cannot approve this inventory count');
     }
-    throw new ForbiddenException('You cannot approve this inventory count');
   }
 
   private async assertCanCountWarehouse(
@@ -847,6 +877,12 @@ export class InventoryCountService {
     warehouse: { id: string; warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
   ) {
     const roles = resolveUserRoles(user);
+    if (isHqInventoryExecutive(roles, user.branchId)) {
+      if (isBranchWarehouse(warehouse)) {
+        throw new ForbiddenException('HQ CEO не может утверждать инвентаризацию филиала');
+      }
+      return;
+    }
     if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
       return;
     }
@@ -875,6 +911,9 @@ export class InventoryCountService {
       return assignmentScope;
     }
     const roles = resolveUserRoles(user);
+    if (isHqInventoryExecutive(roles, user.branchId)) {
+      return activeHqWarehouseWhere;
+    }
     if (hasAnyFullAccessRole(roles) || roles.includes(Role.SUPPLY_CHAIN_MANAGER)) {
       return null;
     }
@@ -885,6 +924,128 @@ export class InventoryCountService {
       return { ...activeBranchWarehouseWhere, branchId: user.branchId };
     }
     return { id: '__none__' };
+  }
+
+  private async assertInventoryApproversExist(
+    tx: PrismaTx,
+    warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null },
+  ) {
+    const roles = resolveInventoryApproverRoles(warehouse);
+    const scope = resolveInventoryApprovalScope(warehouse);
+    const approver = await tx.user.findFirst({
+      where: {
+        status: 'ACTIVE',
+        role: { in: roles },
+        ...(scope === 'BRANCH'
+          ? { branchId: warehouse.branchId ?? undefined }
+          : { branchId: null }),
+      },
+      select: { id: true },
+    });
+    if (!approver) {
+      await this.audit(tx, null, 'INVENTORY_APPROVAL_ROUTING_FAILED', warehouse.branchId ?? 'hq', {
+        warehouseId: undefined,
+        branchId: warehouse.branchId ?? undefined,
+        newValue: { inventoryScope: scope, requiredApproverRoles: roles },
+      });
+      if (scope === 'BRANCH') {
+        throw new BadRequestException('Для филиала не назначен Branch CEO');
+      }
+      throw new BadRequestException('HQ CEO is not configured');
+    }
+    await this.audit(tx, null, 'INVENTORY_APPROVER_RESOLVED', warehouse.branchId ?? 'hq', {
+      branchId: warehouse.branchId ?? undefined,
+      newValue: { inventoryScope: scope, requiredApproverRoles: roles, approverId: approver.id },
+    });
+  }
+
+  private async archiveMisroutedInventorySubmissionAlerts(
+    tx: PrismaTx,
+    sessionId: string,
+    scope: ReturnType<typeof resolveInventoryApprovalScope>,
+  ) {
+    if (scope !== 'BRANCH') return;
+    await tx.alert.updateMany({
+      where: {
+        entityType: 'InventoryCountSession',
+        entityId: sessionId,
+        type: AlertType.INVENTORY_SUBMITTED,
+        status: { in: [AlertStatus.UNREAD, AlertStatus.READ] },
+        recipientRole: { in: [Role.CEO, Role.OWNER] },
+      },
+      data: {
+        status: AlertStatus.ARCHIVED,
+        archivedAt: new Date(),
+      },
+    });
+  }
+
+  async repairMisroutedBranchInventoryApprovals() {
+    const sessions = await this.prisma.inventoryCountSession.findMany({
+      where: {
+        status: InventoryCountStatus.SUBMITTED,
+        deletedAt: null,
+        warehouse: activeBranchWarehouseWhere,
+      },
+      include: { warehouse: true, items: true },
+    });
+
+    let repaired = 0;
+    for (const session of sessions) {
+      const misrouted = await this.prisma.alert.findMany({
+        where: {
+          entityType: 'InventoryCountSession',
+          entityId: session.id,
+          type: AlertType.INVENTORY_SUBMITTED,
+          status: { in: [AlertStatus.UNREAD, AlertStatus.READ] },
+          recipientRole: { in: [Role.CEO, Role.OWNER] },
+        },
+      });
+      if (!misrouted.length) continue;
+
+      const existingBranchCeoAlert = await this.prisma.alert.findFirst({
+        where: {
+          entityType: 'InventoryCountSession',
+          entityId: session.id,
+          type: AlertType.INVENTORY_SUBMITTED,
+          status: { in: [AlertStatus.UNREAD, AlertStatus.READ] },
+          recipientRole: Role.FRANCHISE_OWNER,
+          branchId: session.warehouse.branchId ?? undefined,
+        },
+      });
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.alert.updateMany({
+          where: { id: { in: misrouted.map((alert) => alert.id) } },
+          data: { status: AlertStatus.ARCHIVED, archivedAt: new Date() },
+        });
+
+        if (!existingBranchCeoAlert) {
+          const summary = this.buildSummary(session);
+          await this.notificationsService.notifyInTx(tx, null, {
+            type: AlertType.INVENTORY_SUBMITTED,
+            branchId: session.warehouse.branchId ?? undefined,
+            entityType: 'InventoryCountSession',
+            entityId: session.id,
+            referenceNumber: session.sessionNumber,
+            recipientRoles: [Role.FRANCHISE_OWNER],
+            title: 'Инвентаризация филиала ожидает утверждения',
+            message: `Инвентаризация ${session.sessionNumber} отправлена CEO филиала на утверждение. Расхождений: ${summary.shortages + summary.overages}.`,
+          });
+        }
+
+        await this.audit(tx, null, 'INVENTORY_APPROVAL_ROUTING_REPAIRED', session.id, {
+          warehouseId: session.warehouseId,
+          branchId: session.warehouse.branchId ?? undefined,
+          newValue: {
+            archivedAlertIds: misrouted.map((alert) => alert.id),
+            createdBranchCeoAlert: !existingBranchCeoAlert,
+          },
+        });
+      });
+      repaired += 1;
+    }
+    return { repaired };
   }
 
   private inventoryCreatedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
@@ -921,7 +1082,7 @@ export class InventoryCountService {
 
   private audit(
     tx: PrismaTx | PrismaService,
-    user: AuthUser,
+    user: AuthUser | null,
     action: string,
     inventorySessionId: string,
     opts?: {
@@ -935,13 +1096,13 @@ export class InventoryCountService {
   ) {
     return (tx as PrismaTx).auditLog.create({
       data: {
-        userId: user.id,
-        role: user.role,
+        userId: user?.id ?? null,
+        role: user?.role ?? null,
         action,
         entity: 'InventoryCountSession',
         entityId: inventorySessionId,
         metadata: {
-          roles: user.roles ?? [user.role],
+          roles: user ? (user.roles ?? [user.role]) : undefined,
           branchId: opts?.branchId ?? opts?.extra?.branchId ?? undefined,
           inventorySessionId,
           ...(opts?.warehouseId ? { warehouseId: opts.warehouseId } : {}),

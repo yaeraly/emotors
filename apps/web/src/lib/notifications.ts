@@ -8,11 +8,19 @@ export type NotificationItem = {
   entityType?: string | null;
   entityId?: string | null;
   referenceNumber?: string | null;
+  branchId?: string | null;
+  recipientRole?: string | null;
   createdAt: string;
 };
 
 export function notificationHref(alert: NotificationItem): string | null {
   if (alert.entityType === 'InventoryCountSession' && alert.entityId) {
+    if (alert.branchId) {
+      if (alert.recipientRole === 'WAREHOUSE_OPERATOR') {
+        return `/branch-warehouse/inventory/${alert.entityId}`;
+      }
+      return `/inventory/count/${alert.entityId}`;
+    }
     return `/inventory/count/${alert.entityId}`;
   }
   if (alert.entityType === 'BranchDistributionOrder' && alert.entityId) {
