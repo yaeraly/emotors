@@ -277,6 +277,11 @@ export function isBranchWarehouseOperator(user: Pick<AuthUser, 'role' | 'roles' 
   return !!user.branchId && roles.includes(Role.WAREHOUSE_OPERATOR) && !hasAnyFullAccessRole(roles);
 }
 
+export function isBranchOwnerUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return !!user.branchId && roles.includes(Role.FRANCHISE_OWNER) && !hasAnyFullAccessRole(roles);
+}
+
 export function isBranchCashierUser(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
   const roles = resolveUserRoles(user);
   if (!user.branchId || hasAnyFullAccessRole(roles)) return false;

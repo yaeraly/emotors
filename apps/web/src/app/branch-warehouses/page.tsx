@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseDataTable } from '@/components/warehouse/WarehouseDataTable';
@@ -8,7 +9,7 @@ import { WarehouseListToolbar } from '@/components/warehouse/WarehouseListToolba
 import { WarehousePagination } from '@/components/warehouse/WarehousePagination';
 import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { apiFetch } from '@/lib/api';
-import { canInspectAnyBranchWarehouse } from '@/lib/rbac';
+import { canInspectAnyBranchWarehouse, isBranchOwnerUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import {
   filterWarehouseRows,
@@ -41,6 +42,7 @@ type BranchWarehouseMetrics = {
 };
 
 export default function BranchWarehousesPage() {
+  const router = useRouter();
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [warehouses, setWarehouses] = useState<BranchWarehouseMetrics[]>([]);
@@ -67,6 +69,10 @@ export default function BranchWarehousesPage() {
     ])
       .then(([me, list]) => {
         setUser(me);
+        if (isBranchOwnerUser(me) && !canInspectAnyBranchWarehouse(me)) {
+          router.replace('/branch-ceo/warehouse');
+          return;
+        }
         setWarehouses(
           list.map((warehouse) => ({
             ...warehouse,

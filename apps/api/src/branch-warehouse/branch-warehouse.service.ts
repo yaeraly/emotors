@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
-import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
+import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { activeBranchWarehouseWhere, branchWarehouseWhere, isBranchWarehouse } from '../warehouse/warehouse.util';
 import { UpdateBranchWarehouseDto } from './dto/update-branch-warehouse.dto';
 import {
@@ -137,6 +137,46 @@ export class BranchWarehouseService {
     });
     const metrics = await this.buildMetrics(warehouse, user);
     return { ...warehouse, ...metrics };
+  }
+
+  async updateBranchCeoProfile(
+    user: AuthUser,
+    id: string,
+    dto: {
+      name?: string;
+      city?: string;
+      address?: string;
+      contactPerson?: string;
+      phone?: string;
+      notes?: string;
+    },
+  ) {
+    if (!isBranchOwnerUser(user)) {
+      throw new ForbiddenException('Доступ только для Branch CEO');
+    }
+    const existing = await this.getWarehouse(user, id);
+    if (!existing.branchId || existing.branchId !== user.branchId) {
+      throw new ForbiddenException('У вас нет доступа к складу другого филиала');
+    }
+    const warehouse = await this.prisma.warehouse.update({
+      where: { id },
+      data: {
+        ...(dto.name ? { name: dto.name.trim() } : {}),
+        ...(dto.city !== undefined ? { city: dto.city?.trim() ?? null } : {}),
+        ...(dto.address !== undefined ? { address: dto.address?.trim() ?? null } : {}),
+        ...(dto.contactPerson !== undefined ? { contactPerson: dto.contactPerson?.trim() ?? null } : {}),
+        ...(dto.phone !== undefined ? { phone: dto.phone?.trim() ?? null } : {}),
+        ...(dto.notes !== undefined ? { notes: dto.notes?.trim() ?? null } : {}),
+      },
+      include: { branch: { select: { id: true, name: true, code: true, city: true, ownerName: true } } },
+    });
+    await this.audit(user, 'BRANCH_WAREHOUSE_PROFILE_UPDATED', warehouse.id, {
+      branchId: warehouse.branchId,
+      oldValue: this.snapshotWarehouseInfo(existing),
+      newValue: this.snapshotWarehouseInfo(warehouse),
+    });
+    const metrics = await this.buildMetrics(warehouse, user);
+    return { ...warehouse, ...metrics, permissions: { canEdit: true, readOnly: false } };
   }
 
   async inventory(user: AuthUser, id: string) {
@@ -440,6 +480,7 @@ export class BranchWarehouseService {
   ) {
     const balances = await this.prisma.inventoryBalance.findMany({
       where: { warehouseId: warehouse.id },
+      include: { product: { select: { minStockLevel: true } } },
     });
     const lastInventory = await this.prisma.inventoryCountSession.findFirst({
       where: { warehouseId: warehouse.id, status: { in: ['COMPLETED', 'APPROVED'] } },
@@ -451,6 +492,9 @@ export class BranchWarehouseService {
     const reservedQuantity = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
     const totalStockValueKgs = balances.reduce((sum, item) => sum + Number(item.totalValueKgs), 0);
     const productIds = new Set(balances.filter((b) => b.quantity > 0).map((b) => b.productId));
+    const lowStockSkuCount = balances.filter(
+      (balance) => balance.quantity <= (balance.product?.minStockLevel ?? 0),
+    ).length;
     const lastMovement = await this.prisma.stockMovement.findFirst({
       where: { warehouseId: warehouse.id, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
@@ -470,6 +514,7 @@ export class BranchWarehouseService {
       isActive: warehouse.isActive,
       totalSkuCount: productIds.size,
       totalProductQuantity: totalQuantity,
+      lowStockSkuCount,
       ...(user && this.shouldHideLineItemCosts(user)
         ? {}
         : { totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100 }),
@@ -524,8 +569,8 @@ export class BranchWarehouseService {
 
   private buildPermissions(user: AuthUser) {
     return {
-      canEdit: canEditWarehouseInfo(user),
-      readOnly: !canEditWarehouseInfo(user),
+      canEdit: canEditWarehouseInfo(user) || isBranchOwnerUser(user),
+      readOnly: !(canEditWarehouseInfo(user) || isBranchOwnerUser(user)),
     };
   }
 

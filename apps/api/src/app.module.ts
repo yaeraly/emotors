@@ -5,6 +5,7 @@ import { AiModule } from './ai/ai.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
 import { BranchesModule } from './branches/branches.module';
+import { BranchCeoModule } from './branch-ceo/branch-ceo.module';
 import { CommissionsModule } from './commissions/commissions.module';
 import { CustomersModule } from './customers/customers.module';
 import { DistributionModule } from './distribution/distribution.module';
@@ -46,6 +47,7 @@ import { UsersModule } from './users/users.module';
     InventoryCountModule,
     HqWarehouseModule,
     BranchWarehouseModule,
+    BranchCeoModule,
     BranchAccountantModule,
     SalesModule,
     ServiceModule,

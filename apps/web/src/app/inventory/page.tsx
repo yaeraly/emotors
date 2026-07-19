@@ -58,12 +58,19 @@ export default function InventoryPage() {
   const canManageYuan = canManageYuanRate(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchWarehouseOperatorView = isBranchWarehouseOperator(currentUser);
+  const branchOwnerView = isBranchOwnerUser(currentUser);
 
   useEffect(() => {
     if (branchWarehouseOperatorView) {
       router.replace('/branch-warehouse/warehouse');
     }
   }, [branchWarehouseOperatorView, router]);
+
+  useEffect(() => {
+    if (branchOwnerView) {
+      router.replace('/branch-ceo/warehouse');
+    }
+  }, [branchOwnerView, router]);
 
   if (branchSalesManagerView) {
     return (
@@ -73,7 +80,7 @@ export default function InventoryPage() {
     );
   }
 
-  if (branchWarehouseOperatorView) {
+  if (branchWarehouseOperatorView || branchOwnerView) {
     return null;
   }
 

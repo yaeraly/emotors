@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import {
-  isUnifiedNavPageActive,
+  resolveActiveUnifiedNavPage,
   resolveModuleForPath,
   shouldShowModuleTopNav,
   visibleModulePages,
@@ -30,7 +30,7 @@ function UnifiedModuleTopNavInner({ user }: Props) {
   return (
     <nav className="mb-6 flex flex-wrap gap-2 border-b border-slate-200 pb-4">
       {pages.map((page) => {
-        const active = isUnifiedNavPageActive(pathname, search, page.href);
+        const active = resolveActiveUnifiedNavPage(pathname, search, pages)?.href === page.href;
         return (
           <Link
             key={page.href}

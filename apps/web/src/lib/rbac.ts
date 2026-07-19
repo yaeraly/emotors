@@ -575,10 +575,9 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (isHqSalesManagerUser(user)) return '/branch-purchase-requests';
   if (isHqCashierUser(user)) return '/distribution/invoices';
   if (isWarehouseManagerUser(user)) return '/hq-warehouses';
-  if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
-  if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
-  if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/hq-warehouses';
+  if (isBranchOwnerUser(user)) return '/branch-ceo/warehouse';
   if (isBranchWarehouseOperator(user)) return '/branch-warehouse/warehouse';
+  if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (isBranchCashierUser(user)) return '/branch-cashier/invoices';
   if (isBranchAccountantUser(user)) return '/branch-accountant/invoices';
   if (hasPermission(user, 'payments.manage')) return '/payments';
@@ -643,6 +642,9 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (pathname === '/branch-warehouse' || pathname.startsWith('/branch-warehouse/')) {
     return isBranchWarehouseOperator(user);
+  }
+  if (pathname.startsWith('/branch-ceo/')) {
+    return isBranchOwnerUser(user);
   }
   if (pathname.startsWith('/branch-warehouses')) return canViewBranchWarehouses(user);
   if (pathname.startsWith('/product-master')) return canViewProductMaster(user);
@@ -905,8 +907,12 @@ export function canManageHqWarehouse(user: Pick<User, 'role' | 'roles'> | null |
   return hasFullAccess(user);
 }
 
-export function canEditWarehouseInfo(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+export function canEditWarehouseInfo(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   return hasFullAccess(user);
+}
+
+export function canEditBranchWarehouseProfile(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  return isBranchOwnerUser(user);
 }
 
 export function canCreateHqEmployee(user: Pick<User, 'role' | 'roles'> | null | undefined) {

@@ -5,6 +5,7 @@ import {
   canViewBranchPurchaseRequests,
   canViewDistribution,
   canViewInventoryCount,
+  canViewProductCatalog,
   hasPermission,
   isBranchManagerUser,
   isBranchOwnerUser,
@@ -94,6 +95,20 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     ],
   },
   {
+    id: 'product-directory',
+    labelKey: 'productMaster.title',
+    defaultHref: '/branch-ceo/product-directory',
+    pathPrefixes: ['/branch-ceo/product-directory'],
+    sidebarVisible: (user) => isBranchOwnerUser(user) && canViewProductCatalog(user),
+    pages: [
+      {
+        href: '/branch-ceo/product-directory',
+        labelKey: 'productMaster.title',
+        isVisible: (user) => isBranchOwnerUser(user) && canViewProductCatalog(user),
+      },
+    ],
+  },
+  {
     id: 'service',
     labelKey: 'service.title',
     defaultHref: '/service',
@@ -109,15 +124,14 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
   {
     id: 'warehouse',
     labelKey: 'nav.inventory',
-    defaultHref: '/inventory',
-    pathPrefixes: ['/inventory', '/inventory/count', '/products', '/warehouses', '/stock-movements', '/warehouse-release'],
+    defaultHref: '/branch-ceo/warehouse',
+    pathPrefixes: ['/branch-ceo/warehouse', '/inventory/count'],
     sidebarVisible: inventoryVisible,
     pages: [
-      { href: '/inventory', labelKey: 'nav.inventory', isVisible: inventoryVisible },
       {
-        href: '/inventory/count',
-        labelKey: 'inventoryCount.title',
-        isVisible: (user) => isBranchOwnerUser(user) && canViewInventoryCount(user),
+        href: '/branch-ceo/warehouse',
+        labelKey: 'nav.inventory',
+        isVisible: (user) => isBranchOwnerUser(user) && inventoryVisible(user),
       },
     ],
   },
@@ -228,6 +242,18 @@ export function isUnifiedNavPageActive(pathname: string, search: string, href: s
     if (current.get(key) !== value) return false;
   }
   return true;
+}
+
+export function resolveActiveUnifiedNavPage(
+  pathname: string,
+  search: string,
+  pages: UnifiedNavPage[],
+): UnifiedNavPage | null {
+  const matches = pages.filter((page) => isUnifiedNavPageActive(pathname, search, page.href));
+  if (!matches.length) return null;
+  return matches.sort(
+    (a, b) => b.href.split('?')[0].length - a.href.split('?')[0].length,
+  )[0];
 }
 
 export function usesUnifiedBranchOwnerNav(user: User | null | undefined): boolean {
