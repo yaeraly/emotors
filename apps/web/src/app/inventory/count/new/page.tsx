@@ -60,16 +60,14 @@ export default function NewInventoryCountPage() {
     apiFetch<User>('/auth/me')
       .then(async (me) => {
         setCurrentUser(me);
-        const [warehouseResult, categoryResult, productResult] = await Promise.all([
-          apiFetch<Warehouse[]>(
-            isBranchWarehouseOperator(me)
-              ? '/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'
-              : '/inventory/warehouses?warehouseType=HQ&status=ACTIVE',
-          ),
-          apiFetch<ProductCategory[]>('/inventory/categories'),
-          apiFetch<ProductListResponse>('/inventory/products?pageSize=300'),
-        ]);
-        const filteredWarehouses = isBranchWarehouseOperator(me)
+        const branchOperator = isBranchWarehouseOperator(me);
+
+        const warehouseResult = await apiFetch<Warehouse[]>(
+          branchOperator
+            ? '/inventory/warehouses?warehouseType=BRANCH&status=ACTIVE'
+            : '/inventory/warehouses?warehouseType=HQ&status=ACTIVE',
+        );
+        const filteredWarehouses = branchOperator
           ? warehouseResult
           : isWarehouseManagerUser(me) && !hasFullAccess(me)
             ? warehouseResult.filter((warehouse) =>
@@ -77,12 +75,27 @@ export default function NewInventoryCountPage() {
               )
             : warehouseResult;
         setWarehouses(filteredWarehouses);
-        setCategories(categoryResult);
-        setProducts(productResult.items);
         setForm((current) => ({
           ...current,
           warehouseId: current.warehouseId || filteredWarehouses[0]?.id || '',
         }));
+
+        if (!branchOperator) {
+          const [categoryResult, productResult] = await Promise.all([
+            apiFetch<ProductCategory[]>('/inventory/categories'),
+            apiFetch<ProductListResponse>('/inventory/products?pageSize=300'),
+          ]);
+          setCategories(categoryResult);
+          setProducts(productResult.items);
+        } else {
+          try {
+            const categoryResult = await apiFetch<ProductCategory[]>('/inventory/categories');
+            setCategories(categoryResult);
+          } catch {
+            setCategories([]);
+          }
+        }
+
         if (canViewProcurement(me)) {
           try {
             const supplierResult = await apiFetch<Supplier[]>('/procurement/suppliers');
@@ -94,6 +107,12 @@ export default function NewInventoryCountPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
+
+  const branchOperator = Boolean(currentUser && isBranchWarehouseOperator(currentUser));
+  const singleWarehouse = branchOperator && warehouses.length === 1 ? warehouses[0] : null;
+  const availableInventoryTypes = branchOperator
+    ? inventoryTypes.filter((type) => type !== 'PRODUCT')
+    : inventoryTypes;
 
   if (currentUser && !canManageInventoryCount(currentUser)) {
     return (
@@ -173,22 +192,33 @@ export default function NewInventoryCountPage() {
         ) : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {branchOperator && warehouses.length === 0 && !error ? (
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {t('inventoryCount.branchWarehouseMissing')}
+          </p>
+        ) : null}
 
         <form onSubmit={submit} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label={t('inventory.warehouse')}>
-              <select
-                value={form.warehouseId}
-                onChange={(e) => setForm({ ...form, warehouseId: e.target.value })}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2"
-                required
-              >
-                {warehouses.map((warehouse) => (
-                  <option key={warehouse.id} value={warehouse.id}>
-                    {warehouse.name}
-                  </option>
-                ))}
-              </select>
+              {singleWarehouse ? (
+                <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-semibold text-slate-800">
+                  {singleWarehouse.name}
+                </div>
+              ) : (
+                <select
+                  value={form.warehouseId}
+                  onChange={(e) => setForm({ ...form, warehouseId: e.target.value })}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2"
+                  required
+                >
+                  {warehouses.map((warehouse) => (
+                    <option key={warehouse.id} value={warehouse.id}>
+                      {warehouse.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </Field>
 
             <Field label={t('inventoryCount.inventoryType')}>
@@ -199,7 +229,7 @@ export default function NewInventoryCountPage() {
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2"
               >
-                {inventoryTypes.map((type) => (
+                {availableInventoryTypes.map((type) => (
                   <option key={type} value={type}>
                     {t(`inventoryCount.type.${type}`)}
                   </option>

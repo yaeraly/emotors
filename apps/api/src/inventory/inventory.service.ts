@@ -1281,9 +1281,23 @@ export class InventoryService {
 
   warehouses(user: AuthUser, branchId?: string, warehouseType?: string, status?: string) {
     const activeOnly = status?.toUpperCase() === 'ACTIVE';
-    const where: Prisma.WarehouseWhereInput = {
-      ...this.buildBranchWhere(user, branchId),
-      ...(warehouseType === 'HQ'
+    const branchScope = this.buildBranchWhere(user, branchId);
+
+    if (isBranchWarehouseOperator(user)) {
+      if (!user.branchId) {
+        throw new BadRequestException('Branch is required');
+      }
+      return this.prisma.warehouse.findMany({
+        where: {
+          ...activeBranchWarehouseWhere,
+          branchId: user.branchId,
+        },
+        orderBy: { name: 'asc' },
+      });
+    }
+
+    const typeWhere: Prisma.WarehouseWhereInput =
+      warehouseType === 'HQ'
         ? activeOnly
           ? activeHqWarehouseWhere
           : hqWarehouseWhere
@@ -1291,7 +1305,12 @@ export class InventoryService {
           ? activeOnly
             ? activeBranchWarehouseWhere
             : branchWarehouseWhere
-          : { deletedAt: null }),
+          : { deletedAt: null };
+
+    const where: Prisma.WarehouseWhereInput = {
+      ...typeWhere,
+      ...branchScope,
+      ...(branchScope.branchId ? { branchId: branchScope.branchId } : {}),
     };
 
     if (activeOnly && !warehouseType) {
