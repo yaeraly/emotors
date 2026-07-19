@@ -4008,10 +4008,55 @@ export class OperationsService {
   }
 
   reservations(user: AuthUser) {
-    return this.prisma.reservation.findMany({
+    return this.listReservationsForUser(user);
+  }
+
+  private async listReservationsForUser(user: AuthUser) {
+    const rows = await this.prisma.reservation.findMany({
       where: { deletedAt: null, ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }) },
-      include: { items: true },
+      select: {
+        id: true,
+        reservationNumber: true,
+        branchId: true,
+        customerId: true,
+        status: true,
+        depositAmount: true,
+        expiresAt: true,
+        convertedSaleId: true,
+        createdAt: true,
+        items: {
+          select: {
+            id: true,
+            productId: true,
+            quantity: true,
+            unitPrice: true,
+            totalPrice: true,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
+    });
+
+    const customerIds = [...new Set(rows.map((row) => row.customerId))];
+    const customers = customerIds.length
+      ? await this.prisma.customer.findMany({
+          where: { id: { in: customerIds } },
+          select: { id: true, fullName: true, phone: true },
+        })
+      : [];
+    const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+
+    return rows.map((row) => {
+      const totalAmount = row.items.reduce((sum, item) => sum + Number(item.totalPrice), 0);
+      const totalUnits = row.items.reduce((sum, item) => sum + item.quantity, 0);
+      return {
+        ...row,
+        depositAmount: Number(row.depositAmount),
+        customer: customerById.get(row.customerId) ?? null,
+        totalAmount,
+        itemCount: row.items.length,
+        totalUnits,
+      };
     });
   }
 
@@ -4132,10 +4177,62 @@ export class OperationsService {
   }
 
   returns(user: AuthUser) {
-    return this.prisma.returnOrder.findMany({
+    return this.listReturnsForUser(user);
+  }
+
+  private async listReturnsForUser(user: AuthUser) {
+    const rows = await this.prisma.returnOrder.findMany({
       where: { deletedAt: null, ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }) },
-      include: { items: true },
+      select: {
+        id: true,
+        returnNumber: true,
+        branchId: true,
+        customerId: true,
+        saleId: true,
+        status: true,
+        reason: true,
+        totalAmount: true,
+        note: true,
+        createdAt: true,
+        items: {
+          select: {
+            id: true,
+            quantity: true,
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
+    });
+
+    const customerIds = [...new Set(rows.map((row) => row.customerId))];
+    const saleIds = [...new Set(rows.map((row) => row.saleId).filter((id): id is string => Boolean(id)))];
+    const [customers, sales] = await Promise.all([
+      customerIds.length
+        ? this.prisma.customer.findMany({
+            where: { id: { in: customerIds } },
+            select: { id: true, fullName: true, phone: true },
+          })
+        : [],
+      saleIds.length
+        ? this.prisma.sale.findMany({
+            where: { id: { in: saleIds } },
+            select: { id: true, receiptNumber: true },
+          })
+        : [],
+    ]);
+    const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+    const saleById = new Map(sales.map((sale) => [sale.id, sale]));
+
+    return rows.map((row) => {
+      const totalUnits = row.items.reduce((sum, item) => sum + item.quantity, 0);
+      return {
+        ...row,
+        totalAmount: Number(row.totalAmount),
+        customer: customerById.get(row.customerId) ?? null,
+        sale: row.saleId ? saleById.get(row.saleId) ?? null : null,
+        itemCount: row.items.length,
+        totalUnits,
+      };
     });
   }
 

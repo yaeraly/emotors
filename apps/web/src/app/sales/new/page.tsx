@@ -43,6 +43,7 @@ type SaleItemForm = {
   hasMaximumPrice: boolean;
   discountPercent: string;
   unitPrice: string;
+  unitPriceManuallyEdited?: boolean;
   unitCost: string;
   availableQty: number;
   maxDiscountPercent: number;
@@ -57,6 +58,11 @@ function roundMoney(value: number) {
 
 function priceFromDiscount(listPrice: number, discountPercent: number) {
   return roundMoney(listPrice * (1 - discountPercent / 100));
+}
+
+function formatPriceInput(value: number) {
+  const rounded = roundMoney(value);
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded);
 }
 
 
@@ -251,7 +257,8 @@ export default function NewSalePage() {
         maximumPrice,
         hasMaximumPrice: Boolean(product.hasMaximumRetailPrice && maximumPrice),
         discountPercent: '0',
-        unitPrice: String(recommendedPrice),
+        unitPrice: formatPriceInput(recommendedPrice),
+        unitPriceManuallyEdited: false,
         unitCost: '0',
         availableQty: product.availableQty,
         maxDiscountPercent: product.maximumDiscountPercent,
@@ -267,18 +274,21 @@ export default function NewSalePage() {
         if (itemIndex !== index) return item;
         const next = { ...item, ...updates };
 
-        if ('discountPercent' in updates || 'quantity' in updates) {
+        if ('discountPercent' in updates) {
           const discount = Number(next.discountPercent || 0);
           if (discount > next.maxDiscountPercent + 0.01) {
             setError(t('pricing.discountExceeded'));
           } else {
             setError('');
           }
-          next.unitPrice = String(priceFromDiscount(next.listPrice, discount));
+          if (!next.unitPriceManuallyEdited) {
+            next.unitPrice = formatPriceInput(priceFromDiscount(next.listPrice, discount));
+          }
         }
 
         if ('unitPrice' in updates) {
           next.unitPrice = updates.unitPrice ?? next.unitPrice;
+          next.unitPriceManuallyEdited = true;
         }
 
         const quantity = Number(next.quantity || 0);
@@ -820,7 +830,7 @@ export default function NewSalePage() {
                 return (
                   <div
                     key={`${item.productId}-${index}`}
-                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,0.75fr)_minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)_auto] lg:items-start"
+                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,0.75fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-start"
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.product')}</p>
@@ -844,16 +854,6 @@ export default function NewSalePage() {
                           : undefined
                       }
                     />
-                    <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('sales.recommendedPrice')}
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-900">
-                        {item.hasPricingPolicy
-                          ? formatKgs(item.recommendedPrice)
-                          : t('sales.pricingTooltip.notConfigured')}
-                      </p>
-                    </div>
                     <div className="min-w-0">
                       <SaleInput
                         label={t('sales.sellingPrice')}
@@ -861,6 +861,8 @@ export default function NewSalePage() {
                         value={item.unitPrice}
                         onChange={(value) => updateItem(index, { unitPrice: value })}
                         required
+                        step="1"
+                        min={0}
                         labelAccessory={
                           <SaleLinePricingTooltip
                             minimumPrice={item.minimumPrice}
@@ -1282,6 +1284,8 @@ function SaleInput({
   type = 'text',
   readOnly,
   error,
+  min,
+  step,
 }: {
   label: string;
   labelAccessory?: ReactNode;
@@ -1291,6 +1295,8 @@ function SaleInput({
   type?: string;
   readOnly?: boolean;
   error?: string;
+  min?: number | string;
+  step?: number | string;
 }) {
   return (
     <label className="block min-w-0">
@@ -1304,8 +1310,8 @@ function SaleInput({
         required={required}
         readOnly={readOnly}
         type={type}
-        min={type === 'number' ? 0 : undefined}
-        step={type === 'number' ? '0.01' : undefined}
+        min={min ?? (type === 'number' ? 0 : undefined)}
+        step={step ?? (type === 'number' ? '0.01' : undefined)}
         className={`mt-2 w-full min-w-0 rounded-xl border px-3 py-2 outline-none ring-blue-500 focus:ring-2 ${
           readOnly ? 'border-slate-200 bg-slate-100 text-slate-700' : 'border-slate-300'
         } ${error ? 'border-red-300' : ''}`}
