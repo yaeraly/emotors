@@ -27,6 +27,7 @@ import {
 } from '../warehouse/warehouse.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { ensureHqCatalogBranch } from '../product-catalog/hq-product-catalog.util';
+import { ensureBranchProductForReceivingInTx } from '../distribution/branch-receiving-product.util';
 import { HQ_WAREHOUSE_ACCESS_DENIED, HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES } from '../hq-warehouse/hq-warehouse-assignment.constants';
 import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditProductUnit, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -1501,102 +1502,19 @@ export class InventoryService {
       unitCostKgs?: number;
     },
   ): Promise<{ productId: string; branchId: string; created: boolean }> {
-    if (!params.catalogProductId?.trim()) {
-      throw new BadRequestException('Product reference is missing from shipment item');
-    }
-
-    const warehouse = await tx.warehouse.findFirst({
-      where: { id: params.warehouseId, deletedAt: null, branchId: params.branchId },
-      select: { id: true, branchId: true, warehouseType: true },
+    const resolved = await ensureBranchProductForReceivingInTx(tx, {
+      branchId: params.branchId,
+      warehouseId: params.warehouseId,
+      productId: params.catalogProductId,
+      sku: params.sku,
+      productName: params.productName,
+      unitCostKgs: params.unitCostKgs,
     });
-    if (!warehouse || warehouse.warehouseType !== WarehouseType.BRANCH) {
-      throw new BadRequestException('Branch warehouse is not configured');
-    }
-
-    const catalogProduct = await tx.product.findFirst({
-      where: { id: params.catalogProductId, deletedAt: null },
-      select: {
-        id: true,
-        branchId: true,
-        warehouseId: true,
-        sku: true,
-        barcode: true,
-        name: true,
-        unit: true,
-        weightKg: true,
-        categoryId: true,
-        category: true,
-        minStockLevel: true,
-        isActive: true,
-        finalCostKgs: true,
-        purchaseCostKgs: true,
-        transportCostKgs: true,
-        sellingPriceKgs: true,
-        wholesalePriceKgs: true,
-        hqBranchWholesalePriceKgs: true,
-        defaultSupplierId: true,
-        defaultFactoryId: true,
-      },
-    });
-    if (!catalogProduct) {
-      throw new NotFoundException(
-        `Referenced product was not found. Product ID: ${params.catalogProductId}`,
-      );
-    }
-
-    const sku = (params.sku || catalogProduct.sku).trim();
-    if (!sku) {
-      throw new BadRequestException('Product reference is missing from shipment item');
-    }
-
-    if (
-      catalogProduct.branchId === params.branchId &&
-      catalogProduct.warehouseId === params.warehouseId
-    ) {
-      return { productId: catalogProduct.id, branchId: params.branchId, created: false };
-    }
-
-    const existingBranchProduct = await tx.product.findFirst({
-      where: {
-        branchId: params.branchId,
-        warehouseId: params.warehouseId,
-        sku,
-        deletedAt: null,
-      },
-      select: { id: true },
-    });
-    if (existingBranchProduct) {
-      return { productId: existingBranchProduct.id, branchId: params.branchId, created: false };
-    }
-
-    const unitCostKgs = params.unitCostKgs ?? Number(catalogProduct.finalCostKgs ?? 0);
-    const created = await tx.product.create({
-      data: {
-        branchId: params.branchId,
-        warehouseId: params.warehouseId,
-        categoryId: catalogProduct.categoryId,
-        category: catalogProduct.category,
-        name: params.productName?.trim() || catalogProduct.name,
-        sku,
-        barcode: catalogProduct.barcode,
-        unit: catalogProduct.unit,
-        weightKg: catalogProduct.weightKg,
-        defaultSupplierId: catalogProduct.defaultSupplierId,
-        defaultFactoryId: catalogProduct.defaultFactoryId,
-        purchaseCostKgs: catalogProduct.purchaseCostKgs,
-        transportCostKgs: catalogProduct.transportCostKgs,
-        finalCostKgs: unitCostKgs,
-        costPriceKgs: unitCostKgs,
-        sellingPriceKgs: catalogProduct.sellingPriceKgs,
-        wholesalePriceKgs: catalogProduct.wholesalePriceKgs,
-        hqBranchWholesalePriceKgs: catalogProduct.hqBranchWholesalePriceKgs,
-        minStockLevel: catalogProduct.minStockLevel ?? 0,
-        isActive: catalogProduct.isActive,
-      },
-      select: { id: true },
-    });
-
-    return { productId: created.id, branchId: params.branchId, created: true };
+    return {
+      productId: resolved.productId,
+      branchId: resolved.branchId,
+      created: resolved.created,
+    };
   }
 
   async getAvailableQuantityMap(

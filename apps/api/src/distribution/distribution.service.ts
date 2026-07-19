@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -81,11 +82,14 @@ import {
   resolveReceivingDifferenceQuantity,
   resolveShipmentItemId,
 } from './branch-receiving.util';
+import { resolveMasterProductForReceivingInTx } from './branch-receiving-product.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
 @Injectable()
 export class DistributionService {
+  private readonly logger = new Logger(DistributionService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
@@ -914,7 +918,7 @@ export class DistributionService {
 
         const warehouse = await tx.warehouse.findFirst({
           where: {
-            id: dto.warehouseId,
+            id: dto.warehouseId || order.destinationWarehouseId,
             branchId: order.branchId,
             deletedAt: null,
             isActive: true,
@@ -923,6 +927,40 @@ export class DistributionService {
         });
         if (!warehouse) {
           throw new BadRequestException('Branch warehouse is not configured');
+        }
+
+        this.logger.debug(
+          JSON.stringify({
+            event: 'BRANCH_RECEIVING_CONTEXT',
+            userId: user.id,
+            branchId: user.branchId,
+            shipmentId: order.id,
+            destinationWarehouseId: warehouse.id,
+            sourceWarehouseId: order.sourceWarehouseId,
+            itemCount: order.items.length,
+          }),
+        );
+
+        for (const orderItem of order.items) {
+          const previousProductId = orderItem.productId;
+          const masterProduct = await resolveMasterProductForReceivingInTx(tx, {
+            productId: orderItem.productId,
+            sku: orderItem.sku,
+            productName: orderItem.productName,
+          });
+          if (masterProduct.id !== orderItem.productId) {
+            await tx.branchDistributionOrderItem.update({
+              where: { id: orderItem.id },
+              data: { productId: masterProduct.id },
+            });
+            orderItem.productId = masterProduct.id;
+            await this.auditTransfer(tx, user, 'BRANCH_PRODUCT_REFERENCE_REPAIRED', order, {
+              shipmentItemId: orderItem.id,
+              previousProductId,
+              productId: masterProduct.id,
+              sku: orderItem.sku,
+            });
+          }
         }
 
         await this.auditTransfer(tx, user, 'BRANCH_RECEIVING_STARTED', order, {
@@ -941,6 +979,17 @@ export class DistributionService {
           if (!orderItem) {
             throw new BadRequestException('Shipment item not found');
           }
+
+          this.logger.debug(
+            JSON.stringify({
+              event: 'BRANCH_RECEIVING_LINE',
+              shipmentId: order.id,
+              shipmentItemId: orderItem.id,
+              persistedProductId: orderItem.productId,
+              sku: orderItem.sku,
+            }),
+          );
+
           if (!orderItem.productId) {
             throw new BadRequestException('Product reference is missing from shipment item');
           }
@@ -2576,10 +2625,15 @@ export class DistributionService {
     const isHqOwnedBranch = branch ? this.pricingFifoService.isHqBranchType(branch.branchType) : false;
 
     for (const item of dto.items) {
-      const product = await tx.product.findFirst({
-        where: { id: item.productId, deletedAt: null },
+      const master = await resolveMasterProductForReceivingInTx(tx, {
+        productId: item.productId,
       });
-      if (!product) throw new NotFoundException('Product not found');
+      const product = await tx.product.findFirst({
+        where: { id: master.id, deletedAt: null },
+      });
+      if (!product) {
+        throw new NotFoundException(`Referenced product was not found. Product ID: ${master.id}`);
+      }
 
       const fallbackUnitCost = Number(product.finalCostKgs);
       const fallbackUnitPrice = branchPricing
