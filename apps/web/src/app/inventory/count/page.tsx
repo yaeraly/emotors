@@ -15,6 +15,7 @@ import {
 } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventory';
 
 export default function InventoryCountPage() {
   const router = useRouter();
@@ -27,7 +28,7 @@ export default function InventoryCountPage() {
       .then((me) => {
         setUser(me);
         if (isBranchWarehouseOperator(me)) {
-          router.replace('/branch-warehouse/stock');
+          router.replace(BRANCH_WAREHOUSE_INVENTORY_BASE);
           return;
         }
         const branchScopedView = isBranchOwnerUser(me);

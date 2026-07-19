@@ -98,3 +98,13 @@ export class RejectInventoryCountDto {
   @IsString()
   reason?: string;
 }
+
+export class AddUnexpectedInventoryCountItemDto {
+  @IsString()
+  @MinLength(1)
+  productId!: string;
+
+  @IsOptional()
+  @IsString()
+  remark?: string;
+}

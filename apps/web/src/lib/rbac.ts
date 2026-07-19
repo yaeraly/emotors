@@ -612,9 +612,6 @@ export function canAccessPath(user: User, pathname: string) {
     return canBranchSalesManagerAccessPath(pathname);
   }
   if (isBranchWarehouseOperator(user)) {
-    if (pathname === '/inventory' || pathname.startsWith('/inventory/count')) {
-      return false;
-    }
     return canBranchWarehouseOperatorAccessPath(pathname);
   }
   if (isBranchCashierUser(user)) {
@@ -1039,7 +1036,7 @@ export function canManageInventoryCount(user: Pick<User, 'role' | 'roles' | 'per
 }
 
 export function canApproveInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
-  return hasFullAccess(user) || (hasRole(user, 'FRANCHISE_OWNER') && !!user?.branchId);
+  return hasFullAccess(user) || (hasAnyRole(user, ['FRANCHISE_OWNER', 'MANAGER']) && !!user?.branchId);
 }
 
 export function canManageProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

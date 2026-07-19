@@ -27,11 +27,16 @@ import {
 import {
   BulkUpdateInventoryCountItemsDto,
   CreateInventoryCountDto,
+  AddUnexpectedInventoryCountItemDto,
   RejectInventoryCountDto,
   UpdateInventoryCountItemDto,
 } from './dto/inventory-count.dto';
 import { InventoryCountQueryDto } from './dto/inventory-count-query.dto';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
+import {
+  sanitizeInventoryCountSearchResultForUser,
+  sanitizeInventoryCountSessionForUser,
+} from './inventory-count.presenter';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -60,17 +65,18 @@ export class InventoryCountService {
       where,
       include: this.sessionInclude(),
       orderBy: { createdAt: 'desc' },
-    }).then((sessions) => sessions.map((session) => this.toSessionResponse(session)));
+    }).then((sessions) => sessions.map((session) => this.toSessionResponse(user, session)));
   }
 
   async detail(user: AuthUser, id: string) {
     const session = await this.getSession(user, id);
-    return this.toSessionResponse(session);
+    return this.toSessionResponse(user, session);
   }
 
   async summary(user: AuthUser, id: string) {
     const session = await this.getSession(user, id);
-    return this.buildSummary(session);
+    const summary = this.buildSummary(session);
+    return sanitizeInventoryCountSessionForUser(user, { summary }).summary;
   }
 
   async search(user: AuthUser, warehouseId: string, q: string) {
@@ -99,17 +105,19 @@ export class InventoryCountService {
       },
       take: 20,
     }).then((rows) =>
-      rows.map((row) => ({
-        productId: row.productId,
-        sku: row.product.sku,
-        barcode: row.product.barcode,
-        productName: row.product.name,
-        categoryName: row.product.productCategory?.nameRu ?? row.product.category,
-        shelf: row.shelf,
-        zone: row.zone,
-        systemQuantity: row.quantity,
-        unitCostKgs: Number(row.landedCostKgs || row.averageCostKgs || row.product.finalCostKgs),
-      })),
+      rows.map((row) =>
+        sanitizeInventoryCountSearchResultForUser(user, {
+          productId: row.productId,
+          sku: row.product.sku,
+          barcode: row.product.barcode,
+          productName: row.product.name,
+          categoryName: row.product.productCategory?.nameRu ?? row.product.category,
+          shelf: row.shelf,
+          zone: row.zone,
+          systemQuantity: row.quantity,
+          unitCostKgs: Number(row.landedCostKgs || row.averageCostKgs || row.product.finalCostKgs),
+        }),
+      ),
     );
   }
 
@@ -124,6 +132,26 @@ export class InventoryCountService {
       }
       await this.assertWarehouseAccess(user, warehouse);
       await this.assertCanCountWarehouse(user, warehouse);
+
+      const existingActive = await tx.inventoryCountSession.findFirst({
+        where: {
+          warehouseId: warehouse.id,
+          deletedAt: null,
+          status: {
+            in: [
+              InventoryCountStatus.DRAFT,
+              InventoryCountStatus.COUNTING,
+              InventoryCountStatus.REJECTED,
+            ],
+          },
+        },
+        select: { id: true, sessionNumber: true },
+      });
+      if (existingActive) {
+        throw new BadRequestException(
+          `An active inventory session already exists: ${existingActive.sessionNumber}`,
+        );
+      }
 
       this.validateTypeFilters(dto);
 
@@ -173,11 +201,19 @@ export class InventoryCountService {
         newValue: { status: InventoryCountStatus.COUNTING },
       });
 
+      if (isBranchWarehouse(warehouse)) {
+        await this.audit(tx, user, 'BRANCH_INVENTORY_SNAPSHOT_CREATED', session.id, {
+          warehouseId: warehouse.id,
+          branchId: warehouse.branchId ?? undefined,
+          newValue: { itemCount: items.length },
+        });
+      }
+
       const created = await tx.inventoryCountSession.findUniqueOrThrow({
         where: { id: session.id },
         include: this.sessionInclude(),
       });
-      return this.toSessionResponse(created);
+      return this.toSessionResponse(user, created);
     });
   }
 
@@ -222,7 +258,7 @@ export class InventoryCountService {
       },
     });
 
-    await this.audit(this.prisma, user, this.inventoryCountUpdatedAction(session.warehouse), sessionId, {
+    await this.audit(this.prisma, user, this.inventoryDraftSavedAction(session.warehouse), sessionId, {
       warehouseId: session.warehouseId,
       branchId: session.warehouse.branchId ?? undefined,
       productId: item.productId,
@@ -262,12 +298,85 @@ export class InventoryCountService {
       });
     }
 
-    await this.audit(this.prisma, user, this.inventoryCountUpdatedAction(session.warehouse), sessionId, {
+    await this.audit(this.prisma, user, this.inventoryDraftSavedAction(session.warehouse), sessionId, {
       warehouseId: session.warehouseId,
       branchId: session.warehouse.branchId ?? undefined,
       newValue: { bulkCount: dto.items.length },
     });
 
+    return this.detail(user, sessionId);
+  }
+
+  async addUnexpectedItem(user: AuthUser, sessionId: string, dto: AddUnexpectedInventoryCountItemDto) {
+    this.assertCanCount(user);
+    await this.prisma.$transaction(async (tx) => {
+      const session = await this.getSessionForWriteInTx(tx, user, sessionId);
+      if (session.status !== InventoryCountStatus.COUNTING) {
+        throw new BadRequestException('Unexpected products can only be added while counting');
+      }
+
+      const existing = session.items.find((item) => item.productId === dto.productId);
+      if (existing) {
+        throw new BadRequestException('Product is already included in this inventory session');
+      }
+
+      const balance = await tx.inventoryBalance.findFirst({
+        where: {
+          warehouseId: session.warehouseId,
+          productId: dto.productId,
+          branchId: session.warehouse.branchId ?? undefined,
+        },
+        include: {
+          product: { include: { productCategory: true } },
+        },
+      });
+
+      const product =
+        balance?.product ??
+        (await tx.product.findFirst({
+          where: {
+            id: dto.productId,
+            branchId: session.warehouse.branchId ?? undefined,
+            deletedAt: null,
+          },
+          include: { productCategory: true },
+        }));
+
+      if (!product) {
+        throw new NotFoundException('Referenced product was not found for this branch warehouse');
+      }
+
+      const created = await tx.inventoryCountItem.create({
+        data: {
+          sessionId: session.id,
+          productId: product.id,
+          sku: product.sku,
+          productName: product.name,
+          categoryName: product.productCategory?.nameRu ?? product.category,
+          shelf: balance?.shelf ?? null,
+          zone: balance?.zone ?? null,
+          systemQuantity: balance?.quantity ?? 0,
+          actualQuantity: null,
+          differenceQuantity: 0,
+          unitCostKgs: Number(
+            balance?.landedCostKgs || balance?.averageCostKgs || product.finalCostKgs,
+          ),
+          differenceValueKgs: 0,
+          remark: dto.remark,
+        },
+      });
+
+      await this.audit(tx, user, 'BRANCH_INVENTORY_UNEXPECTED_PRODUCT_ADDED', session.id, {
+        warehouseId: session.warehouseId,
+        branchId: session.warehouse.branchId ?? undefined,
+        productId: product.id,
+        newValue: {
+          itemId: created.id,
+          sku: product.sku,
+          systemQuantity: balance?.quantity ?? 0,
+        },
+      });
+    });
     return this.detail(user, sessionId);
   }
 
@@ -315,7 +424,7 @@ export class InventoryCountService {
           ? `Филиал ${session.warehouse.name}: инвентаризация ${updated.sessionNumber} ожидает проверки BR_CEO. Расхождений: ${summary.shortages + summary.overages}, сумма: ${summary.totalDifferenceValueKgs} KGS.`
           : `Warehouse Manager submitted inventory ${updated.sessionNumber} for approval.`,
       });
-      return this.toSessionResponse(updated);
+      return this.toSessionResponse(user, updated);
     });
   }
 
@@ -420,7 +529,7 @@ export class InventoryCountService {
           ? `Инвентаризация ${updated.sessionNumber} утверждена BR_CEO.`
           : `Inventory ${updated.sessionNumber} was approved.`,
       });
-      return this.toSessionResponse(updated);
+      return this.toSessionResponse(user, updated);
     });
   }
 
@@ -474,7 +583,7 @@ export class InventoryCountService {
             ? `Inventory ${updated.sessionNumber} was rejected: ${dto.reason}`
             : `Inventory ${updated.sessionNumber} was rejected.`,
       });
-      return this.toSessionResponse(updated);
+      return this.toSessionResponse(user, updated);
     });
   }
 
@@ -567,7 +676,7 @@ export class InventoryCountService {
         oldValue: session.status,
         newValue: updated.status,
       });
-      return this.toSessionResponse(updated);
+      return this.toSessionResponse(user, updated);
     });
   }
 
@@ -652,8 +761,8 @@ export class InventoryCountService {
     };
   }
 
-  private toSessionResponse(session: any) {
-    return {
+  private toSessionResponse(user: AuthUser, session: any) {
+    return sanitizeInventoryCountSessionForUser(user, {
       ...session,
       summary: this.buildSummary(session),
       items: session.items?.map((item: any) => ({
@@ -669,7 +778,7 @@ export class InventoryCountService {
                 ? 'MATCHED'
                 : null,
       })),
-    };
+    });
   }
 
   private async generateSessionNumber(tx: PrismaTx) {
@@ -707,9 +816,9 @@ export class InventoryCountService {
     if (hasAnyFullAccessRole(roles)) {
       return;
     }
-    if (isBranchWarehouse(warehouse) && roles.includes(Role.FRANCHISE_OWNER)) {
+    if (isBranchWarehouse(warehouse) && (roles.includes(Role.FRANCHISE_OWNER) || roles.includes(Role.MANAGER))) {
       if (warehouse.branchId !== user.branchId) {
-        throw new ForbiddenException('Branch owners can approve only their own branch inventory');
+        throw new ForbiddenException('Branch managers can approve only their own branch inventory');
       }
       return;
     }
@@ -800,6 +909,10 @@ export class InventoryCountService {
 
   private inventoryCountUpdatedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
     return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_COUNT_UPDATED' : 'PRODUCT_COUNT_UPDATED';
+  }
+
+  private inventoryDraftSavedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
+    return isBranchWarehouse(warehouse) ? 'BRANCH_INVENTORY_DRAFT_SAVED' : 'PRODUCT_COUNT_UPDATED';
   }
 
   private stockAdjustedAction(warehouse: { warehouseType: import('@prisma/client').WarehouseType; branchId: string | null }) {
@@ -911,7 +1024,7 @@ export class InventoryCountService {
         extra: { reason: trimmedReason },
       });
 
-      return { success: true, archived: true, session: this.toSessionResponse(archived) };
+      return { success: true, archived: true, session: this.toSessionResponse(user, archived) };
     });
   }
 

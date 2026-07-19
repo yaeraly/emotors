@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
@@ -16,6 +16,7 @@ import type {
   User,
   Warehouse,
 } from '@/lib/types';
+import { BRANCH_WAREHOUSE_INVENTORY_BASE, branchWarehouseInventoryPath } from '@/lib/branch-warehouse-inventory';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const inventoryTypes: InventoryCountType[] = [
@@ -31,6 +32,11 @@ type Supplier = { id: string; name: string };
 export default function NewInventoryCountPage() {
   const { t } = useTranslation();
   const router = useRouter();
+  const pathname = usePathname();
+  const branchInventoryFlow = pathname.startsWith(BRANCH_WAREHOUSE_INVENTORY_BASE);
+  const inventoryListHref = branchInventoryFlow
+    ? BRANCH_WAREHOUSE_INVENTORY_BASE
+    : '/inventory/count';
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -131,7 +137,11 @@ export default function NewInventoryCountPage() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      router.push(`/inventory/count/${session.id}`);
+      router.push(
+        branchInventoryFlow
+          ? branchWarehouseInventoryPath(session.id)
+          : `/inventory/count/${session.id}`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -152,7 +162,7 @@ export default function NewInventoryCountPage() {
     <ProtectedShell>
       <section className="space-y-6">
         <div>
-          <Link href="/inventory/count" className="text-sm font-semibold text-blue-600">
+          <Link href={inventoryListHref} className="text-sm font-semibold text-blue-600">
             ← {t('inventoryCount.title')}
           </Link>
           <h2 className="mt-2 text-3xl font-bold text-slate-950">{t('inventoryCount.newInventory')}</h2>

@@ -8,6 +8,7 @@ import { RolesGuard } from '../roles/roles.guard';
 import {
   BulkUpdateInventoryCountItemsDto,
   CreateInventoryCountDto,
+  AddUnexpectedInventoryCountItemDto,
   RejectInventoryCountDto,
   UpdateInventoryCountItemDto,
 } from './dto/inventory-count.dto';
@@ -92,6 +93,16 @@ export class InventoryCountController {
     return this.service.bulkUpdateItems(user, id, dto);
   }
 
+  @Post('sessions/:id/items')
+  @Roles(...INVENTORY_COUNT_ROLES)
+  addUnexpectedItem(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AddUnexpectedInventoryCountItemDto,
+  ) {
+    return this.service.addUnexpectedItem(user, id, dto);
+  }
+
   @Post('sessions/:id/submit')
   @Roles(...INVENTORY_COUNT_ROLES)
   submit(@CurrentUser() user: AuthUser, @Param('id') id: string) {
@@ -99,13 +110,13 @@ export class InventoryCountController {
   }
 
   @Post('sessions/:id/approve')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.approve(user, id);
   }
 
   @Post('sessions/:id/reject')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER, Role.MANAGER)
   reject(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

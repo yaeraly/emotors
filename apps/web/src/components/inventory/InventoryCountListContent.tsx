@@ -12,7 +12,13 @@ import { useTranslation } from '@/i18n/useTranslation';
 const activeStatuses = new Set(['DRAFT', 'COUNTING', 'REJECTED']);
 const historyStatuses = new Set(['SUBMITTED', 'APPROVED', 'COMPLETED']);
 
-export function InventoryCountListContent() {
+export function InventoryCountListContent({
+  basePath = '/inventory/count',
+  hideFinancials = false,
+}: {
+  basePath?: string;
+  hideFinancials?: boolean;
+}) {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [sessions, setSessions] = useState<InventoryCountSession[]>([]);
@@ -74,7 +80,8 @@ export function InventoryCountListContent() {
             sessions={activeSessions}
             t={t}
             user={user}
-            branchOwnerView={isBranchOwnerUser(user)}
+            branchOwnerView={isBranchOwnerUser(user) && !hideFinancials}
+            basePath={basePath}
             onDelete={(session) => {
               setDeleteTarget(session);
               setDeleteRequireReason(!['DRAFT', 'COUNTING'].includes(session.status));
@@ -95,7 +102,8 @@ export function InventoryCountListContent() {
             sessions={historySessions}
             t={t}
             user={user}
-            branchOwnerView={isBranchOwnerUser(user)}
+            branchOwnerView={isBranchOwnerUser(user) && !hideFinancials}
+            basePath={basePath}
             onDelete={(session) => {
               setDeleteTarget(session);
               setDeleteRequireReason(true);
@@ -123,12 +131,14 @@ function SessionTable({
   t,
   user,
   branchOwnerView,
+  basePath,
   onDelete,
 }: {
   sessions: InventoryCountSession[];
   t: (key: string) => string;
   user: User | null;
   branchOwnerView: boolean;
+  basePath: string;
   onDelete: (session: InventoryCountSession) => void;
 }) {
   return (
@@ -185,7 +195,7 @@ function SessionTable({
               <td className="px-4 py-3">
                 <div className="flex flex-wrap gap-2">
                   <Link
-                    href={`/inventory/count/${session.id}`}
+                    href={`${basePath}/${session.id}`}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
                   >
                     {t('common.open')}

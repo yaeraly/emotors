@@ -11,6 +11,8 @@ import { canApproveInventoryCount, canDeleteInventoryCount, canManageInventoryCo
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
+import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventory';
+import { usePathname } from 'next/navigation';
 
 type SearchResult = {
   productId: string;
@@ -26,6 +28,7 @@ type SearchResult = {
 
 export default function InventoryCountDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const pathname = usePathname();
   const router = useRouter();
   const { t } = useTranslation();
   const [session, setSession] = useState<InventoryCountSession | null>(null);
@@ -36,6 +39,8 @@ export default function InventoryCountDetailPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
   const [pendingQty, setPendingQty] = useState<Record<string, string>>({});
+  const [unexpectedCandidate, setUnexpectedCandidate] = useState<SearchResult | null>(null);
+  const [addingUnexpected, setAddingUnexpected] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteRequireReason, setDeleteRequireReason] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -47,7 +52,15 @@ export default function InventoryCountDetailPage() {
   const branchScopedView =
     currentUser &&
     (isBranchWarehouseOperator(currentUser) || isBranchOwnerUser(currentUser));
-  const inventoryListHref = branchScopedView ? '/inventory/count' : '/hq-warehouses?tab=inventory';
+  const hideFinancials = Boolean(currentUser && isBranchWarehouseOperator(currentUser));
+  const inventoryListHref = isBranchWarehouseOperator(currentUser)
+    ? BRANCH_WAREHOUSE_INVENTORY_BASE
+    : branchScopedView
+      ? '/inventory/count'
+      : '/hq-warehouses?tab=inventory';
+  const inventoryDetailBase = pathname.startsWith(BRANCH_WAREHOUSE_INVENTORY_BASE)
+    ? BRANCH_WAREHOUSE_INVENTORY_BASE
+    : '/inventory/count';
 
   async function confirmDelete(reason?: string) {
     if (!session) return;
@@ -63,7 +76,7 @@ export default function InventoryCountDetailPage() {
         setSuccess(t('inventoryCount.archivedSuccess'));
         await load();
       } else {
-        router.replace('/inventory/count');
+        router.replace(inventoryDetailBase);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
@@ -195,6 +208,26 @@ export default function InventoryCountDetailPage() {
     }
   }
 
+  async function addUnexpectedProduct() {
+    if (!session || !unexpectedCandidate || !canManage) return;
+    setAddingUnexpected(true);
+    setError('');
+    try {
+      await apiFetch(`/inventory-count/sessions/${id}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ productId: unexpectedCandidate.productId }),
+      });
+      setUnexpectedCandidate(null);
+      setSearch('');
+      setSuccess(t('inventoryCount.unexpectedProductAdded'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setAddingUnexpected(false);
+    }
+  }
+
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session) return;
@@ -202,6 +235,7 @@ export default function InventoryCountDetailPage() {
     if (!term) return;
 
     setError('');
+    setUnexpectedCandidate(null);
     const localMatch = findSessionItem(term);
     if (localMatch) {
       scrollToItem(localMatch.id);
@@ -217,11 +251,19 @@ export default function InventoryCountDetailPage() {
       const results = await apiFetch<SearchResult[]>(
         `/inventory-count/search?warehouseId=${session.warehouseId}&q=${encodeURIComponent(term)}`,
       );
+      if (results.length === 0) {
+        setError(t('inventoryCount.noSearchResults'));
+        return;
+      }
       const match = results.find((row) =>
         session.items?.some((item) => item.productId === row.productId),
       );
       if (!match) {
-        setError(t('inventoryCount.productNotInSession'));
+        if (canManage) {
+          setUnexpectedCandidate(results[0]);
+        } else {
+          setError(t('inventoryCount.productNotInSession'));
+        }
         return;
       }
       const item = session.items?.find((entry) => entry.productId === match.productId);
@@ -327,10 +369,12 @@ export default function InventoryCountDetailPage() {
             <SummaryCard label={t('inventoryCount.remainingProducts')} value={String(summary.remainingProducts)} />
             <SummaryCard label={t('inventoryCount.shortages')} value={String(summary.shortages)} tone="red" />
             <SummaryCard label={t('inventoryCount.overages')} value={String(summary.overages)} tone="amber" />
-            <SummaryCard
-              label={t('inventoryCount.totalDifferenceValue')}
-              value={formatKgs(summary.totalDifferenceValueKgs)}
-            />
+            {!hideFinancials ? (
+              <SummaryCard
+                label={t('inventoryCount.totalDifferenceValue')}
+                value={formatKgs(summary.totalDifferenceValueKgs)}
+              />
+            ) : null}
           </div>
         ) : null}
 
@@ -363,6 +407,7 @@ export default function InventoryCountDetailPage() {
             onChange={(e) => {
               setSearch(e.target.value);
               setError('');
+              setUnexpectedCandidate(null);
             }}
             placeholder={t('inventoryCount.searchPlaceholder')}
             className="flex-1 rounded-xl border border-slate-300 px-3 py-2"
@@ -371,6 +416,26 @@ export default function InventoryCountDetailPage() {
             {t('common.search')}
           </button>
         </form>
+
+        {unexpectedCandidate && isCounting && canManage ? (
+          <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-amber-900">{t('inventoryCount.unexpectedProductHint')}</p>
+              <p className="mt-1 text-sm text-amber-800">
+                {unexpectedCandidate.sku} · {unexpectedCandidate.productName} ·{' '}
+                {t('inventoryCount.systemQuantity')}: {unexpectedCandidate.systemQuantity}
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={addingUnexpected}
+              onClick={() => void addUnexpectedProduct()}
+              className="rounded-xl bg-amber-600 px-4 py-2 font-semibold text-white disabled:opacity-60"
+            >
+              {t('inventoryCount.addUnexpectedProduct')}
+            </button>
+          </div>
+        ) : null}
 
         <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
@@ -384,7 +449,9 @@ export default function InventoryCountDetailPage() {
                 <th className="px-4 py-3">{t('inventoryCount.systemQuantity')}</th>
                 <th className="px-4 py-3">{t('inventoryCount.actualQuantity')}</th>
                 <th className="px-4 py-3">{t('inventoryCount.difference')}</th>
-                <th className="px-4 py-3">{t('inventoryCount.differenceValue')}</th>
+                {!hideFinancials ? (
+                  <th className="px-4 py-3">{t('inventoryCount.differenceValue')}</th>
+                ) : null}
                 {isCounting && canManage ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
               </tr>
             </thead>
@@ -419,7 +486,9 @@ export default function InventoryCountDetailPage() {
                   <td className="px-4 py-3">
                     <DifferenceBadge item={item} t={t} />
                   </td>
-                  <td className="px-4 py-3">{formatKgs(item.differenceValueKgs)}</td>
+                  {!hideFinancials ? (
+                    <td className="px-4 py-3">{formatKgs(item.differenceValueKgs)}</td>
+                  ) : null}
                   {isCounting && canManage ? (
                     <td className="px-4 py-3">
                       <button
