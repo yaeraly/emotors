@@ -11,6 +11,12 @@ export function isRouteActive(pathname: string, href: string, search = '') {
     if (pagePath === '/customers/archive') {
       return pathname === '/customers/archive';
     }
+    if (pagePath === '/branch-ceo/warehouse') {
+      return pathname === '/branch-ceo/warehouse';
+    }
+    if (pagePath === '/branch-ceo/warehouse/inventory') {
+      return pathname === '/branch-ceo/warehouse/inventory' || pathname.startsWith('/branch-ceo/warehouse/inventory/');
+    }
     if (pagePath === '/sales') {
       return pathname === '/sales' || pathname.startsWith('/sales/');
     }

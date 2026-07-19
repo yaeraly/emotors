@@ -48,7 +48,7 @@ type WarehouseDetail = {
   updatedAt?: string;
 };
 
-export function BranchCeoWarehousePanel() {
+export function BranchCeoWarehousePanel({ showHeader = true }: { showHeader?: boolean }) {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [warehouse, setWarehouse] = useState<WarehouseDetail | null>(null);
@@ -213,11 +213,13 @@ export function BranchCeoWarehousePanel() {
 
   return (
     <div className="space-y-6">
-      <WarehousePageHeader
-        eyebrow={t('hqWarehouse.title')}
-        title={t('branchCeo.warehouseTitle')}
-        description={t('branchCeo.warehouseDescription')}
-      />
+      {showHeader ? (
+        <WarehousePageHeader
+          eyebrow={t('hqWarehouse.title')}
+          title={t('branchCeo.warehouseTitle')}
+          description={t('branchCeo.warehouseDescription')}
+        />
+      ) : null}
 
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
       {success ? <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</p> : null}

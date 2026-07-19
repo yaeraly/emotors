@@ -24,7 +24,7 @@ import { PricingCatalogService } from '../pricing/pricing-catalog.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { assertBranchCashierCannotManageSales, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
+import { assertBranchCashierCannotManageSales, assertBranchSalesManagerCannotApproveSale, hasAnyFullAccessRole, hasAnyHqRole, isBranchSalesManagerUser, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -290,12 +290,15 @@ export class SalesService {
       take: 40,
     });
 
-    return balances
-      .map((balance) => {
+    const productOptions = await Promise.all(
+      balances.map(async (balance) => {
         const availableQty = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
-        const sellingPriceKgs = Number(
-          balance.product.recommendedRetailPriceKgs || balance.product.sellingPriceKgs,
+        const recommendedRetailPriceKgs = await this.resolveRecommendedRetailPrice(
+          branchId,
+          balance.product.id,
         );
+        const sellingPriceKgs = recommendedRetailPriceKgs ?? 0;
+
         return {
           id: balance.product.id,
           name: balance.product.name,
@@ -305,13 +308,30 @@ export class SalesService {
           productCode: balance.product.productCategory?.code ?? null,
           availableQty,
           sellingPriceKgs,
+          recommendedRetailPriceKgs,
+          hasRecommendedPrice: recommendedRetailPriceKgs !== null,
           minimumSellingPriceKgs: Number(balance.product.minimumSellingPriceKgs || 0),
           maximumDiscountPercent: Number(balance.product.maximumDiscountPercent || 0),
           enableMaximumRetailPrice: Boolean(balance.product.enableMaximumRetailPrice),
         };
-      })
+      }),
+    );
+
+    return productOptions
       .filter((product) => product.availableQty > 0)
       .slice(0, 20);
+  }
+
+  private async resolveRecommendedRetailPrice(branchId: string, productId: string) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+      });
+      const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
   }
 
   async updateDraft(user: AuthUser, id: string, dto: CreateSaleDto) {
@@ -493,6 +513,7 @@ export class SalesService {
 
   async approve(user: AuthUser, id: string) {
     assertBranchCashierCannotManageSales(user);
+    assertBranchSalesManagerCannotApproveSale(user);
     const sale = await this.getAccessibleSale(user, id);
 
     if (sale.status === SaleStatus.CANCELLED || sale.status === SaleStatus.FINALIZED) {
@@ -578,7 +599,18 @@ export class SalesService {
   async finalize(user: AuthUser, id: string) {
     assertBranchCashierCannotManageSales(user);
     await this.prisma.$transaction(async (tx) => {
-      const sale = await this.getAccessibleSaleInTx(tx, user, id);
+      let sale = await this.getAccessibleSaleInTx(tx, user, id);
+
+      if (isBranchSalesManagerUser(user) && sale.status === SaleStatus.DRAFT) {
+        sale = await tx.sale.update({
+          where: { id: sale.id },
+          data: {
+            status: SaleStatus.APPROVED_BY_CUSTOMER,
+            approvedAt: new Date(),
+          },
+          include: this.saleInclude(),
+        });
+      }
 
       if (
         sale.status !== SaleStatus.APPROVED_BY_CUSTOMER &&

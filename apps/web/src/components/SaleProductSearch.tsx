@@ -14,6 +14,8 @@ export type SaleProductOption = {
   productCode?: string | null;
   availableQty: number;
   sellingPriceKgs: number;
+  recommendedRetailPriceKgs?: number | null;
+  hasRecommendedPrice?: boolean;
   minimumSellingPriceKgs: number;
   maximumDiscountPercent: number;
 };
@@ -22,6 +24,7 @@ type Props = {
   disabled?: boolean;
   onSelect: (product: SaleProductOption) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  showRecommendedPriceLabel?: boolean;
 };
 
 const DEBOUNCE_MS = 200;
@@ -30,6 +33,7 @@ export function SaleProductSearch({
   disabled = false,
   onSelect,
   inputRef,
+  showRecommendedPriceLabel = false,
 }: Props) {
   const { t } = useTranslation();
   const listboxId = useId();
@@ -192,7 +196,10 @@ export function SaleProductSearch({
                 <p className="mt-1 text-xs font-medium text-slate-700">
                   {t('sales.productSearch.available')}: {product.availableQty}
                   {' • '}
-                  {t('sales.productSearch.sellingPrice')}: {product.sellingPriceKgs.toLocaleString('ru-RU')} KGS
+                  {showRecommendedPriceLabel || product.hasRecommendedPrice === false
+                    ? t('pricing.recommendedRetailPrice')
+                    : t('sales.productSearch.sellingPrice')}
+                  : {(product.recommendedRetailPriceKgs ?? product.sellingPriceKgs).toLocaleString('ru-RU')} KGS
                 </p>
               </button>
             </li>

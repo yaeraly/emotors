@@ -6,7 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { SaleCustomerSearch, type SaleCustomerOption } from '@/components/SaleCustomerSearch';
 import { SaleProductSearch, type SaleProductOption } from '@/components/SaleProductSearch';
 import { apiFetch } from '@/lib/api';
-import { isBranchSalesManagerUser } from '@/lib/rbac';
+import { canApproveSale, isBranchSalesManagerUser } from '@/lib/rbac';
 import type {
   PaymentMethod,
   Sale,
@@ -83,6 +83,7 @@ export default function NewSalePage() {
   const [error, setError] = useState('');
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
+  const canApprove = canApproveSale(user);
 
   useEffect(() => {
     apiFetch<User>('/auth/me')
@@ -120,6 +121,12 @@ export default function NewSalePage() {
       return;
     }
 
+    const recommendedPrice = product.recommendedRetailPriceKgs ?? product.sellingPriceKgs;
+    if (branchSalesManagerView && (product.hasRecommendedPrice === false || recommendedPrice <= 0)) {
+      setError(t('sales.noRecommendedPrice'));
+      return;
+    }
+
     setItems((current) => [
       ...current,
       {
@@ -128,9 +135,9 @@ export default function NewSalePage() {
         productSku: product.sku,
         unit: product.unit,
         quantity: '1',
-        listPrice: product.sellingPriceKgs,
+        listPrice: recommendedPrice,
         discountPercent: '0',
-        unitPrice: String(product.sellingPriceKgs),
+        unitPrice: String(recommendedPrice),
         unitCost: '0',
         availableQty: product.availableQty,
         maxDiscountPercent: product.maximumDiscountPercent,
@@ -367,9 +374,15 @@ export default function NewSalePage() {
     }
 
     if (
+      !branchSalesManagerView &&
       draftSale.status !== 'APPROVED_BY_CUSTOMER' &&
       draftSale.status !== 'SENT_TO_CUSTOMER'
     ) {
+      setError(t('sales.finalizeBeforeApproval'));
+      return;
+    }
+
+    if (draftSale.status === 'FINALIZED' || draftSale.status === 'CANCELLED') {
       setError(t('sales.finalizeBeforeApproval'));
       return;
     }
@@ -493,6 +506,7 @@ export default function NewSalePage() {
               disabled={!selectedCustomer}
               inputRef={productSearchRef}
               onSelect={handleProductSelect}
+              showRecommendedPriceLabel={branchSalesManagerView}
             />
           </div>
 
@@ -539,7 +553,11 @@ export default function NewSalePage() {
                       />
                     ) : null}
                     <SaleInput
-                      label={t('sales.unitPrice')}
+                      label={
+                        branchSalesManagerView
+                          ? t('pricing.recommendedRetailPrice')
+                          : t('sales.unitPrice')
+                      }
                       type="number"
                       value={item.unitPrice}
                       onChange={(value) => updateItem(index, { unitPrice: value })}
@@ -717,13 +735,15 @@ export default function NewSalePage() {
               >
                 {t('sales.sendWhatsApp')}
               </button>
-              <button
-                onClick={() => void approveSale()}
-                type="button"
-                className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50"
-              >
-                {t('sales.markApproved')}
-              </button>
+              {canApprove ? (
+                <button
+                  onClick={() => void approveSale()}
+                  type="button"
+                  className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50"
+                >
+                  {t('sales.markApproved')}
+                </button>
+              ) : null}
               <button
                 onClick={() => void finalizeSale()}
                 type="button"

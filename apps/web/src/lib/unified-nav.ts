@@ -132,12 +132,17 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     id: 'warehouse',
     labelKey: 'nav.inventory',
     defaultHref: '/branch-ceo/warehouse',
-    pathPrefixes: ['/branch-ceo/warehouse', '/inventory/count'],
+    pathPrefixes: ['/branch-ceo/warehouse'],
     sidebarVisible: inventoryVisible,
     pages: [
       {
         href: '/branch-ceo/warehouse',
-        labelKey: 'nav.inventory',
+        labelKey: 'branchWarehouseOperator.warehouseTab',
+        isVisible: (user) => isBranchOwnerUser(user) && inventoryVisible(user),
+      },
+      {
+        href: '/branch-ceo/warehouse/inventory',
+        labelKey: 'branchWarehouseOperator.inventory',
         isVisible: (user) => isBranchOwnerUser(user) && inventoryVisible(user),
       },
     ],

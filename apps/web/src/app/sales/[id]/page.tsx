@@ -5,7 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCancelSale, canManageSaleWorkflow, canVoidPayment, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canApproveSale, canCancelSale, canManageSaleWorkflow, canVoidPayment, isBranchSalesManagerUser } from '@/lib/rbac';
 import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -193,14 +193,16 @@ export default function SaleDetailPage() {
                   >
                     Send WhatsApp
                   </button>
-                  <button
-                    onClick={() => void runSaleAction('approve')}
-                    disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
-                    className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-                    type="button"
-                  >
-                    Approve
-                  </button>
+                  {canApproveSale(currentUser) ? (
+                    <button
+                      onClick={() => void runSaleAction('approve')}
+                      disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
+                      className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                      type="button"
+                    >
+                      Approve
+                    </button>
+                  ) : null}
                   <button
                     onClick={() => void runSaleAction('finalize')}
                     disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}

@@ -11,6 +11,7 @@ import { canApproveInventoryCountForWarehouse, canDeleteInventoryCount, canManag
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
+import { BRANCH_CEO_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-ceo-warehouse';
 import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventory';
 import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
 import { usePathname } from 'next/navigation';
@@ -56,13 +57,19 @@ export default function InventoryCountDetailPage() {
   const hideFinancials = Boolean(currentUser && isBranchWarehouseOperator(currentUser));
   const inventoryListHref = isBranchWarehouseOperator(currentUser)
     ? BRANCH_WAREHOUSE_INVENTORY_BASE
-    : branchScopedView
-      ? '/inventory/count'
-      : '/hq-warehouses?tab=inventory';
+    : isBranchOwnerUser(currentUser)
+      ? BRANCH_CEO_WAREHOUSE_INVENTORY_BASE
+      : branchScopedView
+        ? '/inventory/count'
+        : '/hq-warehouses?tab=inventory';
   const inventoryDetailBase = pathname.startsWith(BRANCH_WAREHOUSE_INVENTORY_BASE)
     ? BRANCH_WAREHOUSE_INVENTORY_BASE
-    : '/inventory/count';
-  const branchInventoryFlow = pathname.startsWith(BRANCH_WAREHOUSE_INVENTORY_BASE);
+    : pathname.startsWith(BRANCH_CEO_WAREHOUSE_INVENTORY_BASE)
+      ? BRANCH_CEO_WAREHOUSE_INVENTORY_BASE
+      : '/inventory/count';
+  const branchInventoryFlow =
+    pathname.startsWith(BRANCH_WAREHOUSE_INVENTORY_BASE) ||
+    pathname.startsWith(BRANCH_CEO_WAREHOUSE_INVENTORY_BASE);
 
   async function confirmDelete(reason?: string) {
     if (!session) return;

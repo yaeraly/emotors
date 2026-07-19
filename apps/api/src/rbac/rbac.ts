@@ -302,6 +302,12 @@ export function assertBranchCashierCannotManageSales(user: Pick<AuthUser, 'role'
   }
 }
 
+export function assertBranchSalesManagerCannotApproveSale(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  if (isBranchSalesManagerUser(user)) {
+    throw new ForbiddenException('У вас нет прав подтверждать продажу как одобренную');
+  }
+}
+
 export function assertBranchAccountantRestrictedRoute(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
   if (isBranchAccountantUser(user)) {
     throw new ForbiddenException('Forbidden resource');

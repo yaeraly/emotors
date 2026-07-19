@@ -1049,6 +1049,10 @@ export function canManageSaleWorkflow(user: Pick<User, 'role' | 'roles' | 'permi
   return canCreateSale(user);
 }
 
+export function canApproveSale(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  return canCreateSale(user) && !isBranchSalesManagerUser(user);
+}
+
 export function isBranchCashierForbiddenPath(pathname: string) {
   return BRANCH_CASHIER_FORBIDDEN_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

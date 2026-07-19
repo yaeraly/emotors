@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { BRANCH_CEO_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-ceo-warehouse';
 import { InventoryCountListContent } from '@/components/inventory/InventoryCountListContent';
 import { apiFetch } from '@/lib/api';
 import {
@@ -31,8 +32,11 @@ export default function InventoryCountPage() {
           router.replace(BRANCH_WAREHOUSE_INVENTORY_BASE);
           return;
         }
-        const branchScopedView = isBranchOwnerUser(me);
-        if (!branchScopedView && (isWarehouseManagerUser(me) || hasFullAccess(me))) {
+        if (isBranchOwnerUser(me)) {
+          router.replace(BRANCH_CEO_WAREHOUSE_INVENTORY_BASE);
+          return;
+        }
+        if (isWarehouseManagerUser(me) || hasFullAccess(me)) {
           router.replace('/hq-warehouses?tab=inventory');
         }
       })
