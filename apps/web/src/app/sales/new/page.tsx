@@ -1,7 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { SaleLinePricingTooltip } from '@/components/SaleLinePricingTooltip';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { SaleCustomerSearch, type SaleCustomerOption } from '@/components/SaleCustomerSearch';
 import { SaleProductSearch, type SaleProductOption } from '@/components/SaleProductSearch';
@@ -40,6 +41,7 @@ type SaleItemForm = {
   unitCost: string;
   availableQty: number;
   maxDiscountPercent: number;
+  hasPricingPolicy: boolean;
   priceAboveRecommendedReasonCode: string;
   priceAboveRecommendedComment: string;
 };
@@ -193,6 +195,7 @@ export default function NewSalePage() {
   );
 
   const hasBlockingPriceError = linePriceStates.some((state) => state.level === 'error');
+  const hasMissingPricing = items.some((item) => !item.hasPricingPolicy);
   const cashChange = useMemo(() => {
     if (paymentType !== 'FULL_PAYMENT') return 0;
     const received = Number(cashReceived || 0);
@@ -214,6 +217,7 @@ export default function NewSalePage() {
     Boolean(selectedCustomer) &&
     items.length > 0 &&
     !hasBlockingPriceError &&
+    !hasMissingPricing &&
     draftSale?.status !== 'FINALIZED' &&
     draftSale?.status !== 'CANCELLED' &&
     (paymentType === 'FULL_PAYMENT'
@@ -267,6 +271,7 @@ export default function NewSalePage() {
         unitCost: '0',
         availableQty: product.availableQty,
         maxDiscountPercent: product.maximumDiscountPercent,
+        hasPricingPolicy: product.hasRecommendedPrice !== false && recommendedPrice > 0,
         priceAboveRecommendedReasonCode: '',
         priceAboveRecommendedComment: '',
       },
@@ -409,6 +414,11 @@ export default function NewSalePage() {
 
     if (hasBlockingPriceError) {
       setError(t('sales.priceOutOfRangeBlocked'));
+      return null;
+    }
+
+    if (hasMissingPricing) {
+      setError(t('sales.noPricingPolicy'));
       return null;
     }
 
@@ -577,25 +587,29 @@ export default function NewSalePage() {
   }
 
   function priceWarningMessage(state: ReturnType<typeof evaluateSaleLinePrice>) {
-    if (state.level === 'ok') return t('sales.priceAtRecommended');
+    if (state.level === 'ok') return null;
     if (state.kind === 'below-recommended') {
-      return t('sales.priceBelowRecommendedWarning')
-        .replace('{difference}', state.difference.toLocaleString('ru-RU'))
-        .replace('{minimumPrice}', state.boundary.toLocaleString('ru-RU'));
+      return t('sales.priceBelowRecommendedWarning').replace(
+        '{difference}',
+        state.difference.toLocaleString('ru-RU'),
+      );
     }
     if (state.kind === 'above-recommended') {
-      return t('sales.priceAboveRecommendedRangeWarning')
-        .replace('{difference}', state.difference.toLocaleString('ru-RU'))
-        .replace('{maximumPrice}', state.boundary.toLocaleString('ru-RU'));
+      return t('sales.priceAboveRecommendedRangeWarning').replace(
+        '{difference}',
+        state.difference.toLocaleString('ru-RU'),
+      );
     }
     if (state.kind === 'below-minimum') {
-      return t('sales.priceBelowMinimumError')
-        .replace('{difference}', state.difference.toLocaleString('ru-RU'))
-        .replace('{minimumPrice}', state.boundary.toLocaleString('ru-RU'));
+      return t('sales.priceBelowMinimumError').replace(
+        '{minimumPrice}',
+        state.boundary.toLocaleString('ru-RU'),
+      );
     }
-    return t('sales.priceAboveMaximumError')
-      .replace('{difference}', state.difference.toLocaleString('ru-RU'))
-      .replace('{maximumPrice}', state.boundary.toLocaleString('ru-RU'));
+    return t('sales.priceAboveMaximumError').replace(
+      '{maximumPrice}',
+      state.boundary.toLocaleString('ru-RU'),
+    );
   }
 
   async function finalizeSale() {
@@ -822,11 +836,11 @@ export default function NewSalePage() {
                 return (
                   <div
                     key={`${item.productId}-${index}`}
-                    className="grid gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-12"
+                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.25fr)_minmax(0,1fr)_auto] lg:items-start"
                   >
-                    <div className="lg:col-span-2">
+                    <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.product')}</p>
-                      <p className="mt-1 font-semibold text-slate-950">{item.productName}</p>
+                      <p className="mt-1 truncate font-semibold text-slate-950">{item.productName}</p>
                       <p className="mt-1 text-xs text-slate-500">
                         {t('sales.sku')}: {item.productSku} • {item.unit}
                       </p>
@@ -846,31 +860,36 @@ export default function NewSalePage() {
                           : undefined
                       }
                     />
-                    <div className="text-sm">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('pricing.minimumSellingPrice')}
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700">
-                        {formatKgs(item.minimumPrice)}
-                      </p>
-                    </div>
-                    <div className="text-sm">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('pricing.recommendedRetailPrice')}
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700">
-                        {formatKgs(item.recommendedPrice)}
-                      </p>
-                    </div>
-                    <div className="text-sm">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('sales.maximumPrice')}
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-700">
-                        {item.hasMaximumPrice && item.maximumPrice
-                          ? formatKgs(item.maximumPrice)
-                          : '—'}
-                      </p>
+                    <div className="min-w-0">
+                      <SaleInput
+                        label={t('sales.sellingPrice')}
+                        type="number"
+                        value={item.unitPrice}
+                        onChange={(value) => updateItem(index, { unitPrice: value })}
+                        required
+                        readOnly={branchSalesManagerView}
+                        labelAccessory={
+                          <SaleLinePricingTooltip
+                            minimumPrice={item.minimumPrice}
+                            recommendedPrice={item.recommendedPrice}
+                            maximumPrice={item.maximumPrice}
+                            hasMaximumPrice={item.hasMaximumPrice}
+                            hasPricingPolicy={item.hasPricingPolicy}
+                          />
+                        }
+                        error={
+                          !item.hasPricingPolicy
+                            ? t('sales.noPricingPolicy')
+                            : priceState?.level === 'error'
+                              ? priceWarningMessage(priceState) ?? undefined
+                              : undefined
+                        }
+                      />
+                      {item.hasPricingPolicy && priceState?.level === 'warning' ? (
+                        <p className="mt-1 text-xs font-semibold text-amber-700">
+                          {priceWarningMessage(priceState)}
+                        </p>
+                      ) : null}
                     </div>
                     {item.maxDiscountPercent > 0 && !branchSalesManagerView ? (
                       <SaleInput
@@ -880,31 +899,14 @@ export default function NewSalePage() {
                         onChange={(value) => updateItem(index, { discountPercent: value })}
                       />
                     ) : null}
-                    <SaleInput
-                      label={t('sales.unitPrice')}
-                      type="number"
-                      value={item.unitPrice}
-                      onChange={(value) => updateItem(index, { unitPrice: value })}
-                      required
-                      readOnly={branchSalesManagerView}
-                    />
-                    {priceState && priceState.level !== 'ok' ? (
-                      <div
-                        className={`lg:col-span-3 rounded-xl p-3 text-sm font-semibold ${
-                          priceState.level === 'error'
-                            ? 'border border-red-200 bg-red-50 text-red-700'
-                            : 'border border-amber-200 bg-amber-50 text-amber-800'
-                        }`}
-                      >
-                        {priceWarningMessage(priceState)}
-                      </div>
-                    ) : priceState?.level === 'ok' ? (
-                      <div className="lg:col-span-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
-                        {priceWarningMessage(priceState)}
-                      </div>
-                    ) : null}
-                    {Number(item.unitPrice) > item.recommendedPrice + 0.01 ? (
-                      <div className="lg:col-span-2 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                    <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm">
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {t('sales.totalAmount')}
+                      </p>
+                      <p className="font-bold text-slate-900">{formatKgs(itemTotal)}</p>
+                    </div>
+                    {Number(item.unitPrice) > item.recommendedPrice + 0.01 && !branchSalesManagerView ? (
+                      <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 lg:col-span-5">
                         <p className="text-sm font-semibold text-amber-800">
                           {t('sales.priceAboveRecommendedWarning')}
                         </p>
@@ -937,15 +939,9 @@ export default function NewSalePage() {
                         ) : null}
                       </div>
                     ) : null}
-                    <div className="rounded-xl bg-slate-50 p-3 text-sm">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('sales.totalAmount')}
-                      </p>
-                      <p className="font-bold text-slate-900">{formatKgs(itemTotal)}</p>
-                    </div>
                     <button
                       onClick={() => removeItem(index)}
-                      className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
+                      className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 lg:self-center"
                       type="button"
                     >
                       {t('common.delete')}
@@ -957,73 +953,48 @@ export default function NewSalePage() {
           )}
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-2">
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">{t('sales.paymentSection')}</h3>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('sales.paymentType')}</span>
-                <select
-                  value={paymentType}
-                  onChange={(event) => {
-                    setPaymentType(event.target.value as PaymentType);
-                    setPaymentsSynced(false);
-                  }}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                >
-                  <option value="FULL_PAYMENT">{t('sales.fullPayment')}</option>
-                  <option value="INSTALLMENT">{t('sales.installment')}</option>
-                </select>
-              </label>
-            </div>
+        <section className="min-w-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-950">{t('sales.paymentSection')}</h3>
+
+          <div className="mt-4 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block min-w-0">
+              <span className="text-sm font-semibold text-slate-700">{t('sales.paymentType')}</span>
+              <select
+                value={paymentType}
+                onChange={(event) => {
+                  setPaymentType(event.target.value as PaymentType);
+                  setPaymentsSynced(false);
+                }}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              >
+                <option value="FULL_PAYMENT">{t('sales.fullPayment')}</option>
+                <option value="INSTALLMENT">{t('sales.installment')}</option>
+              </select>
+            </label>
 
             {paymentType === 'FULL_PAYMENT' ? (
-            <div className="mt-4 space-y-3">
-              {paymentRows.map((row, index) => (
-                <div key={index} className="grid gap-3 rounded-2xl bg-slate-50 p-3 md:grid-cols-4">
-                  <SaleInput
-                    label={t('sales.paidAmount')}
-                    type="number"
-                    value={row.amount}
-                    onChange={(value) => updatePayment(index, { amount: value })}
-                  />
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">
-                      {t('sales.paymentMethod')}
-                    </span>
-                    <select
-                      value={row.method}
-                      onChange={(event) =>
-                        updatePayment(index, {
-                          method: event.target.value as PaymentMethod,
-                        })
-                      }
-                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                    >
-                      {visiblePaymentMethods.map((method) => (
-                        <option key={method} value={method}>
-                          {paymentMethodLabel(method, t)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <SaleInput
-                    label={t('crm.notes')}
-                    value={row.note}
-                    onChange={(value) => updatePayment(index, { note: value })}
-                  />
-                  <button
-                    onClick={() => removePaymentRow(index)}
-                    disabled={paymentRows.length === 1}
-                    type="button"
-                    className="self-end rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 disabled:opacity-50"
+              <>
+                <label className="block min-w-0">
+                  <span className="text-sm font-semibold text-slate-700">{t('sales.paymentMethod')}</span>
+                  <select
+                    value={paymentRows[0]?.method ?? 'CASH'}
+                    onChange={(event) =>
+                      updatePayment(0, { method: event.target.value as PaymentMethod })
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
                   >
-                    {t('common.delete')}
-                  </button>
+                    {visiblePaymentMethods.map((method) => (
+                      <option key={method} value={method}>
+                        {paymentMethodLabel(method, t)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm">
+                  <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.saleTotal')}</p>
+                  <p className="mt-1 text-lg font-bold text-slate-900">{formatKgs(totals.totalAmount)}</p>
                 </div>
-              ))}
-              {paymentRows.length === 1 && paymentRows[0]?.method === 'CASH' ? (
-                <div className="grid gap-3 rounded-2xl border border-green-100 bg-green-50 p-3 md:grid-cols-2">
+                {paymentRows[0]?.method === 'CASH' ? (
                   <SaleInput
                     label={t('sales.cashReceived')}
                     type="number"
@@ -1033,165 +1004,210 @@ export default function NewSalePage() {
                       setPaymentsSynced(false);
                     }}
                   />
-                  <div className="rounded-xl bg-white p-3 text-sm">
+                ) : (
+                  <SaleInput
+                    label={t('sales.paidAmount')}
+                    type="number"
+                    value={paymentRows[0]?.amount ?? '0'}
+                    onChange={(value) => updatePayment(0, { amount: value })}
+                  />
+                )}
+                {paymentRows[0]?.method === 'CASH' ? (
+                  <div className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 text-sm sm:col-span-2 lg:col-span-1">
                     <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.changeAmount')}</p>
                     <p className="mt-1 text-lg font-bold text-green-700">{formatKgs(cashChange)}</p>
                   </div>
-                </div>
-              ) : null}
-              <button
-                onClick={addPaymentRow}
-                type="button"
-                className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-              >
-                {t('sales.addPayment')}
-              </button>
-              {totals.debt > 0.009 ? (
-                <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
-                  {t('sales.fullPaymentRequired')}
-                </p>
-              ) : null}
-            </div>
+                ) : null}
+                {!branchSalesManagerView ? (
+                  <SaleInput
+                    label={t('crm.notes')}
+                    value={paymentRows[0]?.note ?? ''}
+                    onChange={(value) => updatePayment(0, { note: value })}
+                  />
+                ) : null}
+              </>
             ) : (
-              <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                {t('sales.installmentSectionHint')}
-              </p>
+              <>
+                <SaleInput
+                  label={t('sales.downPayment')}
+                  type="number"
+                  value={downPayment}
+                  onChange={(value) => {
+                    setDownPayment(value);
+                    setPaymentsSynced(false);
+                  }}
+                />
+                <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm">
+                  <p className="text-xs font-semibold uppercase text-slate-400">
+                    {t('sales.installmentFinancedAmount')}
+                  </p>
+                  <p className="mt-1 text-lg font-bold text-slate-900">
+                    {formatKgs(installmentRemainingDebt)}
+                  </p>
+                </div>
+                <SaleInput
+                  label={t('sales.finalPaymentDate')}
+                  type="date"
+                  value={finalPaymentDate}
+                  onChange={setFinalPaymentDate}
+                />
+                <label className="block min-w-0">
+                  <span className="text-sm font-semibold text-slate-700">{t('sales.downPaymentMethod')}</span>
+                  <select
+                    value={paymentRows[0]?.method ?? 'CASH'}
+                    onChange={(event) =>
+                      updatePayment(0, { method: event.target.value as PaymentMethod })
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                  >
+                    {visiblePaymentMethods.map((method) => (
+                      <option key={method} value={method}>
+                        {paymentMethodLabel(method, t)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block min-w-0 sm:col-span-2 lg:col-span-4">
+                  <span className="text-sm font-semibold text-slate-700">{t('sales.installmentComment')}</span>
+                  <textarea
+                    value={notes}
+                    onChange={(event) => setNotes(event.target.value)}
+                    className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                  />
+                </label>
+              </>
             )}
-          </section>
+          </div>
 
-          {paymentType === 'INSTALLMENT' ? (
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">{t('sales.installment')}</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <SaleInput
-                label={t('sales.downPayment')}
-                type="number"
-                value={downPayment}
-                onChange={(value) => {
-                  setDownPayment(value);
-                  setPaymentsSynced(false);
-                }}
-              />
-              <div className="rounded-xl bg-slate-50 p-3 text-sm">
-                <p className="text-xs font-semibold uppercase text-slate-400">
-                  {t('sales.installmentFinancedAmount')}
-                </p>
-                <p className="mt-1 text-lg font-bold text-slate-900">
-                  {formatKgs(installmentRemainingDebt)}
-                </p>
-              </div>
-              <SaleInput
-                label={t('sales.finalPaymentDate')}
-                type="date"
-                value={finalPaymentDate}
-                onChange={setFinalPaymentDate}
-              />
-            </div>
-            <label className="mt-4 block">
-              <span className="text-sm font-semibold text-slate-700">{t('sales.installmentComment')}</span>
-              <textarea
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-              />
-            </label>
-            {isInstallmentSale && installmentStatusKey ? (
-              <p
-                className={`mt-4 rounded-xl px-4 py-3 text-sm font-semibold ${
-                  installmentApproved
-                    ? 'bg-green-50 text-green-800'
-                    : installmentRejected
-                      ? 'bg-red-50 text-red-700'
-                      : 'bg-amber-50 text-amber-800'
-                }`}
-              >
-                {t(installmentStatusKey)}
-                {installmentRejected && installmentApproval?.rejectionReason
-                  ? `: ${installmentApproval.rejectionReason}`
-                  : ''}
-              </p>
-            ) : null}
-          </section>
+          {paymentType === 'FULL_PAYMENT' && totals.debt > 0.009 ? (
+            <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+              {t('sales.fullPaymentRequired')}
+            </p>
           ) : null}
-        </div>
 
-        <section className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-4">
-          <Summary label={t('sales.totalAmount')} value={formatKgs(totals.totalAmount)} />
-          {!branchSalesManagerView ? (
-            <Summary label={t('sales.profitAmount')} value={formatKgs(totals.profit)} />
+          {paymentType === 'INSTALLMENT' && isInstallmentSale && installmentStatusKey ? (
+            <p
+              className={`mt-4 rounded-xl px-4 py-3 text-sm font-semibold ${
+                installmentApproved
+                  ? 'bg-green-50 text-green-800'
+                  : installmentRejected
+                    ? 'bg-red-50 text-red-700'
+                    : 'bg-amber-50 text-amber-800'
+              }`}
+            >
+              {t(installmentStatusKey)}
+              {installmentRejected && installmentApproval?.rejectionReason
+                ? `: ${installmentApproval.rejectionReason}`
+                : ''}
+            </p>
           ) : null}
-          <Summary label={t('sales.paidAmount')} value={formatKgs(totals.paid)} />
-          <Summary label={t('sales.debtAmount')} value={formatKgs(totals.debt)} />
-        </section>
 
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-            <div>
-              <h3 className="text-lg font-bold text-slate-950">{t('sales.draftReceipt')}</h3>
-              <pre className="mt-3 whitespace-pre-wrap rounded-2xl bg-slate-100 p-4 text-sm text-slate-700">
-                {draftSale?.draftReceiptText ??
-                  `EMOTORS DRAFT RECEIPT\n${t('sales.totalAmount')}: ${formatKgs(totals.totalAmount)}\n${t('sales.paidAmount')}: ${formatKgs(totals.paid)}\n${t('sales.debtAmount')}: ${formatKgs(totals.debt)}`}
-              </pre>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2 lg:min-w-80">
-              <button
-                onClick={() => void saveDraft()}
-                type="button"
-                className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-              >
-                {t('sales.saveDraft')}
-              </button>
+          <div className="mt-6 grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Summary label={t('sales.paymentSummaryTotal')} value={formatKgs(totals.totalAmount)} />
+            {paymentType === 'FULL_PAYMENT' ? (
+              <>
+                <Summary
+                  label={paymentRows[0]?.method === 'CASH' ? t('sales.cashReceived') : t('sales.paidNow')}
+                  value={formatKgs(
+                    paymentRows[0]?.method === 'CASH'
+                      ? Number(cashReceived || 0)
+                      : totals.paid,
+                  )}
+                />
+                {paymentRows[0]?.method === 'CASH' ? (
+                  <Summary label={t('sales.changeAmount')} value={formatKgs(cashChange)} />
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Summary label={t('sales.downPayment')} value={formatKgs(Number(downPayment || 0))} />
+                <Summary
+                  label={t('sales.installmentFinancedAmount')}
+                  value={formatKgs(installmentRemainingDebt)}
+                />
+              </>
+            )}
+          </div>
+
+          <div className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+            <button
+              onClick={() => void saveDraft()}
+              type="button"
+              className="w-full rounded-xl border border-blue-200 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
+            >
+              {t('sales.saveDraft')}
+            </button>
+            {!branchSalesManagerView ? (
               <button
                 onClick={() => void sendWhatsApp()}
                 type="button"
-                className="rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50"
+                className="w-full rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 sm:w-auto"
               >
                 {t('sales.sendWhatsApp')}
               </button>
-              {canApprove ? (
-                <button
-                  onClick={() => void approveSale()}
-                  type="button"
-                  className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50"
-                >
-                  {t('sales.markApproved')}
-                </button>
-              ) : null}
-              {canSubmitInstallment && paymentType === 'INSTALLMENT' && isInstallmentSale ? (
-                <button
-                  onClick={() => void submitInstallmentRequest()}
-                  disabled={submittingInstallment || installmentPending || installmentApproved}
-                  type="button"
-                  className="rounded-xl border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {submittingInstallment
-                    ? t('common.loading')
-                    : t('sales.submitInstallmentRequest')}
-                </button>
-              ) : null}
+            ) : null}
+            {canApprove ? (
+              <button
+                onClick={() => void approveSale()}
+                type="button"
+                className="w-full rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 sm:w-auto"
+              >
+                {t('sales.markApproved')}
+              </button>
+            ) : null}
+            {paymentType === 'INSTALLMENT' && canSubmitInstallment && isInstallmentDraft ? (
+              <button
+                onClick={() => void submitInstallmentRequest()}
+                disabled={submittingInstallment || installmentPending || installmentApproved}
+                type="button"
+                className="w-full rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-300 sm:w-auto"
+              >
+                {submittingInstallment
+                  ? t('common.loading')
+                  : t('sales.submitInstallmentRequest')}
+              </button>
+            ) : null}
+            {paymentType === 'FULL_PAYMENT' ? (
               <button
                 onClick={() => void finalizeSale()}
                 disabled={!canFinalize}
                 type="button"
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 sm:w-auto"
               >
                 {t('sales.finalizeSale')}
               </button>
+            ) : installmentApproved ? (
               <button
-                onClick={() => void cancelSale()}
-                disabled={!draftSale || draftSale.status === 'CANCELLED'}
+                onClick={() => void finalizeSale()}
+                disabled={!canFinalize}
                 type="button"
-                className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 sm:w-auto"
               >
-                {t('sales.cancelSale')}
+                {t('sales.finalizeSale')}
               </button>
-              {draftSale ? (
-                <p className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
-                  {draftSale.status}
-                </p>
-              ) : null}
-            </div>
+            ) : null}
+            <button
+              onClick={() => void cancelSale()}
+              disabled={!draftSale || draftSale.status === 'CANCELLED'}
+              type="button"
+              className="w-full rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50 sm:w-auto"
+            >
+              {t('sales.cancelSale')}
+            </button>
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-950">{t('sales.draftReceipt')}</h3>
+          <pre className="mt-3 whitespace-pre-wrap rounded-2xl bg-slate-100 p-4 text-sm text-slate-700">
+            {draftSale?.draftReceiptText ??
+              `EMOTORS DRAFT RECEIPT\n${t('sales.totalAmount')}: ${formatKgs(totals.totalAmount)}\n${t('sales.paidAmount')}: ${formatKgs(totals.paid)}\n${t('sales.debtAmount')}: ${formatKgs(totals.debt)}`}
+          </pre>
+          {draftSale ? (
+            <p className="mt-3 inline-flex rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">
+              {draftSale.status}
+            </p>
+          ) : null}
         </section>
       </form>
     </ProtectedShell>
@@ -1200,6 +1216,7 @@ export default function NewSalePage() {
 
 function SaleInput({
   label,
+  labelAccessory,
   value,
   onChange,
   required,
@@ -1208,6 +1225,7 @@ function SaleInput({
   error,
 }: {
   label: string;
+  labelAccessory?: React.ReactNode;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
@@ -1216,8 +1234,11 @@ function SaleInput({
   error?: string;
 }) {
   return (
-    <label className="block">
-      <span className="text-sm font-semibold text-slate-700">{label}</span>
+    <label className="block min-w-0">
+      <span className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+        <span className="truncate">{label}</span>
+        {labelAccessory}
+      </span>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -1226,7 +1247,7 @@ function SaleInput({
         type={type}
         min={type === 'number' ? 0 : undefined}
         step={type === 'number' ? '0.01' : undefined}
-        className={`mt-2 w-full rounded-xl border px-3 py-2 outline-none ring-blue-500 focus:ring-2 ${
+        className={`mt-2 w-full min-w-0 rounded-xl border px-3 py-2 outline-none ring-blue-500 focus:ring-2 ${
           readOnly ? 'border-slate-200 bg-slate-100 text-slate-700' : 'border-slate-300'
         } ${error ? 'border-red-300' : ''}`}
       />
