@@ -4,19 +4,24 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { DailySalesReport } from '@/lib/types';
+import { usesUnifiedNav } from '@/lib/unified-nav';
+import type { DailySalesReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function CrmPage() {
   const { t } = useTranslation();
   const [report, setReport] = useState<DailySalesReport | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
     void apiFetch<DailySalesReport>('/sales/reports/daily')
       .then(setReport)
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
+
+  const hideQuickLinks = usesUnifiedNav(user);
 
   return (
     <ProtectedShell>
@@ -43,26 +48,30 @@ export default function CrmPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('crm.totalDebtAmount')}</p>
             <p className="mt-2 text-2xl font-bold text-slate-950">{report?.totalDebtAmount ?? 0}</p>
           </div>
-          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('sales.profitAmount')}</p>
-            <p className="mt-2 text-2xl font-bold text-slate-950">{report?.totalProfitAmount ?? 0}</p>
-          </div>
+          {!hideQuickLinks ? (
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('sales.profitAmount')}</p>
+              <p className="mt-2 text-2xl font-bold text-slate-950">{report?.totalProfitAmount ?? 0}</p>
+            </div>
+          ) : null}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Link href="/customers" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
-            {t('nav.customers')}
-          </Link>
-          <Link href="/follow-ups" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
-            {t('nav.followUps')}
-          </Link>
-          <Link href="/sales" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
-            {t('nav.sales')}
-          </Link>
-          <Link href="/installments" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
-            {t('nav.installments')}
-          </Link>
-        </div>
+        {!hideQuickLinks ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Link href="/customers" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
+              {t('nav.customers')}
+            </Link>
+            <Link href="/follow-ups" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
+              {t('nav.followUps')}
+            </Link>
+            <Link href="/sales" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
+              {t('nav.sales')}
+            </Link>
+            <Link href="/installments" className="rounded-2xl border border-slate-200 bg-white p-4 font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">
+              {t('nav.installments')}
+            </Link>
+          </div>
+        ) : null}
       </section>
     </ProtectedShell>
   );

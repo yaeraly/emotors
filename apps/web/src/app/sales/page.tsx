@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCreateSale, isBranchSalesManagerUser, shouldShowSaleStatusColumn } from '@/lib/rbac';
+import { canCreateSale, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -20,9 +20,9 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const branchSalesView = isBranchSalesManagerUser(user);
+  const hideProfitColumn = shouldHideSaleProfitColumn(user);
   const showSaleStatusColumn = shouldShowSaleStatusColumn(user);
-  const tableColumnCount = (branchSalesView ? 9 : 10) + (showSaleStatusColumn ? 1 : 0);
+  const tableColumnCount = (hideProfitColumn ? 9 : 10) + (showSaleStatusColumn ? 1 : 0);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -94,11 +94,11 @@ export default function SalesPage() {
           </p>
         ) : null}
 
-        <div className={`grid gap-4 ${branchSalesView ? 'md:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
+        <div className={`grid gap-4 ${hideProfitColumn ? 'md:grid-cols-3' : 'md:grid-cols-2 xl:grid-cols-4'}`}>
           <SummaryCard label={t('sales.dailySales')} value={formatKgs(report?.totalSalesAmount)} />
           <SummaryCard label={t('sales.dailyPaid')} value={formatKgs(report?.totalPaidAmount)} />
           <SummaryCard label={t('sales.dailyDebt')} value={formatKgs(report?.totalDebtAmount)} />
-          {!branchSalesView ? (
+          {!hideProfitColumn ? (
             <SummaryCard label={t('sales.dailyProfit')} value={formatKgs(report?.totalProfitAmount)} />
           ) : null}
         </div>
@@ -126,7 +126,7 @@ export default function SalesPage() {
 
         <div className="h-[calc(100vh-300px)] min-h-[420px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className={`divide-y divide-slate-200 text-sm ${branchSalesView ? 'min-w-[980px]' : showSaleStatusColumn ? 'min-w-[1120px]' : 'min-w-[1000px]'}`}>
+            <table className={`divide-y divide-slate-200 text-sm ${hideProfitColumn ? 'min-w-[980px]' : showSaleStatusColumn ? 'min-w-[1120px]' : 'min-w-[1000px]'}`}>
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">{t('sales.receiptNumber')}</th>
@@ -136,7 +136,7 @@ export default function SalesPage() {
                   <th className="px-4 py-3">{t('sales.totalAmount')}</th>
                   <th className="px-4 py-3">{t('sales.paidAmount')}</th>
                   <th className="px-4 py-3">{t('sales.debtAmount')}</th>
-                  {!branchSalesView ? <th className="px-4 py-3">{t('sales.profitAmount')}</th> : null}
+                  {!hideProfitColumn ? <th className="px-4 py-3">{t('sales.profitAmount')}</th> : null}
                   <th className="px-4 py-3">{t('common.status')}</th>
                   {showSaleStatusColumn ? <th className="px-4 py-3">Sale Status</th> : null}
                   <th className="px-4 py-3">{t('common.actions')}</th>
@@ -179,7 +179,7 @@ export default function SalesPage() {
                       <td className="px-4 py-3 font-semibold text-red-700">
                         {formatKgs(sale.debtAmount)}
                       </td>
-                      {!branchSalesView ? (
+                      {!hideProfitColumn ? (
                         <td className="px-4 py-3 font-semibold text-slate-900">
                           {formatKgs(sale.profitAmount)}
                         </td>

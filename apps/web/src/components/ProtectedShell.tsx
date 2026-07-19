@@ -7,7 +7,8 @@ import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
-import { isUnifiedNavModuleActive, sidebarHrefForModule, visibleBranchOwnerSidebarModules } from '@/lib/unified-nav';
+import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
+import { sidebarNavClass } from '@/lib/nav-matching';
 import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
@@ -17,15 +18,6 @@ import { useTranslation } from '@/i18n/useTranslation';
 type ProtectedShellProps = {
   children: ReactNode;
 };
-
-function sidebarNavClass(pathname: string, href: string) {
-  const base = 'block rounded-xl px-3 py-2 text-sm font-semibold';
-  const active =
-    pathname === href ||
-    (href !== '/' && pathname.startsWith(`${href}/`));
-  return active ? `${base} bg-blue-50 text-blue-700` : `${base} text-slate-700 hover:bg-slate-50`;
-}
-
 export function ProtectedShell({ children }: ProtectedShellProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -179,7 +171,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const branchAccountantView = isBranchAccountantUser(user);
   const branchWarehouseOperatorView = isBranchWarehouseOperator(user);
   const branchOwnerView = isBranchOwnerUser(user);
-  const branchOwnerSidebarModules = visibleBranchOwnerSidebarModules(user);
+  const unifiedNavView = usesUnifiedNav(user);
+  const unifiedSidebarModules = visibleUnifiedSidebarModules(user);
   const forbiddenMessage =
     forbiddenReason === 'procurement' ? t('errors.procurementAccessDenied') : undefined;
   const canSeeBranchWarehouses = canViewBranchWarehouses(user);
@@ -252,19 +245,19 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             {supplyChainManagerView || ceoOperationalView ? (
               <>
                 {canSeeHqWarehouse ? (
-                  <Link href="/hq-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.hqWarehouses')}</Link>
+                  <Link href="/hq-warehouses" className={sidebarNavClass(pathname, '/hq-warehouses')}>{t('scm.sidebar.hqWarehouses')}</Link>
                 ) : null}
                 {canSeeBranchWarehouses ? (
-                  <Link href="/branch-warehouses" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.branchWarehouses')}</Link>
+                  <Link href="/branch-warehouses" className={sidebarNavClass(pathname, '/branch-warehouses')}>{t('scm.sidebar.branchWarehouses')}</Link>
                 ) : null}
                 {canSeeProductMaster ? (
-                  <Link href="/product-master" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.productMaster')}</Link>
+                  <Link href="/product-master" className={sidebarNavClass(pathname, '/product-master')}>{t('scm.sidebar.productMaster')}</Link>
                 ) : null}
                 {canSeePricing ? (
-                  <Link href="/pricing" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('pricing.title')}</Link>
+                  <Link href="/pricing" className={sidebarNavClass(pathname, '/pricing')}>{t('pricing.title')}</Link>
                 ) : null}
                 {canSeeProcurement ? (
-                  <Link href="/procurement" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('scm.sidebar.procurement')}</Link>
+                  <Link href="/procurement" className={sidebarNavClass(pathname, '/procurement')}>{t('scm.sidebar.procurement')}</Link>
                 ) : null}
                 {canSeeDistribution ? (
                   <Link href="/distribution/orders" className={sidebarNavClass(pathname, '/distribution/orders')}>{t('nav.supplyBranchFulfillment')}</Link>
@@ -273,7 +266,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/branch-purchase-requests" className={sidebarNavClass(pathname, '/branch-purchase-requests')}>{t('nav.hqBranchOrders')}</Link>
                 ) : null}
                 {canSeeBranchProductShortages ? (
-                  <Link href="/branch-product-shortages" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('productShortages.title')}</Link>
+                  <Link href="/branch-product-shortages" className={sidebarNavClass(pathname, '/branch-product-shortages')}>{t('productShortages.title')}</Link>
                 ) : null}
                 {ceoOperationalView ? (
                   <div className="border-t border-slate-100 pt-2">
@@ -332,70 +325,79 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : branchAccountantView ? (
               <>
-                <Link href="/branch-accountant/invoices" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                <Link href="/branch-accountant/invoices" className={sidebarNavClass(pathname, '/branch-accountant/invoices')}>
                   {t('branchAccountant.invoicesToPay')}
                 </Link>
-                <Link href="/tax" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/tax" className={sidebarNavClass(pathname, '/tax')}>
                   {t('tax.title')}
                 </Link>
-                <Link href="/payroll" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/payroll" className={sidebarNavClass(pathname, '/payroll')}>
                   {t('payroll.title')}
                 </Link>
-                <Link href="/commissions" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/commissions" className={sidebarNavClass(pathname, '/commissions')}>
                   {t('commissions.title')}
                 </Link>
-                <Link href="/compensation/rules" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/compensation/rules" className={sidebarNavClass(pathname, '/compensation/rules')}>
                   {t('compensation.rules')}
                 </Link>
               </>
             ) : branchCashierView ? (
               <>
-                <Link href="/branch-cashier/invoices" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                <Link href="/branch-cashier/invoices" className={sidebarNavClass(pathname, '/branch-cashier/invoices')}>
                   {t('branchCashier.invoicesToPay')}
                 </Link>
-                <Link href="/sales" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/sales" className={sidebarNavClass(pathname, '/sales')}>
                   {t('sales.salesAndPayments')}
                 </Link>
-                <Link href="/service/cashier" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/service/cashier" className={sidebarNavClass(pathname, '/service/cashier')}>
                   Сервис — оплата
                 </Link>
-                <Link href="/returns" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/returns" className={sidebarNavClass(pathname, '/returns')}>
                   {t('operations.returns')}
                 </Link>
               </>
             ) : branchMasterView ? (
               <>
                 {canSeeCrm ? (
-                  <Link href="/customers" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                  <Link href="/customers" className={sidebarNavClass(pathname, '/customers')}>
                     {t('nav.customers')}
                   </Link>
                 ) : null}
-                <Link href="/service" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">
+                <Link href="/service" className={sidebarNavClass(pathname, '/service')}>
                   {t('service.title')}
                 </Link>
-                <Link href="/service/kpi" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                <Link href="/service/kpi" className={sidebarNavClass(pathname, '/service/kpi')}>
                   KPI
                 </Link>
                 {canSeeInventory ? (
-                  <Link href="/inventory" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  <Link href="/inventory" className={sidebarNavClass(pathname, '/inventory')}>
                     {t('nav.inventory')}
                   </Link>
                 ) : null}
               </>
             ) : branchSalesManagerView ? (
               <>
-                <Link href="/customers" className={sidebarNavClass(pathname, '/customers')}>{t('nav.customers')}</Link>
-                <Link href="/crm" className={sidebarNavClass(pathname, '/crm')}>{t('nav.crm')}</Link>
-                <Link href="/sales" className={sidebarNavClass(pathname, '/sales')}>{t('nav.sales')}</Link>
-                <Link href="/installments" className={sidebarNavClass(pathname, '/installments')}>{t('nav.installments')}</Link>
-                <Link href="/inventory" className={sidebarNavClass(pathname, '/inventory')}>{t('nav.inventory')}</Link>
-                <Link href="/branch-purchase-requests" className={sidebarNavClass(pathname, '/branch-purchase-requests')}>{t('nav.branchProductOrders')}</Link>
-                <Link href="/branch-manager/shipments" className={sidebarNavClass(pathname, '/branch-manager/shipments')}>{t('branchManager.incomingShipments')}</Link>
-                <Link href="/follow-ups" className={sidebarNavClass(pathname, '/follow-ups')}>{t('nav.followUps')}</Link>
+                {unifiedSidebarModules.map((module) => {
+                  const active = isUnifiedNavModuleActive(pathname, module);
+                  const href = sidebarHrefForModule(module, user!);
+                  return (
+                    <Link
+                      key={module.id}
+                      href={href}
+                      className={
+                        active
+                          ? 'block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700'
+                          : 'block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                      }
+                    >
+                      {t(module.labelKey)}
+                    </Link>
+                  );
+                })}
               </>
             ) : branchOwnerView ? (
               <>
-                {branchOwnerSidebarModules.map((module) => {
+                {unifiedSidebarModules.map((module) => {
                   const active = isUnifiedNavModuleActive(pathname, module);
                   const href = sidebarHrefForModule(module, user!);
                   return (
@@ -553,7 +555,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
         </aside>
 
         <main>
-          {branchOwnerView ? <UnifiedModuleTopNav user={user} /> : null}
+          {unifiedNavView ? <UnifiedModuleTopNav user={user} /> : null}
           {children}
         </main>
       </div>

@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
+import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { apiFetch } from '@/lib/api';
-import { shouldShowBranchColumnForBranchScopedTables } from '@/lib/rbac';
+import { isHqSalesManagerUser, shouldShowBranchColumnForBranchScopedTables } from '@/lib/rbac';
 import type { ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -16,6 +16,7 @@ export default function ShortageReportsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
   const showBranchColumn = shouldShowBranchColumnForBranchScopedTables(user);
+  const hqSalesView = isHqSalesManagerUser(user);
 
   useEffect(() => {
     void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
@@ -24,44 +25,53 @@ export default function ShortageReportsPage() {
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
-  return (
-    <ProtectedShell>
-      <section className="space-y-6">
-        <HqSalesBranchOrdersNav />
+  const content = (
+    <>
+      {!hqSalesView ? (
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(null))}</p>
           <h2 className="text-3xl font-bold text-slate-950">{t('distribution.shortageReports')}</h2>
         </div>
-        {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        <div className="h-[calc(100vh-240px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-4 py-3">{t('distribution.shortageReport')}</th>
-                <th className="px-4 py-3">{t('distribution.orderNumber')}</th>
-                {showBranchColumn ? <th className="px-4 py-3">{t('distribution.branch')}</th> : null}
-                <th className="px-4 py-3">{t('distribution.status')}</th>
-                <th className="px-4 py-3">{t('distribution.difference')}</th>
-                <th className="px-4 py-3">{t('common.createdDate')}</th>
-                <th className="px-4 py-3">{t('common.actions')}</th>
+      ) : null}
+      {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      <div className="h-[calc(100vh-240px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-4 py-3">{t('distribution.shortageReport')}</th>
+              <th className="px-4 py-3">{t('distribution.orderNumber')}</th>
+              {showBranchColumn ? <th className="px-4 py-3">{t('distribution.branch')}</th> : null}
+              <th className="px-4 py-3">{t('distribution.status')}</th>
+              <th className="px-4 py-3">{t('distribution.difference')}</th>
+              <th className="px-4 py-3">{t('common.createdDate')}</th>
+              <th className="px-4 py-3">{t('common.actions')}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {reports.map((report) => (
+              <tr key={report.id}>
+                <td className="px-4 py-3 font-bold">{report.reportNumber}</td>
+                <td className="px-4 py-3">{report.distributionOrder?.orderNumber}</td>
+                {showBranchColumn ? <td className="px-4 py-3">{report.branch?.name}</td> : null}
+                <td className="px-4 py-3">{report.status}</td>
+                <td className="px-4 py-3">{report.items?.length ?? 0}</td>
+                <td className="px-4 py-3">{new Date(report.createdAt).toLocaleDateString()}</td>
+                <td className="px-4 py-3"><Link href={`/distribution/shortage-reports/${report.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {reports.map((report) => (
-                <tr key={report.id}>
-                  <td className="px-4 py-3 font-bold">{report.reportNumber}</td>
-                  <td className="px-4 py-3">{report.distributionOrder?.orderNumber}</td>
-                  {showBranchColumn ? <td className="px-4 py-3">{report.branch?.name}</td> : null}
-                  <td className="px-4 py-3">{report.status}</td>
-                  <td className="px-4 py-3">{report.items?.length ?? 0}</td>
-                  <td className="px-4 py-3">{new Date(report.createdAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-3"><Link href={`/distribution/shortage-reports/${report.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+
+  return (
+    <ProtectedShell>
+      {hqSalesView ? (
+        <HqSalesBranchOrdersSection>{content}</HqSalesBranchOrdersSection>
+      ) : (
+        <section className="space-y-6">{content}</section>
+      )}
     </ProtectedShell>
   );
 }

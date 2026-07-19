@@ -592,6 +592,14 @@ export function canBranchSalesManagerModifyStock(user: Pick<AuthUser, 'role' | '
   return !isBranchSalesManagerUser(user);
 }
 
+export function shouldStripSaleFinancialFields(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  return isBranchCashierUser(user) || isBranchSalesManagerUser(user);
+}
+
+export function shouldStripSaleWorkflowStatus(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  return isBranchCashierUser(user);
+}
+
 /** Branch Warehouse Operator receives HQ shipments at branch. */
 export function canReceiveBranchDistribution(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);

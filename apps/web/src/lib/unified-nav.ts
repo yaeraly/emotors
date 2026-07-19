@@ -1,5 +1,11 @@
 import type { User } from './types';
 import {
+  isPathUnderPrefixes,
+  isRouteActive,
+  resolveActiveRouteHref,
+  resolveModuleByLongestPrefix,
+} from './nav-matching';
+import {
   canCreateServiceOrder,
   canManageUsers,
   canViewBranchPurchaseRequests,
@@ -9,6 +15,7 @@ import {
   hasPermission,
   isBranchManagerUser,
   isBranchOwnerUser,
+  isBranchSalesManagerUser,
 } from './rbac';
 
 export type UnifiedNavPage = {
@@ -199,12 +206,96 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
   },
 ];
 
-export function visibleBranchOwnerSidebarModules(user: User | null | undefined): UnifiedNavModule[] {
-  if (!user || !isBranchOwnerUser(user)) return [];
-  return branchOwnerNavModules.filter((module) => {
-    if (!module.sidebarVisible(user)) return false;
+export const branchSalesManagerNavModules: UnifiedNavModule[] = [
+  {
+    id: 'customers',
+    labelKey: 'nav.customers',
+    defaultHref: '/customers',
+    pathPrefixes: ['/customers'],
+    sidebarVisible: crmVisible,
+    pages: [{ href: '/customers', labelKey: 'nav.customers', isVisible: crmVisible }],
+  },
+  {
+    id: 'crm',
+    labelKey: 'nav.crm',
+    defaultHref: '/crm',
+    pathPrefixes: ['/crm', '/follow-ups'],
+    sidebarVisible: crmVisible,
+    pages: [
+      { href: '/crm', labelKey: 'nav.crm', isVisible: crmVisible },
+      { href: '/follow-ups', labelKey: 'nav.followUps', isVisible: crmVisible },
+    ],
+  },
+  {
+    id: 'sales',
+    labelKey: 'nav.sales',
+    defaultHref: '/sales',
+    pathPrefixes: ['/sales', '/installments', '/reservations', '/returns'],
+    sidebarVisible: salesVisible,
+    pages: [
+      { href: '/sales', labelKey: 'nav.sales', isVisible: salesVisible },
+      { href: '/installments', labelKey: 'nav.installments', isVisible: salesVisible },
+      { href: '/reservations', labelKey: 'operations.reservations', isVisible: salesVisible },
+      { href: '/returns', labelKey: 'operations.returns', isVisible: salesVisible },
+    ],
+  },
+  {
+    id: 'warehouse',
+    labelKey: 'nav.inventory',
+    defaultHref: '/inventory',
+    pathPrefixes: ['/inventory', '/products'],
+    sidebarVisible: inventoryVisible,
+    pages: [{ href: '/inventory', labelKey: 'nav.inventory', isVisible: inventoryVisible }],
+  },
+  {
+    id: 'distribution',
+    labelKey: 'nav.branchProductOrders',
+    defaultHref: '/branch-purchase-requests',
+    pathPrefixes: ['/branch-purchase-requests', '/branch-manager'],
+    sidebarVisible: canViewBranchPurchaseRequests,
+    pages: [
+      {
+        href: '/branch-purchase-requests',
+        labelKey: 'nav.distributionBranchRequests',
+        isVisible: canViewBranchPurchaseRequests,
+      },
+      {
+        href: '/branch-manager/shipments',
+        labelKey: 'branchManager.incomingShipments',
+        isVisible: (user) => isBranchManagerUser(user) || isBranchSalesManagerUser(user),
+      },
+    ],
+  },
+];
+
+function navModulesForUser(user: User | null | undefined): UnifiedNavModule[] {
+  if (!user) return [];
+  if (isBranchOwnerUser(user)) return branchOwnerNavModules;
+  if (isBranchSalesManagerUser(user)) return branchSalesManagerNavModules;
+  return [];
+}
+
+export function usesUnifiedNav(user: User | null | undefined): boolean {
+  return isBranchOwnerUser(user) || isBranchSalesManagerUser(user);
+}
+
+/** @deprecated Use usesUnifiedNav */
+export function usesUnifiedBranchOwnerNav(user: User | null | undefined): boolean {
+  return isBranchOwnerUser(user);
+}
+
+export function visibleUnifiedSidebarModules(user: User | null | undefined): UnifiedNavModule[] {
+  if (!usesUnifiedNav(user)) return [];
+  return navModulesForUser(user).filter((module) => {
+    if (!module.sidebarVisible(user!)) return false;
     return visibleModulePages(module, user).length > 0;
   });
+}
+
+/** @deprecated Use visibleUnifiedSidebarModules */
+export function visibleBranchOwnerSidebarModules(user: User | null | undefined): UnifiedNavModule[] {
+  if (!user || !isBranchOwnerUser(user)) return [];
+  return visibleUnifiedSidebarModules(user);
 }
 
 export function visibleModulePages(module: UnifiedNavModule, user: User | null | undefined): UnifiedNavPage[] {
@@ -213,12 +304,8 @@ export function visibleModulePages(module: UnifiedNavModule, user: User | null |
 }
 
 export function resolveModuleForPath(pathname: string, user: User | null | undefined): UnifiedNavModule | null {
-  if (!user || !isBranchOwnerUser(user)) return null;
-  return (
-    branchOwnerNavModules.find((module) =>
-      module.pathPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)),
-    ) ?? null
-  );
+  if (!usesUnifiedNav(user)) return null;
+  return resolveModuleByLongestPrefix(pathname, navModulesForUser(user));
 }
 
 export function shouldShowModuleTopNav(module: UnifiedNavModule | null, user: User | null | undefined): boolean {
@@ -227,21 +314,7 @@ export function shouldShowModuleTopNav(module: UnifiedNavModule | null, user: Us
 }
 
 export function isUnifiedNavPageActive(pathname: string, search: string, href: string): boolean {
-  const [pagePath, pageQuery] = href.split('?');
-  const pathMatches = pathname === pagePath || pathname.startsWith(`${pagePath}/`);
-  if (!pathMatches) return false;
-  if (!pageQuery) {
-    if (pagePath === '/customers') {
-      return !search.includes('archived=1');
-    }
-    return true;
-  }
-  const expected = new URLSearchParams(pageQuery);
-  const current = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-  for (const [key, value] of expected.entries()) {
-    if (current.get(key) !== value) return false;
-  }
-  return true;
+  return isRouteActive(pathname, href, search);
 }
 
 export function resolveActiveUnifiedNavPage(
@@ -249,19 +322,14 @@ export function resolveActiveUnifiedNavPage(
   search: string,
   pages: UnifiedNavPage[],
 ): UnifiedNavPage | null {
-  const matches = pages.filter((page) => isUnifiedNavPageActive(pathname, search, page.href));
-  if (!matches.length) return null;
-  return matches.sort(
-    (a, b) => b.href.split('?')[0].length - a.href.split('?')[0].length,
-  )[0];
-}
-
-export function usesUnifiedBranchOwnerNav(user: User | null | undefined): boolean {
-  return isBranchOwnerUser(user);
+  const hrefs = pages.map((page) => page.href);
+  const activeHref = resolveActiveRouteHref(pathname, search, hrefs);
+  if (!activeHref) return null;
+  return pages.find((page) => page.href === activeHref) ?? null;
 }
 
 export function isUnifiedNavModuleActive(pathname: string, module: UnifiedNavModule): boolean {
-  return module.pathPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return isPathUnderPrefixes(pathname, module.pathPrefixes);
 }
 
 export function sidebarHrefForModule(module: UnifiedNavModule, user: User): string {

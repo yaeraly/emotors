@@ -24,7 +24,7 @@ import { PricingCatalogService } from '../pricing/pricing-catalog.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { assertBranchCashierCannotManageSales, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles } from '../rbac/rbac';
+import { assertBranchCashierCannotManageSales, hasAnyFullAccessRole, hasAnyHqRole, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -448,12 +448,12 @@ export class SalesService {
       orderBy: { saleDate: 'desc' },
     });
 
-    return sales.map((sale) => this.toSaleResponse(sale));
+    return sales.map((sale) => this.sanitizeSaleForUser(user, this.toSaleResponse(sale)));
   }
 
   async findOne(user: AuthUser, id: string) {
     const sale = await this.getAccessibleSale(user, id);
-    return this.toSaleResponse(sale);
+    return this.sanitizeSaleForUser(user, this.toSaleResponse(sale));
   }
 
   async sendWhatsApp(user: AuthUser, id: string) {
@@ -754,9 +754,13 @@ export class SalesService {
       totalSalesAmount: this.sumDecimals(sales.map((sale) => sale.totalAmount)),
       totalPaidAmount: this.sumDecimals(sales.map((sale) => sale.paidAmount)),
       totalDebtAmount: this.sumDecimals(sales.map((sale) => sale.debtAmount)),
-      totalProfitAmount: this.sumDecimals(
-        sales.map((sale) => sale.profitAmount),
-      ),
+      ...(shouldStripSaleFinancialFields(user)
+        ? {}
+        : {
+            totalProfitAmount: this.sumDecimals(
+              sales.map((sale) => sale.profitAmount),
+            ),
+          }),
       saleCount: sales.length,
       cashPayments: this.sumPayments(payments, [PaymentMethod.CASH]),
       transferPayments: this.sumPayments(payments, [
@@ -1243,6 +1247,31 @@ export class SalesService {
         paidAmount: Number(installment.paidAmount),
       })),
     };
+  }
+
+  private sanitizeSaleForUser(user: AuthUser, sale: ReturnType<SalesService['toSaleResponse']>) {
+    if (!shouldStripSaleFinancialFields(user) && !shouldStripSaleWorkflowStatus(user)) {
+      return sale;
+    }
+
+    const sanitized = { ...sale };
+    if (shouldStripSaleFinancialFields(user)) {
+      delete sanitized.profitAmount;
+      delete sanitized.totalCost;
+      if (Array.isArray(sanitized.items)) {
+        sanitized.items = sanitized.items.map((item: Record<string, unknown>) => {
+          const next = { ...item };
+          delete next.unitCost;
+          delete next.totalCost;
+          delete next.profitAmount;
+          return next;
+        });
+      }
+    }
+    if (shouldStripSaleWorkflowStatus(user)) {
+      delete sanitized.status;
+    }
+    return sanitized;
   }
 
   private async enrichSaleItemsFromProducts(

@@ -357,7 +357,15 @@ export function shouldShowBranchColumnForBranchScopedTables(
 export function shouldShowSaleStatusColumn(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ) {
-  return !isBranchOwnerUser(user);
+  if (!user) return true;
+  return !isBranchOwnerUser(user) && !isBranchCashierUser(user);
+}
+
+/** Hide profit/margin columns for branch sales and cashier roles. */
+export function shouldHideSaleProfitColumn(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  return isBranchSalesManagerUser(user) || isBranchCashierUser(user);
 }
 
 const BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES = [
@@ -376,8 +384,6 @@ const BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES = [
   '/distribution',
   '/procurement',
   '/service',
-  '/reservations',
-  '/returns',
   '/payments',
   '/tax',
   '/payroll',
@@ -523,9 +529,9 @@ const BRANCH_ACCOUNTANT_FORBIDDEN_PREFIXES = [
   '/distribution',
   '/branch-purchase-requests',
   '/reservations',
+  '/returns',
   '/warehouse-release',
   '/installments',
-  '/follow-ups',
 ];
 
 const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
@@ -534,6 +540,8 @@ const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/crm',
   '/sales',
   '/installments',
+  '/reservations',
+  '/returns',
   '/inventory',
   '/products',
   '/branch-purchase-requests',
