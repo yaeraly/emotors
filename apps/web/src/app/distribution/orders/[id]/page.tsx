@@ -11,7 +11,6 @@ import {
   canReceiveBranchDistribution,
   canRecordDistributionPayment,
   canViewProductCost,
-  canEnterBranchReceivingTransportCost,
   isBranchWarehouseOperator,
   isHqWarehouseLogisticsOnlyUser,
 } from '@/lib/rbac';
@@ -33,16 +32,6 @@ export default function DistributionOrderDetailPage() {
   const [order, setOrder] = useState<BranchDistributionOrder | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [receiveItems, setReceiveItems] = useState<ReceiveItemForm[]>([]);
-  const [transportForm, setTransportForm] = useState({
-    transportCompany: '',
-    deliveryMethod: '',
-    transportCostKgs: '',
-    currency: 'KGS',
-    deliveryDate: new Date().toISOString().slice(0, 10),
-    documentNumber: '',
-    deliveryDocument: '',
-    comment: '',
-  });
   const [dispatchForm, setDispatchForm] = useState({
     transportCompany: '',
     driverName: '',
@@ -54,7 +43,6 @@ export default function DistributionOrderDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submittingReceive, setSubmittingReceive] = useState(false);
-  const [submittingTransport, setSubmittingTransport] = useState(false);
 
   async function load() {
     try {
@@ -123,36 +111,6 @@ export default function DistributionOrderDetailPage() {
     });
   }
 
-  async function submitTransportCost() {
-    if (!order) return;
-    setError('');
-    setSuccess('');
-    setSubmittingTransport(true);
-    try {
-      setOrder(
-        await apiFetch<BranchDistributionOrder>(`/distribution/orders/${order.id}/transport-cost`, {
-          method: 'POST',
-          body: JSON.stringify({
-            transportCompany: transportForm.transportCompany,
-            deliveryMethod: transportForm.deliveryMethod || undefined,
-            transportCostKgs: Number(transportForm.transportCostKgs || 0),
-            currency: transportForm.currency || 'KGS',
-            deliveryDate: transportForm.deliveryDate,
-            documentNumber: transportForm.documentNumber || undefined,
-            deliveryDocument: transportForm.deliveryDocument || undefined,
-            comment: transportForm.comment || undefined,
-          }),
-        }),
-      );
-      setSuccess(t('distribution.receivingTransportSection'));
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSubmittingTransport(false);
-    }
-  }
-
   function updateReceiveItem(index: number, updates: Partial<ReceiveItemForm>) {
     setReceiveItems((current) =>
       current.map((item, itemIndex) =>
@@ -203,21 +161,12 @@ export default function DistributionOrderDetailPage() {
   const canPay = canRecordDistributionPayment(currentUser);
   const showFinancials = canViewProductCost(currentUser) && !isHqWarehouseLogisticsOnlyUser(currentUser);
   const operatorView = isBranchWarehouseOperator(currentUser);
-  const canEnterTransport = canEnterBranchReceivingTransportCost(currentUser);
   const weightSummary = order?.shipmentWeightSummary;
-  const canShowTransportEntry =
-    Boolean(order) &&
-    canEnterTransport &&
-    ['RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE', 'RECEIVED'].includes(order!.status) &&
-    !(Number(order?.transportCostKgs ?? 0) > 0 || order?.deliveryCostEnteredAt);
 
   const invoiceSent = Boolean(order?.branchInvoice?.sentToBranchAt);
   const canReceive =
     order?.status === 'SHIPPED' ||
     order?.status === 'SENT';
-  const hasPreallocatedDelivery = Boolean(
-    order && (Number(order.transportCostKgs ?? 0) > 0 || order.deliveryCostEnteredAt),
-  );
   const showDeliveryCostSummary =
     showFinancials &&
     Boolean(order?.deliveryCostSummary && Number(order.deliveryCostSummary.transportCostKgs) > 0);
@@ -351,45 +300,6 @@ export default function DistributionOrderDetailPage() {
                     value={`${Number(weightSummary?.totalWeightKg ?? order.totalShipmentWeightKg ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 })} ${t('distribution.weightUnitKg')}`}
                   />
                 </div>
-              </section>
-            ) : null}
-            {canShowTransportEntry ? (
-              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
-                <h3 className="text-lg font-bold">{t('distribution.receivingTransportSection')}</h3>
-                <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
-                  <Info
-                    label={t('distribution.totalBatchWeightCalculated')}
-                    value={`${Number(weightSummary?.totalWeightKg ?? order.totalShipmentWeightKg ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 })} ${t('distribution.weightUnitKg')}`}
-                  />
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
-                    <input required value={transportForm.transportCompany} onChange={(event) => setTransportForm((current) => ({ ...current, transportCompany: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                  </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">{t('distribution.deliveryCost')}</span>
-                    <input type="number" min="0.01" step="0.01" required value={transportForm.transportCostKgs} onChange={(event) => setTransportForm((current) => ({ ...current, transportCostKgs: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                  </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">{t('distribution.arrivalDate')}</span>
-                    <input type="date" required value={transportForm.deliveryDate} onChange={(event) => setTransportForm((current) => ({ ...current, deliveryDate: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                  </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">{t('distribution.invoiceNumber')}</span>
-                    <input value={transportForm.documentNumber} onChange={(event) => setTransportForm((current) => ({ ...current, documentNumber: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                  </label>
-                  <label className="block md:col-span-2">
-                    <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
-                    <textarea value={transportForm.comment} onChange={(event) => setTransportForm((current) => ({ ...current, comment: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={2} />
-                  </label>
-                </div>
-                <button
-                  onClick={() => void submitTransportCost()}
-                  disabled={submittingTransport}
-                  className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
-                  type="button"
-                >
-                  {submittingTransport ? t('common.loading') : t('distribution.receivingTransportSection')}
-                </button>
               </section>
             ) : null}
             {showDeliveryCostSummary && order.deliveryCostSummary ? (

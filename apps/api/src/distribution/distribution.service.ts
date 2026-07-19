@@ -39,7 +39,7 @@ import {
   canApproveBranchOrderInstallment,
   canSubmitBranchInvoicePayment,
   canSendInvoiceToCashier,
-  canEnterBranchReceivingTransportCost,
+  canEnterBranchTransportCost,
   isHqWarehouseLogisticsOnlyUser,
   canViewDistribution,
   canViewBranchDiscrepancyReports,
@@ -1055,6 +1055,7 @@ export class DistributionService {
         message: `Заказ ${order.orderNumber} принят на складе филиала`,
         entityType: 'BranchDistributionOrder',
         entityId: order.id,
+        recipientRoles: [Role.MANAGER, Role.FRANCHISE_OWNER],
       });
       if (shortageItems.length > 0 && shortageReport) {
         await this.createWorkflowAlert(tx, user, {
@@ -1164,6 +1165,16 @@ export class DistributionService {
         });
       }
 
+      await this.createWorkflowAlert(tx, user, {
+        branchId: order.branchId,
+        type: AlertType.BRANCH_GOODS_RECEIVED,
+        title: 'Требуется ввод транспортных расходов',
+        message: `По заказу ${order.orderNumber} необходимо внести транспортные расходы`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+        recipientRoles: [Role.MANAGER, Role.FRANCHISE_OWNER],
+      });
+
       return {
         receiving: await this.receivingInTx(tx, user, receiving.id),
         shortageReport,
@@ -1173,8 +1184,8 @@ export class DistributionService {
   }
 
   async enterReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {
-    if (!canEnterBranchReceivingTransportCost(user)) {
-      throw new ForbiddenException('Только склад филиала может внести транспортные расходы');
+    if (!canEnterBranchTransportCost(user)) {
+      throw new ForbiddenException('Только руководитель филиала может внести транспортные расходы');
     }
     const transportCostKgs = Math.max(Number(dto.transportCostKgs ?? 0), 0);
     if (transportCostKgs <= 0) {
@@ -1340,11 +1351,11 @@ export class DistributionService {
         });
       }
 
-      await this.auditTransfer(tx, user, 'TRANSPORT_COST_ENTERED', order, {
+      await this.auditTransfer(tx, user, 'TRANSPORT_COST_ENTERED_BY_BRANCH_MANAGER', order, {
         transportCostKgs,
         receivingId: receiving.id,
       });
-      await this.auditTransfer(tx, user, 'TRANSPORT_COST_CONFIRMED', order, {
+      await this.auditTransfer(tx, user, 'TRANSPORT_COST_CONFIRMED_BY_BRANCH_MANAGER', order, {
         transportCostKgs,
         receivingId: receiving.id,
       });

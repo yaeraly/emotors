@@ -26,7 +26,11 @@ export default function InventoryCountPage() {
     apiFetch<User>('/auth/me')
       .then((me) => {
         setUser(me);
-        const branchScopedView = isBranchWarehouseOperator(me) || isBranchOwnerUser(me);
+        if (isBranchWarehouseOperator(me)) {
+          router.replace('/branch-warehouse/stock');
+          return;
+        }
+        const branchScopedView = isBranchOwnerUser(me);
         if (!branchScopedView && (isWarehouseManagerUser(me) || hasFullAccess(me))) {
           router.replace('/hq-warehouses?tab=inventory');
         }
@@ -43,8 +47,8 @@ export default function InventoryCountPage() {
     );
   }
 
-  const branchScopedView = user && (isBranchWarehouseOperator(user) || isBranchOwnerUser(user));
-  if (!branchScopedView) {
+  const branchScopedView = user && isBranchOwnerUser(user);
+  if (!branchScopedView || isBranchWarehouseOperator(user)) {
     return null;
   }
 

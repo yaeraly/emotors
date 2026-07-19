@@ -1,6 +1,7 @@
 import type { User } from './types';
 import {
   canCreateServiceOrder,
+  canEnterBranchTransportCost,
   canManageUsers,
   canViewBranchPurchaseRequests,
   canViewDistribution,
@@ -124,7 +125,7 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     id: 'distribution',
     labelKey: 'nav.branchProductOrders',
     defaultHref: '/branch-purchase-requests',
-    pathPrefixes: ['/branch-purchase-requests', '/distribution'],
+    pathPrefixes: ['/branch-purchase-requests', '/distribution', '/branch-manager'],
     sidebarVisible: (user) => canViewBranchPurchaseRequests(user) || canViewDistribution(user),
     pages: [
       {
@@ -141,6 +142,11 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
         href: '/distribution/shortage-reports',
         labelKey: 'nav.distributionDiscrepancies',
         isVisible: canViewDistribution,
+      },
+      {
+        href: '/branch-manager/shipments',
+        labelKey: 'branchManager.incomingShipments',
+        isVisible: canEnterBranchTransportCost,
       },
     ],
   },

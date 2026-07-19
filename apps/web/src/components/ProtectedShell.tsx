@@ -311,10 +311,10 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : branchWarehouseOperatorView ? (
               <>
-                <Link href="/inventory" className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700">{t('nav.inventory')}</Link>
-                <Link href="/inventory/count" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('inventoryCount.title')}</Link>
-                <Link href="/distribution/orders?status=SHIPPED" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.receiveGoods')}</Link>
-                <Link href="/distribution/receivings" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.orders.receivingHistory')}</Link>
+                <Link href="/branch-warehouse/stock" className={sidebarNavClass(pathname, '/branch-warehouse/stock')}>{t('branchWarehouseOperator.stock')}</Link>
+                <Link href="/branch-warehouse/requests" className={sidebarNavClass(pathname, '/branch-warehouse/requests')}>{t('branchWarehouseOperator.requests')}</Link>
+                <Link href="/distribution/orders?status=SHIPPED" className={sidebarNavClass(pathname, '/distribution/orders')}>{t('distribution.receiveGoods')}</Link>
+                <Link href="/distribution/shortage-reports" className={sidebarNavClass(pathname, '/distribution/shortage-reports')}>{t('distribution.shortageReports')}</Link>
                 <Link href="/service/parts-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.partsRequests')}</Link>
               </>
             ) : branchAccountantView ? (
@@ -377,6 +377,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/installments" className={sidebarNavClass(pathname, '/installments')}>{t('nav.installments')}</Link>
                 <Link href="/inventory" className={sidebarNavClass(pathname, '/inventory')}>{t('nav.inventory')}</Link>
                 <Link href="/branch-purchase-requests" className={sidebarNavClass(pathname, '/branch-purchase-requests')}>{t('nav.branchProductOrders')}</Link>
+                <Link href="/branch-manager/shipments" className={sidebarNavClass(pathname, '/branch-manager/shipments')}>{t('branchManager.incomingShipments')}</Link>
                 <Link href="/follow-ups" className={sidebarNavClass(pathname, '/follow-ups')}>{t('nav.followUps')}</Link>
               </>
             ) : branchOwnerView ? (

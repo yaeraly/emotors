@@ -483,9 +483,22 @@ export function canConfirmBranchInvoicePayment(user: Pick<AuthUser, 'role' | 'ro
 export function canEnterBranchReceivingTransportCost(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
 ) {
+  return canEnterBranchTransportCost(user);
+}
+
+/** Branch Manager enters HQ→Branch transportation cost after warehouse receiving. */
+export function canEnterBranchTransportCost(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
+) {
   const roles = resolveUserRoles(user);
   if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
-  return roles.includes(Role.WAREHOUSE_OPERATOR) || userHasPermission(user, 'warehouse.view');
+  return roles.includes(Role.MANAGER) || roles.includes(Role.FRANCHISE_OWNER);
+}
+
+export function canViewBranchWarehouseOperationalData(
+  user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>,
+) {
+  return isBranchWarehouseOperator(user);
 }
 
 /** HQ Warehouse Manager must not see financial order data. */

@@ -371,13 +371,27 @@ const BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES = [
   '/warehouse/list',
 ];
 
+const BRANCH_MANAGER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/branch-manager',
+  '/branch-purchase-requests',
+  '/alerts',
+  '/notifications',
+];
+
+function canBranchManagerAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  return BRANCH_MANAGER_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 const BRANCH_WAREHOUSE_OPERATOR_ALLOWED_PREFIXES = [
   '/change-password',
-  '/inventory',
-  '/inventory/count',
-  '/stock-movements',
+  '/branch-warehouse',
   '/distribution/orders',
   '/distribution/receivings',
+  '/distribution/shortage-reports',
   '/service/parts-requests',
   '/alerts',
   '/notifications',
@@ -492,6 +506,7 @@ const BRANCH_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/inventory',
   '/products',
   '/branch-purchase-requests',
+  '/branch-manager',
   '/follow-ups',
   '/alerts',
   '/notifications',
@@ -563,7 +578,7 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (hasPermission(user, 'procurement.view') || hasPermission(user, 'procurement.manage')) return '/procurement';
   if (hasRole(user, 'WAREHOUSE_MANAGER')) return '/hq-warehouses';
-  if (isBranchWarehouseOperator(user)) return '/inventory';
+  if (isBranchWarehouseOperator(user)) return '/branch-warehouse/stock';
   if (isBranchCashierUser(user)) return '/branch-cashier/invoices';
   if (isBranchAccountantUser(user)) return '/branch-accountant/invoices';
   if (hasPermission(user, 'payments.manage')) return '/payments';
@@ -597,6 +612,9 @@ export function canAccessPath(user: User, pathname: string) {
     return canBranchSalesManagerAccessPath(pathname);
   }
   if (isBranchWarehouseOperator(user)) {
+    if (pathname === '/inventory' || pathname.startsWith('/inventory/count')) {
+      return false;
+    }
     return canBranchWarehouseOperatorAccessPath(pathname);
   }
   if (isBranchCashierUser(user)) {
@@ -623,6 +641,12 @@ export function canAccessPath(user: User, pathname: string) {
     return hasPermission(user, 'inventory.manage');
   }
   if (pathname.startsWith('/hq-warehouses')) return canViewHqWarehouse(user);
+  if (pathname.startsWith('/branch-manager')) {
+    return canEnterBranchTransportCost(user) || isBranchOwnerUser(user);
+  }
+  if (pathname === '/branch-warehouse' || pathname.startsWith('/branch-warehouse/')) {
+    return isBranchWarehouseOperator(user);
+  }
   if (pathname.startsWith('/branch-warehouses')) return canViewBranchWarehouses(user);
   if (pathname.startsWith('/product-master')) return canViewProductMaster(user);
   if (pathname.startsWith('/pricing')) return canViewPricing(user);
@@ -1237,8 +1261,21 @@ export function canSendInvoiceToCashier(
 export function canEnterBranchReceivingTransportCost(
   user: (Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) | null | undefined,
 ) {
+  return canEnterBranchTransportCost(user);
+}
+
+/** Branch Manager (MANAGER / FRANCHISE_OWNER) enters transportation cost after receiving. */
+export function canEnterBranchTransportCost(
+  user: (Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) | null | undefined,
+) {
   if (!user?.branchId || hasFullAccess(user)) return false;
-  return hasRole(user, 'WAREHOUSE_OPERATOR');
+  return hasRole(user, 'MANAGER') || hasRole(user, 'FRANCHISE_OWNER');
+}
+
+export function isBranchManagerUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user?.branchId || hasFullAccess(user)) return false;
+  if (isBranchWarehouseOperator(user)) return false;
+  return hasRole(user, 'MANAGER') || hasRole(user, 'FRANCHISE_OWNER');
 }
 
 export function isHqWarehouseLogisticsOnlyUser(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

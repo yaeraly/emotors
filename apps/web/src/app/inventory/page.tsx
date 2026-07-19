@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
@@ -9,9 +10,9 @@ import { canManageProductCatalog, canManageYuanRate, isBranchOwnerUser, isBranch
 import type { InventoryBalance, ProductListResponse, StockValueReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { BranchSalesManagerWarehousePanel } from '@/components/branch-sales-manager/BranchSalesManagerWarehousePanel';
-import { BranchWarehouseOperatorPanel } from '@/components/branch-warehouse-manager/BranchWarehouseOperatorPanel';
 
 export default function InventoryPage() {
+  const router = useRouter();
   const { t } = useTranslation();
   const [stockValue, setStockValue] = useState<StockValueReport | null>(null);
   const [lowStock, setLowStock] = useState<InventoryBalance[]>([]);
@@ -57,7 +58,12 @@ export default function InventoryPage() {
   const canManageYuan = canManageYuanRate(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchWarehouseOperatorView = isBranchWarehouseOperator(currentUser);
-  const hideWarehouseNav = isWarehouseManagerUser(currentUser) || branchSalesManagerView || branchWarehouseOperatorView || isBranchOwnerUser(currentUser);
+
+  useEffect(() => {
+    if (branchWarehouseOperatorView) {
+      router.replace('/branch-warehouse/stock');
+    }
+  }, [branchWarehouseOperatorView, router]);
 
   if (branchSalesManagerView) {
     return (
@@ -68,12 +74,10 @@ export default function InventoryPage() {
   }
 
   if (branchWarehouseOperatorView) {
-    return (
-      <ProtectedShell>
-        <BranchWarehouseOperatorPanel />
-      </ProtectedShell>
-    );
+    return null;
   }
+
+  const hideWarehouseNav = isWarehouseManagerUser(currentUser) || branchSalesManagerView || isBranchOwnerUser(currentUser);
 
   return (
     <ProtectedShell>

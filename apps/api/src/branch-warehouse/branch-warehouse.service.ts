@@ -5,6 +5,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { activeBranchWarehouseWhere, branchWarehouseWhere, isBranchWarehouse } from '../warehouse/warehouse.util';
 import { UpdateBranchWarehouseDto } from './dto/update-branch-warehouse.dto';
+import {
+  sanitizeBranchWarehouseRequest,
+  sanitizeBranchWarehouseRequestDetail,
+  sanitizeBranchWarehouseStockRow,
+} from './branch-warehouse-operator.presenter';
 
 @Injectable()
 export class BranchWarehouseService {
@@ -245,6 +250,155 @@ export class BranchWarehouseService {
     });
   }
 
+  async listBranchRequests(user: AuthUser) {
+    this.assertBranchWarehouseOperator(user);
+    if (!user.branchId) {
+      throw new ForbiddenException('Branch is required');
+    }
+    const rows = await this.prisma.branchPurchaseRequest.findMany({
+      where: { deletedAt: null, branchId: user.branchId },
+      include: {
+        items: { select: { quantity: true, approvedQuantity: true, lineStatus: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const orderMap = await this.loadConvertedOrdersForRequests(rows);
+    await this.audit(user, 'BRANCH_REQUEST_VIEWED', user.branchId, { branchId: user.branchId });
+    return rows.map((row) =>
+      sanitizeBranchWarehouseRequest(this.attachConvertedOrder(row, orderMap)),
+    );
+  }
+
+  async getBranchRequest(user: AuthUser, id: string) {
+    this.assertBranchWarehouseOperator(user);
+    if (!user.branchId) {
+      throw new ForbiddenException('Branch is required');
+    }
+    const request = await this.prisma.branchPurchaseRequest.findFirst({
+      where: { id, deletedAt: null, branchId: user.branchId },
+      include: {
+        items: {
+          select: {
+            id: true,
+            productId: true,
+            sku: true,
+            productName: true,
+            quantity: true,
+            approvedQuantity: true,
+            lineStatus: true,
+            unit: true,
+            note: true,
+          },
+        },
+      },
+    });
+    if (!request) throw new NotFoundException('Заявка не найдена');
+    const orderMap = await this.loadConvertedOrdersForRequests([request]);
+    const enriched = this.attachConvertedOrder(request, orderMap);
+    await this.audit(user, 'BRANCH_REQUEST_VIEWED', request.id, {
+      branchId: request.branchId,
+      requestNumber: request.requestNumber,
+    });
+    return sanitizeBranchWarehouseRequestDetail(enriched);
+  }
+
+  async listOperationalStock(user: AuthUser) {
+    this.assertBranchWarehouseOperator(user);
+    const warehouse = await this.getOperatorWarehouse(user);
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: { warehouseId: warehouse.id, branchId: user.branchId! },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            unit: true,
+            minStockLevel: true,
+            isActive: true,
+            category: true,
+            productCategory: { select: { nameRu: true } },
+          },
+        },
+      },
+      orderBy: { product: { sku: 'asc' } },
+    });
+    await this.audit(user, 'BRANCH_STOCK_VIEWED', warehouse.id, { branchId: user.branchId });
+    return {
+      warehouse: { id: warehouse.id, name: warehouse.name, code: warehouse.code },
+      items: balances.map((balance) => sanitizeBranchWarehouseStockRow(balance)),
+    };
+  }
+
+  private async loadConvertedOrdersForRequests(
+    requests: Array<{ convertedOrderId: string | null }>,
+  ) {
+    const orderIds = [
+      ...new Set(
+        requests
+          .map((request) => request.convertedOrderId)
+          .filter((orderId): orderId is string => Boolean(orderId)),
+      ),
+    ];
+    if (!orderIds.length) {
+      return new Map<
+        string,
+        {
+          orderNumber: string;
+          status: string;
+          sentAt: Date | null;
+          items: Array<{ quantity: number }>;
+          goodsReceivings: Array<{ items: Array<{ receivedQuantity: number }> }>;
+        }
+      >();
+    }
+    const orders = await this.prisma.branchDistributionOrder.findMany({
+      where: { id: { in: orderIds }, deletedAt: null },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        sentAt: true,
+        items: { select: { quantity: true } },
+        goodsReceivings: {
+          where: { deletedAt: null },
+          select: { items: { select: { receivedQuantity: true } } },
+        },
+      },
+    });
+    return new Map(orders.map((order) => [order.id, order]));
+  }
+
+  private attachConvertedOrder<T extends { convertedOrderId: string | null }>(
+    request: T,
+    orderMap: Awaited<ReturnType<BranchWarehouseService['loadConvertedOrdersForRequests']>>,
+  ) {
+    return {
+      ...request,
+      convertedOrder: request.convertedOrderId ? orderMap.get(request.convertedOrderId) ?? null : null,
+    };
+  }
+
+  private async getOperatorWarehouse(user: AuthUser) {
+    if (!user.branchId) {
+      throw new ForbiddenException('Branch is required');
+    }
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { ...activeBranchWarehouseWhere, branchId: user.branchId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!warehouse || !isBranchWarehouse(warehouse)) {
+      throw new NotFoundException('Склад филиала не найден');
+    }
+    return warehouse;
+  }
+
+  private assertBranchWarehouseOperator(user: AuthUser) {
+    if (!isBranchWarehouseOperator(user)) {
+      throw new ForbiddenException('Доступ только для кладовщика филиала');
+    }
+  }
+
   private async buildMetrics(
     warehouse: {
     id: string;
@@ -291,7 +445,9 @@ export class BranchWarehouseService {
       isActive: warehouse.isActive,
       totalSkuCount: productIds.size,
       totalProductQuantity: totalQuantity,
-      totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100,
+      ...(user && this.shouldHideLineItemCosts(user)
+        ? {}
+        : { totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100 }),
       reservedQuantity,
       availableQuantity: Math.max(totalQuantity - reservedQuantity, 0),
       lastInventoryDate:
@@ -392,7 +548,7 @@ export class BranchWarehouseService {
       updatedAt: balance.updatedAt,
     };
     if (user && this.shouldHideLineItemCosts(user)) {
-      const { averageCostKgs, landedCostKgs, ...rest } = response;
+      const { averageCostKgs, landedCostKgs, totalValueKgs, ...rest } = response;
       return rest;
     }
     return response;
