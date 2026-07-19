@@ -303,8 +303,11 @@ export function assertBranchAccountantRestrictedRoute(user: Pick<AuthUser, 'role
   }
 }
 
-export function canViewProductCost(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
-  return !isBranchWarehouseOperator(user);
+export function canViewProductCost(user: Pick<AuthUser, 'role' | 'roles' | 'branchId' | 'permissions'>) {
+  if (isBranchWarehouseOperator(user)) return false;
+  if (isBranchCashierUser(user)) return false;
+  if (isHqWarehouseLogisticsOnlyUser(user)) return false;
+  return true;
 }
 
 export function canViewProductCatalog(user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>) {

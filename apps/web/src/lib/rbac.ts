@@ -392,7 +392,6 @@ const BRANCH_WAREHOUSE_OPERATOR_ALLOWED_PREFIXES = [
   '/distribution/orders',
   '/distribution/receivings',
   '/distribution/shortage-reports',
-  '/service/parts-requests',
   '/alerts',
   '/notifications',
 ];
@@ -415,6 +414,7 @@ const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
   '/finance',
   '/users',
   '/branches',
+  '/service/parts-requests',
 ];
 
 const BRANCH_CASHIER_ALLOWED_PREFIXES = [
@@ -839,7 +839,10 @@ export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'
 
 export function canViewProductCost(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   if (!user) return false;
-  return !isBranchWarehouseOperator(user);
+  if (isBranchWarehouseOperator(user)) return false;
+  if (isBranchCashierUser(user)) return false;
+  if (isHqWarehouseLogisticsOnlyUser(user)) return false;
+  return true;
 }
 
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {

@@ -23,6 +23,7 @@ import {
 import {
   buildWorkflowStatusWhere,
   sanitizeAccountantInvoice,
+  sanitizeBranchCashierInvoice,
 } from './branch-accountant-invoice.presenter';
 import { BranchAccountantInvoiceQueryDto } from './dto/branch-accountant-invoice-query.dto';
 import { BranchAccountantInstallmentRequestDto } from './dto/installment-request.dto';
@@ -247,7 +248,7 @@ export class BranchAccountantService {
       orderBy: { sentToCashierAt: 'desc' },
     });
     const enriched = await Promise.all(invoices.map((invoice) => this.attachLinkedRequest(invoice)));
-    return enriched.map((invoice) => sanitizeAccountantInvoice(invoice));
+    return enriched.map((invoice) => sanitizeBranchCashierInvoice(invoice));
   }
 
   async getCashierInvoice(user: AuthUser, id: string) {
@@ -263,7 +264,7 @@ export class BranchAccountantService {
     });
     if (!invoice) throw new NotFoundException('Счёт не найден');
     const enriched = await this.attachLinkedRequest(invoice);
-    return sanitizeAccountantInvoice(enriched);
+    return sanitizeBranchCashierInvoice(enriched);
   }
 
   async submitCashierPayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {

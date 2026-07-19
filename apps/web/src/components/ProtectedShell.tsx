@@ -315,7 +315,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/branch-warehouse/requests" className={sidebarNavClass(pathname, '/branch-warehouse/requests')}>{t('branchWarehouseOperator.requests')}</Link>
                 <Link href="/distribution/orders?status=SHIPPED" className={sidebarNavClass(pathname, '/distribution/orders')}>{t('distribution.receiveGoods')}</Link>
                 <Link href="/distribution/shortage-reports" className={sidebarNavClass(pathname, '/distribution/shortage-reports')}>{t('distribution.shortageReports')}</Link>
-                <Link href="/service/parts-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('operations.partsRequests')}</Link>
               </>
             ) : branchAccountantView ? (
               <>

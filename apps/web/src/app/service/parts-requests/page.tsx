@@ -1,17 +1,30 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import type { PartsRequest } from '@/lib/types';
+import { isBranchWarehouseOperator } from '@/lib/rbac';
+import type { PartsRequest, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
 export default function PartsRequestsPage() {
+  const router = useRouter();
   const { t } = useTranslation();
   const [requests, setRequests] = useState<PartsRequest[]>([]);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    apiFetch<User>('/auth/me')
+      .then((user) => {
+        if (isBranchWarehouseOperator(user)) {
+          router.replace('/branch-warehouse/requests');
+        }
+      })
+      .catch(() => null);
+  }, [router]);
 
   async function load() {
     setRequests(await apiFetch<PartsRequest[]>('/service-orders/parts-requests'));

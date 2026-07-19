@@ -14,6 +14,11 @@ import {
   isHqWarehouse,
 } from '../warehouse/warehouse.util';
 import { canCreateHqWarehouse, canDeactivateHqWarehouse, canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, hasAnyFullAccessRole, isHqWarehouseLogisticsOnlyUser, resolveUserRoles } from '../rbac/rbac';
+import {
+  sanitizeHqWarehouseDashboard,
+  sanitizeHqWarehouseInventoryRow,
+  sanitizeHqWarehouseTransferOrder,
+} from './hq-warehouse-logistics.presenter';
 import { CreateHqWarehouseDto } from './dto/create-hq-warehouse.dto';
 import { UpdateHqWarehouseDto } from './dto/update-hq-warehouse.dto';
 import { hasHqReceivingDownstreamUsage, HQ_RECEIVING_ARCHIVED_MESSAGE } from './hq-receiving-delete.util';
@@ -54,7 +59,7 @@ export class HqWarehouseService {
       );
       const productIds = new Set(balances.filter((b) => b.quantity > 0).map((b) => b.productId));
 
-      return {
+      const stats = {
         totalHqWarehouses: warehouses,
         totalProducts: productIds.size,
         totalStock: totalQuantity,
@@ -63,6 +68,7 @@ export class HqWarehouseService {
         totalAvailable: Math.max(totalQuantity - totalReserved, 0),
         pendingTransfers,
       };
+      return isHqWarehouseLogisticsOnlyUser(user) ? sanitizeHqWarehouseDashboard(stats) : stats;
     });
   }
 
@@ -437,10 +443,15 @@ export class HqWarehouseService {
       },
       orderBy: { updatedAt: 'desc' },
     });
-    return balances.map((balance) => ({
-      ...this.toInventoryRow(balance),
-      wholesalePriceKgs: Number(balance.product.sellingPriceKgs ?? 0),
-    }));
+    return balances.map((balance) => {
+      const row = {
+        ...this.toInventoryRow(balance),
+        wholesalePriceKgs: Number(balance.product.sellingPriceKgs ?? 0),
+      };
+      return isHqWarehouseLogisticsOnlyUser(user)
+        ? sanitizeHqWarehouseInventoryRow(row)
+        : row;
+    });
   }
 
   async receivings(user: AuthUser, id: string) {
@@ -614,7 +625,7 @@ export class HqWarehouseService {
 
   async transfers(user: AuthUser, id: string) {
     await this.getHqWarehouse(user, id);
-    return this.prisma.branchDistributionOrder.findMany({
+    const orders = await this.prisma.branchDistributionOrder.findMany({
       where: { sourceWarehouseId: id, deletedAt: null },
       include: {
         branch: { select: { id: true, name: true, code: true } },
@@ -623,6 +634,9 @@ export class HqWarehouseService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    return isHqWarehouseLogisticsOnlyUser(user)
+      ? orders.map((order) => sanitizeHqWarehouseTransferOrder(order))
+      : orders;
   }
 
   async history(user: AuthUser, id: string) {

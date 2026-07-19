@@ -253,11 +253,13 @@ function HqWarehousesPageContent() {
           <WarehouseSummaryCard compact label={t('hqWarehouse.totalWarehouses')} value={String(displaySummary.totalHqWarehouses)} />
           <WarehouseSummaryCard compact label={t('hqWarehouse.totalProducts')} value={String(displaySummary.totalProducts)} />
           <WarehouseSummaryCard compact label={t('hqWarehouse.totalStock')} value={String(displaySummary.totalStock)} />
-          <WarehouseSummaryCard
-            compact
-            label={t('hqWarehouse.totalValue')}
-            value={`${displaySummary.totalInventoryValueKgs.toLocaleString()} KGS`}
-          />
+          {!isWmScopedView ? (
+            <WarehouseSummaryCard
+              compact
+              label={t('hqWarehouse.totalValue')}
+              value={`${(displaySummary.totalInventoryValueKgs ?? 0).toLocaleString()} KGS`}
+            />
+          ) : null}
           <WarehouseSummaryCard compact label={t('branchWarehouse.totalReserved')} value={String(displaySummary.totalReserved)} />
           <WarehouseSummaryCard compact label={t('branchWarehouse.totalAvailable')} value={String(displaySummary.totalAvailable)} />
         </div>
@@ -341,12 +343,14 @@ function HqWarehousesPageContent() {
               sortable: true,
               render: (row) => row.totalProductQuantity ?? 0,
             },
-            {
-              key: 'totalStockValueKgs',
-              label: t('hqWarehouse.totalValue'),
-              sortable: true,
-              render: (row) => `${(row.totalStockValueKgs ?? 0).toLocaleString()} KGS`,
-            },
+            ...(!isWmScopedView
+              ? [{
+                  key: 'totalStockValueKgs',
+                  label: t('hqWarehouse.totalValue'),
+                  sortable: true,
+                  render: (row: WarehouseMetrics) => `${(row.totalStockValueKgs ?? 0).toLocaleString()} KGS`,
+                }]
+              : []),
             {
               key: 'reservedQuantity',
               label: t('branchWarehouse.reserved'),

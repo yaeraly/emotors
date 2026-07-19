@@ -134,6 +134,21 @@ export function sanitizeAccountantInvoice(invoice: any) {
   };
 }
 
+export function sanitizeBranchCashierInvoice(invoice: any) {
+  const base = sanitizeAccountantInvoice(invoice);
+  return {
+    ...base,
+    items: (base.items ?? []).map((item: { id: string; productId: string; sku: string; productName: string; quantity: number; unit: string | null }) => ({
+      id: item.id,
+      productId: item.productId,
+      sku: item.sku,
+      productName: item.productName,
+      quantity: item.quantity,
+      unit: item.unit,
+    })),
+  };
+}
+
 export function buildWorkflowStatusWhere(
   workflowStatus: AccountantInvoiceWorkflowStatus,
 ): Record<string, unknown> | null {

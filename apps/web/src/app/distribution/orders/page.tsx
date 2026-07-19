@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import { apiFetch } from '@/lib/api';
-import { canManageDistributionOrders, isBranchWarehouseOperator } from '@/lib/rbac';
+import { canManageDistributionOrders, isBranchWarehouseOperator, isHqWarehouseLogisticsOnlyUser } from '@/lib/rbac';
 import type { Branch, BranchDistributionOrder, BranchDistributionOrderStatus, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -63,6 +63,8 @@ export default function DistributionOrdersPage() {
   }, [query, t]);
 
   const operatorView = isBranchWarehouseOperator(currentUser);
+  const logisticsOnlyView = isHqWarehouseLogisticsOnlyUser(currentUser);
+  const showFinancialColumns = !operatorView && !logisticsOnlyView;
 
   return (
     <ProtectedShell>
@@ -104,8 +106,8 @@ export default function DistributionOrdersPage() {
                 <th className="px-4 py-3">{t('distribution.sourceWarehouse')}</th>
                 <th className="px-4 py-3">{t('distribution.destinationWarehouse')}</th>
                 <th className="px-4 py-3">{t('distribution.status')}</th>
-                {!operatorView ? <th className="px-4 py-3">{t('distribution.totalAmount')}</th> : null}
-                {!operatorView ? <th className="px-4 py-3">{t('distribution.totalProfit')}</th> : null}
+                {!showFinancialColumns ? null : <th className="px-4 py-3">{t('distribution.totalAmount')}</th>}
+                {!showFinancialColumns ? null : <th className="px-4 py-3">{t('distribution.totalProfit')}</th>}
                 <th className="px-4 py-3">{t('common.createdDate')}</th>
                 <th className="px-4 py-3">{t('common.actions')}</th>
               </tr>
@@ -118,8 +120,8 @@ export default function DistributionOrdersPage() {
                   <td className="px-4 py-3">{order.sourceWarehouse?.name}</td>
                   <td className="px-4 py-3">{order.destinationWarehouse?.name}</td>
                   <td className="px-4 py-3">{translateStatus(t, order.status, 'distribution')}</td>
-                  {!operatorView ? <td className="px-4 py-3">{formatKgs(order.totalAmount)}</td> : null}
-                  {!operatorView ? <td className="px-4 py-3">{formatKgs(order.totalProfit)}</td> : null}
+                  {!showFinancialColumns ? null : <td className="px-4 py-3">{formatKgs(order.totalAmount)}</td>}
+                  {!showFinancialColumns ? null : <td className="px-4 py-3">{formatKgs(order.totalProfit)}</td>}
                   <td className="px-4 py-3">{new Date(order.createdAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3"><Link href={`/distribution/orders/${order.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td>
                 </tr>
