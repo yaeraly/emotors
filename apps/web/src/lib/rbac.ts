@@ -639,7 +639,7 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (pathname.startsWith('/hq-warehouses')) return canViewHqWarehouse(user);
   if (pathname.startsWith('/branch-manager')) {
-    return canEnterBranchTransportCost(user) || isBranchOwnerUser(user);
+    return isBranchManagerUser(user) || isBranchOwnerUser(user);
   }
   if (pathname === '/branch-warehouse' || pathname.startsWith('/branch-warehouse/')) {
     return isBranchWarehouseOperator(user);
@@ -1264,12 +1264,12 @@ export function canEnterBranchReceivingTransportCost(
   return canEnterBranchTransportCost(user);
 }
 
-/** Branch Manager (MANAGER / FRANCHISE_OWNER) enters transportation cost after receiving. */
+/** Branch Warehouse Manager (WAREHOUSE_OPERATOR) enters transportation cost after receiving. */
 export function canEnterBranchTransportCost(
   user: (Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) | null | undefined,
 ) {
   if (!user?.branchId || hasFullAccess(user)) return false;
-  return hasRole(user, 'MANAGER') || hasRole(user, 'FRANCHISE_OWNER');
+  return isBranchWarehouseOperator(user);
 }
 
 export function isBranchManagerUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {

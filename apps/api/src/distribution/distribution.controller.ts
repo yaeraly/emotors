@@ -288,7 +288,7 @@ export class DistributionController {
   }
 
   @Post('orders/:id/transport-cost')
-  @Roles(Role.OWNER, Role.CEO, Role.MANAGER, Role.FRANCHISE_OWNER)
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_OPERATOR)
   enterReceivingTransportCost(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

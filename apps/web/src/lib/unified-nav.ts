@@ -1,12 +1,12 @@
 import type { User } from './types';
 import {
   canCreateServiceOrder,
-  canEnterBranchTransportCost,
   canManageUsers,
   canViewBranchPurchaseRequests,
   canViewDistribution,
   canViewInventoryCount,
   hasPermission,
+  isBranchManagerUser,
   isBranchOwnerUser,
 } from './rbac';
 
@@ -146,7 +146,7 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
       {
         href: '/branch-manager/shipments',
         labelKey: 'branchManager.incomingShipments',
-        isVisible: canEnterBranchTransportCost,
+        isVisible: (user) => isBranchManagerUser(user) || isBranchOwnerUser(user),
       },
     ],
   },

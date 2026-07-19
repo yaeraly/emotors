@@ -489,13 +489,13 @@ export function canEnterBranchReceivingTransportCost(
   return canEnterBranchTransportCost(user);
 }
 
-/** Branch Manager enters HQ→Branch transportation cost after warehouse receiving. */
+/** Branch Warehouse Manager enters HQ→Branch transportation cost after receiving. */
 export function canEnterBranchTransportCost(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
 ) {
   const roles = resolveUserRoles(user);
   if (!user.branchId || hasAnyFullAccessRole(roles)) return false;
-  return roles.includes(Role.MANAGER) || roles.includes(Role.FRANCHISE_OWNER);
+  return roles.includes(Role.WAREHOUSE_OPERATOR);
 }
 
 export function canViewBranchWarehouseOperationalData(

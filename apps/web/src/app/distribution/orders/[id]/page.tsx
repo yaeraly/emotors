@@ -7,6 +7,7 @@ import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import { apiFetch } from '@/lib/api';
 import {
   canDispatchFromHq,
+  canEnterBranchTransportCost,
   canManageDistributionOrders,
   canReceiveBranchDistribution,
   canRecordDistributionPayment,
@@ -14,6 +15,7 @@ import {
   isBranchWarehouseOperator,
   isHqWarehouseLogisticsOnlyUser,
 } from '@/lib/rbac';
+import { ReceivingTransportCostSection } from '@/components/distribution/ReceivingTransportCostSection';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -164,6 +166,7 @@ export default function DistributionOrderDetailPage() {
   const canApprove = canManageDistributionOrders(currentUser);
   const canDispatch = canDispatchFromHq(currentUser);
   const canReceiveAtBranch = canReceiveBranchDistribution(currentUser);
+  const canEnterTransport = canEnterBranchTransportCost(currentUser);
   const canPay = canRecordDistributionPayment(currentUser);
   const showFinancials = canViewProductCost(currentUser) && !isHqWarehouseLogisticsOnlyUser(currentUser);
   const operatorView = isBranchWarehouseOperator(currentUser);
@@ -270,7 +273,7 @@ export default function DistributionOrderDetailPage() {
                 <h3 className="text-lg font-bold">{t('distribution.totalBatchWeight')}</h3>
                 <div className="grid gap-4 md:grid-cols-3">
                   <Info label={t('distribution.totalBatchWeightPositions')} value={String(weightSummary?.lineCount ?? order.items?.length ?? 0)} />
-                  <Info label={t('distribution.totalBatchWeightQuantity')} value={String(weightSummary?.totalQuantity ?? order.items?.reduce((sum, item) => sum + item.quantity, 0) ?? 0)} />
+                  <Info label={t('distribution.totalBatchWeightQuantity')} value={String(weightSummary?.totalQuantity ?? order.items?.reduce((sum, item) => sum + Number(item.dispatchedQuantity ?? item.quantity), 0) ?? 0)} />
                   <Info
                     label={t('distribution.totalBatchWeightCalculated')}
                     value={`${Number(weightSummary?.totalWeightKg ?? order.totalShipmentWeightKg ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 })} ${t('distribution.weightUnitKg')}`}
@@ -296,7 +299,7 @@ export default function DistributionOrderDetailPage() {
                 </div>
               </section>
             ) : null}
-            {(weightSummary || Number(order.totalShipmentWeightKg ?? 0) > 0) && !showFinancials ? (
+            {(weightSummary || Number(order.totalShipmentWeightKg ?? 0) > 0) && !showFinancials && !(order.status === 'PACKED' && canDispatch) ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h3 className="text-lg font-bold">{t('distribution.totalBatchWeight')}</h3>
                 <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -387,7 +390,9 @@ export default function DistributionOrderDetailPage() {
                         <th className="px-4 py-3">SKU</th>
                         <th className="px-4 py-3">{t('sales.product')}</th>
                         <th className="px-4 py-3">{t('distribution.sentQuantity')}</th>
-                        <th className="px-4 py-3">{t('distribution.receivedQuantity')}</th>
+                        <th className="px-4 py-3">{t('distribution.acceptedQuantity')}</th>
+                        <th className="px-4 py-3">{t('distribution.damagedQuantity')}</th>
+                        <th className="px-4 py-3">{t('distribution.missingQuantity')}</th>
                         <th className="px-4 py-3">{t('distribution.difference')}</th>
                         <th className="px-4 py-3">{t('crm.notes')}</th>
                       </tr>
@@ -408,6 +413,24 @@ export default function DistributionOrderDetailPage() {
                               <input
                                 value={form?.acceptedQuantity ?? ''}
                                 onChange={(event) => updateReceiveItem(index, { acceptedQuantity: event.target.value })}
+                                type="number"
+                                min="0"
+                                className="w-28 rounded-xl border border-slate-300 px-3 py-2"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                value={form?.damagedQuantity ?? ''}
+                                onChange={(event) => updateReceiveItem(index, { damagedQuantity: event.target.value })}
+                                type="number"
+                                min="0"
+                                className="w-28 rounded-xl border border-slate-300 px-3 py-2"
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                value={form?.missingQuantity ?? ''}
+                                onChange={(event) => updateReceiveItem(index, { missingQuantity: event.target.value })}
                                 type="number"
                                 min="0"
                                 className="w-28 rounded-xl border border-slate-300 px-3 py-2"
@@ -439,6 +462,16 @@ export default function DistributionOrderDetailPage() {
                   {submittingReceive ? t('common.loading') : t('distribution.completeReceiving')}
                 </button>
               </section>
+            ) : null}
+            {order && (canEnterTransport || operatorView) ? (
+              <ReceivingTransportCostSection
+                order={order}
+                canEnter={canEnterTransport}
+                onUpdated={(updated) => {
+                  setOrder(updated);
+                  setSuccess(t('branchWarehouseOperator.transportEntered'));
+                }}
+              />
             ) : null}
             {receiving ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

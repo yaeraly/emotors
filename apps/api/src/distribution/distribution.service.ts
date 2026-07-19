@@ -1247,6 +1247,15 @@ export class DistributionService {
         entityId: order.id,
         recipientRoles: [Role.MANAGER, Role.FRANCHISE_OWNER],
       });
+      await this.createWorkflowAlert(tx, user, {
+        branchId: order.branchId,
+        type: AlertType.BRANCH_GOODS_RECEIVED,
+        title: 'Требуется внести транспортные расходы',
+        message: `По заказу ${order.orderNumber} внесите транспортные расходы после приёмки`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+        recipientRoles: [Role.WAREHOUSE_OPERATOR],
+      });
       if (shortageItems.length > 0 && shortageReport) {
         await this.createWorkflowAlert(tx, user, {
           branchId: order.branchId,
@@ -1397,7 +1406,7 @@ export class DistributionService {
 
   async enterReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {
     if (!canEnterBranchTransportCost(user)) {
-      throw new ForbiddenException('Только руководитель филиала может внести транспортные расходы');
+      throw new ForbiddenException('Только кладовщик филиала может внести транспортные расходы');
     }
     const transportCostKgs = Math.max(Number(dto.transportCostKgs ?? 0), 0);
     if (transportCostKgs <= 0) {
@@ -1439,9 +1448,17 @@ export class DistributionService {
 
       const transportLines = [];
       for (const orderItem of order.items) {
-        const receivingItem = receiving?.items.find((row) => row.distributionOrderItemId === orderItem.id);
-        const receivedQuantity = Number(receivingItem?.receivedQuantity ?? 0);
-        if (receivedQuantity <= 0) continue;
+        const acceptedMovement = await tx.stockMovement.findFirst({
+          where: {
+            referenceType: 'GOODS_RECEIVING_ITEM',
+            referenceId: orderItem.id,
+            type: StockMovementType.IN,
+            status: StockMovementStatus.ACTIVE,
+          },
+          select: { quantity: true },
+        });
+        const acceptedQuantity = Number(acceptedMovement?.quantity ?? 0);
+        if (acceptedQuantity <= 0) continue;
         const snapshotWeight = Number(orderItem.unitWeightKgSnapshot ?? 0);
         if (snapshotWeight <= 0) {
           throw new BadRequestException(
@@ -1450,7 +1467,7 @@ export class DistributionService {
         }
         transportLines.push({
           productId: orderItem.productId,
-          receivedQuantity,
+          receivedQuantity: acceptedQuantity,
           weightKg: snapshotWeight,
           unitCostKgs: Number(orderItem.unitCost),
         });
@@ -1516,8 +1533,17 @@ export class DistributionService {
           });
         }
 
-        const receivedQuantity = Number(receivingItem?.receivedQuantity ?? 0);
-        if (receivedQuantity <= 0) continue;
+        const acceptedMovement = await tx.stockMovement.findFirst({
+          where: {
+            referenceType: 'GOODS_RECEIVING_ITEM',
+            referenceId: orderItem.id,
+            type: StockMovementType.IN,
+            status: StockMovementStatus.ACTIVE,
+          },
+          select: { quantity: true },
+        });
+        const acceptedQuantity = Number(acceptedMovement?.quantity ?? 0);
+        if (acceptedQuantity <= 0) continue;
 
         const balance = await tx.inventoryBalance.findFirst({
           where: {
@@ -1563,11 +1589,11 @@ export class DistributionService {
         });
       }
 
-      await this.auditTransfer(tx, user, 'TRANSPORT_COST_ENTERED_BY_BRANCH_MANAGER', order, {
+      await this.auditTransfer(tx, user, 'TRANSPORT_COST_ENTERED_BY_BRANCH_WAREHOUSE', order, {
         transportCostKgs,
         receivingId: receiving.id,
       });
-      await this.auditTransfer(tx, user, 'TRANSPORT_COST_CONFIRMED_BY_BRANCH_MANAGER', order, {
+      await this.auditTransfer(tx, user, 'TRANSPORT_COST_CONFIRMED_BY_BRANCH_WAREHOUSE', order, {
         transportCostKgs,
         receivingId: receiving.id,
       });
@@ -2912,13 +2938,14 @@ export class DistributionService {
   private buildShipmentWeightSummary(order: any) {
     const items = order.items ?? [];
     const lineCount = items.length;
-    const totalQuantity = items.reduce((sum: number, item: any) => sum + Number(item.quantity ?? 0), 0);
+    const lineQuantity = (item: any) => Number(item.dispatchedQuantity ?? item.quantity ?? 0);
+    const totalQuantity = items.reduce((sum: number, item: any) => sum + lineQuantity(item), 0);
     const hasSnapshot = Boolean(order.weightSnapshotAt) || items.some((item: any) => item.unitWeightKgSnapshot != null);
     let totalWeightKg = Number(order.totalShipmentWeightKg ?? 0);
     if (!hasSnapshot) {
       totalWeightKg = items.reduce((sum: number, item: any) => {
-        const unitWeight = Number(item.product?.weightKg ?? 0);
-        return sum + unitWeight * Number(item.quantity ?? 0);
+        const unitWeight = Number(item.unitWeightKgSnapshot ?? item.product?.weightKg ?? 0);
+        return sum + unitWeight * lineQuantity(item);
       }, 0);
       totalWeightKg = Math.round((totalWeightKg + Number.EPSILON) * 1000) / 1000;
     }
