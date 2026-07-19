@@ -20,6 +20,7 @@ import {
   isBranchWarehouseOperator,
   isExecutiveBranchOrderInspector,
   isHqSalesManagerUser,
+  shouldShowBranchColumnForBranchScopedTables,
 } from '@/lib/rbac';
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -394,6 +395,7 @@ export default function BranchPurchaseRequestsPage() {
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const branchWarehouseView = isBranchWarehouseOperator(user);
   const branchOwnerView = isBranchOwnerUser(user);
+  const showBranchColumn = shouldShowBranchColumnForBranchScopedTables(user);
   const hqSalesView = isHqSalesManagerUser(user);
   const ceoInspectorView = isExecutiveBranchOrderInspector(user);
   const detailHref = (requestId: string) => `/branch-purchase-requests/${requestId}`;
@@ -749,7 +751,9 @@ export default function BranchPurchaseRequestsPage() {
             <thead className={`bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500 ${hqSalesView ? 'text-[10px]' : 'text-xs'}`}>
               <tr>
                 <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.number') : '#'}</th>
-                <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.branch') : t('distribution.branch')}</th>
+                {showBranchColumn ? (
+                  <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.branch') : t('distribution.branch')}</th>
+                ) : null}
                 {ceoInspectorView ? (
                   <th className={hqThClass(hqSalesView)}>{t('common.createdDate')}</th>
                 ) : null}
@@ -794,12 +798,14 @@ export default function BranchPurchaseRequestsPage() {
                   title={hqSalesView ? hqOrderRowHint(t, request.status) : undefined}
                   className={`cursor-pointer hover:bg-slate-50 ${hqSalesView ? 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500' : ''}`}
                 >
-                  <td className={hqTdClass(hqSalesView, 'font-bold text-blue-700')}>
+                      <td className={hqTdClass(hqSalesView, 'font-bold text-blue-700')}>
                     {request.requestNumber}
                   </td>
-                  <td className={hqTdClass(hqSalesView, 'max-w-[7rem] truncate')} title={String(branchName)}>
-                    {branchName}
-                  </td>
+                  {showBranchColumn ? (
+                    <td className={hqTdClass(hqSalesView, 'max-w-[7rem] truncate')} title={String(branchName)}>
+                      {branchName}
+                    </td>
+                  ) : null}
                   {ceoInspectorView ? (
                     <td className={hqTdClass(hqSalesView)}>{new Date(request.createdAt).toLocaleDateString()}</td>
                   ) : null}

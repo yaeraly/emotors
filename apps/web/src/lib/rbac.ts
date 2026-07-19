@@ -329,6 +329,37 @@ export function isBranchSalesManagerUser(user: Pick<User, 'role' | 'roles' | 'br
   return hasRole(user, 'MANAGER');
 }
 
+const BRANCH_OWNER_FORBIDDEN_PREFIXES = [
+  '/procurement',
+  '/hq-warehouses/china-receiving',
+  '/supply-chain',
+  '/supplier-claims',
+];
+
+export function isBranchOwnerForbiddenPath(pathname: string) {
+  return BRANCH_OWNER_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+export function isBranchOwnerProcurementForbiddenPath(pathname: string) {
+  return pathname === '/procurement' || pathname.startsWith('/procurement/');
+}
+
+/** Branch CEO tables are scoped to one branch — hide redundant branch column. */
+export function shouldShowBranchColumnForBranchScopedTables(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  return !isBranchOwnerUser(user);
+}
+
+/** Branch CEO sales list keeps localized payment status only. */
+export function shouldShowSaleStatusColumn(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  return !isBranchOwnerUser(user);
+}
+
 const BRANCH_SALES_MANAGER_FORBIDDEN_PREFIXES = [
   '/finance',
   '/reports',
@@ -595,6 +626,9 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
 
 export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/change-password') return true;
+  if (isBranchOwnerUser(user) && isBranchOwnerForbiddenPath(pathname)) {
+    return false;
+  }
   if (isSupplyChainManagerUser(user)) {
     return canSupplyChainManagerAccessPath(pathname);
   }
@@ -1067,8 +1101,9 @@ export function canCreateProcurementOrder(user: Pick<User, 'role' | 'roles' | 'p
   return canManageProcurement(user);
 }
 
-export function canViewProcurement(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+export function canViewProcurement(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
+  if (isBranchOwnerUser(user)) return false;
   if (isWarehouseManagerUser(user)) return false;
   return hasPermission(user, 'procurement.manage') || hasPermission(user, 'procurement.view');
 }

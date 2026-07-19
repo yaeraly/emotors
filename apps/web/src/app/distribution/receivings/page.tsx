@@ -5,16 +5,20 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import { apiFetch } from '@/lib/api';
-import type { GoodsReceiving } from '@/lib/types';
+import { shouldShowBranchColumnForBranchScopedTables } from '@/lib/rbac';
+import type { GoodsReceiving, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ReceivingsPage() {
   const { t } = useTranslation();
   const [receivings, setReceivings] = useState<GoodsReceiving[]>([]);
+  const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
+  const showBranchColumn = shouldShowBranchColumnForBranchScopedTables(user);
 
   useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
     apiFetch<GoodsReceiving[]>('/distribution/receivings')
       .then(setReceivings)
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -35,7 +39,7 @@ export default function ReceivingsPage() {
               <tr>
                 <th className="px-4 py-3">{t('distribution.receivingNumber')}</th>
                 <th className="px-4 py-3">{t('distribution.orderNumber')}</th>
-                <th className="px-4 py-3">{t('distribution.branch')}</th>
+                {showBranchColumn ? <th className="px-4 py-3">{t('distribution.branch')}</th> : null}
                 <th className="px-4 py-3">{t('inventory.warehouse')}</th>
                 <th className="px-4 py-3">{t('distribution.status')}</th>
                 <th className="px-4 py-3">{t('distribution.receivedBy')}</th>
@@ -48,7 +52,7 @@ export default function ReceivingsPage() {
                 <tr key={receiving.id}>
                   <td className="px-4 py-3 font-bold">{receiving.receivingNumber}</td>
                   <td className="px-4 py-3">{receiving.distributionOrder?.orderNumber}</td>
-                  <td className="px-4 py-3">{receiving.branch?.name}</td>
+                  {showBranchColumn ? <td className="px-4 py-3">{receiving.branch?.name}</td> : null}
                   <td className="px-4 py-3">{receiving.warehouse?.name}</td>
                   <td className="px-4 py-3">{receiving.status}</td>
                   <td className="px-4 py-3">{receiving.receivedBy?.fullName}</td>

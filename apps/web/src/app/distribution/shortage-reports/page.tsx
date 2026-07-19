@@ -5,16 +5,20 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
 import { apiFetch } from '@/lib/api';
-import type { ShortageReport } from '@/lib/types';
+import { shouldShowBranchColumnForBranchScopedTables } from '@/lib/rbac';
+import type { ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export default function ShortageReportsPage() {
   const { t } = useTranslation();
   const [reports, setReports] = useState<ShortageReport[]>([]);
+  const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
+  const showBranchColumn = shouldShowBranchColumnForBranchScopedTables(user);
 
   useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
     apiFetch<ShortageReport[]>('/distribution/shortage-reports')
       .then(setReports)
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -32,11 +36,27 @@ export default function ShortageReportsPage() {
         <div className="h-[calc(100vh-240px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full divide-y divide-slate-200 text-sm">
             <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-              <tr><th className="px-4 py-3">{t('distribution.shortageReport')}</th><th className="px-4 py-3">{t('distribution.orderNumber')}</th><th className="px-4 py-3">{t('distribution.branch')}</th><th className="px-4 py-3">{t('distribution.status')}</th><th className="px-4 py-3">{t('distribution.difference')}</th><th className="px-4 py-3">{t('common.createdDate')}</th><th className="px-4 py-3">{t('common.actions')}</th></tr>
+              <tr>
+                <th className="px-4 py-3">{t('distribution.shortageReport')}</th>
+                <th className="px-4 py-3">{t('distribution.orderNumber')}</th>
+                {showBranchColumn ? <th className="px-4 py-3">{t('distribution.branch')}</th> : null}
+                <th className="px-4 py-3">{t('distribution.status')}</th>
+                <th className="px-4 py-3">{t('distribution.difference')}</th>
+                <th className="px-4 py-3">{t('common.createdDate')}</th>
+                <th className="px-4 py-3">{t('common.actions')}</th>
+              </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {reports.map((report) => (
-                <tr key={report.id}><td className="px-4 py-3 font-bold">{report.reportNumber}</td><td className="px-4 py-3">{report.distributionOrder?.orderNumber}</td><td className="px-4 py-3">{report.branch?.name}</td><td className="px-4 py-3">{report.status}</td><td className="px-4 py-3">{report.items?.length ?? 0}</td><td className="px-4 py-3">{new Date(report.createdAt).toLocaleDateString()}</td><td className="px-4 py-3"><Link href={`/distribution/shortage-reports/${report.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td></tr>
+                <tr key={report.id}>
+                  <td className="px-4 py-3 font-bold">{report.reportNumber}</td>
+                  <td className="px-4 py-3">{report.distributionOrder?.orderNumber}</td>
+                  {showBranchColumn ? <td className="px-4 py-3">{report.branch?.name}</td> : null}
+                  <td className="px-4 py-3">{report.status}</td>
+                  <td className="px-4 py-3">{report.items?.length ?? 0}</td>
+                  <td className="px-4 py-3">{new Date(report.createdAt).toLocaleDateString()}</td>
+                  <td className="px-4 py-3"><Link href={`/distribution/shortage-reports/${report.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">{t('common.open')}</Link></td>
+                </tr>
               ))}
             </tbody>
           </table>

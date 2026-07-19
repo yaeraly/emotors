@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canCreateSale, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canCreateSale, isBranchSalesManagerUser, shouldShowSaleStatusColumn } from '@/lib/rbac';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -21,6 +21,8 @@ export default function SalesPage() {
   const [error, setError] = useState('');
 
   const branchSalesView = isBranchSalesManagerUser(user);
+  const showSaleStatusColumn = shouldShowSaleStatusColumn(user);
+  const tableColumnCount = (branchSalesView ? 9 : 10) + (showSaleStatusColumn ? 1 : 0);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -124,7 +126,7 @@ export default function SalesPage() {
 
         <div className="h-[calc(100vh-300px)] min-h-[420px] overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto">
-            <table className={`divide-y divide-slate-200 text-sm ${branchSalesView ? 'min-w-[980px]' : 'min-w-[1120px]'}`}>
+            <table className={`divide-y divide-slate-200 text-sm ${branchSalesView ? 'min-w-[980px]' : showSaleStatusColumn ? 'min-w-[1120px]' : 'min-w-[1000px]'}`}>
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="px-4 py-3">{t('sales.receiptNumber')}</th>
@@ -136,20 +138,20 @@ export default function SalesPage() {
                   <th className="px-4 py-3">{t('sales.debtAmount')}</th>
                   {!branchSalesView ? <th className="px-4 py-3">{t('sales.profitAmount')}</th> : null}
                   <th className="px-4 py-3">{t('common.status')}</th>
-                  <th className="px-4 py-3">Sale Status</th>
+                  {showSaleStatusColumn ? <th className="px-4 py-3">Sale Status</th> : null}
                   <th className="px-4 py-3">{t('common.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={branchSalesView ? 10 : 11} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={tableColumnCount} className="px-4 py-8 text-center text-slate-500">
                       {t('sales.loadingSales')}
                     </td>
                   </tr>
                 ) : sales.length === 0 ? (
                   <tr>
-                    <td colSpan={branchSalesView ? 10 : 11} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={tableColumnCount} className="px-4 py-8 text-center text-slate-500">
                       {t('sales.noSales')}
                     </td>
                   </tr>
@@ -185,9 +187,11 @@ export default function SalesPage() {
                       <td className="px-4 py-3">
                         <PaymentStatusPill status={sale.paymentStatus} />
                       </td>
-                      <td className="px-4 py-3">
-                        <SaleStatusPill status={sale.status} />
-                      </td>
+                      {showSaleStatusColumn ? (
+                        <td className="px-4 py-3">
+                          <SaleStatusPill status={sale.status} />
+                        </td>
+                      ) : null}
                       <td className="px-4 py-3">
                         <Link
                           href={`/sales/${sale.id}`}

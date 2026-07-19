@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, visibleBranchOwnerSidebarModules } from '@/lib/unified-nav';
 import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
@@ -33,6 +33,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [forbidden, setForbidden] = useState(false);
+  const [forbiddenReason, setForbiddenReason] = useState<'procurement' | null>(null);
 
   useEffect(() => {
     if (!getToken()) {
@@ -42,6 +43,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
 
     setLoading(true);
     setForbidden(false);
+    setForbiddenReason(null);
 
     apiFetch<User>('/auth/me')
       .then((currentUser) => {
@@ -88,6 +90,16 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               body: JSON.stringify({ pathname }),
             }).catch(() => null);
             setUser(currentUser);
+            setForbidden(true);
+            return;
+          }
+          if (isBranchOwnerUser(currentUser) && isBranchOwnerForbiddenPath(pathname)) {
+            void apiFetch('/audit/forbidden-route', {
+              method: 'POST',
+              body: JSON.stringify({ pathname }),
+            }).catch(() => null);
+            setUser(currentUser);
+            setForbiddenReason(isBranchOwnerProcurementForbiddenPath(pathname) ? 'procurement' : null);
             setForbidden(true);
             return;
           }
@@ -168,6 +180,8 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const branchWarehouseOperatorView = isBranchWarehouseOperator(user);
   const branchOwnerView = isBranchOwnerUser(user);
   const branchOwnerSidebarModules = visibleBranchOwnerSidebarModules(user);
+  const forbiddenMessage =
+    forbiddenReason === 'procurement' ? t('errors.procurementAccessDenied') : undefined;
   const canSeeBranchWarehouses = canViewBranchWarehouses(user);
   const canSeeProductMaster = canViewProductMaster(user);
   const canSeePricing = canViewPricing(user);
@@ -191,7 +205,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
           </div>
         </header>
         <div className="mx-auto max-w-7xl px-4 py-6">
-          <ForbiddenView />
+          <ForbiddenView message={forbiddenMessage} />
         </div>
       </div>
     );
