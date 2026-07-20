@@ -8,7 +8,7 @@ import type { User } from '@/lib/types';
 import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
-import { sidebarNavClass } from '@/lib/nav-matching';
+import { sidebarFinanceNavClass, sidebarNavClass, sidebarPaymentsNavClass, sidebarShiftsNavClass } from '@/lib/nav-matching';
 import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
@@ -325,7 +325,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : branchAccountantView ? (
               <>
-                <Link href="/finance/dashboard" className={sidebarNavClass(pathname, '/finance/dashboard')}>
+                <Link href="/finance/dashboard" className={sidebarFinanceNavClass(pathname)}>
                   {t('nav.finance')}
                 </Link>
                 <Link href="/branch-accountant/invoices" className={sidebarNavClass(pathname, '/branch-accountant/invoices')}>
@@ -349,20 +349,17 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/finance/accounts" className={sidebarNavClass(pathname, '/finance/accounts')}>
                   {t('finance.myAccounts')}
                 </Link>
-                <Link href="/finance/payments/pending" className={sidebarNavClass(pathname, '/finance/payments/pending')}>
-                  {t('finance.pendingPayments')}
+                <Link href="/finance/payments/pending" className={sidebarPaymentsNavClass(pathname)}>
+                  {t('finance.payments')}
                 </Link>
-                <Link href="/finance/shifts" className={sidebarNavClass(pathname, '/finance/shifts')}>
+                <Link href="/finance/shifts?status=OPEN" className={sidebarShiftsNavClass(pathname)}>
                   {t('finance.myShifts')}
                 </Link>
                 <Link href="/branch-cashier/invoices" className={sidebarNavClass(pathname, '/branch-cashier/invoices')}>
                   {t('branchCashier.invoicesToPay')}
                 </Link>
-                <Link href="/sales" className={sidebarNavClass(pathname, '/sales')}>
-                  {t('sales.salesAndPayments')}
-                </Link>
                 <Link href="/service/cashier" className={sidebarNavClass(pathname, '/service/cashier')}>
-                  Сервис — оплата
+                  {t('branchCashier.servicePayment')}
                 </Link>
                 <Link href="/returns" className={sidebarNavClass(pathname, '/returns')}>
                   {t('operations.returns')}

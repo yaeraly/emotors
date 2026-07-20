@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { useTranslation } from '@/i18n/useTranslation';
-import { isRouteActive, resolveActiveRouteHref } from '@/lib/nav-matching';
+import { isRouteActive, resolveActiveRouteHref, sectionCardClass, sectionTabClass } from '@/lib/nav-matching';
 
 export type ModuleSectionLink = {
   href: string;
@@ -45,11 +45,7 @@ function ModuleSectionNavInner({ sections, variant = 'cards' }: Props) {
               key={`${section.href}-${section.labelKey}`}
               href={section.href}
               aria-current={active ? 'page' : undefined}
-              className={
-                active
-                  ? 'rounded-xl bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700'
-                  : 'rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900'
-              }
+              className={sectionTabClass(active)}
             >
               {t(section.labelKey)}
             </Link>
@@ -68,11 +64,7 @@ function ModuleSectionNavInner({ sections, variant = 'cards' }: Props) {
             key={`${section.href}-${section.labelKey}`}
             href={section.href}
             aria-current={active ? 'page' : undefined}
-            className={
-              active
-                ? 'rounded-2xl border border-blue-300 bg-blue-50 p-4 text-sm font-semibold text-blue-700 shadow-sm'
-                : 'rounded-2xl border border-slate-200 bg-white p-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-blue-300 hover:text-blue-700'
-            }
+            className={sectionCardClass(active)}
           >
             {t(section.labelKey)}
           </Link>

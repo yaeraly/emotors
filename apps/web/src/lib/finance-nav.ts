@@ -1,6 +1,5 @@
 import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import type { User } from './types';
-import { isBranchCashierUser } from './rbac';
 import { hasCashierCapability } from './cashier-capability';
 import { canManageFinanceAccounts, isHqFinanceUser } from './finance-rbac';
 
@@ -23,13 +22,6 @@ export const FINANCE_MAIN_NAV: FinanceNavSection[] = [
   { href: '/finance/audit', labelKey: 'finance.audit', roles: ['view', 'manage', 'owner', 'hq'] },
 ];
 
-export const FINANCE_CASHIER_NAV: FinanceNavSection[] = [
-  { href: '/finance/accounts', labelKey: 'finance.myAccounts', roles: ['cashier'] },
-  { href: '/finance/payments/pending', labelKey: 'finance.pendingPayments', roles: ['cashier'] },
-  { href: '/finance/payments', labelKey: 'finance.acceptedPayments', roles: ['cashier'] },
-  { href: '/finance/shifts', labelKey: 'finance.myShifts', roles: ['cashier'] },
-];
-
 export const FINANCE_ACCOUNT_TYPE_TABS: ModuleSectionLink[] = [
   { href: '/finance/accounts', labelKey: 'finance.accountsAll' },
   { href: '/finance/accounts?type=CASH', labelKey: 'finance.accountsCash' },
@@ -44,7 +36,6 @@ export const FINANCE_PAYMENT_TABS: ModuleSectionLink[] = [
   { href: '/finance/payments/pending', labelKey: 'finance.pendingPayments' },
   { href: '/finance/payments', labelKey: 'finance.acceptedPayments' },
   { href: '/finance/payments?status=PARTIAL', labelKey: 'finance.partiallyPaid' },
-  { href: '/finance/payments?status=PAID', labelKey: 'finance.paid' },
 ];
 
 export const FINANCE_TRANSFER_TABS: ModuleSectionLink[] = [
@@ -58,7 +49,6 @@ export const FINANCE_SHIFT_TABS: ModuleSectionLink[] = [
   { href: '/finance/shifts?status=OPEN', labelKey: 'finance.openShifts' },
   { href: '/finance/shifts?status=CLOSED', labelKey: 'finance.closedShifts' },
   { href: '/finance/shifts?differences=1', labelKey: 'finance.shiftDifferences' },
-  { href: '/finance/shifts?mine=1', labelKey: 'finance.myShifts' },
 ];
 
 export const FINANCE_RECONCILIATION_TABS: ModuleSectionLink[] = [
@@ -93,16 +83,36 @@ function matchesFinanceRole(user: User, roles: FinanceNavSection['roles']) {
   return roles.includes('view');
 }
 
+export function isCashierOnlyFinanceUser(user: User | null | undefined) {
+  if (!user) return false;
+  return hasCashierCapability(user) && !canManageFinanceAccounts(user) && !isHqFinanceUser(user);
+}
+
+export function financeRootHrefForUser(user: User | null | undefined) {
+  return isCashierOnlyFinanceUser(user) ? '/finance/payments/pending' : '/finance/dashboard';
+}
+
 export function visibleFinanceNavSections(user: User | null) {
   if (!user) return [];
-  if (hasCashierCapability(user) && !canManageFinanceAccounts(user) && !isHqFinanceUser(user)) {
-    return FINANCE_CASHIER_NAV;
+  if (isCashierOnlyFinanceUser(user)) {
+    return [];
   }
   return FINANCE_MAIN_NAV.filter((section) => matchesFinanceRole(user, section.roles));
 }
 
+const CASHIER_FINANCE_PATH_PREFIXES = ['/finance/accounts', '/finance/payments', '/finance/shifts'];
+
 export function canAccessFinancePath(user: User, pathname: string) {
   if (!pathname.startsWith('/finance')) return true;
+  if (isCashierOnlyFinanceUser(user)) {
+    if (pathname === '/finance' || pathname === '/finance/') return true;
+    if (pathname.match(/^\/finance\/accounts\/[^/]+$/) && !pathname.startsWith('/finance/accounts/new')) {
+      return true;
+    }
+    return CASHIER_FINANCE_PATH_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+  }
   const sections = visibleFinanceNavSections(user);
   if (pathname === '/finance' || pathname === '/finance/') {
     return sections.length > 0;

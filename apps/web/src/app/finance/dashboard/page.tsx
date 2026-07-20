@@ -64,7 +64,24 @@ export default function FinanceDashboardPage() {
     : [];
 
   return (
-    <FinanceLayout titleKey="finance.dashboard">
+    <FinanceLayout
+      titleKey="finance.dashboard"
+      headerActions={
+        user && canManageFinanceAccounts(user) ? (
+          <>
+            <Link href="/finance/accounts/new" className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700">
+              {t('finance.createAccount')}
+            </Link>
+            <Link href="/finance/transfers/new" className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50">
+              {t('finance.createTransfer')}
+            </Link>
+            <Link href="/finance/expenses/new" className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700 hover:bg-slate-50">
+              {t('finance.createExpense')}
+            </Link>
+          </>
+        ) : undefined
+      }
+    >
       {error ? <FinanceErrorState message={error} /> : null}
       {loading ? <FinanceLoadingState /> : null}
       {data ? (
@@ -109,14 +126,6 @@ export default function FinanceDashboardPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
-          ) : null}
-
-          {user && canManageFinanceAccounts(user) ? (
-            <div className="flex flex-wrap gap-3">
-              <Link href="/finance/accounts/new" className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('finance.createAccount')}</Link>
-              <Link href="/finance/transfers/new" className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">{t('finance.createTransfer')}</Link>
-              <Link href="/finance/expenses/new" className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">{t('finance.createExpense')}</Link>
             </div>
           ) : null}
         </>

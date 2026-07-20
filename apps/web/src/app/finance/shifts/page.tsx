@@ -1,17 +1,17 @@
 'use client';
 
 import { FormEvent, Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FinanceEmptyState,
   FinanceErrorState,
   FinanceLayout,
   FinanceMoney,
 } from '@/components/finance/FinanceLayout';
-import { FINANCE_SHIFT_TABS } from '@/lib/finance-nav';
+import { FINANCE_SHIFT_TABS, isCashierOnlyFinanceUser } from '@/lib/finance-nav';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
-import type { CashierShift, FinanceAccount } from '@/lib/types';
+import type { CashierShift, FinanceAccount, User } from '@/lib/types';
 
 export default function FinanceShiftsPage() {
   return (
@@ -23,12 +23,31 @@ export default function FinanceShiftsPage() {
 
 function FinanceShiftsPageContent() {
   const { t } = useTranslation();
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const [user, setUser] = useState<User | null>(null);
   const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [error, setError] = useState('');
   const [openForm, setOpenForm] = useState({ accountId: '', openingBalance: '' });
   const [closeForm, setCloseForm] = useState({ shiftId: '', actualBalance: '' });
+
+  useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
+  }, []);
+
+  useEffect(() => {
+    const status = searchParams.get('status');
+    const mine = searchParams.get('mine');
+    if (mine === '1' || (!status && !searchParams.get('differences'))) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete('mine');
+      if (!status && !searchParams.get('differences')) {
+        params.set('status', 'OPEN');
+      }
+      router.replace(`/finance/shifts?${params.toString()}`);
+    }
+  }, [router, searchParams]);
 
   const load = () => {
     Promise.all([
@@ -67,7 +86,11 @@ function FinanceShiftsPageContent() {
   };
 
   return (
-    <FinanceLayout titleKey="finance.shifts" breadcrumbs={[{ labelKey: 'finance.shifts' }]} sectionTabs={FINANCE_SHIFT_TABS}>
+    <FinanceLayout
+      titleKey={isCashierOnlyFinanceUser(user) ? 'finance.myShifts' : 'finance.shifts'}
+      breadcrumbs={[{ labelKey: isCashierOnlyFinanceUser(user) ? 'finance.myShifts' : 'finance.shifts' }]}
+      sectionTabs={FINANCE_SHIFT_TABS}
+    >
       {error ? <FinanceErrorState message={error} /> : null}
       <form onSubmit={onOpen} className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
         <select required value={openForm.accountId} onChange={(e) => setOpenForm({ ...openForm, accountId: e.target.value })} className="rounded-xl border border-slate-300 px-4 py-3">

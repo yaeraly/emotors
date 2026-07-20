@@ -6,7 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import { useTranslation } from '@/i18n/useTranslation';
-import { visibleFinanceNavSections } from '@/lib/finance-nav';
+import { financeRootHrefForUser, visibleFinanceNavSections } from '@/lib/finance-nav';
 import { apiFetch } from '@/lib/api';
 import type { User } from '@/lib/types';
 import { useEffect, useState } from 'react';
@@ -21,6 +21,7 @@ type FinanceLayoutProps = {
   breadcrumbs?: FinanceBreadcrumb[];
   sectionTabs?: ModuleSectionLink[];
   primaryAction?: ReactNode;
+  headerActions?: ReactNode;
   children: ReactNode;
 };
 
@@ -29,6 +30,7 @@ export function FinanceLayout({
   breadcrumbs = [],
   sectionTabs,
   primaryAction,
+  headerActions,
   children,
 }: FinanceLayoutProps) {
   const { t } = useTranslation();
@@ -39,6 +41,8 @@ export function FinanceLayout({
   }, []);
 
   const mainNav = visibleFinanceNavSections(user);
+  const financeRootHref = financeRootHrefForUser(user);
+  const actions = headerActions ?? primaryAction;
 
   return (
     <ProtectedShell>
@@ -46,7 +50,7 @@ export function FinanceLayout({
         <nav className="text-sm text-slate-500" aria-label="Breadcrumb">
           <ol className="flex flex-wrap items-center gap-1">
             <li>
-              <Link href="/finance/dashboard" className="font-semibold text-blue-600 hover:text-blue-700">
+              <Link href={financeRootHref} className="font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded">
                 {t('nav.finance')}
               </Link>
             </li>
@@ -65,9 +69,9 @@ export function FinanceLayout({
           </ol>
         </nav>
 
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <h2 className="text-3xl font-bold text-slate-950">{t(titleKey)}</h2>
-          {primaryAction}
+          {actions ? <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div> : null}
         </div>
 
         {mainNav.length > 0 ? (

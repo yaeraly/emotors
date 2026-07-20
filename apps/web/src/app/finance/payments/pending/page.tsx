@@ -38,7 +38,7 @@ export default function FinancePendingPaymentsPage() {
   }, [t]);
 
   return (
-    <FinanceLayout titleKey="finance.pendingPayments" breadcrumbs={[{ labelKey: 'finance.payments' }, { labelKey: 'finance.pendingPayments' }]} sectionTabs={FINANCE_PAYMENT_TABS}>
+    <FinanceLayout titleKey="finance.payments" breadcrumbs={[{ labelKey: 'finance.payments' }]} sectionTabs={FINANCE_PAYMENT_TABS}>
       {error ? <FinanceErrorState message={error} /> : null}
       {loading ? <FinanceLoadingState /> : null}
       {!loading && rows.length === 0 ? <FinanceEmptyState messageKey="finance.noPayments" /> : null}

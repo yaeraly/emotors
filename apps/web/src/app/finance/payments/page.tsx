@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   FinanceEmptyState,
   FinanceErrorState,
@@ -39,12 +39,19 @@ export default function FinancePaymentsPage() {
 
 function FinancePaymentsPageContent() {
   const { t } = useTranslation();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const status = searchParams.get('status') ?? undefined;
   const [rows, setRows] = useState<FinancePaymentRow[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (searchParams.get('status') === 'PAID') {
+      router.replace('/finance/payments');
+    }
+  }, [router, searchParams]);
 
   useEffect(() => {
     const params = new URLSearchParams();

@@ -11,7 +11,7 @@ import {
   FinanceMoney,
   FinanceStatusBadge,
 } from '@/components/finance/FinanceLayout';
-import { FINANCE_ACCOUNT_TYPE_TABS } from '@/lib/finance-nav';
+import { FINANCE_ACCOUNT_TYPE_TABS, isCashierOnlyFinanceUser } from '@/lib/finance-nav';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts } from '@/lib/finance-rbac';
@@ -74,12 +74,13 @@ function FinanceAccountsPageContent() {
   }, [accounts, typeFilter, search]);
 
   const canManage = user && canManageFinanceAccounts(user);
+  const cashierOnly = isCashierOnlyFinanceUser(user);
 
   return (
     <FinanceLayout
-      titleKey="finance.accounts"
-      breadcrumbs={[{ labelKey: 'finance.accounts' }]}
-      sectionTabs={FINANCE_ACCOUNT_TYPE_TABS}
+      titleKey={cashierOnly ? 'finance.myAccounts' : 'finance.accounts'}
+      breadcrumbs={[{ labelKey: cashierOnly ? 'finance.myAccounts' : 'finance.accounts' }]}
+      sectionTabs={cashierOnly ? undefined : FINANCE_ACCOUNT_TYPE_TABS}
       primaryAction={
         canManage ? (
           <Link href="/finance/accounts/new" className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">
