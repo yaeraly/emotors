@@ -3,6 +3,16 @@ import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+/** Capability-style codes without a dot (e.g. cashier) map explicitly; others use module.action. */
+function parsePermissionCode(code: string): { module: string; action: string } {
+  const overrides: Record<string, { module: string; action: string }> = {
+    cashier: { module: 'finance', action: 'cashier' },
+  };
+  if (overrides[code]) return overrides[code];
+  const [module, action] = code.split('.');
+  return { module, action };
+}
+
 const permissionCodes = [
   'users.manage',
   'branches.manage',
@@ -181,7 +191,7 @@ async function main() {
   });
 
   for (const code of permissionCodes) {
-    const [module, action] = code.split('.');
+    const { module, action } = parsePermissionCode(code);
     await prisma.permission.upsert({
       where: { code },
       update: { module, action },
