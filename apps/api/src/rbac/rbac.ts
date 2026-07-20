@@ -51,6 +51,7 @@ export const ALL_PERMISSION_CODES = [
   'products.archive',
   'service.manage',
   'finance.view',
+  'finance.manage',
   'payments.manage',
   'payroll.manage',
   'kpi.view',
@@ -70,7 +71,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   CEO: [...ALL_PERMISSION_CODES],
   SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
+  FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
   WAREHOUSE_MANAGER: [
     'inventory.manage',
     'inventory.view',
@@ -119,8 +120,8 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MASTER: ['service.manage', 'kpi.view', 'products.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage'],
-  ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
-  HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
+  ACCOUNTANT: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
+  HQ_ACCOUNTANT: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
 

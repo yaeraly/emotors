@@ -986,6 +986,10 @@ model Branch {
   branchRequestShortages    BranchRequestShortage[]
   branchRequestIssues       BranchRequestIssue[]
   hqStockBookings           HqStockBooking[]
+  financeAccounts           FinanceAccount[]
+  financeTransfers          FinanceTransfer[]
+  financeLedgerEntries      FinanceLedgerEntry[]
+  cashierShifts             CashierShift[]
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
   deletedAt                 DateTime?
@@ -1341,6 +1345,14 @@ model User {
   createdHqStockBookings                          HqStockBooking[]                    @relation("HqStockBookingCreator")
   confirmedHqStockBookings                        HqStockBooking[]                    @relation("HqStockBookingConfirmer")
   releasedHqStockBookings                         HqStockBooking[]                    @relation("HqStockBookingReleaser")
+  financeAccountsCreated                        FinanceAccount[]                    @relation("FinanceAccountCreator")
+  financeAccountsUpdated                          FinanceAccount[]                    @relation("FinanceAccountUpdater")
+  financeAccountAssignments                       FinanceAccountAssignment[]          @relation("FinanceAccountAssignmentUser")
+  financeAccountAssignmentsCreated                FinanceAccountAssignment[]          @relation("FinanceAccountAssignmentCreator")
+  financeTransfersCreated                         FinanceTransfer[]                   @relation("FinanceTransferCreator")
+  financeTransfersApproved                        FinanceTransfer[]                   @relation("FinanceTransferApprover")
+  financeLedgerEntries                            FinanceLedgerEntry[]                @relation("FinanceLedgerEntryCreator")
+  cashierShifts                                   CashierShift[]                      @relation("CashierShiftCashier")
   createdAt                                       DateTime                            @default(now())
   updatedAt                                       DateTime                            @updatedAt
   deletedAt                                       DateTime?
@@ -4722,4 +4734,198 @@ model Alert {
   @@index([createdAt])
   @@index([entityType, entityId])
   @@index([referenceNumber])
+}
+
+enum FinanceAccountScope {
+  HQ
+  BRANCH
+}
+
+enum FinanceAccountStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum FinanceLedgerEntryType {
+  OPENING_BALANCE
+  OWNER_INVESTMENT
+  CAPITAL_INJECTION
+  TRANSFER_IN
+  TRANSFER_OUT
+  INCOME
+  EXPENSE
+  PAYMENT
+  REFUND
+  ADJUSTMENT
+  CLOSING_BALANCE
+}
+
+enum FinanceTransferStatus {
+  PENDING
+  APPROVED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum CashierShiftStatus {
+  OPEN
+  CLOSED
+}
+
+model FinanceAccountTypeDefinition {
+  id        String           @id @default(cuid())
+  code      String           @unique
+  name      String
+  category  String?
+  isSystem  Boolean          @default(true)
+  isActive  Boolean          @default(true)
+  accounts  FinanceAccount[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+model FinanceAccount {
+  id               String                       @id @default(cuid())
+  accountNumber    String                       @unique
+  name             String
+  scope            FinanceAccountScope
+  branchId         String?
+  branch           Branch?                      @relation(fields: [branchId], references: [id])
+  typeCode         String
+  typeDefinition   FinanceAccountTypeDefinition @relation(fields: [typeCode], references: [code])
+  currency         String                       @default("KGS")
+  status           FinanceAccountStatus         @default(ACTIVE)
+  openingBalance   Decimal                      @default(0) @db.Decimal(14, 2)
+  currentBalance   Decimal                      @default(0) @db.Decimal(14, 2)
+  availableBalance Decimal                      @default(0) @db.Decimal(14, 2)
+  pendingBalance   Decimal                      @default(0) @db.Decimal(14, 2)
+  bankName         String?
+  bankAccountNo    String?
+  qrProvider       String?
+  qrMerchantId     String?
+  posTerminalId    String?
+  notes            String?
+  createdById      String?
+  createdBy        User?                        @relation("FinanceAccountCreator", fields: [createdById], references: [id])
+  updatedById      String?
+  updatedBy        User?                        @relation("FinanceAccountUpdater", fields: [updatedById], references: [id])
+  assignments      FinanceAccountAssignment[]
+  ledgerEntries    FinanceLedgerEntry[]
+  transfersOut     FinanceTransfer[]            @relation("FinanceTransferSource")
+  transfersIn      FinanceTransfer[]            @relation("FinanceTransferDestination")
+  cashierShifts      CashierShift[]
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  deletedAt        DateTime?
+
+  @@index([branchId])
+  @@index([scope])
+  @@index([typeCode])
+  @@index([status])
+  @@index([currency])
+}
+
+model FinanceAccountAssignment {
+  id          String         @id @default(cuid())
+  accountId   String
+  account     FinanceAccount @relation(fields: [accountId], references: [id])
+  userId      String
+  user        User           @relation("FinanceAccountAssignmentUser", fields: [userId], references: [id])
+  assignedById String?
+  assignedBy  User?          @relation("FinanceAccountAssignmentCreator", fields: [assignedById], references: [id])
+  isActive    Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([accountId, userId])
+  @@index([accountId])
+  @@index([userId])
+}
+
+model FinanceLedgerEntry {
+  id                String                 @id @default(cuid())
+  entryNumber       String                 @unique
+  accountId         String
+  account           FinanceAccount         @relation(fields: [accountId], references: [id])
+  branchId          String?
+  branch            Branch?                @relation(fields: [branchId], references: [id])
+  entryType         FinanceLedgerEntryType
+  amount            Decimal                @db.Decimal(14, 2)
+  signedAmount      Decimal                @db.Decimal(14, 2)
+  beforeBalance     Decimal                @db.Decimal(14, 2)
+  afterBalance      Decimal                @db.Decimal(14, 2)
+  currency          String                 @default("KGS")
+  transferId        String?
+  transfer          FinanceTransfer?       @relation(fields: [transferId], references: [id])
+  referenceType     String?
+  referenceId       String?
+  notes             String?
+  createdById       String?
+  createdBy         User?                  @relation("FinanceLedgerEntryCreator", fields: [createdById], references: [id])
+  createdAt         DateTime               @default(now())
+
+  @@index([accountId])
+  @@index([branchId])
+  @@index([entryType])
+  @@index([transferId])
+  @@index([createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model FinanceTransfer {
+  id                    String                @id @default(cuid())
+  transferNumber        String                @unique
+  sourceAccountId       String
+  sourceAccount         FinanceAccount        @relation("FinanceTransferSource", fields: [sourceAccountId], references: [id])
+  destinationAccountId  String
+  destinationAccount    FinanceAccount        @relation("FinanceTransferDestination", fields: [destinationAccountId], references: [id])
+  branchId              String?
+  branch                Branch?               @relation(fields: [branchId], references: [id])
+  amount                Decimal               @db.Decimal(14, 2)
+  currency              String                @default("KGS")
+  transferDate          DateTime              @default(now())
+  status                FinanceTransferStatus @default(COMPLETED)
+  requiresApproval      Boolean               @default(false)
+  notes                 String?
+  createdById           String?
+  createdBy             User?                 @relation("FinanceTransferCreator", fields: [createdById], references: [id])
+  approvedById          String?
+  approvedBy            User?                 @relation("FinanceTransferApprover", fields: [approvedById], references: [id])
+  approvedAt            DateTime?
+  ledgerEntries         FinanceLedgerEntry[]
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([sourceAccountId])
+  @@index([destinationAccountId])
+  @@index([branchId])
+  @@index([status])
+  @@index([transferDate])
+}
+
+model CashierShift {
+  id              String             @id @default(cuid())
+  shiftNumber     String             @unique
+  cashierId       String
+  cashier         User               @relation("CashierShiftCashier", fields: [cashierId], references: [id])
+  branchId        String
+  branch          Branch             @relation(fields: [branchId], references: [id])
+  accountId       String
+  account         FinanceAccount     @relation(fields: [accountId], references: [id])
+  status          CashierShiftStatus @default(OPEN)
+  openingBalance  Decimal            @db.Decimal(14, 2)
+  expectedBalance Decimal            @default(0) @db.Decimal(14, 2)
+  actualBalance   Decimal?           @db.Decimal(14, 2)
+  closingBalance  Decimal?           @db.Decimal(14, 2)
+  difference      Decimal?           @db.Decimal(14, 2)
+  comments        String?
+  openedAt        DateTime           @default(now())
+  closedAt        DateTime?
+
+  @@index([cashierId])
+  @@index([branchId])
+  @@index([accountId])
+  @@index([status])
+  @@index([openedAt])
 }

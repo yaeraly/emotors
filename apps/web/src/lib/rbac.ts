@@ -12,6 +12,7 @@ const ALL_PERMISSIONS = [
   'products.archive',
   'service.manage',
   'finance.view',
+  'finance.manage',
   'payments.manage',
   'payroll.manage',
   'kpi.view',
@@ -31,7 +32,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   CEO: [...ALL_PERMISSIONS],
   SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view'],
-  FINANCE_MANAGER: ['finance.view', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
+  FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
   WAREHOUSE_MANAGER: [
     'inventory.manage',
     'inventory.view',
@@ -80,8 +81,8 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   MASTER: ['service.manage', 'kpi.view', 'products.view'],
   WAREHOUSE_OPERATOR: ['inventory.manage', 'distribution.manage'],
   CASHIER: ['payments.manage'],
-  ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
-  HQ_ACCOUNTANT: ['finance.view', 'payments.manage', 'payroll.manage'],
+  ACCOUNTANT: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
+  HQ_ACCOUNTANT: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
   SALESPERSON: ['sales.manage'],
 };
 
@@ -465,6 +466,8 @@ const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
 const BRANCH_CASHIER_ALLOWED_PREFIXES = [
   '/change-password',
   '/branch-cashier',
+  '/finance/accounts',
+  '/finance/shifts',
   '/payments',
   '/sales',
   '/service/cashier',
@@ -507,6 +510,7 @@ const BRANCH_CASHIER_FORBIDDEN_PREFIXES = [
 const BRANCH_ACCOUNTANT_ALLOWED_PREFIXES = [
   '/change-password',
   '/branch-accountant',
+  '/finance',
   '/payments',
   '/tax',
   '/payroll',
@@ -520,7 +524,6 @@ const BRANCH_ACCOUNTANT_ALLOWED_PREFIXES = [
 const BRANCH_ACCOUNTANT_FORBIDDEN_PREFIXES = [
   '/dashboard',
   '/branch-dashboard',
-  '/finance',
   '/analytics',
   '/kpi',
   '/ai',
@@ -673,7 +676,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/branch-dashboard') {
     return hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
   }
-  if (pathname === '/finance') return hasPermission(user, 'finance.view');
+  if (pathname === '/finance' || pathname.startsWith('/finance/')) {
+    return hasPermission(user, 'finance.view') || hasPermission(user, 'finance.manage') || hasPermission(user, 'payments.manage');
+  }
   if (pathname === '/payments') return hasPermission(user, 'payments.manage') || hasPermission(user, 'sales.manage');
   if (pathname.startsWith('/customers')) return hasPermission(user, 'crm.manage');
   if (pathname.startsWith('/sales')) return canViewSalesForPayment(user) || canCreateSale(user);

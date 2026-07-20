@@ -1173,3 +1173,113 @@ export type TimelineEntry =
         receiptNumber: string;
       };
     };
+
+export type FinanceAccountScope = 'HQ' | 'BRANCH';
+export type FinanceAccountStatus = 'ACTIVE' | 'INACTIVE';
+export type FinanceTransferStatus = 'PENDING' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'CANCELLED';
+export type CashierShiftStatus = 'OPEN' | 'CLOSED';
+
+export type FinanceAccountTypeDefinition = {
+  id: string;
+  code: string;
+  name: string;
+  category?: string | null;
+};
+
+export type FinanceAccount = {
+  id: string;
+  accountNumber: string;
+  name: string;
+  scope: FinanceAccountScope;
+  branchId?: string | null;
+  typeCode: string;
+  currency: string;
+  status: FinanceAccountStatus;
+  openingBalance: number;
+  currentBalance: number;
+  availableBalance: number;
+  pendingBalance: number;
+  bankName?: string | null;
+  bankAccountNo?: string | null;
+  qrProvider?: string | null;
+  qrMerchantId?: string | null;
+  posTerminalId?: string | null;
+  notes?: string | null;
+  typeDefinition?: FinanceAccountTypeDefinition;
+  branch?: { id: string; name: string; code: string } | null;
+  assignments?: Array<{
+    id: string;
+    user: { id: string; fullName: string; email: string; role: Role };
+  }>;
+};
+
+export type FinanceTransfer = {
+  id: string;
+  transferNumber: string;
+  amount: number;
+  currency: string;
+  transferDate: string;
+  status: FinanceTransferStatus;
+  notes?: string | null;
+  sourceAccount: FinanceAccount;
+  destinationAccount: FinanceAccount;
+};
+
+export type FinanceLedgerEntry = {
+  id: string;
+  entryNumber: string;
+  entryType: string;
+  amount: number;
+  signedAmount: number;
+  beforeBalance: number;
+  afterBalance: number;
+  currency: string;
+  createdAt: string;
+  account?: { id: string; name: string; accountNumber: string };
+  createdBy?: { id: string; fullName: string } | null;
+};
+
+export type CashierShift = {
+  id: string;
+  shiftNumber: string;
+  status: CashierShiftStatus;
+  openingBalance: number;
+  expectedBalance: number;
+  actualBalance?: number | null;
+  closingBalance?: number | null;
+  difference?: number | null;
+  comments?: string | null;
+  openedAt: string;
+  closedAt?: string | null;
+  account: { id: string; name: string; accountNumber: string; currentBalance: number; currency: string };
+  cashier: { id: string; fullName: string; email: string };
+};
+
+export type FinanceSummaryReport = {
+  accounts: FinanceAccount[];
+  branchSummaries: Array<{
+    branchId: string;
+    branchName: string;
+    branchCode: string;
+    accountCount: number;
+    totalBalance: number;
+  }>;
+  totals: {
+    balance: number;
+    income: number;
+    expenses: number;
+    profit: number;
+    transfersExcluded: boolean;
+  };
+};
+
+export type FinanceAuditEntry = {
+  id: string;
+  action: string;
+  entity: string;
+  entityId?: string | null;
+  timestamp: string;
+  metadata?: Record<string, unknown> | null;
+  user?: { id: string; fullName: string; email: string } | null;
+};
+
