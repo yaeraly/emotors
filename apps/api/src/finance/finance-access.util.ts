@@ -4,11 +4,11 @@ import { AuthUser } from '../auth/auth.types';
 import {
   hasAnyFullAccessRole,
   isBranchAccountantUser,
-  isBranchCashierUser,
   isBranchOwnerUser,
   resolveUserRoles,
   userHasPermission,
 } from '../rbac/rbac';
+import { hasCashierCapability } from '../rbac/cashier-capability.util';
 
 export type FinanceAccountAccess = {
   id: string;
@@ -72,9 +72,9 @@ export function canApproveFinanceTransfer(
 }
 
 export function canOperateCashierShift(
-  user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>,
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
 ) {
-  return isBranchCashierUser(user) || userHasPermission(user, 'payments.manage');
+  return hasCashierCapability(user);
 }
 
 export function assertBranchIsolation(
@@ -106,7 +106,7 @@ export function assertCanAccessAccountScope(
     return;
   }
 
-  if (isBranchCashierUser(user)) {
+  if (hasCashierCapability(user)) {
     assertBranchIsolation(user, account.branchId);
     if (!assignedAccountIds.has(account.id)) {
       throw new ForbiddenException('Cashier can only access assigned accounts');

@@ -25,6 +25,8 @@ import { PricingResolutionService } from '../pricing/pricing-resolution.service'
 import { PricingService } from '../pricing/pricing.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertBranchCashierCannotManageSales, assertBranchSalesManagerCannotApproveSale, hasAnyFullAccessRole, hasAnyHqRole, isBranchSalesManagerUser, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
+import { CASHIER_ASSIGNMENT_OPERATIONS } from '../rbac/cashier-capability.util';
+import { assertCashierPaymentAllowed } from '../finance/finance-assignment.util';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
@@ -636,8 +638,14 @@ export class SalesService {
   }
 
   async addPayment(user: AuthUser, id: string, dto: AddPaymentDto) {
+    const assignment = await assertCashierPaymentAllowed(this.prisma, user, {
+      accountId: dto.financeAccountId,
+      operation: CASHIER_ASSIGNMENT_OPERATIONS.RECEIVE_PAYMENTS,
+    });
+
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
+      const selfProcessed = sale.sellerId === user.id;
 
       if (sale.status === SaleStatus.CANCELLED) {
         throw new BadRequestException('Cannot add payment to cancelled sale');
@@ -724,6 +732,8 @@ export class SalesService {
           paidAt: dto.paidAt ?? new Date(),
           note: dto.note,
           createdById: user.id,
+          financeAccountId: dto.financeAccountId ?? assignment.accountId,
+          selfProcessed,
         },
       });
 
@@ -742,6 +752,10 @@ export class SalesService {
         amount,
         cashReceived,
         changeAmount,
+        financeAccountId: payment.financeAccountId,
+        selfProcessed,
+        saleCreatedBy: sale.sellerId,
+        paymentAcceptedBy: user.id,
       });
 
       await this.refreshSalePaymentState(tx, sale.id);

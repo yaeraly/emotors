@@ -7,6 +7,7 @@ import { hqAssignableRoles, RoleBadges, RoleSelector } from '@/components/RoleSe
 import { HqWarehouseMultiSelect } from '@/components/users/HqWarehouseMultiSelect';
 import { apiFetch } from '@/lib/api';
 import { canAssignHqWarehouseManager, canDeleteEmployee, canResetUserPassword } from '@/lib/rbac';
+import { canGrantCashierCapability } from '@/lib/cashier-capability';
 import type { Branch, Role, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
@@ -25,6 +26,8 @@ export default function UserDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteReason, setDeleteReason] = useState('');
   const [loginForm, setLoginForm] = useState({ username: '', email: '', password: '' });
+  const [cashierEnabled, setCashierEnabled] = useState(false);
+  const [cashierSaving, setCashierSaving] = useState(false);
   const [form, setForm] = useState({
     fullName: '',
     employeeId: '',
@@ -54,6 +57,7 @@ export default function UserDetailPage() {
         : [];
       setCurrentUser(currentUserResult);
       setUser(userResult);
+      setCashierEnabled(Boolean(userResult.cashierCapability || userResult.additionalPermissions?.includes('cashier')));
       setBranches(branchResult);
       setHistory(historyResult);
       setHqWarehouses(warehouseList);
@@ -86,6 +90,21 @@ export default function UserDetailPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  async function toggleCashierPermission(enabled: boolean) {
+    if (!user) return;
+    setCashierSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/users/${user.id}/permissions/cashier/${enabled ? 'grant' : 'revoke'}`, { method: 'POST' });
+      setCashierEnabled(enabled);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setCashierSaving(false);
+    }
+  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -173,6 +192,13 @@ export default function UserDetailPage() {
   const canAssignWarehousesRole = isWarehouseManagerRole || isHqSalesManagerRole;
   const canEditAssignments = canAssignHqWarehouseManager(currentUser) && isHqEmployee && canAssignWarehousesRole;
   const canDelete = canDeleteEmployee(currentUser) && currentUser?.id !== user?.id;
+  const canManageCashierPermission =
+    canGrantCashierCapability(currentUser) &&
+    !isHqEmployee &&
+    user &&
+    currentUser?.id !== user.id &&
+    !user.roles?.includes('CASHIER') &&
+    user.role !== 'CASHIER';
 
   return (
     <ProtectedShell>
@@ -235,6 +261,21 @@ export default function UserDetailPage() {
                   <li key={warehouse.id}>{warehouse.name} ({warehouse.code})</li>
                 ))}
               </ul>
+            </div>
+          ) : null}
+          {canManageCashierPermission ? (
+            <div className="rounded-2xl border border-slate-200 p-4 md:col-span-2">
+              <p className="text-sm font-semibold text-slate-800">{t('users.additionalPermissions')}</p>
+              <label className="mt-3 flex items-center gap-3 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={cashierEnabled}
+                  disabled={cashierSaving}
+                  onChange={(event) => void toggleCashierPermission(event.target.checked)}
+                />
+                {t('users.cashierPermission')}
+              </label>
+              <p className="mt-2 text-sm text-slate-500">{t('users.cashierPermissionHint')}</p>
             </div>
           ) : null}
           <button className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white md:col-span-2" type="submit">{t('common.save')}</button>

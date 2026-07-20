@@ -230,7 +230,7 @@ export class UsersService {
     }
     const assignments = await this.loadWarehouseAssignments(created.id, roles);
     return {
-      ...this.enrichUser({ ...created, userRoles: synced }, assignments),
+      ...(await this.enrichUser({ ...created, userRoles: synced }, assignments)),
       temporaryPassword: hasLogin && !dto.password?.trim() ? TEMP_PASSWORD : undefined,
     };
   }
@@ -623,7 +623,7 @@ export class UsersService {
     });
     if (!found) throw new NotFoundException('User not found');
     const assignments = await this.loadWarehouseAssignments(found.id, this.extractRoles(found));
-    return this.enrichUser(found, assignments);
+    return await this.enrichUser(found, assignments);
   }
 
   async update(user: AuthUser, id: string, dto: any) {
@@ -674,7 +674,7 @@ export class UsersService {
       rolesAfter: roles,
     });
     const assignments = await this.loadWarehouseAssignments(id, roles);
-    return this.enrichUser({ ...updated, userRoles: synced }, assignments);
+    return await this.enrichUser({ ...updated, userRoles: synced }, assignments);
   }
 
   async resetPassword(user: AuthUser, id: string) {
@@ -985,10 +985,16 @@ export class UsersService {
     return [];
   }
 
-  private enrichUser(user: any, assignments: Array<{ warehouseId: string; warehouse: { id: string; name: string; code: string } }>) {
+  private async enrichUser(user: any, assignments: Array<{ warehouseId: string; warehouse: { id: string; name: string; code: string } }>) {
     const safe = this.safeUser(user);
+    const additionalPermissions = await this.prisma.userPermission.findMany({
+      where: { userId: user.id, isActive: true },
+      include: { permission: true },
+    });
     return {
       ...safe,
+      additionalPermissions: additionalPermissions.map((row) => row.permission.code),
+      cashierCapability: additionalPermissions.some((row) => row.permission.code === 'cashier'),
       assignedHqWarehouseIds: assignments.map((row) => row.warehouseId),
       assignedHqWarehouses: assignments.map((row) => row.warehouse),
     };

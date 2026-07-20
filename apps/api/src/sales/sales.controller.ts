@@ -163,7 +163,16 @@ export class SalesController {
   }
 
   @Post(':id/payments')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.CASHIER)
+  @Roles(
+    Role.OWNER,
+    Role.CEO,
+    Role.SYSTEM_ADMINISTRATOR,
+    Role.FRANCHISE_OWNER,
+    Role.CASHIER,
+    Role.MANAGER,
+    Role.MASTER,
+    Role.SALESPERSON,
+  )
   addPayment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

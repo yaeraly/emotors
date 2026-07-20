@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { AccountAssignmentsPanel } from '@/components/finance/AccountAssignmentsPanel';
 import {
   FinanceErrorState,
   FinanceLayout,
@@ -23,11 +24,16 @@ export default function FinanceAccountDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('overview');
 
-  useEffect(() => {
+  const reload = () => {
+    setLoading(true);
     apiFetch<FinanceAccount & { ledgerEntries?: FinanceLedgerEntry[] }>(`/finance/accounts/${params.id}`)
       .then(setAccount)
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    reload();
   }, [params.id, t]);
 
   const tabs = [
@@ -77,6 +83,8 @@ export default function FinanceAccountDetailsPage() {
               </ul>
             </div>
           ) : null}
+
+          <AccountAssignmentsPanel account={account} onUpdated={reload} />
 
           {account.ledgerEntries && account.ledgerEntries.length > 0 ? (
             <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">

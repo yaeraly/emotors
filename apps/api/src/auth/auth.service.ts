@@ -274,10 +274,20 @@ export class AuthService {
     });
     const roles = rows.map((row) => row.role.code as Role);
     const assignedRoles = roles.length ? roles : [role];
-    const permissions = rows.flatMap((row) =>
+    const rolePermissions = rows.flatMap((row) =>
       row.role.permissions.map((rolePermission) => rolePermission.permission.code),
     );
-    return Array.from(new Set([...permissionsForRoles(assignedRoles), ...permissions]));
+    const basePermissions = Array.from(new Set([...permissionsForRoles(assignedRoles), ...rolePermissions]));
+    const userPermissionRows = await this.prisma.userPermission.findMany({
+      where: { userId, isActive: true },
+      include: { permission: true },
+    });
+    const additionalPermissions = userPermissionRows.map((row) => row.permission.code);
+    const merged = Array.from(new Set([...basePermissions, ...additionalPermissions]));
+    if (additionalPermissions.includes('cashier') || assignedRoles.includes(Role.CASHIER)) {
+      merged.push('cashier', 'payments.manage');
+    }
+    return Array.from(new Set(merged));
   }
 
   private roleCodes(user: { role: Role; userRoles?: { role: { code: string } }[] }) {

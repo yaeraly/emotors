@@ -7,6 +7,7 @@ import {
   hasFullAccess,
   hasRole,
 } from './rbac';
+import { hasCashierCapability } from './cashier-capability';
 
 export function isHqFinanceUser(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   if (!user) return false;
@@ -42,9 +43,9 @@ export function canCreateOwnerInvestment(user: Pick<User, 'role' | 'roles' | 'br
   return isBranchOwnerUser(user) || hasFullAccess(user);
 }
 
-export function canAcceptFinancePayment(user: Pick<User, 'role' | 'roles' | 'branchId' | 'permissions'> | null | undefined) {
+export function canAcceptFinancePayment(user: Pick<User, 'role' | 'roles' | 'branchId' | 'permissions' | 'additionalPermissions'> | null | undefined) {
   if (!user) return false;
-  return isBranchCashierUser(user) || hasPermission(user, 'payments.manage');
+  return hasCashierCapability(user);
 }
 
 export function canViewFinancePayments(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {

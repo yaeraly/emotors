@@ -1001,6 +1001,7 @@ model Branch {
   financeLedgerEntries      FinanceLedgerEntry[]
   financeExpenses           FinanceExpense[]
   financeReconciliations    FinanceReconciliation[]
+  financeAccountAssignments FinanceAccountAssignment[]
   cashierShifts             CashierShift[]
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
@@ -1369,6 +1370,9 @@ model User {
   financeExpensesApproved                         FinanceExpense[]                    @relation("FinanceExpenseApprover")
   financeReconciliationsCreated                   FinanceReconciliation[]             @relation("FinanceReconciliationCreator")
   cashierShifts                                   CashierShift[]                      @relation("CashierShiftCashier")
+  userPermissionsHeld                             UserPermission[]                    @relation("UserPermissionHolder")
+  userPermissionsGranted                          UserPermission[]                    @relation("UserPermissionGranter")
+  userPermissionsRevoked                          UserPermission[]                    @relation("UserPermissionRevoker")
   createdAt                                       DateTime                            @default(now())
   updatedAt                                       DateTime                            @updatedAt
   deletedAt                                       DateTime?
@@ -1397,6 +1401,7 @@ model Permission {
   action      String
   description String?
   roles       RolePermission[]
+  userPermissions UserPermission[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 }
@@ -1428,6 +1433,28 @@ model UserRole {
   @@index([userId])
   @@index([roleId])
   @@index([assignedById])
+}
+
+model UserPermission {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation("UserPermissionHolder", fields: [userId], references: [id])
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  grantedById  String?
+  grantedBy    User?      @relation("UserPermissionGranter", fields: [grantedById], references: [id])
+  revokedById  String?
+  revokedBy    User?      @relation("UserPermissionRevoker", fields: [revokedById], references: [id])
+  isActive     Boolean    @default(true)
+  grantedAt    DateTime   @default(now())
+  revokedAt    DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([userId, permissionId])
+  @@index([userId])
+  @@index([permissionId])
+  @@index([isActive])
 }
 
 model LoginHistory {
@@ -1626,6 +1653,9 @@ model Payment {
   paidAt      DateTime            @default(now())
   note        String?
   status      PaymentRecordStatus @default(ACTIVE)
+  financeAccountId String?
+  financeAccount   FinanceAccount? @relation(fields: [financeAccountId], references: [id])
+  selfProcessed Boolean             @default(false)
   voidedAt    DateTime?
   createdById String
   createdBy   User                @relation("PaymentCreator", fields: [createdById], references: [id])
@@ -1638,6 +1668,7 @@ model Payment {
   @@index([paidAt])
   @@index([method])
   @@index([status])
+  @@index([financeAccountId])
 }
 
 model InstallmentSchedule {
@@ -4837,6 +4868,7 @@ model FinanceAccount {
   transfersIn      FinanceTransfer[]            @relation("FinanceTransferDestination")
   cashierShifts      CashierShift[]
   expenses           FinanceExpense[]
+  payments           Payment[]
   reconciliations    FinanceReconciliation[]
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
@@ -4855,6 +4887,8 @@ model FinanceAccountAssignment {
   account     FinanceAccount @relation(fields: [accountId], references: [id])
   userId      String
   user        User           @relation("FinanceAccountAssignmentUser", fields: [userId], references: [id])
+  branchId    String?
+  branch      Branch?        @relation(fields: [branchId], references: [id])
   assignedById String?
   assignedBy  User?          @relation("FinanceAccountAssignmentCreator", fields: [assignedById], references: [id])
   isActive    Boolean        @default(true)
@@ -4868,6 +4902,8 @@ model FinanceAccountAssignment {
   @@unique([accountId, userId])
   @@index([accountId])
   @@index([userId])
+  @@index([branchId])
+  @@index([isActive])
 }
 
 model FinanceLedgerEntry {

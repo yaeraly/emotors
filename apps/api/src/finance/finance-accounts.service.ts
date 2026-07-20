@@ -15,7 +15,11 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveUserRoles } from '../rbac/rbac';
+import { resolveUserRoles, isBranchOwnerUser } from '../rbac/rbac';
+import {
+  DEFAULT_CASHIER_ASSIGNMENT_OPERATIONS,
+  hasCashierCapability,
+} from '../rbac/cashier-capability.util';
 import {
   assertCanAccessAccountScope,
   canManageBranchFinanceAccounts,
@@ -23,6 +27,7 @@ import {
   canManageHqFinanceAccounts,
   resolveFinanceScopeFilter,
 } from './finance-access.util';
+import { getActiveAssignmentAccountIds, listCashierEligibleEmployees } from './finance-assignment.util';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
 import { AssignFinanceAccountDto, CreateFinanceAccountDto, FinanceAccountQueryDto, SetOpeningBalanceDto, UpdateFinanceAccountDto } from './dto/finance-account.dto';
@@ -51,11 +56,21 @@ export class FinanceAccountsService {
   }
 
   private async getAssignedAccountIds(user: AuthUser) {
-    const assignments = await this.prisma.financeAccountAssignment.findMany({
-      where: { userId: user.id, isActive: true },
-      select: { accountId: true },
-    });
-    return new Set(assignments.map((item) => item.accountId));
+    return getActiveAssignmentAccountIds(this.prisma, user.id);
+  }
+
+  async listCashierEligibleEmployees(user: AuthUser, branchId?: string) {
+    if (!canManageFinanceAccounts(user)) {
+      throw new ForbiddenException('Forbidden');
+    }
+    const effectiveBranchId = branchId ?? user.branchId;
+    if (!effectiveBranchId) {
+      throw new BadRequestException('Branch is required');
+    }
+    if (user.branchId && user.branchId !== effectiveBranchId) {
+      throw new ForbiddenException('Branch isolation violation');
+    }
+    return listCashierEligibleEmployees(this.prisma, effectiveBranchId);
   }
 
   private assertAccountVisible<T extends { id: string; branchId: string | null; scope: FinanceAccountScope }>(
@@ -77,11 +92,7 @@ export class FinanceAccountsService {
   async listAccounts(user: AuthUser, query: FinanceAccountQueryDto) {
     const scopeFilter = resolveFinanceScopeFilter(user, query.branchId);
     const assignedAccountIds = await this.getAssignedAccountIds(user);
-    const roles = resolveUserRoles(user);
-    const isCashierOnly =
-      roles.includes(Role.CASHIER) &&
-      !canManageFinanceAccounts(user) &&
-      !canManageHqFinanceAccounts(user);
+    const restrictToAssigned = hasCashierCapability(user) && !canManageFinanceAccounts(user) && !isBranchOwnerUser(user);
 
     const where: Prisma.FinanceAccountWhereInput = {
       deletedAt: null,
@@ -90,9 +101,7 @@ export class FinanceAccountsService {
       ...(query.currency ? { currency: query.currency } : {}),
       ...(scopeFilter.scope ? { scope: scopeFilter.scope } : {}),
       ...(scopeFilter.branchId !== undefined ? { branchId: scopeFilter.branchId } : {}),
-      ...(isCashierOnly
-        ? { id: { in: [...assignedAccountIds] } }
-        : {}),
+      ...(restrictToAssigned ? { id: { in: [...assignedAccountIds] } } : {}),
     };
 
     const accounts = await this.prisma.financeAccount.findMany({
@@ -315,16 +324,19 @@ export class FinanceAccountsService {
       throw new ForbiddenException('Branch isolation violation');
     }
 
-    const cashier = await this.prisma.user.findFirst({
-      where: {
-        id: dto.userId,
-        branchId: account.branchId,
-        deletedAt: null,
-        role: Role.CASHIER,
-      },
-    });
-    if (!cashier) {
-      throw new BadRequestException('Cashier not found in branch');
+    const eligible = await listCashierEligibleEmployees(this.prisma, account.branchId!);
+    if (!eligible.some((employee) => employee.id === dto.userId)) {
+      throw new BadRequestException('Employee must have active cashier permission before account assignment');
+    }
+
+    const allowedOperations =
+      dto.allowedOperations?.length ? dto.allowedOperations : [...DEFAULT_CASHIER_ASSIGNMENT_OPERATIONS];
+
+    if (dto.isPrimary) {
+      await this.prisma.financeAccountAssignment.updateMany({
+        where: { userId: dto.userId, isActive: true, accountId: { not: id } },
+        data: { isPrimary: false },
+      });
     }
 
     const assignment = await this.prisma.financeAccountAssignment.upsert({
@@ -337,12 +349,22 @@ export class FinanceAccountsService {
       create: {
         accountId: id,
         userId: dto.userId,
+        branchId: account.branchId,
         assignedById: user.id,
         isActive: true,
+        isPrimary: dto.isPrimary ?? false,
+        allowedOperations,
+        startDate: dto.startDate ? new Date(dto.startDate) : new Date(),
+        endDate: dto.endDate ? new Date(dto.endDate) : null,
       },
       update: {
         isActive: true,
+        branchId: account.branchId,
         assignedById: user.id,
+        isPrimary: dto.isPrimary ?? false,
+        allowedOperations,
+        startDate: dto.startDate ? new Date(dto.startDate) : new Date(),
+        endDate: dto.endDate ? new Date(dto.endDate) : null,
       },
       include: {
         user: { select: { id: true, fullName: true, email: true, role: true } },
@@ -398,6 +420,25 @@ export class FinanceAccountsService {
         },
       },
       data: { isActive: false },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'finance.account.unassign',
+        entity: 'FinanceAccountAssignment',
+        entityId: assignment.id,
+        metadata: {
+          accountId: id,
+          branchId: account.branchId,
+          employeeId: user.id,
+          role: user.role,
+          operation: 'UNASSIGN_CASHIER',
+          assignedUserId: userId,
+          transactionNumber: account.accountNumber,
+        },
+      },
     });
 
     await this.notifications.notify(user, {

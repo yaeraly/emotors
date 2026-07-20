@@ -1,6 +1,7 @@
 import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import type { User } from './types';
 import { isBranchCashierUser } from './rbac';
+import { hasCashierCapability } from './cashier-capability';
 import { canManageFinanceAccounts, isHqFinanceUser } from './finance-rbac';
 
 export type FinanceNavSection = ModuleSectionLink & {
@@ -83,7 +84,7 @@ export const FINANCE_REPORT_LINKS: ModuleSectionLink[] = [
 ];
 
 function matchesFinanceRole(user: User, roles: FinanceNavSection['roles']) {
-  if (isBranchCashierUser(user)) return roles.includes('cashier');
+  if (hasCashierCapability(user)) return roles.includes('cashier');
   if (canManageFinanceAccounts(user)) return roles.includes('manage') || roles.includes('view');
   if (isHqFinanceUser(user)) return roles.includes('hq') || roles.includes('view');
   if (user.roles?.includes('FRANCHISE_OWNER') || user.role === 'FRANCHISE_OWNER') {
@@ -94,7 +95,7 @@ function matchesFinanceRole(user: User, roles: FinanceNavSection['roles']) {
 
 export function visibleFinanceNavSections(user: User | null) {
   if (!user) return [];
-  if (isBranchCashierUser(user)) {
+  if (hasCashierCapability(user) && !canManageFinanceAccounts(user) && !isHqFinanceUser(user)) {
     return FINANCE_CASHIER_NAV;
   }
   return FINANCE_MAIN_NAV.filter((section) => matchesFinanceRole(user, section.roles));

@@ -31,4 +31,8 @@ export class AddPaymentDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  financeAccountId?: string;
 }

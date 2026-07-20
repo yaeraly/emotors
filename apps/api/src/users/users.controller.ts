@@ -8,12 +8,16 @@ import { RolesGuard } from '../roles/roles.guard';
 import { CreateBranchOwnerDto } from './dto/create-branch-owner.dto';
 import { UpdateBranchOwnerDto } from './dto/update-branch-owner.dto';
 import { UsersService } from './users.service';
+import { UserPermissionsService } from './user-permissions.service';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly userPermissionsService: UserPermissionsService,
+  ) {}
 
   @Get()
   list(@CurrentUser() user: AuthUser, @Query('role') role?: string) {
@@ -98,5 +102,22 @@ export class UsersController {
   @Get(':id/login-history')
   loginHistory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.usersService.loginHistory(user, id);
+  }
+
+  @Get(':id/permissions/cashier')
+  getCashierPermission(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.userPermissionsService.getCashierCapabilityStatus(user, id);
+  }
+
+  @Post(':id/permissions/cashier/grant')
+  @Roles(Role.FRANCHISE_OWNER)
+  grantCashierPermission(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.userPermissionsService.grantCashierCapability(user, id);
+  }
+
+  @Post(':id/permissions/cashier/revoke')
+  @Roles(Role.FRANCHISE_OWNER)
+  revokeCashierPermission(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.userPermissionsService.revokeCashierCapability(user, id);
   }
 }

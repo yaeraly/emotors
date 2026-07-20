@@ -124,6 +124,12 @@ export class FinanceController {
     return this.accountsService.listAccountTypes();
   }
 
+  @Get('cashier-eligible-employees')
+  @Roles(...FINANCE_MANAGE_ROLES)
+  listCashierEligibleEmployees(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
+    return this.accountsService.listCashierEligibleEmployees(user, branchId);
+  }
+
   @Get('accounts')
   @Roles(...FINANCE_VIEW_ROLES)
   listAccounts(@CurrentUser() user: AuthUser, @Query() query: FinanceAccountQueryDto) {
@@ -237,13 +243,13 @@ export class FinanceController {
   }
 
   @Post('shifts/open')
-  @Roles(Role.CASHIER)
+  @Roles(Role.CASHIER, Role.MANAGER, Role.MASTER, Role.FRANCHISE_OWNER, Role.SALESPERSON)
   openShift(@CurrentUser() user: AuthUser, @Body() dto: OpenCashierShiftDto) {
     return this.shiftsService.openShift(user, dto);
   }
 
   @Post('shifts/:id/close')
-  @Roles(Role.CASHIER)
+  @Roles(Role.CASHIER, Role.MANAGER, Role.MASTER, Role.FRANCHISE_OWNER, Role.SALESPERSON)
   closeShift(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

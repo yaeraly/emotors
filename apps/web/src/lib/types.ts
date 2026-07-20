@@ -258,6 +258,8 @@ export type User = {
   salary?: number | string | null;
   startDate?: string | null;
   permissions?: string[];
+  additionalPermissions?: string[];
+  cashierCapability?: boolean;
   assignedHqWarehouseIds?: string[];
   assignedHqWarehouses?: Array<Pick<Warehouse, 'id' | 'name' | 'code' | 'city'>>;
   lastLoginAt?: string | null;
@@ -1209,6 +1211,8 @@ export type FinanceAccount = {
   branch?: { id: string; name: string; code: string } | null;
   assignments?: Array<{
     id: string;
+    isPrimary?: boolean;
+    allowedOperations?: string[];
     user: { id: string; fullName: string; email: string; role: Role };
   }>;
 };

@@ -3,6 +3,7 @@ import { PaymentRecordStatus, PaymentStatus, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { isBranchCashierUser } from '../rbac/rbac';
+import { hasCashierCapability } from '../rbac/cashier-capability.util';
 import { resolveFinanceScopeFilter } from './finance-access.util';
 import { FinancePaymentsQueryDto } from './dto/finance-payments-query.dto';
 
@@ -67,7 +68,7 @@ export class FinancePaymentsService {
         createdBy: payment.createdBy,
       })),
       date: sale.createdAt,
-      canAccept: isBranchCashierUser(user) && Number(sale.debtAmount) > 0,
+      canAccept: hasCashierCapability(user) && Number(sale.debtAmount) > 0,
     }));
   }
 

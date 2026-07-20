@@ -116,4 +116,19 @@ export class SetOpeningBalanceDto {
 export class AssignFinanceAccountDto {
   @IsString()
   userId!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isPrimary?: boolean;
+
+  @IsOptional()
+  allowedOperations?: string[];
+
+  @IsOptional()
+  @IsDateString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  endDate?: string;
 }

@@ -6,12 +6,12 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   }
 }
 
-const branchCashier = {
-  id: 'c1',
-  role: 'CASHIER' as const,
-  roles: ['CASHIER' as const],
+const salesManagerWithCashier = {
+  id: 'sm1',
+  role: 'MANAGER' as const,
+  roles: ['MANAGER' as const],
   branchId: 'branch-1',
-  permissions: ['payments.manage'],
+  permissions: ['cashier', 'payments.manage'],
 };
 
 const branchAccountant = {
@@ -22,8 +22,8 @@ const branchAccountant = {
   permissions: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
 };
 
-const cashierNav = visibleFinanceNavSections(branchCashier);
-assertEqual(cashierNav.some((s) => s.href === '/finance/payments/pending'), true, 'cashier sees pending payments');
+const cashierNav = visibleFinanceNavSections(salesManagerWithCashier);
+assertEqual(cashierNav.some((s) => s.href === '/finance/payments/pending'), true, 'cashier-capable employee sees pending payments');
 assertEqual(cashierNav.some((s) => s.href === '/finance/investments'), false, 'cashier hidden from investments');
 
 const accountantNav = visibleFinanceNavSections(branchAccountant);

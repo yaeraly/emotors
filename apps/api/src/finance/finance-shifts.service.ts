@@ -12,6 +12,11 @@ import {
   assertCanAccessAccountScope,
   canOperateCashierShift,
 } from './finance-access.util';
+import {
+  CASHIER_ASSIGNMENT_OPERATIONS,
+  assertCashierCapability,
+} from '../rbac/cashier-capability.util';
+import { assertCashierPaymentAllowed, getActiveAssignmentAccountIds } from './finance-assignment.util';
 import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
 import { CloseCashierShiftDto, OpenCashierShiftDto } from './dto/cashier-shift.dto';
 
@@ -39,11 +44,7 @@ export class FinanceShiftsService {
   }
 
   private async getAssignedAccountIds(user: AuthUser) {
-    const assignments = await this.prisma.financeAccountAssignment.findMany({
-      where: { userId: user.id, isActive: true },
-      select: { accountId: true },
-    });
-    return new Set(assignments.map((item) => item.accountId));
+    return getActiveAssignmentAccountIds(this.prisma, user.id);
   }
 
   async listShifts(user: AuthUser, accountId?: string) {
@@ -68,8 +69,9 @@ export class FinanceShiftsService {
   }
 
   async openShift(user: AuthUser, dto: OpenCashierShiftDto) {
-    if (!canOperateCashierShift(user) || !user.branchId) {
-      throw new ForbiddenException('Only branch cashier can open shifts');
+    assertCashierCapability(user);
+    if (!user.branchId) {
+      throw new ForbiddenException('Only branch employees can open shifts');
     }
 
     const account = await this.prisma.financeAccount.findFirst({
@@ -77,8 +79,11 @@ export class FinanceShiftsService {
     });
     if (!account) throw new NotFoundException('Account not found');
 
-    const assignedAccountIds = await this.getAssignedAccountIds(user);
-    assertCanAccessAccountScope(user, account, assignedAccountIds);
+    await assertCashierPaymentAllowed(this.prisma, user, {
+      accountId: dto.accountId,
+      operation: CASHIER_ASSIGNMENT_OPERATIONS.OPEN_SHIFT,
+      branchId: user.branchId,
+    });
 
     const existingOpen = await this.prisma.cashierShift.findFirst({
       where: {
@@ -130,6 +135,7 @@ export class FinanceShiftsService {
   }
 
   async closeShift(user: AuthUser, id: string, dto: CloseCashierShiftDto) {
+    assertCashierCapability(user);
     const shift = await this.prisma.cashierShift.findUnique({
       where: { id },
       include: { account: true },
@@ -144,6 +150,12 @@ export class FinanceShiftsService {
     if (user.branchId && shift.branchId !== user.branchId) {
       throw new ForbiddenException('Branch isolation violation');
     }
+
+    await assertCashierPaymentAllowed(this.prisma, user, {
+      accountId: shift.accountId,
+      operation: CASHIER_ASSIGNMENT_OPERATIONS.CLOSE_SHIFT,
+      branchId: shift.branchId,
+    });
 
     const actualBalance = roundMoney(Number(dto.actualBalance));
     const accountBalance = roundMoney(Number(shift.account.currentBalance));
