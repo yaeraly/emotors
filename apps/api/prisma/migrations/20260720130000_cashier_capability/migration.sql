@@ -1,4 +1,4 @@
--- Cashier capability permission and account assignment extensions
+-- Cashier capability permission (UserPermission only; finance tables come later)
 
 INSERT INTO "Permission" ("id", "code", "module", "action", "description", "createdAt", "updatedAt")
 SELECT md5(random()::text || clock_timestamp()::text), 'cashier', 'finance', 'cashier', 'Additional cashier capability for branch employees', NOW(), NOW()
@@ -24,26 +24,29 @@ CREATE INDEX IF NOT EXISTS "UserPermission_userId_idx" ON "UserPermission"("user
 CREATE INDEX IF NOT EXISTS "UserPermission_permissionId_idx" ON "UserPermission"("permissionId");
 CREATE INDEX IF NOT EXISTS "UserPermission_isActive_idx" ON "UserPermission"("isActive");
 
-ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_permissionId_fkey" FOREIGN KEY ("permissionId") REFERENCES "Permission"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_grantedById_fkey" FOREIGN KEY ("grantedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_revokedById_fkey" FOREIGN KEY ("revokedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "FinanceAccountAssignment" ADD COLUMN IF NOT EXISTS "branchId" TEXT;
-CREATE INDEX IF NOT EXISTS "FinanceAccountAssignment_branchId_idx" ON "FinanceAccountAssignment"("branchId");
-CREATE INDEX IF NOT EXISTS "FinanceAccountAssignment_isActive_idx" ON "FinanceAccountAssignment"("isActive");
+DO $$ BEGIN
+  ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_permissionId_fkey" FOREIGN KEY ("permissionId") REFERENCES "Permission"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
-ALTER TABLE "FinanceAccountAssignment" ADD CONSTRAINT "FinanceAccountAssignment_branchId_fkey" FOREIGN KEY ("branchId") REFERENCES "Branch"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_grantedById_fkey" FOREIGN KEY ("grantedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
-UPDATE "FinanceAccountAssignment" fa
-SET "branchId" = a."branchId"
-FROM "FinanceAccount" a
-WHERE fa."accountId" = a."id" AND fa."branchId" IS NULL;
-
-ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "financeAccountId" TEXT;
-ALTER TABLE "Payment" ADD COLUMN IF NOT EXISTS "selfProcessed" BOOLEAN NOT NULL DEFAULT false;
-CREATE INDEX IF NOT EXISTS "Payment_financeAccountId_idx" ON "Payment"("financeAccountId");
-ALTER TABLE "Payment" ADD CONSTRAINT "Payment_financeAccountId_fkey" FOREIGN KEY ("financeAccountId") REFERENCES "FinanceAccount"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_revokedById_fkey" FOREIGN KEY ("revokedById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+EXCEPTION
+  WHEN duplicate_object THEN NULL;
+END $$;
 
 -- Dedicated cashiers receive the cashier capability permission record for consistency
 INSERT INTO "UserPermission" ("id", "userId", "permissionId", "isActive", "grantedAt", "createdAt", "updatedAt")
