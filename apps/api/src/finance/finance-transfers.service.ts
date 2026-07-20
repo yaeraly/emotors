@@ -5,12 +5,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AlertType,
   FinanceAccountScope,
   FinanceLedgerEntryType,
   FinanceTransferStatus,
   Prisma,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   assertCanAccessAccountScope,
@@ -28,6 +30,7 @@ export class FinanceTransfersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledgerService: FinanceLedgerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private transferInclude() {
@@ -155,6 +158,14 @@ export class FinanceTransfersService {
 
       if (!requiresApproval) {
         await this.completeTransferEntries(tx, user, transfer.id, sourceAccount.id, destinationAccount.id, amount, sourceAccount.currency, branchId);
+      } else {
+        await this.notifications.notifyInTx(tx, user, {
+          type: AlertType.FINANCE_TRANSFER_PENDING,
+          branchId: branchId ?? undefined,
+          entityType: 'FinanceTransfer',
+          entityId: transfer.id,
+          referenceNumber: transfer.transferNumber,
+        });
       }
 
       return tx.financeTransfer.findUniqueOrThrow({
@@ -193,7 +204,7 @@ export class FinanceTransfersService {
         transfer.branchId,
       );
 
-      return tx.financeTransfer.update({
+      const updated = await tx.financeTransfer.update({
         where: { id },
         data: {
           status: FinanceTransferStatus.COMPLETED,
@@ -202,6 +213,16 @@ export class FinanceTransfersService {
         },
         include: this.transferInclude(),
       });
+
+      await this.notifications.notifyInTx(tx, user, {
+        type: AlertType.FINANCE_TRANSFER_APPROVED,
+        branchId: transfer.branchId ?? undefined,
+        entityType: 'FinanceTransfer',
+        entityId: transfer.id,
+        referenceNumber: transfer.transferNumber,
+      });
+
+      return updated;
     });
   }
 

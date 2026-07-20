@@ -3,8 +3,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { FinanceLedgerEntryType } from '@prisma/client';
+import { AlertType, FinanceLedgerEntryType } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   assertCanAccessAccountScope,
@@ -18,6 +19,7 @@ export class FinanceInvestmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledgerService: FinanceLedgerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async createOwnerInvestment(user: AuthUser, dto: CreateOwnerInvestmentDto) {
@@ -49,6 +51,14 @@ export class FinanceInvestmentsService {
         currency: account.currency,
         notes: dto.notes,
         referenceType: 'OwnerInvestment',
+      });
+
+      await this.notifications.notifyInTx(tx, user, {
+        type: AlertType.FINANCE_INVESTMENT_RECORDED,
+        branchId: account.branchId ?? undefined,
+        entityType: 'FinanceAccount',
+        entityId: account.id,
+        referenceNumber: entry.entryNumber,
       });
 
       return {

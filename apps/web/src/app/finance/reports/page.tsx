@@ -1,81 +1,56 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { ProtectedShell } from '@/components/ProtectedShell';
-import { useTranslation } from '@/i18n/useTranslation';
+import { FormEvent, useEffect, useState } from 'react';
+import {
+  FinanceEmptyState,
+  FinanceErrorState,
+  FinanceLayout,
+  FinanceMoney,
+} from '@/components/finance/FinanceLayout';
+import { FINANCE_REPORT_LINKS } from '@/lib/finance-nav';
+import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { apiFetch } from '@/lib/api';
-import type { FinanceSummaryReport } from '@/lib/types';
+import { useTranslation } from '@/i18n/useTranslation';
+import type { FinanceAccount, FinanceLedgerEntry, FinanceSummaryReport } from '@/lib/types';
 
 export default function FinanceReportsPage() {
   const { t } = useTranslation();
   const [report, setReport] = useState<FinanceSummaryReport | null>(null);
+  const [investments, setInvestments] = useState<FinanceLedgerEntry[]>([]);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    apiFetch<FinanceSummaryReport>('/finance/reports/summary')
-      .then(setReport)
+    Promise.all([
+      apiFetch<FinanceSummaryReport>('/finance/reports/summary'),
+      apiFetch<FinanceLedgerEntry[]>('/finance/investments'),
+    ])
+      .then(([summary, investmentRows]) => {
+        setReport(summary);
+        setInvestments(investmentRows);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }, [t]);
 
   return (
-    <ProtectedShell>
-      <section className="space-y-6">
-        <div>
-          <Link href="/finance" className="text-sm font-semibold text-blue-600">{t('nav.finance')}</Link>
-          <h2 className="text-3xl font-bold">{t('finance.reports')}</h2>
+    <FinanceLayout titleKey="finance.reports" breadcrumbs={[{ labelKey: 'finance.reports' }]}>
+      {error ? <FinanceErrorState message={error} /> : null}
+      <ModuleSectionNav sections={FINANCE_REPORT_LINKS} variant="cards" />
+      {report ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.totalBalance')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={report.totals.balance} /></p></div>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.income')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={report.totals.income} /></p></div>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.expenses')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={report.totals.expenses} /></p></div>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.profit')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={report.totals.profit} /></p></div>
         </div>
-
-        {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-
-        {report ? (
-          <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">{t('finance.totalBalance')}</p>
-                <p className="mt-2 text-2xl font-bold">{Number(report.totals.balance).toLocaleString('ru-RU')}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">{t('finance.income')}</p>
-                <p className="mt-2 text-2xl font-bold">{Number(report.totals.income).toLocaleString('ru-RU')}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">{t('finance.expenses')}</p>
-                <p className="mt-2 text-2xl font-bold">{Number(report.totals.expenses).toLocaleString('ru-RU')}</p>
-              </div>
-              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                <p className="text-sm text-slate-500">{t('finance.profit')}</p>
-                <p className="mt-2 text-2xl font-bold">{Number(report.totals.profit).toLocaleString('ru-RU')}</p>
-              </div>
-            </div>
-
-            {report.branchSummaries.length > 0 ? (
-              <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-slate-50 text-left">
-                    <tr>
-                      <th className="px-4 py-3">{t('branches.branch')}</th>
-                      <th className="px-4 py-3">{t('finance.accounts')}</th>
-                      <th className="px-4 py-3">{t('finance.totalBalance')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {report.branchSummaries.map((branch) => (
-                      <tr key={branch.branchId} className="border-t border-slate-100">
-                        <td className="px-4 py-3">{branch.branchName}</td>
-                        <td className="px-4 py-3">{branch.accountCount}</td>
-                        <td className="px-4 py-3">{Number(branch.totalBalance).toLocaleString('ru-RU')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <p>{t('common.loading')}</p>
-        )}
-      </section>
-    </ProtectedShell>
+      ) : null}
+      {investments.length > 0 ? (
+        <div className="rounded-3xl border border-slate-200 bg-white p-5">
+          <h3 className="font-bold">{t('finance.reportInvestments')}</h3>
+          <p className="mt-2 text-sm text-slate-600">{investments.length} {t('finance.investments')}</p>
+        </div>
+      ) : <FinanceEmptyState messageKey="finance.noReports" />}
+      <Link href="/finance/cash-flow" className="inline-flex rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">{t('finance.reportCashFlow')}</Link>
+    </FinanceLayout>
   );
 }

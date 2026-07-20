@@ -10,11 +10,9 @@ const TRANSFER_TYPES: FinanceLedgerEntryType[] = [
   FinanceLedgerEntryType.TRANSFER_OUT,
 ];
 
-const INCOME_TYPES: FinanceLedgerEntryType[] = [
+const OPERATING_INCOME_TYPES: FinanceLedgerEntryType[] = [
   FinanceLedgerEntryType.INCOME,
   FinanceLedgerEntryType.PAYMENT,
-  FinanceLedgerEntryType.OWNER_INVESTMENT,
-  FinanceLedgerEntryType.CAPITAL_INJECTION,
 ];
 
 const EXPENSE_TYPES: FinanceLedgerEntryType[] = [
@@ -60,7 +58,7 @@ export class FinanceReportsService {
 
     const [incomeAgg, expenseAgg] = await Promise.all([
       this.prisma.financeLedgerEntry.aggregate({
-        where: { ...ledgerWhere, entryType: { in: INCOME_TYPES } },
+        where: { ...ledgerWhere, entryType: { in: OPERATING_INCOME_TYPES } },
         _sum: { amount: true },
       }),
       this.prisma.financeLedgerEntry.aggregate({

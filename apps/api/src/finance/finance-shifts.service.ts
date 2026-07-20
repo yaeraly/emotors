@@ -4,8 +4,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CashierShiftStatus, FinanceLedgerEntryType } from '@prisma/client';
+import { AlertType, CashierShiftStatus, FinanceLedgerEntryType } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   assertCanAccessAccountScope,
@@ -16,7 +17,10 @@ import { CloseCashierShiftDto, OpenCashierShiftDto } from './dto/cashier-shift.d
 
 @Injectable()
 export class FinanceShiftsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   private shiftInclude() {
     return {
@@ -194,6 +198,16 @@ export class FinanceShiftsService {
         },
       },
     });
+
+    if (difference !== 0) {
+      await this.notifications.notify(user, {
+        type: AlertType.FINANCE_SHIFT_DIFFERENCE,
+        branchId: shift.branchId,
+        entityType: 'CashierShift',
+        entityId: closed.id,
+        referenceNumber: closed.shiftNumber,
+      });
+    }
 
     return closed;
   }

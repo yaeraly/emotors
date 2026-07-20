@@ -1,14 +1,29 @@
 'use client';
 
-import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
-import { ProtectedShell } from '@/components/ProtectedShell';
-import { useTranslation } from '@/i18n/useTranslation';
+import { FormEvent, Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import {
+  FinanceEmptyState,
+  FinanceErrorState,
+  FinanceLayout,
+  FinanceMoney,
+} from '@/components/finance/FinanceLayout';
+import { FINANCE_SHIFT_TABS } from '@/lib/finance-nav';
 import { apiFetch } from '@/lib/api';
+import { useTranslation } from '@/i18n/useTranslation';
 import type { CashierShift, FinanceAccount } from '@/lib/types';
 
 export default function FinanceShiftsPage() {
+  return (
+    <Suspense fallback={null}>
+      <FinanceShiftsPageContent />
+    </Suspense>
+  );
+}
+
+function FinanceShiftsPageContent() {
   const { t } = useTranslation();
+  const searchParams = useSearchParams();
   const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
   const [shifts, setShifts] = useState<CashierShift[]>([]);
   const [error, setError] = useState('');
@@ -22,110 +37,55 @@ export default function FinanceShiftsPage() {
     ])
       .then(([accountRows, shiftRows]) => {
         setAccounts(accountRows);
-        setShifts(shiftRows);
+        let rows = shiftRows;
+        const status = searchParams.get('status');
+        if (status) rows = rows.filter((s) => s.status === status);
+        if (searchParams.get('differences') === '1') rows = rows.filter((s) => s.difference != null && Number(s.difference) !== 0);
+        setShifts(rows);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   };
 
-  useEffect(() => {
-    load();
-  }, [t]);
+  useEffect(() => { load(); }, [searchParams, t]);
 
   const onOpen = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await apiFetch('/finance/shifts/open', {
-        method: 'POST',
-        body: JSON.stringify({
-          accountId: openForm.accountId,
-          openingBalance: Number(openForm.openingBalance),
-        }),
-      });
+      await apiFetch('/finance/shifts/open', { method: 'POST', body: JSON.stringify({ accountId: openForm.accountId, openingBalance: Number(openForm.openingBalance) }) });
       setOpenForm({ accountId: '', openingBalance: '' });
       load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : t('common.error')); }
   };
 
   const onClose = async (event: FormEvent) => {
     event.preventDefault();
     try {
-      await apiFetch(`/finance/shifts/${closeForm.shiftId}/close`, {
-        method: 'POST',
-        body: JSON.stringify({ actualBalance: Number(closeForm.actualBalance) }),
-      });
+      await apiFetch(`/finance/shifts/${closeForm.shiftId}/close`, { method: 'POST', body: JSON.stringify({ actualBalance: Number(closeForm.actualBalance) }) });
       setCloseForm({ shiftId: '', actualBalance: '' });
       load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : t('common.error')); }
   };
 
   return (
-    <ProtectedShell>
-      <section className="space-y-6">
-        <div>
-          <Link href="/finance" className="text-sm font-semibold text-blue-600">{t('nav.finance')}</Link>
-          <h2 className="text-3xl font-bold">{t('finance.shifts')}</h2>
-        </div>
-
-        {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-
-        <form onSubmit={onOpen} className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
-          <select
-            value={openForm.accountId}
-            onChange={(event) => setOpenForm({ ...openForm, accountId: event.target.value })}
-            className="rounded-xl border border-slate-300 px-4 py-3"
-            required
-          >
-            <option value="">{t('finance.account')}</option>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>{account.name}</option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={openForm.openingBalance}
-            onChange={(event) => setOpenForm({ ...openForm, openingBalance: event.target.value })}
-            placeholder={t('finance.openingBalance')}
-            className="rounded-xl border border-slate-300 px-4 py-3"
-            required
-          />
-          <button type="submit" className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white">
-            {t('finance.openShift')}
-          </button>
-        </form>
-
-        <form onSubmit={onClose} className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
-          <select
-            value={closeForm.shiftId}
-            onChange={(event) => setCloseForm({ ...closeForm, shiftId: event.target.value })}
-            className="rounded-xl border border-slate-300 px-4 py-3"
-            required
-          >
-            <option value="">{t('finance.openShift')}</option>
-            {shifts.filter((shift) => shift.status === 'OPEN').map((shift) => (
-              <option key={shift.id} value={shift.id}>{shift.shiftNumber} — {shift.account.name}</option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={closeForm.actualBalance}
-            onChange={(event) => setCloseForm({ ...closeForm, actualBalance: event.target.value })}
-            placeholder={t('finance.actualBalance')}
-            className="rounded-xl border border-slate-300 px-4 py-3"
-            required
-          />
-          <button type="submit" className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white">
-            {t('finance.closeShift')}
-          </button>
-        </form>
-
+    <FinanceLayout titleKey="finance.shifts" breadcrumbs={[{ labelKey: 'finance.shifts' }]} sectionTabs={FINANCE_SHIFT_TABS}>
+      {error ? <FinanceErrorState message={error} /> : null}
+      <form onSubmit={onOpen} className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
+        <select required value={openForm.accountId} onChange={(e) => setOpenForm({ ...openForm, accountId: e.target.value })} className="rounded-xl border border-slate-300 px-4 py-3">
+          <option value="">{t('finance.account')}</option>
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <input required type="number" min="0" step="0.01" value={openForm.openingBalance} onChange={(e) => setOpenForm({ ...openForm, openingBalance: e.target.value })} placeholder={t('finance.openingBalance')} className="rounded-xl border border-slate-300 px-4 py-3" />
+        <button type="submit" className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white">{t('finance.openShift')}</button>
+      </form>
+      <form onSubmit={onClose} className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 md:grid-cols-3">
+        <select required value={closeForm.shiftId} onChange={(e) => setCloseForm({ ...closeForm, shiftId: e.target.value })} className="rounded-xl border border-slate-300 px-4 py-3">
+          <option value="">{t('finance.openShift')}</option>
+          {shifts.filter((s) => s.status === 'OPEN').map((s) => <option key={s.id} value={s.id}>{s.shiftNumber}</option>)}
+        </select>
+        <input required type="number" min="0" step="0.01" value={closeForm.actualBalance} onChange={(e) => setCloseForm({ ...closeForm, actualBalance: e.target.value })} placeholder={t('finance.actualBalance')} className="rounded-xl border border-slate-300 px-4 py-3" />
+        <button type="submit" className="rounded-xl bg-slate-900 px-4 py-3 font-semibold text-white">{t('finance.closeShift')}</button>
+      </form>
+      {shifts.length === 0 ? <FinanceEmptyState messageKey="finance.noShifts" /> : (
         <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left">
@@ -144,17 +104,17 @@ export default function FinanceShiftsPage() {
                 <tr key={shift.id} className="border-t border-slate-100">
                   <td className="px-4 py-3">{shift.shiftNumber}</td>
                   <td className="px-4 py-3">{shift.account.name}</td>
-                  <td className="px-4 py-3">{Number(shift.openingBalance).toLocaleString('ru-RU')}</td>
-                  <td className="px-4 py-3">{Number(shift.expectedBalance).toLocaleString('ru-RU')}</td>
-                  <td className="px-4 py-3">{shift.actualBalance != null ? Number(shift.actualBalance).toLocaleString('ru-RU') : '—'}</td>
-                  <td className="px-4 py-3">{shift.difference != null ? Number(shift.difference).toLocaleString('ru-RU') : '—'}</td>
+                  <td className="px-4 py-3 text-right"><FinanceMoney amount={Number(shift.openingBalance)} currency={shift.account.currency} /></td>
+                  <td className="px-4 py-3 text-right"><FinanceMoney amount={Number(shift.expectedBalance)} currency={shift.account.currency} /></td>
+                  <td className="px-4 py-3 text-right">{shift.actualBalance != null ? <FinanceMoney amount={Number(shift.actualBalance)} currency={shift.account.currency} /> : '—'}</td>
+                  <td className="px-4 py-3 text-right">{shift.difference != null ? <FinanceMoney amount={Number(shift.difference)} currency={shift.account.currency} /> : '—'}</td>
                   <td className="px-4 py-3">{shift.status}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </section>
-    </ProtectedShell>
+      )}
+    </FinanceLayout>
   );
 }

@@ -612,6 +612,16 @@ enum AlertType {
   SALE_INSTALLMENT_APPROVED
   SALE_INSTALLMENT_REJECTED
   SALE_INSTALLMENT_PAID
+  FINANCE_TRANSFER_PENDING
+  FINANCE_TRANSFER_APPROVED
+  FINANCE_TRANSFER_REJECTED
+  FINANCE_ACCOUNT_ASSIGNED
+  FINANCE_ACCOUNT_UNASSIGNED
+  FINANCE_INVESTMENT_RECORDED
+  FINANCE_SHIFT_DIFFERENCE
+  FINANCE_RECONCILIATION_DIFFERENCE
+  FINANCE_EXPENSE_PENDING
+  FINANCE_PAYMENT_ACCEPTED
 }
 
 enum NotificationModule {
@@ -989,6 +999,8 @@ model Branch {
   financeAccounts           FinanceAccount[]
   financeTransfers          FinanceTransfer[]
   financeLedgerEntries      FinanceLedgerEntry[]
+  financeExpenses           FinanceExpense[]
+  financeReconciliations    FinanceReconciliation[]
   cashierShifts             CashierShift[]
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
@@ -1347,11 +1359,15 @@ model User {
   releasedHqStockBookings                         HqStockBooking[]                    @relation("HqStockBookingReleaser")
   financeAccountsCreated                        FinanceAccount[]                    @relation("FinanceAccountCreator")
   financeAccountsUpdated                          FinanceAccount[]                    @relation("FinanceAccountUpdater")
+  financeAccountsResponsible                      FinanceAccount[]                    @relation("FinanceAccountResponsible")
   financeAccountAssignments                       FinanceAccountAssignment[]          @relation("FinanceAccountAssignmentUser")
   financeAccountAssignmentsCreated                FinanceAccountAssignment[]          @relation("FinanceAccountAssignmentCreator")
   financeTransfersCreated                         FinanceTransfer[]                   @relation("FinanceTransferCreator")
   financeTransfersApproved                        FinanceTransfer[]                   @relation("FinanceTransferApprover")
   financeLedgerEntries                            FinanceLedgerEntry[]                @relation("FinanceLedgerEntryCreator")
+  financeExpensesCreated                          FinanceExpense[]                    @relation("FinanceExpenseCreator")
+  financeExpensesApproved                         FinanceExpense[]                    @relation("FinanceExpenseApprover")
+  financeReconciliationsCreated                   FinanceReconciliation[]             @relation("FinanceReconciliationCreator")
   cashierShifts                                   CashierShift[]                      @relation("CashierShiftCashier")
   createdAt                                       DateTime                            @default(now())
   updatedAt                                       DateTime                            @updatedAt
@@ -4802,9 +4818,14 @@ model FinanceAccount {
   pendingBalance   Decimal                      @default(0) @db.Decimal(14, 2)
   bankName         String?
   bankAccountNo    String?
+  iban             String?
+  swiftBic         String?
   qrProvider       String?
   qrMerchantId     String?
   posTerminalId    String?
+  posProvider      String?
+  responsibleEmployeeId String?
+  responsibleEmployee   User?   @relation("FinanceAccountResponsible", fields: [responsibleEmployeeId], references: [id])
   notes            String?
   createdById      String?
   createdBy        User?                        @relation("FinanceAccountCreator", fields: [createdById], references: [id])
@@ -4815,6 +4836,8 @@ model FinanceAccount {
   transfersOut     FinanceTransfer[]            @relation("FinanceTransferSource")
   transfersIn      FinanceTransfer[]            @relation("FinanceTransferDestination")
   cashierShifts      CashierShift[]
+  expenses           FinanceExpense[]
+  reconciliations    FinanceReconciliation[]
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
   deletedAt        DateTime?
@@ -4835,6 +4858,10 @@ model FinanceAccountAssignment {
   assignedById String?
   assignedBy  User?          @relation("FinanceAccountAssignmentCreator", fields: [assignedById], references: [id])
   isActive    Boolean        @default(true)
+  isPrimary   Boolean        @default(false)
+  allowedOperations String[] @default([])
+  startDate   DateTime?
+  endDate     DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
@@ -4928,4 +4955,77 @@ model CashierShift {
   @@index([accountId])
   @@index([status])
   @@index([openedAt])
+}
+
+enum FinanceExpenseStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum FinanceReconciliationStatus {
+  PENDING
+  COMPLETED
+  DIFFERENCE
+  REJECTED
+}
+
+model FinanceExpense {
+  id             String               @id @default(cuid())
+  expenseNumber  String               @unique
+  category       String
+  accountId      String
+  account        FinanceAccount       @relation(fields: [accountId], references: [id])
+  branchId       String?
+  branch         Branch?              @relation(fields: [branchId], references: [id])
+  amount         Decimal              @db.Decimal(14, 2)
+  currency       String               @default("KGS")
+  payee          String?
+  purpose        String?
+  documentNumber String?
+  attachmentUrl  String?
+  expenseDate    DateTime             @default(now())
+  status         FinanceExpenseStatus @default(PAID)
+  notes          String?
+  ledgerEntryId  String?
+  createdById    String?
+  createdBy      User?                @relation("FinanceExpenseCreator", fields: [createdById], references: [id])
+  approvedById   String?
+  approvedBy     User?                @relation("FinanceExpenseApprover", fields: [approvedById], references: [id])
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([accountId])
+  @@index([branchId])
+  @@index([status])
+  @@index([expenseDate])
+  @@index([category])
+}
+
+model FinanceReconciliation {
+  id              String                      @id @default(cuid())
+  reconciliationNumber String               @unique
+  accountId       String
+  account         FinanceAccount              @relation(fields: [accountId], references: [id])
+  branchId        String?
+  branch          Branch?                     @relation(fields: [branchId], references: [id])
+  statementDate   DateTime
+  systemBalance   Decimal                     @db.Decimal(14, 2)
+  actualBalance   Decimal                     @db.Decimal(14, 2)
+  difference      Decimal                     @db.Decimal(14, 2)
+  status          FinanceReconciliationStatus @default(PENDING)
+  notes           String?
+  attachmentUrl   String?
+  createdById     String?
+  createdBy       User?                       @relation("FinanceReconciliationCreator", fields: [createdById], references: [id])
+  completedAt     DateTime?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  @@index([accountId])
+  @@index([branchId])
+  @@index([status])
+  @@index([statementDate])
 }

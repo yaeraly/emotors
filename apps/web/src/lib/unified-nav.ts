@@ -182,12 +182,15 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
   {
     id: 'finance',
     labelKey: 'nav.finance',
-    defaultHref: '/finance',
+    defaultHref: '/finance/dashboard',
     pathPrefixes: ['/finance', '/payments', '/tax', '/payroll', '/commissions', '/compensation'],
     sidebarVisible: financeVisible,
     pages: [
-      { href: '/finance', labelKey: 'nav.finance', isVisible: (user) => hasPermission(user, 'finance.view') },
-      { href: '/payments', labelKey: 'nav.payments', isVisible: (user) => hasPermission(user, 'payments.manage') },
+      { href: '/finance/dashboard', labelKey: 'finance.dashboard', isVisible: (user) => hasPermission(user, 'finance.view') },
+      { href: '/finance/accounts', labelKey: 'finance.accounts', isVisible: (user) => hasPermission(user, 'finance.view') },
+      { href: '/finance/payments', labelKey: 'finance.payments', isVisible: (user) => hasPermission(user, 'finance.view') || hasPermission(user, 'payments.manage') },
+      { href: '/finance/transfers', labelKey: 'finance.transfers', isVisible: (user) => hasPermission(user, 'finance.view') },
+      { href: '/finance/reports', labelKey: 'finance.reports', isVisible: (user) => hasPermission(user, 'finance.view') },
       { href: '/tax', labelKey: 'tax.title', isVisible: (user) => hasPermission(user, 'finance.view') },
       { href: '/payroll', labelKey: 'payroll.title', isVisible: (user) => hasPermission(user, 'payroll.manage') },
       { href: '/commissions', labelKey: 'commissions.title', isVisible: (user) => hasPermission(user, 'payroll.manage') },

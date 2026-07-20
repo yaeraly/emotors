@@ -6,7 +6,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { FinanceAccountsService } from './finance-accounts.service';
+import { FinanceDashboardService } from './finance-dashboard.service';
+import { FinanceExpensesService } from './finance-expenses.service';
+import { FinanceIncomeService } from './finance-income.service';
 import { FinanceInvestmentsService } from './finance-investments.service';
+import { FinancePaymentsService } from './finance-payments.service';
+import { FinanceReconciliationService } from './finance-reconciliation.service';
 import { FinanceReportsService } from './finance-reports.service';
 import { FinanceShiftsService } from './finance-shifts.service';
 import { FinanceTransfersService } from './finance-transfers.service';
@@ -21,6 +26,9 @@ import { CreateOwnerInvestmentDto } from './dto/create-owner-investment.dto';
 import { CloseCashierShiftDto, OpenCashierShiftDto } from './dto/cashier-shift.dto';
 import { FinanceReportQueryDto } from './dto/finance-report-query.dto';
 import { CreateFinanceTransferDto, FinanceTransferQueryDto } from './dto/finance-transfer.dto';
+import { CreateFinanceExpenseDto } from './dto/create-finance-expense.dto';
+import { CreateFinanceReconciliationDto } from './dto/create-finance-reconciliation.dto';
+import { FinancePaymentsQueryDto } from './dto/finance-payments-query.dto';
 
 const FINANCE_VIEW_ROLES = [
   Role.OWNER,
@@ -49,7 +57,66 @@ export class FinanceController {
     private readonly investmentsService: FinanceInvestmentsService,
     private readonly shiftsService: FinanceShiftsService,
     private readonly reportsService: FinanceReportsService,
+    private readonly dashboardService: FinanceDashboardService,
+    private readonly paymentsService: FinancePaymentsService,
+    private readonly incomeService: FinanceIncomeService,
+    private readonly expensesService: FinanceExpensesService,
+    private readonly reconciliationService: FinanceReconciliationService,
   ) {}
+
+  @Get('dashboard')
+  @Roles(...FINANCE_VIEW_ROLES)
+  getDashboard(@CurrentUser() user: AuthUser, @Query() query: FinanceReportQueryDto) {
+    return this.dashboardService.getDashboard(user, query);
+  }
+
+  @Get('payments')
+  @Roles(...FINANCE_VIEW_ROLES)
+  listPayments(@CurrentUser() user: AuthUser, @Query() query: FinancePaymentsQueryDto) {
+    return this.paymentsService.listPayments(user, query);
+  }
+
+  @Get('payments/pending')
+  @Roles(...FINANCE_VIEW_ROLES)
+  listPendingPayments(@CurrentUser() user: AuthUser, @Query() query: FinancePaymentsQueryDto) {
+    return this.paymentsService.listPendingPayments(user, query);
+  }
+
+  @Get('income')
+  @Roles(...FINANCE_VIEW_ROLES)
+  listIncome(@CurrentUser() user: AuthUser, @Query() query: FinanceReportQueryDto) {
+    return this.incomeService.listIncome(user, query);
+  }
+
+  @Get('expenses')
+  @Roles(...FINANCE_VIEW_ROLES)
+  listExpenses(@CurrentUser() user: AuthUser, @Query() query: FinanceReportQueryDto) {
+    return this.expensesService.listExpenses(user, query);
+  }
+
+  @Post('expenses')
+  @Roles(...FINANCE_MANAGE_ROLES)
+  createExpense(@CurrentUser() user: AuthUser, @Body() dto: CreateFinanceExpenseDto) {
+    return this.expensesService.createExpense(user, dto);
+  }
+
+  @Get('reconciliations')
+  @Roles(...FINANCE_VIEW_ROLES)
+  listReconciliations(@CurrentUser() user: AuthUser, @Query() query: FinanceReportQueryDto) {
+    return this.reconciliationService.listReconciliations(user, query);
+  }
+
+  @Post('reconciliations')
+  @Roles(...FINANCE_MANAGE_ROLES)
+  createReconciliation(@CurrentUser() user: AuthUser, @Body() dto: CreateFinanceReconciliationDto) {
+    return this.reconciliationService.createReconciliation(user, dto);
+  }
+
+  @Post('reconciliations/:id/complete')
+  @Roles(...FINANCE_MANAGE_ROLES)
+  completeReconciliation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.reconciliationService.completeReconciliation(user, id);
+  }
 
   @Get('account-types')
   @Roles(...FINANCE_VIEW_ROLES)

@@ -325,6 +325,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : branchAccountantView ? (
               <>
+                <Link href="/finance/dashboard" className={sidebarNavClass(pathname, '/finance/dashboard')}>
+                  {t('nav.finance')}
+                </Link>
                 <Link href="/branch-accountant/invoices" className={sidebarNavClass(pathname, '/branch-accountant/invoices')}>
                   {t('branchAccountant.invoicesToPay')}
                 </Link>
@@ -343,6 +346,15 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : branchCashierView ? (
               <>
+                <Link href="/finance/accounts" className={sidebarNavClass(pathname, '/finance/accounts')}>
+                  {t('finance.myAccounts')}
+                </Link>
+                <Link href="/finance/payments/pending" className={sidebarNavClass(pathname, '/finance/payments/pending')}>
+                  {t('finance.pendingPayments')}
+                </Link>
+                <Link href="/finance/shifts" className={sidebarNavClass(pathname, '/finance/shifts')}>
+                  {t('finance.myShifts')}
+                </Link>
                 <Link href="/branch-cashier/invoices" className={sidebarNavClass(pathname, '/branch-cashier/invoices')}>
                   {t('branchCashier.invoicesToPay')}
                 </Link>

@@ -466,8 +466,7 @@ const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
 const BRANCH_CASHIER_ALLOWED_PREFIXES = [
   '/change-password',
   '/branch-cashier',
-  '/finance/accounts',
-  '/finance/shifts',
+  '/finance',
   '/payments',
   '/sales',
   '/service/cashier',
@@ -479,7 +478,6 @@ const BRANCH_CASHIER_ALLOWED_PREFIXES = [
 const BRANCH_CASHIER_FORBIDDEN_PREFIXES = [
   '/dashboard',
   '/branch-dashboard',
-  '/finance',
   '/analytics',
   '/kpi',
   '/ai',
@@ -605,7 +603,7 @@ export function getDefaultRoute(role: Role) {
   if (role === 'HQ_SALES_MANAGER') return '/branch-purchase-requests';
   if (role === 'HQ_CASHIER') return '/distribution/invoices';
   if (role === 'WAREHOUSE_MANAGER') return '/hq-warehouses';
-  if (role === 'FINANCE_MANAGER' || role === 'HQ_ACCOUNTANT' || role === 'ACCOUNTANT') return '/finance';
+  if (role === 'FINANCE_MANAGER' || role === 'HQ_ACCOUNTANT' || role === 'ACCOUNTANT') return '/finance/dashboard';
   if (role === 'FRANCHISE_OWNER') return '/dashboard';
   if (role === 'MANAGER') return '/sales';
   if (role === 'MASTER') return '/service';
@@ -629,9 +627,9 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (isBranchWarehouseOperator(user)) return '/branch-warehouse/warehouse';
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (isBranchCashierUser(user)) return '/branch-cashier/invoices';
-  if (isBranchAccountantUser(user)) return '/branch-accountant/invoices';
+  if (isBranchAccountantUser(user)) return '/finance/dashboard';
   if (hasPermission(user, 'payments.manage')) return '/payments';
-  if (hasPermission(user, 'finance.view') && !isBranchAccountantUser(user)) return '/finance';
+  if (hasPermission(user, 'finance.view') && !isBranchAccountantUser(user)) return '/finance/dashboard';
   if (hasPermission(user, 'users.manage') && !user.branchId) return '/users';
   if (hasPermission(user, 'crm.manage')) return '/customers';
   if (hasPermission(user, 'sales.manage')) return '/sales';
@@ -1086,8 +1084,28 @@ export function isBranchAccountantForbiddenPath(pathname: string) {
   );
 }
 
+const BRANCH_CASHIER_FINANCE_FORBIDDEN_PREFIXES = [
+  '/finance/dashboard',
+  '/finance/income',
+  '/finance/expenses',
+  '/finance/transfers',
+  '/finance/investments',
+  '/finance/reconciliation',
+  '/finance/cash-flow',
+  '/finance/reports',
+  '/finance/audit',
+  '/finance/accounts/new',
+];
+
+function isBranchCashierFinanceForbiddenPath(pathname: string) {
+  return BRANCH_CASHIER_FINANCE_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 function canBranchCashierAccessPath(pathname: string) {
   if (pathname === '/') return false;
+  if (pathname.startsWith('/finance') && isBranchCashierFinanceForbiddenPath(pathname)) return false;
   if (isBranchCashierForbiddenPath(pathname)) return false;
   if (/^\/service\/[^/]+$/.test(pathname)) return true;
   return BRANCH_CASHIER_ALLOWED_PREFIXES.some(

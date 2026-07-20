@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AlertType,
   FinanceAccountScope,
   FinanceAccountStatus,
   FinanceLedgerEntryType,
@@ -12,6 +13,7 @@ import {
   Role,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveUserRoles } from '../rbac/rbac';
 import {
@@ -32,6 +34,7 @@ export class FinanceAccountsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledgerService: FinanceLedgerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private accountInclude() {
@@ -366,6 +369,14 @@ export class FinanceAccountsService {
       },
     });
 
+    await this.notifications.notify(user, {
+      type: AlertType.FINANCE_ACCOUNT_ASSIGNED,
+      branchId: account.branchId ?? undefined,
+      entityType: 'FinanceAccount',
+      entityId: account.id,
+      referenceNumber: account.accountNumber,
+    });
+
     return assignment;
   }
 
@@ -387,6 +398,14 @@ export class FinanceAccountsService {
         },
       },
       data: { isActive: false },
+    });
+
+    await this.notifications.notify(user, {
+      type: AlertType.FINANCE_ACCOUNT_UNASSIGNED,
+      branchId: account.branchId ?? undefined,
+      entityType: 'FinanceAccount',
+      entityId: account.id,
+      referenceNumber: account.accountNumber,
     });
 
     return assignment;

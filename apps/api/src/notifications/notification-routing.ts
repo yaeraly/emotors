@@ -31,6 +31,16 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   SUPPLIER_PAYMENT_COMPLETED: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER] },
   PAYMENT_RECEIVED: { module: NotificationModule.FINANCE, roles: [Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
   BRANCH_INVOICE_CREATED: { module: NotificationModule.FINANCE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER] },
+  FINANCE_TRANSFER_PENDING: { module: NotificationModule.FINANCE, roles: [Role.FRANCHISE_OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT] },
+  FINANCE_TRANSFER_APPROVED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FINANCE_MANAGER] },
+  FINANCE_TRANSFER_REJECTED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FINANCE_MANAGER] },
+  FINANCE_ACCOUNT_ASSIGNED: { module: NotificationModule.FINANCE, roles: [Role.CASHIER] },
+  FINANCE_ACCOUNT_UNASSIGNED: { module: NotificationModule.FINANCE, roles: [Role.CASHIER] },
+  FINANCE_INVESTMENT_RECORDED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FRANCHISE_OWNER] },
+  FINANCE_SHIFT_DIFFERENCE: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FRANCHISE_OWNER] },
+  FINANCE_RECONCILIATION_DIFFERENCE: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FRANCHISE_OWNER] },
+  FINANCE_EXPENSE_PENDING: { module: NotificationModule.FINANCE, roles: [Role.FRANCHISE_OWNER, Role.FINANCE_MANAGER] },
+  FINANCE_PAYMENT_ACCEPTED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FRANCHISE_OWNER] },
   BRANCH_REQUEST_NO_PRICING_POLICY: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
   BRANCH_REQUEST_OUT_OF_STOCK: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
 };
@@ -131,6 +141,46 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   BRANCH_REQUEST_OUT_OF_STOCK: {
     title: 'Недостаточно товара на складе HQ',
     message: 'Филиал заказал товар, но на складе HQ недостаточно остатков.',
+  },
+  FINANCE_TRANSFER_PENDING: {
+    title: 'Transfer awaiting approval',
+    message: 'A finance transfer requires your approval.',
+  },
+  FINANCE_TRANSFER_APPROVED: {
+    title: 'Transfer approved',
+    message: 'A finance transfer was approved and completed.',
+  },
+  FINANCE_TRANSFER_REJECTED: {
+    title: 'Transfer rejected',
+    message: 'A finance transfer was rejected.',
+  },
+  FINANCE_ACCOUNT_ASSIGNED: {
+    title: 'Account assigned',
+    message: 'A cash account was assigned to you.',
+  },
+  FINANCE_ACCOUNT_UNASSIGNED: {
+    title: 'Account unassigned',
+    message: 'A cash account assignment was removed.',
+  },
+  FINANCE_INVESTMENT_RECORDED: {
+    title: 'Investment recorded',
+    message: 'An owner investment was recorded.',
+  },
+  FINANCE_SHIFT_DIFFERENCE: {
+    title: 'Cashier shift difference',
+    message: 'A cashier shift closed with a cash difference.',
+  },
+  FINANCE_RECONCILIATION_DIFFERENCE: {
+    title: 'Reconciliation difference',
+    message: 'A reconciliation was completed with a balance difference.',
+  },
+  FINANCE_EXPENSE_PENDING: {
+    title: 'Expense awaiting approval',
+    message: 'An expense is waiting for approval.',
+  },
+  FINANCE_PAYMENT_ACCEPTED: {
+    title: 'Payment accepted',
+    message: 'A customer payment was accepted.',
   },
 };
 
