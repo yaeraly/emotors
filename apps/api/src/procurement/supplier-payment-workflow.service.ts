@@ -109,6 +109,67 @@ export class SupplierPaymentWorkflowService {
     return payments.map((payment) => this.toPaymentResponse(payment));
   }
 
+  /**
+   * Supply Manager inbox: every saved purchase order appears here automatically
+   * (UNPAID) until fully paid. Used by Supply Manager → Платежи поставщику.
+   */
+  async listSupplyManagerPaymentQueue(user: AuthUser) {
+    this.assertCanView(user);
+    const orders = await this.prisma.procurementOrder.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { remainingYuan: { gt: 0 } },
+          {
+            supplierPaymentStatus: {
+              in: [
+                'UNPAID',
+                'AWAITING_ACCOUNTANT',
+                'AWAITING_CASHIER',
+                'PARTIALLY_PAID',
+                'OVERPAID',
+              ],
+            },
+          },
+          {
+            supplierPayments: {
+              some: {
+                status: {
+                  in: [
+                    ProcurementSupplierPaymentStatus.DRAFT,
+                    ProcurementSupplierPaymentStatus.RETURNED,
+                    ProcurementSupplierPaymentStatus.PENDING_CASHIER,
+                    ProcurementSupplierPaymentStatus.ACTIVE,
+                  ],
+                },
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        invoiceSentBy: { select: { id: true, fullName: true } },
+        paymentInfoVersions: {
+          where: { isActive: true },
+          take: 1,
+          select: { id: true, paymentMethod: true, versionNumber: true },
+        },
+        supplierPayments: {
+          include: PAYMENT_INCLUDE,
+          orderBy: [{ sequenceNumber: 'asc' }],
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { updatedAt: 'desc' }],
+      take: 300,
+    });
+    return orders.map((order) => ({
+      ...this.toOrderPaymentSummary(order),
+      hasPaymentInfo: (order.paymentInfoVersions?.length ?? 0) > 0,
+      activePaymentMethod: order.paymentInfoVersions?.[0]?.paymentMethod ?? null,
+    }));
+  }
+
   async listAccountantQueue(user: AuthUser) {
     if (!canCreateSupplierPayment(user)) {
       throw new ForbiddenException('You do not have permission to review supplier invoices');
@@ -233,6 +294,45 @@ export class SupplierPaymentWorkflowService {
     }
     return this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, orderId);
+      const requestedPaymentYuan = roundMoney(Number(dto.requestedPaymentYuan));
+      if (requestedPaymentYuan <= 0) {
+        throw new BadRequestException('Requested CNY payment amount must be greater than zero');
+      }
+
+      const activePaymentInfo = await tx.procurementPaymentInfoVersion.findFirst({
+        where: { procurementOrderId: order.id, isActive: true },
+      });
+      if (!activePaymentInfo) {
+        throw new BadRequestException(
+          'Add payment method and payment instructions before sending to HQ Accountant',
+        );
+      }
+      if (activePaymentInfo.paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT) {
+        if (
+          !activePaymentInfo.bankName?.trim() ||
+          !activePaymentInfo.accountHolder?.trim() ||
+          !activePaymentInfo.accountNumber?.trim()
+        ) {
+          throw new BadRequestException(
+            'Complete supplier bank account payment instructions before sending to HQ Accountant',
+          );
+        }
+      }
+      if (activePaymentInfo.paymentMethod === ProcurementPaymentInfoMethod.QR_CODE) {
+        const qrCount = await tx.fileAttachment.count({
+          where: {
+            entityType: FileAttachmentEntityType.PAYMENT_QR,
+            entityId: activePaymentInfo.id,
+            deletedAt: null,
+          },
+        });
+        if (qrCount <= 0 && !activePaymentInfo.comment?.trim()) {
+          throw new BadRequestException(
+            'Attach at least one payment QR code (or comment) before sending to HQ Accountant',
+          );
+        }
+      }
+
       const invoiceAttachments = await tx.fileAttachment.count({
         where: {
           entityId: order.id,
@@ -254,6 +354,7 @@ export class SupplierPaymentWorkflowService {
             ? new Date(dto.expectedPaymentDate)
             : order.expectedPaymentDate,
           note: dto.note !== undefined ? dto.note.trim() || null : order.note,
+          requestedPaymentYuan,
           invoiceSentToAccountantAt: order.invoiceSentToAccountantAt ?? new Date(),
           invoiceSentById: order.invoiceSentById ?? user.id,
         },
@@ -268,10 +369,14 @@ export class SupplierPaymentWorkflowService {
       await this.audit(tx, user, 'SUPPLIER_INVOICE_SENT_TO_ACCOUNTANT', order.id, {
         invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
         supplierPaymentStatus: order.supplierPaymentStatus,
+        requestedPaymentYuan: order.requestedPaymentYuan,
       }, {
         invoiceSentToAccountantAt: updated.invoiceSentToAccountantAt,
         supplierInvoiceNumber: updated.supplierInvoiceNumber,
         supplierPaymentStatus: synced.supplierPaymentStatus,
+        requestedPaymentYuan,
+        paymentInfoVersionId: activePaymentInfo.id,
+        paymentMethod: activePaymentInfo.paymentMethod,
       });
 
       await this.notificationsService.notifyInTx(tx, user, {
@@ -279,7 +384,7 @@ export class SupplierPaymentWorkflowService {
         entityType: 'ProcurementOrder',
         entityId: order.id,
         referenceNumber: updated.orderNumber,
-        message: `Supplier invoice for procurement ${updated.orderNumber} awaits HQ Accountant decision.`,
+        message: `Supplier payment request for procurement ${updated.orderNumber} (${requestedPaymentYuan} CNY) awaits HQ Accountant.`,
         recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER],
       });
 
@@ -1079,6 +1184,8 @@ export class SupplierPaymentWorkflowService {
       supplierPaymentStatus: summary.supplierPaymentStatus,
       completedPaymentCount: summary.completedPaymentCount,
       pendingCashierCount: summary.pendingCashierCount,
+      requestedPaymentYuan:
+        order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
       supplierInvoiceNumber: order.supplierInvoiceNumber,
       expectedPaymentDate: order.expectedPaymentDate,
       invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,

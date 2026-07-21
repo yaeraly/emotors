@@ -41,13 +41,6 @@ type HeaderForm = {
   insuranceCostKgs: string;
   bankFeeCostKgs: string;
   otherExpenseKgs: string;
-  paymentMethod: 'BANK_ACCOUNT' | 'QR_CODE';
-  bankName: string;
-  accountHolder: string;
-  accountNumber: string;
-  swiftCode: string;
-  bankAddress: string;
-  paymentComment: string;
 };
 
 const emptyLine = (): ProcurementLine => ({
@@ -92,13 +85,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     insuranceCostKgs: '0',
     bankFeeCostKgs: '0',
     otherExpenseKgs: '0',
-    paymentMethod: 'BANK_ACCOUNT',
-    bankName: '',
-    accountHolder: '',
-    accountNumber: '',
-    swiftCode: '',
-    bankAddress: '',
-    paymentComment: '',
   });
   const [lines, setLines] = useState<ProcurementLine[]>([]);
   const [user, setUser] = useState<User | null>(null);
@@ -168,13 +154,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             insuranceCostKgs: String(order.insuranceCostKgs ?? 0),
             bankFeeCostKgs: String(order.bankFeeCostKgs ?? 0),
             otherExpenseKgs: String(order.otherExpenseKgs ?? 0),
-            paymentMethod: 'BANK_ACCOUNT',
-            bankName: '',
-            accountHolder: '',
-            accountNumber: '',
-            swiftCode: '',
-            bankAddress: '',
-            paymentComment: '',
           });
           setLines((order.items ?? [])
             .filter((item: any) => item.status !== 'CANCELLED')
@@ -328,12 +307,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       setError(t('procurement.orders.productSearch.emptyOrder'));
       return;
     }
-    if (mode === 'create' && form.paymentMethod === 'BANK_ACCOUNT') {
-      if (!form.bankName.trim() || !form.accountHolder.trim() || !form.accountNumber.trim()) {
-        setError(t('procurement.paymentInfo.bankRequired'));
-        return;
-      }
-    }
     setSaving(true);
     const payload: Record<string, unknown> = {
       supplierId: form.supplierId,
@@ -373,20 +346,9 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
           method: 'POST',
           body: JSON.stringify(payload),
         });
-        await apiFetch(`/procurement/orders/${created.id}/payment-info`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            paymentMethod: form.paymentMethod,
-            bankName: form.bankName || undefined,
-            accountHolder: form.accountHolder || undefined,
-            accountNumber: form.accountNumber || undefined,
-            swiftCode: form.swiftCode || undefined,
-            bankAddress: form.bankAddress || undefined,
-            comment: form.paymentComment || undefined,
-          }),
-        });
+        // Payment details are configured later in Supply Manager → Платежи поставщику.
         window.localStorage.setItem('emotors_procurement_success', t('procurement.orders.created'));
-        router.push(`/procurement/orders/${created.id}`);
+        router.push(`/procurement/orders/${created.id}?tab=payments`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -434,37 +396,12 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
           <Field label={t('procurement.orders.estimatedArrivalDate')}><input type="date" value={form.estimatedArrivalDate} onChange={(e) => setField('estimatedArrivalDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
         </div>
         <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{t('procurement.orders.exchangeRateOnPaymentHint')}</p>
+        {mode === 'create' ? (
+          <p className="mt-3 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            {t('procurement.orders.paymentDetailsLaterHint')}
+          </p>
+        ) : null}
       </section>
-
-      {mode === 'create' ? (
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-bold text-slate-950">{t('procurement.paymentInfo.title')}</h3>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field label={t('procurement.paymentInfo.paymentMethod')}>
-              <select
-                value={form.paymentMethod}
-                onChange={(e) => setField('paymentMethod', e.target.value as 'BANK_ACCOUNT' | 'QR_CODE')}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2"
-              >
-                <option value="BANK_ACCOUNT">{t('procurement.paymentInfo.method.BANK_ACCOUNT')}</option>
-                <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
-              </select>
-            </Field>
-            {form.paymentMethod === 'BANK_ACCOUNT' ? (
-              <>
-                <Field label={t('procurement.paymentInfo.bankName')}><input value={form.bankName} onChange={(e) => setField('bankName', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-                <Field label={t('procurement.paymentInfo.accountHolder')}><input value={form.accountHolder} onChange={(e) => setField('accountHolder', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-                <Field label={t('procurement.paymentInfo.accountNumber')}><input value={form.accountNumber} onChange={(e) => setField('accountNumber', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-                <Field label={t('procurement.paymentInfo.swift')}><input value={form.swiftCode} onChange={(e) => setField('swiftCode', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-                <Field label={t('procurement.paymentInfo.bankAddress')}><input value={form.bankAddress} onChange={(e) => setField('bankAddress', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-              </>
-            ) : (
-              <p className="md:col-span-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">{t('procurement.paymentInfo.qrUploadAfterCreate')}</p>
-            )}
-            <Field label={t('procurement.paymentInfo.comment')}><textarea value={form.paymentComment} onChange={(e) => setField('paymentComment', e.target.value)} className="min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
-          </div>
-        </section>
-      ) : null}
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-4">

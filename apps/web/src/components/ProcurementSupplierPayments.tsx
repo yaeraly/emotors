@@ -73,6 +73,7 @@ type ProcurementOrderPayments = {
   totalPaidYuan?: number;
   totalPaidKgs?: number;
   remainingYuan?: number;
+  requestedPaymentYuan?: number | null;
   weightedAverageYuanRate?: number | null;
   effectiveYuanRate?: number;
   supplierPaymentStatus?: string;
@@ -157,6 +158,9 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const [expectedPaymentDate, setExpectedPaymentDate] = useState(
     order.expectedPaymentDate ? String(order.expectedPaymentDate).slice(0, 10) : '',
   );
+  const [requestedPaymentYuan, setRequestedPaymentYuan] = useState(
+    String(order.requestedPaymentYuan ?? order.remainingYuan ?? order.totalYuan ?? ''),
+  );
   const [confirmTarget, setConfirmTarget] = useState<SupplierPayment | null>(null);
   const [confirmForm, setConfirmForm] = useState({
     actualPaidKgs: '',
@@ -204,6 +208,11 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   }, [calculatedKgs, form.approvedAmountKgs]);
 
   async function sendInvoice() {
+    const amount = Number(requestedPaymentYuan);
+    if (!amount || amount <= 0) {
+      setError(t('procurement.payments.requestedAmountRequired'));
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -212,6 +221,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         body: JSON.stringify({
           supplierInvoiceNumber: invoiceNumber || undefined,
           expectedPaymentDate: expectedPaymentDate || undefined,
+          requestedPaymentYuan: amount,
         }),
       });
       await onChanged();
@@ -524,12 +534,25 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <h4 className="font-semibold text-slate-900">{t('procurement.payments.sendInvoiceTitle')}</h4>
           <p className="mt-1 text-sm text-slate-600">{t('procurement.payments.sendInvoiceHelp')}</p>
-          <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <p className="mt-2 text-sm text-slate-600">{t('procurement.payments.paymentInfoBeforeSendHint')}</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.supplierInvoiceNumber')}</span>
               <input
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.requestedPaymentYuan')}</span>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={requestedPaymentYuan}
+                onChange={(e) => setRequestedPaymentYuan(e.target.value)}
+                disabled={Boolean(order.invoiceSentToAccountantAt)}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>

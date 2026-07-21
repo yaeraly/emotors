@@ -15,6 +15,7 @@ type QueueOrder = {
   totalYuan: number;
   totalPaidYuan: number;
   remainingYuan: number;
+  requestedPaymentYuan?: number | null;
   supplierPaymentStatus: string;
   completedPaymentCount: number;
   invoiceSentToAccountantAt?: string | null;
@@ -52,6 +53,7 @@ export default function AccountantPaymentsPage() {
                 <th className="px-4 py-3">{t('procurement.orders.orderNumber') || '№'}</th>
                 <th className="px-4 py-3">{t('procurement.suppliers.title')}</th>
                 <th className="px-4 py-3">{t('procurement.payments.totalOrderYuan')}</th>
+                <th className="px-4 py-3">{t('procurement.payments.requestedPaymentYuan')}</th>
                 <th className="px-4 py-3">{t('procurement.payments.totalPaidYuan')}</th>
                 <th className="px-4 py-3">{t('procurement.payments.remainingYuan')}</th>
                 <th className="px-4 py-3">{t('procurement.payments.paymentStatus')}</th>
@@ -64,17 +66,20 @@ export default function AccountantPaymentsPage() {
                   <td className="px-4 py-3 font-semibold">{order.orderNumber}</td>
                   <td className="px-4 py-3">{order.supplier?.name || '-'}</td>
                   <td className="px-4 py-3">¥{Number(order.totalYuan).toFixed(2)}</td>
+                  <td className="px-4 py-3">
+                    {order.requestedPaymentYuan != null ? `¥${Number(order.requestedPaymentYuan).toFixed(2)}` : '—'}
+                  </td>
                   <td className="px-4 py-3">¥{Number(order.totalPaidYuan).toFixed(2)}</td>
                   <td className="px-4 py-3">¥{Number(order.remainingYuan).toFixed(2)}</td>
                   <td className="px-4 py-3">{t(`procurement.payments.status.${order.supplierPaymentStatus}`)}</td>
                   <td className="px-4 py-3">
-                    <Link href={`/procurement/orders/${order.id}`} className="rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700">
-                      {t('common.open') || 'Open'}
+                    <Link href={`/procurement/orders/${order.id}?tab=payments`} className="rounded-lg border border-blue-200 px-3 py-1 text-xs font-semibold text-blue-700">
+                      {t('common.open')}
                     </Link>
                   </td>
                 </tr>
               )) : (
-                <tr><td className="px-4 py-8 text-slate-500" colSpan={7}>{t('procurement.payments.noPayments')}</td></tr>
+                <tr><td className="px-4 py-8 text-slate-500" colSpan={8}>{t('procurement.payments.noPayments')}</td></tr>
               )}
             </tbody>
           </table>

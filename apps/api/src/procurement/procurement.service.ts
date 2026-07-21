@@ -1047,6 +1047,19 @@ export class ProcurementService {
       });
 
       await this.auditProcurement(tx, user, 'CREATE_PROCUREMENT_ORDER', order.id, null, this.pickProcurementAuditFields(order));
+      // Order automatically enters Supply Manager → Платежи поставщику as UNPAID payment tracking record.
+      await this.auditProcurement(
+        tx,
+        user,
+        'SUPPLIER_PAYMENT_TRACKING_CREATED',
+        order.id,
+        null,
+        {
+          supplierPaymentStatus: order.supplierPaymentStatus,
+          totalYuan: Number(order.totalYuan),
+          remainingYuan: Number(order.remainingYuan),
+        },
+      );
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.PROCUREMENT_CREATED,
         entityType: 'ProcurementOrder',
@@ -1084,6 +1097,10 @@ export class ProcurementService {
 
   supplierPayments(user: AuthUser, orderId: string) {
     return this.supplierPaymentWorkflow.listPayments(user, orderId);
+  }
+
+  listSupplyManagerPaymentQueue(user: AuthUser) {
+    return this.supplierPaymentWorkflow.listSupplyManagerPaymentQueue(user);
   }
 
   listAccountantPaymentQueue(user: AuthUser) {
@@ -3521,6 +3538,8 @@ export class ProcurementService {
       totalPaidYuan: Number(order.totalPaidYuan ?? 0),
       totalPaidKgs: Number(order.totalPaidKgs ?? 0),
       remainingYuan: Number(order.remainingYuan ?? 0),
+      requestedPaymentYuan:
+        order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
       weightedAverageYuanRate: order.weightedAverageYuanRate
         ? Number(order.weightedAverageYuanRate)
         : null,

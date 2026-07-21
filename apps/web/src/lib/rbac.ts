@@ -728,6 +728,9 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/procurement/purchase-price-history')) {
     return canViewProcurement(user) || hasPermission(user, 'reports.view');
   }
+  if (pathname.startsWith('/procurement/payments')) {
+    return canViewSupplierPayments(user);
+  }
   if (pathname.startsWith('/procurement/accountant-payments')) {
     return canCreateSupplierPayment(user);
   }

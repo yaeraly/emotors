@@ -2866,6 +2866,8 @@ model ProcurementOrder {
   note                                  String?
   supplierInvoiceNumber                 String?
   expectedPaymentDate                   DateTime?
+  /** CNY amount SM requests HQ Accountant to pay (may match order total or invoice). */
+  requestedPaymentYuan                  Decimal?                               @db.Decimal(14, 2)
   invoiceSentToAccountantAt             DateTime?
   invoiceSentById                       String?
   invoiceSentBy                         User?                                  @relation("ProcurementInvoiceSender", fields: [invoiceSentById], references: [id])

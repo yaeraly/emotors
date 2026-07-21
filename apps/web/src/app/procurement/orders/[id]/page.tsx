@@ -136,6 +136,7 @@ type ProcurementOrder = {
   totalPaidYuan?: number;
   totalPaidKgs?: number;
   remainingYuan?: number;
+  requestedPaymentYuan?: number | null;
   weightedAverageYuanRate?: number | null;
   effectiveYuanRate?: number;
   supplierPaymentStatus?: string;
@@ -938,6 +939,10 @@ export default function ProcurementOrderDetailPage() {
                   totalPaidYuan: Number(order.totalPaidYuan ?? 0),
                   totalPaidKgs: Number(order.totalPaidKgs ?? 0),
                   remainingYuan: Number(order.remainingYuan ?? order.totalYuan),
+                  requestedPaymentYuan:
+                    order.requestedPaymentYuan != null
+                      ? Number(order.requestedPaymentYuan)
+                      : null,
                   hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
                 }}
                 user={user}
