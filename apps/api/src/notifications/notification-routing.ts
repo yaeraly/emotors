@@ -27,8 +27,14 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   REPLACEMENT_GOODS_SHIPPED: { module: NotificationModule.DISTRIBUTION, roles: [Role.WAREHOUSE_OPERATOR] },
   LOW_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER] },
   OUT_OF_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER] },
-  SUPPLIER_PAYMENT_DUE: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
-  SUPPLIER_PAYMENT_COMPLETED: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER] },
+  SUPPLIER_PAYMENT_DUE: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
+  SUPPLIER_PAYMENT_COMPLETED: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.CEO, Role.OWNER, Role.FINANCE_MANAGER] },
+  SUPPLIER_INVOICE_SENT_TO_ACCOUNTANT: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
+  SUPPLIER_PAYMENT_SENT_TO_CASHIER: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.HQ_CASHIER, Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER] },
+  SUPPLIER_PAYMENT_RETURNED_TO_ACCOUNTANT: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.SUPPLY_CHAIN_MANAGER] },
+  SUPPLIER_PAYMENT_PARTIALLY_PAID: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER] },
+  SUPPLIER_PAYMENT_OVERPAYMENT_ATTEMPT: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER] },
+  SUPPLIER_PAYMENT_REVERSAL_REQUESTED: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT, Role.SUPPLY_CHAIN_MANAGER] },
   PAYMENT_RECEIVED: { module: NotificationModule.FINANCE, roles: [Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
   BRANCH_INVOICE_CREATED: { module: NotificationModule.FINANCE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER] },
   FINANCE_TRANSFER_PENDING: { module: NotificationModule.FINANCE, roles: [Role.FRANCHISE_OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT] },
@@ -133,6 +139,30 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   SUPPLIER_PAYMENT_COMPLETED: {
     title: 'Supplier Payment Completed',
     message: 'A supplier payment was completed.',
+  },
+  SUPPLIER_INVOICE_SENT_TO_ACCOUNTANT: {
+    title: 'Счёт отправлен бухгалтеру',
+    message: 'Supply Manager отправил счёт поставщика на решение HQ бухгалтера.',
+  },
+  SUPPLIER_PAYMENT_SENT_TO_CASHIER: {
+    title: 'Платёж отправлен кассиру',
+    message: 'HQ бухгалтер отправил платёж по закупке из Китая кассиру HQ.',
+  },
+  SUPPLIER_PAYMENT_RETURNED_TO_ACCOUNTANT: {
+    title: 'Платёж возвращён бухгалтеру',
+    message: 'HQ кассир вернул платёж бухгалтеру на исправление.',
+  },
+  SUPPLIER_PAYMENT_PARTIALLY_PAID: {
+    title: 'Закупка частично оплачена',
+    message: 'По закупке из Китая выполнена частичная оплата.',
+  },
+  SUPPLIER_PAYMENT_OVERPAYMENT_ATTEMPT: {
+    title: 'Попытка переплаты',
+    message: 'Обнаружена попытка оплатить больше утверждённой суммы.',
+  },
+  SUPPLIER_PAYMENT_REVERSAL_REQUESTED: {
+    title: 'Сторно платежа',
+    message: 'Выполнено сторнирование платежа по закупке из Китая.',
   },
   BRANCH_REQUEST_NO_PRICING_POLICY: {
     title: 'Требуется ценовая политика',

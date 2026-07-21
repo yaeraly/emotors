@@ -1,10 +1,15 @@
 'use client';
 
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
 import {
+  canConfirmSupplierPayment,
   canCreateSupplierPayment,
   canEditSupplierPayment,
+  canReturnSupplierPaymentToAccountant,
+  canReverseSupplierPayment,
+  canSendProcurementInvoiceToAccountant,
+  canSendSupplierPaymentToCashier,
   canVoidSupplierPayment,
 } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -13,20 +18,56 @@ import { translateStatus } from '@/lib/translate-status';
 
 export type SupplierPayment = {
   id: string;
+  sequenceNumber?: number;
   paymentDate: string;
   amountYuan: number;
   exchangeRate: number;
+  calculatedAmountKgs?: number;
+  approvedAmountKgs?: number;
+  actualPaidKgs?: number | null;
   amountKgs: number;
-  paymentMethod: 'BANK' | 'CASH' | 'TRANSFER';
+  paymentMethod: string;
+  recipientName?: string | null;
+  recipientCompany?: string | null;
+  bankName?: string | null;
+  beneficiaryName?: string | null;
+  accountNumber?: string | null;
+  swiftCode?: string | null;
+  cardholderName?: string | null;
+  cardNumberMasked?: string | null;
+  paymentInstructions?: string | null;
+  paymentDeadline?: string | null;
+  intendedFinanceAccountId?: string | null;
+  intendedFinanceAccount?: { id: string; name: string; availableBalance?: number } | null;
+  actualFinanceAccount?: { id: string; name: string } | null;
   receiptNumber?: string | null;
+  transactionNumber?: string | null;
   notes?: string | null;
-  status: 'ACTIVE' | 'VOID';
+  accountantComment?: string | null;
+  cashierComment?: string | null;
+  returnReason?: string | null;
+  status: string;
+  version?: number;
+  accountant?: { fullName: string } | null;
+  cashier?: { fullName: string } | null;
   createdBy?: { fullName: string };
-  attachments?: Array<{ id: string; fileName: string; fileUrl: string }>;
+  attachments?: Array<{ id: string; fileName: string; fileUrl: string; entityType?: string }>;
+  paidAt?: string | null;
+  sentToCashierAt?: string | null;
+  createdAt?: string;
+};
+
+type FinanceAccountOption = {
+  id: string;
+  name: string;
+  accountNumber: string;
+  availableBalance: number;
+  currentBalance: number;
 };
 
 type ProcurementOrderPayments = {
   id: string;
+  orderNumber?: string;
   totalYuan: number;
   totalPaidYuan?: number;
   totalPaidKgs?: number;
@@ -36,7 +77,12 @@ type ProcurementOrderPayments = {
   supplierPaymentStatus?: string;
   yuanRateLocked?: boolean;
   hqStockMovementCreatedAt?: string | null;
+  supplierInvoiceNumber?: string | null;
+  expectedPaymentDate?: string | null;
+  invoiceSentToAccountantAt?: string | null;
+  note?: string | null;
   supplierPayments?: SupplierPayment[];
+  attachments?: Array<{ id: string; fileName: string; fileUrl: string; entityType?: string }>;
 };
 
 type Props = {
@@ -45,136 +91,207 @@ type Props = {
   onChanged: () => Promise<void>;
 };
 
-const paymentMethods = ['BANK', 'CASH', 'TRANSFER'] as const;
+const paymentMethods = ['QR_CODE', 'BANK_ACCOUNT', 'BANK_CARD', 'CASH', 'OTHER', 'BANK', 'TRANSFER'] as const;
+const adjustmentReasons = [
+  'BANK_COMMISSION',
+  'PAYMENT_SERVICE_COMMISSION',
+  'SUPPLIER_AGREED_CORRECTION',
+  'CURRENCY_CONVERSION_DIFFERENCE',
+  'OTHER',
+] as const;
 
-type EditForm = {
-  paymentDate: string;
+type PaymentForm = {
   amountYuan: string;
   exchangeRate: string;
+  approvedAmountKgs: string;
+  kgsAdjustmentReason: string;
+  kgsAdjustmentComment: string;
+  paymentMethod: (typeof paymentMethods)[number];
+  recipientName: string;
+  recipientCompany: string;
+  bankName: string;
+  beneficiaryName: string;
+  accountNumber: string;
+  swiftCode: string;
+  cardholderName: string;
+  cardNumber: string;
+  paymentInstructions: string;
+  paymentDeadline: string;
+  intendedFinanceAccountId: string;
+  accountantComment: string;
   notes: string;
-  changeReason: string;
 };
+
+const emptyForm = (): PaymentForm => ({
+  amountYuan: '',
+  exchangeRate: '',
+  approvedAmountKgs: '',
+  kgsAdjustmentReason: '',
+  kgsAdjustmentComment: '',
+  paymentMethod: 'BANK_ACCOUNT',
+  recipientName: '',
+  recipientCompany: '',
+  bankName: '',
+  beneficiaryName: '',
+  accountNumber: '',
+  swiftCode: '',
+  cardholderName: '',
+  cardNumber: '',
+  paymentInstructions: '',
+  paymentDeadline: '',
+  intendedFinanceAccountId: '',
+  accountantComment: '',
+  notes: '',
+});
 
 export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const { t } = useTranslation();
-  const [form, setForm] = useState({
-    paymentDate: new Date().toISOString().slice(0, 10),
-    amountYuan: '',
-    exchangeRate: '',
-    paymentMethod: 'TRANSFER' as (typeof paymentMethods)[number],
-    receiptNumber: '',
-    notes: '',
-  });
-  const [editTarget, setEditTarget] = useState<SupplierPayment | null>(null);
-  const [editForm, setEditForm] = useState<EditForm>({
-    paymentDate: '',
-    amountYuan: '',
-    exchangeRate: '',
-    notes: '',
-    changeReason: '',
-  });
-  const [showConfirm, setShowConfirm] = useState(false);
+  const [form, setForm] = useState<PaymentForm>(emptyForm);
+  const [showForm, setShowForm] = useState(false);
+  const [accounts, setAccounts] = useState<FinanceAccountOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [showForm, setShowForm] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState(order.supplierInvoiceNumber ?? '');
+  const [confirmTarget, setConfirmTarget] = useState<SupplierPayment | null>(null);
+  const [confirmForm, setConfirmForm] = useState({
+    actualPaidKgs: '',
+    paymentDate: new Date().toISOString().slice(0, 10),
+    financeAccountId: '',
+    transactionNumber: '',
+    cashierComment: '',
+    accountChangeReason: '',
+    actualPaidDifferenceReason: '',
+  });
+  const [returnTarget, setReturnTarget] = useState<SupplierPayment | null>(null);
+  const [returnReason, setReturnReason] = useState('');
 
-  const canCreate = canCreateSupplierPayment(user);
+  const canPrepare = canCreateSupplierPayment(user);
   const canEdit = canEditSupplierPayment(user);
+  const canSendInvoice = canSendProcurementInvoiceToAccountant(user);
+  const canSendCashier = canSendSupplierPaymentToCashier(user);
+  const canConfirm = canConfirmSupplierPayment(user);
+  const canReturn = canReturnSupplierPaymentToAccountant(user);
   const canVoid = canVoidSupplierPayment(user);
+  const canReverse = canReverseSupplierPayment(user);
   const payments = order.supplierPayments ?? [];
-  const hqReceived = Boolean(order.hqStockMovementCreatedAt);
+  const invoiceAttachments = (order.attachments ?? []).filter(
+    (item) => item.entityType === 'SUPPLIER_INVOICE' || item.entityType === 'PROCUREMENT_ORDER',
+  );
 
-  function openEdit(payment: SupplierPayment) {
-    setEditTarget(payment);
-    setEditForm({
-      paymentDate: payment.paymentDate.slice(0, 10),
-      amountYuan: String(payment.amountYuan),
-      exchangeRate: String(payment.exchangeRate),
-      notes: payment.notes ?? '',
-      changeReason: '',
-    });
-    setShowConfirm(false);
-    setError('');
-  }
+  const calculatedKgs = useMemo(() => {
+    const yuan = Number(form.amountYuan);
+    const rate = Number(form.exchangeRate);
+    if (!yuan || !rate) return 0;
+    return Math.round(yuan * rate * 100) / 100;
+  }, [form.amountYuan, form.exchangeRate]);
 
-  function closeEdit() {
-    setEditTarget(null);
-    setShowConfirm(false);
-    setError('');
-  }
+  useEffect(() => {
+    if (!canPrepare && !canConfirm) return;
+    void apiFetch<FinanceAccountOption[]>('/procurement/supplier-payment-accounts')
+      .then(setAccounts)
+      .catch(() => setAccounts([]));
+  }, [canPrepare, canConfirm]);
 
-  function validateEditForm() {
-    const amountYuan = Number(editForm.amountYuan);
-    const exchangeRate = Number(editForm.exchangeRate);
-    if (!amountYuan || amountYuan <= 0) {
-      setError(t('procurement.payments.amountRequired'));
-      return false;
+  useEffect(() => {
+    if (!form.approvedAmountKgs && calculatedKgs > 0) {
+      setForm((current) => ({ ...current, approvedAmountKgs: String(calculatedKgs) }));
     }
-    if (!exchangeRate || exchangeRate <= 0) {
-      setError(t('procurement.payments.exchangeRateRequired'));
-      return false;
-    }
-    if (!editForm.changeReason.trim() || editForm.changeReason.trim().length < 3) {
-      setError(t('procurement.payments.changeReasonRequired'));
-      return false;
-    }
-    setError('');
-    return true;
-  }
+  }, [calculatedKgs, form.approvedAmountKgs]);
 
-  function requestSave() {
-    if (!validateEditForm()) return;
-    setShowConfirm(true);
-  }
-
-  async function saveEdit() {
-    if (!editTarget || !validateEditForm()) return;
+  async function sendInvoice() {
     setSaving(true);
     setError('');
     try {
-      await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${editTarget.id}`, {
-        method: 'PUT',
+      await apiFetch(`/procurement/orders/${order.id}/send-invoice-to-accountant`, {
+        method: 'POST',
         body: JSON.stringify({
-          paymentDate: editForm.paymentDate,
-          amountYuan: Number(editForm.amountYuan),
-          exchangeRate: Number(editForm.exchangeRate),
-          notes: editForm.notes || undefined,
-          changeReason: editForm.changeReason.trim(),
+          supplierInvoiceNumber: invoiceNumber || undefined,
         }),
       });
-      closeEdit();
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
-      setShowConfirm(false);
     } finally {
       setSaving(false);
     }
   }
 
-  async function createPayment() {
+  async function uploadInvoice(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    const token = getToken();
+    if (!token) return;
+    const formData = new FormData();
+    formData.append('file', file);
     setSaving(true);
     setError('');
     try {
+      const response = await fetch(`${API_URL}/procurement/orders/${order.id}/attachments/supplier-invoice`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || t('common.error'));
+      }
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createPayment(sendToCashier: boolean) {
+    setSaving(true);
+    setError('');
+    try {
+      const approved = Number(form.approvedAmountKgs || calculatedKgs);
       await apiFetch(`/procurement/orders/${order.id}/supplier-payments`, {
         method: 'POST',
         body: JSON.stringify({
-          paymentDate: form.paymentDate,
           amountYuan: Number(form.amountYuan),
           exchangeRate: Number(form.exchangeRate),
+          approvedAmountKgs: approved,
+          kgsAdjustmentReason:
+            Math.abs(approved - calculatedKgs) > 0.009 ? form.kgsAdjustmentReason || undefined : undefined,
+          kgsAdjustmentComment: form.kgsAdjustmentComment || undefined,
           paymentMethod: form.paymentMethod,
-          receiptNumber: form.receiptNumber || undefined,
+          recipientName: form.recipientName || undefined,
+          recipientCompany: form.recipientCompany || undefined,
+          bankName: form.bankName || undefined,
+          beneficiaryName: form.beneficiaryName || undefined,
+          accountNumber: form.accountNumber || undefined,
+          swiftCode: form.swiftCode || undefined,
+          cardholderName: form.cardholderName || undefined,
+          cardNumber: form.cardNumber || undefined,
+          paymentInstructions: form.paymentInstructions || undefined,
+          paymentDeadline: form.paymentDeadline || undefined,
+          intendedFinanceAccountId: form.intendedFinanceAccountId || undefined,
+          accountantComment: form.accountantComment || undefined,
           notes: form.notes || undefined,
+          sendToCashier,
         }),
       });
       setShowForm(false);
-      setForm({
-        paymentDate: new Date().toISOString().slice(0, 10),
-        amountYuan: '',
-        exchangeRate: '',
-        paymentMethod: 'TRANSFER',
-        receiptNumber: '',
-        notes: '',
+      setForm(emptyForm());
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function sendExistingToCashier(paymentId: string) {
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${paymentId}/send-to-cashier`, {
+        method: 'POST',
+        body: JSON.stringify({}),
       });
       await onChanged();
     } catch (err) {
@@ -192,6 +309,24 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${paymentId}/void`, {
         method: 'POST',
         body: JSON.stringify({}),
+      });
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reversePayment(paymentId: string) {
+    const reason = window.prompt(t('procurement.payments.reverseReasonPrompt'));
+    if (!reason || reason.trim().length < 3) return;
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${paymentId}/reverse`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() }),
       });
       await onChanged();
     } catch (err) {
@@ -232,11 +367,77 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
     }
   }
 
+  async function submitReturn() {
+    if (!returnTarget) return;
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${returnTarget.id}/return-to-accountant`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: returnReason.trim() }),
+      });
+      setReturnTarget(null);
+      setReturnReason('');
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitConfirm() {
+    if (!confirmTarget) return;
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${confirmTarget.id}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({
+          actualPaidKgs: Number(confirmForm.actualPaidKgs),
+          paymentDate: confirmForm.paymentDate,
+          financeAccountId: confirmForm.financeAccountId || undefined,
+          transactionNumber: confirmForm.transactionNumber || undefined,
+          cashierComment: confirmForm.cashierComment || undefined,
+          accountChangeReason: confirmForm.accountChangeReason || undefined,
+          actualPaidDifferenceReason: confirmForm.actualPaidDifferenceReason || undefined,
+          expectedVersion: confirmTarget.version,
+        }),
+      });
+      setConfirmTarget(null);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function openConfirm(payment: SupplierPayment) {
+    setConfirmTarget(payment);
+    setConfirmForm({
+      actualPaidKgs: String(payment.approvedAmountKgs ?? payment.amountKgs),
+      paymentDate: new Date().toISOString().slice(0, 10),
+      financeAccountId: payment.intendedFinanceAccountId ?? '',
+      transactionNumber: '',
+      cashierComment: '',
+      accountChangeReason: '',
+      actualPaidDifferenceReason: '',
+    });
+  }
+
+  const selectedAccount = accounts.find((account) => account.id === form.intendedFinanceAccountId);
+  const approvedPreview = Number(form.approvedAmountKgs || calculatedKgs);
+  const balanceWarning =
+    selectedAccount && approvedPreview > Number(selectedAccount.availableBalance)
+      ? t('procurement.payments.balanceWarning')
+      : '';
+
   return (
     <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
         <h3 className="text-lg font-bold">{t('procurement.payments.title')}</h3>
-        {canCreate ? (
+        {canPrepare ? (
           <button
             type="button"
             onClick={() => setShowForm((current) => !current)}
@@ -249,34 +450,93 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
 
       {error ? <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
-      <div className="mb-6 grid gap-4 md:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-6 grid gap-4 md:grid-cols-3 lg:grid-cols-7">
         <SummaryCard label={t('procurement.payments.totalOrderYuan')} value={`¥${Number(order.totalYuan).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.totalPaidYuan')} value={`¥${Number(order.totalPaidYuan ?? 0).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.remainingYuan')} value={`¥${Number(order.remainingYuan ?? order.totalYuan).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.totalPaidKgs')} value={formatKgs(order.totalPaidKgs ?? 0)} />
+        <SummaryCard label={t('procurement.payments.paymentCount')} value={String(payments.filter((p) => p.status === 'ACTIVE').length)} />
         <SummaryCard
           label={t('procurement.payments.weightedAverageRate')}
           value={order.weightedAverageYuanRate ? Number(order.weightedAverageYuanRate).toFixed(4) : '-'}
         />
-        <SummaryCard label={t('procurement.payments.paymentStatus')} value={t(`procurement.payments.status.${order.supplierPaymentStatus ?? 'UNPAID'}`)} />
+        <SummaryCard
+          label={t('procurement.payments.paymentStatus')}
+          value={t(`procurement.payments.status.${order.supplierPaymentStatus ?? 'UNPAID'}`)}
+        />
       </div>
 
-      {order.yuanRateLocked ? (
-        <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {t('procurement.payments.rateLocked')}
-        </p>
+      {canSendInvoice ? (
+        <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <h4 className="font-semibold text-slate-900">{t('procurement.payments.sendInvoiceTitle')}</h4>
+          <p className="mt-1 text-sm text-slate-600">{t('procurement.payments.sendInvoiceHelp')}</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.supplierInvoiceNumber')}</span>
+              <input
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.uploadInvoice')}</span>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="mt-2 block w-full text-sm" onChange={(e) => void uploadInvoice(e)} />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                disabled={saving || Boolean(order.invoiceSentToAccountantAt)}
+                onClick={() => void sendInvoice()}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
+              >
+                {order.invoiceSentToAccountantAt
+                  ? t('procurement.payments.invoiceAlreadySent')
+                  : t('procurement.payments.sendInvoice')}
+              </button>
+            </div>
+          </div>
+          {invoiceAttachments.length ? (
+            <div className="mt-3 space-y-1 text-sm">
+              {invoiceAttachments.map((attachment) => (
+                <a key={attachment.id} href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="block text-blue-700">
+                  {attachment.fileName}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
-      {showForm && canCreate ? (
+      {showForm && canPrepare ? (
         <div className="mb-6 grid gap-4 rounded-2xl bg-slate-50 p-4 md:grid-cols-3">
-          <Field label={t('procurement.payments.paymentDate')} type="date" value={form.paymentDate} onChange={(value) => setForm({ ...form, paymentDate: value })} />
-          <Field label={t('procurement.payments.amountYuan')} type="number" value={form.amountYuan} onChange={(value) => setForm({ ...form, amountYuan: value })} />
-          <Field label={t('procurement.payments.exchangeRate')} type="number" value={form.exchangeRate} onChange={(value) => setForm({ ...form, exchangeRate: value })} />
+          <Field label={t('procurement.payments.amountYuan')} type="number" value={form.amountYuan} onChange={(value) => setForm({ ...form, amountYuan: value, approvedAmountKgs: '' })} />
+          <Field label={t('procurement.payments.exchangeRate')} type="number" value={form.exchangeRate} onChange={(value) => setForm({ ...form, exchangeRate: value, approvedAmountKgs: '' })} />
+          <Field label={t('procurement.payments.calculatedKgs')} type="number" value={String(calculatedKgs || '')} onChange={() => undefined} />
+          <Field label={t('procurement.payments.approvedKgs')} type="number" value={form.approvedAmountKgs} onChange={(value) => setForm({ ...form, approvedAmountKgs: value })} />
+          {Math.abs(approvedPreview - calculatedKgs) > 0.009 ? (
+            <>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.adjustmentReason')}</span>
+                <select
+                  value={form.kgsAdjustmentReason}
+                  onChange={(e) => setForm({ ...form, kgsAdjustmentReason: e.target.value })}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                >
+                  <option value="">{t('common.select')}</option>
+                  {adjustmentReasons.map((reason) => (
+                    <option key={reason} value={reason}>{t(`procurement.payments.adjustment.${reason}`)}</option>
+                  ))}
+                </select>
+              </label>
+              <Field label={t('procurement.payments.adjustmentComment')} value={form.kgsAdjustmentComment} onChange={(value) => setForm({ ...form, kgsAdjustmentComment: value })} />
+            </>
+          ) : null}
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.paymentMethod')}</span>
             <select
               value={form.paymentMethod}
-              onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as typeof form.paymentMethod })}
+              onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as PaymentForm['paymentMethod'] })}
               className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
             >
               {paymentMethods.map((method) => (
@@ -284,17 +544,62 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               ))}
             </select>
           </label>
-          <Field label={t('procurement.payments.receiptNumber')} value={form.receiptNumber} onChange={(value) => setForm({ ...form, receiptNumber: value })} />
+          <Field label={t('procurement.payments.recipientName')} value={form.recipientName} onChange={(value) => setForm({ ...form, recipientName: value })} />
+          <Field label={t('procurement.payments.recipientCompany')} value={form.recipientCompany} onChange={(value) => setForm({ ...form, recipientCompany: value })} />
+          {(form.paymentMethod === 'BANK_ACCOUNT' || form.paymentMethod === 'BANK' || form.paymentMethod === 'TRANSFER') ? (
+            <>
+              <Field label={t('procurement.payments.bankName')} value={form.bankName} onChange={(value) => setForm({ ...form, bankName: value })} />
+              <Field label={t('procurement.payments.beneficiaryName')} value={form.beneficiaryName} onChange={(value) => setForm({ ...form, beneficiaryName: value })} />
+              <Field label={t('procurement.payments.accountNumber')} value={form.accountNumber} onChange={(value) => setForm({ ...form, accountNumber: value })} />
+              <Field label={t('procurement.payments.swiftCode')} value={form.swiftCode} onChange={(value) => setForm({ ...form, swiftCode: value })} />
+            </>
+          ) : null}
+          {form.paymentMethod === 'BANK_CARD' ? (
+            <>
+              <Field label={t('procurement.payments.cardholderName')} value={form.cardholderName} onChange={(value) => setForm({ ...form, cardholderName: value })} />
+              <Field label={t('procurement.payments.cardNumber')} value={form.cardNumber} onChange={(value) => setForm({ ...form, cardNumber: value })} />
+            </>
+          ) : null}
+          {(form.paymentMethod === 'OTHER' || form.paymentMethod === 'QR_CODE') ? (
+            <Field label={t('procurement.payments.paymentInstructions')} value={form.paymentInstructions} onChange={(value) => setForm({ ...form, paymentInstructions: value })} />
+          ) : null}
+          <label className="block md:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.financeAccount')}</span>
+            <select
+              value={form.intendedFinanceAccountId}
+              onChange={(e) => setForm({ ...form, intendedFinanceAccountId: e.target.value })}
+              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+            >
+              <option value="">{t('common.select')}</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name} · {formatKgs(account.availableBalance)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Field label={t('procurement.payments.paymentDeadline')} type="date" value={form.paymentDeadline} onChange={(value) => setForm({ ...form, paymentDeadline: value })} />
           <Field label={t('procurement.payments.notes')} value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
-          <div className="md:col-span-3">
+          {balanceWarning ? <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{balanceWarning}</p> : null}
+          <div className="md:col-span-3 flex flex-wrap gap-3">
             <button
               type="button"
               disabled={saving}
-              onClick={() => void createPayment()}
-              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
+              onClick={() => void createPayment(false)}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
             >
-              {saving ? t('common.loading') : t('procurement.payments.savePayment')}
+              {saving ? t('common.loading') : t('procurement.payments.saveDraft')}
             </button>
+            {canSendCashier ? (
+              <button
+                type="button"
+                disabled={saving || Boolean(balanceWarning)}
+                onClick={() => void createPayment(true)}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
+              >
+                {saving ? t('common.loading') : t('procurement.payments.sendToCashier')}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -303,25 +608,38 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">{t('procurement.payments.paymentDate')}</th>
-              <th className="px-4 py-3">{t('procurement.payments.amountYuan')}</th>
-              <th className="px-4 py-3">{t('procurement.payments.exchangeRate')}</th>
-              <th className="px-4 py-3">{t('procurement.payments.amountKgs')}</th>
-              <th className="px-4 py-3">{t('procurement.payments.paymentMethod')}</th>
-              <th className="px-4 py-3">{t('procurement.payments.receipt')}</th>
-              <th className="px-4 py-3">{t('procurement.orders.status')}</th>
-              <th className="px-4 py-3" />
+              <th className="px-3 py-3">{t('procurement.payments.sequence')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.paymentDate')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.amountYuan')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.exchangeRate')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.approvedKgs')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.actualPaidKgs')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.recipientName')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.paymentMethod')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.financeAccount')}</th>
+              <th className="px-3 py-3">{t('procurement.orders.status')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.accountant')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.cashier')}</th>
+              <th className="px-3 py-3">{t('procurement.payments.receipt')}</th>
+              <th className="px-3 py-3" />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {payments.length ? payments.map((payment) => (
-              <tr key={payment.id} className={payment.status === 'VOID' ? 'bg-slate-50 text-slate-400' : ''}>
-                <td className="px-4 py-3">{new Date(payment.paymentDate).toLocaleDateString()}</td>
-                <td className="px-4 py-3">¥{Number(payment.amountYuan).toFixed(2)}</td>
-                <td className="px-4 py-3">{Number(payment.exchangeRate).toFixed(4)}</td>
-                <td className="px-4 py-3">{formatKgs(payment.amountKgs)}</td>
-                <td className="px-4 py-3">{t(`procurement.payments.method.${payment.paymentMethod}`)}</td>
-                <td className="px-4 py-3">
+              <tr key={payment.id} className={payment.status === 'VOID' || payment.status === 'REVERSED' ? 'bg-slate-50 text-slate-400' : ''}>
+                <td className="px-3 py-3">#{payment.sequenceNumber ?? '-'}</td>
+                <td className="px-3 py-3">{new Date(payment.paidAt ?? payment.paymentDate).toLocaleDateString()}</td>
+                <td className="px-3 py-3">¥{Number(payment.amountYuan).toFixed(2)}</td>
+                <td className="px-3 py-3">{Number(payment.exchangeRate).toFixed(4)}</td>
+                <td className="px-3 py-3">{formatKgs(payment.approvedAmountKgs ?? payment.amountKgs)}</td>
+                <td className="px-3 py-3">{payment.actualPaidKgs != null ? formatKgs(payment.actualPaidKgs) : '-'}</td>
+                <td className="px-3 py-3">{payment.recipientName || '-'}</td>
+                <td className="px-3 py-3">{t(`procurement.payments.method.${payment.paymentMethod}`)}</td>
+                <td className="px-3 py-3">{payment.actualFinanceAccount?.name || payment.intendedFinanceAccount?.name || '-'}</td>
+                <td className="px-3 py-3">{translateStatus(t, payment.status, 'payment')}</td>
+                <td className="px-3 py-3">{payment.accountant?.fullName || payment.createdBy?.fullName || '-'}</td>
+                <td className="px-3 py-3">{payment.cashier?.fullName || '-'}</td>
+                <td className="px-3 py-3">
                   {payment.attachments?.length ? (
                     <div className="space-y-1">
                       {payment.attachments.map((attachment) => (
@@ -330,95 +648,115 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                         </a>
                       ))}
                     </div>
-                  ) : payment.receiptNumber || '-'}
+                  ) : '-'}
                 </td>
-                <td className="px-4 py-3">{translateStatus(t, payment.status, 'payment')}</td>
-                <td className="px-4 py-3">
+                <td className="px-3 py-3">
                   <div className="flex flex-wrap gap-2">
-                    {canEdit && payment.status === 'ACTIVE' ? (
-                      <button
-                        type="button"
-                        onClick={() => openEdit(payment)}
-                        className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700"
-                      >
-                        {t('procurement.payments.edit')}
+                    {canSendCashier && (payment.status === 'DRAFT' || payment.status === 'RETURNED') ? (
+                      <button type="button" onClick={() => void sendExistingToCashier(payment.id)} className="rounded-lg border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700">
+                        {t('procurement.payments.sendToCashier')}
                       </button>
                     ) : null}
-                    {canCreate && payment.status === 'ACTIVE' ? (
-                      <label className="cursor-pointer rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold">
-                        {t('procurement.payments.uploadReceipt')}
-                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => void uploadReceipt(payment.id, e)} />
-                      </label>
+                    {canConfirm && payment.status === 'PENDING_CASHIER' ? (
+                      <>
+                        <label className="cursor-pointer rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold">
+                          {t('procurement.payments.uploadReceipt')}
+                          <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => void uploadReceipt(payment.id, e)} />
+                        </label>
+                        <button type="button" onClick={() => openConfirm(payment)} className="rounded-lg bg-blue-600 px-2 py-1 text-xs font-semibold text-white">
+                          {t('procurement.payments.confirmPayment')}
+                        </button>
+                      </>
                     ) : null}
-                    {canVoid && payment.status === 'ACTIVE' ? (
+                    {canReturn && payment.status === 'PENDING_CASHIER' ? (
+                      <button type="button" onClick={() => { setReturnTarget(payment); setReturnReason(''); }} className="rounded-lg border border-amber-300 px-2 py-1 text-xs font-semibold text-amber-800">
+                        {t('procurement.payments.returnToAccountant')}
+                      </button>
+                    ) : null}
+                    {canVoid && ['DRAFT', 'RETURNED', 'PENDING_CASHIER', 'CANCELLED'].includes(payment.status) ? (
                       <button type="button" onClick={() => void voidPayment(payment.id)} className="rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold text-red-700">
                         {t('procurement.payments.voidPayment')}
                       </button>
+                    ) : null}
+                    {canReverse && payment.status === 'ACTIVE' ? (
+                      <button type="button" onClick={() => void reversePayment(payment.id)} className="rounded-lg border border-red-200 px-2 py-1 text-xs font-semibold text-red-700">
+                        {t('procurement.payments.reversePayment')}
+                      </button>
+                    ) : null}
+                    {canEdit && (payment.status === 'DRAFT' || payment.status === 'RETURNED') ? (
+                      <span className="text-xs text-slate-500">{payment.returnReason || ''}</span>
                     ) : null}
                   </div>
                 </td>
               </tr>
             )) : (
-              <tr><td className="px-4 py-6 text-slate-500" colSpan={8}>{t('procurement.payments.noPayments')}</td></tr>
+              <tr><td className="px-4 py-6 text-slate-500" colSpan={14}>{t('procurement.payments.noPayments')}</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {editTarget ? (
+      {confirmTarget ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
           <div className="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
-            <h4 className="text-xl font-bold text-slate-950">{t('procurement.payments.editPayment')}</h4>
+            <h4 className="text-xl font-bold">{t('procurement.payments.confirmPayment')}</h4>
             <p className="mt-2 text-sm text-slate-500">
-              {t(`procurement.payments.method.${editTarget.paymentMethod}`)} · ¥{Number(editTarget.amountYuan).toFixed(2)}
+              #{confirmTarget.sequenceNumber} · ¥{Number(confirmTarget.amountYuan).toFixed(2)} · {t('procurement.payments.exchangeRate')}: {Number(confirmTarget.exchangeRate).toFixed(4)}
             </p>
+            <div className="mt-5 space-y-4">
+              <Field label={t('procurement.payments.actualPaidKgs')} type="number" value={confirmForm.actualPaidKgs} onChange={(value) => setConfirmForm({ ...confirmForm, actualPaidKgs: value })} />
+              <Field label={t('procurement.payments.paymentDate')} type="date" value={confirmForm.paymentDate} onChange={(value) => setConfirmForm({ ...confirmForm, paymentDate: value })} />
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.financeAccount')}</span>
+                <select
+                  value={confirmForm.financeAccountId}
+                  onChange={(e) => setConfirmForm({ ...confirmForm, financeAccountId: e.target.value })}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                >
+                  <option value="">{t('common.select')}</option>
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} · {formatKgs(account.availableBalance)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {confirmForm.financeAccountId && confirmForm.financeAccountId !== confirmTarget.intendedFinanceAccountId ? (
+                <Field label={t('procurement.payments.accountChangeReason')} value={confirmForm.accountChangeReason} onChange={(value) => setConfirmForm({ ...confirmForm, accountChangeReason: value })} />
+              ) : null}
+              {Math.abs(Number(confirmForm.actualPaidKgs || 0) - Number(confirmTarget.approvedAmountKgs ?? confirmTarget.amountKgs)) > 0.009 ? (
+                <Field label={t('procurement.payments.differenceReason')} value={confirmForm.actualPaidDifferenceReason} onChange={(value) => setConfirmForm({ ...confirmForm, actualPaidDifferenceReason: value })} />
+              ) : null}
+              <Field label={t('procurement.payments.transactionNumber')} value={confirmForm.transactionNumber} onChange={(value) => setConfirmForm({ ...confirmForm, transactionNumber: value })} />
+              <Field label={t('procurement.payments.notes')} value={confirmForm.cashierComment} onChange={(value) => setConfirmForm({ ...confirmForm, cashierComment: value })} />
+              <p className="text-sm text-amber-800">{t('procurement.payments.receiptRequiredHint')}</p>
+              <div className="flex justify-end gap-3">
+                <button type="button" onClick={() => setConfirmTarget(null)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
+                <button type="button" disabled={saving} onClick={() => void submitConfirm()} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white disabled:bg-blue-300">
+                  {saving ? t('common.loading') : t('procurement.payments.confirmPayment')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-            {!showConfirm ? (
-              <div className="mt-5 space-y-4">
-                <Field label={t('procurement.payments.paymentDate')} type="date" value={editForm.paymentDate} onChange={(value) => setEditForm({ ...editForm, paymentDate: value })} />
-                <Field label={t('procurement.payments.amountYuan')} type="number" value={editForm.amountYuan} onChange={(value) => setEditForm({ ...editForm, amountYuan: value })} />
-                <Field label={t('procurement.payments.exchangeRate')} type="number" value={editForm.exchangeRate} onChange={(value) => setEditForm({ ...editForm, exchangeRate: value })} />
-                <Field label={t('procurement.payments.notes')} value={editForm.notes} onChange={(value) => setEditForm({ ...editForm, notes: value })} />
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.changeReason')}</span>
-                  <textarea
-                    value={editForm.changeReason}
-                    onChange={(e) => setEditForm({ ...editForm, changeReason: e.target.value })}
-                    placeholder={t('procurement.payments.changeReasonPlaceholder')}
-                    className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </label>
-                <div className="flex justify-end gap-3">
-                  <button type="button" onClick={closeEdit} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">
-                    {t('common.cancel')}
-                  </button>
-                  <button type="button" onClick={requestSave} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">
-                    {t('procurement.payments.saveChanges')}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-5 space-y-4">
-                <p className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  {hqReceived
-                    ? t('procurement.payments.confirmRateChangeHqReceived')
-                    : t('procurement.payments.confirmRateChange')}
-                </p>
-                <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
-                  <p>{t('procurement.payments.exchangeRate')}: {Number(editTarget.exchangeRate).toFixed(4)} → {Number(editForm.exchangeRate || 0).toFixed(4)}</p>
-                  <p className="mt-1">{t('procurement.payments.amountYuan')}: ¥{Number(editTarget.amountYuan).toFixed(2)} → ¥{Number(editForm.amountYuan || 0).toFixed(2)}</p>
-                  <p className="mt-1">{t('procurement.payments.changeReason')}: {editForm.changeReason}</p>
-                </div>
-                <div className="flex justify-end gap-3">
-                  <button type="button" onClick={() => setShowConfirm(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">
-                    {t('common.cancel')}
-                  </button>
-                  <button type="button" disabled={saving} onClick={() => void saveEdit()} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white disabled:bg-blue-300">
-                    {saving ? t('common.loading') : t('common.confirm')}
-                  </button>
-                </div>
-              </div>
-            )}
+      {returnTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl">
+            <h4 className="text-xl font-bold">{t('procurement.payments.returnToAccountant')}</h4>
+            <textarea
+              value={returnReason}
+              onChange={(e) => setReturnReason(e.target.value)}
+              className="mt-4 min-h-28 w-full rounded-xl border border-slate-300 px-3 py-2"
+              placeholder={t('procurement.payments.returnReason')}
+            />
+            <div className="mt-4 flex justify-end gap-3">
+              <button type="button" onClick={() => setReturnTarget(null)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
+              <button type="button" disabled={saving || returnReason.trim().length < 3} onClick={() => void submitReturn()} className="rounded-xl bg-amber-600 px-4 py-2 font-semibold text-white disabled:bg-amber-300">
+                {saving ? t('common.loading') : t('common.confirm')}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -454,7 +792,8 @@ function Field({
         step={type === 'number' ? '0.0001' : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+        readOnly={label.includes('Рассчитан') || label.toLowerCase().includes('calculated')}
+        className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 read-only:bg-slate-100"
       />
     </label>
   );

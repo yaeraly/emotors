@@ -7,7 +7,11 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RequirePermissions } from '../roles/permissions.decorator';
 import { PermissionsGuard } from '../roles/permissions.guard';
 import { RolesGuard } from '../roles/roles.guard';
+import { ConfirmSupplierPaymentDto } from './dto/confirm-supplier-payment.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
+import { ReturnSupplierPaymentDto } from './dto/return-supplier-payment.dto';
+import { ReverseSupplierPaymentDto } from './dto/reverse-supplier-payment.dto';
+import { SendInvoiceToAccountantDto } from './dto/send-invoice-to-accountant.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
 import { UpdateCargoReceiptDto } from './dto/update-cargo-receipt.dto';
 import { UpdateChinaDomesticTransportDto } from './dto/update-china-domestic-transport.dto';
@@ -186,14 +190,57 @@ export class ProcurementController {
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
   procurementOrderAuditLogs(@Param('id') id: string) { return this.service.procurementOrderAuditLogs(id); }
 
+  @Get('supplier-payment-accounts')
+  @RequirePermissions('finance.view', 'payments.manage', 'procurement.manage')
+  supplierPaymentAccounts(@CurrentUser() user: AuthUser) {
+    return this.service.listHqFinanceAccountsForPayments(user);
+  }
+
+  @Get('accountant-payment-queue')
+  @RequirePermissions('finance.view', 'payments.manage')
+  accountantPaymentQueue(@CurrentUser() user: AuthUser) {
+    return this.service.listAccountantPaymentQueue(user);
+  }
+
+  @Get('cashier-payment-queue')
+  @RequirePermissions('payments.manage', 'finance.view')
+  cashierPaymentQueue(@CurrentUser() user: AuthUser) {
+    return this.service.listCashierPaymentQueue(user);
+  }
+
   @Get('orders/:id/supplier-payments')
-  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'payments.manage')
   supplierPayments(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.supplierPayments(user, id);
   }
 
+  @Post('orders/:id/send-invoice-to-accountant')
+  @RequirePermissions('procurement.manage')
+  sendInvoiceToAccountant(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: SendInvoiceToAccountantDto,
+  ) {
+    return this.service.sendInvoiceToAccountant(user, id, dto);
+  }
+
+  @Post('orders/:id/attachments/supplier-invoice')
+  @RequirePermissions('procurement.manage')
+  uploadSupplierInvoice(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.service.uploadProcurementAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.SUPPLIER_INVOICE,
+    );
+  }
+
   @Post('orders/:id/supplier-payments')
-  @RequirePermissions('procurement.manage', 'finance.view')
+  @RequirePermissions('finance.view', 'payments.manage')
   createSupplierPayment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -203,7 +250,7 @@ export class ProcurementController {
   }
 
   @Put('orders/:id/supplier-payments/:paymentId')
-  @RequirePermissions('procurement.manage', 'finance.view')
+  @RequirePermissions('finance.view', 'payments.manage')
   updateSupplierPayment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -213,8 +260,40 @@ export class ProcurementController {
     return this.service.updateSupplierPayment(user, id, paymentId, dto);
   }
 
+  @Post('orders/:id/supplier-payments/:paymentId/send-to-cashier')
+  @RequirePermissions('finance.view', 'payments.manage')
+  sendSupplierPaymentToCashier(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+  ) {
+    return this.service.sendSupplierPaymentToCashier(user, id, paymentId);
+  }
+
+  @Post('orders/:id/supplier-payments/:paymentId/return-to-accountant')
+  @RequirePermissions('payments.manage', 'finance.view')
+  returnSupplierPaymentToAccountant(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: ReturnSupplierPaymentDto,
+  ) {
+    return this.service.returnSupplierPaymentToAccountant(user, id, paymentId, dto);
+  }
+
+  @Post('orders/:id/supplier-payments/:paymentId/confirm')
+  @RequirePermissions('payments.manage', 'finance.view')
+  confirmSupplierPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: ConfirmSupplierPaymentDto,
+  ) {
+    return this.service.confirmSupplierPayment(user, id, paymentId, dto);
+  }
+
   @Post('orders/:id/supplier-payments/:paymentId/void')
-  @RequirePermissions('procurement.manage', 'finance.view')
+  @RequirePermissions('finance.manage', 'finance.view')
   voidSupplierPayment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
@@ -222,6 +301,17 @@ export class ProcurementController {
     @Body() dto: VoidSupplierPaymentDto,
   ) {
     return this.service.voidSupplierPayment(user, id, paymentId, dto);
+  }
+
+  @Post('orders/:id/supplier-payments/:paymentId/reverse')
+  @RequirePermissions('finance.manage')
+  reverseSupplierPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('paymentId') paymentId: string,
+    @Body() dto: ReverseSupplierPaymentDto,
+  ) {
+    return this.service.reverseSupplierPayment(user, id, paymentId, dto);
   }
 
   @Get('orders/:id/attachments')

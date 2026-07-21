@@ -346,24 +346,64 @@ export function canViewSupplierPayments(user: Pick<AuthUser, 'role' | 'roles' | 
     roles.includes(Role.PROCUREMENT_MANAGER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
     roles.includes(Role.HQ_ACCOUNTANT) ||
+    roles.includes(Role.HQ_CASHIER) ||
     userHasPermission(user, 'procurement.view') ||
     userHasPermission(user, 'procurement.manage') ||
-    userHasPermission(user, 'finance.view')
+    userHasPermission(user, 'finance.view') ||
+    userHasPermission(user, 'payments.manage')
   );
 }
 
+/** HQ Accountant prepares payment tranches (no longer Supply Manager). */
 export function canCreateSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
   return (
     hasAnyFullAccessRole(roles) ||
-    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
     roles.includes(Role.FINANCE_MANAGER) ||
     roles.includes(Role.HQ_ACCOUNTANT)
   );
 }
 
+export function canSendProcurementInvoiceToAccountant(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.SUPPLY_CHAIN_MANAGER) ||
+    roles.includes(Role.PROCUREMENT_MANAGER) ||
+    userHasPermission(user, 'procurement.manage')
+  );
+}
+
+export function canSendSupplierPaymentToCashier(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
+  return canCreateSupplierPayment(user);
+}
+
+export function canConfirmSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.HQ_CASHIER) ||
+    userHasPermission(user, 'payments.manage')
+  );
+}
+
+export function canReturnSupplierPaymentToAccountant(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
+  return canConfirmSupplierPayment(user);
+}
+
 export function canEditSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return hasAnyFullAccessRole(resolveUserRoles(user));
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT)
+  );
 }
 
 export function canVoidSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
@@ -371,7 +411,19 @@ export function canVoidSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | '
   return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
 }
 
+export function canReverseSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
 export function canAllowSupplierOverpayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
+export function canChangeSupplierPaymentFinanceAccount(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
+) {
   const roles = resolveUserRoles(user);
   return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
 }

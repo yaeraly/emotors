@@ -260,7 +260,7 @@ export default function ProcurementOrderDetailPage() {
   });
   const canUnlock = canUnlockProcurementOrder(user) && order?.editWindowStatus === 'LOCKED';
   const canSeePayments = canViewSupplierPayments(user);
-  const canUploadCargo = canCreateSupplierPayment(user) || canReceiveProcurementToHq(user);
+  const canUploadCargo = canCreateProcurementOrder(user) || canReceiveProcurementToHq(user);
   const readOnlyFinance = hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'HQ_ACCOUNTANT') || hasRole(user, 'ACCOUNTANT');
   const canReceive = canReceiveProcurementToHq(user);
   const readyForHqReceiving = order?.status === 'ARRIVED' || order?.status === 'ARRIVED_IN_KYRGYZSTAN' || order?.status === 'IN_TRANSIT';

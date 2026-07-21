@@ -23,6 +23,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   canAllowSupplierOverpayment,
+  canCreateProcurementOrder,
   canCreateSupplierPayment,
   canEditSupplierPayment,
   canVoidSupplierPayment,
@@ -40,7 +41,11 @@ import {
   resolveUserRoles,
 } from '../rbac/rbac';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
+import { ConfirmSupplierPaymentDto } from './dto/confirm-supplier-payment.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
+import { ReturnSupplierPaymentDto } from './dto/return-supplier-payment.dto';
+import { ReverseSupplierPaymentDto } from './dto/reverse-supplier-payment.dto';
+import { SendInvoiceToAccountantDto } from './dto/send-invoice-to-accountant.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
 import { UpdateCargoReceiptDto } from './dto/update-cargo-receipt.dto';
 import { UpdateChinaDomesticTransportDto } from './dto/update-china-domestic-transport.dto';
@@ -67,8 +72,10 @@ import {
 import { LandedCostService } from './landed-cost.service';
 import {
   calculateAmountKgs,
+  isConfirmedSupplierPayment,
   summarizeSupplierPayments,
 } from './supplier-payment.util';
+import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import {
   canUnlockProcurementOrder,
   canUserEditProcurementItems,
@@ -122,6 +129,7 @@ export class ProcurementService {
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
     private readonly landedCostService: LandedCostService,
+    private readonly supplierPaymentWorkflow: SupplierPaymentWorkflowService,
   ) {}
 
   createSupplier(dto: any) {
@@ -1074,100 +1082,28 @@ export class ProcurementService {
     }).then((order) => (order ? this.toProcurementOrderResponse(order) : null));
   }
 
-  async supplierPayments(user: AuthUser, orderId: string) {
-    this.assertCanViewSupplierPayments(user);
-    await this.getProcurementOrderForRead(orderId);
-    const payments = await this.prisma.procurementSupplierPayment.findMany({
-      where: { procurementOrderId: orderId },
-      include: {
-        supplier: { select: { id: true, name: true } },
-        createdBy: { select: { id: true, fullName: true, role: true } },
-        voidedBy: { select: { id: true, fullName: true, role: true } },
-        attachments: {
-          where: { deletedAt: null },
-          include: { uploadedBy: { select: { id: true, fullName: true } } },
-        },
-      },
-      orderBy: { paymentDate: 'desc' },
-    });
-    return payments.map((payment) => this.toSupplierPaymentResponse(payment));
+  supplierPayments(user: AuthUser, orderId: string) {
+    return this.supplierPaymentWorkflow.listPayments(user, orderId);
+  }
+
+  listAccountantPaymentQueue(user: AuthUser) {
+    return this.supplierPaymentWorkflow.listAccountantQueue(user);
+  }
+
+  listCashierPaymentQueue(user: AuthUser) {
+    return this.supplierPaymentWorkflow.listCashierQueue(user);
+  }
+
+  listHqFinanceAccountsForPayments(user: AuthUser) {
+    return this.supplierPaymentWorkflow.listHqFinanceAccounts(user);
+  }
+
+  sendInvoiceToAccountant(user: AuthUser, orderId: string, dto: SendInvoiceToAccountantDto) {
+    return this.supplierPaymentWorkflow.sendInvoiceToAccountant(user, orderId, dto);
   }
 
   createSupplierPayment(user: AuthUser, orderId: string, dto: CreateSupplierPaymentDto) {
-    this.assertCanCreateSupplierPayment(user);
-    return this.prisma.$transaction(async (tx) => {
-      const order = await this.getProcurementOrderForWrite(tx, orderId);
-      this.validateSupplierPaymentPayload(dto.amountYuan, dto.exchangeRate);
-      await this.assertSupplierPaymentAllowed(
-        tx,
-        user,
-        order,
-        dto.amountYuan,
-        dto.allowOverpayment === true,
-      );
-      const amountKgs = calculateAmountKgs(dto.amountYuan, dto.exchangeRate);
-      const payment = await tx.procurementSupplierPayment.create({
-        data: {
-          procurementOrderId: order.id,
-          supplierId: order.supplierId,
-          paymentDate: new Date(dto.paymentDate),
-          amountYuan: dto.amountYuan,
-          exchangeRate: dto.exchangeRate,
-          amountKgs,
-          paymentMethod: dto.paymentMethod,
-          receiptNumber: dto.receiptNumber?.trim() || null,
-          notes: dto.notes?.trim() || null,
-          createdById: user.id,
-        },
-        include: {
-          supplier: { select: { id: true, name: true } },
-          createdBy: { select: { id: true, fullName: true, role: true } },
-          attachments: true,
-        },
-      });
-      const updated = await this.syncSupplierPaymentSummaryAndRecalculate(
-        tx,
-        user,
-        order.id,
-        'Supplier payment recorded',
-      );
-      await this.auditProcurement(
-        tx,
-        user,
-        'SUPPLIER_PAYMENT_CREATED',
-        order.id,
-        null,
-        {
-          paymentId: payment.id,
-          amountYuan: dto.amountYuan,
-          exchangeRate: dto.exchangeRate,
-          amountKgs,
-          paymentMethod: dto.paymentMethod,
-        },
-      );
-      const remainingYuan = Number(updated.remainingYuan ?? 0);
-      if (remainingYuan > 0) {
-        await this.notificationsService.notifyInTx(tx, user, {
-          type: AlertType.SUPPLIER_PAYMENT_DUE,
-          entityType: 'ProcurementOrder',
-          entityId: order.id,
-          referenceNumber: updated.orderNumber,
-          message: `Supplier payment due for procurement ${updated.orderNumber}. Remaining: ${remainingYuan} yuan.`,
-        });
-      } else {
-        await this.notificationsService.notifyInTx(tx, user, {
-          type: AlertType.SUPPLIER_PAYMENT_COMPLETED,
-          entityType: 'ProcurementOrder',
-          entityId: order.id,
-          referenceNumber: updated.orderNumber,
-          message: `Supplier payment completed for procurement ${updated.orderNumber}.`,
-        });
-      }
-      return {
-        payment: this.toSupplierPaymentResponse(payment),
-        order: updated,
-      };
-    });
+    return this.supplierPaymentWorkflow.createPayment(user, orderId, dto);
   }
 
   updateSupplierPayment(
@@ -1176,98 +1112,29 @@ export class ProcurementService {
     paymentId: string,
     dto: UpdateSupplierPaymentDto,
   ) {
-    this.assertCanEditSupplierPayment(user);
-    return this.prisma.$transaction(async (tx) => {
-      const order = await this.getProcurementOrderForWrite(tx, orderId);
-      const payment = await tx.procurementSupplierPayment.findFirst({
-        where: { id: paymentId, procurementOrderId: order.id },
-      });
-      if (!payment) throw new NotFoundException('Supplier payment not found');
-      if (payment.status === ProcurementSupplierPaymentStatus.VOID) {
-        throw new BadRequestException('Voided payments cannot be edited');
-      }
-      const oldValue = this.toSupplierPaymentResponse(payment);
-      const amountYuan = dto.amountYuan ?? Number(payment.amountYuan);
-      const exchangeRate = dto.exchangeRate ?? Number(payment.exchangeRate);
-      const changeReason = dto.changeReason?.trim();
-      if (!changeReason) {
-        throw new BadRequestException('Change reason is required');
-      }
-      this.validateSupplierPaymentPayload(amountYuan, exchangeRate);
-      const otherPayments = await tx.procurementSupplierPayment.findMany({
-        where: {
-          procurementOrderId: order.id,
-          status: ProcurementSupplierPaymentStatus.ACTIVE,
-          NOT: { id: payment.id },
-        },
-      });
-      const projectedTotal = otherPayments.reduce((sum, row) => sum + Number(row.amountYuan), 0) + amountYuan;
-      if (projectedTotal > Number(order.totalYuan) && !dto.allowOverpayment) {
-        this.assertCanAllowSupplierOverpayment(user);
-      }
-      const updatedPayment = await tx.procurementSupplierPayment.update({
-        where: { id: payment.id },
-        data: {
-          paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : payment.paymentDate,
-          amountYuan,
-          exchangeRate,
-          amountKgs: calculateAmountKgs(amountYuan, exchangeRate),
-          paymentMethod: dto.paymentMethod ?? payment.paymentMethod,
-          receiptNumber: dto.receiptNumber !== undefined ? dto.receiptNumber?.trim() || null : payment.receiptNumber,
-          notes: dto.notes !== undefined ? dto.notes?.trim() || null : payment.notes,
-        },
-        include: {
-          supplier: { select: { id: true, name: true } },
-          createdBy: { select: { id: true, fullName: true, role: true } },
-          attachments: { where: { deletedAt: null } },
-        },
-      });
-      const updatedOrder = await this.syncSupplierPaymentSummaryAndRecalculate(
-        tx,
-        user,
-        order.id,
-        changeReason,
-      );
-      await this.auditProcurement(
-        tx,
-        user,
-        'PAYMENT_EXCHANGE_RATE_UPDATED',
-        order.id,
-        {
-          paymentId: payment.id,
-          procurementOrderId: order.id,
-          oldExchangeRate: oldValue.exchangeRate,
-          newExchangeRate: Number(updatedPayment.exchangeRate),
-          oldAmountYuan: oldValue.amountYuan,
-          newAmountYuan: Number(updatedPayment.amountYuan),
-          oldAmountKgs: oldValue.amountKgs,
-          newAmountKgs: Number(updatedPayment.amountKgs),
-          oldPaymentDate: oldValue.paymentDate,
-          newPaymentDate: updatedPayment.paymentDate,
-        },
-        {
-          paymentId: updatedPayment.id,
-          procurementOrderId: order.id,
-          oldExchangeRate: oldValue.exchangeRate,
-          newExchangeRate: Number(updatedPayment.exchangeRate),
-          oldAmountYuan: oldValue.amountYuan,
-          newAmountYuan: Number(updatedPayment.amountYuan),
-          oldAmountKgs: oldValue.amountKgs,
-          newAmountKgs: Number(updatedPayment.amountKgs),
-          changedBy: user.id,
-          changeReason,
-        },
-        changeReason,
-        {
-          paymentId: payment.id,
-          changedByName: user.fullName ?? user.email ?? user.id,
-        },
-      );
-      return {
-        payment: this.toSupplierPaymentResponse(updatedPayment),
-        order: updatedOrder,
-      };
-    });
+    return this.supplierPaymentWorkflow.updatePayment(user, orderId, paymentId, dto);
+  }
+
+  sendSupplierPaymentToCashier(user: AuthUser, orderId: string, paymentId: string) {
+    return this.supplierPaymentWorkflow.sendPaymentToCashier(user, orderId, paymentId);
+  }
+
+  returnSupplierPaymentToAccountant(
+    user: AuthUser,
+    orderId: string,
+    paymentId: string,
+    dto: ReturnSupplierPaymentDto,
+  ) {
+    return this.supplierPaymentWorkflow.returnPaymentToAccountant(user, orderId, paymentId, dto);
+  }
+
+  confirmSupplierPayment(
+    user: AuthUser,
+    orderId: string,
+    paymentId: string,
+    dto: ConfirmSupplierPaymentDto,
+  ) {
+    return this.supplierPaymentWorkflow.confirmPayment(user, orderId, paymentId, dto);
   }
 
   voidSupplierPayment(
@@ -1276,52 +1143,16 @@ export class ProcurementService {
     paymentId: string,
     dto: VoidSupplierPaymentDto,
   ) {
-    this.assertCanVoidSupplierPayment(user);
-    return this.prisma.$transaction(async (tx) => {
-      const order = await this.getProcurementOrderForWrite(tx, orderId);
-      const payment = await tx.procurementSupplierPayment.findFirst({
-        where: { id: paymentId, procurementOrderId: order.id },
-      });
-      if (!payment) throw new NotFoundException('Supplier payment not found');
-      if (payment.status === ProcurementSupplierPaymentStatus.VOID) {
-        throw new BadRequestException('Payment is already voided');
-      }
-      const oldValue = this.toSupplierPaymentResponse(payment);
-      const voided = await tx.procurementSupplierPayment.update({
-        where: { id: payment.id },
-        data: {
-          status: ProcurementSupplierPaymentStatus.VOID,
-          voidedAt: new Date(),
-          voidedById: user.id,
-          voidReason: dto.reason?.trim() || null,
-        },
-        include: {
-          supplier: { select: { id: true, name: true } },
-          createdBy: { select: { id: true, fullName: true, role: true } },
-          voidedBy: { select: { id: true, fullName: true, role: true } },
-          attachments: { where: { deletedAt: null } },
-        },
-      });
-      const updatedOrder = await this.syncSupplierPaymentSummaryAndRecalculate(
-        tx,
-        user,
-        order.id,
-        dto.reason?.trim() || 'Supplier payment voided',
-      );
-      await this.auditProcurement(
-        tx,
-        user,
-        'SUPPLIER_PAYMENT_VOIDED',
-        order.id,
-        oldValue,
-        this.toSupplierPaymentResponse(voided),
-        dto.reason,
-      );
-      return {
-        payment: this.toSupplierPaymentResponse(voided),
-        order: updatedOrder,
-      };
-    });
+    return this.supplierPaymentWorkflow.voidPayment(user, orderId, paymentId, dto);
+  }
+
+  reverseSupplierPayment(
+    user: AuthUser,
+    orderId: string,
+    paymentId: string,
+    dto: ReverseSupplierPaymentDto,
+  ) {
+    return this.supplierPaymentWorkflow.reversePayment(user, orderId, paymentId, dto);
   }
 
   async procurementAttachments(user: AuthUser, orderId: string, entityType?: FileAttachmentEntityType) {
@@ -1347,8 +1178,27 @@ export class ProcurementService {
     supplierPaymentId?: string,
   ) {
     if (entityType === FileAttachmentEntityType.CARGO_RECEIPT) {
-      if (!canCreateSupplierPayment(user) && !canReceiveProcurementToHq(user)) {
+      if (!canCreateProcurementOrder(user) && !canReceiveProcurementToHq(user)) {
         throw new ForbiddenException('You do not have permission to upload cargo receipt attachments');
+      }
+    } else if (
+      entityType === FileAttachmentEntityType.SUPPLIER_PAYMENT ||
+      entityType === FileAttachmentEntityType.PAYMENT_QR ||
+      entityType === FileAttachmentEntityType.PAYMENT_BANK_DETAILS
+    ) {
+      const roles = resolveUserRoles(user);
+      const canUploadPaymentAttachment =
+        canCreateSupplierPayment(user) ||
+        hasAnyFullAccessRole(roles) ||
+        roles.includes(Role.HQ_CASHIER) ||
+        roles.includes(Role.HQ_ACCOUNTANT) ||
+        roles.includes(Role.FINANCE_MANAGER);
+      if (!canUploadPaymentAttachment) {
+        throw new ForbiddenException('You do not have permission to upload payment attachments');
+      }
+    } else if (entityType === FileAttachmentEntityType.SUPPLIER_INVOICE) {
+      if (!canCreateProcurementOrder(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+        throw new ForbiddenException('You do not have permission to upload supplier invoices');
       }
     } else {
       this.assertCanCreateSupplierPayment(user);
@@ -3503,7 +3353,18 @@ export class ProcurementService {
     if (!order) throw new NotFoundException('Procurement order not found');
 
     const oldValue = this.pickProcurementAuditFields(order);
-    const summary = summarizeSupplierPayments(order.supplierPayments, Number(order.totalYuan));
+    const summary = summarizeSupplierPayments(
+      order.supplierPayments.map((payment: any) => ({
+        amountYuan: Number(payment.amountYuan),
+        exchangeRate: Number(payment.exchangeRate),
+        amountKgs: Number(payment.amountKgs),
+        actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+        approvedAmountKgs: payment.approvedAmountKgs != null ? Number(payment.approvedAmountKgs) : null,
+        status: payment.status,
+      })),
+      Number(order.totalYuan),
+      { invoiceSentToAccountantAt: order.invoiceSentToAccountantAt },
+    );
     const effectiveRate =
       summary.weightedAverageYuanRate && summary.totalPaidYuan > 0
         ? summary.weightedAverageYuanRate
@@ -3622,12 +3483,7 @@ export class ProcurementService {
   }
 
   private toSupplierPaymentResponse(payment: any) {
-    return {
-      ...payment,
-      amountYuan: Number(payment.amountYuan),
-      exchangeRate: Number(payment.exchangeRate),
-      amountKgs: Number(payment.amountKgs),
-    };
+    return this.supplierPaymentWorkflow.toPaymentResponse(payment);
   }
 
   private async toProcurementOrderResponse(order: any) {
@@ -3641,9 +3497,7 @@ export class ProcurementService {
       orderBy: { createdAt: 'desc' },
     });
     const activePaymentCount = order.supplierPayments
-      ? order.supplierPayments.filter(
-          (payment: any) => payment.status === ProcurementSupplierPaymentStatus.ACTIVE,
-        ).length
+      ? order.supplierPayments.filter((payment: any) => isConfirmedSupplierPayment(payment.status)).length
       : await this.prisma.procurementSupplierPayment.count({
           where: { procurementOrderId: order.id, status: ProcurementSupplierPaymentStatus.ACTIVE },
         });

@@ -59,9 +59,13 @@ export class LandedCostService {
         (order.supplierPayments ?? []).map((payment) => ({
           amountYuan: Number(payment.amountYuan),
           exchangeRate: Number(payment.exchangeRate),
+          amountKgs: Number(payment.amountKgs),
+          actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+          approvedAmountKgs: payment.approvedAmountKgs != null ? Number(payment.approvedAmountKgs) : null,
           status: payment.status,
         })),
         Number(order.totalYuan),
+        { invoiceSentToAccountantAt: (order as any).invoiceSentToAccountantAt },
       );
       const effectiveRate =
         summary.weightedAverageYuanRate && summary.totalPaidYuan > 0

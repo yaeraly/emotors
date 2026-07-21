@@ -11,6 +11,7 @@ export const FINANCE_MAIN_NAV: FinanceNavSection[] = [
   { href: '/finance/dashboard', labelKey: 'finance.dashboard', roles: ['view', 'manage', 'owner', 'hq'] },
   { href: '/finance/accounts', labelKey: 'finance.accounts', roles: ['view', 'manage', 'cashier', 'owner', 'hq'] },
   { href: '/finance/payments', labelKey: 'finance.payments', roles: ['view', 'manage', 'cashier', 'owner', 'hq'] },
+  { href: '/procurement/accountant-payments', labelKey: 'procurement.payments.accountantQueue', roles: ['manage', 'hq'] },
   { href: '/finance/income', labelKey: 'finance.income', roles: ['view', 'manage', 'owner', 'hq'] },
   { href: '/finance/expenses', labelKey: 'finance.expenses', roles: ['view', 'manage', 'owner', 'hq'] },
   { href: '/finance/transfers', labelKey: 'finance.transfers', roles: ['view', 'manage', 'owner', 'hq'] },

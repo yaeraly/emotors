@@ -302,6 +302,8 @@ function canHqSalesManagerAccessPath(pathname: string) {
 const HQ_CASHIER_ALLOWED_PREFIXES = [
   '/change-password',
   '/distribution',
+  '/procurement/cashier-payments',
+  '/procurement/orders',
   '/alerts',
   '/notifications',
 ];
@@ -725,13 +727,19 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/procurement/purchase-price-history')) {
     return canViewProcurement(user) || hasPermission(user, 'reports.view');
   }
+  if (pathname.startsWith('/procurement/accountant-payments')) {
+    return canCreateSupplierPayment(user);
+  }
+  if (pathname.startsWith('/procurement/cashier-payments')) {
+    return canConfirmSupplierPayment(user);
+  }
   if (pathname.startsWith('/procurement/orders/')) {
     return canViewProcurement(user) || canViewSupplierPayments(user);
   }
   if (pathname.startsWith('/procurement/difference-acts')) {
     return canViewChinaReceivingActs(user);
   }
-  if (pathname.startsWith('/procurement')) return canViewProcurement(user);
+  if (pathname.startsWith('/procurement')) return canViewProcurement(user) || canViewSupplierPayments(user);
   if (pathname.startsWith('/branch-purchase-requests')) {
     return canViewBranchPurchaseRequests(user);
   }
@@ -911,25 +919,71 @@ export function canEditPurchasePriceYuan(user: Pick<User, 'role' | 'roles'> | nu
 export function canViewSupplierPayments(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return (
     hasFullAccess(user) ||
-    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'PROCUREMENT_MANAGER', 'FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT']) ||
+    hasAnyRole(user, [
+      'SUPPLY_CHAIN_MANAGER',
+      'PROCUREMENT_MANAGER',
+      'FINANCE_MANAGER',
+      'HQ_ACCOUNTANT',
+      'ACCOUNTANT',
+      'HQ_CASHIER',
+    ]) ||
     hasPermission(user, 'procurement.view') ||
     hasPermission(user, 'procurement.manage') ||
-    hasPermission(user, 'finance.view')
+    hasPermission(user, 'finance.view') ||
+    hasPermission(user, 'payments.manage')
   );
 }
 
+/** HQ Accountant prepares China Purchase payment tranches. */
 export function canCreateSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return (
     hasFullAccess(user) ||
-    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT'])
+    hasAnyRole(user, ['FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT'])
   );
 }
 
+export function canSendProcurementInvoiceToAccountant(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+) {
+  return (
+    hasFullAccess(user) ||
+    hasAnyRole(user, ['SUPPLY_CHAIN_MANAGER', 'PROCUREMENT_MANAGER']) ||
+    hasPermission(user, 'procurement.manage')
+  );
+}
+
+export function canSendSupplierPaymentToCashier(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+) {
+  return canCreateSupplierPayment(user);
+}
+
+export function canConfirmSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return (
+    hasFullAccess(user) ||
+    hasRole(user, 'HQ_CASHIER') ||
+    hasPermission(user, 'payments.manage')
+  );
+}
+
+export function canReturnSupplierPaymentToAccountant(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+) {
+  return canConfirmSupplierPayment(user);
+}
+
 export function canEditSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasFullAccess(user);
+  return (
+    hasFullAccess(user) ||
+    hasAnyRole(user, ['FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT'])
+  );
 }
 
 export function canVoidSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER');
+}
+
+export function canReverseSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER');
 }
 

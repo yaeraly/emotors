@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
 import { PopupFilterButton } from '@/components/PopupFilterButton';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
-import { canCreateSupplierPayment, canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
+import { canCreateProcurementOrder, canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -380,7 +380,7 @@ function ChinaReceivingEditableView({
   const readOnly = Boolean(task.readOnly) || !canReceiveProcurementToHq(user);
   const canEdit = canReceiveProcurementToHq(user) && !readOnly;
   const isCeo = hasFullAccess(user);
-  const canUploadCargoReceipt = canCreateSupplierPayment(user) || canReceiveProcurementToHq(user);
+  const canUploadCargoReceipt = canCreateProcurementOrder(user) || canReceiveProcurementToHq(user);
   const cargoAttachments = task.cargoAttachments ?? task.documents?.photos ?? [];
   const hasCargoReceiptAttachment = cargoAttachments.length > 0 || (task.cargoAttachmentCount ?? 0) > 0;
 

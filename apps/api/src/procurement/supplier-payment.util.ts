@@ -1,9 +1,15 @@
-import { ProcurementSupplierPaymentLedgerStatus, ProcurementSupplierPaymentStatus } from '@prisma/client';
+import {
+  ProcurementSupplierPaymentLedgerStatus,
+  ProcurementSupplierPaymentStatus,
+} from '@prisma/client';
 
 export type SupplierPaymentInput = {
   amountYuan: number;
   exchangeRate: number;
-  status?: ProcurementSupplierPaymentStatus;
+  amountKgs?: number;
+  actualPaidKgs?: number | null;
+  approvedAmountKgs?: number | null;
+  status?: ProcurementSupplierPaymentStatus | string;
 };
 
 export type SupplierPaymentSummary = {
@@ -12,6 +18,9 @@ export type SupplierPaymentSummary = {
   remainingYuan: number;
   weightedAverageYuanRate: number | null;
   supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus;
+  completedPaymentCount: number;
+  pendingCashierCount: number;
+  inFlightYuan: number;
 };
 
 export function roundMoney(value: number, decimals = 2) {
@@ -25,14 +34,28 @@ export function calculateAmountKgs(amountYuan: number, exchangeRate: number) {
 
 const EXCLUDED_SUPPLIER_PAYMENT_STATUSES = new Set([
   'DRAFT',
+  'PENDING_CASHIER',
+  'RETURNED',
   'CANCELLED',
   'CANCELED',
   'FAILED',
   'REJECTED',
   'VOID',
+  'REVERSED',
 ]);
 
 const CONFIRMED_SUPPLIER_PAYMENT_STATUSES = new Set([
+  'ACTIVE',
+  'CONFIRMED',
+  'COMPLETED',
+  'PAID',
+]);
+
+/** Statuses that reserve remaining CNY (cannot create overlapping tranches). */
+const ALLOCATED_SUPPLIER_PAYMENT_STATUSES = new Set([
+  'DRAFT',
+  'PENDING_CASHIER',
+  'RETURNED',
   'ACTIVE',
   'CONFIRMED',
   'COMPLETED',
@@ -45,11 +68,22 @@ export function isConfirmedSupplierPayment(status?: string | null) {
   return CONFIRMED_SUPPLIER_PAYMENT_STATUSES.has(normalized);
 }
 
+export function isAllocatedSupplierPayment(status?: string | null) {
+  const normalized = String(status ?? ProcurementSupplierPaymentStatus.ACTIVE).toUpperCase();
+  return ALLOCATED_SUPPLIER_PAYMENT_STATUSES.has(normalized);
+}
+
 export function resolveSupplierPaymentKgs(payment: {
   amountKgs?: number | string | null;
+  actualPaidKgs?: number | string | null;
+  approvedAmountKgs?: number | string | null;
   amountYuan?: number | string | null;
   exchangeRate?: number | string | null;
 }) {
+  const actual = Number(payment.actualPaidKgs);
+  if (Number.isFinite(actual) && actual >= 0) return roundMoney(actual);
+  const approved = Number(payment.approvedAmountKgs);
+  if (Number.isFinite(approved) && approved >= 0) return roundMoney(approved);
   const stored = Number(payment.amountKgs);
   if (Number.isFinite(stored) && stored >= 0) return roundMoney(stored);
   const yuan = Number(payment.amountYuan ?? 0);
@@ -62,6 +96,8 @@ export function sumConfirmedSupplierPaymentsKgs(
   payments: Array<{
     status?: string | null;
     amountKgs?: number | string | null;
+    actualPaidKgs?: number | string | null;
+    approvedAmountKgs?: number | string | null;
     amountYuan?: number | string | null;
     exchangeRate?: number | string | null;
   }>,
@@ -73,37 +109,81 @@ export function sumConfirmedSupplierPaymentsKgs(
   );
 }
 
+export function sumAllocatedSupplierPaymentsYuan(
+  payments: Array<{ id?: string; status?: string | null; amountYuan?: number | string | null }>,
+  excludePaymentId?: string,
+) {
+  return roundMoney(
+    payments
+      .filter((payment) => {
+        if (excludePaymentId && payment.id === excludePaymentId) return false;
+        return isAllocatedSupplierPayment(payment.status);
+      })
+      .reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
+  );
+}
+
+export function resolvePurchasePaymentLedgerStatus(input: {
+  totalOrderYuan: number;
+  totalPaidYuan: number;
+  remainingYuan: number;
+  pendingCashierCount: number;
+  invoiceSentToAccountantAt?: Date | string | null;
+}): ProcurementSupplierPaymentLedgerStatus {
+  const totalPaidYuan = roundMoney(input.totalPaidYuan);
+  const totalOrderYuan = roundMoney(input.totalOrderYuan);
+  const remainingYuan = roundMoney(input.remainingYuan);
+
+  if (totalPaidYuan > totalOrderYuan) {
+    return ProcurementSupplierPaymentLedgerStatus.OVERPAID;
+  }
+  if (totalPaidYuan > 0 && remainingYuan <= 0) {
+    return ProcurementSupplierPaymentLedgerStatus.PAID;
+  }
+  if (totalPaidYuan > 0 && remainingYuan > 0) {
+    return ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID;
+  }
+  if (input.pendingCashierCount > 0) {
+    return ProcurementSupplierPaymentLedgerStatus.AWAITING_CASHIER;
+  }
+  if (input.invoiceSentToAccountantAt) {
+    return ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT;
+  }
+  return ProcurementSupplierPaymentLedgerStatus.UNPAID;
+}
+
 export function summarizeSupplierPayments(
   payments: SupplierPaymentInput[],
   totalOrderYuan: number,
+  options?: { invoiceSentToAccountantAt?: Date | string | null },
 ): SupplierPaymentSummary {
-  const active = payments.filter(
-    (payment) => (payment.status ?? ProcurementSupplierPaymentStatus.ACTIVE) === ProcurementSupplierPaymentStatus.ACTIVE,
+  const confirmed = payments.filter((payment) => isConfirmedSupplierPayment(payment.status));
+  const pendingCashierCount = payments.filter(
+    (payment) => String(payment.status ?? '').toUpperCase() === 'PENDING_CASHIER',
+  ).length;
+  const inFlightYuan = roundMoney(
+    payments
+      .filter((payment) => isAllocatedSupplierPayment(payment.status))
+      .reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
   );
+
   const totalPaidYuan = roundMoney(
-    active.reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
+    confirmed.reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
   );
   const totalPaidKgs = roundMoney(
-    active.reduce(
-      (sum, payment) => sum + calculateAmountKgs(Number(payment.amountYuan || 0), Number(payment.exchangeRate || 0)),
-      0,
-    ),
+    confirmed.reduce((sum, payment) => sum + resolveSupplierPaymentKgs(payment), 0),
   );
   const remainingYuan = roundMoney(Math.max(totalOrderYuan - totalPaidYuan, 0));
   const weightedAverageYuanRate =
     totalPaidYuan > 0 ? roundMoney(totalPaidKgs / totalPaidYuan, 4) : null;
 
-  let supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus =
-    ProcurementSupplierPaymentLedgerStatus.UNPAID;
-  if (totalPaidYuan <= 0) {
-    supplierPaymentStatus = ProcurementSupplierPaymentLedgerStatus.UNPAID;
-  } else if (totalPaidYuan > totalOrderYuan) {
-    supplierPaymentStatus = ProcurementSupplierPaymentLedgerStatus.OVERPAID;
-  } else if (totalPaidYuan >= totalOrderYuan) {
-    supplierPaymentStatus = ProcurementSupplierPaymentLedgerStatus.PAID;
-  } else {
-    supplierPaymentStatus = ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID;
-  }
+  const supplierPaymentStatus = resolvePurchasePaymentLedgerStatus({
+    totalOrderYuan,
+    totalPaidYuan,
+    remainingYuan,
+    pendingCashierCount,
+    invoiceSentToAccountantAt: options?.invoiceSentToAccountantAt,
+  });
 
   return {
     totalPaidYuan,
@@ -111,5 +191,14 @@ export function summarizeSupplierPayments(
     remainingYuan,
     weightedAverageYuanRate,
     supplierPaymentStatus,
+    completedPaymentCount: confirmed.length,
+    pendingCashierCount,
+    inFlightYuan,
   };
+}
+
+export function maskCardNumber(cardNumber: string) {
+  const digits = cardNumber.replace(/\s+/g, '');
+  if (digits.length < 4) return digits;
+  return `${'*'.repeat(Math.max(digits.length - 4, 0))}${digits.slice(-4)}`;
 }

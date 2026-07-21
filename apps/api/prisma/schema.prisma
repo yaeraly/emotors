@@ -505,21 +505,40 @@ enum PurchasePriceChangeReason {
 }
 
 enum ProcurementSupplierPaymentStatus {
+  DRAFT
+  PENDING_CASHIER
+  RETURNED
+  CANCELLED
   ACTIVE
   VOID
+  REVERSED
 }
 
 enum ProcurementSupplierPaymentMethod {
   BANK
   CASH
   TRANSFER
+  QR_CODE
+  BANK_ACCOUNT
+  BANK_CARD
+  OTHER
 }
 
 enum ProcurementSupplierPaymentLedgerStatus {
   UNPAID
+  AWAITING_ACCOUNTANT
+  AWAITING_CASHIER
   PARTIALLY_PAID
   PAID
   OVERPAID
+}
+
+enum ProcurementKgsAdjustmentReason {
+  BANK_COMMISSION
+  PAYMENT_SERVICE_COMMISSION
+  SUPPLIER_AGREED_CORRECTION
+  CURRENCY_CONVERSION_DIFFERENCE
+  OTHER
 }
 
 enum ProcurementOrderItemStatus {
@@ -543,6 +562,9 @@ enum ProcurementLandedCostStatus {
 enum FileAttachmentEntityType {
   PROCUREMENT_ORDER
   SUPPLIER_PAYMENT
+  SUPPLIER_INVOICE
+  PAYMENT_QR
+  PAYMENT_BANK_DETAILS
   CARGO_RECEIPT
   SVH_TO_HQ_RECEIPT
   DOMESTIC_TRANSPORT_ATTACHMENT
@@ -604,6 +626,12 @@ enum AlertType {
   GOODS_RECEIVED_HQ
   SUPPLIER_PAYMENT_DUE
   SUPPLIER_PAYMENT_COMPLETED
+  SUPPLIER_INVOICE_SENT_TO_ACCOUNTANT
+  SUPPLIER_PAYMENT_SENT_TO_CASHIER
+  SUPPLIER_PAYMENT_RETURNED_TO_ACCOUNTANT
+  SUPPLIER_PAYMENT_PARTIALLY_PAID
+  SUPPLIER_PAYMENT_OVERPAYMENT_ATTEMPT
+  SUPPLIER_PAYMENT_REVERSAL_REQUESTED
   BRANCH_REQUEST_NO_PRICING_POLICY
   BRANCH_REQUEST_OUT_OF_STOCK
   SUPPLY_INQUIRY_CREATED
@@ -1335,6 +1363,11 @@ model User {
   auditLogs                                       AuditLog[]
   procurementSupplierPayments                     ProcurementSupplierPayment[]        @relation("ProcurementSupplierPaymentCreator")
   voidedProcurementSupplierPayments               ProcurementSupplierPayment[]        @relation("ProcurementSupplierPaymentVoider")
+  accountantProcurementSupplierPayments           ProcurementSupplierPayment[]        @relation("ProcurementSupplierPaymentAccountant")
+  cashierProcurementSupplierPayments              ProcurementSupplierPayment[]        @relation("ProcurementSupplierPaymentCashier")
+  returnedProcurementSupplierPayments             ProcurementSupplierPayment[]        @relation("ProcurementSupplierPaymentReturner")
+  kgsAdjustedProcurementSupplierPayments          ProcurementSupplierPayment[]        @relation("ProcurementSupplierPaymentKgsAdjuster")
+  sentProcurementInvoices                         ProcurementOrder[]                  @relation("ProcurementInvoiceSender")
   fileAttachments                                 FileAttachment[]                    @relation("FileAttachmentUploader")
   replacedDomesticTransportAttachments            FileAttachment[]                    @relation("DomesticTransportAttachmentReplacer")
   procurementCostAdjustments                      ProcurementCostAdjustment[]         @relation("ProcurementCostAdjustmentCreator")
@@ -2785,6 +2818,11 @@ model ProcurementOrder {
   chinaDomesticTransportUnlockedById    String?
   chinaDomesticTransportUnlockedBy      User?                                  @relation("ProcurementChinaDomesticTransportUnlocker", fields: [chinaDomesticTransportUnlockedById], references: [id])
   note                                  String?
+  supplierInvoiceNumber                 String?
+  expectedPaymentDate                   DateTime?
+  invoiceSentToAccountantAt             DateTime?
+  invoiceSentById                       String?
+  invoiceSentBy                         User?                                  @relation("ProcurementInvoiceSender", fields: [invoiceSentById], references: [id])
   items                                 ProcurementOrderItem[]
   receivings                            ProcurementGoodsReceiving[]
   differenceReports                     ProcurementDifferenceReport[]
@@ -2810,6 +2848,9 @@ model ProcurementOrder {
   @@index([chinaDomesticTransportCompanyId])
   @@index([chinaExportTransportCompanyId])
   @@index([svhToHqTransportCompanyId])
+  @@index([invoiceSentById])
+  @@index([invoiceSentToAccountantAt])
+  @@index([supplierPaymentStatus])
 }
 
 model ProcurementSvhToHqTransport {
@@ -2840,34 +2881,85 @@ model ProcurementSvhToHqTransport {
 }
 
 model ProcurementSupplierPayment {
-  id                 String                           @id @default(cuid())
-  procurementOrderId String
-  procurementOrder   ProcurementOrder                 @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
-  supplierId         String
-  supplier           Supplier                         @relation(fields: [supplierId], references: [id])
-  paymentDate        DateTime
-  amountYuan         Decimal                          @db.Decimal(14, 2)
-  exchangeRate       Decimal                          @db.Decimal(14, 4)
-  amountKgs          Decimal                          @db.Decimal(14, 2)
-  paymentMethod      ProcurementSupplierPaymentMethod
-  receiptNumber      String?
-  notes              String?
-  status             ProcurementSupplierPaymentStatus @default(ACTIVE)
-  voidedAt           DateTime?
-  voidedById         String?
-  voidedBy           User?                            @relation("ProcurementSupplierPaymentVoider", fields: [voidedById], references: [id])
-  voidReason         String?
-  createdById        String
-  createdBy          User                             @relation("ProcurementSupplierPaymentCreator", fields: [createdById], references: [id])
-  attachments        FileAttachment[]
-  createdAt          DateTime                         @default(now())
-  updatedAt          DateTime                         @updatedAt
+  id                      String                            @id @default(cuid())
+  procurementOrderId      String
+  procurementOrder        ProcurementOrder                  @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  supplierId              String
+  supplier                Supplier                          @relation(fields: [supplierId], references: [id])
+  sequenceNumber          Int                               @default(1)
+  paymentDate             DateTime
+  amountYuan              Decimal                           @db.Decimal(14, 2)
+  exchangeRate            Decimal                           @db.Decimal(14, 4)
+  calculatedAmountKgs     Decimal                           @default(0) @db.Decimal(14, 2)
+  approvedAmountKgs       Decimal                           @default(0) @db.Decimal(14, 2)
+  actualPaidKgs           Decimal?                          @db.Decimal(14, 2)
+  amountKgs               Decimal                           @db.Decimal(14, 2)
+  kgsAdjustmentReason     ProcurementKgsAdjustmentReason?
+  kgsAdjustmentComment    String?
+  kgsAdjustedById         String?
+  kgsAdjustedBy           User?                             @relation("ProcurementSupplierPaymentKgsAdjuster", fields: [kgsAdjustedById], references: [id])
+  kgsAdjustedAt           DateTime?
+  paymentMethod           ProcurementSupplierPaymentMethod
+  recipientName           String?
+  recipientCompany        String?
+  bankName                String?
+  beneficiaryName         String?
+  accountNumber           String?
+  swiftCode               String?
+  cardholderName          String?
+  cardNumberMasked        String?
+  paymentInstructions     String?
+  paymentDeadline         DateTime?
+  intendedFinanceAccountId String?
+  intendedFinanceAccount  FinanceAccount?                   @relation("ProcurementPaymentIntendedAccount", fields: [intendedFinanceAccountId], references: [id])
+  actualFinanceAccountId  String?
+  actualFinanceAccount    FinanceAccount?                   @relation("ProcurementPaymentActualAccount", fields: [actualFinanceAccountId], references: [id])
+  accountChangeReason     String?
+  receiptNumber           String?
+  transactionNumber       String?
+  notes                   String?
+  accountantComment       String?
+  cashierComment          String?
+  returnReason            String?
+  actualPaidDifferenceReason String?
+  status                  ProcurementSupplierPaymentStatus  @default(DRAFT)
+  version                 Int                               @default(1)
+  idempotencyKey          String?                           @unique
+  sentToCashierAt         DateTime?
+  paidAt                  DateTime?
+  returnedAt              DateTime?
+  returnedById            String?
+  returnedBy              User?                             @relation("ProcurementSupplierPaymentReturner", fields: [returnedById], references: [id])
+  accountantId            String?
+  accountant              User?                             @relation("ProcurementSupplierPaymentAccountant", fields: [accountantId], references: [id])
+  cashierId               String?
+  cashier                 User?                             @relation("ProcurementSupplierPaymentCashier", fields: [cashierId], references: [id])
+  ledgerEntryId           String?                           @unique
+  ledgerEntry             FinanceLedgerEntry?               @relation("ProcurementSupplierPaymentLedgerEntry", fields: [ledgerEntryId], references: [id])
+  reversalOfPaymentId     String?
+  reversalOfPayment       ProcurementSupplierPayment?       @relation("ProcurementPaymentReversal", fields: [reversalOfPaymentId], references: [id])
+  reversals               ProcurementSupplierPayment[]      @relation("ProcurementPaymentReversal")
+  voidedAt                DateTime?
+  voidedById              String?
+  voidedBy                User?                             @relation("ProcurementSupplierPaymentVoider", fields: [voidedById], references: [id])
+  voidReason              String?
+  createdById             String
+  createdBy               User                              @relation("ProcurementSupplierPaymentCreator", fields: [createdById], references: [id])
+  attachments             FileAttachment[]
+  createdAt               DateTime                          @default(now())
+  updatedAt               DateTime                          @updatedAt
 
+  @@unique([procurementOrderId, sequenceNumber])
   @@index([procurementOrderId])
   @@index([supplierId])
   @@index([status])
   @@index([createdById])
   @@index([paymentDate])
+  @@index([accountantId])
+  @@index([cashierId])
+  @@index([intendedFinanceAccountId])
+  @@index([actualFinanceAccountId])
+  @@index([sentToCashierAt])
 }
 
 model ProcurementCostAdjustment {
@@ -4878,6 +4970,8 @@ model FinanceAccount {
   payments           Payment[]
   reconciliations    FinanceReconciliation[]
   investments        FinanceInvestment[]
+  intendedProcurementPayments ProcurementSupplierPayment[] @relation("ProcurementPaymentIntendedAccount")
+  actualProcurementPayments   ProcurementSupplierPayment[] @relation("ProcurementPaymentActualAccount")
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
   deletedAt        DateTime?
@@ -4936,6 +5030,7 @@ model FinanceLedgerEntry {
   createdBy         User?                  @relation("FinanceLedgerEntryCreator", fields: [createdById], references: [id])
   createdAt         DateTime               @default(now())
   financeInvestment FinanceInvestment?
+  procurementSupplierPayment ProcurementSupplierPayment? @relation("ProcurementSupplierPaymentLedgerEntry")
 
   @@index([accountId])
   @@index([branchId])
