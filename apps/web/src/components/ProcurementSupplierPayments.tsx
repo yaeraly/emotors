@@ -14,6 +14,7 @@ import {
 } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { isConfirmedSupplierPayment } from '@/lib/supplier-payment-utils';
 import { translateStatus } from '@/lib/translate-status';
 
 export type SupplierPayment = {
@@ -148,10 +149,14 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const { t } = useTranslation();
   const [form, setForm] = useState<PaymentForm>(emptyForm);
   const [showForm, setShowForm] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<FinanceAccountOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState(order.supplierInvoiceNumber ?? '');
+  const [expectedPaymentDate, setExpectedPaymentDate] = useState(
+    order.expectedPaymentDate ? String(order.expectedPaymentDate).slice(0, 10) : '',
+  );
   const [confirmTarget, setConfirmTarget] = useState<SupplierPayment | null>(null);
   const [confirmForm, setConfirmForm] = useState({
     actualPaidKgs: '',
@@ -206,6 +211,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         method: 'POST',
         body: JSON.stringify({
           supplierInvoiceNumber: invoiceNumber || undefined,
+          expectedPaymentDate: expectedPaymentDate || undefined,
         }),
       });
       await onChanged();
@@ -214,6 +220,44 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
     } finally {
       setSaving(false);
     }
+  }
+
+  function openCreateForm() {
+    setEditingPaymentId(null);
+    setForm(emptyForm());
+    setShowForm(true);
+  }
+
+  function openEditForm(payment: SupplierPayment) {
+    setEditingPaymentId(payment.id);
+    setForm({
+      amountYuan: String(payment.amountYuan ?? ''),
+      exchangeRate: String(payment.exchangeRate ?? ''),
+      approvedAmountKgs: String(payment.approvedAmountKgs ?? payment.amountKgs ?? ''),
+      kgsAdjustmentReason: '',
+      kgsAdjustmentComment: '',
+      paymentMethod: (payment.paymentMethod as PaymentForm['paymentMethod']) || 'BANK_ACCOUNT',
+      recipientName: payment.recipientName ?? '',
+      recipientCompany: payment.recipientCompany ?? '',
+      bankName: payment.bankName ?? '',
+      beneficiaryName: payment.beneficiaryName ?? '',
+      accountNumber: payment.accountNumber ?? '',
+      swiftCode: payment.swiftCode ?? '',
+      cardholderName: payment.cardholderName ?? '',
+      cardNumber: '',
+      paymentInstructions: payment.paymentInstructions ?? '',
+      paymentDeadline: payment.paymentDeadline ? String(payment.paymentDeadline).slice(0, 10) : '',
+      intendedFinanceAccountId: payment.intendedFinanceAccountId ?? '',
+      accountantComment: payment.accountantComment ?? '',
+      notes: payment.notes ?? '',
+    });
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditingPaymentId(null);
+    setForm(emptyForm());
   }
 
   async function uploadInvoice(event: ChangeEvent<HTMLInputElement>) {
@@ -244,39 +288,46 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
     }
   }
 
-  async function createPayment(sendToCashier: boolean) {
+  async function savePayment(sendToCashier: boolean) {
     setSaving(true);
     setError('');
     try {
       const approved = Number(form.approvedAmountKgs || calculatedKgs);
-      await apiFetch(`/procurement/orders/${order.id}/supplier-payments`, {
-        method: 'POST',
-        body: JSON.stringify({
-          amountYuan: Number(form.amountYuan),
-          exchangeRate: Number(form.exchangeRate),
-          approvedAmountKgs: approved,
-          kgsAdjustmentReason:
-            Math.abs(approved - calculatedKgs) > 0.009 ? form.kgsAdjustmentReason || undefined : undefined,
-          kgsAdjustmentComment: form.kgsAdjustmentComment || undefined,
-          paymentMethod: form.paymentMethod,
-          recipientName: form.recipientName || undefined,
-          recipientCompany: form.recipientCompany || undefined,
-          bankName: form.bankName || undefined,
-          beneficiaryName: form.beneficiaryName || undefined,
-          accountNumber: form.accountNumber || undefined,
-          swiftCode: form.swiftCode || undefined,
-          cardholderName: form.cardholderName || undefined,
-          cardNumber: form.cardNumber || undefined,
-          paymentInstructions: form.paymentInstructions || undefined,
-          paymentDeadline: form.paymentDeadline || undefined,
-          intendedFinanceAccountId: form.intendedFinanceAccountId || undefined,
-          accountantComment: form.accountantComment || undefined,
-          notes: form.notes || undefined,
-          sendToCashier,
-        }),
-      });
-      setShowForm(false);
-      setForm(emptyForm());
+      const payload = {
+        amountYuan: Number(form.amountYuan),
+        exchangeRate: Number(form.exchangeRate),
+        approvedAmountKgs: approved,
+        kgsAdjustmentReason:
+          Math.abs(approved - calculatedKgs) > 0.009 ? form.kgsAdjustmentReason || undefined : undefined,
+        kgsAdjustmentComment: form.kgsAdjustmentComment || undefined,
+        paymentMethod: form.paymentMethod,
+        recipientName: form.recipientName || undefined,
+        recipientCompany: form.recipientCompany || undefined,
+        bankName: form.bankName || undefined,
+        beneficiaryName: form.beneficiaryName || undefined,
+        accountNumber: form.accountNumber || undefined,
+        swiftCode: form.swiftCode || undefined,
+        cardholderName: form.cardholderName || undefined,
+        cardNumber: form.cardNumber || undefined,
+        paymentInstructions: form.paymentInstructions || undefined,
+        paymentDeadline: form.paymentDeadline || undefined,
+        intendedFinanceAccountId: form.intendedFinanceAccountId || undefined,
+        accountantComment: form.accountantComment || undefined,
+        notes: form.notes || undefined,
+        sendToCashier,
+      };
+      if (editingPaymentId) {
+        await apiFetch(`/procurement/orders/${order.id}/supplier-payments/${editingPaymentId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await apiFetch(`/procurement/orders/${order.id}/supplier-payments`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+      }
+      closeForm();
       await onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -440,10 +491,10 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         {canPrepare ? (
           <button
             type="button"
-            onClick={() => setShowForm((current) => !current)}
+            onClick={() => (showForm && !editingPaymentId ? closeForm() : openCreateForm())}
             className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700"
           >
-            {t('procurement.payments.addPayment')}
+            {showForm && !editingPaymentId ? t('common.cancel') : t('procurement.payments.addPayment')}
           </button>
         ) : null}
       </div>
@@ -455,7 +506,10 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         <SummaryCard label={t('procurement.payments.totalPaidYuan')} value={`¥${Number(order.totalPaidYuan ?? 0).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.remainingYuan')} value={`¥${Number(order.remainingYuan ?? order.totalYuan).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.totalPaidKgs')} value={formatKgs(order.totalPaidKgs ?? 0)} />
-        <SummaryCard label={t('procurement.payments.paymentCount')} value={String(payments.filter((p) => p.status === 'ACTIVE').length)} />
+        <SummaryCard
+          label={t('procurement.payments.paymentCount')}
+          value={String(payments.filter((payment) => isConfirmedSupplierPayment(payment.status)).length)}
+        />
         <SummaryCard
           label={t('procurement.payments.weightedAverageRate')}
           value={order.weightedAverageYuanRate ? Number(order.weightedAverageYuanRate).toFixed(4) : '-'}
@@ -470,12 +524,21 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <h4 className="font-semibold text-slate-900">{t('procurement.payments.sendInvoiceTitle')}</h4>
           <p className="mt-1 text-sm text-slate-600">{t('procurement.payments.sendInvoiceHelp')}</p>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.supplierInvoiceNumber')}</span>
               <input
                 value={invoiceNumber}
                 onChange={(e) => setInvoiceNumber(e.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block">
+              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.expectedPaymentDate')}</span>
+              <input
+                type="date"
+                value={expectedPaymentDate}
+                onChange={(e) => setExpectedPaymentDate(e.target.value)}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
@@ -510,6 +573,14 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
 
       {showForm && canPrepare ? (
         <div className="mb-6 grid gap-4 rounded-2xl bg-slate-50 p-4 md:grid-cols-3">
+          <div className="md:col-span-3">
+            <h4 className="font-semibold text-slate-900">
+              {editingPaymentId ? t('procurement.payments.editPayment') : t('procurement.payments.addPayment')}
+            </h4>
+            {editingPaymentId ? (
+              <p className="mt-1 text-sm text-slate-600">{t('procurement.payments.editPaymentHelp')}</p>
+            ) : null}
+          </div>
           <Field label={t('procurement.payments.amountYuan')} type="number" value={form.amountYuan} onChange={(value) => setForm({ ...form, amountYuan: value, approvedAmountKgs: '' })} />
           <Field label={t('procurement.payments.exchangeRate')} type="number" value={form.exchangeRate} onChange={(value) => setForm({ ...form, exchangeRate: value, approvedAmountKgs: '' })} />
           <Field label={t('procurement.payments.calculatedKgs')} type="number" value={String(calculatedKgs || '')} onChange={() => undefined} />
@@ -579,13 +650,14 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
             </select>
           </label>
           <Field label={t('procurement.payments.paymentDeadline')} type="date" value={form.paymentDeadline} onChange={(value) => setForm({ ...form, paymentDeadline: value })} />
+          <Field label={t('procurement.payments.accountantComment')} value={form.accountantComment} onChange={(value) => setForm({ ...form, accountantComment: value })} />
           <Field label={t('procurement.payments.notes')} value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
           {balanceWarning ? <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{balanceWarning}</p> : null}
           <div className="md:col-span-3 flex flex-wrap gap-3">
             <button
               type="button"
               disabled={saving}
-              onClick={() => void createPayment(false)}
+              onClick={() => void savePayment(false)}
               className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
             >
               {saving ? t('common.loading') : t('procurement.payments.saveDraft')}
@@ -594,12 +666,20 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               <button
                 type="button"
                 disabled={saving || Boolean(balanceWarning)}
-                onClick={() => void createPayment(true)}
+                onClick={() => void savePayment(true)}
                 className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
               >
                 {saving ? t('common.loading') : t('procurement.payments.sendToCashier')}
               </button>
             ) : null}
+            <button
+              type="button"
+              disabled={saving}
+              onClick={closeForm}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600"
+            >
+              {t('common.cancel')}
+            </button>
           </div>
         </div>
       ) : null}
@@ -636,7 +716,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 <td className="px-3 py-3">{payment.recipientName || '-'}</td>
                 <td className="px-3 py-3">{t(`procurement.payments.method.${payment.paymentMethod}`)}</td>
                 <td className="px-3 py-3">{payment.actualFinanceAccount?.name || payment.intendedFinanceAccount?.name || '-'}</td>
-                <td className="px-3 py-3">{translateStatus(t, payment.status, 'payment')}</td>
+                <td className="px-3 py-3">{trancheStatusLabel(t, payment.status)}</td>
                 <td className="px-3 py-3">{payment.accountant?.fullName || payment.createdBy?.fullName || '-'}</td>
                 <td className="px-3 py-3">{payment.cashier?.fullName || '-'}</td>
                 <td className="px-3 py-3">
@@ -652,6 +732,11 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 </td>
                 <td className="px-3 py-3">
                   <div className="flex flex-wrap gap-2">
+                    {canEdit && (payment.status === 'DRAFT' || payment.status === 'RETURNED') ? (
+                      <button type="button" onClick={() => openEditForm(payment)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700">
+                        {t('procurement.payments.editPayment')}
+                      </button>
+                    ) : null}
                     {canSendCashier && (payment.status === 'DRAFT' || payment.status === 'RETURNED') ? (
                       <button type="button" onClick={() => void sendExistingToCashier(payment.id)} className="rounded-lg border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700">
                         {t('procurement.payments.sendToCashier')}
@@ -683,8 +768,8 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                         {t('procurement.payments.reversePayment')}
                       </button>
                     ) : null}
-                    {canEdit && (payment.status === 'DRAFT' || payment.status === 'RETURNED') ? (
-                      <span className="text-xs text-slate-500">{payment.returnReason || ''}</span>
+                    {payment.returnReason ? (
+                      <span className="text-xs text-amber-800">{payment.returnReason}</span>
                     ) : null}
                   </div>
                 </td>
@@ -797,6 +882,13 @@ function Field({
       />
     </label>
   );
+}
+
+function trancheStatusLabel(t: (key: string) => string, status: string) {
+  const key = `procurement.payments.trancheStatus.${status}`;
+  const translated = t(key);
+  if (translated !== key) return translated;
+  return translateStatus(t, status, 'payment');
 }
 
 function formatKgs(value: number | string | null | undefined) {

@@ -2140,10 +2140,35 @@ export class ProcurementService {
       supplierPayments: {
         include: {
           createdBy: { select: { id: true, fullName: true, role: true } },
+          accountant: { select: { id: true, fullName: true, role: true } },
+          cashier: { select: { id: true, fullName: true, role: true } },
           voidedBy: { select: { id: true, fullName: true, role: true } },
+          returnedBy: { select: { id: true, fullName: true, role: true } },
+          intendedFinanceAccount: {
+            select: {
+              id: true,
+              name: true,
+              accountNumber: true,
+              currentBalance: true,
+              availableBalance: true,
+              status: true,
+              scope: true,
+            },
+          },
+          actualFinanceAccount: {
+            select: {
+              id: true,
+              name: true,
+              accountNumber: true,
+              currentBalance: true,
+              availableBalance: true,
+              status: true,
+              scope: true,
+            },
+          },
           attachments: { where: { deletedAt: null } },
         },
-        orderBy: { paymentDate: 'desc' as const },
+        orderBy: [{ sequenceNumber: 'asc' as const }, { createdAt: 'asc' as const }],
       },
       costAdjustments: { orderBy: { createdAt: 'desc' as const }, take: 10 },
     };

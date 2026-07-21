@@ -382,13 +382,10 @@ export function canSendSupplierPaymentToCashier(
   return canCreateSupplierPayment(user);
 }
 
+/** Only HQ Cashier (or full-access CEO/Owner) may confirm China Purchase payments. */
 export function canConfirmSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
-  return (
-    hasAnyFullAccessRole(roles) ||
-    roles.includes(Role.HQ_CASHIER) ||
-    userHasPermission(user, 'payments.manage')
-  );
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_CASHIER);
 }
 
 export function canReturnSupplierPaymentToAccountant(

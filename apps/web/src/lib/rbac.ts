@@ -934,11 +934,11 @@ export function canViewSupplierPayments(user: Pick<User, 'role' | 'roles' | 'per
   );
 }
 
-/** HQ Accountant prepares China Purchase payment tranches. */
+/** HQ Accountant prepares China Purchase payment tranches (not Supply Manager). */
 export function canCreateSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return (
     hasFullAccess(user) ||
-    hasAnyRole(user, ['FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT'])
+    hasAnyRole(user, ['FINANCE_MANAGER', 'HQ_ACCOUNTANT'])
   );
 }
 
@@ -958,12 +958,9 @@ export function canSendSupplierPaymentToCashier(
   return canCreateSupplierPayment(user);
 }
 
+/** Only HQ Cashier (or full-access CEO/Owner) may confirm China Purchase payments. */
 export function canConfirmSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return (
-    hasFullAccess(user) ||
-    hasRole(user, 'HQ_CASHIER') ||
-    hasPermission(user, 'payments.manage')
-  );
+  return hasFullAccess(user) || hasRole(user, 'HQ_CASHIER');
 }
 
 export function canReturnSupplierPaymentToAccountant(
@@ -975,7 +972,7 @@ export function canReturnSupplierPaymentToAccountant(
 export function canEditSupplierPayment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   return (
     hasFullAccess(user) ||
-    hasAnyRole(user, ['FINANCE_MANAGER', 'HQ_ACCOUNTANT', 'ACCOUNTANT'])
+    hasAnyRole(user, ['FINANCE_MANAGER', 'HQ_ACCOUNTANT'])
   );
 }
 
