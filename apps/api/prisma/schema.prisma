@@ -582,6 +582,13 @@ enum ProcurementLandedCostStatus {
   FINALIZED
 }
 
+/// Payment-confirmation quality of procurement cost (separate from weight readiness).
+enum ProcurementCostConfirmationStatus {
+  PRELIMINARY
+  PARTIALLY_CONFIRMED
+  ACTUAL
+}
+
 enum FileAttachmentEntityType {
   PROCUREMENT_ORDER
   SUPPLIER_PAYMENT
@@ -2837,6 +2844,8 @@ model ProcurementOrder {
   bankFeeCostKgs                        Decimal                                @default(0) @db.Decimal(14, 2)
   otherExpenseKgs                       Decimal                                @default(0) @db.Decimal(14, 2)
   landedCostStatus                      ProcurementLandedCostStatus            @default(PENDING_WEIGHT)
+  costConfirmationStatus                ProcurementCostConfirmationStatus      @default(PRELIMINARY)
+  estimatedSupplierCostKgs              Decimal                                @default(0) @db.Decimal(14, 2)
   landedCostCalculationVersion          Int                                    @default(0)
   landedCostCalculatedAt                DateTime?
   estimatedArrivalDate                  DateTime?
@@ -2901,6 +2910,7 @@ model ProcurementOrder {
   @@index([invoiceSentById])
   @@index([invoiceSentToAccountantAt])
   @@index([supplierPaymentStatus])
+  @@index([costConfirmationStatus])
 }
 
 model ProcurementSvhToHqTransport {

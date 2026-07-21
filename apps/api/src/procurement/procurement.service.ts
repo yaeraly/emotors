@@ -3540,6 +3540,9 @@ export class ProcurementService {
         ? Number(order.weightedAverageYuanRate)
         : null,
       defaultYuanRate: Number(order.defaultYuanRate),
+      estimatedYuanRate: Number(order.defaultYuanRate),
+      estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
+      costConfirmationStatus: order.costConfirmationStatus ?? 'PRELIMINARY',
       chinaDomesticTransportYuan: Number(order.chinaDomesticTransportYuan ?? 0),
       chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs ?? 0),
       chinaDomesticTransportLocked: isChinaDomesticTransportLockedByStatus(order.status),

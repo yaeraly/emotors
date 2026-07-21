@@ -97,6 +97,9 @@ type ProcurementOrder = {
   totalYuan: string | number;
   totalCostKgs: string | number;
   landedCostStatus?: 'PENDING_WEIGHT' | 'READY_TO_CALCULATE' | 'CALCULATED' | 'FINALIZED';
+  costConfirmationStatus?: 'PRELIMINARY' | 'PARTIALLY_CONFIRMED' | 'ACTUAL';
+  estimatedSupplierCostKgs?: number | string | null;
+  estimatedYuanRate?: number | string | null;
   landedCostCalculationVersion?: number;
   landedCostCalculatedAt?: string | null;
   totalWeightKg: string | number;
@@ -1250,6 +1253,12 @@ function ProcurementOrderDetailPageContent() {
             label={t('procurement.orders.landedCostStatus')}
             value={t(`procurement.orders.landedCostStatus.${order.landedCostStatus ?? 'PENDING_WEIGHT'}`)}
           />
+          <Info
+            label={t('procurement.orders.costConfirmationStatus')}
+            value={t(
+              `procurement.orders.costConfirmationStatus.${order.costConfirmationStatus ?? 'PRELIMINARY'}`,
+            )}
+          />
           {order.landedCostCalculatedAt ? (
             <Info label={t('procurement.orders.lastCalculationDate')} value={new Date(order.landedCostCalculatedAt).toLocaleString('ru-RU')} />
           ) : null}
@@ -1257,6 +1266,9 @@ function ProcurementOrderDetailPageContent() {
             <Info label={t('procurement.orders.calculationVersion')} value={String(order.landedCostCalculationVersion)} />
           ) : null}
         </div>
+        <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          {t('procurement.orders.fullOrderCostHint')}
+        </p>
         {landedCostPendingWeight ? (
           <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
             {t('procurement.orders.landedCostPendingWeight')}
@@ -1283,12 +1295,40 @@ function ProcurementOrderDetailPageContent() {
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <CostBlock title={t('procurement.orders.productPurchase')}>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Info
+              label={t('procurement.orders.totalProcurementYuan')}
+              value={`¥${Number(order.totalYuan || 0).toFixed(2)}`}
+            />
+            <Info
+              label={t('procurement.orders.paidToSupplierYuan')}
+              value={`¥${Number(order.totalPaidYuan || 0).toFixed(2)}`}
+            />
+            <Info
+              label={t('procurement.orders.remainingDebtYuan')}
+              value={`¥${Number(order.remainingYuan ?? order.totalYuan ?? 0).toFixed(2)}`}
+            />
             <Info label={t('procurement.orders.paidToSupplier')} value={formatKgs(confirmedSupplierPaidKgs)} />
             <Info
               label={t('procurement.orders.weightedAverageYuanRate')}
               value={effectiveYuanRate > 0 ? effectiveYuanRate.toFixed(4) : '-'}
             />
-            <Info label={t('procurement.orders.totalPurchaseCost')} value={formatKgs(totalPurchaseCostKgs)} />
+            <Info
+              label={t('procurement.orders.estimatedYuanRate')}
+              value={
+                Number(order.estimatedYuanRate ?? order.defaultYuanRate ?? 0) > 0
+                  ? Number(order.estimatedYuanRate ?? order.defaultYuanRate).toFixed(4)
+                  : '-'
+              }
+            />
+            <Info
+              label={t('procurement.orders.totalPurchaseCost')}
+              value={formatKgs(
+                Number(order.estimatedSupplierCostKgs || 0) > 0
+                  ? Number(order.estimatedSupplierCostKgs)
+                  : totalPurchaseCostKgs,
+              )}
+              highlight
+            />
           </div>
         </CostBlock>
       </section>

@@ -39,12 +39,14 @@ import {
   ReturnTransportExpenseDto,
   UpdateTransportExpenseDto,
 } from './dto/transport-expense.dto';
+import { estimateSectionExpenseCostKgs } from './procurement-cost.util';
 import {
   hasActiveSectionRequest,
   requestTypeForExpenseType,
   summarizeSectionPayments,
   validateSectionPayableSubmit,
 } from './section-payable.util';
+import { LandedCostService } from './landed-cost.service';
 
 type Tx = Prisma.TransactionClient;
 
@@ -71,6 +73,7 @@ export class TransportExpenseService {
     private readonly prisma: PrismaService,
     private readonly ledgerService: FinanceLedgerService,
     private readonly notifications: NotificationsService,
+    private readonly landedCostService: LandedCostService,
   ) {}
 
   list(user: AuthUser, orderId?: string) {
@@ -884,48 +887,104 @@ export class TransportExpenseService {
     },
   ) {
     if (!expense.procurementOrderId) return;
-    const paid = await tx.procurementTransportExpense.findMany({
-      where: {
-        procurementOrderId: expense.procurementOrderId,
-        expenseType: expense.expenseType,
-        status: TransportExpenseStatus.PAID,
-      },
-      select: { amountKgs: true },
-    });
-    const totalPaidKgs = roundMoney(
-      paid.reduce((sum, row) => sum + Number(row.amountKgs || 0), 0),
-    );
     const order = await tx.procurementOrder.findFirst({
       where: { id: expense.procurementOrderId, deletedAt: null },
     });
     if (!order) return;
 
+    const siblings = await tx.procurementTransportExpense.findMany({
+      where: {
+        procurementOrderId: expense.procurementOrderId,
+        expenseType: expense.expenseType,
+        status: { not: TransportExpenseStatus.CANCELLED },
+      },
+      select: {
+        amount: true,
+        currency: true,
+        exchangeRate: true,
+        amountKgs: true,
+        status: true,
+      },
+    });
+
+    const estimatedRate =
+      order.weightedAverageYuanRate != null && Number(order.totalPaidYuan) > 0
+        ? Number(order.weightedAverageYuanRate)
+        : Number(order.defaultYuanRate);
+
+    const sectionTotal =
+      expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT
+        ? Number(order.chinaDomesticTransportYuan || 0)
+        : expense.expenseType === TransportExpenseType.LOCAL_DELIVERY
+          ? Number(order.localTransportKgs || 0)
+          : expense.expenseType === TransportExpenseType.OTHER_LOGISTICS
+            ? Number(order.otherExpenseKgs || 0)
+            : expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
+              ? Number(order.totalCargoCostKgs || 0)
+              : 0;
+
+    const section = estimateSectionExpenseCostKgs({
+      expenses: siblings.map((row) => ({
+        amount: Number(row.amount),
+        currency: row.currency,
+        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+        amountKgs: Number(row.amountKgs),
+        status: row.status,
+      })),
+      sectionTotalAmount: sectionTotal,
+      estimatedYuanRate: estimatedRate,
+      defaultCurrency:
+        expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT ? 'CNY' : 'KGS',
+    });
+
     const data: Prisma.ProcurementOrderUpdateInput = {};
     if (expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT) {
-      data.chinaDomesticTransportKgs = totalPaidKgs;
+      data.chinaDomesticTransportKgs = section.estimatedSectionCostKgs;
     } else if (expense.expenseType === TransportExpenseType.LOCAL_DELIVERY) {
-      data.localTransportKgs = totalPaidKgs;
+      data.localTransportKgs = section.estimatedSectionCostKgs;
     } else if (expense.expenseType === TransportExpenseType.OTHER_LOGISTICS) {
-      data.otherExpenseKgs = totalPaidKgs;
+      // Keep the declared other-expense budget; cost engine uses full section estimate.
+      if (section.sectionTotalAmount > Number(order.otherExpenseKgs || 0)) {
+        data.otherExpenseKgs = section.sectionTotalAmount;
+      }
+    } else if (expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
+      data.chinaExportTransportKgs = section.estimatedSectionCostKgs;
+      data.totalCargoCostKgs = section.estimatedSectionCostKgs;
     }
 
-    if (Object.keys(data).length === 0) return;
-    const updated = await tx.procurementOrder.update({
-      where: { id: order.id },
-      data,
-    });
-    await this.audit(tx, user, 'PROCUREMENT_COST_RECALCULATED', order.id, {
-      chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs),
-      localTransportKgs: Number(order.localTransportKgs),
-      otherExpenseKgs: Number(order.otherExpenseKgs),
-    }, {
-      chinaDomesticTransportKgs: Number(updated.chinaDomesticTransportKgs),
-      localTransportKgs: Number(updated.localTransportKgs),
-      otherExpenseKgs: Number(updated.otherExpenseKgs),
-      sourceExpenseId: expense.id,
-      paidSectionKgs: totalPaidKgs,
-      expenseType: expense.expenseType,
-    });
+    if (Object.keys(data).length > 0) {
+      const updated = await tx.procurementOrder.update({
+        where: { id: order.id },
+        data,
+      });
+      await this.audit(tx, user, 'PROCUREMENT_COST_RECALCULATED', order.id, {
+        chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs),
+        localTransportKgs: Number(order.localTransportKgs),
+        otherExpenseKgs: Number(order.otherExpenseKgs),
+        totalCargoCostKgs: Number(order.totalCargoCostKgs),
+      }, {
+        chinaDomesticTransportKgs: Number(updated.chinaDomesticTransportKgs),
+        localTransportKgs: Number(updated.localTransportKgs),
+        otherExpenseKgs: Number(updated.otherExpenseKgs),
+        totalCargoCostKgs: Number(updated.totalCargoCostKgs),
+        sourceExpenseId: expense.id,
+        sectionTotalAmount: section.sectionTotalAmount,
+        estimatedSectionCostKgs: section.estimatedSectionCostKgs,
+        paidSectionAmount: section.paidAmount,
+        expenseType: expense.expenseType,
+        note: 'Full section amount used for cost; unpaid balance remains in inventory cost',
+      });
+    }
+
+    try {
+      await this.landedCostService.recalculateProcurementOrder(
+        order.id,
+        { user, reason: 'transport-expense-paid', triggerReason: 'transport-expense-paid' },
+        tx,
+      );
+    } catch {
+      // Weight/finalized gates may block recalculation; section totals above remain updated.
+    }
   }
 
   private async audit(

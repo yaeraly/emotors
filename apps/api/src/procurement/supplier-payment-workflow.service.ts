@@ -1270,16 +1270,16 @@ export class SupplierPaymentWorkflowService {
       reason,
     }, reason);
 
-    if (summary.completedPaymentCount > 0) {
-      try {
-        await this.landedCostService.recalculateProcurementOrder(
-          order.id,
-          { user, reason, triggerReason: 'supplier-payment-sync' },
-          tx,
-        );
-      } catch {
-        // Landed cost may be blocked (finalized / weight); payment totals above remain source of truth.
-      }
+    // Recalculate product/landed cost from the FULL procurement CNY amount
+    // (estimated rate before payments; weighted paid rate thereafter).
+    try {
+      await this.landedCostService.recalculateProcurementOrder(
+        order.id,
+        { user, reason, triggerReason: 'supplier-payment-sync' },
+        tx,
+      );
+    } catch {
+      // Landed cost may be blocked (finalized / weight); payment totals above remain source of truth.
     }
 
     return this.toOrderPaymentSummary(updated);
