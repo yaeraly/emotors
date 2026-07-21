@@ -400,6 +400,9 @@ export async function verifyDevDatabaseCleanup(prisma: PrismaClient): Promise<De
   if (pricingPolicies === 0) failures.push('Pricing policy configuration must be preserved');
   if (warehouses === 0) failures.push('Warehouses must be preserved');
   if (financeAccountTypes === 0) failures.push('Finance account types must be preserved');
+  if (financeAccounts === 0 && financeAccountTypes > 0) {
+    failures.push('Finance accounts must be preserved (run prisma:seed to create default accounts)');
+  }
   if (inventoryQuantityTotal !== 0) failures.push(`Inventory quantities must be zero (found ${inventoryQuantityTotal})`);
   if (inventoryValueTotal !== 0) failures.push(`Inventory value must be zero (found ${inventoryValueTotal})`);
   if (financeBalanceTotal !== 0) failures.push(`Finance balances must be zero (found ${financeBalanceTotal})`);

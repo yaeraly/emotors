@@ -1,4 +1,4 @@
-import { PrismaClient, Role } from '@prisma/client';
+import { FinanceAccountScope, PrismaClient, Role } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -535,6 +535,58 @@ async function main() {
       where: { code: item.code },
       update: item,
       create: item,
+    });
+  }
+
+  const financeAccounts = [
+    {
+      accountNumber: 'FAC-SEED-HQ-CASH',
+      name: 'HQ Cash Account',
+      scope: FinanceAccountScope.HQ,
+      branchId: null as string | null,
+      typeCode: 'CASH',
+    },
+    {
+      accountNumber: 'FAC-SEED-HQ-BANK',
+      name: 'HQ Bank Account',
+      scope: FinanceAccountScope.HQ,
+      branchId: null,
+      typeCode: 'BANK',
+    },
+    {
+      accountNumber: 'FAC-SEED-BISHKEK-CASH',
+      name: 'Bishkek Branch Cash',
+      scope: FinanceAccountScope.BRANCH,
+      branchId: branch.id,
+      typeCode: 'CASH',
+    },
+  ];
+
+  for (const account of financeAccounts) {
+    await prisma.financeAccount.upsert({
+      where: { accountNumber: account.accountNumber },
+      update: {
+        name: account.name,
+        scope: account.scope,
+        branchId: account.branchId,
+        typeCode: account.typeCode,
+        status: 'ACTIVE',
+        openingBalance: 0,
+        currentBalance: 0,
+        availableBalance: 0,
+        pendingBalance: 0,
+        deletedAt: null,
+      },
+      create: {
+        accountNumber: account.accountNumber,
+        name: account.name,
+        scope: account.scope,
+        branchId: account.branchId,
+        typeCode: account.typeCode,
+        currency: 'KGS',
+        status: 'ACTIVE',
+        createdById: ceoUser?.id ?? null,
+      },
     });
   }
 }
