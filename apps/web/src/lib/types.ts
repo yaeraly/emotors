@@ -1243,6 +1243,22 @@ export type FinanceLedgerEntry = {
   createdBy?: { id: string; fullName: string } | null;
 };
 
+export type FinanceInvestment = {
+  id: string;
+  investmentNumber: string;
+  investmentDate: string;
+  investmentType: 'OWNER_INVESTMENT' | 'INVESTOR_INVESTMENT';
+  amount: number;
+  currency: string;
+  investorOwnerName: string;
+  providedBy: string;
+  notes?: string | null;
+  createdAt: string;
+  account?: { id: string; name: string; accountNumber: string; branchId?: string | null };
+  createdBy?: { id: string; fullName: string; email: string } | null;
+  ledgerEntry?: { id: string; entryNumber: string; entryType: string; beforeBalance?: number; afterBalance?: number };
+};
+
 export type CashierShift = {
   id: string;
   shiftNumber: string;

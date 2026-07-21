@@ -429,15 +429,11 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             {canSeeCrm ? (
               <Link
                 href="/customers"
-                className="block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700"
+                className={sidebarNavClass(pathname, '/customers')}
               >
                 {t('nav.customers')}
               </Link>
-            ) : (
-              <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                {t('nav.noCrmAccess')}
-              </p>
-            )}
+            ) : null}
             {canSeeSales ? (
               <Link
                 href="/sales"

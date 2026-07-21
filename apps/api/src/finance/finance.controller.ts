@@ -22,7 +22,7 @@ import {
   SetOpeningBalanceDto,
   UpdateFinanceAccountDto,
 } from './dto/finance-account.dto';
-import { CreateOwnerInvestmentDto } from './dto/create-owner-investment.dto';
+import { CreateFinanceInvestmentDto } from './dto/create-finance-investment.dto';
 import { CloseCashierShiftDto, OpenCashierShiftDto } from './dto/cashier-shift.dto';
 import { FinanceReportQueryDto } from './dto/finance-report-query.dto';
 import { CreateFinanceTransferDto, FinanceTransferQueryDto } from './dto/finance-transfer.dto';
@@ -232,8 +232,8 @@ export class FinanceController {
 
   @Post('investments')
   @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
-  createInvestment(@CurrentUser() user: AuthUser, @Body() dto: CreateOwnerInvestmentDto) {
-    return this.investmentsService.createOwnerInvestment(user, dto);
+  createInvestment(@CurrentUser() user: AuthUser, @Body() dto: CreateFinanceInvestmentDto) {
+    return this.investmentsService.createInvestment(user, dto);
   }
 
   @Get('shifts')

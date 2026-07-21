@@ -1002,6 +1002,7 @@ model Branch {
   financeExpenses           FinanceExpense[]
   financeReconciliations    FinanceReconciliation[]
   financeAccountAssignments FinanceAccountAssignment[]
+  financeInvestments        FinanceInvestment[]
   cashierShifts             CashierShift[]
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
@@ -1369,6 +1370,7 @@ model User {
   financeExpensesCreated                          FinanceExpense[]                    @relation("FinanceExpenseCreator")
   financeExpensesApproved                         FinanceExpense[]                    @relation("FinanceExpenseApprover")
   financeReconciliationsCreated                   FinanceReconciliation[]             @relation("FinanceReconciliationCreator")
+  financeInvestmentsCreated                       FinanceInvestment[]                 @relation("FinanceInvestmentCreator")
   cashierShifts                                   CashierShift[]                      @relation("CashierShiftCashier")
   userPermissionsHeld                             UserPermission[]                    @relation("UserPermissionHolder")
   userPermissionsGranted                          UserPermission[]                    @relation("UserPermissionGranter")
@@ -4807,6 +4809,11 @@ enum FinanceLedgerEntryType {
   CLOSING_BALANCE
 }
 
+enum FinanceInvestmentType {
+  OWNER_INVESTMENT
+  INVESTOR_INVESTMENT
+}
+
 enum FinanceTransferStatus {
   PENDING
   APPROVED
@@ -4870,6 +4877,7 @@ model FinanceAccount {
   expenses           FinanceExpense[]
   payments           Payment[]
   reconciliations    FinanceReconciliation[]
+  investments        FinanceInvestment[]
   createdAt        DateTime                     @default(now())
   updatedAt        DateTime                     @updatedAt
   deletedAt        DateTime?
@@ -4927,6 +4935,7 @@ model FinanceLedgerEntry {
   createdById       String?
   createdBy         User?                  @relation("FinanceLedgerEntryCreator", fields: [createdById], references: [id])
   createdAt         DateTime               @default(now())
+  financeInvestment FinanceInvestment?
 
   @@index([accountId])
   @@index([branchId])
@@ -5064,4 +5073,31 @@ model FinanceReconciliation {
   @@index([branchId])
   @@index([status])
   @@index([statementDate])
+}
+
+model FinanceInvestment {
+  id                String                @id @default(cuid())
+  investmentNumber  String                @unique
+  investmentDate    DateTime
+  investmentType    FinanceInvestmentType
+  amount            Decimal               @db.Decimal(14, 2)
+  currency          String                @default("KGS")
+  accountId         String
+  account           FinanceAccount        @relation(fields: [accountId], references: [id])
+  branchId          String?
+  branch            Branch?               @relation(fields: [branchId], references: [id])
+  investorOwnerName String
+  providedBy        String
+  notes             String?
+  ledgerEntryId     String                @unique
+  ledgerEntry       FinanceLedgerEntry    @relation(fields: [ledgerEntryId], references: [id])
+  createdById       String?
+  createdBy         User?                 @relation("FinanceInvestmentCreator", fields: [createdById], references: [id])
+  createdAt         DateTime              @default(now())
+
+  @@index([accountId])
+  @@index([branchId])
+  @@index([investmentType])
+  @@index([investmentDate])
+  @@index([createdAt])
 }

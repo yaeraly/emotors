@@ -13,6 +13,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "prisma:db:push": "prisma db push --schema prisma/schema.prisma",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "db:cleanup": "ts-node prisma/scripts/dev-database-cleanup.ts",
+    "db:cleanup:preview": "ts-node prisma/scripts/dev-database-cleanup.ts --preview",
     "product-code:migrate:preview": "ts-node prisma/scripts/product-code-migration.ts preview",
     "product-code:migrate:apply": "ts-node prisma/scripts/product-code-migration.ts apply",
     "test": "node --import tsx --test src/**/*.test.ts",
