@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
-import { ProcurementPaymentInfo } from '@/components/ProcurementPaymentInfo';
+import { ProcurementPaymentInfo, type SupplierAccountFormValue } from '@/components/ProcurementPaymentInfo';
 import {
   canConfirmSupplierPayment,
   canCreateSupplierPayment,
@@ -15,7 +15,6 @@ import {
 } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
-import { isConfirmedSupplierPayment } from '@/lib/supplier-payment-utils';
 import { translateStatus } from '@/lib/translate-status';
 
 export type SupplierPayment = {
@@ -155,13 +154,12 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const [accounts, setAccounts] = useState<FinanceAccountOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [invoiceNumber, setInvoiceNumber] = useState(order.supplierInvoiceNumber ?? '');
-  const [expectedPaymentDate, setExpectedPaymentDate] = useState(
-    order.expectedPaymentDate ? String(order.expectedPaymentDate).slice(0, 10) : '',
-  );
-  const [requestedPaymentYuan, setRequestedPaymentYuan] = useState(
-    String(order.requestedPaymentYuan ?? order.remainingYuan ?? order.totalYuan ?? ''),
-  );
+  const [accountForm, setAccountForm] = useState<SupplierAccountFormValue>({
+    paymentMethod: 'BANK_ACCOUNT',
+    bankName: '',
+    accountHolder: '',
+    accountNumber: '',
+  });
   const [confirmTarget, setConfirmTarget] = useState<SupplierPayment | null>(null);
   const [confirmForm, setConfirmForm] = useState({
     actualPaidKgs: '',
@@ -184,23 +182,9 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const canVoid = canVoidSupplierPayment(user);
   const canReverse = canReverseSupplierPayment(user);
   const payments = order.supplierPayments ?? [];
-  const completedPayments = payments.filter((payment) => isConfirmedSupplierPayment(payment.status));
-  const pendingPayments = payments.filter((payment) =>
-    ['DRAFT', 'AWAITING_ACCOUNTANT', 'AWAITING_CASHIER', 'WAITING_ACCOUNTANT', 'PENDING_CASHIER', 'SENT_TO_CASHIER'].includes(
-      payment.status,
-    ),
-  );
-  const lastCompletedPayment = [...completedPayments].sort((a, b) => {
-    const aTime = new Date(a.paidAt || a.paymentDate || a.createdAt || 0).getTime();
-    const bTime = new Date(b.paidAt || b.paymentDate || b.createdAt || 0).getTime();
-    return bTime - aTime;
-  })[0];
   const activeInvoiceRequest =
     order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
     order.supplierPaymentStatus === 'AWAITING_CASHIER';
-  const invoiceAttachments = (order.attachments ?? []).filter(
-    (item) => item.entityType === 'SUPPLIER_INVOICE' || item.entityType === 'PROCUREMENT_ORDER',
-  );
 
   const calculatedKgs = useMemo(() => {
     const yuan = Number(form.amountYuan);
@@ -223,9 +207,9 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   }, [calculatedKgs, form.approvedAmountKgs]);
 
   async function sendInvoice() {
-    const amount = Number(requestedPaymentYuan);
-    if (!amount || amount <= 0) {
-      setError(t('procurement.payments.requestedAmountRequired'));
+    if (activeInvoiceRequest || saving) return;
+    if (accountForm.paymentMethod === 'BANK_ACCOUNT' && !accountForm.accountNumber.trim()) {
+      setError(t('procurement.paymentInfo.accountNumberRequired'));
       return;
     }
     setSaving(true);
@@ -234,9 +218,10 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       await apiFetch(`/procurement/orders/${order.id}/send-invoice-to-accountant`, {
         method: 'POST',
         body: JSON.stringify({
-          supplierInvoiceNumber: invoiceNumber || undefined,
-          expectedPaymentDate: expectedPaymentDate || undefined,
-          requestedPaymentYuan: amount,
+          paymentMethod: accountForm.paymentMethod,
+          bankName: accountForm.bankName || undefined,
+          accountHolder: accountForm.accountHolder || undefined,
+          accountNumber: accountForm.accountNumber || undefined,
         }),
       });
       await onChanged();
@@ -283,34 +268,6 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
     setShowForm(false);
     setEditingPaymentId(null);
     setForm(emptyForm());
-  }
-
-  async function uploadInvoice(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    const token = getToken();
-    if (!token) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    setSaving(true);
-    setError('');
-    try {
-      const response = await fetch(`${API_URL}/procurement/orders/${order.id}/attachments/supplier-invoice`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || t('common.error'));
-      }
-      await onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSaving(false);
-    }
   }
 
   async function savePayment(sendToCashier: boolean) {
@@ -510,23 +467,23 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       : '';
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-        <h3 className="text-lg font-bold">{t('procurement.payments.title')}</h3>
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h3 className="text-base font-bold">{t('procurement.payments.title')}</h3>
         {canPrepare ? (
           <button
             type="button"
             onClick={() => (showForm && !editingPaymentId ? closeForm() : openCreateForm())}
-            className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700"
+            className="rounded-lg border border-blue-200 px-3 py-1.5 text-sm font-semibold text-blue-700"
           >
             {showForm && !editingPaymentId ? t('common.cancel') : t('procurement.payments.addPayment')}
           </button>
         ) : null}
       </div>
 
-      {error ? <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
-      <div className="mb-6 grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+      <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
         <SummaryCard label={t('procurement.payments.totalOrderYuan')} value={`¥${Number(order.totalYuan).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.totalPaidYuan')} value={`¥${Number(order.totalPaidYuan ?? 0).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.remainingYuan')} value={`¥${Number(order.remainingYuan ?? order.totalYuan).toFixed(2)}`} />
@@ -534,95 +491,30 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
           label={t('procurement.payments.paymentStatus')}
           value={t(`procurement.payments.status.${order.supplierPaymentStatus ?? 'UNPAID'}`)}
         />
-        <SummaryCard label={t('procurement.payments.paymentCount')} value={String(completedPayments.length)} />
-        <SummaryCard label={t('procurement.payments.pendingPaymentCount')} value={String(pendingPayments.length)} />
-        <SummaryCard
-          label={t('procurement.payments.lastPaymentDate')}
-          value={
-            lastCompletedPayment
-              ? new Date(lastCompletedPayment.paidAt || lastCompletedPayment.paymentDate).toLocaleDateString()
-              : '—'
-          }
-        />
-        <SummaryCard
-          label={t('procurement.payments.lastPaymentAmount')}
-          value={lastCompletedPayment ? `¥${Number(lastCompletedPayment.amountYuan).toFixed(2)}` : '—'}
-        />
-        <SummaryCard
-          label={t('procurement.payments.weightedAverageRate')}
-          value={order.weightedAverageYuanRate ? Number(order.weightedAverageYuanRate).toFixed(4) : '—'}
-        />
       </div>
 
       {canSendInvoice ? (
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <h4 className="font-semibold text-slate-900">{t('procurement.payments.supplierAccountTitle')}</h4>
-          <p className="mt-1 text-sm text-slate-600">{t('procurement.payments.sendInvoiceHelp')}</p>
-
-          <ProcurementPaymentInfo
-            orderId={order.id}
-            user={user}
-            hasCompletedPayments={completedPayments.length > 0}
-            embedded
-            onChanged={() => void onChanged()}
-          />
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.supplierInvoiceNumber')}</span>
-              <input
-                value={invoiceNumber}
-                onChange={(e) => setInvoiceNumber(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.requestedPaymentYuan')}</span>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={requestedPaymentYuan}
-                onChange={(e) => setRequestedPaymentYuan(e.target.value)}
-                disabled={activeInvoiceRequest}
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.expectedPaymentDate')}</span>
-              <input
-                type="date"
-                value={expectedPaymentDate}
-                onChange={(e) => setExpectedPaymentDate(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.uploadInvoice')}</span>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="mt-2 block w-full text-sm" onChange={(e) => void uploadInvoice(e)} />
-            </label>
-            <div className="flex items-end">
-              <button
-                type="button"
-                disabled={saving || activeInvoiceRequest}
-                onClick={() => void sendInvoice()}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
-              >
-                {activeInvoiceRequest
-                  ? t('procurement.payments.awaitingAccountant')
-                  : t('procurement.payments.sendInvoice')}
-              </button>
-            </div>
+        <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-semibold text-slate-900">{t('procurement.payments.supplierAccountTitle')}</h4>
+          <div className="mt-2">
+            <ProcurementPaymentInfo
+              orderId={order.id}
+              user={user}
+              value={accountForm}
+              onChange={setAccountForm}
+              disabled={activeInvoiceRequest}
+            />
           </div>
-          {invoiceAttachments.length ? (
-            <div className="mt-3 space-y-1 text-sm">
-              {invoiceAttachments.map((attachment) => (
-                <a key={attachment.id} href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="block text-blue-700">
-                  {attachment.fileName}
-                </a>
-              ))}
-            </div>
-          ) : null}
+          <button
+            type="button"
+            disabled={saving || activeInvoiceRequest}
+            onClick={() => void sendInvoice()}
+            className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
+          >
+            {activeInvoiceRequest
+              ? t('procurement.payments.awaitingAccountant')
+              : t('procurement.payments.sendInvoice')}
+          </button>
         </div>
       ) : null}
 
@@ -906,9 +798,9 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
-      <p className="mt-2 text-lg font-bold text-slate-950">{value}</p>
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-bold text-slate-950">{value}</p>
     </div>
   );
 }

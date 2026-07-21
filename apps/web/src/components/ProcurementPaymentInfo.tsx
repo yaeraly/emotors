@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { User } from '@/lib/types';
@@ -20,69 +20,55 @@ type PaymentInfoVersion = {
   bankName?: string | null;
   accountHolder?: string | null;
   accountNumber?: string | null;
-  swiftCode?: string | null;
-  bankAddress?: string | null;
-  comment?: string | null;
-  reason?: string | null;
   isActive: boolean;
-  createdAt: string;
-  createdBy?: { fullName?: string } | null;
   qrCodes?: QrCode[];
+};
+
+export type SupplierAccountFormValue = {
+  paymentMethod: 'BANK_ACCOUNT' | 'QR_CODE';
+  bankName: string;
+  accountHolder: string;
+  accountNumber: string;
 };
 
 type Props = {
   orderId: string;
   user: User | null;
-  hasCompletedPayments: boolean;
-  onChanged?: () => void;
-  /** When true, render fields without a standalone "Способ оплаты" section shell. */
-  embedded?: boolean;
+  value: SupplierAccountFormValue;
+  onChange: (value: SupplierAccountFormValue) => void;
+  disabled?: boolean;
+  onQrChanged?: () => void;
 };
 
+/** Compact supplier account fields — no Save button; parent submits via send. */
 export function ProcurementPaymentInfo({
   orderId,
   user,
-  hasCompletedPayments,
-  onChanged,
-  embedded = false,
+  value,
+  onChange,
+  disabled = false,
+  onQrChanged,
 }: Props) {
   const { t } = useTranslation();
-  const canEdit = canCreateProcurementOrder(user) || hasFullAccess(user);
+  const canEdit = (canCreateProcurementOrder(user) || hasFullAccess(user)) && !disabled;
   const canView = canEdit || canCreateSupplierPayment(user) || hasFullAccess(user);
-  const [versions, setVersions] = useState<PaymentInfoVersion[]>([]);
+  const [active, setActive] = useState<PaymentInfoVersion | null>(null);
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    paymentMethod: 'BANK_ACCOUNT' as 'BANK_ACCOUNT' | 'QR_CODE',
-    bankName: '',
-    accountHolder: '',
-    accountNumber: '',
-    swiftCode: '',
-    comment: '',
-    reason: '',
-  });
-  const [qrDescription, setQrDescription] = useState('');
-
-  const active = versions.find((v) => v.isActive) ?? versions[0] ?? null;
+  const [busy, setBusy] = useState(false);
 
   function load() {
     if (!canView) return;
     apiFetch<PaymentInfoVersion[]>(`/procurement/orders/${orderId}/payment-info`)
       .then((rows) => {
-        setVersions(rows);
-        const current = rows.find((v) => v.isActive) ?? rows[0];
+        const current = rows.find((v) => v.isActive) ?? rows[0] ?? null;
+        setActive(current);
         if (current) {
-          setForm({
+          onChange({
             paymentMethod: current.paymentMethod,
             bankName: current.bankName ?? '',
             accountHolder: current.accountHolder ?? '',
             accountNumber: current.accountNumber ?? '',
-            swiftCode: current.swiftCode ?? '',
-            comment: current.comment ?? '',
-            reason: '',
           });
-        } else {
-          setForm((prev) => ({ ...prev, paymentMethod: 'BANK_ACCOUNT' }));
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -93,53 +79,35 @@ export function ProcurementPaymentInfo({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (!canEdit) return;
-    if (hasCompletedPayments && form.reason.trim().length < 3) {
-      setError(t('procurement.paymentInfo.versionReasonRequired'));
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      await apiFetch(`/procurement/orders/${orderId}/payment-info`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          paymentMethod: form.paymentMethod,
-          bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
-          accountHolder: form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
-          accountNumber: form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
-          swiftCode: form.paymentMethod === 'BANK_ACCOUNT' ? form.swiftCode || undefined : undefined,
-          comment: form.comment || undefined,
-          reason: hasCompletedPayments ? form.reason : undefined,
-        }),
-      });
-      load();
-      onChanged?.();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSaving(false);
-    }
+  async function ensureDraft(method: 'BANK_ACCOUNT' | 'QR_CODE') {
+    const saved = await apiFetch<PaymentInfoVersion>(`/procurement/orders/${orderId}/payment-info`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        paymentMethod: method,
+        bankName: method === 'BANK_ACCOUNT' ? value.bankName || undefined : undefined,
+        accountHolder: method === 'BANK_ACCOUNT' ? value.accountHolder || undefined : undefined,
+        accountNumber: method === 'BANK_ACCOUNT' ? value.accountNumber || undefined : undefined,
+      }),
+    });
+    setActive(saved);
+    return saved;
   }
 
   async function uploadQr(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file || !canEdit) return;
-    if (!active) {
-      setError(t('procurement.paymentInfo.saveMethodFirst'));
-      return;
-    }
-    const token = getToken();
-    if (!token) return;
-    const body = new FormData();
-    body.append('file', file);
-    if (qrDescription.trim()) body.append('description', qrDescription.trim());
-    setSaving(true);
+    setBusy(true);
     setError('');
     try {
+      let version = active;
+      if (!version || version.paymentMethod !== 'QR_CODE') {
+        version = await ensureDraft('QR_CODE');
+      }
+      const token = getToken();
+      if (!token) return;
+      const body = new FormData();
+      body.append('file', file);
       const response = await fetch(`${API_URL}/procurement/orders/${orderId}/payment-info/qr`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -149,185 +117,107 @@ export function ProcurementPaymentInfo({
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.message || t('common.error'));
       }
-      setQrDescription('');
       load();
-      onChanged?.();
+      onQrChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
   async function removeQr(attachmentId: string) {
-    setSaving(true);
+    setBusy(true);
     setError('');
     try {
       await apiFetch(`/procurement/orders/${orderId}/payment-info/qr/${attachmentId}`, {
         method: 'DELETE',
       });
       load();
-      onChanged?.();
+      onQrChanged?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
-      setSaving(false);
+      setBusy(false);
     }
   }
 
   if (!canView) return null;
 
-  const content = (
-    <>
-      {!embedded ? (
-        <>
-          <h3 className="mb-2 text-lg font-bold">{t('procurement.paymentInfo.supplierAccountTitle')}</h3>
-          <p className="mb-4 text-sm text-slate-500">{t('procurement.paymentInfo.methodHelp')}</p>
-        </>
-      ) : (
-        <p className="mb-4 text-sm text-slate-600">{t('procurement.paymentInfo.methodHelp')}</p>
-      )}
-      {error ? <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {hasCompletedPayments ? (
-        <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {t('procurement.paymentInfo.versionAfterPaymentHint')}
-        </p>
-      ) : null}
+  return (
+    <div className="space-y-3">
+      {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+      <label className="block">
+        <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.paymentMethod')}</span>
+        <select
+          value={value.paymentMethod}
+          disabled={!canEdit || busy}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              paymentMethod: e.target.value as 'BANK_ACCOUNT' | 'QR_CODE',
+            })
+          }
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+        >
+          <option value="BANK_ACCOUNT">{t('procurement.paymentInfo.method.BANK_ACCOUNT')}</option>
+          <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
+        </select>
+      </label>
 
-      {canEdit ? (
-        <form onSubmit={save} className="mb-6 grid gap-3 md:grid-cols-2">
-          <label className="block md:col-span-2">
-            <span className="text-sm font-semibold">{t('procurement.paymentInfo.paymentMethod')}</span>
-            <select
-              value={form.paymentMethod}
-              onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as 'BANK_ACCOUNT' | 'QR_CODE' })}
-              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-            >
-              <option value="BANK_ACCOUNT">{t('procurement.paymentInfo.method.BANK_ACCOUNT')}</option>
-              <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
-            </select>
-          </label>
-
-          {form.paymentMethod === 'BANK_ACCOUNT' ? (
-            <>
-              <label className="block">
-                <span className="text-sm font-semibold">{t('procurement.paymentInfo.bankName')}</span>
-                <input
-                  required
-                  value={form.bankName}
-                  onChange={(e) => setForm({ ...form, bankName: e.target.value })}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold">{t('procurement.paymentInfo.accountHolder')}</span>
-                <input
-                  required
-                  value={form.accountHolder}
-                  onChange={(e) => setForm({ ...form, accountHolder: e.target.value })}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold">{t('procurement.paymentInfo.accountNumber')}</span>
-                <input
-                  required
-                  value={form.accountNumber}
-                  onChange={(e) => setForm({ ...form, accountNumber: e.target.value })}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
-              <label className="block">
-                <span className="text-sm font-semibold">{t('procurement.paymentInfo.swift')}</span>
-                <input
-                  value={form.swiftCode}
-                  onChange={(e) => setForm({ ...form, swiftCode: e.target.value })}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
-            </>
-          ) : (
-            <p className="md:col-span-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              {t('procurement.paymentInfo.qrUnlimitedHint')}
-            </p>
-          )}
-
-          <label className="block md:col-span-2">
-            <span className="text-sm font-semibold">{t('procurement.paymentInfo.comment')}</span>
-            <textarea
-              value={form.comment}
-              onChange={(e) => setForm({ ...form, comment: e.target.value })}
-              className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2"
+      {value.paymentMethod === 'BANK_ACCOUNT' ? (
+        <div className="grid gap-2 md:grid-cols-3">
+          <label className="block md:col-span-1">
+            <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.accountNumber')}</span>
+            <input
+              required
+              disabled={!canEdit}
+              value={value.accountNumber}
+              onChange={(e) => onChange({ ...value, accountNumber: e.target.value })}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
-
-          {hasCompletedPayments ? (
-            <label className="block md:col-span-2">
-              <span className="text-sm font-semibold">{t('procurement.paymentInfo.versionReason')}</span>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-700">
+              {t('procurement.paymentInfo.bankName')} ({t('common.optional')})
+            </span>
+            <input
+              disabled={!canEdit}
+              value={value.bankName}
+              onChange={(e) => onChange({ ...value, bankName: e.target.value })}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold text-slate-700">
+              {t('procurement.paymentInfo.accountHolder')} ({t('common.optional')})
+            </span>
+            <input
+              disabled={!canEdit}
+              value={value.accountHolder}
+              onChange={(e) => onChange({ ...value, accountHolder: e.target.value })}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            />
+          </label>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {canEdit ? (
+            <label className="inline-flex cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold">
+              {busy ? t('common.loading') : t('procurement.paymentInfo.uploadQr')}
               <input
-                required
-                value={form.reason}
-                onChange={(e) => setForm({ ...form, reason: e.target.value })}
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                disabled={busy}
+                onChange={(e) => void uploadQr(e)}
               />
             </label>
           ) : null}
-
-          <div className="md:col-span-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white disabled:bg-blue-300"
-            >
-              {saving
-                ? t('common.loading')
-                : hasCompletedPayments
-                  ? t('procurement.paymentInfo.createVersion')
-                  : t('common.save')}
-            </button>
-          </div>
-        </form>
-      ) : active ? (
-        <div className="mb-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          {t('procurement.paymentInfo.paymentMethod')}:{' '}
-          <strong>{t(`procurement.paymentInfo.method.${active.paymentMethod}`)}</strong>
-          {active.paymentMethod === 'BANK_ACCOUNT' ? (
-            <span className="mt-1 block">
-              {[active.bankName, active.accountHolder, active.accountNumber].filter(Boolean).join(' · ')}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {(form.paymentMethod === 'QR_CODE' || active?.paymentMethod === 'QR_CODE') && (
-        <>
-          {canEdit && !hasCompletedPayments ? (
-            <div className="mb-4 flex flex-wrap items-end gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-              <label className="block flex-1">
-                <span className="text-sm font-semibold">{t('procurement.paymentInfo.qrDescription')}</span>
-                <input
-                  value={qrDescription}
-                  onChange={(e) => setQrDescription(e.target.value)}
-                  placeholder={t('procurement.paymentInfo.qrDescriptionOptional')}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
-              <label className="cursor-pointer rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold">
-                {t('procurement.paymentInfo.uploadQr')}
-                <input
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.webp"
-                  className="hidden"
-                  onChange={(e) => void uploadQr(e)}
-                />
-              </label>
-            </div>
-          ) : null}
-
           {active?.qrCodes?.length ? (
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {active.qrCodes.map((qr) => (
-                <div key={qr.id} className="rounded-2xl border border-slate-200 p-3">
+                <div key={qr.id} className="rounded-lg border border-slate-200 bg-white p-2 text-sm">
                   <a
                     href={`${API_URL}${qr.fileUrl}`}
                     target="_blank"
@@ -336,12 +226,11 @@ export function ProcurementPaymentInfo({
                   >
                     {qr.fileName}
                   </a>
-                  {qr.description ? <p className="mt-1 text-xs text-slate-500">{qr.description}</p> : null}
-                  {canEdit && !hasCompletedPayments ? (
+                  {canEdit ? (
                     <button
                       type="button"
                       onClick={() => void removeQr(qr.id)}
-                      className="mt-2 text-xs font-semibold text-red-700"
+                      className="mt-1 block text-xs font-semibold text-red-700"
                     >
                       {t('common.delete')}
                     </button>
@@ -349,19 +238,11 @@ export function ProcurementPaymentInfo({
                 </div>
               ))}
             </div>
-          ) : form.paymentMethod === 'QR_CODE' ? (
-            <p className="text-sm text-slate-500">{t('procurement.paymentInfo.noQrYet')}</p>
-          ) : null}
-        </>
+          ) : (
+            <p className="text-xs text-slate-500">{t('procurement.paymentInfo.noQrYet')}</p>
+          )}
+        </div>
       )}
-    </>
-  );
-
-  if (embedded) {
-    return <div className="mb-4">{content}</div>;
-  }
-
-  return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">{content}</section>
+    </div>
   );
 }

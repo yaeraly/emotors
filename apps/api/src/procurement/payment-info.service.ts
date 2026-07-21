@@ -376,9 +376,9 @@ export class PaymentInfoService {
 
   private validatePaymentInfo(dto: UpsertPaymentInfoDto) {
     if (dto.paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT) {
-      if (!dto.bankName?.trim() || !dto.accountHolder?.trim() || !dto.accountNumber?.trim()) {
+      if (!dto.accountNumber?.trim()) {
         throw new BadRequestException(
-          'Bank name, account holder, and account number are required for Supplier Bank Account',
+          'Account number is required for Supplier Bank Account',
         );
       }
     }

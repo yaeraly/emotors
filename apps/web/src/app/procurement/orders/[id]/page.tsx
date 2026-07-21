@@ -4,9 +4,8 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { DomesticTransportSection, type DomesticTransportForm } from '@/components/DomesticTransportSection';
+import { type DomesticTransportForm } from '@/components/DomesticTransportSection';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
-import { LockedFieldHint } from '@/components/LockedFieldHint';
 import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
 import { ProcurementSectionPayablePanel } from '@/components/ProcurementSectionPayablePanel';
@@ -968,86 +967,8 @@ function ProcurementOrderDetailPageContent() {
 
           {activeTab === 'transport' ? (
           <>
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
-              {chinaDomesticLocked && !chinaDomesticEditable ? (
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold uppercase text-amber-800">{t('procurement.chinaDomestic.locked')}</span>
-              ) : null}
-            </div>
-            {chinaDomesticLocked && !chinaDomesticFieldsEditable ? (
-              <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.chinaDomestic.lockedTooltip')}</p>
-            ) : null}
-            {chinaDomesticLocked && !chinaDomesticEditable && isCeoUser ? (
-              <p className="mb-4 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">{t('procurement.transport.changeReasonRequired')}</p>
-            ) : null}
-            <div className="grid gap-4 md:grid-cols-3">
-              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticFieldsEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
-                <TransportCompanySelect
-                  label={t('procurement.transportCompanies.select')}
-                  value={logisticsForm.chinaDomesticTransportCompanyId}
-                  companies={transportCompanies}
-                  onChange={(value) => setLogistics('chinaDomesticTransportCompanyId', value)}
-                  disabled={finalized || readOnlyFinance || !chinaDomesticFieldsEditable}
-                />
-              </LockedFieldHint>
-              <LockedFieldHint locked={chinaDomesticLocked && !chinaDomesticFieldsEditable} tooltip={t('procurement.chinaDomestic.lockedTooltip')}>
-                <EditableField
-                  label={t('procurement.orders.costInYuan')}
-                  value={logisticsForm.chinaDomesticTransportYuan}
-                  onChange={(v) => setLogistics('chinaDomesticTransportYuan', v)}
-                  type="number"
-                  disabled={finalized || readOnlyFinance || !chinaDomesticFieldsEditable}
-                />
-              </LockedFieldHint>
-              <Info label={t('procurement.orders.costInKgs')} value={formatKgs(previewChinaDomesticTransportKgs)} />
-              <Info label={t('procurement.orders.weightedAverageYuanRate')} value={String(effectiveYuanRate || '-')} />
-            </div>
-            {chinaDomesticLocked && isCeoUser && !finalized ? (
-              <div className="mt-4">
-                <label className="block text-sm font-semibold text-slate-700">{t('procurement.chinaDomestic.unlockReasonPlaceholder')}</label>
-                <textarea
-                  value={chinaDomesticChangeReason}
-                  onChange={(e) => setChinaDomesticChangeReason(e.target.value)}
-                  placeholder={t('procurement.chinaDomestic.unlockReasonPlaceholder')}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                  rows={2}
-                />
-              </div>
-            ) : null}
-            {canUnlockChinaDomestic && !finalized ? (
-              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-semibold text-amber-900">{t('procurement.chinaDomestic.unlockTitle')}</p>
-                <textarea
-                  value={chinaDomesticUnlockReason}
-                  onChange={(e) => setChinaDomesticUnlockReason(e.target.value)}
-                  placeholder={t('procurement.chinaDomestic.unlockReasonPlaceholder')}
-                  className="mt-3 w-full rounded-xl border border-amber-200 px-3 py-2 text-sm"
-                  rows={2}
-                />
-                <button
-                  type="button"
-                  disabled={unlockingChinaDomestic}
-                  onClick={() => void unlockChinaDomesticTransport()}
-                  className="mt-3 rounded-xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-amber-300"
-                >
-                  {unlockingChinaDomestic ? t('common.loading') : t('procurement.chinaDomestic.unlock')}
-                </button>
-              </div>
-            ) : null}
-            {chinaDomesticDirty && chinaDomesticFieldsEditable && !finalized && !readOnlyFinance ? (
-              <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
-            ) : null}
-            {chinaDomesticFieldsEditable && !finalized && !readOnlyFinance ? (
-              <button
-                type="button"
-                disabled={savingChinaDomestic || !chinaDomesticDirty}
-                onClick={() => void saveChinaDomesticTransport()}
-                className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
-              >
-                {savingChinaDomestic ? t('common.loading') : t('procurement.transport.save')}
-              </button>
-            ) : null}
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.chinaDomestic')}</h3>
             {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
@@ -1055,95 +976,12 @@ function ProcurementOrderDetailPageContent() {
                 expenseType="DOMESTIC_CHINA_TRANSPORT"
                 requestType="CHINA_DOMESTIC_TRANSPORT"
                 defaultCurrency="CNY"
-                sectionTotalAmount={Number(logisticsForm.chinaDomesticTransportYuan || 0)}
-                defaultCarrier={order.chinaDomesticTransportCompany?.name ?? ''}
-                showRoute
               />
             ) : null}
           </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.cargoPayment')}</h3>
-            <div className="grid gap-4 md:grid-cols-3">
-              <TransportCompanySelect
-                label={t('procurement.transportCompanies.select')}
-                value={logisticsForm.chinaExportTransportCompanyId}
-                companies={transportCompanies}
-                onChange={(value) => setLogistics('chinaExportTransportCompanyId', value)}
-                disabled={finalized || readOnlyFinance}
-              />
-              <EditableField label={t('procurement.orders.cargoReceiptNumber')} value={logisticsForm.cargoReceiptNumber} onChange={(v) => setLogistics('cargoReceiptNumber', v)} disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoReceiptDate')} value={logisticsForm.cargoReceiptDate} onChange={(v) => setLogistics('cargoReceiptDate', v)} type="date" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoTotalWeightKg')} value={logisticsForm.cargoTotalWeightKg} onChange={(v) => setLogistics('cargoTotalWeightKg', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.cargoRateUsdPerKg')} value={logisticsForm.cargoRateUsdPerKg} onChange={(v) => setLogistics('cargoRateUsdPerKg', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.usdExchangeRate')} value={logisticsForm.defaultUsdRate} onChange={(v) => setLogistics('defaultUsdRate', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <Info label={t('procurement.orders.totalCargoCostUsd')} value={`$${(previewTotals?.totalCargoCostUsd ?? 0).toFixed(2)}`} />
-              <Info label={t('procurement.orders.totalCargoCostKgs')} value={formatKgs(previewTotals?.totalCargoCostKgs ?? 0)} />
-            </div>
-            <div className="mt-4 grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.cargoReceiptNote')} value={logisticsForm.cargoReceiptNote} onChange={(v) => setLogistics('cargoReceiptNote', v)} disabled={finalized || readOnlyFinance} />
-            </div>
-            <div className={`mt-4 space-y-3 rounded-2xl border p-4 ${
-              missingCargoAttachment && canReceive && readyForHqReceiving && !finalized
-                ? 'border-red-400 bg-red-50'
-                : 'border-transparent'
-            }`}>
-              <div className="flex items-center justify-between gap-4">
-                <h4 className="font-semibold text-slate-900">{t('procurement.payments.cargoAttachments')}</h4>
-                {canUploadCargo && !finalized ? (
-                  <label className={`cursor-pointer rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 ${uploadingCargoReceipt ? 'opacity-50' : ''}`}>
-                    {uploadingCargoReceipt ? t('common.loading') : t('procurement.payments.attachCargoReceipt')}
-                    <input
-                      type="file"
-                      className="hidden"
-                      accept=".pdf,.jpg,.jpeg,.png,.webp"
-                      disabled={uploadingCargoReceipt || savingCargoReceipt}
-                      onChange={(e) => void uploadCargoReceipt(e)}
-                    />
-                  </label>
-                ) : null}
-              </div>
-              {order.cargoAttachments?.length ? (
-                <ul className="space-y-2">
-                  {order.cargoAttachments.map((attachment) => (
-                    <li key={attachment.id}>
-                      <a href={`${API_URL}${attachment.fileUrl}`} target="_blank" rel="noreferrer" className="text-sm font-semibold text-blue-700">
-                        {attachment.fileName}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className={`text-sm ${missingCargoAttachment ? 'font-semibold text-red-700' : 'text-slate-500'}`}>
-                  {t('procurement.payments.noCargoAttachments')}
-                </p>
-              )}
-              {missingCargoAttachment && canReceive && readyForHqReceiving && !finalized ? (
-                <p className="rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800">
-                  {t('chinaReceiving.cargoReceiptRequired')}
-                </p>
-              ) : null}
-            </div>
-            {cargoReceiptDirty && canEditOrder && !finalized && !readOnlyFinance ? (
-              <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
-            ) : null}
-            {canEditOrder && !finalized && !readOnlyFinance ? (
-              <button
-                type="button"
-                disabled={savingCargoReceipt || uploadingCargoReceipt || !!cargoValidationError || !cargoReceiptDirty}
-                onClick={() => void saveCargoReceipt()}
-                className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
-              >
-                {savingCargoReceipt ? t('common.loading') : t('procurement.transport.save')}
-              </button>
-            ) : null}
-            {!cargoReceiptCompleted && canReceive && readyForHqReceiving && !finalized ? (
-              <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                {missingCargoAttachment
-                  ? t('chinaReceiving.cargoReceiptRequired')
-                  : t('procurement.receiving.warning.cargo')}
-              </p>
-            ) : null}
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.cargoPayment')}</h3>
             {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
@@ -1151,72 +989,25 @@ function ProcurementOrderDetailPageContent() {
                 expenseType="INTERNATIONAL_FREIGHT"
                 requestType="CARGO_PAYMENT"
                 defaultCurrency="USD"
-                sectionTotalAmount={Number(previewTotals?.totalCargoCostKgs || 0)}
-                defaultCarrier={
-                  transportCompanies.find((c) => c.id === logisticsForm.chinaExportTransportCompanyId)?.name
-                  ?? order.cargoCompany
-                  ?? ''
-                }
-                showShipmentReference
               />
             ) : null}
           </section>
 
-          <DomesticTransportSection
-            user={user}
-            finalized={finalized}
-            readOnlyFinance={readOnlyFinance}
-            canEditSection={canEditSvh}
-            transportCompanies={transportCompanies}
-            form={svhForm}
-            onChange={setSvhField}
-            dirty={svhDirty}
-            saving={savingSvh}
-            changeReason={svhChangeReason}
-            onChangeReason={setSvhChangeReason}
-            onSave={() => void saveSvhTransport()}
-          />
-          {canSeePayments ? (
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.domesticTransportKyrgyzstan')}</h3>
+            {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
                 user={user}
                 expenseType="LOCAL_DELIVERY"
                 requestType="KYRGYZSTAN_DOMESTIC_TRANSPORT"
                 defaultCurrency="KGS"
-                sectionTotalAmount={Number(svhForm.transportCostKgs || order.localTransportKgs || 0)}
-                defaultCarrier={
-                  transportCompanies.find((c) => c.id === svhForm.transportCompanyId)?.name ?? ''
-                }
-                showRoute
-                showVehicle
               />
-            </div>
-          ) : null}
-          {!svhTransportCompleted && canReceive && readyForHqReceiving && !finalized ? (
-            <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.domesticTransport.receiveBlocked')}</p>
-          ) : null}
+            ) : null}
+          </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.otherExpenses')}</h3>
-            <div className="grid gap-4 md:grid-cols-3">
-              <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.otherExpenseAmount')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-            </div>
-            {importCostsDirty && canEditOrder && !finalized && !readOnlyFinance ? (
-              <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
-            ) : null}
-            {canEditOrder && !finalized && !readOnlyFinance ? (
-              <button
-                type="button"
-                disabled={savingImportCosts || !!cargoValidationError || !importCostsDirty}
-                onClick={() => void saveImportCosts()}
-                className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
-              >
-                {savingImportCosts ? t('common.loading') : t('procurement.transport.save')}
-              </button>
-            ) : null}
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.otherExpenses')}</h3>
             {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
@@ -1224,8 +1015,7 @@ function ProcurementOrderDetailPageContent() {
                 expenseType="OTHER_LOGISTICS"
                 requestType="OTHER_EXPENSE"
                 defaultCurrency="KGS"
-                sectionTotalAmount={Number(logisticsForm.otherExpenseKgs || 0)}
-                showOtherExpenseFields
+                showExpenseName
               />
             ) : null}
           </section>

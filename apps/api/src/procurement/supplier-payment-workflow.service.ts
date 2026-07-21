@@ -294,10 +294,6 @@ export class SupplierPaymentWorkflowService {
     }
     return this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, orderId);
-      const requestedPaymentYuan = roundMoney(Number(dto.requestedPaymentYuan));
-      if (requestedPaymentYuan <= 0) {
-        throw new BadRequestException('Requested CNY payment amount must be greater than zero');
-      }
 
       if (
         order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
@@ -308,22 +304,89 @@ export class SupplierPaymentWorkflowService {
         );
       }
 
-      const activePaymentInfo = await tx.procurementPaymentInfoVersion.findFirst({
+      const remainingOrTotal = roundMoney(
+        Number(order.remainingYuan ?? 0) > 0
+          ? Number(order.remainingYuan)
+          : Number(order.totalYuan ?? 0),
+      );
+      const requestedPaymentYuan = roundMoney(
+        dto.requestedPaymentYuan != null ? Number(dto.requestedPaymentYuan) : remainingOrTotal,
+      );
+      if (requestedPaymentYuan <= 0) {
+        throw new BadRequestException('Requested CNY payment amount must be greater than zero');
+      }
+
+      const paymentMethod =
+        dto.paymentMethod ??
+        (
+          await tx.procurementPaymentInfoVersion.findFirst({
+            where: { procurementOrderId: order.id, isActive: true },
+            select: { paymentMethod: true },
+          })
+        )?.paymentMethod ??
+        ProcurementPaymentInfoMethod.BANK_ACCOUNT;
+
+      let activePaymentInfo = await tx.procurementPaymentInfoVersion.findFirst({
         where: { procurementOrderId: order.id, isActive: true },
       });
+
+      if (dto.paymentMethod || dto.accountNumber || dto.bankName || dto.accountHolder) {
+        if (paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT && !dto.accountNumber?.trim() && !activePaymentInfo?.accountNumber?.trim()) {
+          throw new BadRequestException('Account number is required for bank account payment method');
+        }
+        if (!activePaymentInfo) {
+          activePaymentInfo = await tx.procurementPaymentInfoVersion.create({
+            data: {
+              procurementOrderId: order.id,
+              versionNumber: 1,
+              paymentMethod,
+              bankName: dto.bankName?.trim() || null,
+              accountHolder: dto.accountHolder?.trim() || null,
+              accountNumber: dto.accountNumber?.trim() || null,
+              isActive: true,
+              createdById: user.id,
+            },
+          });
+          await this.audit(tx, user, 'PAYMENT_INFO_CREATED', order.id, null, {
+            versionId: activePaymentInfo.id,
+            paymentMethod,
+          });
+        } else {
+          const oldMethod = activePaymentInfo.paymentMethod;
+          activePaymentInfo = await tx.procurementPaymentInfoVersion.update({
+            where: { id: activePaymentInfo.id },
+            data: {
+              paymentMethod,
+              bankName:
+                dto.bankName !== undefined ? dto.bankName?.trim() || null : activePaymentInfo.bankName,
+              accountHolder:
+                dto.accountHolder !== undefined
+                  ? dto.accountHolder?.trim() || null
+                  : activePaymentInfo.accountHolder,
+              accountNumber:
+                dto.accountNumber !== undefined
+                  ? dto.accountNumber?.trim() || null
+                  : activePaymentInfo.accountNumber,
+            },
+          });
+          if (oldMethod !== activePaymentInfo.paymentMethod) {
+            await this.audit(tx, user, 'PAYMENT_INFO_BANK_ACCOUNT_CHANGED', order.id, {
+              paymentMethod: oldMethod,
+            }, { paymentMethod: activePaymentInfo.paymentMethod });
+          }
+        }
+      }
+
       if (!activePaymentInfo) {
         throw new BadRequestException(
           'Add payment method and payment instructions before sending to HQ Accountant',
         );
       }
+
       if (activePaymentInfo.paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT) {
-        if (
-          !activePaymentInfo.bankName?.trim() ||
-          !activePaymentInfo.accountHolder?.trim() ||
-          !activePaymentInfo.accountNumber?.trim()
-        ) {
+        if (!activePaymentInfo.accountNumber?.trim()) {
           throw new BadRequestException(
-            'Complete supplier bank account payment instructions before sending to HQ Accountant',
+            'Account number is required for bank account payment method',
           );
         }
       }
@@ -342,26 +405,10 @@ export class SupplierPaymentWorkflowService {
         }
       }
 
-      const invoiceAttachments = await tx.fileAttachment.count({
-        where: {
-          entityId: order.id,
-          deletedAt: null,
-          entityType: {
-            in: [FileAttachmentEntityType.SUPPLIER_INVOICE, FileAttachmentEntityType.PROCUREMENT_ORDER],
-          },
-        },
-      });
-      if (invoiceAttachments <= 0 && !dto.supplierInvoiceNumber && !order.supplierInvoiceNumber) {
-        throw new BadRequestException('Upload a supplier invoice or enter an invoice number before sending');
-      }
-
       const updated = await tx.procurementOrder.update({
         where: { id: order.id },
         data: {
           supplierInvoiceNumber: dto.supplierInvoiceNumber?.trim() || order.supplierInvoiceNumber,
-          expectedPaymentDate: dto.expectedPaymentDate
-            ? new Date(dto.expectedPaymentDate)
-            : order.expectedPaymentDate,
           note: dto.note !== undefined ? dto.note.trim() || null : order.note,
           requestedPaymentYuan,
           invoiceSentToAccountantAt: order.invoiceSentToAccountantAt ?? new Date(),
@@ -381,11 +428,11 @@ export class SupplierPaymentWorkflowService {
         requestedPaymentYuan: order.requestedPaymentYuan,
       }, {
         invoiceSentToAccountantAt: updated.invoiceSentToAccountantAt,
-        supplierInvoiceNumber: updated.supplierInvoiceNumber,
         supplierPaymentStatus: synced.supplierPaymentStatus,
         requestedPaymentYuan,
         paymentInfoVersionId: activePaymentInfo.id,
         paymentMethod: activePaymentInfo.paymentMethod,
+        totalProcurementYuan: Number(order.totalYuan),
       });
 
       await this.notificationsService.notifyInTx(tx, user, {
