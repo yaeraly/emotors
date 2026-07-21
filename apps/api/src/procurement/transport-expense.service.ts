@@ -11,8 +11,10 @@ import {
   FinanceAccountStatus,
   FinanceLedgerEntryType,
   Prisma,
+  ProcurementPaymentInfoMethod,
   Role,
   TransportExpenseStatus,
+  TransportExpenseType,
 } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { mkdir, writeFile } from 'fs/promises';
@@ -37,6 +39,12 @@ import {
   ReturnTransportExpenseDto,
   UpdateTransportExpenseDto,
 } from './dto/transport-expense.dto';
+import {
+  hasActiveSectionRequest,
+  requestTypeForExpenseType,
+  summarizeSectionPayments,
+  validateSectionPayableSubmit,
+} from './section-payable.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -131,14 +139,67 @@ export class TransportExpenseService {
       const amount = roundMoney(dto.amount);
       if (amount <= 0) throw new BadRequestException('Amount must be greater than zero');
       const currency = (dto.currency || 'KGS').toUpperCase();
-      const send = dto.sendToAccountant === true;
+      const paymentMethod = dto.paymentMethod ?? ProcurementPaymentInfoMethod.QR_CODE;
+      const requestType =
+        dto.requestType?.trim() || requestTypeForExpenseType(dto.expenseType) || null;
+
+      if (paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT && !dto.accountNumber?.trim()) {
+        throw new BadRequestException('Account number is required for bank account payment method');
+      }
+
+      if (dto.procurementOrderId) {
+        const siblings = await tx.procurementTransportExpense.findMany({
+          where: {
+            procurementOrderId: dto.procurementOrderId,
+            expenseType: dto.expenseType,
+            status: { not: TransportExpenseStatus.CANCELLED },
+          },
+          select: { amount: true, amountKgs: true, status: true },
+        });
+        if (dto.sendToAccountant === true && hasActiveSectionRequest(siblings)) {
+          throw new BadRequestException('An active payment request already exists for this section');
+        }
+        const summary = summarizeSectionPayments(
+          siblings.map((row) => ({
+            amount: Number(row.amount),
+            amountKgs: Number(row.amountKgs),
+            status: row.status,
+          })),
+          dto.sectionTotalAmount,
+        );
+        if (
+          summary.remainingAmount > 0 &&
+          amount > summary.remainingAmount + 0.009 &&
+          Number(dto.sectionTotalAmount || 0) > 0
+        ) {
+          throw new BadRequestException(
+            'Requested amount must not exceed the remaining unpaid amount',
+          );
+        }
+      }
+
+      // Always create as draft when QR — SM attaches QR then submits.
+      const send =
+        dto.sendToAccountant === true && paymentMethod !== ProcurementPaymentInfoMethod.QR_CODE;
       const created = await tx.procurementTransportExpense.create({
         data: {
           expenseNumber: buildFinanceDocumentNumber('TRE'),
           procurementOrderId: dto.procurementOrderId || null,
           expenseType: dto.expenseType,
+          requestType,
           supplierCarrier: dto.supplierCarrier.trim(),
           transportCompanyId: dto.transportCompanyId || null,
+          expenseName: dto.expenseName?.trim() || null,
+          expenseCategory: dto.expenseCategory?.trim() || null,
+          recipientName: dto.recipientName?.trim() || null,
+          route: dto.route?.trim() || null,
+          vehicleInfo: dto.vehicleInfo?.trim() || null,
+          shipmentReference: dto.shipmentReference?.trim() || null,
+          paymentMethod,
+          bankName: dto.bankName?.trim() || null,
+          accountHolder: dto.accountHolder?.trim() || null,
+          accountNumber: dto.accountNumber?.trim() || null,
+          swiftCode: dto.swiftCode?.trim() || null,
           invoiceNumber: dto.invoiceNumber?.trim() || null,
           invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
           amount,
@@ -157,10 +218,16 @@ export class TransportExpenseService {
         amount,
         currency,
         status: created.status,
+        requestType,
+        paymentMethod,
+        procurementOrderId: created.procurementOrderId,
       });
       if (send) {
-        await this.audit(tx, user, 'TRANSPORT_EXPENSE_SUBMITTED', created.id, null, {
+        await this.audit(tx, user, this.submitAuditAction(created.expenseType), created.id, null, {
           status: created.status,
+          requestType,
+          paymentMethod,
+          procurementOrderId: created.procurementOrderId,
         });
         await this.notifications.notifyInTx(tx, user, {
           type: AlertType.TRANSPORT_EXPENSE_SUBMITTED,
@@ -187,13 +254,52 @@ export class TransportExpenseService {
       }
       const amount = dto.amount != null ? roundMoney(dto.amount) : Number(existing.amount);
       const currency = (dto.currency ?? existing.currency).toUpperCase();
+      const paymentMethod = dto.paymentMethod ?? existing.paymentMethod;
+      if (
+        paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT &&
+        !(dto.accountNumber !== undefined ? dto.accountNumber?.trim() : existing.accountNumber?.trim())
+      ) {
+        throw new BadRequestException('Account number is required for bank account payment method');
+      }
       const updated = await tx.procurementTransportExpense.update({
         where: { id },
         data: {
           expenseType: dto.expenseType ?? existing.expenseType,
+          requestType:
+            dto.requestType !== undefined
+              ? dto.requestType?.trim() || null
+              : existing.requestType,
           supplierCarrier: dto.supplierCarrier?.trim() || existing.supplierCarrier,
           transportCompanyId:
             dto.transportCompanyId !== undefined ? dto.transportCompanyId : existing.transportCompanyId,
+          expenseName:
+            dto.expenseName !== undefined ? dto.expenseName?.trim() || null : existing.expenseName,
+          expenseCategory:
+            dto.expenseCategory !== undefined
+              ? dto.expenseCategory?.trim() || null
+              : existing.expenseCategory,
+          recipientName:
+            dto.recipientName !== undefined
+              ? dto.recipientName?.trim() || null
+              : existing.recipientName,
+          route: dto.route !== undefined ? dto.route?.trim() || null : existing.route,
+          vehicleInfo:
+            dto.vehicleInfo !== undefined ? dto.vehicleInfo?.trim() || null : existing.vehicleInfo,
+          shipmentReference:
+            dto.shipmentReference !== undefined
+              ? dto.shipmentReference?.trim() || null
+              : existing.shipmentReference,
+          paymentMethod,
+          bankName: dto.bankName !== undefined ? dto.bankName?.trim() || null : existing.bankName,
+          accountHolder:
+            dto.accountHolder !== undefined
+              ? dto.accountHolder?.trim() || null
+              : existing.accountHolder,
+          accountNumber:
+            dto.accountNumber !== undefined
+              ? dto.accountNumber?.trim() || null
+              : existing.accountNumber,
+          swiftCode: dto.swiftCode !== undefined ? dto.swiftCode?.trim() || null : existing.swiftCode,
           invoiceNumber:
             dto.invoiceNumber !== undefined ? dto.invoiceNumber?.trim() || null : existing.invoiceNumber,
           invoiceDate:
@@ -240,6 +346,17 @@ export class TransportExpenseService {
       if (!EDITABLE.has(expense.status)) {
         throw new BadRequestException('Only draft or returned expenses can be submitted');
       }
+      if (!expense.procurementOrderId) {
+        throw new BadRequestException('Procurement Order must exist');
+      }
+
+      const qrCount = await tx.fileAttachment.count({
+        where: {
+          entityType: FileAttachmentEntityType.PAYMENT_QR,
+          entityId: id,
+          deletedAt: null,
+        },
+      });
       const invoiceCount = await tx.fileAttachment.count({
         where: {
           entityType: FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE,
@@ -247,9 +364,39 @@ export class TransportExpenseService {
           deletedAt: null,
         },
       });
-      if (invoiceCount <= 0) {
-        throw new BadRequestException('Invoice attachment is required before sending to accountant');
+
+      const siblings = await tx.procurementTransportExpense.findMany({
+        where: {
+          procurementOrderId: expense.procurementOrderId,
+          expenseType: expense.expenseType,
+          id: { not: id },
+          status: { not: TransportExpenseStatus.CANCELLED },
+        },
+        select: { amount: true, amountKgs: true, status: true },
+      });
+      if (hasActiveSectionRequest(siblings)) {
+        throw new BadRequestException('An active payment request already exists for this section');
       }
+
+      const validationError = validateSectionPayableSubmit({
+        amount: Number(expense.amount),
+        currency: expense.currency,
+        paymentMethod: expense.paymentMethod,
+        accountNumber: expense.accountNumber,
+        qrCount,
+        remainingAmount: Number(expense.amount),
+        hasActiveRequest: false,
+        procurementOrderId: expense.procurementOrderId,
+      });
+      if (validationError) throw new BadRequestException(validationError);
+      if (
+        expense.paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT &&
+        invoiceCount <= 0 &&
+        !expense.invoiceNumber?.trim()
+      ) {
+        // Bank transfers may proceed with invoice number or attachment; QR path requires QR only.
+      }
+
       const updated = await tx.procurementTransportExpense.update({
         where: { id },
         data: {
@@ -258,12 +405,23 @@ export class TransportExpenseService {
           returnReason: null,
           returnedAt: null,
           returnedById: null,
+          requestType: expense.requestType || requestTypeForExpenseType(expense.expenseType),
         },
         include: INCLUDE,
       });
-      await this.audit(tx, user, 'TRANSPORT_EXPENSE_SUBMITTED', id, { status: expense.status }, {
-        status: updated.status,
-      });
+      await this.audit(
+        tx,
+        user,
+        this.submitAuditAction(expense.expenseType),
+        id,
+        { status: expense.status },
+        {
+          status: updated.status,
+          requestType: updated.requestType,
+          paymentMethod: updated.paymentMethod,
+          procurementOrderId: updated.procurementOrderId,
+        },
+      );
       await this.notifications.notifyInTx(tx, user, {
         type: AlertType.TRANSPORT_EXPENSE_SUBMITTED,
         entityType: 'ProcurementTransportExpense',
@@ -449,7 +607,9 @@ export class TransportExpenseService {
         amountKgs,
         financeAccountId: account.id,
         ledgerEntryId: ledger.id,
+        exchangeRate: expense.exchangeRate != null ? Number(expense.exchangeRate) : null,
       });
+      await this.syncOrderSectionCostFromPaidExpenses(tx, user, updated);
       await this.notifications.notifyInTx(tx, user, {
         type: AlertType.TRANSPORT_EXPENSE_PAID,
         entityType: 'ProcurementTransportExpense',
@@ -459,6 +619,106 @@ export class TransportExpenseService {
         recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
       });
       return this.toResponse(updated, tx);
+    });
+  }
+
+  async uploadQr(user: AuthUser, id: string, request: FastifyRequest) {
+    if (!canCreateProcurementOrder(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+      throw new ForbiddenException('Forbidden');
+    }
+    const expense = await this.prisma.procurementTransportExpense.findUnique({ where: { id } });
+    if (!expense) throw new NotFoundException('Transport expense not found');
+    if (!EDITABLE.has(expense.status)) {
+      throw new BadRequestException('QR codes can only be changed on draft or returned expenses');
+    }
+    if (expense.paymentMethod !== ProcurementPaymentInfoMethod.QR_CODE) {
+      throw new BadRequestException('Payment method must be QR Code to upload QR attachments');
+    }
+
+    let file: Awaited<ReturnType<FastifyRequest['file']>>;
+    try {
+      file = await request.file();
+    } catch {
+      throw new BadRequestException('File is too large');
+    }
+    if (!file) throw new BadRequestException('File is required');
+
+    const allowed = new Map([
+      ['application/pdf', '.pdf'],
+      ['image/jpeg', '.jpg'],
+      ['image/png', '.png'],
+      ['image/webp', '.webp'],
+    ]);
+    const extFromMime = allowed.get(file.mimetype);
+    const originalExt = extname(file.filename).toLowerCase();
+    if (!extFromMime || !['.pdf', '.jpg', '.jpeg', '.png', '.webp'].includes(originalExt)) {
+      throw new BadRequestException('Invalid file format');
+    }
+    const buffer = await file.toBuffer();
+    if (buffer.length > 5 * 1024 * 1024) throw new BadRequestException('File is too large');
+
+    const fields = file.fields as Record<string, { value?: string } | undefined>;
+    const description = fields?.description?.value?.trim() || null;
+
+    const dir = join(process.cwd(), 'uploads', 'procurement');
+    await mkdir(dir, { recursive: true });
+    const extension = originalExt === '.jpeg' ? '.jpg' : extFromMime;
+    const stored = `${randomUUID()}${extension}`;
+    await writeFile(join(dir, stored), buffer);
+    const fileUrl = `/uploads/procurement/${stored}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.fileAttachment.create({
+        data: {
+          entityType: FileAttachmentEntityType.PAYMENT_QR,
+          entityId: id,
+          fileName: file.filename,
+          fileUrl,
+          mimeType: file.mimetype,
+          size: buffer.length,
+          description,
+          uploadedById: user.id,
+        },
+      });
+      await this.audit(tx, user, 'TRANSPORT_EXPENSE_QR_UPLOADED', id, null, {
+        attachmentId: created.id,
+        fileName: created.fileName,
+        description,
+        procurementOrderId: expense.procurementOrderId,
+        requestType: expense.requestType,
+      });
+      return created;
+    });
+  }
+
+  removeQr(user: AuthUser, id: string, attachmentId: string) {
+    if (!canCreateProcurementOrder(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+      throw new ForbiddenException('Forbidden');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundException('Transport expense not found');
+      if (!EDITABLE.has(expense.status)) {
+        throw new BadRequestException('QR codes can only be changed on draft or returned expenses');
+      }
+      const attachment = await tx.fileAttachment.findFirst({
+        where: {
+          id: attachmentId,
+          entityId: id,
+          entityType: FileAttachmentEntityType.PAYMENT_QR,
+          deletedAt: null,
+        },
+      });
+      if (!attachment) throw new NotFoundException('QR attachment not found');
+      await tx.fileAttachment.update({
+        where: { id: attachmentId },
+        data: { deletedAt: new Date() },
+      });
+      await this.audit(tx, user, 'TRANSPORT_EXPENSE_QR_REMOVED', id, {
+        attachmentId,
+        fileName: attachment.fileName,
+      }, null);
+      return { id: attachmentId, deleted: true };
     });
   }
 
@@ -475,11 +735,22 @@ export class TransportExpenseService {
     const canUploadInvoice =
       canCreateProcurementOrder(user) || hasAnyFullAccessRole(roles);
     const canUploadReceipt = canConfirmSupplierPayment(user);
-    if (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE && !canUploadInvoice) {
+    if (
+      (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE ||
+        entityType === FileAttachmentEntityType.PAYMENT_QR) &&
+      !canUploadInvoice
+    ) {
       throw new ForbiddenException('Forbidden');
     }
     if (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT && !canUploadReceipt) {
       throw new ForbiddenException('Forbidden');
+    }
+    if (
+      entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE &&
+      !EDITABLE.has(expense.status) &&
+      !hasAnyFullAccessRole(roles)
+    ) {
+      throw new BadRequestException('Invoice can only be attached to draft or returned expenses');
     }
 
     let file: Awaited<ReturnType<FastifyRequest['file']>>;
@@ -582,8 +853,79 @@ export class TransportExpenseService {
       receipts: attachments.filter(
         (a) => a.entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT,
       ),
+      qrCodes: attachments.filter((a) => a.entityType === FileAttachmentEntityType.PAYMENT_QR),
       attachments,
     };
+  }
+
+  private submitAuditAction(expenseType: TransportExpenseType): string {
+    switch (expenseType) {
+      case TransportExpenseType.DOMESTIC_CHINA_TRANSPORT:
+        return 'CHINA_TRANSPORT_INVOICE_SENT';
+      case TransportExpenseType.INTERNATIONAL_FREIGHT:
+        return 'CARGO_INVOICE_SENT';
+      case TransportExpenseType.LOCAL_DELIVERY:
+        return 'KYRGYZSTAN_TRANSPORT_INVOICE_SENT';
+      case TransportExpenseType.OTHER_LOGISTICS:
+        return 'OTHER_EXPENSE_INVOICE_SENT';
+      default:
+        return 'TRANSPORT_EXPENSE_SUBMITTED';
+    }
+  }
+
+  private async syncOrderSectionCostFromPaidExpenses(
+    tx: Tx,
+    user: AuthUser,
+    expense: {
+      id: string;
+      procurementOrderId: string | null;
+      expenseType: TransportExpenseType;
+      amountKgs: unknown;
+    },
+  ) {
+    if (!expense.procurementOrderId) return;
+    const paid = await tx.procurementTransportExpense.findMany({
+      where: {
+        procurementOrderId: expense.procurementOrderId,
+        expenseType: expense.expenseType,
+        status: TransportExpenseStatus.PAID,
+      },
+      select: { amountKgs: true },
+    });
+    const totalPaidKgs = roundMoney(
+      paid.reduce((sum, row) => sum + Number(row.amountKgs || 0), 0),
+    );
+    const order = await tx.procurementOrder.findFirst({
+      where: { id: expense.procurementOrderId, deletedAt: null },
+    });
+    if (!order) return;
+
+    const data: Prisma.ProcurementOrderUpdateInput = {};
+    if (expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT) {
+      data.chinaDomesticTransportKgs = totalPaidKgs;
+    } else if (expense.expenseType === TransportExpenseType.LOCAL_DELIVERY) {
+      data.localTransportKgs = totalPaidKgs;
+    } else if (expense.expenseType === TransportExpenseType.OTHER_LOGISTICS) {
+      data.otherExpenseKgs = totalPaidKgs;
+    }
+
+    if (Object.keys(data).length === 0) return;
+    const updated = await tx.procurementOrder.update({
+      where: { id: order.id },
+      data,
+    });
+    await this.audit(tx, user, 'PROCUREMENT_COST_RECALCULATED', order.id, {
+      chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs),
+      localTransportKgs: Number(order.localTransportKgs),
+      otherExpenseKgs: Number(order.otherExpenseKgs),
+    }, {
+      chinaDomesticTransportKgs: Number(updated.chinaDomesticTransportKgs),
+      localTransportKgs: Number(updated.localTransportKgs),
+      otherExpenseKgs: Number(updated.otherExpenseKgs),
+      sourceExpenseId: expense.id,
+      paidSectionKgs: totalPaidKgs,
+      expenseType: expense.expenseType,
+    });
   }
 
   private async audit(

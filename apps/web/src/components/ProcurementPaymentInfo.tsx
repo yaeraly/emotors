@@ -35,9 +35,17 @@ type Props = {
   user: User | null;
   hasCompletedPayments: boolean;
   onChanged?: () => void;
+  /** When true, render fields without a standalone "Способ оплаты" section shell. */
+  embedded?: boolean;
 };
 
-export function ProcurementPaymentInfo({ orderId, user, hasCompletedPayments, onChanged }: Props) {
+export function ProcurementPaymentInfo({
+  orderId,
+  user,
+  hasCompletedPayments,
+  onChanged,
+  embedded = false,
+}: Props) {
   const { t } = useTranslation();
   const canEdit = canCreateProcurementOrder(user) || hasFullAccess(user);
   const canView = canEdit || canCreateSupplierPayment(user) || hasFullAccess(user);
@@ -45,7 +53,7 @@ export function ProcurementPaymentInfo({ orderId, user, hasCompletedPayments, on
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    paymentMethod: 'QR_CODE' as 'BANK_ACCOUNT' | 'QR_CODE',
+    paymentMethod: 'BANK_ACCOUNT' as 'BANK_ACCOUNT' | 'QR_CODE',
     bankName: '',
     accountHolder: '',
     accountNumber: '',
@@ -74,7 +82,7 @@ export function ProcurementPaymentInfo({ orderId, user, hasCompletedPayments, on
             reason: '',
           });
         } else {
-          setForm((prev) => ({ ...prev, paymentMethod: 'QR_CODE' }));
+          setForm((prev) => ({ ...prev, paymentMethod: 'BANK_ACCOUNT' }));
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -169,10 +177,16 @@ export function ProcurementPaymentInfo({ orderId, user, hasCompletedPayments, on
 
   if (!canView) return null;
 
-  return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <h3 className="mb-2 text-lg font-bold">{t('procurement.payments.paymentMethod')}</h3>
-      <p className="mb-4 text-sm text-slate-500">{t('procurement.paymentInfo.methodHelp')}</p>
+  const content = (
+    <>
+      {!embedded ? (
+        <>
+          <h3 className="mb-2 text-lg font-bold">{t('procurement.paymentInfo.supplierAccountTitle')}</h3>
+          <p className="mb-4 text-sm text-slate-500">{t('procurement.paymentInfo.methodHelp')}</p>
+        </>
+      ) : (
+        <p className="mb-4 text-sm text-slate-600">{t('procurement.paymentInfo.methodHelp')}</p>
+      )}
       {error ? <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
       {hasCompletedPayments ? (
         <p className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -183,14 +197,14 @@ export function ProcurementPaymentInfo({ orderId, user, hasCompletedPayments, on
       {canEdit ? (
         <form onSubmit={save} className="mb-6 grid gap-3 md:grid-cols-2">
           <label className="block md:col-span-2">
-            <span className="text-sm font-semibold">{t('procurement.payments.paymentMethod')}</span>
+            <span className="text-sm font-semibold">{t('procurement.paymentInfo.paymentMethod')}</span>
             <select
               value={form.paymentMethod}
               onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as 'BANK_ACCOUNT' | 'QR_CODE' })}
               className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
             >
-              <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
               <option value="BANK_ACCOUNT">{t('procurement.paymentInfo.method.BANK_ACCOUNT')}</option>
+              <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
             </select>
           </label>
 
@@ -275,7 +289,7 @@ export function ProcurementPaymentInfo({ orderId, user, hasCompletedPayments, on
         </form>
       ) : active ? (
         <div className="mb-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          {t('procurement.payments.paymentMethod')}:{' '}
+          {t('procurement.paymentInfo.paymentMethod')}:{' '}
           <strong>{t(`procurement.paymentInfo.method.${active.paymentMethod}`)}</strong>
           {active.paymentMethod === 'BANK_ACCOUNT' ? (
             <span className="mt-1 block">
@@ -340,6 +354,14 @@ export function ProcurementPaymentInfo({ orderId, user, hasCompletedPayments, on
           ) : null}
         </>
       )}
-    </section>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="mb-4">{content}</div>;
+  }
+
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">{content}</section>
   );
 }

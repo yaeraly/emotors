@@ -361,6 +361,26 @@ export class ProcurementController {
     );
   }
 
+  @Post('transport-expenses/:id/attachments/qr')
+  @RequirePermissions('procurement.manage')
+  uploadTransportExpenseQr(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.transportExpenseService.uploadQr(user, id, request);
+  }
+
+  @Delete('transport-expenses/:id/attachments/qr/:attachmentId')
+  @RequirePermissions('procurement.manage')
+  removeTransportExpenseQr(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.transportExpenseService.removeQr(user, id, attachmentId);
+  }
+
   @Post('transport-expenses/:id/attachments/receipt')
   @RequirePermissions('payments.manage', 'finance.view')
   uploadTransportExpenseReceipt(

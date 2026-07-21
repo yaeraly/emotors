@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
+import { ProcurementPaymentInfo } from '@/components/ProcurementPaymentInfo';
 import {
   canConfirmSupplierPayment,
   canCreateSupplierPayment,
@@ -184,11 +185,19 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const canReverse = canReverseSupplierPayment(user);
   const payments = order.supplierPayments ?? [];
   const completedPayments = payments.filter((payment) => isConfirmedSupplierPayment(payment.status));
+  const pendingPayments = payments.filter((payment) =>
+    ['DRAFT', 'AWAITING_ACCOUNTANT', 'AWAITING_CASHIER', 'WAITING_ACCOUNTANT', 'PENDING_CASHIER', 'SENT_TO_CASHIER'].includes(
+      payment.status,
+    ),
+  );
   const lastCompletedPayment = [...completedPayments].sort((a, b) => {
     const aTime = new Date(a.paidAt || a.paymentDate || a.createdAt || 0).getTime();
     const bTime = new Date(b.paidAt || b.paymentDate || b.createdAt || 0).getTime();
     return bTime - aTime;
   })[0];
+  const activeInvoiceRequest =
+    order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
+    order.supplierPaymentStatus === 'AWAITING_CASHIER';
   const invoiceAttachments = (order.attachments ?? []).filter(
     (item) => item.entityType === 'SUPPLIER_INVOICE' || item.entityType === 'PROCUREMENT_ORDER',
   );
@@ -526,6 +535,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
           value={t(`procurement.payments.status.${order.supplierPaymentStatus ?? 'UNPAID'}`)}
         />
         <SummaryCard label={t('procurement.payments.paymentCount')} value={String(completedPayments.length)} />
+        <SummaryCard label={t('procurement.payments.pendingPaymentCount')} value={String(pendingPayments.length)} />
         <SummaryCard
           label={t('procurement.payments.lastPaymentDate')}
           value={
@@ -546,9 +556,17 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
 
       {canSendInvoice ? (
         <div className="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <h4 className="font-semibold text-slate-900">{t('procurement.payments.sendInvoiceTitle')}</h4>
+          <h4 className="font-semibold text-slate-900">{t('procurement.payments.supplierAccountTitle')}</h4>
           <p className="mt-1 text-sm text-slate-600">{t('procurement.payments.sendInvoiceHelp')}</p>
-          <p className="mt-2 text-sm text-slate-600">{t('procurement.payments.paymentInfoBeforeSendHint')}</p>
+
+          <ProcurementPaymentInfo
+            orderId={order.id}
+            user={user}
+            hasCompletedPayments={completedPayments.length > 0}
+            embedded
+            onChanged={() => void onChanged()}
+          />
+
           <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-5">
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.supplierInvoiceNumber')}</span>
@@ -566,7 +584,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 step="0.01"
                 value={requestedPaymentYuan}
                 onChange={(e) => setRequestedPaymentYuan(e.target.value)}
-                disabled={Boolean(order.invoiceSentToAccountantAt)}
+                disabled={activeInvoiceRequest}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
@@ -586,12 +604,12 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
             <div className="flex items-end">
               <button
                 type="button"
-                disabled={saving || Boolean(order.invoiceSentToAccountantAt)}
+                disabled={saving || activeInvoiceRequest}
                 onClick={() => void sendInvoice()}
                 className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
               >
-                {order.invoiceSentToAccountantAt
-                  ? t('procurement.payments.invoiceAlreadySent')
+                {activeInvoiceRequest
+                  ? t('procurement.payments.awaitingAccountant')
                   : t('procurement.payments.sendInvoice')}
               </button>
             </div>

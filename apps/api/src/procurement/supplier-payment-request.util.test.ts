@@ -40,7 +40,7 @@ function validateSendPaymentRequest(input: {
     return 'Complete supplier bank account payment instructions before sending to HQ Accountant';
   }
   if (input.paymentMethod === 'QR_CODE' && !input.qrComplete) {
-    return 'Attach at least one payment QR code (or comment) before sending to HQ Accountant';
+    return 'Attach at least one payment QR code before sending to HQ Accountant';
   }
   if (!input.hasInvoice) {
     return 'Upload a supplier invoice or enter an invoice number before sending';

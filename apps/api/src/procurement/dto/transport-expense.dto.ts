@@ -1,4 +1,4 @@
-import { TransportExpenseType } from '@prisma/client';
+import { ProcurementPaymentInfoMethod, TransportExpenseType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsDateString,
@@ -18,6 +18,10 @@ export class CreateTransportExpenseDto {
   @IsEnum(TransportExpenseType)
   expenseType!: TransportExpenseType;
 
+  @IsOptional()
+  @IsString()
+  requestType?: string;
+
   @IsString()
   @MinLength(1)
   supplierCarrier!: string;
@@ -25,6 +29,50 @@ export class CreateTransportExpenseDto {
   @IsOptional()
   @IsString()
   transportCompanyId?: string;
+
+  @IsOptional()
+  @IsString()
+  expenseName?: string;
+
+  @IsOptional()
+  @IsString()
+  expenseCategory?: string;
+
+  @IsOptional()
+  @IsString()
+  recipientName?: string;
+
+  @IsOptional()
+  @IsString()
+  route?: string;
+
+  @IsOptional()
+  @IsString()
+  vehicleInfo?: string;
+
+  @IsOptional()
+  @IsString()
+  shipmentReference?: string;
+
+  @IsOptional()
+  @IsEnum(ProcurementPaymentInfoMethod)
+  paymentMethod?: ProcurementPaymentInfoMethod;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string;
+
+  @IsOptional()
+  @IsString()
+  accountHolder?: string;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  swiftCode?: string;
 
   @IsOptional()
   @IsString()
@@ -53,6 +101,13 @@ export class CreateTransportExpenseDto {
 
   @IsOptional()
   sendToAccountant?: boolean;
+
+  /** Optional section budget used to validate remaining unpaid amount. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  sectionTotalAmount?: number;
 }
 
 export class UpdateTransportExpenseDto {
@@ -62,11 +117,59 @@ export class UpdateTransportExpenseDto {
 
   @IsOptional()
   @IsString()
+  requestType?: string | null;
+
+  @IsOptional()
+  @IsString()
   supplierCarrier?: string;
 
   @IsOptional()
   @IsString()
   transportCompanyId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  expenseName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  expenseCategory?: string | null;
+
+  @IsOptional()
+  @IsString()
+  recipientName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  route?: string | null;
+
+  @IsOptional()
+  @IsString()
+  vehicleInfo?: string | null;
+
+  @IsOptional()
+  @IsString()
+  shipmentReference?: string | null;
+
+  @IsOptional()
+  @IsEnum(ProcurementPaymentInfoMethod)
+  paymentMethod?: ProcurementPaymentInfoMethod;
+
+  @IsOptional()
+  @IsString()
+  bankName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  accountHolder?: string | null;
+
+  @IsOptional()
+  @IsString()
+  accountNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  swiftCode?: string | null;
 
   @IsOptional()
   @IsString()

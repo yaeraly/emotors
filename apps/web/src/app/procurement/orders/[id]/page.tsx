@@ -8,9 +8,8 @@ import { DomesticTransportSection, type DomesticTransportForm } from '@/componen
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
 import { LockedFieldHint } from '@/components/LockedFieldHint';
 import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
-import { ProcurementPaymentInfo } from '@/components/ProcurementPaymentInfo';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
-import { ProcurementTransportExpenses } from '@/components/ProcurementTransportExpenses';
+import { ProcurementSectionPayablePanel } from '@/components/ProcurementSectionPayablePanel';
 import { sumConfirmedSupplierPaymentsKgs } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
@@ -945,12 +944,6 @@ function ProcurementOrderDetailPageContent() {
 
           {activeTab === 'payments' && canSeePayments ? (
             <div className="space-y-6">
-              <ProcurementPaymentInfo
-                orderId={order.id}
-                user={user}
-                hasCompletedPayments={Number(order.totalPaidYuan ?? 0) > 0}
-                onChanged={load}
-              />
               <ProcurementSupplierPayments
                 order={{
                   ...order,
@@ -967,13 +960,11 @@ function ProcurementOrderDetailPageContent() {
                 user={user}
                 onChanged={load}
               />
-              <ProcurementTransportExpenses orderId={order.id} user={user} />
             </div>
           ) : null}
 
           {activeTab === 'transport' ? (
           <>
-          <ProcurementTransportExpenses orderId={order.id} user={user} />
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>
@@ -1053,6 +1044,18 @@ function ProcurementOrderDetailPageContent() {
               >
                 {savingChinaDomestic ? t('common.loading') : t('procurement.transport.save')}
               </button>
+            ) : null}
+            {canSeePayments ? (
+              <ProcurementSectionPayablePanel
+                orderId={order.id}
+                user={user}
+                expenseType="DOMESTIC_CHINA_TRANSPORT"
+                requestType="CHINA_DOMESTIC_TRANSPORT"
+                defaultCurrency="CNY"
+                sectionTotalAmount={Number(logisticsForm.chinaDomesticTransportYuan || 0)}
+                defaultCarrier={order.chinaDomesticTransportCompany?.name ?? ''}
+                showRoute
+              />
             ) : null}
           </section>
 
@@ -1138,6 +1141,22 @@ function ProcurementOrderDetailPageContent() {
                   : t('procurement.receiving.warning.cargo')}
               </p>
             ) : null}
+            {canSeePayments ? (
+              <ProcurementSectionPayablePanel
+                orderId={order.id}
+                user={user}
+                expenseType="INTERNATIONAL_FREIGHT"
+                requestType="CARGO_PAYMENT"
+                defaultCurrency="USD"
+                sectionTotalAmount={Number(previewTotals?.totalCargoCostKgs || 0)}
+                defaultCarrier={
+                  transportCompanies.find((c) => c.id === logisticsForm.chinaExportTransportCompanyId)?.name
+                  ?? order.cargoCompany
+                  ?? ''
+                }
+                showShipmentReference
+              />
+            ) : null}
           </section>
 
           <DomesticTransportSection
@@ -1154,6 +1173,23 @@ function ProcurementOrderDetailPageContent() {
             onChangeReason={setSvhChangeReason}
             onSave={() => void saveSvhTransport()}
           />
+          {canSeePayments ? (
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <ProcurementSectionPayablePanel
+                orderId={order.id}
+                user={user}
+                expenseType="LOCAL_DELIVERY"
+                requestType="KYRGYZSTAN_DOMESTIC_TRANSPORT"
+                defaultCurrency="KGS"
+                sectionTotalAmount={Number(svhForm.transportCostKgs || order.localTransportKgs || 0)}
+                defaultCarrier={
+                  transportCompanies.find((c) => c.id === svhForm.transportCompanyId)?.name ?? ''
+                }
+                showRoute
+                showVehicle
+              />
+            </div>
+          ) : null}
           {!svhTransportCompleted && canReceive && readyForHqReceiving && !finalized ? (
             <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.domesticTransport.receiveBlocked')}</p>
           ) : null}
@@ -1163,7 +1199,7 @@ function ProcurementOrderDetailPageContent() {
             <div className="grid gap-4 md:grid-cols-3">
               <EditableField label={t('procurement.orders.insurance')} value={logisticsForm.insuranceCostKgs} onChange={(v) => setLogistics('insuranceCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
               <EditableField label={t('procurement.orders.customs')} value={logisticsForm.customsCostKgs} onChange={(v) => setLogistics('customsCostKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
-              <EditableField label={t('procurement.orders.transportCosts')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
+              <EditableField label={t('procurement.orders.otherExpenseAmount')} value={logisticsForm.otherExpenseKgs} onChange={(v) => setLogistics('otherExpenseKgs', v)} type="number" disabled={finalized || readOnlyFinance} />
             </div>
             {importCostsDirty && canEditOrder && !finalized && !readOnlyFinance ? (
               <p className="mt-4 text-sm font-semibold text-amber-700">{t('procurement.transport.unsavedChanges')}</p>
@@ -1177,6 +1213,17 @@ function ProcurementOrderDetailPageContent() {
               >
                 {savingImportCosts ? t('common.loading') : t('procurement.transport.save')}
               </button>
+            ) : null}
+            {canSeePayments ? (
+              <ProcurementSectionPayablePanel
+                orderId={order.id}
+                user={user}
+                expenseType="OTHER_LOGISTICS"
+                requestType="OTHER_EXPENSE"
+                defaultCurrency="KGS"
+                sectionTotalAmount={Number(logisticsForm.otherExpenseKgs || 0)}
+                showOtherExpenseFields
+              />
             ) : null}
           </section>
           </>

@@ -299,6 +299,15 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Requested CNY payment amount must be greater than zero');
       }
 
+      if (
+        order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
+        order.supplierPaymentStatus === 'AWAITING_CASHIER'
+      ) {
+        throw new BadRequestException(
+          'An active supplier payment request already exists for this procurement order',
+        );
+      }
+
       const activePaymentInfo = await tx.procurementPaymentInfoVersion.findFirst({
         where: { procurementOrderId: order.id, isActive: true },
       });
@@ -326,9 +335,9 @@ export class SupplierPaymentWorkflowService {
             deletedAt: null,
           },
         });
-        if (qrCount <= 0 && !activePaymentInfo.comment?.trim()) {
+        if (qrCount <= 0) {
           throw new BadRequestException(
-            'Attach at least one payment QR code (or comment) before sending to HQ Accountant',
+            'Attach at least one payment QR code before sending to HQ Accountant',
           );
         }
       }
