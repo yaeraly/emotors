@@ -2950,7 +2950,9 @@ model ProcurementPaymentInfoVersion {
   createdAt          DateTime                     @default(now())
   updatedAt          DateTime                     @updatedAt
 
-  @@unique([procurementOrderId, versionNumber])
+  // Short mapped name: the default Prisma name exceeds PostgreSQL's 63-char
+  // identifier limit and truncates to "...versionNumber_", which breaks migrate dev.
+  @@unique([procurementOrderId, versionNumber], map: "ProcurementPaymentInfoVersion_order_ver_key")
   @@index([procurementOrderId])
   @@index([isActive])
   @@index([createdById])
