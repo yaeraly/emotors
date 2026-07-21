@@ -8,7 +8,9 @@ import { DomesticTransportSection, type DomesticTransportForm } from '@/componen
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
 import { LockedFieldHint } from '@/components/LockedFieldHint';
 import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
+import { ProcurementPaymentInfo } from '@/components/ProcurementPaymentInfo';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
+import { ProcurementTransportExpenses } from '@/components/ProcurementTransportExpenses';
 import { sumConfirmedSupplierPaymentsKgs } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
@@ -910,31 +912,43 @@ export default function ProcurementOrderDetailPage() {
               />
               <Info label={t('procurement.orders.supplier')} value={order.supplier?.name ?? ''} />
               <Info label={t('procurement.orders.factory')} value={order.factory?.name ?? '-'} />
-              <Info label={t('procurement.orders.exchangeRate')} value={String(order.effectiveYuanRate ?? order.defaultYuanRate ?? '-')} />
+              <Info
+                label={t('procurement.orders.weightedAverageRate')}
+                value={String(order.weightedAverageYuanRate ?? order.effectiveYuanRate ?? '-')}
+              />
             </div>
-            {order.yuanRateLocked ? (
-              <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.payments.rateLocked')}</p>
-            ) : null}
+            <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              {t('procurement.orders.exchangeRateOnPaymentHint')}
+            </p>
           </section>
           ) : null}
 
           {activeTab === 'payments' && canSeePayments ? (
-            <ProcurementSupplierPayments
-              order={{
-                ...order,
-                totalYuan: Number(order.totalYuan),
-                totalPaidYuan: Number(order.totalPaidYuan ?? 0),
-                totalPaidKgs: Number(order.totalPaidKgs ?? 0),
-                remainingYuan: Number(order.remainingYuan ?? order.totalYuan),
-                hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
-              }}
-              user={user}
-              onChanged={load}
-            />
+            <div className="space-y-6">
+              <ProcurementPaymentInfo
+                orderId={order.id}
+                user={user}
+                hasCompletedPayments={Number(order.totalPaidYuan ?? 0) > 0}
+                onChanged={load}
+              />
+              <ProcurementSupplierPayments
+                order={{
+                  ...order,
+                  totalYuan: Number(order.totalYuan),
+                  totalPaidYuan: Number(order.totalPaidYuan ?? 0),
+                  totalPaidKgs: Number(order.totalPaidKgs ?? 0),
+                  remainingYuan: Number(order.remainingYuan ?? order.totalYuan),
+                  hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
+                }}
+                user={user}
+                onChanged={load}
+              />
+            </div>
           ) : null}
 
           {activeTab === 'transport' ? (
           <>
+          <ProcurementTransportExpenses orderId={order.id} user={user} />
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-lg font-bold">{t('procurement.orders.chinaDomestic')}</h3>

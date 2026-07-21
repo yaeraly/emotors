@@ -46,8 +46,9 @@ export class CreateSupplierPaymentDto {
   @IsString()
   kgsAdjustmentComment?: string;
 
+  @IsOptional()
   @IsEnum(ProcurementSupplierPaymentMethod)
-  paymentMethod!: ProcurementSupplierPaymentMethod;
+  paymentMethod?: ProcurementSupplierPaymentMethod;
 
   @IsOptional()
   @IsString()

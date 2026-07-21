@@ -35,6 +35,22 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   SUPPLIER_PAYMENT_PARTIALLY_PAID: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER] },
   SUPPLIER_PAYMENT_OVERPAYMENT_ATTEMPT: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER] },
   SUPPLIER_PAYMENT_REVERSAL_REQUESTED: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT, Role.SUPPLY_CHAIN_MANAGER] },
+  TRANSPORT_EXPENSE_SUBMITTED: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+  },
+  TRANSPORT_EXPENSE_RETURNED: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
+  },
+  TRANSPORT_EXPENSE_SENT_TO_CASHIER: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.HQ_CASHIER, Role.FINANCE_MANAGER],
+  },
+  TRANSPORT_EXPENSE_PAID: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+  },
   PAYMENT_RECEIVED: { module: NotificationModule.FINANCE, roles: [Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
   BRANCH_INVOICE_CREATED: { module: NotificationModule.FINANCE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER] },
   FINANCE_TRANSFER_PENDING: { module: NotificationModule.FINANCE, roles: [Role.FRANCHISE_OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT] },
@@ -183,6 +199,22 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   SUPPLIER_PAYMENT_REVERSAL_REQUESTED: {
     title: 'Сторно платежа',
     message: 'Выполнено сторнирование платежа по закупке из Китая.',
+  },
+  TRANSPORT_EXPENSE_SUBMITTED: {
+    title: 'Transport expense awaiting accountant',
+    message: 'Supply Manager submitted a transport expense for review.',
+  },
+  TRANSPORT_EXPENSE_RETURNED: {
+    title: 'Transport expense returned',
+    message: 'A transport expense was returned for correction.',
+  },
+  TRANSPORT_EXPENSE_SENT_TO_CASHIER: {
+    title: 'Transport expense awaiting cashier',
+    message: 'HQ Accountant sent a transport expense payment to cashier.',
+  },
+  TRANSPORT_EXPENSE_PAID: {
+    title: 'Transport expense paid',
+    message: 'A transport expense payment was completed.',
   },
   BRANCH_REQUEST_NO_PRICING_POLICY: {
     title: 'Требуется ценовая политика',

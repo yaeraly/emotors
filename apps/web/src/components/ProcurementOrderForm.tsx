@@ -31,7 +31,6 @@ type HeaderForm = {
   factoryId: string;
   hqWarehouseId: string;
   currency: string;
-  exchangeRate: string;
   purchaseDate: string;
   estimatedArrivalDate: string;
   note: string;
@@ -42,6 +41,13 @@ type HeaderForm = {
   insuranceCostKgs: string;
   bankFeeCostKgs: string;
   otherExpenseKgs: string;
+  paymentMethod: 'BANK_ACCOUNT' | 'QR_CODE';
+  bankName: string;
+  accountHolder: string;
+  accountNumber: string;
+  swiftCode: string;
+  bankAddress: string;
+  paymentComment: string;
 };
 
 const emptyLine = (): ProcurementLine => ({
@@ -76,7 +82,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     factoryId: '',
     hqWarehouseId: '',
     currency: 'CNY',
-    exchangeRate: '0',
     purchaseDate: new Date().toISOString().slice(0, 10),
     estimatedArrivalDate: '',
     note: '',
@@ -87,6 +92,13 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     insuranceCostKgs: '0',
     bankFeeCostKgs: '0',
     otherExpenseKgs: '0',
+    paymentMethod: 'BANK_ACCOUNT',
+    bankName: '',
+    accountHolder: '',
+    accountNumber: '',
+    swiftCode: '',
+    bankAddress: '',
+    paymentComment: '',
   });
   const [lines, setLines] = useState<ProcurementLine[]>([]);
   const [user, setUser] = useState<User | null>(null);
@@ -146,7 +158,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             factoryId: order.factoryId ?? '',
             hqWarehouseId: order.hqWarehouseId,
             currency: order.currency ?? 'CNY',
-            exchangeRate: String(order.defaultYuanRate ?? 0),
             purchaseDate: order.purchaseDate ? order.purchaseDate.slice(0, 10) : new Date().toISOString().slice(0, 10),
             estimatedArrivalDate: order.estimatedArrivalDate ? order.estimatedArrivalDate.slice(0, 10) : '',
             note: order.note ?? '',
@@ -157,6 +168,13 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             insuranceCostKgs: String(order.insuranceCostKgs ?? 0),
             bankFeeCostKgs: String(order.bankFeeCostKgs ?? 0),
             otherExpenseKgs: String(order.otherExpenseKgs ?? 0),
+            paymentMethod: 'BANK_ACCOUNT',
+            bankName: '',
+            accountHolder: '',
+            accountNumber: '',
+            swiftCode: '',
+            bankAddress: '',
+            paymentComment: '',
           });
           setLines((order.items ?? [])
             .filter((item: any) => item.status !== 'CANCELLED')
@@ -195,7 +213,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     const purchasePriceYuan = Number(line.purchasePriceYuan || 0);
     const masterPriceYuan = Number(line.masterPriceYuan || product?.purchasePriceYuan || 0);
     const priceDifference = purchasePriceYuan - masterPriceYuan;
-    const exchangeRate = Number(form.exchangeRate || 0);
     const missingWeight = !product || netWeightKg <= 0;
     return {
       ...line,
@@ -211,22 +228,22 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       missingWeight,
       factoryName: factoryMap.get(line.factoryId || form.factoryId) ?? '-',
     };
-  }), [lines, productMap, factoryMap, form.exchangeRate, form.factoryId]);
+  }), [lines, productMap, factoryMap, form.factoryId]);
 
   const chinaDomesticTransportKgs = useMemo(
     () => resolveChinaDomesticTransportKgs({
       chinaDomesticTransportYuan: mode === 'create' ? 0 : Number(form.chinaDomesticTransportYuan || 0),
       chinaDomesticTransportKgs: 0,
-      effectiveYuanRate: Number(form.exchangeRate || 0),
+      effectiveYuanRate: 0,
     }),
-    [form.chinaDomesticTransportYuan, form.exchangeRate, mode],
+    [form.chinaDomesticTransportYuan, mode],
   );
 
   const totals = useMemo(() => calculateLandedCosts(
     lineDetails.map((line) => ({
       quantity: Number(line.quantity || 0),
       purchasePriceYuan: Number(line.purchasePriceYuan || 0),
-      yuanRate: Number(form.exchangeRate || 0),
+      yuanRate: 0,
       weightKg: line.netWeightKg,
     })),
     {
@@ -279,9 +296,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     cacheProduct(product);
     const masterPrice = String(product.purchasePriceYuan ?? 0);
     const defaultFactory = product.defaultFactoryId ?? form.factoryId;
-    if (!Number(form.exchangeRate || 0) && Number(product.latestYuanRate || 0)) {
-      setField('exchangeRate', String(product.latestYuanRate));
-    }
     setLines((current) => [...current, {
       ...emptyLine(),
       productId: product.id,
@@ -306,10 +320,6 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    if (!Number(form.exchangeRate || 0)) {
-      setError(t('procurement.orders.exchangeRateRequired'));
-      return;
-    }
     if (weightErrors.length) {
       setError(t('procurement.orders.weightNotConfigured'));
       return;
@@ -318,13 +328,18 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
       setError(t('procurement.orders.productSearch.emptyOrder'));
       return;
     }
+    if (mode === 'create' && form.paymentMethod === 'BANK_ACCOUNT') {
+      if (!form.bankName.trim() || !form.accountHolder.trim() || !form.accountNumber.trim()) {
+        setError(t('procurement.paymentInfo.bankRequired'));
+        return;
+      }
+    }
     setSaving(true);
     const payload: Record<string, unknown> = {
       supplierId: form.supplierId,
       factoryId: form.factoryId || undefined,
       hqWarehouseId: form.hqWarehouseId,
       currency: form.currency,
-      defaultYuanRate: Number(form.exchangeRate),
       purchaseDate: form.purchaseDate || undefined,
       estimatedArrivalDate: form.estimatedArrivalDate || undefined,
       note: form.note || undefined,
@@ -354,9 +369,24 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         window.localStorage.setItem('emotors_procurement_success', t('procurement.orders.updated'));
         router.push(`/procurement/orders/${orderId}`);
       } else {
-        await apiFetch('/procurement/orders', { method: 'POST', body: JSON.stringify(payload) });
+        const created = await apiFetch<{ id: string }>('/procurement/orders', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        await apiFetch(`/procurement/orders/${created.id}/payment-info`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            paymentMethod: form.paymentMethod,
+            bankName: form.bankName || undefined,
+            accountHolder: form.accountHolder || undefined,
+            accountNumber: form.accountNumber || undefined,
+            swiftCode: form.swiftCode || undefined,
+            bankAddress: form.bankAddress || undefined,
+            comment: form.paymentComment || undefined,
+          }),
+        });
         window.localStorage.setItem('emotors_procurement_success', t('procurement.orders.created'));
-        router.push('/procurement/orders');
+        router.push(`/procurement/orders/${created.id}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -399,12 +429,42 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
         <div className="grid gap-4 md:grid-cols-3">
           <Field label={t('procurement.orders.supplier')}><select disabled={itemsLocked} value={form.supplierId} onChange={(e) => setField('supplierId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
           <Field label={t('procurement.orders.factory')}><select disabled={itemsLocked} value={form.factoryId} onChange={(e) => setField('factoryId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2"><option value="">-</option>{factories.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</select></Field>
-          <Field label={t('procurement.orders.exchangeRate')}><input type="number" step="0.0001" value={form.exchangeRate} onChange={(e) => setField('exchangeRate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.warehouse')}><select value={form.hqWarehouseId} onChange={(e) => setField('hqWarehouseId', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2">{warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}</select></Field>
           <Field label={t('procurement.orders.purchaseDate')}><input type="date" value={form.purchaseDate} onChange={(e) => setField('purchaseDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
           <Field label={t('procurement.orders.estimatedArrivalDate')}><input type="date" value={form.estimatedArrivalDate} onChange={(e) => setField('estimatedArrivalDate', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
         </div>
+        <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">{t('procurement.orders.exchangeRateOnPaymentHint')}</p>
       </section>
+
+      {mode === 'create' ? (
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="mb-4 text-lg font-bold text-slate-950">{t('procurement.paymentInfo.title')}</h3>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field label={t('procurement.paymentInfo.paymentMethod')}>
+              <select
+                value={form.paymentMethod}
+                onChange={(e) => setField('paymentMethod', e.target.value as 'BANK_ACCOUNT' | 'QR_CODE')}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2"
+              >
+                <option value="BANK_ACCOUNT">{t('procurement.paymentInfo.method.BANK_ACCOUNT')}</option>
+                <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
+              </select>
+            </Field>
+            {form.paymentMethod === 'BANK_ACCOUNT' ? (
+              <>
+                <Field label={t('procurement.paymentInfo.bankName')}><input value={form.bankName} onChange={(e) => setField('bankName', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+                <Field label={t('procurement.paymentInfo.accountHolder')}><input value={form.accountHolder} onChange={(e) => setField('accountHolder', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+                <Field label={t('procurement.paymentInfo.accountNumber')}><input value={form.accountNumber} onChange={(e) => setField('accountNumber', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+                <Field label={t('procurement.paymentInfo.swift')}><input value={form.swiftCode} onChange={(e) => setField('swiftCode', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+                <Field label={t('procurement.paymentInfo.bankAddress')}><input value={form.bankAddress} onChange={(e) => setField('bankAddress', e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+              </>
+            ) : (
+              <p className="md:col-span-2 rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-800">{t('procurement.paymentInfo.qrUploadAfterCreate')}</p>
+            )}
+            <Field label={t('procurement.paymentInfo.comment')}><textarea value={form.paymentComment} onChange={(e) => setField('paymentComment', e.target.value)} className="min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" /></Field>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-4">

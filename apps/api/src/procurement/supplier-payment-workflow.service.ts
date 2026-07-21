@@ -13,6 +13,7 @@ import {
   FileAttachmentEntityType,
   Prisma,
   ProcurementKgsAdjustmentReason,
+  ProcurementPaymentInfoMethod,
   ProcurementSupplierPaymentMethod,
   ProcurementSupplierPaymentStatus,
   Role,
@@ -69,6 +70,7 @@ const PAYMENT_INCLUDE = {
   voidedBy: { select: { id: true, fullName: true, role: true } },
   returnedBy: { select: { id: true, fullName: true, role: true } },
   kgsAdjustedBy: { select: { id: true, fullName: true, role: true } },
+  paymentInfoVersion: true,
   intendedFinanceAccount: {
     select: { id: true, name: true, accountNumber: true, currentBalance: true, availableBalance: true, status: true, scope: true },
   },
@@ -334,8 +336,30 @@ export class SupplierPaymentWorkflowService {
         dto.allowOverpayment === true,
       );
 
-      const paymentMethod = dto.paymentMethod;
-      const recipientFields = this.validateAndBuildRecipientFields(paymentMethod, dto);
+      const paymentInfo = await tx.procurementPaymentInfoVersion.findFirst({
+        where: { procurementOrderId: order.id, isActive: true },
+      });
+      const paymentMethod: ProcurementSupplierPaymentMethod =
+        dto.paymentMethod ??
+        (paymentInfo?.paymentMethod === ProcurementPaymentInfoMethod.QR_CODE
+          ? ProcurementSupplierPaymentMethod.QR_CODE
+          : ProcurementSupplierPaymentMethod.BANK_ACCOUNT);
+
+      const dtoWithPaymentInfo = {
+        ...dto,
+        paymentMethod,
+        bankName: dto.bankName ?? paymentInfo?.bankName ?? undefined,
+        beneficiaryName: dto.beneficiaryName ?? paymentInfo?.accountHolder ?? undefined,
+        accountNumber: dto.accountNumber ?? paymentInfo?.accountNumber ?? undefined,
+        swiftCode: dto.swiftCode ?? paymentInfo?.swiftCode ?? undefined,
+        recipientName: dto.recipientName ?? paymentInfo?.accountHolder ?? undefined,
+        paymentInstructions:
+          dto.paymentInstructions ??
+          paymentInfo?.comment ??
+          (paymentInfo?.bankAddress ? `Bank address: ${paymentInfo.bankAddress}` : undefined),
+      };
+
+      const recipientFields = this.validateAndBuildRecipientFields(paymentMethod, dtoWithPaymentInfo);
       const intendedAccount = dto.intendedFinanceAccountId
         ? await this.assertHqFinanceAccount(tx, dto.intendedFinanceAccountId)
         : null;
@@ -366,6 +390,7 @@ export class SupplierPaymentWorkflowService {
         data: {
           procurementOrderId: order.id,
           supplierId: order.supplierId,
+          paymentInfoVersionId: paymentInfo?.id ?? null,
           sequenceNumber,
           paymentDate: new Date(dto.paymentDate ?? new Date().toISOString()),
           amountYuan,

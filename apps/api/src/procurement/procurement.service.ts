@@ -1006,8 +1006,8 @@ export class ProcurementService {
       const itemInputs = dto.items ?? [];
       if (!itemInputs.length) throw new BadRequestException('At least one product is required');
 
-      const exchangeRate = Number(dto.defaultYuanRate ?? dto.exchangeRate ?? dto.yuanRate ?? 0);
-      this.validateExchangeRate(exchangeRate);
+      // Exchange rate belongs to each supplier payment, never to purchase creation.
+      const exchangeRate = 0;
       await this.assertSelectableTransportCompanies(tx, dto);
       const resolved = this.resolveProcurementLogistics(dto, undefined, exchangeRate);
       const { logistics, cargo, ...transportResolved } = resolved;
@@ -1482,24 +1482,12 @@ export class ProcurementService {
 
       const editState = this.assertProcurementOrderEditable(user, existing, dto);
 
-      const activePaymentCount = await tx.procurementSupplierPayment.count({
-        where: { procurementOrderId: id, status: ProcurementSupplierPaymentStatus.ACTIVE },
-      });
-      if (
-        activePaymentCount > 0 &&
-        dto.defaultYuanRate !== undefined &&
-        Number(dto.defaultYuanRate) !== Number(existing.defaultYuanRate)
-      ) {
-        throw new BadRequestException(
-          'Exchange rate is locked after supplier payments are recorded. Edit or void payments to correct the weighted average rate.',
-        );
-      }
-
       const oldValue = this.pickProcurementAuditFields(existing);
-      const exchangeRate = dto.defaultYuanRate !== undefined
-        ? Number(dto.defaultYuanRate)
-        : await this.resolveEffectiveYuanRate(tx, existing);
-      this.validateExchangeRate(exchangeRate);
+      // Purchase has no fixed FX — use weighted average from completed payments when available.
+      let exchangeRate = await this.resolveEffectiveYuanRate(tx, existing);
+      if (!exchangeRate || exchangeRate <= 0) {
+        exchangeRate = Number(existing.weightedAverageYuanRate ?? 0);
+      }
       this.assertProcurementLogisticsEditable(user, existing, dto);
       if (dto.hqWarehouseId && dto.hqWarehouseId !== existing.hqWarehouseId) {
         const warehouse = await tx.warehouse.findFirst({

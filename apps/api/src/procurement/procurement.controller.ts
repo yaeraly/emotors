@@ -9,9 +9,17 @@ import { PermissionsGuard } from '../roles/permissions.guard';
 import { RolesGuard } from '../roles/roles.guard';
 import { ConfirmSupplierPaymentDto } from './dto/confirm-supplier-payment.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
+import { UpsertPaymentInfoDto } from './dto/payment-info.dto';
 import { ReturnSupplierPaymentDto } from './dto/return-supplier-payment.dto';
 import { ReverseSupplierPaymentDto } from './dto/reverse-supplier-payment.dto';
 import { SendInvoiceToAccountantDto } from './dto/send-invoice-to-accountant.dto';
+import {
+  ApproveTransportExpenseDto,
+  ConfirmTransportExpenseDto,
+  CreateTransportExpenseDto,
+  ReturnTransportExpenseDto,
+  UpdateTransportExpenseDto,
+} from './dto/transport-expense.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
 import { UpdateCargoReceiptDto } from './dto/update-cargo-receipt.dto';
 import { UpdateChinaDomesticTransportDto } from './dto/update-china-domestic-transport.dto';
@@ -21,14 +29,20 @@ import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto'
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
 import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
 import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
+import { PaymentInfoService } from './payment-info.service';
 import { ProcurementService } from './procurement.service';
+import { TransportExpenseService } from './transport-expense.service';
 
 const PROCUREMENT_VIEW_PERMISSIONS = ['procurement.manage', 'procurement.view'] as const;
 
 @Controller('procurement')
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 export class ProcurementController {
-  constructor(private readonly service: ProcurementService) {}
+  constructor(
+    private readonly service: ProcurementService,
+    private readonly paymentInfoService: PaymentInfoService,
+    private readonly transportExpenseService: TransportExpenseService,
+  ) {}
 
   @Post('suppliers')
   @RequirePermissions('procurement.manage')
@@ -212,6 +226,154 @@ export class ProcurementController {
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'payments.manage')
   supplierPayments(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.supplierPayments(user, id);
+  }
+
+  @Get('orders/:id/payment-info')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'payments.manage')
+  paymentInfoVersions(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.paymentInfoService.listVersions(user, id);
+  }
+
+  @Get('orders/:id/payment-info/active')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'payments.manage')
+  activePaymentInfo(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.paymentInfoService.getActiveVersion(user, id);
+  }
+
+  @Put('orders/:id/payment-info')
+  @RequirePermissions('procurement.manage')
+  upsertPaymentInfo(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpsertPaymentInfoDto,
+  ) {
+    return this.paymentInfoService.upsertPaymentInfo(user, id, dto);
+  }
+
+  @Post('orders/:id/payment-info/qr')
+  @RequirePermissions('procurement.manage')
+  uploadPaymentQr(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.paymentInfoService.uploadQr(user, id, request);
+  }
+
+  @Delete('orders/:id/payment-info/qr/:attachmentId')
+  @RequirePermissions('procurement.manage')
+  removePaymentQr(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.paymentInfoService.removeQr(user, id, attachmentId);
+  }
+
+  @Get('transport-expenses')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'payments.manage')
+  transportExpenses(@CurrentUser() user: AuthUser, @Query('orderId') orderId?: string) {
+    return this.transportExpenseService.list(user, orderId);
+  }
+
+  @Get('transport-expenses/accountant-queue')
+  @RequirePermissions('finance.view', 'payments.manage')
+  transportExpenseAccountantQueue(@CurrentUser() user: AuthUser) {
+    return this.transportExpenseService.listAccountantQueue(user);
+  }
+
+  @Get('transport-expenses/cashier-queue')
+  @RequirePermissions('payments.manage', 'finance.view')
+  transportExpenseCashierQueue(@CurrentUser() user: AuthUser) {
+    return this.transportExpenseService.listCashierQueue(user);
+  }
+
+  @Get('transport-expenses/:id')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'payments.manage')
+  transportExpense(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.transportExpenseService.getOne(user, id);
+  }
+
+  @Post('transport-expenses')
+  @RequirePermissions('procurement.manage')
+  createTransportExpense(@CurrentUser() user: AuthUser, @Body() dto: CreateTransportExpenseDto) {
+    return this.transportExpenseService.create(user, dto);
+  }
+
+  @Put('transport-expenses/:id')
+  @RequirePermissions('procurement.manage')
+  updateTransportExpense(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateTransportExpenseDto,
+  ) {
+    return this.transportExpenseService.update(user, id, dto);
+  }
+
+  @Post('transport-expenses/:id/submit')
+  @RequirePermissions('procurement.manage')
+  submitTransportExpense(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.transportExpenseService.submitToAccountant(user, id);
+  }
+
+  @Post('transport-expenses/:id/approve')
+  @RequirePermissions('finance.view', 'payments.manage')
+  approveTransportExpense(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ApproveTransportExpenseDto,
+  ) {
+    return this.transportExpenseService.approveAndSendToCashier(user, id, dto);
+  }
+
+  @Post('transport-expenses/:id/return')
+  @RequirePermissions('finance.view', 'payments.manage')
+  returnTransportExpense(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ReturnTransportExpenseDto,
+  ) {
+    return this.transportExpenseService.returnToCreator(user, id, dto);
+  }
+
+  @Post('transport-expenses/:id/confirm')
+  @RequirePermissions('payments.manage', 'finance.view')
+  confirmTransportExpense(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ConfirmTransportExpenseDto,
+  ) {
+    return this.transportExpenseService.confirmPayment(user, id, dto);
+  }
+
+  @Post('transport-expenses/:id/attachments/invoice')
+  @RequirePermissions('procurement.manage')
+  uploadTransportExpenseInvoice(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.transportExpenseService.uploadAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE,
+    );
+  }
+
+  @Post('transport-expenses/:id/attachments/receipt')
+  @RequirePermissions('payments.manage', 'finance.view')
+  uploadTransportExpenseReceipt(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.transportExpenseService.uploadAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT,
+    );
   }
 
   @Post('orders/:id/send-invoice-to-accountant')
