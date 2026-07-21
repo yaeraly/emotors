@@ -16,6 +16,7 @@
     "prisma:seed": "npm run prisma:seed -w @emotors/api",
     "db:cleanup": "npm run db:cleanup -w @emotors/api",
     "db:cleanup:preview": "npm run db:cleanup:preview -w @emotors/api",
+    "db:cleanup:verify": "npm run db:cleanup:verify -w @emotors/api",
     "product-code:migrate:preview": "npm run product-code:migrate:preview -w @emotors/api",
     "product-code:migrate:apply": "npm run product-code:migrate:apply -w @emotors/api"
   },

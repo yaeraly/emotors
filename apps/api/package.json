@@ -15,6 +15,7 @@
     "prisma:seed": "ts-node prisma/seed.ts",
     "db:cleanup": "ts-node prisma/scripts/dev-database-cleanup.ts",
     "db:cleanup:preview": "ts-node prisma/scripts/dev-database-cleanup.ts --preview",
+    "db:cleanup:verify": "ts-node prisma/scripts/dev-database-cleanup.ts --verify",
     "product-code:migrate:preview": "ts-node prisma/scripts/product-code-migration.ts preview",
     "product-code:migrate:apply": "ts-node prisma/scripts/product-code-migration.ts apply",
     "test": "node --import tsx --test src/**/*.test.ts",

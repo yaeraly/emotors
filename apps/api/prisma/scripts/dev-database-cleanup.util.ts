@@ -17,7 +17,8 @@ export const PRESERVED_TABLES = [
   'PricingCategoryRule',
   'PricingProductRule',
   'PricingMasterSettings',
-  'PricingSimulation',
+  'PricingPolicyVersionCategoryDiscount',
+  'PricingPolicyVersionProductSnapshot',
   'BranchPriceProfile',
   'BranchPriceProfileCategoryDiscount',
   'FinanceAccountTypeDefinition',
@@ -25,75 +26,208 @@ export const PRESERVED_TABLES = [
   'FinanceAccountAssignment',
   'Warehouse',
   'CentralWarehouse',
+  'HqWarehouseManagerAssignment',
+  'HqSalesManagerWarehouseAssignment',
   'TransportCompany',
   'Supplier',
+  'SupplierContact',
   'Factory',
   'SkillLevel',
   'EmployeeCompensationRule',
   'BonusRule',
   'RoyaltyRule',
+  'TaxProfile',
+  'YuanRateHistory',
 ] as const;
 
-/** Operational tables targeted by development cleanup. */
-export const CLEANED_TABLES = [
-  'Customer',
-  'CustomerEvent',
-  'FollowUp',
-  'Sale',
-  'SaleItem',
-  'Payment',
-  'InstallmentSchedule',
-  'SaleInstallmentApproval',
-  'SaleInstallmentPayment',
-  'Receipt',
-  'Reservation',
-  'ReservationItem',
-  'ReturnOrder',
-  'ReturnOrderItem',
-  'ExchangeOrder',
-  'ExchangeOrderItem',
-  'StockMovement',
-  'InventoryBalance',
-  'InventoryCountSession',
-  'InventoryCountItem',
-  'FifoInventoryBatch',
-  'SaleFifoAllocation',
-  'DistributionFifoAllocation',
-  'FinanceInvestment',
-  'FinanceLedgerEntry',
-  'FinanceTransfer',
-  'FinanceExpense',
-  'FinanceReconciliation',
-  'CashierShift',
-  'ProcurementOrder',
-  'ProcurementOrderItem',
-  'PurchaseOrder',
-  'PurchaseOrderItem',
-  'LogisticsShipment',
-  'GoodsReceiving',
-  'GoodsReceivingItem',
-  'BranchDistributionOrder',
-  'BranchDistributionOrderItem',
-  'BranchInvoice',
-  'BranchPayment',
-  'BranchOrderInstallment',
-  'BranchPurchaseRequest',
-  'BranchPurchaseRequestItem',
-  'ServiceOrder',
-  'ServiceOrderPayment',
-  'PartsConsumption',
-  'Alert',
-  'AuditLog',
-  'LoginHistory',
-  'KpiSnapshot',
-  'BranchAccountBalance',
+/**
+ * Operational Prisma models deleted in strict FK-safe order (children before parents).
+ * Each name must match a Prisma delegate on TransactionClient.
+ */
+export const DELETE_STEPS = [
+  // Notifications & temp files
+  'alert',
+  'fileAttachment',
+
+  // Claims / returns / warehouse release
+  'warrantyClaimItem',
+  'warrantyClaim',
+  'supplierClaim',
+  'exchangeOrderItem',
+  'exchangeOrder',
+  'returnOrderItem',
+  'returnOrder',
+  'warehouseReleaseOrderItem',
+  'warehouseReleaseOrder',
+  'partsRequestItem',
+  'partsRequest',
+
+  // Reservations
+  'reservationItem',
+  'reservation',
+
+  // FIFO allocations (before batches & distribution/sales)
+  'saleFifoAllocation',
+  'distributionFifoAllocation',
+
+  // Sales & payments
+  'saleInstallmentPayment',
+  'saleInstallmentApproval',
+  'salesCommission',
+  'receipt',
+  'payment',
+  'installmentSchedule',
+  'saleItem',
+  'sale',
+
+  // Branch invoice workflow (before goods receiving / distribution)
+  'branchPayment',
+  'branchOrderInstallment',
+  'branchInvoice',
+
+  // Shortage reports (before goods receiving)
+  'shortageResolution',
+  'shortageReportItem',
+  'shortageReport',
+
+  // Goods receiving (before distribution order items)
+  'goodsReceivingItem',
+  'goodsReceiving',
+
+  // Distribution
+  'hqWarehousePickingTask',
+  'hqStockBooking',
+  'branchDistributionOrderItem',
+  'branchDistributionOrder',
+
+  // Service orders
+  'serviceOrderPayment',
+  'repairCommission',
+  'partsConsumption',
+  'diagnosis',
+  'repair',
+  'serviceOrderPhoto',
+  'warranty',
+  'serviceOrder',
+
+  // Finance operational
+  'financeInvestment',
+  'financeLedgerEntry',
+  'financeExpense',
+  'financeReconciliation',
+  'financeTransfer',
+  'cashierShift',
+
+  // Inventory counts & FIFO layers
+  'inventoryCountItem',
+  'inventoryCountSession',
+  'fifoInventoryBatch',
+  'stockMovement',
+  'inventoryBalance',
+
+  // Procurement / receiving drafts
+  'chinaReceivingDraftRow',
+  'chinaReceivingEditSession',
+  'procurementGoodsReceivingItem',
+  'procurementGoodsReceiving',
+  'procurementDifferenceReport',
+  'procurementLandedCostSnapshot',
+  'procurementCostAdjustment',
+  'procurementSupplierPayment',
+  'procurementSvhToHqTransport',
+  'procurementOrderItem',
+  'procurementOrder',
+
+  // Branch requests / supply chain
+  'replacementShipmentItem',
+  'replacementShipment',
+  'branchRequestIssue',
+  'branchRequestShortage',
+  'branchPurchaseRequestItem',
+  'branchPurchaseRequest',
+  'supplyInquiry',
+
+  // Legacy transfers / purchase orders / logistics
+  'stockTransferItem',
+  'stockTransfer',
+  'purchaseOrderItem',
+  'purchaseOrder',
+  'containerTrackingEvent',
+  'logisticsShipment',
+
+  // CRM
+  'followUp',
+  'customerEvent',
+  'customer',
+
+  // Product operational history (keep cards & pricing config)
+  'productPriceHistory',
+  'productPurchasePriceHistory',
+  'productPricingChangeHistory',
+  'productCodeMigration',
+  'pricingSimulation',
+
+  // Payroll / KPI operational
+  'payrollRecord',
+  'employeeKPI',
+  'kpiSnapshot',
+  'branchKpiTarget',
+  'npsSurvey',
+  'stockForecast',
+  'branchStockRequest',
+
+  // Franchise / expansion operational
+  'matchmakingRecord',
+  'depositAgreement',
+  'investmentDeal',
+  'franchiseApplication',
+  'franchiseApproval',
+  'franchiseCandidate',
+  'investor',
+  'cityAnalysis',
+  'locationCandidate',
+
+  // Tax / royalty operational documents
+  'taxPayment',
+  'taxReport',
+  'taxReminder',
+  'royaltyPayment',
+  'royaltyInvoice',
+
+  // AI / analytics operational
+  'aiInsight',
+  'salesForecast',
+  'stockRiskPrediction',
+  'customerPrediction',
+  'kpiRecommendation',
+
+  // Academy / marketing operational
+  'certificate',
+  'enrollment',
+  'student',
+  'lesson',
+  'course',
+  'banner',
+  'promotion',
+  'campaign',
+  'marketingAsset',
+
+  // Operational logs
+  'auditLog',
+  'loginHistory',
 ] as const;
+
+/** Operational tables targeted by development cleanup (alias of DELETE_STEPS for reporting). */
+export const CLEANED_TABLES = DELETE_STEPS;
 
 type PrismaTx = Prisma.TransactionClient;
+type DeleteStep = (typeof DELETE_STEPS)[number];
 
-async function deleteAll(tx: PrismaTx, model: keyof PrismaTx, label: string) {
+async function deleteAll(tx: PrismaTx, model: DeleteStep) {
   const delegate = tx[model] as { deleteMany: (args?: unknown) => Promise<{ count: number }> };
-  if (!delegate?.deleteMany) return 0;
+  if (!delegate?.deleteMany) {
+    throw new Error(`Prisma delegate missing for model: ${model}`);
+  }
   const result = await delegate.deleteMany();
   return result.count ?? 0;
 }
@@ -103,71 +237,42 @@ export type DevDatabaseCleanupResult = {
   reset: Record<string, number>;
 };
 
+export type DevDatabaseCleanupVerification = {
+  users: number;
+  roles: number;
+  productCategories: number;
+  products: number;
+  pricingPolicies: number;
+  warehouses: number;
+  financeAccounts: number;
+  inventoryBalanceRows: number;
+  inventoryQuantityTotal: number;
+  inventoryValueTotal: number;
+  financeBalanceTotal: number;
+  sales: number;
+  returns: number;
+  payments: number;
+  transfers: number;
+  investments: number;
+  stockMovements: number;
+  customers: number;
+  ledgerEntries: number;
+  fifoBatches: number;
+  alerts: number;
+  auditLogs: number;
+  passed: boolean;
+  failures: string[];
+};
+
 export async function runDevDatabaseCleanup(prisma: PrismaClient): Promise<DevDatabaseCleanupResult> {
   const deleted: Record<string, number> = {};
   const reset: Record<string, number> = {};
 
   await prisma.$transaction(
     async (tx) => {
-      // Notifications
-      deleted.alert = await deleteAll(tx, 'alert', 'alert');
-
-      // Returns / exchanges / warranty / supplier claims
-      for (const model of [
-        'warrantyClaimItem',
-        'warrantyClaim',
-        'supplierClaim',
-        'exchangeOrderItem',
-        'exchangeOrder',
-        'returnOrderItem',
-        'returnOrder',
-        'warehouseReleaseOrderItem',
-        'warehouseReleaseOrder',
-        'partsRequestItem',
-        'partsRequest',
-      ] as const) {
-        deleted[model] = await deleteAll(tx, model, model);
+      for (const model of DELETE_STEPS) {
+        deleted[model] = await deleteAll(tx, model);
       }
-
-      // Reservations
-      deleted.reservationItem = await deleteAll(tx, 'reservationItem', 'reservationItem');
-      deleted.reservation = await deleteAll(tx, 'reservation', 'reservation');
-
-      // Sales chain
-      deleted.saleFifoAllocation = await deleteAll(tx, 'saleFifoAllocation', 'saleFifoAllocation');
-      deleted.saleInstallmentPayment = await deleteAll(tx, 'saleInstallmentPayment', 'saleInstallmentPayment');
-      deleted.saleInstallmentApproval = await deleteAll(tx, 'saleInstallmentApproval', 'saleInstallmentApproval');
-      deleted.installmentSchedule = await deleteAll(tx, 'installmentSchedule', 'installmentSchedule');
-      deleted.receipt = await deleteAll(tx, 'receipt', 'receipt');
-      deleted.payment = await deleteAll(tx, 'payment', 'payment');
-      deleted.saleItem = await deleteAll(tx, 'saleItem', 'saleItem');
-      deleted.sale = await deleteAll(tx, 'sale', 'sale');
-
-      // CRM
-      deleted.followUp = await deleteAll(tx, 'followUp', 'followUp');
-      deleted.customerEvent = await deleteAll(tx, 'customerEvent', 'customerEvent');
-      deleted.customer = await deleteAll(tx, 'customer', 'customer');
-
-      // Branch order / invoice workflow
-      deleted.branchPayment = await deleteAll(tx, 'branchPayment', 'branchPayment');
-      deleted.branchOrderInstallment = await deleteAll(tx, 'branchOrderInstallment', 'branchOrderInstallment');
-      deleted.branchInvoice = await deleteAll(tx, 'branchInvoice', 'branchInvoice');
-
-      // Service
-      deleted.serviceOrderPayment = await deleteAll(tx, 'serviceOrderPayment', 'serviceOrderPayment');
-      deleted.partsConsumption = await deleteAll(tx, 'partsConsumption', 'partsConsumption');
-      deleted.diagnosis = await deleteAll(tx, 'diagnosis', 'diagnosis');
-      deleted.repair = await deleteAll(tx, 'repair', 'repair');
-      deleted.serviceOrderPhoto = await deleteAll(tx, 'serviceOrderPhoto', 'serviceOrderPhoto');
-      deleted.serviceOrder = await deleteAll(tx, 'serviceOrder', 'serviceOrder');
-
-      // Finance operational (investments before ledger entries)
-      deleted.financeInvestment = await deleteAll(tx, 'financeInvestment', 'financeInvestment');
-      deleted.financeLedgerEntry = await deleteAll(tx, 'financeLedgerEntry', 'financeLedgerEntry');
-      deleted.financeTransfer = await deleteAll(tx, 'financeTransfer', 'financeTransfer');
-      deleted.financeExpense = await deleteAll(tx, 'financeExpense', 'financeExpense');
-      deleted.financeReconciliation = await deleteAll(tx, 'financeReconciliation', 'financeReconciliation');
-      deleted.cashierShift = await deleteAll(tx, 'cashierShift', 'cashierShift');
 
       const accountReset = await tx.financeAccount.updateMany({
         data: {
@@ -179,103 +284,159 @@ export async function runDevDatabaseCleanup(prisma: PrismaClient): Promise<DevDa
       });
       reset.financeAccount = accountReset.count;
 
-      // Warehouse / inventory
-      deleted.distributionFifoAllocation = await deleteAll(tx, 'distributionFifoAllocation', 'distributionFifoAllocation');
-      deleted.inventoryCountItem = await deleteAll(tx, 'inventoryCountItem', 'inventoryCountItem');
-      deleted.inventoryCountSession = await deleteAll(tx, 'inventoryCountSession', 'inventoryCountSession');
-      deleted.stockMovement = await deleteAll(tx, 'stockMovement', 'stockMovement');
-      deleted.inventoryBalance = await deleteAll(tx, 'inventoryBalance', 'inventoryBalance');
-      deleted.fifoInventoryBatch = await deleteAll(tx, 'fifoInventoryBatch', 'fifoInventoryBatch');
-
-      // Distribution / procurement
-      for (const model of [
-        'shortageResolution',
-        'shortageReportItem',
-        'shortageReport',
-        'hqWarehousePickingTask',
-        'branchDistributionOrderItem',
-        'branchDistributionOrder',
-        'goodsReceivingItem',
-        'goodsReceiving',
-        'procurementGoodsReceivingItem',
-        'procurementGoodsReceiving',
-        'chinaReceivingDraftRow',
-        'chinaReceivingEditSession',
-        'procurementDifferenceReport',
-        'procurementLandedCostSnapshot',
-        'procurementCostAdjustment',
-        'procurementSupplierPayment',
-        'procurementSvhToHqTransport',
-        'procurementOrderItem',
-        'procurementOrder',
-        'purchaseOrderItem',
-        'purchaseOrder',
-        'containerTrackingEvent',
-        'logisticsShipment',
-        'stockTransferItem',
-        'stockTransfer',
-        'branchRequestIssue',
-        'branchRequestShortage',
-        'branchPurchaseRequestItem',
-        'branchPurchaseRequest',
-        'hqStockBooking',
-        'supplyInquiry',
-        'replacementShipmentItem',
-        'replacementShipment',
-      ] as const) {
-        deleted[model] = await deleteAll(tx, model, model);
-      }
-
-      // Commissions / payroll operational snapshots
-      deleted.salesCommission = await deleteAll(tx, 'salesCommission', 'salesCommission');
-      deleted.repairCommission = await deleteAll(tx, 'repairCommission', 'repairCommission');
-      deleted.payrollRecord = await deleteAll(tx, 'payrollRecord', 'payrollRecord');
-      deleted.employeeKPI = await deleteAll(tx, 'employeeKPI', 'employeeKPI');
-
-      // Franchise investment CRM module (operational deals, keep Investor master if any)
-      deleted.matchmakingRecord = await deleteAll(tx, 'matchmakingRecord', 'matchmakingRecord');
-      deleted.depositAgreement = await deleteAll(tx, 'depositAgreement', 'depositAgreement');
-      deleted.investmentDeal = await deleteAll(tx, 'investmentDeal', 'investmentDeal');
-      deleted.franchiseApplication = await deleteAll(tx, 'franchiseApplication', 'franchiseApplication');
-      deleted.franchiseApproval = await deleteAll(tx, 'franchiseApproval', 'franchiseApproval');
-      deleted.franchiseCandidate = await deleteAll(tx, 'franchiseCandidate', 'franchiseCandidate');
-      deleted.investor = await deleteAll(tx, 'investor', 'investor');
-
-      // Tax / royalty operational
-      deleted.taxPayment = await deleteAll(tx, 'taxPayment', 'taxPayment');
-      deleted.taxReport = await deleteAll(tx, 'taxReport', 'taxReport');
-      deleted.taxReminder = await deleteAll(tx, 'taxReminder', 'taxReminder');
-      deleted.royaltyPayment = await deleteAll(tx, 'royaltyPayment', 'royaltyPayment');
-      deleted.royaltyInvoice = await deleteAll(tx, 'royaltyInvoice', 'royaltyInvoice');
-
-      // AI / analytics operational
-      deleted.aiInsight = await deleteAll(tx, 'aiInsight', 'aiInsight');
-      deleted.salesForecast = await deleteAll(tx, 'salesForecast', 'salesForecast');
-      deleted.stockRiskPrediction = await deleteAll(tx, 'stockRiskPrediction', 'stockRiskPrediction');
-      deleted.customerPrediction = await deleteAll(tx, 'customerPrediction', 'customerPrediction');
-      deleted.kpiRecommendation = await deleteAll(tx, 'kpiRecommendation', 'kpiRecommendation');
-
-      // KPI / branch statistics
-      deleted.kpiSnapshot = await deleteAll(tx, 'kpiSnapshot', 'kpiSnapshot');
-      deleted.branchKpiTarget = await deleteAll(tx, 'branchKpiTarget', 'branchKpiTarget');
-      deleted.npsSurvey = await deleteAll(tx, 'npsSurvey', 'npsSurvey');
-      deleted.stockForecast = await deleteAll(tx, 'stockForecast', 'stockForecast');
-      deleted.branchStockRequest = await deleteAll(tx, 'branchStockRequest', 'branchStockRequest');
-
       const branchBalanceReset = await tx.branchAccountBalance.updateMany({
         data: { totalDebt: 0, totalPaid: 0, lastPaymentAt: null },
       });
       reset.branchAccountBalance = branchBalanceReset.count;
 
-      // Operational logs
-      deleted.auditLog = await deleteAll(tx, 'auditLog', 'auditLog');
-      deleted.loginHistory = await deleteAll(tx, 'loginHistory', 'loginHistory');
-
-      // Temporary / attachment files linked to operational entities
-      deleted.fileAttachment = await deleteAll(tx, 'fileAttachment', 'fileAttachment');
+      // Safety net: zero any inventory balance rows that could not be deleted
+      const inventoryReset = await tx.inventoryBalance.updateMany({
+        data: {
+          quantity: 0,
+          reservedQuantity: 0,
+          averageCostKgs: 0,
+          landedCostKgs: 0,
+          totalValueKgs: 0,
+          lastReceivingAt: null,
+        },
+      });
+      reset.inventoryBalance = inventoryReset.count;
     },
-    { maxWait: 60_000, timeout: 300_000 },
+    { maxWait: 120_000, timeout: 600_000 },
   );
 
   return { deleted, reset };
+}
+
+export async function verifyDevDatabaseCleanup(prisma: PrismaClient): Promise<DevDatabaseCleanupVerification> {
+  const [
+    users,
+    roles,
+    productCategories,
+    products,
+    pricingPolicyVersions,
+    productPricingPolicies,
+    pricingMasterSettings,
+    pricingCategoryRules,
+    warehouses,
+    financeAccounts,
+    financeAccountTypes,
+    inventoryBalances,
+    sales,
+    returns,
+    payments,
+    transfers,
+    investments,
+    stockMovements,
+    customers,
+    ledgerEntries,
+    fifoBatches,
+    alerts,
+    auditLogs,
+  ] = await Promise.all([
+    prisma.user.count(),
+    prisma.rbacRole.count(),
+    prisma.productCategory.count(),
+    prisma.product.count({ where: { deletedAt: null } }),
+    prisma.pricingPolicyVersion.count(),
+    prisma.productPricingPolicy.count(),
+    prisma.pricingMasterSettings.count(),
+    prisma.pricingCategoryRule.count(),
+    prisma.warehouse.count({ where: { deletedAt: null } }),
+    prisma.financeAccount.count({ where: { deletedAt: null } }),
+    prisma.financeAccountTypeDefinition.count(),
+    prisma.inventoryBalance.findMany({
+      select: { quantity: true, reservedQuantity: true, totalValueKgs: true },
+    }),
+    prisma.sale.count(),
+    prisma.returnOrder.count(),
+    prisma.payment.count(),
+    prisma.financeTransfer.count(),
+    prisma.financeInvestment.count(),
+    prisma.stockMovement.count(),
+    prisma.customer.count(),
+    prisma.financeLedgerEntry.count(),
+    prisma.fifoInventoryBatch.count(),
+    prisma.alert.count(),
+    prisma.auditLog.count(),
+  ]);
+
+  const pricingPolicies =
+    pricingPolicyVersions + productPricingPolicies + pricingMasterSettings + pricingCategoryRules;
+
+  const inventoryQuantityTotal = inventoryBalances.reduce(
+    (sum, row) => sum + row.quantity + row.reservedQuantity,
+    0,
+  );
+  const inventoryValueTotal = inventoryBalances.reduce(
+    (sum, row) => sum + Number(row.totalValueKgs),
+    0,
+  );
+
+  const financeAccountsRows = await prisma.financeAccount.findMany({
+    where: { deletedAt: null },
+    select: {
+      currentBalance: true,
+      availableBalance: true,
+      pendingBalance: true,
+      openingBalance: true,
+    },
+  });
+  const financeBalanceTotal = financeAccountsRows.reduce(
+    (sum, row) =>
+      sum +
+      Number(row.currentBalance) +
+      Number(row.availableBalance) +
+      Number(row.pendingBalance) +
+      Number(row.openingBalance),
+    0,
+  );
+
+  const failures: string[] = [];
+  if (users === 0) failures.push('Users must be preserved');
+  if (roles === 0) failures.push('Roles must be preserved');
+  if (productCategories === 0) failures.push('Product categories must be preserved');
+  if (products === 0) failures.push('Product cards must be preserved');
+  if (pricingPolicies === 0) failures.push('Pricing policy configuration must be preserved');
+  if (warehouses === 0) failures.push('Warehouses must be preserved');
+  if (financeAccountTypes === 0) failures.push('Finance account types must be preserved');
+  if (inventoryQuantityTotal !== 0) failures.push(`Inventory quantities must be zero (found ${inventoryQuantityTotal})`);
+  if (inventoryValueTotal !== 0) failures.push(`Inventory value must be zero (found ${inventoryValueTotal})`);
+  if (financeBalanceTotal !== 0) failures.push(`Finance balances must be zero (found ${financeBalanceTotal})`);
+  if (sales !== 0) failures.push(`Sales must be empty (found ${sales})`);
+  if (returns !== 0) failures.push(`Returns must be empty (found ${returns})`);
+  if (payments !== 0) failures.push(`Payments must be empty (found ${payments})`);
+  if (transfers !== 0) failures.push(`Transfers must be empty (found ${transfers})`);
+  if (investments !== 0) failures.push(`Investments must be empty (found ${investments})`);
+  if (stockMovements !== 0) failures.push(`Stock movements must be empty (found ${stockMovements})`);
+  if (customers !== 0) failures.push(`Customers must be empty (found ${customers})`);
+  if (ledgerEntries !== 0) failures.push(`Ledger entries must be empty (found ${ledgerEntries})`);
+  if (fifoBatches !== 0) failures.push(`FIFO batches must be empty (found ${fifoBatches})`);
+
+  return {
+    users,
+    roles,
+    productCategories,
+    products,
+    pricingPolicies,
+    warehouses,
+    financeAccounts,
+    inventoryBalanceRows: inventoryBalances.length,
+    inventoryQuantityTotal,
+    inventoryValueTotal,
+    financeBalanceTotal,
+    sales,
+    returns,
+    payments,
+    transfers,
+    investments,
+    stockMovements,
+    customers,
+    ledgerEntries,
+    fifoBatches,
+    alerts,
+    auditLogs,
+    passed: failures.length === 0,
+    failures,
+  };
 }
