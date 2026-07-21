@@ -210,12 +210,6 @@ export class ProcurementController {
     return this.service.listHqFinanceAccountsForPayments(user);
   }
 
-  @Get('supply-manager-payment-queue')
-  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view', 'payments.manage')
-  supplyManagerPaymentQueue(@CurrentUser() user: AuthUser) {
-    return this.service.listSupplyManagerPaymentQueue(user);
-  }
-
   @Get('accountant-payment-queue')
   @RequirePermissions('finance.view', 'payments.manage')
   accountantPaymentQueue(@CurrentUser() user: AuthUser) {

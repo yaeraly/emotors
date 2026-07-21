@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DomesticTransportSection, type DomesticTransportForm } from '@/components/DomesticTransportSection';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
@@ -212,7 +212,16 @@ const emptySvhForm = (): DomesticTransportForm => ({
 });
 
 export default function ProcurementOrderDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProcurementOrderDetailPageContent />
+    </Suspense>
+  );
+}
+
+function ProcurementOrderDetailPageContent() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [order, setOrder] = useState<ProcurementOrder | null>(null);
@@ -253,7 +262,17 @@ export default function ProcurementOrderDetailPage() {
   const [unlocking, setUnlocking] = useState(false);
   const [unlockingChinaDomestic, setUnlockingChinaDomestic] = useState(false);
   const [chinaDomesticUnlockReason, setChinaDomesticUnlockReason] = useState('');
-  const [activeTab, setActiveTab] = useState<OrderDetailTab>('general');
+  const initialTab = (searchParams.get('tab') as OrderDetailTab | null) ?? 'general';
+  const [activeTab, setActiveTab] = useState<OrderDetailTab>(
+    ORDER_DETAIL_TABS.some((tab) => tab.id === initialTab) ? initialTab : 'general',
+  );
+
+  useEffect(() => {
+    const tab = searchParams.get('tab') as OrderDetailTab | null;
+    if (tab && ORDER_DETAIL_TABS.some((item) => item.id === tab)) {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
 
   const canEditOrder = canCreateProcurementOrder(user);
   const canEditItems = canEditProcurementOrderItemsInWindow(user, {
@@ -948,6 +967,7 @@ export default function ProcurementOrderDetailPage() {
                 user={user}
                 onChanged={load}
               />
+              <ProcurementTransportExpenses orderId={order.id} user={user} />
             </div>
           ) : null}
 

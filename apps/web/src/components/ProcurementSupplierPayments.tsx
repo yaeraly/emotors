@@ -183,6 +183,12 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const canVoid = canVoidSupplierPayment(user);
   const canReverse = canReverseSupplierPayment(user);
   const payments = order.supplierPayments ?? [];
+  const completedPayments = payments.filter((payment) => isConfirmedSupplierPayment(payment.status));
+  const lastCompletedPayment = [...completedPayments].sort((a, b) => {
+    const aTime = new Date(a.paidAt || a.paymentDate || a.createdAt || 0).getTime();
+    const bTime = new Date(b.paidAt || b.paymentDate || b.createdAt || 0).getTime();
+    return bTime - aTime;
+  })[0];
   const invoiceAttachments = (order.attachments ?? []).filter(
     (item) => item.entityType === 'SUPPLIER_INVOICE' || item.entityType === 'PROCUREMENT_ORDER',
   );
@@ -511,22 +517,30 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
 
       {error ? <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
 
-      <div className="mb-6 grid gap-4 md:grid-cols-3 lg:grid-cols-7">
+      <div className="mb-6 grid gap-4 md:grid-cols-3 lg:grid-cols-4">
         <SummaryCard label={t('procurement.payments.totalOrderYuan')} value={`¥${Number(order.totalYuan).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.totalPaidYuan')} value={`¥${Number(order.totalPaidYuan ?? 0).toFixed(2)}`} />
         <SummaryCard label={t('procurement.payments.remainingYuan')} value={`¥${Number(order.remainingYuan ?? order.totalYuan).toFixed(2)}`} />
-        <SummaryCard label={t('procurement.payments.totalPaidKgs')} value={formatKgs(order.totalPaidKgs ?? 0)} />
-        <SummaryCard
-          label={t('procurement.payments.paymentCount')}
-          value={String(payments.filter((payment) => isConfirmedSupplierPayment(payment.status)).length)}
-        />
-        <SummaryCard
-          label={t('procurement.payments.weightedAverageRate')}
-          value={order.weightedAverageYuanRate ? Number(order.weightedAverageYuanRate).toFixed(4) : '-'}
-        />
         <SummaryCard
           label={t('procurement.payments.paymentStatus')}
           value={t(`procurement.payments.status.${order.supplierPaymentStatus ?? 'UNPAID'}`)}
+        />
+        <SummaryCard label={t('procurement.payments.paymentCount')} value={String(completedPayments.length)} />
+        <SummaryCard
+          label={t('procurement.payments.lastPaymentDate')}
+          value={
+            lastCompletedPayment
+              ? new Date(lastCompletedPayment.paidAt || lastCompletedPayment.paymentDate).toLocaleDateString()
+              : '—'
+          }
+        />
+        <SummaryCard
+          label={t('procurement.payments.lastPaymentAmount')}
+          value={lastCompletedPayment ? `¥${Number(lastCompletedPayment.amountYuan).toFixed(2)}` : '—'}
+        />
+        <SummaryCard
+          label={t('procurement.payments.weightedAverageRate')}
+          value={order.weightedAverageYuanRate ? Number(order.weightedAverageYuanRate).toFixed(4) : '—'}
         />
       </div>
 

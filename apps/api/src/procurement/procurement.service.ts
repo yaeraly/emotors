@@ -1099,10 +1099,6 @@ export class ProcurementService {
     return this.supplierPaymentWorkflow.listPayments(user, orderId);
   }
 
-  listSupplyManagerPaymentQueue(user: AuthUser) {
-    return this.supplierPaymentWorkflow.listSupplyManagerPaymentQueue(user);
-  }
-
   listAccountantPaymentQueue(user: AuthUser) {
     return this.supplierPaymentWorkflow.listAccountantQueue(user);
   }

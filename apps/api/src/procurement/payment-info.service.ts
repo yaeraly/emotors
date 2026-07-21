@@ -355,7 +355,7 @@ export class PaymentInfoService {
       data: {
         procurementOrderId: orderId,
         versionNumber: 1,
-        paymentMethod: dto.paymentMethod ?? ProcurementPaymentInfoMethod.BANK_ACCOUNT,
+        paymentMethod: dto.paymentMethod ?? ProcurementPaymentInfoMethod.QR_CODE,
         bankName: dto.bankName?.trim() || null,
         accountHolder: dto.accountHolder?.trim() || null,
         accountNumber: dto.accountNumber?.trim() || null,

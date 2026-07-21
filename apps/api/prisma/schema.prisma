@@ -2935,7 +2935,7 @@ model ProcurementPaymentInfoVersion {
   procurementOrderId String
   procurementOrder   ProcurementOrder             @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
   versionNumber      Int
-  paymentMethod      ProcurementPaymentInfoMethod @default(BANK_ACCOUNT)
+  paymentMethod      ProcurementPaymentInfoMethod @default(QR_CODE)
   bankName           String?
   accountHolder      String?
   accountNumber      String?

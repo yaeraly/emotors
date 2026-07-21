@@ -9,7 +9,6 @@ import { apiFetch } from '@/lib/api';
 import {
   canViewChinaReceivingActs,
   canViewProcurement,
-  canViewSupplierPayments,
   canViewTransportCompany,
   hasFullAccess,
   isSupplyChainManagerUser,
@@ -22,7 +21,6 @@ export type ProcurementHubTab =
   | 'factories'
   | 'transport'
   | 'orders'
-  | 'payments'
   | 'difference-acts';
 
 type Props = {
@@ -39,7 +37,6 @@ export function ProcurementHubNav({ activeTab }: Props) {
   }, []);
 
   const canViewTransport = canViewTransportCompany(user);
-  const canViewPayments = canViewSupplierPayments(user);
   const canViewDifferenceActs =
     canViewChinaReceivingActs(user) && (isSupplyChainManagerUser(user) || hasFullAccess(user));
 
@@ -52,17 +49,14 @@ export function ProcurementHubNav({ activeTab }: Props) {
       items.push({ id: 'transport', label: t('procurement.transportCompanies.title') });
     }
     items.push({ id: 'orders', label: t('procurement.orders.title') });
-    if (canViewPayments) {
-      items.push({ id: 'payments', label: t('scm.hub.procurement.payments') });
-    }
     if (canViewDifferenceActs) {
       items.push({ id: 'difference-acts', label: t('chinaReceiving.differenceActs') });
     }
     return items;
-  }, [canViewDifferenceActs, canViewPayments, canViewTransport, t]);
+  }, [canViewDifferenceActs, canViewTransport, t]);
 
   const createAction = useProcurementCreateAction(
-    activeTab === 'difference-acts' || activeTab === 'payments' ? 'orders' : activeTab,
+    activeTab === 'difference-acts' ? 'orders' : activeTab,
     user,
     t,
   );
@@ -70,10 +64,6 @@ export function ProcurementHubNav({ activeTab }: Props) {
   function setTab(tabId: string) {
     if (tabId === 'difference-acts') {
       router.push('/procurement/difference-acts');
-      return;
-    }
-    if (tabId === 'payments') {
-      router.push('/procurement/payments');
       return;
     }
     router.push(`/procurement?tab=${tabId}`);
