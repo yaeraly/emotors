@@ -58,6 +58,19 @@ export function canCreateOwnerInvestment(user: Pick<User, 'role' | 'roles' | 'br
   return isBranchOwnerUser(user) || hasFullAccess(user);
 }
 
+/** CEO / Owner (full access) or franchise owners who already create investments. */
+export function canManageFinanceInvestments(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  if (!user) return false;
+  return (
+    hasFullAccess(user) ||
+    hasRole(user, 'CEO') ||
+    hasRole(user, 'OWNER') ||
+    canCreateOwnerInvestment(user)
+  );
+}
+
 export function canAcceptFinancePayment(user: Pick<User, 'role' | 'roles' | 'branchId' | 'permissions' | 'additionalPermissions'> | null | undefined) {
   if (!user) return false;
   return hasCashierCapability(user);

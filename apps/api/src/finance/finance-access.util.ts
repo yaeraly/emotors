@@ -61,6 +61,19 @@ export function canCreateOwnerInvestment(
   return isBranchOwnerUser(user) || hasAnyFullAccessRole(resolveUserRoles(user));
 }
 
+/** CEO/Owner (full access) or branch owner who already manages investments. */
+export function canManageFinanceInvestments(
+  user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>,
+) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.OWNER) ||
+    canCreateOwnerInvestment(user)
+  );
+}
+
 export function canApproveFinanceTransfer(
   user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>,
 ) {

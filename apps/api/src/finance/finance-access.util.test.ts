@@ -4,6 +4,7 @@ import {
   canCreateOwnerInvestment,
   canManageBranchFinanceAccounts,
   canManageFinanceAccounts,
+  canManageFinanceInvestments,
   canPrepareFinanceTransfer,
   canReturnFinanceTransfer,
   canReverseFinanceTransfer,
@@ -62,6 +63,38 @@ assertEqual(isHqFinanceUser(hqFinance), true, 'hq finance detected');
 assertEqual(canManageFinanceAccounts(branchAccountant), true, 'branch accountant manages finance');
 assertEqual(canManageBranchFinanceAccounts(branchAccountant), true, 'branch accountant manages branch finance');
 assertEqual(canCreateOwnerInvestment(branchCeo), true, 'branch ceo can invest');
+
+const hqCeo = {
+  id: 'hq-ceo',
+  role: Role.CEO,
+  roles: [Role.CEO],
+  branchId: null,
+  permissions: ['finance.view', 'finance.manage'],
+};
+
+const hqOwner = {
+  id: 'hq-owner',
+  role: Role.OWNER,
+  roles: [Role.OWNER],
+  branchId: null,
+  permissions: ['finance.view', 'finance.manage'],
+};
+
+// 1 / 2 / 3 / 4 — CEO can manage; unauthorized roles cannot
+assertEqual(canManageFinanceInvestments(hqCeo), true, 'CEO can edit/delete investments');
+assertEqual(canManageFinanceInvestments(hqOwner), true, 'Owner can edit/delete investments');
+assertEqual(canManageFinanceInvestments(branchCeo), true, 'franchise owner can manage investments');
+assertEqual(
+  canManageFinanceInvestments(branchAccountant),
+  false,
+  'branch accountant cannot edit/delete investments',
+);
+assertEqual(
+  canManageFinanceInvestments(hqCashier),
+  false,
+  'HQ cashier cannot edit/delete investments',
+);
+
 assertEqual(
   resolveFinanceScopeFilter(branchAccountant).branchId,
   'branch-1',

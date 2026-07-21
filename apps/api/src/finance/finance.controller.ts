@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { FileAttachmentEntityType, FinanceAccountStatus, Role } from '@prisma/client';
 import type { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
@@ -23,7 +23,11 @@ import {
   SetOpeningBalanceDto,
   UpdateFinanceAccountDto,
 } from './dto/finance-account.dto';
-import { CreateFinanceInvestmentDto } from './dto/create-finance-investment.dto';
+import {
+  CreateFinanceInvestmentDto,
+  DeleteFinanceInvestmentDto,
+  UpdateFinanceInvestmentDto,
+} from './dto/create-finance-investment.dto';
 import { CloseCashierShiftDto, OpenCashierShiftDto } from './dto/cashier-shift.dto';
 import { FinanceReportQueryDto } from './dto/finance-report-query.dto';
 import {
@@ -341,14 +345,44 @@ export class FinanceController {
 
   @Get('investments')
   @Roles(...FINANCE_VIEW_ROLES)
-  listInvestments(@CurrentUser() user: AuthUser, @Query('branchId') branchId?: string) {
-    return this.investmentsService.listInvestments(user, branchId);
+  listInvestments(
+    @CurrentUser() user: AuthUser,
+    @Query('branchId') branchId?: string,
+    @Query('includeDeleted') includeDeleted?: string,
+  ) {
+    return this.investmentsService.listInvestments(user, { branchId, includeDeleted });
+  }
+
+  @Get('investments/:id')
+  @Roles(...FINANCE_VIEW_ROLES)
+  getInvestment(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.investmentsService.getInvestment(user, id);
   }
 
   @Post('investments')
   @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
   createInvestment(@CurrentUser() user: AuthUser, @Body() dto: CreateFinanceInvestmentDto) {
     return this.investmentsService.createInvestment(user, dto);
+  }
+
+  @Patch('investments/:id')
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
+  updateInvestment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateFinanceInvestmentDto,
+  ) {
+    return this.investmentsService.updateInvestment(user, id, dto);
+  }
+
+  @Delete('investments/:id')
+  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_OWNER)
+  deleteInvestment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: DeleteFinanceInvestmentDto,
+  ) {
+    return this.investmentsService.deleteInvestment(user, id, dto);
   }
 
   @Get('shifts')

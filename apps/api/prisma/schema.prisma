@@ -1433,7 +1433,7 @@ model User {
   createdHqStockBookings                          HqStockBooking[]                    @relation("HqStockBookingCreator")
   confirmedHqStockBookings                        HqStockBooking[]                    @relation("HqStockBookingConfirmer")
   releasedHqStockBookings                         HqStockBooking[]                    @relation("HqStockBookingReleaser")
-  financeAccountsCreated                        FinanceAccount[]                    @relation("FinanceAccountCreator")
+  financeAccountsCreated                          FinanceAccount[]                    @relation("FinanceAccountCreator")
   financeAccountsUpdated                          FinanceAccount[]                    @relation("FinanceAccountUpdater")
   financeAccountsResponsible                      FinanceAccount[]                    @relation("FinanceAccountResponsible")
   financeAccountAssignments                       FinanceAccountAssignment[]          @relation("FinanceAccountAssignmentUser")
@@ -1448,6 +1448,7 @@ model User {
   financeExpensesApproved                         FinanceExpense[]                    @relation("FinanceExpenseApprover")
   financeReconciliationsCreated                   FinanceReconciliation[]             @relation("FinanceReconciliationCreator")
   financeInvestmentsCreated                       FinanceInvestment[]                 @relation("FinanceInvestmentCreator")
+  financeInvestmentsDeleted                       FinanceInvestment[]                 @relation("FinanceInvestmentDeletedBy")
   cashierShifts                                   CashierShift[]                      @relation("CashierShiftCashier")
   userPermissionsHeld                             UserPermission[]                    @relation("UserPermissionHolder")
   userPermissionsGranted                          UserPermission[]                    @relation("UserPermissionGranter")
@@ -1474,15 +1475,15 @@ model RbacRole {
 }
 
 model Permission {
-  id          String           @id @default(cuid())
-  code        String           @unique
-  module      String
-  action      String
-  description String?
-  roles       RolePermission[]
+  id              String           @id @default(cuid())
+  code            String           @unique
+  module          String
+  action          String
+  description     String?
+  roles           RolePermission[]
   userPermissions UserPermission[]
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 }
 
 model RolePermission {
@@ -1640,24 +1641,24 @@ model FollowUp {
 }
 
 model Sale {
-  id                     String                @id @default(cuid())
+  id                     String                   @id @default(cuid())
   branchId               String
-  branch                 Branch                @relation(fields: [branchId], references: [id])
+  branch                 Branch                   @relation(fields: [branchId], references: [id])
   customerId             String
-  customer               Customer              @relation(fields: [customerId], references: [id])
+  customer               Customer                 @relation(fields: [customerId], references: [id])
   sellerId               String
-  seller                 User                  @relation("SaleSeller", fields: [sellerId], references: [id])
+  seller                 User                     @relation("SaleSeller", fields: [sellerId], references: [id])
   pricingPolicyVersionId String?
-  pricingPolicyVersion   PricingPolicyVersion? @relation(fields: [pricingPolicyVersionId], references: [id])
-  receiptNumber          String                @unique
-  saleDate               DateTime              @default(now())
-  totalAmount            Decimal               @default(0) @db.Decimal(14, 2)
-  totalCost              Decimal               @default(0) @db.Decimal(14, 2)
-  profitAmount           Decimal               @default(0) @db.Decimal(14, 2)
-  paidAmount             Decimal               @default(0) @db.Decimal(14, 2)
-  debtAmount             Decimal               @default(0) @db.Decimal(14, 2)
-  paymentStatus          PaymentStatus         @default(DEBT)
-  status                 SaleStatus            @default(DRAFT)
+  pricingPolicyVersion   PricingPolicyVersion?    @relation(fields: [pricingPolicyVersionId], references: [id])
+  receiptNumber          String                   @unique
+  saleDate               DateTime                 @default(now())
+  totalAmount            Decimal                  @default(0) @db.Decimal(14, 2)
+  totalCost              Decimal                  @default(0) @db.Decimal(14, 2)
+  profitAmount           Decimal                  @default(0) @db.Decimal(14, 2)
+  paidAmount             Decimal                  @default(0) @db.Decimal(14, 2)
+  debtAmount             Decimal                  @default(0) @db.Decimal(14, 2)
+  paymentStatus          PaymentStatus            @default(DEBT)
+  status                 SaleStatus               @default(DRAFT)
   draftReceiptText       String?
   whatsappMessageText    String?
   sentToCustomerAt       DateTime?
@@ -1671,8 +1672,8 @@ model Sale {
   installmentApproval    SaleInstallmentApproval?
   receipt                Receipt?
   salesCommissions       SalesCommission[]
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
   deletedAt              DateTime?
 
   @@index([branchId])
@@ -1718,27 +1719,27 @@ model SaleItem {
 }
 
 model Payment {
-  id          String              @id @default(cuid())
-  branchId    String
-  branch      Branch              @relation(fields: [branchId], references: [id])
-  saleId      String
-  sale        Sale                @relation(fields: [saleId], references: [id])
-  customerId  String
-  customer    Customer            @relation(fields: [customerId], references: [id])
-  amount      Decimal             @db.Decimal(14, 2)
-  method      PaymentMethod
-  cashReceived Decimal?           @db.Decimal(14, 2)
-  changeAmount Decimal?           @db.Decimal(14, 2)
-  paidAt      DateTime            @default(now())
-  note        String?
-  status      PaymentRecordStatus @default(ACTIVE)
+  id               String              @id @default(cuid())
+  branchId         String
+  branch           Branch              @relation(fields: [branchId], references: [id])
+  saleId           String
+  sale             Sale                @relation(fields: [saleId], references: [id])
+  customerId       String
+  customer         Customer            @relation(fields: [customerId], references: [id])
+  amount           Decimal             @db.Decimal(14, 2)
+  method           PaymentMethod
+  cashReceived     Decimal?            @db.Decimal(14, 2)
+  changeAmount     Decimal?            @db.Decimal(14, 2)
+  paidAt           DateTime            @default(now())
+  note             String?
+  status           PaymentRecordStatus @default(ACTIVE)
   financeAccountId String?
-  financeAccount   FinanceAccount? @relation(fields: [financeAccountId], references: [id])
-  selfProcessed Boolean             @default(false)
-  voidedAt    DateTime?
-  createdById String
-  createdBy   User                @relation("PaymentCreator", fields: [createdById], references: [id])
-  createdAt   DateTime            @default(now())
+  financeAccount   FinanceAccount?     @relation(fields: [financeAccountId], references: [id])
+  selfProcessed    Boolean             @default(false)
+  voidedAt         DateTime?
+  createdById      String
+  createdBy        User                @relation("PaymentCreator", fields: [createdById], references: [id])
+  createdAt        DateTime            @default(now())
 
   @@index([branchId])
   @@index([saleId])
@@ -1773,31 +1774,31 @@ model InstallmentSchedule {
 }
 
 model SaleInstallmentApproval {
-  id              String                        @id @default(cuid())
-  saleId          String                        @unique
-  sale            Sale                          @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  branchId        String
-  branch          Branch                        @relation(fields: [branchId], references: [id])
-  requestNumber   String                        @unique
-  status          SaleInstallmentApprovalStatus @default(DRAFT)
-  requestVersion  Int                           @default(1)
-  termsSnapshot   Json
-  totalAmount     Decimal                       @db.Decimal(14, 2)
-  initialPayment  Decimal                       @default(0) @db.Decimal(14, 2)
-  financedAmount  Decimal                       @db.Decimal(14, 2)
-  installmentDays Int?
-  dueDate         DateTime?
-  paymentCount    Int                           @default(1)
-  notes           String?
-  submittedById   String?
-  submittedBy     User?                         @relation("SaleInstallmentSubmittedBy", fields: [submittedById], references: [id])
-  submittedAt     DateTime?
-  approvedById    String?
-  approvedBy      User?                         @relation("SaleInstallmentApprovedBy", fields: [approvedById], references: [id])
-  approvedAt      DateTime?
-  rejectedById    String?
-  rejectedBy      User?                         @relation("SaleInstallmentRejectedBy", fields: [rejectedById], references: [id])
-  rejectedAt      DateTime?
+  id                    String                        @id @default(cuid())
+  saleId                String                        @unique
+  sale                  Sale                          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  branchId              String
+  branch                Branch                        @relation(fields: [branchId], references: [id])
+  requestNumber         String                        @unique
+  status                SaleInstallmentApprovalStatus @default(DRAFT)
+  requestVersion        Int                           @default(1)
+  termsSnapshot         Json
+  totalAmount           Decimal                       @db.Decimal(14, 2)
+  initialPayment        Decimal                       @default(0) @db.Decimal(14, 2)
+  financedAmount        Decimal                       @db.Decimal(14, 2)
+  installmentDays       Int?
+  dueDate               DateTime?
+  paymentCount          Int                           @default(1)
+  notes                 String?
+  submittedById         String?
+  submittedBy           User?                         @relation("SaleInstallmentSubmittedBy", fields: [submittedById], references: [id])
+  submittedAt           DateTime?
+  approvedById          String?
+  approvedBy            User?                         @relation("SaleInstallmentApprovedBy", fields: [approvedById], references: [id])
+  approvedAt            DateTime?
+  rejectedById          String?
+  rejectedBy            User?                         @relation("SaleInstallmentRejectedBy", fields: [rejectedById], references: [id])
+  rejectedAt            DateTime?
   rejectionReason       String?
   installmentPaidAmount Decimal                       @default(0) @db.Decimal(14, 2)
   remainingDebt         Decimal?                      @db.Decimal(14, 2)
@@ -2954,75 +2955,75 @@ model ProcurementPaymentInfoVersion {
 }
 
 model ProcurementSupplierPayment {
-  id                      String                            @id @default(cuid())
-  procurementOrderId      String
-  procurementOrder        ProcurementOrder                  @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
-  supplierId              String
-  supplier                Supplier                          @relation(fields: [supplierId], references: [id])
-  paymentInfoVersionId    String?
-  paymentInfoVersion      ProcurementPaymentInfoVersion?    @relation(fields: [paymentInfoVersionId], references: [id])
-  sequenceNumber          Int                               @default(1)
-  paymentDate             DateTime
-  amountYuan              Decimal                           @db.Decimal(14, 2)
-  exchangeRate            Decimal                           @db.Decimal(14, 4)
-  calculatedAmountKgs     Decimal                           @default(0) @db.Decimal(14, 2)
-  approvedAmountKgs       Decimal                           @default(0) @db.Decimal(14, 2)
-  actualPaidKgs           Decimal?                          @db.Decimal(14, 2)
-  amountKgs               Decimal                           @db.Decimal(14, 2)
-  kgsAdjustmentReason     ProcurementKgsAdjustmentReason?
-  kgsAdjustmentComment    String?
-  kgsAdjustedById         String?
-  kgsAdjustedBy           User?                             @relation("ProcurementSupplierPaymentKgsAdjuster", fields: [kgsAdjustedById], references: [id])
-  kgsAdjustedAt           DateTime?
-  paymentMethod           ProcurementSupplierPaymentMethod
-  recipientName           String?
-  recipientCompany        String?
-  bankName                String?
-  beneficiaryName         String?
-  accountNumber           String?
-  swiftCode               String?
-  cardholderName          String?
-  cardNumberMasked        String?
-  paymentInstructions     String?
-  paymentDeadline         DateTime?
-  intendedFinanceAccountId String?
-  intendedFinanceAccount  FinanceAccount?                   @relation("ProcurementPaymentIntendedAccount", fields: [intendedFinanceAccountId], references: [id])
-  actualFinanceAccountId  String?
-  actualFinanceAccount    FinanceAccount?                   @relation("ProcurementPaymentActualAccount", fields: [actualFinanceAccountId], references: [id])
-  accountChangeReason     String?
-  receiptNumber           String?
-  transactionNumber       String?
-  notes                   String?
-  accountantComment       String?
-  cashierComment          String?
-  returnReason            String?
+  id                         String                           @id @default(cuid())
+  procurementOrderId         String
+  procurementOrder           ProcurementOrder                 @relation(fields: [procurementOrderId], references: [id], onDelete: Cascade)
+  supplierId                 String
+  supplier                   Supplier                         @relation(fields: [supplierId], references: [id])
+  paymentInfoVersionId       String?
+  paymentInfoVersion         ProcurementPaymentInfoVersion?   @relation(fields: [paymentInfoVersionId], references: [id])
+  sequenceNumber             Int                              @default(1)
+  paymentDate                DateTime
+  amountYuan                 Decimal                          @db.Decimal(14, 2)
+  exchangeRate               Decimal                          @db.Decimal(14, 4)
+  calculatedAmountKgs        Decimal                          @default(0) @db.Decimal(14, 2)
+  approvedAmountKgs          Decimal                          @default(0) @db.Decimal(14, 2)
+  actualPaidKgs              Decimal?                         @db.Decimal(14, 2)
+  amountKgs                  Decimal                          @db.Decimal(14, 2)
+  kgsAdjustmentReason        ProcurementKgsAdjustmentReason?
+  kgsAdjustmentComment       String?
+  kgsAdjustedById            String?
+  kgsAdjustedBy              User?                            @relation("ProcurementSupplierPaymentKgsAdjuster", fields: [kgsAdjustedById], references: [id])
+  kgsAdjustedAt              DateTime?
+  paymentMethod              ProcurementSupplierPaymentMethod
+  recipientName              String?
+  recipientCompany           String?
+  bankName                   String?
+  beneficiaryName            String?
+  accountNumber              String?
+  swiftCode                  String?
+  cardholderName             String?
+  cardNumberMasked           String?
+  paymentInstructions        String?
+  paymentDeadline            DateTime?
+  intendedFinanceAccountId   String?
+  intendedFinanceAccount     FinanceAccount?                  @relation("ProcurementPaymentIntendedAccount", fields: [intendedFinanceAccountId], references: [id])
+  actualFinanceAccountId     String?
+  actualFinanceAccount       FinanceAccount?                  @relation("ProcurementPaymentActualAccount", fields: [actualFinanceAccountId], references: [id])
+  accountChangeReason        String?
+  receiptNumber              String?
+  transactionNumber          String?
+  notes                      String?
+  accountantComment          String?
+  cashierComment             String?
+  returnReason               String?
   actualPaidDifferenceReason String?
-  status                  ProcurementSupplierPaymentStatus  @default(DRAFT)
-  version                 Int                               @default(1)
-  idempotencyKey          String?                           @unique
-  sentToCashierAt         DateTime?
-  paidAt                  DateTime?
-  returnedAt              DateTime?
-  returnedById            String?
-  returnedBy              User?                             @relation("ProcurementSupplierPaymentReturner", fields: [returnedById], references: [id])
-  accountantId            String?
-  accountant              User?                             @relation("ProcurementSupplierPaymentAccountant", fields: [accountantId], references: [id])
-  cashierId               String?
-  cashier                 User?                             @relation("ProcurementSupplierPaymentCashier", fields: [cashierId], references: [id])
-  ledgerEntryId           String?                           @unique
-  ledgerEntry             FinanceLedgerEntry?               @relation("ProcurementSupplierPaymentLedgerEntry", fields: [ledgerEntryId], references: [id])
-  reversalOfPaymentId     String?
-  reversalOfPayment       ProcurementSupplierPayment?       @relation("ProcurementPaymentReversal", fields: [reversalOfPaymentId], references: [id])
-  reversals               ProcurementSupplierPayment[]      @relation("ProcurementPaymentReversal")
-  voidedAt                DateTime?
-  voidedById              String?
-  voidedBy                User?                             @relation("ProcurementSupplierPaymentVoider", fields: [voidedById], references: [id])
-  voidReason              String?
-  createdById             String
-  createdBy               User                              @relation("ProcurementSupplierPaymentCreator", fields: [createdById], references: [id])
-  attachments             FileAttachment[]
-  createdAt               DateTime                          @default(now())
-  updatedAt               DateTime                          @updatedAt
+  status                     ProcurementSupplierPaymentStatus @default(DRAFT)
+  version                    Int                              @default(1)
+  idempotencyKey             String?                          @unique
+  sentToCashierAt            DateTime?
+  paidAt                     DateTime?
+  returnedAt                 DateTime?
+  returnedById               String?
+  returnedBy                 User?                            @relation("ProcurementSupplierPaymentReturner", fields: [returnedById], references: [id])
+  accountantId               String?
+  accountant                 User?                            @relation("ProcurementSupplierPaymentAccountant", fields: [accountantId], references: [id])
+  cashierId                  String?
+  cashier                    User?                            @relation("ProcurementSupplierPaymentCashier", fields: [cashierId], references: [id])
+  ledgerEntryId              String?                          @unique
+  ledgerEntry                FinanceLedgerEntry?              @relation("ProcurementSupplierPaymentLedgerEntry", fields: [ledgerEntryId], references: [id])
+  reversalOfPaymentId        String?
+  reversalOfPayment          ProcurementSupplierPayment?      @relation("ProcurementPaymentReversal", fields: [reversalOfPaymentId], references: [id])
+  reversals                  ProcurementSupplierPayment[]     @relation("ProcurementPaymentReversal")
+  voidedAt                   DateTime?
+  voidedById                 String?
+  voidedBy                   User?                            @relation("ProcurementSupplierPaymentVoider", fields: [voidedById], references: [id])
+  voidReason                 String?
+  createdById                String
+  createdBy                  User                             @relation("ProcurementSupplierPaymentCreator", fields: [createdById], references: [id])
+  attachments                FileAttachment[]
+  createdAt                  DateTime                         @default(now())
+  updatedAt                  DateTime                         @updatedAt
 
   @@unique([procurementOrderId, sequenceNumber])
   @@index([procurementOrderId])
@@ -3039,20 +3040,20 @@ model ProcurementSupplierPayment {
 }
 
 model ProcurementTransportExpense {
-  id                 String                @id @default(cuid())
-  expenseNumber      String                @unique
+  id                 String                 @id @default(cuid())
+  expenseNumber      String                 @unique
   procurementOrderId String?
-  procurementOrder   ProcurementOrder?     @relation(fields: [procurementOrderId], references: [id], onDelete: SetNull)
+  procurementOrder   ProcurementOrder?      @relation(fields: [procurementOrderId], references: [id], onDelete: SetNull)
   expenseType        TransportExpenseType
   supplierCarrier    String
   transportCompanyId String?
-  transportCompany   TransportCompany?     @relation(fields: [transportCompanyId], references: [id])
+  transportCompany   TransportCompany?      @relation(fields: [transportCompanyId], references: [id])
   invoiceNumber      String?
   invoiceDate        DateTime?
-  amount             Decimal               @db.Decimal(14, 2)
-  currency           String                @default("KGS")
-  exchangeRate       Decimal?              @db.Decimal(14, 4)
-  amountKgs          Decimal               @default(0) @db.Decimal(14, 2)
+  amount             Decimal                @db.Decimal(14, 2)
+  currency           String                 @default("KGS")
+  exchangeRate       Decimal?               @db.Decimal(14, 4)
+  amountKgs          Decimal                @default(0) @db.Decimal(14, 2)
   dueDate            DateTime?
   comment            String?
   status             TransportExpenseStatus @default(DRAFT)
@@ -3061,24 +3062,24 @@ model ProcurementTransportExpense {
   cashierComment     String?
   transactionNumber  String?
   financeAccountId   String?
-  financeAccount     FinanceAccount?       @relation("TransportExpenseFinanceAccount", fields: [financeAccountId], references: [id])
-  ledgerEntryId      String?               @unique
-  ledgerEntry        FinanceLedgerEntry?   @relation("TransportExpenseLedgerEntry", fields: [ledgerEntryId], references: [id])
+  financeAccount     FinanceAccount?        @relation("TransportExpenseFinanceAccount", fields: [financeAccountId], references: [id])
+  ledgerEntryId      String?                @unique
+  ledgerEntry        FinanceLedgerEntry?    @relation("TransportExpenseLedgerEntry", fields: [ledgerEntryId], references: [id])
   submittedAt        DateTime?
   approvedAt         DateTime?
   sentToCashierAt    DateTime?
   paidAt             DateTime?
   returnedAt         DateTime?
   createdById        String
-  createdBy          User                  @relation("TransportExpenseCreator", fields: [createdById], references: [id])
+  createdBy          User                   @relation("TransportExpenseCreator", fields: [createdById], references: [id])
   accountantId       String?
-  accountant         User?                 @relation("TransportExpenseAccountant", fields: [accountantId], references: [id])
+  accountant         User?                  @relation("TransportExpenseAccountant", fields: [accountantId], references: [id])
   cashierId          String?
-  cashier            User?                 @relation("TransportExpenseCashier", fields: [cashierId], references: [id])
+  cashier            User?                  @relation("TransportExpenseCashier", fields: [cashierId], references: [id])
   returnedById       String?
-  returnedBy         User?                 @relation("TransportExpenseReturnedBy", fields: [returnedById], references: [id])
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
+  returnedBy         User?                  @relation("TransportExpenseReturnedBy", fields: [returnedById], references: [id])
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   @@index([procurementOrderId])
   @@index([expenseType])
@@ -5064,50 +5065,50 @@ model FinanceAccountTypeDefinition {
 }
 
 model FinanceAccount {
-  id               String                       @id @default(cuid())
-  accountNumber    String                       @unique
-  name             String
-  scope            FinanceAccountScope
-  branchId         String?
-  branch           Branch?                      @relation(fields: [branchId], references: [id])
-  typeCode         String
-  typeDefinition   FinanceAccountTypeDefinition @relation(fields: [typeCode], references: [code])
-  currency         String                       @default("KGS")
-  status           FinanceAccountStatus         @default(ACTIVE)
-  openingBalance   Decimal                      @default(0) @db.Decimal(14, 2)
-  currentBalance   Decimal                      @default(0) @db.Decimal(14, 2)
-  availableBalance Decimal                      @default(0) @db.Decimal(14, 2)
-  pendingBalance   Decimal                      @default(0) @db.Decimal(14, 2)
-  bankName         String?
-  bankAccountNo    String?
-  iban             String?
-  swiftBic         String?
-  qrProvider       String?
-  qrMerchantId     String?
-  posTerminalId    String?
-  posProvider      String?
-  responsibleEmployeeId String?
-  responsibleEmployee   User?   @relation("FinanceAccountResponsible", fields: [responsibleEmployeeId], references: [id])
-  notes            String?
-  createdById      String?
-  createdBy        User?                        @relation("FinanceAccountCreator", fields: [createdById], references: [id])
-  updatedById      String?
-  updatedBy        User?                        @relation("FinanceAccountUpdater", fields: [updatedById], references: [id])
-  assignments      FinanceAccountAssignment[]
-  ledgerEntries    FinanceLedgerEntry[]
-  transfersOut     FinanceTransfer[]            @relation("FinanceTransferSource")
-  transfersIn      FinanceTransfer[]            @relation("FinanceTransferDestination")
-  cashierShifts      CashierShift[]
-  expenses           FinanceExpense[]
-  payments           Payment[]
-  reconciliations    FinanceReconciliation[]
-  investments        FinanceInvestment[]
-  intendedProcurementPayments ProcurementSupplierPayment[] @relation("ProcurementPaymentIntendedAccount")
-  actualProcurementPayments   ProcurementSupplierPayment[] @relation("ProcurementPaymentActualAccount")
+  id                          String                        @id @default(cuid())
+  accountNumber               String                        @unique
+  name                        String
+  scope                       FinanceAccountScope
+  branchId                    String?
+  branch                      Branch?                       @relation(fields: [branchId], references: [id])
+  typeCode                    String
+  typeDefinition              FinanceAccountTypeDefinition  @relation(fields: [typeCode], references: [code])
+  currency                    String                        @default("KGS")
+  status                      FinanceAccountStatus          @default(ACTIVE)
+  openingBalance              Decimal                       @default(0) @db.Decimal(14, 2)
+  currentBalance              Decimal                       @default(0) @db.Decimal(14, 2)
+  availableBalance            Decimal                       @default(0) @db.Decimal(14, 2)
+  pendingBalance              Decimal                       @default(0) @db.Decimal(14, 2)
+  bankName                    String?
+  bankAccountNo               String?
+  iban                        String?
+  swiftBic                    String?
+  qrProvider                  String?
+  qrMerchantId                String?
+  posTerminalId               String?
+  posProvider                 String?
+  responsibleEmployeeId       String?
+  responsibleEmployee         User?                         @relation("FinanceAccountResponsible", fields: [responsibleEmployeeId], references: [id])
+  notes                       String?
+  createdById                 String?
+  createdBy                   User?                         @relation("FinanceAccountCreator", fields: [createdById], references: [id])
+  updatedById                 String?
+  updatedBy                   User?                         @relation("FinanceAccountUpdater", fields: [updatedById], references: [id])
+  assignments                 FinanceAccountAssignment[]
+  ledgerEntries               FinanceLedgerEntry[]
+  transfersOut                FinanceTransfer[]             @relation("FinanceTransferSource")
+  transfersIn                 FinanceTransfer[]             @relation("FinanceTransferDestination")
+  cashierShifts               CashierShift[]
+  expenses                    FinanceExpense[]
+  payments                    Payment[]
+  reconciliations             FinanceReconciliation[]
+  investments                 FinanceInvestment[]
+  intendedProcurementPayments ProcurementSupplierPayment[]  @relation("ProcurementPaymentIntendedAccount")
+  actualProcurementPayments   ProcurementSupplierPayment[]  @relation("ProcurementPaymentActualAccount")
   transportExpenses           ProcurementTransportExpense[] @relation("TransportExpenseFinanceAccount")
-  createdAt        DateTime                     @default(now())
-  updatedAt        DateTime                     @updatedAt
-  deletedAt        DateTime?
+  createdAt                   DateTime                      @default(now())
+  updatedAt                   DateTime                      @updatedAt
+  deletedAt                   DateTime?
 
   @@index([branchId])
   @@index([scope])
@@ -5117,22 +5118,22 @@ model FinanceAccount {
 }
 
 model FinanceAccountAssignment {
-  id          String         @id @default(cuid())
-  accountId   String
-  account     FinanceAccount @relation(fields: [accountId], references: [id])
-  userId      String
-  user        User           @relation("FinanceAccountAssignmentUser", fields: [userId], references: [id])
-  branchId    String?
-  branch      Branch?        @relation(fields: [branchId], references: [id])
-  assignedById String?
-  assignedBy  User?          @relation("FinanceAccountAssignmentCreator", fields: [assignedById], references: [id])
-  isActive    Boolean        @default(true)
-  isPrimary   Boolean        @default(false)
-  allowedOperations String[] @default([])
-  startDate   DateTime?
-  endDate     DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id                String         @id @default(cuid())
+  accountId         String
+  account           FinanceAccount @relation(fields: [accountId], references: [id])
+  userId            String
+  user              User           @relation("FinanceAccountAssignmentUser", fields: [userId], references: [id])
+  branchId          String?
+  branch            Branch?        @relation(fields: [branchId], references: [id])
+  assignedById      String?
+  assignedBy        User?          @relation("FinanceAccountAssignmentCreator", fields: [assignedById], references: [id])
+  isActive          Boolean        @default(true)
+  isPrimary         Boolean        @default(false)
+  allowedOperations String[]       @default([])
+  startDate         DateTime?
+  endDate           DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   @@unique([accountId, userId])
   @@index([accountId])
@@ -5142,29 +5143,29 @@ model FinanceAccountAssignment {
 }
 
 model FinanceLedgerEntry {
-  id                String                 @id @default(cuid())
-  entryNumber       String                 @unique
-  accountId         String
-  account           FinanceAccount         @relation(fields: [accountId], references: [id])
-  branchId          String?
-  branch            Branch?                @relation(fields: [branchId], references: [id])
-  entryType         FinanceLedgerEntryType
-  amount            Decimal                @db.Decimal(14, 2)
-  signedAmount      Decimal                @db.Decimal(14, 2)
-  beforeBalance     Decimal                @db.Decimal(14, 2)
-  afterBalance      Decimal                @db.Decimal(14, 2)
-  currency          String                 @default("KGS")
-  transferId        String?
-  transfer          FinanceTransfer?       @relation(fields: [transferId], references: [id])
-  referenceType     String?
-  referenceId       String?
-  notes             String?
-  createdById       String?
-  createdBy         User?                  @relation("FinanceLedgerEntryCreator", fields: [createdById], references: [id])
-  createdAt         DateTime               @default(now())
-  financeInvestment FinanceInvestment?
-  procurementSupplierPayment ProcurementSupplierPayment? @relation("ProcurementSupplierPaymentLedgerEntry")
-  transportExpense  ProcurementTransportExpense? @relation("TransportExpenseLedgerEntry")
+  id                         String                       @id @default(cuid())
+  entryNumber                String                       @unique
+  accountId                  String
+  account                    FinanceAccount               @relation(fields: [accountId], references: [id])
+  branchId                   String?
+  branch                     Branch?                      @relation(fields: [branchId], references: [id])
+  entryType                  FinanceLedgerEntryType
+  amount                     Decimal                      @db.Decimal(14, 2)
+  signedAmount               Decimal                      @db.Decimal(14, 2)
+  beforeBalance              Decimal                      @db.Decimal(14, 2)
+  afterBalance               Decimal                      @db.Decimal(14, 2)
+  currency                   String                       @default("KGS")
+  transferId                 String?
+  transfer                   FinanceTransfer?             @relation(fields: [transferId], references: [id])
+  referenceType              String?
+  referenceId                String?
+  notes                      String?
+  createdById                String?
+  createdBy                  User?                        @relation("FinanceLedgerEntryCreator", fields: [createdById], references: [id])
+  createdAt                  DateTime                     @default(now())
+  financeInvestment          FinanceInvestment?
+  procurementSupplierPayment ProcurementSupplierPayment?  @relation("ProcurementSupplierPaymentLedgerEntry")
+  transportExpense           ProcurementTransportExpense? @relation("TransportExpenseLedgerEntry")
 
   @@index([accountId])
   @@index([branchId])
@@ -5175,45 +5176,45 @@ model FinanceLedgerEntry {
 }
 
 model FinanceTransfer {
-  id                    String                @id @default(cuid())
-  transferNumber        String                @unique
-  sourceAccountId       String
-  sourceAccount         FinanceAccount        @relation("FinanceTransferSource", fields: [sourceAccountId], references: [id])
-  destinationAccountId  String
-  destinationAccount    FinanceAccount        @relation("FinanceTransferDestination", fields: [destinationAccountId], references: [id])
-  branchId              String?
-  branch                Branch?               @relation(fields: [branchId], references: [id])
-  amount                Decimal               @db.Decimal(14, 2)
-  currency              String                @default("KGS")
-  transferDate          DateTime              @default(now())
-  status                FinanceTransferStatus @default(DRAFT)
-  requiresApproval      Boolean               @default(true)
-  reason                String?
-  notes                 String?
-  transactionNumber     String?
-  version               Int                   @default(1)
-  idempotencyKey        String?               @unique
-  sentToCashierAt       DateTime?
-  completedAt           DateTime?
-  returnedAt            DateTime?
-  returnReason          String?
-  createdById           String?
-  createdBy             User?                 @relation("FinanceTransferCreator", fields: [createdById], references: [id])
-  accountantId          String?
-  accountant            User?                 @relation("FinanceTransferAccountant", fields: [accountantId], references: [id])
-  cashierId             String?
-  cashier               User?                 @relation("FinanceTransferCashier", fields: [cashierId], references: [id])
-  returnedById          String?
-  returnedBy            User?                 @relation("FinanceTransferReturnedBy", fields: [returnedById], references: [id])
-  approvedById          String?
-  approvedBy            User?                 @relation("FinanceTransferApprover", fields: [approvedById], references: [id])
-  approvedAt            DateTime?
-  reversalOfTransferId  String?
-  reversalOfTransfer    FinanceTransfer?      @relation("FinanceTransferReversal", fields: [reversalOfTransferId], references: [id])
-  reversals             FinanceTransfer[]     @relation("FinanceTransferReversal")
-  ledgerEntries         FinanceLedgerEntry[]
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
+  id                   String                @id @default(cuid())
+  transferNumber       String                @unique
+  sourceAccountId      String
+  sourceAccount        FinanceAccount        @relation("FinanceTransferSource", fields: [sourceAccountId], references: [id])
+  destinationAccountId String
+  destinationAccount   FinanceAccount        @relation("FinanceTransferDestination", fields: [destinationAccountId], references: [id])
+  branchId             String?
+  branch               Branch?               @relation(fields: [branchId], references: [id])
+  amount               Decimal               @db.Decimal(14, 2)
+  currency             String                @default("KGS")
+  transferDate         DateTime              @default(now())
+  status               FinanceTransferStatus @default(DRAFT)
+  requiresApproval     Boolean               @default(true)
+  reason               String?
+  notes                String?
+  transactionNumber    String?
+  version              Int                   @default(1)
+  idempotencyKey       String?               @unique
+  sentToCashierAt      DateTime?
+  completedAt          DateTime?
+  returnedAt           DateTime?
+  returnReason         String?
+  createdById          String?
+  createdBy            User?                 @relation("FinanceTransferCreator", fields: [createdById], references: [id])
+  accountantId         String?
+  accountant           User?                 @relation("FinanceTransferAccountant", fields: [accountantId], references: [id])
+  cashierId            String?
+  cashier              User?                 @relation("FinanceTransferCashier", fields: [cashierId], references: [id])
+  returnedById         String?
+  returnedBy           User?                 @relation("FinanceTransferReturnedBy", fields: [returnedById], references: [id])
+  approvedById         String?
+  approvedBy           User?                 @relation("FinanceTransferApprover", fields: [approvedById], references: [id])
+  approvedAt           DateTime?
+  reversalOfTransferId String?
+  reversalOfTransfer   FinanceTransfer?      @relation("FinanceTransferReversal", fields: [reversalOfTransferId], references: [id])
+  reversals            FinanceTransfer[]     @relation("FinanceTransferReversal")
+  ledgerEntries        FinanceLedgerEntry[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 
   @@index([sourceAccountId])
   @@index([destinationAccountId])
@@ -5299,24 +5300,24 @@ model FinanceExpense {
 }
 
 model FinanceReconciliation {
-  id              String                      @id @default(cuid())
-  reconciliationNumber String               @unique
-  accountId       String
-  account         FinanceAccount              @relation(fields: [accountId], references: [id])
-  branchId        String?
-  branch          Branch?                     @relation(fields: [branchId], references: [id])
-  statementDate   DateTime
-  systemBalance   Decimal                     @db.Decimal(14, 2)
-  actualBalance   Decimal                     @db.Decimal(14, 2)
-  difference      Decimal                     @db.Decimal(14, 2)
-  status          FinanceReconciliationStatus @default(PENDING)
-  notes           String?
-  attachmentUrl   String?
-  createdById     String?
-  createdBy       User?                       @relation("FinanceReconciliationCreator", fields: [createdById], references: [id])
-  completedAt     DateTime?
-  createdAt       DateTime                    @default(now())
-  updatedAt       DateTime                    @updatedAt
+  id                   String                      @id @default(cuid())
+  reconciliationNumber String                      @unique
+  accountId            String
+  account              FinanceAccount              @relation(fields: [accountId], references: [id])
+  branchId             String?
+  branch               Branch?                     @relation(fields: [branchId], references: [id])
+  statementDate        DateTime
+  systemBalance        Decimal                     @db.Decimal(14, 2)
+  actualBalance        Decimal                     @db.Decimal(14, 2)
+  difference           Decimal                     @db.Decimal(14, 2)
+  status               FinanceReconciliationStatus @default(PENDING)
+  notes                String?
+  attachmentUrl        String?
+  createdById          String?
+  createdBy            User?                       @relation("FinanceReconciliationCreator", fields: [createdById], references: [id])
+  completedAt          DateTime?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
 
   @@index([accountId])
   @@index([branchId])
@@ -5336,17 +5337,22 @@ model FinanceInvestment {
   branchId          String?
   branch            Branch?               @relation(fields: [branchId], references: [id])
   investorOwnerName String
-  providedBy        String
   notes             String?
   ledgerEntryId     String                @unique
   ledgerEntry       FinanceLedgerEntry    @relation(fields: [ledgerEntryId], references: [id])
   createdById       String?
   createdBy         User?                 @relation("FinanceInvestmentCreator", fields: [createdById], references: [id])
+  deletedAt         DateTime?
+  deletedById       String?
+  deletedBy         User?                 @relation("FinanceInvestmentDeletedBy", fields: [deletedById], references: [id])
+  deletionReason    String?
   createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
 
   @@index([accountId])
   @@index([branchId])
   @@index([investmentType])
   @@index([investmentDate])
   @@index([createdAt])
+  @@index([deletedAt])
 }

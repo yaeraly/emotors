@@ -1279,12 +1279,18 @@ export type FinanceInvestment = {
   investmentType: 'OWNER_INVESTMENT' | 'INVESTOR_INVESTMENT';
   amount: number;
   currency: string;
+  accountId: string;
   investorOwnerName: string;
-  providedBy: string;
   notes?: string | null;
   createdAt: string;
+  updatedAt?: string;
+  deletedAt?: string | null;
+  deletedById?: string | null;
+  deletionReason?: string | null;
+  deleted?: boolean;
   account?: { id: string; name: string; accountNumber: string; branchId?: string | null };
   createdBy?: { id: string; fullName: string; email: string } | null;
+  deletedBy?: { id: string; fullName: string; email: string } | null;
   ledgerEntry?: { id: string; entryNumber: string; entryType: string; beforeBalance?: number; afterBalance?: number };
 };
 
