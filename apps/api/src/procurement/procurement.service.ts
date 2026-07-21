@@ -337,57 +337,88 @@ export class ProcurementService {
 
   createTransportCompany(user: AuthUser, dto: any) {
     this.assertCanManageTransportCompany(user);
-    this.validateTransportCompanyPayload(dto);
+    const payload = { ...dto };
+    if (!payload.companyCode?.trim() && payload.name?.trim()) {
+      payload.companyCode = this.generateTransportCompanyCode(payload.name);
+    }
+    this.validateTransportCompanyPayload(payload);
     return this.prisma.$transaction(async (tx) => {
-      const duplicate = await tx.transportCompany.findFirst({
-        where: { companyCode: dto.companyCode.trim(), deletedAt: null },
+      let companyCode = payload.companyCode.trim();
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const duplicate = await tx.transportCompany.findFirst({
+          where: { companyCode, deletedAt: null },
+        });
+        if (!duplicate) break;
+        companyCode = this.generateTransportCompanyCode(payload.name, attempt + 1);
+      }
+      const stillDuplicate = await tx.transportCompany.findFirst({
+        where: { companyCode, deletedAt: null },
       });
-      if (duplicate) throw new BadRequestException('Transport company code already exists');
+      if (stillDuplicate) throw new BadRequestException('Transport company code already exists');
 
       const company = await tx.transportCompany.create({
         data: {
-          name: dto.name.trim(),
-          companyCode: dto.companyCode.trim(),
-          country: dto.country?.trim() || null,
-          city: dto.city?.trim() || null,
-          contactPerson: dto.contactPerson?.trim() || null,
-          phone: dto.phone?.trim() || null,
-          whatsapp: dto.whatsapp?.trim() || null,
-          wechat: dto.wechat?.trim() || null,
-          email: dto.email?.trim() || null,
-          address: dto.address?.trim() || null,
-          transportType: dto.transportType ?? 'UNIVERSAL',
-          defaultCurrency: dto.defaultCurrency?.trim() || 'CNY',
-          notes: dto.notes?.trim() || null,
-          status: dto.status ?? TransportCompanyStatus.ACTIVE,
+          name: payload.name.trim(),
+          companyCode,
+          country: payload.country?.trim() || null,
+          city: payload.city?.trim() || null,
+          contactPerson: payload.contactPerson?.trim() || null,
+          phone: payload.phone?.trim() || null,
+          whatsapp: payload.whatsapp?.trim() || null,
+          wechat: payload.wechat?.trim() || null,
+          email: payload.email?.trim() || null,
+          address: payload.address?.trim() || null,
+          bankName: payload.bankName?.trim() || null,
+          bankAccount: payload.bankAccount?.trim() || null,
+          accountHolder: payload.accountHolder?.trim() || null,
+          transportType: payload.transportType ?? 'UNIVERSAL',
+          defaultCurrency: payload.defaultCurrency?.trim() || 'CNY',
+          notes: payload.notes?.trim() || null,
+          status: payload.status ?? TransportCompanyStatus.ACTIVE,
           createdById: user.id,
         },
         include: { createdBy: { select: { id: true, fullName: true, role: true } } },
       });
 
       await this.auditTransportCompany(tx, user, 'TRANSPORT_COMPANY_CREATED', company.id, null, this.pickTransportCompanyAuditFields(company));
-      return company;
+      return this.enrichTransportCompany(company, tx);
     });
   }
 
-  transportCompanies(user: AuthUser, selectableOnly = false) {
+  transportCompanies(user: AuthUser, selectableOnly = false, q?: string) {
     this.assertCanViewTransportCompany(user);
-    return this.prisma.transportCompany.findMany({
-      where: {
-        deletedAt: null,
-        ...(selectableOnly ? { status: TransportCompanyStatus.ACTIVE } : {}),
-      },
-      include: { createdBy: { select: { id: true, fullName: true, role: true } } },
-      orderBy: { createdAt: 'desc' },
-    });
+    const query = q?.trim();
+    return this.prisma.transportCompany
+      .findMany({
+        where: {
+          deletedAt: null,
+          ...(selectableOnly ? { status: TransportCompanyStatus.ACTIVE } : {}),
+          ...(query
+            ? {
+                OR: [
+                  { name: { contains: query, mode: 'insensitive' } },
+                  { contactPerson: { contains: query, mode: 'insensitive' } },
+                  { phone: { contains: query, mode: 'insensitive' } },
+                  { companyCode: { contains: query, mode: 'insensitive' } },
+                ],
+              }
+            : {}),
+        },
+        include: { createdBy: { select: { id: true, fullName: true, role: true } } },
+        orderBy: [{ name: 'asc' }, { createdAt: 'desc' }],
+        take: 100,
+      })
+      .then((rows) => Promise.all(rows.map((row) => this.enrichTransportCompany(row))));
   }
 
   transportCompany(user: AuthUser, id: string) {
     this.assertCanViewTransportCompany(user);
-    return this.prisma.transportCompany.findFirst({
-      where: { id, deletedAt: null },
-      include: { createdBy: { select: { id: true, fullName: true, role: true } } },
-    });
+    return this.prisma.transportCompany
+      .findFirst({
+        where: { id, deletedAt: null },
+        include: { createdBy: { select: { id: true, fullName: true, role: true } } },
+      })
+      .then((company) => (company ? this.enrichTransportCompany(company) : null));
   }
 
   updateTransportCompany(user: AuthUser, id: string, dto: any) {
@@ -418,6 +449,9 @@ export class ProcurementService {
           ...(dto.wechat !== undefined ? { wechat: dto.wechat?.trim() || null } : {}),
           ...(dto.email !== undefined ? { email: dto.email?.trim() || null } : {}),
           ...(dto.address !== undefined ? { address: dto.address?.trim() || null } : {}),
+          ...(dto.bankName !== undefined ? { bankName: dto.bankName?.trim() || null } : {}),
+          ...(dto.bankAccount !== undefined ? { bankAccount: dto.bankAccount?.trim() || null } : {}),
+          ...(dto.accountHolder !== undefined ? { accountHolder: dto.accountHolder?.trim() || null } : {}),
           ...(dto.transportType !== undefined ? { transportType: dto.transportType } : {}),
           ...(dto.defaultCurrency !== undefined ? { defaultCurrency: dto.defaultCurrency.trim() } : {}),
           ...(dto.notes !== undefined ? { notes: dto.notes?.trim() || null } : {}),
@@ -445,6 +479,68 @@ export class ProcurementService {
         this.pickTransportCompanyAuditFields(updated),
       );
       return updated;
+    });
+  }
+
+  async uploadTransportCompanyQr(user: AuthUser, id: string, request: FastifyRequest) {
+    this.assertCanManageTransportCompany(user);
+    const company = await this.prisma.transportCompany.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!company) throw new NotFoundException('Transport company not found');
+
+    let file: MultipartFile | undefined;
+    try {
+      file = await request.file();
+    } catch {
+      throw new BadRequestException('File is too large');
+    }
+    if (!file) throw new BadRequestException('File is required');
+
+    const allowedMimeTypes = new Map<string, string>([
+      ['application/pdf', '.pdf'],
+      ['image/jpeg', '.jpg'],
+      ['image/png', '.png'],
+      ['image/webp', '.webp'],
+    ]);
+    const extensionFromMime = allowedMimeTypes.get(file.mimetype);
+    const originalExtension = extname(file.filename).toLowerCase();
+    if (
+      !extensionFromMime ||
+      !['.pdf', '.jpg', '.jpeg', '.png', '.webp'].includes(originalExtension)
+    ) {
+      throw new BadRequestException('Invalid file format');
+    }
+    const buffer = await file.toBuffer();
+    if (buffer.length > 5 * 1024 * 1024) {
+      throw new BadRequestException('File is too large');
+    }
+
+    const uploadDirectory = join(process.cwd(), 'uploads', 'procurement');
+    await mkdir(uploadDirectory, { recursive: true });
+    const extension = originalExtension === '.jpeg' ? '.jpg' : extensionFromMime;
+    const stored = `${randomUUID()}${extension}`;
+    await writeFile(join(uploadDirectory, stored), buffer);
+    const fileUrl = `/uploads/procurement/${stored}`;
+
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.fileAttachment.create({
+        data: {
+          entityType: FileAttachmentEntityType.PAYMENT_QR,
+          entityId: id,
+          transportCompanyId: id,
+          fileName: file.filename,
+          fileUrl,
+          mimeType: file.mimetype,
+          size: buffer.length,
+          uploadedById: user.id,
+        },
+      });
+      await this.auditTransportCompany(tx, user, 'TRANSPORT_COMPANY_QR_UPLOADED', id, null, {
+        attachmentId: created.id,
+        fileName: created.fileName,
+      });
+      return created;
     });
   }
 
@@ -2734,6 +2830,37 @@ export class ProcurementService {
     }
   }
 
+  private generateTransportCompanyCode(name: string, salt = 0) {
+    const base = String(name || 'TC')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 18);
+    const suffix = `${Date.now().toString(36)}${salt}`.slice(-6).toUpperCase();
+    return `${base || 'TC'}-${suffix}`.slice(0, 32);
+  }
+
+  private async enrichTransportCompany(company: any, tx?: any) {
+    const db = tx ?? this.prisma;
+    const qrAttachments = await db.fileAttachment.findMany({
+      where: {
+        deletedAt: null,
+        OR: [
+          { transportCompanyId: company.id, entityType: FileAttachmentEntityType.PAYMENT_QR },
+          { entityId: company.id, entityType: FileAttachmentEntityType.PAYMENT_QR },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    return {
+      ...company,
+      isActive: company.status === TransportCompanyStatus.ACTIVE,
+      qrAttachments,
+    };
+  }
+
   private pickTransportCompanyAuditFields(company: any) {
     return {
       id: company.id,
@@ -2747,6 +2874,9 @@ export class ProcurementService {
       wechat: company.wechat,
       email: company.email,
       address: company.address,
+      bankName: company.bankName,
+      bankAccount: company.bankAccount,
+      accountHolder: company.accountHolder,
       transportType: company.transportType,
       defaultCurrency: company.defaultCurrency,
       notes: company.notes,

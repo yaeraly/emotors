@@ -22,9 +22,10 @@ export class CreateTransportExpenseDto {
   @IsString()
   requestType?: string;
 
+  /** Legacy free-text carrier. Prefer transportCompanyId for section payment requests. */
+  @IsOptional()
   @IsString()
-  @MinLength(1)
-  supplierCarrier!: string;
+  supplierCarrier?: string;
 
   @IsOptional()
   @IsString()
@@ -108,6 +109,36 @@ export class CreateTransportExpenseDto {
   @IsNumber()
   @Min(0)
   sectionTotalAmount?: number;
+
+  /** Cargo payment calculation inputs (required for INTERNATIONAL_FREIGHT / CARGO_PAYMENT). */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.001)
+  totalWeightKg?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  cargoRateUsdPerKg?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  usdExchangeRate?: number;
+
+  /** Client-calculated totals — validated against server; never trusted alone. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  calculatedAmountUsd?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  calculatedAmountKgs?: number;
 }
 
 export class UpdateTransportExpenseDto {
@@ -232,6 +263,13 @@ export class ConfirmTransportExpenseDto {
   @IsOptional()
   @IsDateString()
   paidAt?: string;
+
+  /** Optional partial payment amount in KGS. Defaults to remaining unpaid amount. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  paidAmountKgs?: number;
 }
 
 export class ReturnTransportExpenseDto {

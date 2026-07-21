@@ -108,8 +108,12 @@ export class ProcurementController {
 
   @Get('transport-companies')
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
-  transportCompanies(@CurrentUser() user: AuthUser, @Query('selectable') selectable?: string) {
-    return this.service.transportCompanies(user, selectable === 'true');
+  transportCompanies(
+    @CurrentUser() user: AuthUser,
+    @Query('selectable') selectable?: string,
+    @Query('q') q?: string,
+  ) {
+    return this.service.transportCompanies(user, selectable === 'true', q);
   }
 
   @Get('transport-companies/:id')
@@ -128,6 +132,16 @@ export class ProcurementController {
   @RequirePermissions('procurement.manage')
   archiveTransportCompany(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: any) {
     return this.service.archiveTransportCompany(user, id, dto?.reason);
+  }
+
+  @Post('transport-companies/:id/attachments/qr')
+  @RequirePermissions('procurement.manage')
+  uploadTransportCompanyQr(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.service.uploadTransportCompanyQr(user, id, request);
   }
 
   @Post('orders')
@@ -381,6 +395,16 @@ export class ProcurementController {
     return this.transportExpenseService.removeQr(user, id, attachmentId);
   }
 
+  @Post('transport-expenses/:id/attachments/qr-from-company')
+  @RequirePermissions('procurement.manage')
+  attachTransportExpenseQrFromCompany(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: { transportCompanyId?: string },
+  ) {
+    return this.transportExpenseService.attachCompanyQr(user, id, dto?.transportCompanyId || '');
+  }
+
   @Post('transport-expenses/:id/attachments/receipt')
   @RequirePermissions('payments.manage', 'finance.view')
   uploadTransportExpenseReceipt(
@@ -393,6 +417,21 @@ export class ProcurementController {
       id,
       request,
       FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT,
+    );
+  }
+
+  @Post('transport-expenses/:id/attachments/cargo-receipt')
+  @RequirePermissions('procurement.manage')
+  uploadTransportExpenseCargoReceipt(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.transportExpenseService.uploadAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.CARGO_RECEIPT,
     );
   }
 

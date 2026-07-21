@@ -53,7 +53,8 @@ assertEqual(sectionBlocks.kyrgyzstan.paymentRequestOnly, true, '14. kyrgyzstan k
 assertEqual(sectionBlocks.otherExpenses.paymentRequestOnly, true, '15. other expenses keep only payment request');
 
 const sharedRequestFields = [
-  'recipient',
+  'transportCompany',
+  'createTransportCompany',
   'amount',
   'currency',
   'paymentMethod',
@@ -63,6 +64,8 @@ const sharedRequestFields = [
 ];
 assertEqual(sharedRequestFields.includes('saveButton'), false, 'no separate save on section request');
 assertEqual(sharedRequestFields.includes('sendButton'), true, 'send button present');
+assertEqual(sharedRequestFields.includes('transportCompany'), true, 'transport company selector present');
+assertEqual(sharedRequestFields.includes('recipient'), false, 'free-text recipient removed from shared contract');
 
 const duplicateSubmissionGuarded = true;
 assertEqual(duplicateSubmissionGuarded, true, '26. duplicate submission prevented');

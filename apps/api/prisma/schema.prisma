@@ -560,6 +560,7 @@ enum TransportExpenseStatus {
   WAITING_ACCOUNTANT
   RETURNED
   PENDING_CASHIER
+  PARTIALLY_PAID
   PAID
   CANCELLED
 }
@@ -2702,6 +2703,9 @@ model TransportCompany {
   wechat                         String?
   email                          String?
   address                        String?
+  bankName                       String?
+  bankAccount                    String?
+  accountHolder                  String?
   transportType                  TransportType                 @default(UNIVERSAL)
   defaultCurrency                String                        @default("CNY")
   notes                          String?
@@ -2720,6 +2724,7 @@ model TransportCompany {
   @@index([status])
   @@index([transportType])
   @@index([createdById])
+  @@index([name])
 }
 
 model Supplier {
@@ -3054,58 +3059,65 @@ model ProcurementSupplierPayment {
 }
 
 model ProcurementTransportExpense {
-  id                 String                        @id @default(cuid())
-  expenseNumber      String                        @unique
-  procurementOrderId String?
-  procurementOrder   ProcurementOrder?             @relation(fields: [procurementOrderId], references: [id], onDelete: SetNull)
-  expenseType        TransportExpenseType
-  requestType        String?
-  supplierCarrier    String
-  transportCompanyId String?
-  transportCompany   TransportCompany?             @relation(fields: [transportCompanyId], references: [id])
-  expenseName        String?
-  expenseCategory    String?
-  recipientName      String?
-  route              String?
-  vehicleInfo        String?
-  shipmentReference  String?
-  paymentMethod      ProcurementPaymentInfoMethod  @default(QR_CODE)
-  bankName           String?
-  accountHolder      String?
-  accountNumber      String?
-  swiftCode          String?
-  invoiceNumber      String?
-  invoiceDate        DateTime?
-  amount             Decimal                       @db.Decimal(14, 2)
-  currency           String                        @default("KGS")
-  exchangeRate       Decimal?                      @db.Decimal(14, 4)
-  amountKgs          Decimal                       @default(0) @db.Decimal(14, 2)
-  dueDate            DateTime?
-  comment            String?
-  status             TransportExpenseStatus        @default(DRAFT)
-  returnReason       String?
-  accountantComment  String?
-  cashierComment     String?
-  transactionNumber  String?
-  financeAccountId   String?
-  financeAccount     FinanceAccount?               @relation("TransportExpenseFinanceAccount", fields: [financeAccountId], references: [id])
-  ledgerEntryId      String?                       @unique
-  ledgerEntry        FinanceLedgerEntry?           @relation("TransportExpenseLedgerEntry", fields: [ledgerEntryId], references: [id])
-  submittedAt        DateTime?
-  approvedAt         DateTime?
-  sentToCashierAt    DateTime?
-  paidAt             DateTime?
-  returnedAt         DateTime?
-  createdById        String
-  createdBy          User                          @relation("TransportExpenseCreator", fields: [createdById], references: [id])
-  accountantId       String?
-  accountant         User?                         @relation("TransportExpenseAccountant", fields: [accountantId], references: [id])
-  cashierId          String?
-  cashier            User?                         @relation("TransportExpenseCashier", fields: [cashierId], references: [id])
-  returnedById       String?
-  returnedBy         User?                         @relation("TransportExpenseReturnedBy", fields: [returnedById], references: [id])
-  createdAt          DateTime                      @default(now())
-  updatedAt          DateTime                      @updatedAt
+  id                        String                        @id @default(cuid())
+  expenseNumber             String                        @unique
+  procurementOrderId        String?
+  procurementOrder          ProcurementOrder?             @relation(fields: [procurementOrderId], references: [id], onDelete: SetNull)
+  expenseType               TransportExpenseType
+  requestType               String?
+  supplierCarrier           String
+  transportCompanyId        String?
+  transportCompany          TransportCompany?             @relation(fields: [transportCompanyId], references: [id])
+  expenseName               String?
+  expenseCategory           String?
+  recipientName             String?
+  route                     String?
+  vehicleInfo               String?
+  shipmentReference         String?
+  paymentMethod             ProcurementPaymentInfoMethod  @default(QR_CODE)
+  bankName                  String?
+  accountHolder             String?
+  accountNumber             String?
+  swiftCode                 String?
+  invoiceNumber             String?
+  invoiceDate               DateTime?
+  amount                    Decimal                       @db.Decimal(14, 2)
+  currency                  String                        @default("KGS")
+  exchangeRate              Decimal?                      @db.Decimal(14, 4)
+  amountKgs                 Decimal                       @default(0) @db.Decimal(14, 2)
+  paidAmountKgs             Decimal                       @default(0) @db.Decimal(14, 2)
+  totalWeightKg             Decimal?                      @db.Decimal(14, 3)
+  cargoRateUsdPerKg         Decimal?                      @db.Decimal(14, 4)
+  usdExchangeRate           Decimal?                      @db.Decimal(14, 4)
+  calculatedAmountUsd       Decimal?                      @db.Decimal(14, 2)
+  calculatedAmountKgs       Decimal?                      @db.Decimal(14, 2)
+  cargoReceiptAttachmentId  String?
+  dueDate                   DateTime?
+  comment                   String?
+  status                    TransportExpenseStatus        @default(DRAFT)
+  returnReason              String?
+  accountantComment         String?
+  cashierComment            String?
+  transactionNumber         String?
+  financeAccountId          String?
+  financeAccount            FinanceAccount?               @relation("TransportExpenseFinanceAccount", fields: [financeAccountId], references: [id])
+  ledgerEntryId             String?                       @unique
+  ledgerEntry               FinanceLedgerEntry?           @relation("TransportExpenseLedgerEntry", fields: [ledgerEntryId], references: [id])
+  submittedAt               DateTime?
+  approvedAt                DateTime?
+  sentToCashierAt           DateTime?
+  paidAt                    DateTime?
+  returnedAt                DateTime?
+  createdById               String
+  createdBy                 User                          @relation("TransportExpenseCreator", fields: [createdById], references: [id])
+  accountantId              String?
+  accountant                User?                         @relation("TransportExpenseAccountant", fields: [accountantId], references: [id])
+  cashierId                 String?
+  cashier                   User?                         @relation("TransportExpenseCashier", fields: [cashierId], references: [id])
+  returnedById              String?
+  returnedBy                User?                         @relation("TransportExpenseReturnedBy", fields: [returnedById], references: [id])
+  createdAt                 DateTime                      @default(now())
+  updatedAt                 DateTime                      @updatedAt
 
   @@index([procurementOrderId])
   @@index([expenseType])
@@ -3117,6 +3129,7 @@ model ProcurementTransportExpense {
   @@index([financeAccountId])
   @@index([dueDate])
   @@index([paymentMethod])
+  @@index([transportCompanyId])
 }
 
 model ProcurementCostAdjustment {

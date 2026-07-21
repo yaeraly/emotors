@@ -15,8 +15,6 @@ import {
 } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
-import { translateStatus } from '@/lib/translate-status';
-
 export type SupplierPayment = {
   id: string;
   sequenceNumber?: number;
@@ -644,7 +642,6 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               <th className="px-3 py-3">{t('procurement.payments.recipientName')}</th>
               <th className="px-3 py-3">{t('procurement.payments.paymentMethod')}</th>
               <th className="px-3 py-3">{t('procurement.payments.financeAccount')}</th>
-              <th className="px-3 py-3">{t('procurement.orders.status')}</th>
               <th className="px-3 py-3">{t('procurement.payments.accountant')}</th>
               <th className="px-3 py-3">{t('procurement.payments.cashier')}</th>
               <th className="px-3 py-3">{t('procurement.payments.receipt')}</th>
@@ -663,7 +660,6 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 <td className="px-3 py-3">{payment.recipientName || '-'}</td>
                 <td className="px-3 py-3">{t(`procurement.payments.method.${payment.paymentMethod}`)}</td>
                 <td className="px-3 py-3">{payment.actualFinanceAccount?.name || payment.intendedFinanceAccount?.name || '-'}</td>
-                <td className="px-3 py-3">{trancheStatusLabel(t, payment.status)}</td>
                 <td className="px-3 py-3">{payment.accountant?.fullName || payment.createdBy?.fullName || '-'}</td>
                 <td className="px-3 py-3">{payment.cashier?.fullName || '-'}</td>
                 <td className="px-3 py-3">
@@ -722,7 +718,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 </td>
               </tr>
             )) : (
-              <tr><td className="px-4 py-6 text-slate-500" colSpan={14}>{t('procurement.payments.noPayments')}</td></tr>
+              <tr><td className="px-4 py-6 text-slate-500" colSpan={13}>{t('procurement.payments.noPayments')}</td></tr>
             )}
           </tbody>
         </table>
@@ -829,13 +825,6 @@ function Field({
       />
     </label>
   );
-}
-
-function trancheStatusLabel(t: (key: string) => string, status: string) {
-  const key = `procurement.payments.trancheStatus.${status}`;
-  const translated = t(key);
-  if (translated !== key) return translated;
-  return translateStatus(t, status, 'payment');
 }
 
 function formatKgs(value: number | string | null | undefined) {

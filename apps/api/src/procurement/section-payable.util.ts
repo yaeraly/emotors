@@ -23,6 +23,7 @@ const REQUEST_TYPE_TO_EXPENSE: Record<
 const ACTIVE_REQUEST_STATUSES = new Set<string>([
   TransportExpenseStatus.WAITING_ACCOUNTANT,
   TransportExpenseStatus.PENDING_CASHIER,
+  TransportExpenseStatus.PARTIALLY_PAID,
 ]);
 
 const COUNTED_FOR_REMAINING = new Set<string>([
@@ -30,6 +31,7 @@ const COUNTED_FOR_REMAINING = new Set<string>([
   TransportExpenseStatus.WAITING_ACCOUNTANT,
   TransportExpenseStatus.RETURNED,
   TransportExpenseStatus.PENDING_CASHIER,
+  TransportExpenseStatus.PARTIALLY_PAID,
   TransportExpenseStatus.PAID,
 ]);
 

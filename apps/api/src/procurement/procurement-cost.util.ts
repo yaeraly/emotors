@@ -29,6 +29,7 @@ const OPEN_EXPENSE = new Set<string>([
   TransportExpenseStatus.WAITING_ACCOUNTANT,
   TransportExpenseStatus.RETURNED,
   TransportExpenseStatus.PENDING_CASHIER,
+  TransportExpenseStatus.PARTIALLY_PAID,
   TransportExpenseStatus.PAID,
 ]);
 
@@ -253,6 +254,7 @@ export function expensesFullySettled(
   const unsettled = new Set<string>([
     TransportExpenseStatus.WAITING_ACCOUNTANT,
     TransportExpenseStatus.PENDING_CASHIER,
+    TransportExpenseStatus.PARTIALLY_PAID,
     TransportExpenseStatus.RETURNED,
     TransportExpenseStatus.DRAFT,
   ]);

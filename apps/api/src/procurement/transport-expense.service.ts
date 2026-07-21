@@ -39,6 +39,10 @@ import {
   ReturnTransportExpenseDto,
   UpdateTransportExpenseDto,
 } from './dto/transport-expense.dto';
+import {
+  assertCargoTotalsMatchServer,
+  calculateCargoPaymentAmounts,
+} from './cargo-payment-calc.util';
 import { estimateSectionExpenseCostKgs } from './procurement-cost.util';
 import {
   hasActiveSectionRequest,
@@ -63,7 +67,21 @@ const INCLUDE = {
   financeAccount: {
     select: { id: true, name: true, accountNumber: true, availableBalance: true, currency: true },
   },
-  transportCompany: { select: { id: true, name: true, companyCode: true } },
+  transportCompany: {
+    select: {
+      id: true,
+      name: true,
+      companyCode: true,
+      contactPerson: true,
+      phone: true,
+      country: true,
+      city: true,
+      bankName: true,
+      bankAccount: true,
+      accountHolder: true,
+      status: true,
+    },
+  },
   procurementOrder: { select: { id: true, orderNumber: true } },
 } as const;
 
@@ -110,7 +128,11 @@ export class TransportExpenseService {
     }
     return this.prisma.procurementTransportExpense
       .findMany({
-        where: { status: TransportExpenseStatus.PENDING_CASHIER },
+        where: {
+          status: {
+            in: [TransportExpenseStatus.PENDING_CASHIER, TransportExpenseStatus.PARTIALLY_PAID],
+          },
+        },
         include: INCLUDE,
         orderBy: [{ sentToCashierAt: 'asc' }, { createdAt: 'asc' }],
         take: 200,
@@ -133,22 +155,90 @@ export class TransportExpenseService {
       throw new ForbiddenException('Only Supply Manager can create transport expenses');
     }
     return this.prisma.$transaction(async (tx) => {
+      let order: Awaited<ReturnType<typeof tx.procurementOrder.findFirst>> = null;
       if (dto.procurementOrderId) {
-        const order = await tx.procurementOrder.findFirst({
+        order = await tx.procurementOrder.findFirst({
           where: { id: dto.procurementOrderId, deletedAt: null },
         });
         if (!order) throw new NotFoundException('Procurement order not found');
       }
-      const amount = roundMoney(dto.amount);
-      if (amount <= 0) throw new BadRequestException('Amount must be greater than zero');
-      const currency = (dto.currency || 'KGS').toUpperCase();
+
+      const requiresTransportCompany =
+        dto.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT ||
+        dto.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT ||
+        dto.expenseType === TransportExpenseType.LOCAL_DELIVERY;
+
+      let transportCompany: {
+        id: string;
+        name: string;
+        bankName: string | null;
+        bankAccount: string | null;
+        accountHolder: string | null;
+      } | null = null;
+      if (dto.transportCompanyId) {
+        transportCompany = await tx.transportCompany.findFirst({
+          where: { id: dto.transportCompanyId, deletedAt: null, status: 'ACTIVE' },
+          select: {
+            id: true,
+            name: true,
+            bankName: true,
+            bankAccount: true,
+            accountHolder: true,
+          },
+        });
+        if (!transportCompany) {
+          throw new BadRequestException('Transport company not found or inactive');
+        }
+      } else if (requiresTransportCompany) {
+        throw new BadRequestException('Transport company is required');
+      }
+
+      const isCargo = dto.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT;
+      let cargoCalc: ReturnType<typeof calculateCargoPaymentAmounts> | null = null;
+      let amount = roundMoney(dto.amount);
+      let currency = (dto.currency || 'KGS').toUpperCase();
+
+      if (isCargo) {
+        try {
+          cargoCalc = calculateCargoPaymentAmounts({
+            totalWeightKg: Number(dto.totalWeightKg),
+            cargoRateUsdPerKg: Number(dto.cargoRateUsdPerKg),
+            usdExchangeRate: Number(dto.usdExchangeRate),
+          });
+          assertCargoTotalsMatchServer(cargoCalc, {
+            calculatedAmountUsd: dto.calculatedAmountUsd,
+            calculatedAmountKgs: dto.calculatedAmountKgs,
+            amount: dto.amount,
+          });
+        } catch (err) {
+          throw new BadRequestException(err instanceof Error ? err.message : 'Invalid cargo calculation');
+        }
+        amount = cargoCalc.calculatedAmountKgs;
+        currency = 'KGS';
+      } else if (amount <= 0) {
+        throw new BadRequestException('Amount must be greater than zero');
+      }
+
       const paymentMethod = dto.paymentMethod ?? ProcurementPaymentInfoMethod.QR_CODE;
       const requestType =
         dto.requestType?.trim() || requestTypeForExpenseType(dto.expenseType) || null;
+      const carrierName =
+        transportCompany?.name?.trim() ||
+        dto.supplierCarrier?.trim() ||
+        dto.recipientName?.trim() ||
+        '';
+      if (!carrierName) {
+        throw new BadRequestException('Transport company / recipient is required');
+      }
 
       if (paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT && !dto.accountNumber?.trim()) {
         throw new BadRequestException('Account number is required for bank account payment method');
       }
+
+      const sectionBudget =
+        isCargo && cargoCalc
+          ? cargoCalc.calculatedAmountKgs
+          : dto.sectionTotalAmount;
 
       if (dto.procurementOrderId) {
         const siblings = await tx.procurementTransportExpense.findMany({
@@ -168,12 +258,13 @@ export class TransportExpenseService {
             amountKgs: Number(row.amountKgs),
             status: row.status,
           })),
-          dto.sectionTotalAmount,
+          sectionBudget,
         );
         if (
           summary.remainingAmount > 0 &&
           amount > summary.remainingAmount + 0.009 &&
-          Number(dto.sectionTotalAmount || 0) > 0
+          Number(sectionBudget || 0) > 0 &&
+          !isCargo
         ) {
           throw new BadRequestException(
             'Requested amount must not exceed the remaining unpaid amount',
@@ -190,24 +281,30 @@ export class TransportExpenseService {
           procurementOrderId: dto.procurementOrderId || null,
           expenseType: dto.expenseType,
           requestType,
-          supplierCarrier: dto.supplierCarrier.trim(),
-          transportCompanyId: dto.transportCompanyId || null,
+          supplierCarrier: carrierName,
+          transportCompanyId: transportCompany?.id || null,
           expenseName: dto.expenseName?.trim() || null,
           expenseCategory: dto.expenseCategory?.trim() || null,
-          recipientName: dto.recipientName?.trim() || null,
+          recipientName: carrierName,
           route: dto.route?.trim() || null,
           vehicleInfo: dto.vehicleInfo?.trim() || null,
           shipmentReference: dto.shipmentReference?.trim() || null,
           paymentMethod,
-          bankName: dto.bankName?.trim() || null,
-          accountHolder: dto.accountHolder?.trim() || null,
-          accountNumber: dto.accountNumber?.trim() || null,
+          bankName: dto.bankName?.trim() || transportCompany?.bankName || null,
+          accountHolder: dto.accountHolder?.trim() || transportCompany?.accountHolder || null,
+          accountNumber: dto.accountNumber?.trim() || transportCompany?.bankAccount || null,
           swiftCode: dto.swiftCode?.trim() || null,
           invoiceNumber: dto.invoiceNumber?.trim() || null,
           invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
           amount,
           currency,
           amountKgs: currency === 'KGS' ? amount : 0,
+          exchangeRate: cargoCalc?.usdExchangeRate ?? null,
+          totalWeightKg: cargoCalc?.totalWeightKg ?? null,
+          cargoRateUsdPerKg: cargoCalc?.cargoRateUsdPerKg ?? null,
+          usdExchangeRate: cargoCalc?.usdExchangeRate ?? null,
+          calculatedAmountUsd: cargoCalc?.calculatedAmountUsd ?? null,
+          calculatedAmountKgs: cargoCalc?.calculatedAmountKgs ?? null,
           dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
           comment: dto.comment?.trim() || null,
           status: send ? TransportExpenseStatus.WAITING_ACCOUNTANT : TransportExpenseStatus.DRAFT,
@@ -216,6 +313,37 @@ export class TransportExpenseService {
         },
         include: INCLUDE,
       });
+
+      if (isCargo && cargoCalc && order) {
+        await tx.procurementOrder.update({
+          where: { id: order.id },
+          data: {
+            cargoTotalWeightKg: cargoCalc.totalWeightKg,
+            cargoRateUsdPerKg: cargoCalc.cargoRateUsdPerKg,
+            cargoCompany: carrierName,
+            totalCargoCostUsd: cargoCalc.calculatedAmountUsd,
+            // Full calculated KGS is the cost base even when payments are partial.
+            totalCargoCostKgs: cargoCalc.calculatedAmountKgs,
+            chinaExportTransportKgs: cargoCalc.calculatedAmountKgs,
+            chinaExportTransportCompanyId: transportCompany?.id || order.chinaExportTransportCompanyId,
+          },
+        });
+        await this.audit(tx, user, 'CARGO_AMOUNT_CALCULATED', created.id, null, {
+          procurementOrderId: order.id,
+          transportCompanyId: transportCompany?.id ?? null,
+          ...cargoCalc,
+        });
+      }
+
+      if (transportCompany) {
+        await this.audit(tx, user, 'TRANSPORT_COMPANY_SELECTED', created.id, null, {
+          procurementOrderId: created.procurementOrderId,
+          transportCompanyId: transportCompany.id,
+          transportCompanyName: transportCompany.name,
+          requestType,
+        });
+      }
+
       await this.audit(tx, user, 'TRANSPORT_EXPENSE_CREATED', created.id, null, {
         expenseNumber: created.expenseNumber,
         amount,
@@ -224,6 +352,8 @@ export class TransportExpenseService {
         requestType,
         paymentMethod,
         procurementOrderId: created.procurementOrderId,
+        transportCompanyId: transportCompany?.id ?? null,
+        cargo: cargoCalc,
       });
       if (send) {
         await this.audit(tx, user, this.submitAuditAction(created.expenseType), created.id, null, {
@@ -231,15 +361,12 @@ export class TransportExpenseService {
           requestType,
           paymentMethod,
           procurementOrderId: created.procurementOrderId,
+          transportCompanyId: transportCompany?.id ?? null,
+          amount,
+          currency,
+          cargo: cargoCalc,
         });
-        await this.notifications.notifyInTx(tx, user, {
-          type: AlertType.TRANSPORT_EXPENSE_SUBMITTED,
-          entityType: 'ProcurementTransportExpense',
-          entityId: created.id,
-          referenceNumber: created.expenseNumber,
-          message: `Transport expense ${created.expenseNumber} awaits HQ Accountant review.`,
-          recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
-        });
+        await this.notifyAccountantSubmitted(tx, user, created, transportCompany?.name ?? carrierName, cargoCalc);
       }
       return this.toResponse(created, tx);
     });
@@ -367,6 +494,29 @@ export class TransportExpenseService {
           deletedAt: null,
         },
       });
+      const cargoReceiptCount = await tx.fileAttachment.count({
+        where: {
+          entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+          entityId: id,
+          deletedAt: null,
+        },
+      });
+
+      if (
+        (expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT ||
+          expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT ||
+          expense.expenseType === TransportExpenseType.LOCAL_DELIVERY) &&
+        !expense.transportCompanyId
+      ) {
+        throw new BadRequestException('Transport company is required');
+      }
+
+      if (
+        expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT &&
+        cargoReceiptCount <= 0
+      ) {
+        throw new BadRequestException('Cargo receipt is required');
+      }
 
       const siblings = await tx.procurementTransportExpense.findMany({
         where: {
@@ -423,16 +573,33 @@ export class TransportExpenseService {
           requestType: updated.requestType,
           paymentMethod: updated.paymentMethod,
           procurementOrderId: updated.procurementOrderId,
+          transportCompanyId: updated.transportCompanyId,
+          amount: Number(updated.amount),
+          currency: updated.currency,
         },
       );
-      await this.notifications.notifyInTx(tx, user, {
-        type: AlertType.TRANSPORT_EXPENSE_SUBMITTED,
-        entityType: 'ProcurementTransportExpense',
-        entityId: id,
-        referenceNumber: expense.expenseNumber,
-        message: `Transport expense ${expense.expenseNumber} awaits HQ Accountant review.`,
-        recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+      await this.audit(tx, user, 'REQUEST_SENT_TO_ACCOUNTANT', id, null, {
+        procurementOrderId: updated.procurementOrderId,
+        transportCompanyId: updated.transportCompanyId,
+        requestType: updated.requestType,
+        amount: Number(updated.amount),
+        currency: updated.currency,
       });
+      await this.notifyAccountantSubmitted(
+        tx,
+        user,
+        updated,
+        updated.transportCompany?.name || updated.recipientName || updated.supplierCarrier,
+        updated.calculatedAmountKgs != null
+          ? {
+              totalWeightKg: Number(updated.totalWeightKg || 0),
+              cargoRateUsdPerKg: Number(updated.cargoRateUsdPerKg || 0),
+              usdExchangeRate: Number(updated.usdExchangeRate || 0),
+              calculatedAmountUsd: Number(updated.calculatedAmountUsd || 0),
+              calculatedAmountKgs: Number(updated.calculatedAmountKgs || 0),
+            }
+          : null,
+      );
       return this.toResponse(updated, tx);
     });
   }
@@ -518,7 +685,8 @@ export class TransportExpenseService {
       if (!expense) throw new NotFoundException('Transport expense not found');
       if (
         expense.status !== TransportExpenseStatus.WAITING_ACCOUNTANT &&
-        expense.status !== TransportExpenseStatus.PENDING_CASHIER
+        expense.status !== TransportExpenseStatus.PENDING_CASHIER &&
+        expense.status !== TransportExpenseStatus.PARTIALLY_PAID
       ) {
         throw new BadRequestException('Expense cannot be returned in current status');
       }
@@ -558,7 +726,10 @@ export class TransportExpenseService {
       if (expense.status === TransportExpenseStatus.PAID) {
         throw new BadRequestException('Transport expense is already paid');
       }
-      if (expense.status !== TransportExpenseStatus.PENDING_CASHIER) {
+      if (
+        expense.status !== TransportExpenseStatus.PENDING_CASHIER &&
+        expense.status !== TransportExpenseStatus.PARTIALLY_PAID
+      ) {
         throw new BadRequestException('Expense is not awaiting cashier payment');
       }
 
@@ -574,9 +745,17 @@ export class TransportExpenseService {
       }
 
       const account = await this.assertHqAccount(tx, dto.financeAccountId);
-      const amountKgs = Number(expense.amountKgs);
-      if (amountKgs <= 0) throw new BadRequestException('Payable KGS amount is invalid');
-      if (amountKgs > Number(account.availableBalance) + 0.009) {
+      const requestedKgs = Number(expense.amountKgs) > 0 ? Number(expense.amountKgs) : Number(expense.amount);
+      const alreadyPaid = Number(expense.paidAmountKgs || 0);
+      const remaining = roundMoney(Math.max(requestedKgs - alreadyPaid, 0));
+      if (!(remaining > 0)) throw new BadRequestException('Expense is already fully paid');
+
+      const payNow = dto.paidAmountKgs != null ? roundMoney(dto.paidAmountKgs) : remaining;
+      if (!(payNow > 0)) throw new BadRequestException('Paid amount must be greater than zero');
+      if (payNow > remaining + 0.009) {
+        throw new BadRequestException('Paid amount exceeds remaining unpaid amount');
+      }
+      if (payNow > Number(account.availableBalance) + 0.009) {
         throw new BadRequestException('Insufficient balance on finance account');
       }
 
@@ -584,17 +763,20 @@ export class TransportExpenseService {
         accountId: account.id,
         branchId: null,
         entryType: FinanceLedgerEntryType.EXPENSE,
-        amount: amountKgs,
+        amount: payNow,
         currency: 'KGS',
         referenceType: 'ProcurementTransportExpense',
         referenceId: id,
-        notes: `Transport expense ${expense.expenseNumber}`,
+        notes: `Transport expense ${expense.expenseNumber}${payNow + 0.009 < remaining ? ' (partial)' : ''}`,
       });
 
+      const newPaidTotal = roundMoney(alreadyPaid + payNow);
+      const fullyPaid = newPaidTotal + 0.009 >= requestedKgs;
       const updated = await tx.procurementTransportExpense.update({
         where: { id },
         data: {
-          status: TransportExpenseStatus.PAID,
+          status: fullyPaid ? TransportExpenseStatus.PAID : TransportExpenseStatus.PARTIALLY_PAID,
+          paidAmountKgs: newPaidTotal,
           financeAccountId: account.id,
           ledgerEntryId: ledger.id,
           cashierId: user.id,
@@ -605,20 +787,37 @@ export class TransportExpenseService {
         include: INCLUDE,
       });
 
-      await this.audit(tx, user, 'TRANSPORT_EXPENSE_PAID', id, { status: expense.status }, {
-        status: updated.status,
-        amountKgs,
-        financeAccountId: account.id,
-        ledgerEntryId: ledger.id,
-        exchangeRate: expense.exchangeRate != null ? Number(expense.exchangeRate) : null,
-      });
+      await this.audit(
+        tx,
+        user,
+        fullyPaid ? 'TRANSPORT_EXPENSE_PAID' : 'TRANSPORT_EXPENSE_PARTIALLY_PAID',
+        id,
+        { status: expense.status, paidAmountKgs: alreadyPaid },
+        {
+          status: updated.status,
+          paidNowKgs: payNow,
+          paidAmountKgs: newPaidTotal,
+          requestedKgs,
+          remainingKgs: roundMoney(Math.max(requestedKgs - newPaidTotal, 0)),
+          financeAccountId: account.id,
+          ledgerEntryId: ledger.id,
+          exchangeRate: expense.exchangeRate != null ? Number(expense.exchangeRate) : null,
+          // Cost base remains full calculated/requested amount — never reduced by partial payment.
+          costBaseKgs:
+            expense.calculatedAmountKgs != null
+              ? Number(expense.calculatedAmountKgs)
+              : requestedKgs,
+        },
+      );
       await this.syncOrderSectionCostFromPaidExpenses(tx, user, updated);
       await this.notifications.notifyInTx(tx, user, {
         type: AlertType.TRANSPORT_EXPENSE_PAID,
         entityType: 'ProcurementTransportExpense',
         entityId: id,
         referenceNumber: expense.expenseNumber,
-        message: `Transport expense ${expense.expenseNumber} was paid.`,
+        message: fullyPaid
+          ? `Transport expense ${expense.expenseNumber} was paid in full.`
+          : `Transport expense ${expense.expenseNumber} received a partial payment of ${payNow.toFixed(2)} KGS.`,
         recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
       });
       return this.toResponse(updated, tx);
@@ -694,6 +893,62 @@ export class TransportExpenseService {
     });
   }
 
+  attachCompanyQr(user: AuthUser, id: string, transportCompanyId: string) {
+    if (!canCreateProcurementOrder(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+      throw new ForbiddenException('Forbidden');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundException('Transport expense not found');
+      if (!EDITABLE.has(expense.status)) {
+        throw new BadRequestException('QR codes can only be changed on draft or returned expenses');
+      }
+      if (expense.paymentMethod !== ProcurementPaymentInfoMethod.QR_CODE) {
+        throw new BadRequestException('Payment method must be QR Code to attach QR attachments');
+      }
+      const companyId = transportCompanyId || expense.transportCompanyId;
+      if (!companyId) throw new BadRequestException('Transport company is required');
+
+      const companyQrs = await tx.fileAttachment.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            { transportCompanyId: companyId, entityType: FileAttachmentEntityType.PAYMENT_QR },
+            { entityId: companyId, entityType: FileAttachmentEntityType.PAYMENT_QR },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!companyQrs.length) {
+        throw new BadRequestException('Selected transport company has no QR attachments');
+      }
+
+      const created: Array<{ id: string }> = [];
+      for (const qr of companyQrs) {
+        const row = await tx.fileAttachment.create({
+          data: {
+            entityType: FileAttachmentEntityType.PAYMENT_QR,
+            entityId: id,
+            fileName: qr.fileName,
+            fileUrl: qr.fileUrl,
+            mimeType: qr.mimeType,
+            size: qr.size,
+            description: qr.description,
+            uploadedById: user.id,
+            transportCompanyId: companyId,
+          },
+        });
+        created.push(row);
+      }
+      await this.audit(tx, user, 'TRANSPORT_EXPENSE_QR_COPIED_FROM_COMPANY', id, null, {
+        transportCompanyId: companyId,
+        count: created.length,
+        attachmentIds: created.map((row) => row.id),
+      });
+      return created;
+    });
+  }
+
   removeQr(user: AuthUser, id: string, attachmentId: string) {
     if (!canCreateProcurementOrder(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
       throw new ForbiddenException('Forbidden');
@@ -740,7 +995,8 @@ export class TransportExpenseService {
     const canUploadReceipt = canConfirmSupplierPayment(user);
     if (
       (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE ||
-        entityType === FileAttachmentEntityType.PAYMENT_QR) &&
+        entityType === FileAttachmentEntityType.PAYMENT_QR ||
+        entityType === FileAttachmentEntityType.CARGO_RECEIPT) &&
       !canUploadInvoice
     ) {
       throw new ForbiddenException('Forbidden');
@@ -749,11 +1005,22 @@ export class TransportExpenseService {
       throw new ForbiddenException('Forbidden');
     }
     if (
-      entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE &&
+      (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE ||
+        entityType === FileAttachmentEntityType.CARGO_RECEIPT) &&
       !EDITABLE.has(expense.status) &&
       !hasAnyFullAccessRole(roles)
     ) {
-      throw new BadRequestException('Invoice can only be attached to draft or returned expenses');
+      throw new BadRequestException(
+        entityType === FileAttachmentEntityType.CARGO_RECEIPT
+          ? 'Cargo receipt can only be attached to draft or returned expenses'
+          : 'Invoice can only be attached to draft or returned expenses',
+      );
+    }
+    if (
+      entityType === FileAttachmentEntityType.CARGO_RECEIPT &&
+      expense.expenseType !== TransportExpenseType.INTERNATIONAL_FREIGHT
+    ) {
+      throw new BadRequestException('Cargo receipt is only allowed for cargo payment requests');
     }
 
     let file: Awaited<ReturnType<FastifyRequest['file']>>;
@@ -786,6 +1053,16 @@ export class TransportExpenseService {
     const fileUrl = `/uploads/procurement/${stored}`;
 
     return this.prisma.$transaction(async (tx) => {
+      if (entityType === FileAttachmentEntityType.CARGO_RECEIPT) {
+        await tx.fileAttachment.updateMany({
+          where: {
+            entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+            entityId: id,
+            deletedAt: null,
+          },
+          data: { deletedAt: new Date(), isCurrent: false },
+        });
+      }
       const created = await tx.fileAttachment.create({
         data: {
           entityType,
@@ -795,18 +1072,31 @@ export class TransportExpenseService {
           mimeType: file.mimetype,
           size: buffer.length,
           uploadedById: user.id,
+          isCurrent: true,
         },
       });
-      await this.audit(
-        tx,
-        user,
+      if (entityType === FileAttachmentEntityType.CARGO_RECEIPT) {
+        await tx.procurementTransportExpense.update({
+          where: { id },
+          data: { cargoReceiptAttachmentId: created.id },
+        });
+      }
+      const auditAction =
         entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT
           ? 'TRANSPORT_EXPENSE_RECEIPT_UPLOADED'
-          : 'TRANSPORT_EXPENSE_INVOICE_UPLOADED',
-        id,
-        null,
-        { attachmentId: created.id, fileName: created.fileName },
-      );
+          : entityType === FileAttachmentEntityType.CARGO_RECEIPT
+            ? 'CARGO_RECEIPT_UPLOADED'
+            : 'TRANSPORT_EXPENSE_INVOICE_UPLOADED';
+      await this.audit(tx, user, auditAction, id, null, {
+        attachmentId: created.id,
+        fileName: created.fileName,
+        entityType,
+        procurementOrderId: expense.procurementOrderId,
+        note:
+          entityType === FileAttachmentEntityType.CARGO_RECEIPT
+            ? 'Cargo receipt (Supply Manager) — separate from accountant/cashier payment receipt'
+            : null,
+      });
       return created;
     });
   }
@@ -849,16 +1139,72 @@ export class TransportExpenseService {
       ...expense,
       amount: Number(expense.amount),
       amountKgs: Number(expense.amountKgs),
+      paidAmountKgs: Number(expense.paidAmountKgs || 0),
       exchangeRate: expense.exchangeRate != null ? Number(expense.exchangeRate) : null,
+      totalWeightKg: expense.totalWeightKg != null ? Number(expense.totalWeightKg) : null,
+      cargoRateUsdPerKg:
+        expense.cargoRateUsdPerKg != null ? Number(expense.cargoRateUsdPerKg) : null,
+      usdExchangeRate: expense.usdExchangeRate != null ? Number(expense.usdExchangeRate) : null,
+      calculatedAmountUsd:
+        expense.calculatedAmountUsd != null ? Number(expense.calculatedAmountUsd) : null,
+      calculatedAmountKgs:
+        expense.calculatedAmountKgs != null ? Number(expense.calculatedAmountKgs) : null,
       invoices: attachments.filter(
         (a) => a.entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE,
       ),
       receipts: attachments.filter(
         (a) => a.entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT,
       ),
+      cargoReceipts: attachments.filter(
+        (a) => a.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
+      ),
       qrCodes: attachments.filter((a) => a.entityType === FileAttachmentEntityType.PAYMENT_QR),
       attachments,
     };
+  }
+
+  private async notifyAccountantSubmitted(
+    tx: Tx,
+    user: AuthUser,
+    expense: {
+      id: string;
+      expenseNumber: string;
+      expenseType: TransportExpenseType;
+      requestType?: string | null;
+      amount: unknown;
+      currency: string;
+      procurementOrderId?: string | null;
+      procurementOrder?: { orderNumber?: string } | null;
+    },
+    transportCompanyName: string,
+    cargo: {
+      totalWeightKg: number;
+      cargoRateUsdPerKg: number;
+      usdExchangeRate: number;
+      calculatedAmountUsd: number;
+      calculatedAmountKgs: number;
+    } | null,
+  ) {
+    const orderNumber = expense.procurementOrder?.orderNumber;
+    const requestLabel =
+      expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT
+        ? 'China domestic transport'
+        : expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
+          ? 'Cargo payment'
+          : expense.expenseType === TransportExpenseType.LOCAL_DELIVERY
+            ? 'Kyrgyzstan domestic transport'
+            : 'Transport expense';
+    const cargoExtra = cargo
+      ? ` Weight: ${cargo.totalWeightKg} kg; Tariff: ${cargo.cargoRateUsdPerKg} USD/kg; USD rate: ${cargo.usdExchangeRate}; Calculated: ${cargo.calculatedAmountKgs.toFixed(2)} KGS.`
+      : '';
+    await this.notifications.notifyInTx(tx, user, {
+      type: AlertType.TRANSPORT_EXPENSE_SUBMITTED,
+      entityType: 'ProcurementTransportExpense',
+      entityId: expense.id,
+      referenceNumber: orderNumber || expense.expenseNumber,
+      message: `${requestLabel} request ${expense.expenseNumber}${orderNumber ? ` for order ${orderNumber}` : ''}: ${transportCompanyName}, ${Number(expense.amount).toFixed(2)} ${expense.currency}.${cargoExtra}`,
+      recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+    });
   }
 
   private submitAuditAction(expenseType: TransportExpenseType): string {
@@ -903,6 +1249,7 @@ export class TransportExpenseService {
         currency: true,
         exchangeRate: true,
         amountKgs: true,
+        calculatedAmountKgs: true,
         status: true,
       },
     });
@@ -912,6 +1259,11 @@ export class TransportExpenseService {
         ? Number(order.weightedAverageYuanRate)
         : Number(order.defaultYuanRate);
 
+    const maxCargoCalculated = siblings.reduce(
+      (max, row) => Math.max(max, Number(row.calculatedAmountKgs || 0)),
+      0,
+    );
+
     const sectionTotal =
       expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT
         ? Number(order.chinaDomesticTransportYuan || 0)
@@ -920,7 +1272,7 @@ export class TransportExpenseService {
           : expense.expenseType === TransportExpenseType.OTHER_LOGISTICS
             ? Number(order.otherExpenseKgs || 0)
             : expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
-              ? Number(order.totalCargoCostKgs || 0)
+              ? Math.max(Number(order.totalCargoCostKgs || 0), maxCargoCalculated)
               : 0;
 
     const section = estimateSectionExpenseCostKgs({
