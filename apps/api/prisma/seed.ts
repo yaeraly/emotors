@@ -13,6 +13,131 @@ function parsePermissionCode(code: string): { module: string; action: string } {
   return { module, action };
 }
 
+type SeedUserInput = {
+  email: string;
+  fullName: string;
+  role: Role;
+  employeeId: string;
+  phone: string;
+  passwordHash: string;
+  username?: string | null;
+  branchId?: string | null;
+  hasLogin?: boolean;
+  mustChangePassword?: boolean;
+  /** When true, refresh passwordHash for known demo/seed accounts. */
+  resetPassword?: boolean;
+};
+
+function assertUniqueSeedEmployeeIds(records: Array<{ employeeId: string; email: string }>) {
+  const employeeIds = records.map((record) => record.employeeId);
+  const duplicateEmployeeIds = employeeIds.filter((id, index) => employeeIds.indexOf(id) !== index);
+  if (duplicateEmployeeIds.length > 0) {
+    throw new Error(
+      `Duplicate employee IDs in seed configuration: ${[...new Set(duplicateEmployeeIds)].join(', ')}`,
+    );
+  }
+}
+
+/**
+ * Idempotent seed user upsert that reconciles email / username / employeeId collisions
+ * without overwriting another user's unique employeeId.
+ */
+async function ensureSeedUser(input: SeedUserInput) {
+  const existingByEmail = await prisma.user.findUnique({ where: { email: input.email } });
+  const existingByUsername =
+    input.username != null && input.username !== ''
+      ? await prisma.user.findUnique({ where: { username: input.username } })
+      : null;
+  const existingByEmployeeId = await prisma.user.findUnique({
+    where: { employeeId: input.employeeId },
+  });
+  const existingByPhone = await prisma.user.findUnique({ where: { phone: input.phone } });
+
+  // Prefer the email match as the canonical seeded identity.
+  let target = existingByEmail ?? existingByUsername ?? null;
+
+  if (existingByUsername && existingByEmail && existingByUsername.id !== existingByEmail.id) {
+    console.warn(
+      `[seed] username ${input.username} belongs to ${existingByUsername.email}, not ${input.email}; keeping email identity`,
+    );
+    target = existingByEmail;
+  }
+
+  if (existingByEmployeeId && target && existingByEmployeeId.id !== target.id) {
+    console.warn(
+      `[seed] employeeId ${input.employeeId} already owned by ${existingByEmployeeId.email}; preserving ${target.email}'s current employeeId`,
+    );
+  } else if (existingByEmployeeId && !target) {
+    target = existingByEmployeeId;
+  }
+
+  if (existingByPhone && target && existingByPhone.id !== target.id) {
+    console.warn(
+      `[seed] phone ${input.phone} already owned by ${existingByPhone.email}; preserving ${target.email}'s current phone`,
+    );
+  } else if (existingByPhone && !target) {
+    target = existingByPhone;
+  }
+
+  const employeeIdAvailable =
+    !existingByEmployeeId || (target != null && existingByEmployeeId.id === target.id);
+  const phoneAvailable = !existingByPhone || (target != null && existingByPhone.id === target.id);
+
+  const employeeId = employeeIdAvailable
+    ? input.employeeId
+    : target?.employeeId && target.employeeId.length > 0
+      ? target.employeeId
+      : `${input.employeeId}-SEED`;
+
+  const phone = phoneAvailable
+    ? input.phone
+    : target?.phone && target.phone.length > 0
+      ? target.phone
+      : `${input.phone}-S`;
+
+  if (employeeId !== input.employeeId) {
+    console.warn(`[seed] Using employeeId ${employeeId} for ${input.email}`);
+  }
+  if (phone !== input.phone) {
+    console.warn(`[seed] Using phone ${phone} for ${input.email}`);
+  }
+
+  const data = {
+    email: input.email,
+    fullName: input.fullName,
+    role: input.role,
+    branchId: input.branchId === undefined ? null : input.branchId,
+    employeeId,
+    phone,
+    username: input.username ?? null,
+    status: 'ACTIVE' as const,
+    hasLogin: input.hasLogin ?? true,
+    mustChangePassword: input.mustChangePassword ?? false,
+  };
+
+  if (target) {
+    return prisma.user.update({
+      where: { id: target.id },
+      data: {
+        ...data,
+        // Avoid stealing another user's username.
+        username:
+          existingByUsername && existingByUsername.id !== target.id
+            ? target.username
+            : data.username,
+        ...(input.resetPassword ? { passwordHash: input.passwordHash } : {}),
+      },
+    });
+  }
+
+  return prisma.user.create({
+    data: {
+      ...data,
+      passwordHash: input.passwordHash,
+    },
+  });
+}
+
 const permissionCodes = [
   'users.manage',
   'branches.manage',
@@ -163,31 +288,17 @@ async function main() {
 
   const passwordHash = await bcrypt.hash('password123', 12);
 
-  await prisma.user.upsert({
-    where: { email: 'owner@emotors.kg' },
-    update: {
-      passwordHash,
-      fullName: 'EMOTORS Owner',
-      role: Role.OWNER,
-      branchId: branch.id,
-      employeeId: 'HQ-OWNER-001',
-      phone: '+996700000001',
-      username: 'owner001',
-      status: 'ACTIVE',
-      mustChangePassword: false,
-    },
-    create: {
-      email: 'owner@emotors.kg',
-      passwordHash,
-      fullName: 'EMOTORS Owner',
-      role: Role.OWNER,
-      branchId: branch.id,
-      employeeId: 'HQ-OWNER-001',
-      phone: '+996700000001',
-      username: 'owner001',
-      status: 'ACTIVE',
-      mustChangePassword: false,
-    },
+  await ensureSeedUser({
+    email: 'owner@emotors.kg',
+    passwordHash,
+    fullName: 'EMOTORS Owner',
+    role: Role.OWNER,
+    branchId: branch.id,
+    employeeId: 'HQ-OWNER-001',
+    phone: '+996700000001',
+    username: 'owner001',
+    mustChangePassword: false,
+    resetPassword: true,
   });
 
   for (const code of permissionCodes) {
@@ -235,31 +346,17 @@ async function main() {
   }
 
   const ceoPasswordHash = await bcrypt.hash('Emotors@2026', 12);
-  await prisma.user.upsert({
-    where: { email: 'ceo@emotors.kg' },
-    update: {
-      passwordHash: ceoPasswordHash,
-      fullName: 'EMOTORS CEO',
-      role: Role.CEO,
-      branchId: null,
-      employeeId: 'HQ-CEO-001',
-      phone: '+996700000002',
-      username: 'ceo',
-      status: 'ACTIVE',
-      mustChangePassword: false,
-    },
-    create: {
-      email: 'ceo@emotors.kg',
-      passwordHash: ceoPasswordHash,
-      fullName: 'EMOTORS CEO',
-      role: Role.CEO,
-      branchId: null,
-      employeeId: 'HQ-CEO-001',
-      phone: '+996700000002',
-      username: 'ceo',
-      status: 'ACTIVE',
-      mustChangePassword: false,
-    },
+  await ensureSeedUser({
+    email: 'ceo@emotors.kg',
+    passwordHash: ceoPasswordHash,
+    fullName: 'EMOTORS CEO',
+    role: Role.CEO,
+    branchId: null,
+    employeeId: 'HQ-CEO-001',
+    phone: '+996700000002',
+    username: 'ceo',
+    mustChangePassword: false,
+    resetPassword: true,
   });
 
   const ceo = await prisma.user.findUnique({ where: { email: 'ceo@emotors.kg' } });
@@ -388,34 +485,27 @@ async function main() {
 
   const hqPasswordHash = await bcrypt.hash('Emotors@2026', 12);
   const noLoginPasswordHash = await bcrypt.hash('hq-employee-no-login-seed', 12);
+
+  assertUniqueSeedEmployeeIds([
+    { email: 'owner@emotors.kg', employeeId: 'HQ-OWNER-001' },
+    { email: 'ceo@emotors.kg', employeeId: 'HQ-CEO-001' },
+    ...hqTestUsers,
+    ...hqStaffRecords,
+  ]);
+
   for (const hqUser of hqTestUsers) {
-    await prisma.user.upsert({
-      where: { email: hqUser.email },
-      update: {
-        passwordHash: hqPasswordHash,
-        fullName: hqUser.fullName,
-        role: hqUser.role,
-        branchId: null,
-        employeeId: hqUser.employeeId,
-        phone: hqUser.phone,
-        username: hqUser.username,
-        status: 'ACTIVE',
-        mustChangePassword: false,
-      },
-      create: {
-        email: hqUser.email,
-        passwordHash: hqPasswordHash,
-        fullName: hqUser.fullName,
-        role: hqUser.role,
-        branchId: null,
-        employeeId: hqUser.employeeId,
-        phone: hqUser.phone,
-        username: hqUser.username,
-        status: 'ACTIVE',
-        mustChangePassword: false,
-      },
+    const createdUser = await ensureSeedUser({
+      email: hqUser.email,
+      passwordHash: hqPasswordHash,
+      fullName: hqUser.fullName,
+      role: hqUser.role,
+      branchId: null,
+      employeeId: hqUser.employeeId,
+      phone: hqUser.phone,
+      username: hqUser.username,
+      mustChangePassword: false,
+      resetPassword: true,
     });
-    const createdUser = await prisma.user.findUnique({ where: { email: hqUser.email } });
     const role = await prisma.rbacRole.findUnique({ where: { code: hqUser.role } });
     if (createdUser && role) {
       await prisma.userRole.upsert({
@@ -427,35 +517,25 @@ async function main() {
   }
 
   for (const record of hqStaffRecords) {
-    const existing = await prisma.user.findFirst({
-      where: {
-        OR: [{ email: record.email }, { employeeId: record.employeeId }],
-      },
-    });
-    if (existing) {
-      console.log(`HQ employee already exists: ${record.fullName}`);
-      continue;
-    }
-
-    const created = await prisma.user.create({
-      data: {
-        email: record.email,
-        passwordHash: record.hasLogin ? hqPasswordHash : noLoginPasswordHash,
-        fullName: record.fullName,
-        role: record.role,
-        branchId: null,
-        employeeId: record.employeeId,
-        phone: record.phone,
-        username: record.hasLogin ? record.username ?? record.email.split('@')[0] : null,
-        status: 'ACTIVE',
-        hasLogin: record.hasLogin,
-        mustChangePassword: record.hasLogin,
-      },
+    const created = await ensureSeedUser({
+      email: record.email,
+      passwordHash: record.hasLogin ? hqPasswordHash : noLoginPasswordHash,
+      fullName: record.fullName,
+      role: record.role,
+      branchId: null,
+      employeeId: record.employeeId,
+      phone: record.phone,
+      username: record.hasLogin ? record.username ?? record.email.split('@')[0] : null,
+      hasLogin: record.hasLogin,
+      mustChangePassword: record.hasLogin,
+      resetPassword: false,
     });
     const role = await prisma.rbacRole.findUnique({ where: { code: record.role } });
-    if (role) {
-      await prisma.userRole.create({
-        data: { userId: created.id, roleId: role.id },
+    if (created && role) {
+      await prisma.userRole.upsert({
+        where: { userId_roleId: { userId: created.id, roleId: role.id } },
+        update: {},
+        create: { userId: created.id, roleId: role.id },
       });
     }
     console.log(`Registered HQ employee: ${record.fullName}`);
