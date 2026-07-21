@@ -171,7 +171,10 @@ EXCEPTION WHEN duplicate_object THEN null;
 END $$;
 
 -- Indexes and uniqueness
-CREATE UNIQUE INDEX IF NOT EXISTS "ProcurementSupplierPayment_procurementOrderId_sequenceNumber_key"
+-- Use Prisma's 63-char truncated name directly. Creating the longer
+-- "...sequenceNumber_key" name lets PostgreSQL truncate to
+-- "...sequenceNumber_ke", which later ALTER INDEX renames can fail to find.
+CREATE UNIQUE INDEX IF NOT EXISTS "ProcurementSupplierPayment_procurementOrderId_sequenceNumbe_key"
   ON "ProcurementSupplierPayment"("procurementOrderId", "sequenceNumber");
 CREATE UNIQUE INDEX IF NOT EXISTS "ProcurementSupplierPayment_idempotencyKey_key"
   ON "ProcurementSupplierPayment"("idempotencyKey");

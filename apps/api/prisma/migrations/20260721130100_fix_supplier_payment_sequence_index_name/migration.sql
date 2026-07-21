@@ -1,4 +1,8 @@
--- PostgreSQL truncates identifiers to 63 chars. Align the unique index name with Prisma's expected truncated name.
+-- Align truncated unique index name with Prisma's expected name.
+-- Safe on fresh databases: if the old truncated name does not exist, do nothing.
+-- Never use bare ALTER INDEX / DROP INDEX on "...sequenceNumber_ke" — that raises:
+--   ERROR: relation "...sequenceNumber_ke" does not exist
+
 DO $$ BEGIN
   IF EXISTS (
     SELECT 1 FROM pg_class c
@@ -13,7 +17,11 @@ DO $$ BEGIN
       AND n.nspname = 'public'
       AND c.relname = 'ProcurementSupplierPayment_procurementOrderId_sequenceNumbe_key'
   ) THEN
-    ALTER INDEX "ProcurementSupplierPayment_procurementOrderId_sequenceNumber_ke"
-      RENAME TO "ProcurementSupplierPayment_procurementOrderId_sequenceNumbe_key";
+    EXECUTE 'ALTER INDEX public."ProcurementSupplierPayment_procurementOrderId_sequenceNumber_ke" RENAME TO "ProcurementSupplierPayment_procurementOrderId_sequenceNumbe_key"';
   END IF;
+EXCEPTION
+  WHEN undefined_table THEN
+    NULL;
+  WHEN duplicate_table THEN
+    NULL;
 END $$;
