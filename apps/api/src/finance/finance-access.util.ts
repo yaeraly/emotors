@@ -71,6 +71,50 @@ export function canApproveFinanceTransfer(
   );
 }
 
+/** HQ Accountant prepares HQ account transfers (draft → send to cashier). */
+export function canPrepareFinanceTransfer(
+  user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>,
+) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT)
+  );
+}
+
+/** Only HQ Cashier (or full-access) confirms HQ transfers after receipt upload. */
+export function canConfirmFinanceTransfer(
+  user: Pick<AuthUser, 'role' | 'roles'>,
+) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_CASHIER);
+}
+
+export function canReturnFinanceTransfer(
+  user: Pick<AuthUser, 'role' | 'roles'>,
+) {
+  return canConfirmFinanceTransfer(user);
+}
+
+export function canCancelFinanceTransfer(
+  user: Pick<AuthUser, 'role' | 'roles'>,
+) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_ACCOUNTANT)
+  );
+}
+
+export function canReverseFinanceTransfer(
+  user: Pick<AuthUser, 'role' | 'roles'>,
+) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+}
+
 export function canOperateCashierShift(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
 ) {
@@ -94,6 +138,11 @@ export function assertCanAccessAccountScope(
 ) {
   const roles = resolveUserRoles(user);
   if (hasAnyFullAccessRole(roles) || isHqFinanceUser(user)) {
+    return;
+  }
+
+  // HQ Cashier may view/operate HQ accounts for transfer & supplier payment confirmation.
+  if (roles.includes(Role.HQ_CASHIER) && account.scope === FinanceAccountScope.HQ) {
     return;
   }
 

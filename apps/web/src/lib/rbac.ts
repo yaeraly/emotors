@@ -304,6 +304,7 @@ const HQ_CASHIER_ALLOWED_PREFIXES = [
   '/distribution',
   '/procurement/cashier-payments',
   '/procurement/orders',
+  '/finance/transfers',
   '/alerts',
   '/notifications',
 ];

@@ -40,6 +40,26 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   FINANCE_TRANSFER_PENDING: { module: NotificationModule.FINANCE, roles: [Role.FRANCHISE_OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT] },
   FINANCE_TRANSFER_APPROVED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FINANCE_MANAGER] },
   FINANCE_TRANSFER_REJECTED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FINANCE_MANAGER] },
+  FINANCE_TRANSFER_SENT_TO_CASHIER: {
+    module: NotificationModule.FINANCE,
+    roles: [Role.HQ_CASHIER, Role.FINANCE_MANAGER],
+  },
+  FINANCE_TRANSFER_RETURNED: {
+    module: NotificationModule.FINANCE,
+    roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+  },
+  FINANCE_TRANSFER_COMPLETED: {
+    module: NotificationModule.FINANCE,
+    roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER],
+  },
+  FINANCE_TRANSFER_REVERSED: {
+    module: NotificationModule.FINANCE,
+    roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT],
+  },
+  FINANCE_TRANSFER_LARGE: {
+    module: NotificationModule.FINANCE,
+    roles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER],
+  },
   FINANCE_ACCOUNT_ASSIGNED: { module: NotificationModule.FINANCE, roles: [Role.CASHIER] },
   FINANCE_ACCOUNT_UNASSIGNED: { module: NotificationModule.FINANCE, roles: [Role.CASHIER] },
   FINANCE_INVESTMENT_RECORDED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FRANCHISE_OWNER] },
@@ -183,6 +203,26 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   FINANCE_TRANSFER_REJECTED: {
     title: 'Transfer rejected',
     message: 'A finance transfer was rejected.',
+  },
+  FINANCE_TRANSFER_SENT_TO_CASHIER: {
+    title: 'Transfer awaiting cashier',
+    message: 'HQ Accountant submitted a finance account transfer for confirmation.',
+  },
+  FINANCE_TRANSFER_RETURNED: {
+    title: 'Transfer returned',
+    message: 'HQ Cashier returned a finance transfer to the accountant.',
+  },
+  FINANCE_TRANSFER_COMPLETED: {
+    title: 'Transfer completed',
+    message: 'A finance account transfer was completed.',
+  },
+  FINANCE_TRANSFER_REVERSED: {
+    title: 'Transfer reversed',
+    message: 'A completed finance transfer was reversed.',
+  },
+  FINANCE_TRANSFER_LARGE: {
+    title: 'Large finance transfer',
+    message: 'A large finance account transfer requires your attention.',
   },
   FINANCE_ACCOUNT_ASSIGNED: {
     title: 'Account assigned',

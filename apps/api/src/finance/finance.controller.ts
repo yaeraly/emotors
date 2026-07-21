@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
-import { FinanceAccountStatus, Role } from '@prisma/client';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { FileAttachmentEntityType, FinanceAccountStatus, Role } from '@prisma/client';
+import type { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -25,7 +26,14 @@ import {
 import { CreateFinanceInvestmentDto } from './dto/create-finance-investment.dto';
 import { CloseCashierShiftDto, OpenCashierShiftDto } from './dto/cashier-shift.dto';
 import { FinanceReportQueryDto } from './dto/finance-report-query.dto';
-import { CreateFinanceTransferDto, FinanceTransferQueryDto } from './dto/finance-transfer.dto';
+import {
+  ConfirmFinanceTransferDto,
+  CreateFinanceTransferDto,
+  FinanceTransferQueryDto,
+  ReturnFinanceTransferDto,
+  ReverseFinanceTransferDto,
+  UpdateFinanceTransferDto,
+} from './dto/finance-transfer.dto';
 import { CreateFinanceExpenseDto } from './dto/create-finance-expense.dto';
 import { CreateFinanceReconciliationDto } from './dto/create-finance-reconciliation.dto';
 import { FinancePaymentsQueryDto } from './dto/finance-payments-query.dto';
@@ -38,6 +46,24 @@ const FINANCE_VIEW_ROLES = [
   Role.ACCOUNTANT,
   Role.FRANCHISE_OWNER,
   Role.CASHIER,
+] as const;
+
+const FINANCE_TRANSFER_VIEW_ROLES = [
+  ...FINANCE_VIEW_ROLES,
+  Role.HQ_CASHIER,
+] as const;
+
+const FINANCE_TRANSFER_PREPARE_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.FINANCE_MANAGER,
+  Role.HQ_ACCOUNTANT,
+] as const;
+
+const FINANCE_TRANSFER_CASHIER_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+  Role.HQ_CASHIER,
 ] as const;
 
 const FINANCE_MANAGE_ROLES = [
@@ -201,25 +227,114 @@ export class FinanceController {
   }
 
   @Get('transfers')
-  @Roles(...FINANCE_VIEW_ROLES)
+  @Roles(...FINANCE_TRANSFER_VIEW_ROLES)
   listTransfers(@CurrentUser() user: AuthUser, @Query() query: FinanceTransferQueryDto) {
     return this.transfersService.listTransfers(user, query);
   }
 
+  @Get('transfers/cashier-queue')
+  @Roles(...FINANCE_TRANSFER_CASHIER_ROLES)
+  listTransferCashierQueue(@CurrentUser() user: AuthUser) {
+    return this.transfersService.listCashierQueue(user);
+  }
+
   @Get('transfers/:id')
-  @Roles(...FINANCE_VIEW_ROLES)
+  @Roles(...FINANCE_TRANSFER_VIEW_ROLES)
   getTransfer(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.transfersService.getTransfer(user, id);
   }
 
   @Post('transfers')
-  @Roles(...FINANCE_MANAGE_ROLES, Role.FRANCHISE_OWNER)
+  @Roles(...FINANCE_TRANSFER_PREPARE_ROLES)
   createTransfer(@CurrentUser() user: AuthUser, @Body() dto: CreateFinanceTransferDto) {
     return this.transfersService.createTransfer(user, dto);
   }
 
+  @Put('transfers/:id')
+  @Roles(...FINANCE_TRANSFER_PREPARE_ROLES)
+  updateTransfer(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateFinanceTransferDto,
+  ) {
+    return this.transfersService.updateTransfer(user, id, dto);
+  }
+
+  @Post('transfers/:id/send-to-cashier')
+  @Roles(...FINANCE_TRANSFER_PREPARE_ROLES)
+  sendTransferToCashier(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.transfersService.sendToCashier(user, id);
+  }
+
+  @Post('transfers/:id/return')
+  @Roles(...FINANCE_TRANSFER_CASHIER_ROLES)
+  returnTransfer(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ReturnFinanceTransferDto,
+  ) {
+    return this.transfersService.returnToAccountant(user, id, dto);
+  }
+
+  @Post('transfers/:id/confirm')
+  @Roles(...FINANCE_TRANSFER_CASHIER_ROLES)
+  confirmTransfer(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ConfirmFinanceTransferDto,
+  ) {
+    return this.transfersService.confirmTransfer(user, id, dto);
+  }
+
+  @Post('transfers/:id/cancel')
+  @Roles(...FINANCE_TRANSFER_PREPARE_ROLES)
+  cancelTransfer(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.transfersService.cancelTransfer(user, id);
+  }
+
+  @Post('transfers/:id/reverse')
+  @Roles(Role.OWNER, Role.CEO, Role.FINANCE_MANAGER)
+  reverseTransfer(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ReverseFinanceTransferDto,
+  ) {
+    return this.transfersService.reverseTransfer(user, id, dto);
+  }
+
+  @Post('transfers/:id/attachments/support')
+  @Roles(...FINANCE_TRANSFER_PREPARE_ROLES)
+  uploadTransferSupport(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.transfersService.uploadAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.FINANCE_TRANSFER_SUPPORT,
+    );
+  }
+
+  @Post('transfers/:id/attachments/receipt')
+  @Roles(...FINANCE_TRANSFER_CASHIER_ROLES)
+  uploadTransferReceipt(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ) {
+    return this.transfersService.uploadAttachment(
+      user,
+      id,
+      request,
+      FileAttachmentEntityType.FINANCE_TRANSFER_RECEIPT,
+    );
+  }
+
+  /** @deprecated Prefer confirm with receipt */
   @Post('transfers/:id/approve')
-  @Roles(Role.OWNER, Role.CEO, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT, Role.FRANCHISE_OWNER)
+  @Roles(...FINANCE_TRANSFER_CASHIER_ROLES)
   approveTransfer(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.transfersService.approveTransfer(user, id);
   }

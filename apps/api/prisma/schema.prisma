@@ -570,6 +570,8 @@ enum FileAttachmentEntityType {
   DOMESTIC_TRANSPORT_ATTACHMENT
   BRANCH_PAYMENT_RECEIPT
   BRANCH_RECEIVING
+  FINANCE_TRANSFER_RECEIPT
+  FINANCE_TRANSFER_SUPPORT
 }
 
 enum DomesticTransportDocumentType {
@@ -643,6 +645,11 @@ enum AlertType {
   FINANCE_TRANSFER_PENDING
   FINANCE_TRANSFER_APPROVED
   FINANCE_TRANSFER_REJECTED
+  FINANCE_TRANSFER_SENT_TO_CASHIER
+  FINANCE_TRANSFER_RETURNED
+  FINANCE_TRANSFER_COMPLETED
+  FINANCE_TRANSFER_REVERSED
+  FINANCE_TRANSFER_LARGE
   FINANCE_ACCOUNT_ASSIGNED
   FINANCE_ACCOUNT_UNASSIGNED
   FINANCE_INVESTMENT_RECORDED
@@ -1399,6 +1406,9 @@ model User {
   financeAccountAssignmentsCreated                FinanceAccountAssignment[]          @relation("FinanceAccountAssignmentCreator")
   financeTransfersCreated                         FinanceTransfer[]                   @relation("FinanceTransferCreator")
   financeTransfersApproved                        FinanceTransfer[]                   @relation("FinanceTransferApprover")
+  financeTransfersAsAccountant                    FinanceTransfer[]                   @relation("FinanceTransferAccountant")
+  financeTransfersAsCashier                       FinanceTransfer[]                   @relation("FinanceTransferCashier")
+  financeTransfersReturned                        FinanceTransfer[]                   @relation("FinanceTransferReturnedBy")
   financeLedgerEntries                            FinanceLedgerEntry[]                @relation("FinanceLedgerEntryCreator")
   financeExpensesCreated                          FinanceExpense[]                    @relation("FinanceExpenseCreator")
   financeExpensesApproved                         FinanceExpense[]                    @relation("FinanceExpenseApprover")
@@ -4907,6 +4917,9 @@ enum FinanceInvestmentType {
 }
 
 enum FinanceTransferStatus {
+  DRAFT
+  PENDING_CASHIER
+  RETURNED
   PENDING
   APPROVED
   COMPLETED
@@ -5052,14 +5065,31 @@ model FinanceTransfer {
   amount                Decimal               @db.Decimal(14, 2)
   currency              String                @default("KGS")
   transferDate          DateTime              @default(now())
-  status                FinanceTransferStatus @default(COMPLETED)
-  requiresApproval      Boolean               @default(false)
+  status                FinanceTransferStatus @default(DRAFT)
+  requiresApproval      Boolean               @default(true)
+  reason                String?
   notes                 String?
+  transactionNumber     String?
+  version               Int                   @default(1)
+  idempotencyKey        String?               @unique
+  sentToCashierAt       DateTime?
+  completedAt           DateTime?
+  returnedAt            DateTime?
+  returnReason          String?
   createdById           String?
   createdBy             User?                 @relation("FinanceTransferCreator", fields: [createdById], references: [id])
+  accountantId          String?
+  accountant            User?                 @relation("FinanceTransferAccountant", fields: [accountantId], references: [id])
+  cashierId             String?
+  cashier               User?                 @relation("FinanceTransferCashier", fields: [cashierId], references: [id])
+  returnedById          String?
+  returnedBy            User?                 @relation("FinanceTransferReturnedBy", fields: [returnedById], references: [id])
   approvedById          String?
   approvedBy            User?                 @relation("FinanceTransferApprover", fields: [approvedById], references: [id])
   approvedAt            DateTime?
+  reversalOfTransferId  String?
+  reversalOfTransfer    FinanceTransfer?      @relation("FinanceTransferReversal", fields: [reversalOfTransferId], references: [id])
+  reversals             FinanceTransfer[]     @relation("FinanceTransferReversal")
   ledgerEntries         FinanceLedgerEntry[]
   createdAt             DateTime              @default(now())
   updatedAt             DateTime              @updatedAt
@@ -5069,6 +5099,9 @@ model FinanceTransfer {
   @@index([branchId])
   @@index([status])
   @@index([transferDate])
+  @@index([accountantId])
+  @@index([cashierId])
+  @@index([sentToCashierAt])
 }
 
 model CashierShift {

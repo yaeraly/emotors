@@ -1178,7 +1178,15 @@ export type TimelineEntry =
 
 export type FinanceAccountScope = 'HQ' | 'BRANCH';
 export type FinanceAccountStatus = 'ACTIVE' | 'INACTIVE';
-export type FinanceTransferStatus = 'PENDING' | 'APPROVED' | 'COMPLETED' | 'REJECTED' | 'CANCELLED';
+export type FinanceTransferStatus =
+  | 'DRAFT'
+  | 'PENDING_CASHIER'
+  | 'PENDING'
+  | 'RETURNED'
+  | 'APPROVED'
+  | 'COMPLETED'
+  | 'REJECTED'
+  | 'CANCELLED';
 export type CashierShiftStatus = 'OPEN' | 'CLOSED';
 
 export type FinanceAccountTypeDefinition = {
@@ -1217,6 +1225,15 @@ export type FinanceAccount = {
   }>;
 };
 
+export type FinanceTransferAttachment = {
+  id: string;
+  fileName: string;
+  fileUrl: string;
+  entityType: string;
+  mimeType?: string | null;
+  createdAt?: string;
+};
+
 export type FinanceTransfer = {
   id: string;
   transferNumber: string;
@@ -1224,9 +1241,21 @@ export type FinanceTransfer = {
   currency: string;
   transferDate: string;
   status: FinanceTransferStatus;
+  reason?: string | null;
   notes?: string | null;
+  transactionNumber?: string | null;
+  version?: number;
+  returnReason?: string | null;
+  sentToCashierAt?: string | null;
+  completedAt?: string | null;
   sourceAccount: FinanceAccount;
   destinationAccount: FinanceAccount;
+  accountant?: { id: string; fullName: string; role?: Role } | null;
+  cashier?: { id: string; fullName: string; role?: Role } | null;
+  createdBy?: { id: string; fullName: string; role?: Role } | null;
+  receipts?: FinanceTransferAttachment[];
+  supportDocuments?: FinanceTransferAttachment[];
+  attachments?: FinanceTransferAttachment[];
 };
 
 export type FinanceLedgerEntry = {

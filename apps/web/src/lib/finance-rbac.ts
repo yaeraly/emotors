@@ -15,6 +15,21 @@ export function isHqFinanceUser(user: Pick<User, 'role' | 'roles' | 'branchId'> 
   return hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'HQ_ACCOUNTANT');
 }
 
+export function canPrepareFinanceTransfer(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER') || hasRole(user, 'HQ_ACCOUNTANT');
+}
+
+export function canConfirmFinanceTransfer(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'HQ_CASHIER');
+}
+
+export function canReverseFinanceTransfer(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'FINANCE_MANAGER');
+}
+
 export function canManageFinanceAccounts(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
   if (isHqFinanceUser(user) && !user.branchId) return true;

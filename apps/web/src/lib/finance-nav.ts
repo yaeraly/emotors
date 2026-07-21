@@ -14,7 +14,7 @@ export const FINANCE_MAIN_NAV: FinanceNavSection[] = [
   { href: '/procurement/accountant-payments', labelKey: 'procurement.payments.accountantQueue', roles: ['manage', 'hq'] },
   { href: '/finance/income', labelKey: 'finance.income', roles: ['view', 'manage', 'owner', 'hq'] },
   { href: '/finance/expenses', labelKey: 'finance.expenses', roles: ['view', 'manage', 'owner', 'hq'] },
-  { href: '/finance/transfers', labelKey: 'finance.transfers', roles: ['view', 'manage', 'owner', 'hq'] },
+  { href: '/finance/transfers', labelKey: 'finance.transfers', roles: ['view', 'manage', 'owner', 'hq', 'cashier'] },
   { href: '/finance/investments', labelKey: 'finance.investments', roles: ['view', 'owner', 'hq'] },
   { href: '/finance/shifts', labelKey: 'finance.shifts', roles: ['view', 'manage', 'cashier', 'owner', 'hq'] },
   { href: '/finance/reconciliation', labelKey: 'finance.reconciliation', roles: ['view', 'manage', 'owner', 'hq'] },
@@ -41,9 +41,11 @@ export const FINANCE_PAYMENT_TABS: ModuleSectionLink[] = [
 
 export const FINANCE_TRANSFER_TABS: ModuleSectionLink[] = [
   { href: '/finance/transfers', labelKey: 'finance.transfersAll' },
-  { href: '/finance/transfers?status=PENDING', labelKey: 'finance.transfersPending' },
+  { href: '/finance/transfers?status=DRAFT', labelKey: 'finance.transfersDraft' },
+  { href: '/finance/transfers?status=PENDING_CASHIER', labelKey: 'finance.transfersPendingCashier' },
+  { href: '/finance/transfers?status=RETURNED', labelKey: 'finance.transfersReturned' },
   { href: '/finance/transfers?status=COMPLETED', labelKey: 'finance.transfersCompleted' },
-  { href: '/finance/transfers?status=REJECTED', labelKey: 'finance.transfersRejected' },
+  { href: '/finance/transfers?status=CANCELLED', labelKey: 'finance.transfersCancelled' },
 ];
 
 export const FINANCE_SHIFT_TABS: ModuleSectionLink[] = [

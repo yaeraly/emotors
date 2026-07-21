@@ -76,7 +76,9 @@ export class FinanceDashboardService {
         }),
         this.prisma.financeTransfer.count({
           where: {
-            status: FinanceTransferStatus.PENDING,
+            status: {
+              in: [FinanceTransferStatus.PENDING_CASHIER, FinanceTransferStatus.PENDING],
+            },
             ...(scopeFilter.branchId ? { branchId: scopeFilter.branchId } : {}),
           },
         }),
