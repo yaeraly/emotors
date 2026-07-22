@@ -33,6 +33,7 @@ import {
   isHqFinanceUser,
   resolveFinanceScopeFilter,
 } from './finance-access.util';
+import { getActiveAssignmentAccountIds } from './finance-assignment.util';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
 import {
@@ -155,11 +156,24 @@ export class FinanceTransfersService {
     if (!canConfirmFinanceTransfer(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
       throw new ForbiddenException('You do not have permission to view the transfer cashier queue');
     }
+    const roles = resolveUserRoles(user);
+    const restrictToAssigned =
+      roles.includes(Role.HQ_CASHIER) && !hasAnyFullAccessRole(roles) && !isHqFinanceUser(user);
+    const assignedAccountIds = restrictToAssigned
+      ? await getActiveAssignmentAccountIds(this.prisma, user.id)
+      : null;
+    const assignedIds = assignedAccountIds ? [...assignedAccountIds] : [];
     const rows = await this.prisma.financeTransfer.findMany({
       where: {
         status: { in: [FinanceTransferStatus.PENDING_CASHIER, FinanceTransferStatus.PENDING] },
         sourceAccount: { scope: FinanceAccountScope.HQ },
         destinationAccount: { scope: FinanceAccountScope.HQ },
+        ...(restrictToAssigned
+          ? {
+              sourceAccountId: { in: assignedIds },
+              destinationAccountId: { in: assignedIds },
+            }
+          : {}),
       },
       include: this.transferInclude(),
       orderBy: [{ sentToCashierAt: 'asc' }, { createdAt: 'asc' }],
@@ -174,8 +188,9 @@ export class FinanceTransfersService {
       include: this.transferInclude(),
     });
     if (!transfer) throw new NotFoundException('Transfer not found');
-    assertCanAccessAccountScope(user, transfer.sourceAccount);
-    assertCanAccessAccountScope(user, transfer.destinationAccount);
+    const assignedAccountIds = await getActiveAssignmentAccountIds(this.prisma, user.id);
+    assertCanAccessAccountScope(user, transfer.sourceAccount, assignedAccountIds);
+    assertCanAccessAccountScope(user, transfer.destinationAccount, assignedAccountIds);
     return this.toTransferResponse(transfer);
   }
 
@@ -746,8 +761,9 @@ export class FinanceTransfersService {
       throw new BadRequestException('Currency mismatch between accounts');
     }
 
-    assertCanAccessAccountScope(user, sourceAccount);
-    assertCanAccessAccountScope(user, destinationAccount);
+    const assignedAccountIds = await getActiveAssignmentAccountIds(this.prisma, user.id);
+    assertCanAccessAccountScope(user, sourceAccount, assignedAccountIds);
+    assertCanAccessAccountScope(user, destinationAccount, assignedAccountIds);
 
     if (requireBalance && amount > Number(sourceAccount.availableBalance) + 0.009) {
       throw new BadRequestException(

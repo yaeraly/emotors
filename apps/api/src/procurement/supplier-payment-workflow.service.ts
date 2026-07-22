@@ -21,6 +21,10 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { FinanceLedgerService } from '../finance/finance-ledger.service';
+import {
+  assertHqCashierAssignedAccount,
+  getActiveAssignmentAccountIds,
+} from '../finance/finance-assignment.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -261,11 +265,21 @@ export class SupplierPaymentWorkflowService {
     if (!canCreateSupplierPayment(user) && !canConfirmSupplierPayment(user)) {
       throw new ForbiddenException('Forbidden');
     }
+    const roles = resolveUserRoles(user);
+    const restrictToAssigned =
+      roles.includes(Role.HQ_CASHIER) &&
+      !hasAnyFullAccessRole(roles) &&
+      !roles.includes(Role.HQ_ACCOUNTANT) &&
+      !roles.includes(Role.FINANCE_MANAGER);
+    const assignedAccountIds = restrictToAssigned
+      ? await getActiveAssignmentAccountIds(this.prisma, user.id)
+      : null;
     const accounts = await this.prisma.financeAccount.findMany({
       where: {
         deletedAt: null,
         scope: FinanceAccountScope.HQ,
         status: FinanceAccountStatus.ACTIVE,
+        ...(restrictToAssigned ? { id: { in: [...(assignedAccountIds ?? [])] } } : {}),
       },
       select: {
         id: true,
@@ -1011,6 +1025,7 @@ export class SupplierPaymentWorkflowService {
       }
 
       const account = await this.assertHqFinanceAccount(tx, financeAccountId, true);
+      await assertHqCashierAssignedAccount(this.prisma, user, account.id);
       if (actualPaidKgs > Number(account.availableBalance) + 0.009) {
         throw new BadRequestException('Insufficient HQ Finance Account balance');
       }

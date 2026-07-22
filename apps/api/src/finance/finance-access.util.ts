@@ -154,8 +154,14 @@ export function assertCanAccessAccountScope(
     return;
   }
 
-  // HQ Cashier may view/operate HQ accounts for transfer & supplier payment confirmation.
-  if (roles.includes(Role.HQ_CASHIER) && account.scope === FinanceAccountScope.HQ) {
+  // HQ Cashier may access only HQ accounts they are assigned to (access grant, not ownership).
+  if (roles.includes(Role.HQ_CASHIER)) {
+    if (account.scope !== FinanceAccountScope.HQ) {
+      throw new ForbiddenException('HQ cashiers can only access HQ accounts');
+    }
+    if (!assignedAccountIds.has(account.id)) {
+      throw new ForbiddenException('Cashier can only access assigned accounts');
+    }
     return;
   }
 

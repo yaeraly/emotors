@@ -1219,8 +1219,11 @@ export type FinanceAccount = {
   branch?: { id: string; name: string; code: string } | null;
   assignments?: Array<{
     id: string;
+    isActive?: boolean;
     isPrimary?: boolean;
     allowedOperations?: string[];
+    startDate?: string | null;
+    endDate?: string | null;
     user: { id: string; fullName: string; email: string; role: Role };
   }>;
 };

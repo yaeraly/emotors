@@ -78,7 +78,12 @@ export default function FinanceAccountDetailsPage() {
               <h3 className="font-bold">{t('finance.tabAssignments')}</h3>
               <ul className="mt-3 space-y-2">
                 {account.assignments.map((assignment) => (
-                  <li key={assignment.id} className="text-sm">{assignment.user.fullName} ({assignment.user.email})</li>
+                  <li key={assignment.id} className="text-sm">
+                    {assignment.user.fullName} ({assignment.user.role}) — {assignment.user.email}
+                    {assignment.startDate
+                      ? ` · ${new Date(assignment.startDate).toLocaleDateString()}`
+                      : null}
+                  </li>
                 ))}
               </ul>
             </div>

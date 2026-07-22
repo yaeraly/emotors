@@ -63,14 +63,17 @@ export class FinanceAccountsService {
     if (!canManageFinanceAccounts(user)) {
       throw new ForbiddenException('Forbidden');
     }
-    const effectiveBranchId = branchId ?? user.branchId;
-    if (!effectiveBranchId) {
-      throw new BadRequestException('Branch is required');
+    if (branchId) {
+      if (user.branchId && user.branchId !== branchId) {
+        throw new ForbiddenException('Branch isolation violation');
+      }
+      return listCashierEligibleEmployees(this.prisma, branchId);
     }
-    if (user.branchId && user.branchId !== effectiveBranchId) {
-      throw new ForbiddenException('Branch isolation violation');
+    if (user.branchId) {
+      return listCashierEligibleEmployees(this.prisma, user.branchId);
     }
-    return listCashierEligibleEmployees(this.prisma, effectiveBranchId);
+    // HQ finance managers list HQ cashiers for HQ account assignment (no branch).
+    return listCashierEligibleEmployees(this.prisma, null);
   }
 
   private assertAccountVisible<T extends { id: string; branchId: string | null; scope: FinanceAccountScope }>(
@@ -418,9 +421,18 @@ export class FinanceAccountsService {
       throw new ForbiddenException('Branch isolation violation');
     }
 
-    const eligible = await listCashierEligibleEmployees(this.prisma, account.branchId!);
+    const eligibleBranchId =
+      account.scope === FinanceAccountScope.HQ ? null : account.branchId;
+    if (account.scope === FinanceAccountScope.BRANCH && !account.branchId) {
+      throw new BadRequestException('Branch account is missing branch');
+    }
+    const eligible = await listCashierEligibleEmployees(this.prisma, eligibleBranchId);
     if (!eligible.some((employee) => employee.id === dto.userId)) {
-      throw new BadRequestException('Employee must have active cashier permission before account assignment');
+      throw new BadRequestException(
+        account.scope === FinanceAccountScope.HQ
+          ? 'Employee must be an active HQ Cashier before account assignment'
+          : 'Employee must have active cashier permission before account assignment',
+      );
     }
 
     const allowedOperations =
@@ -513,7 +525,7 @@ export class FinanceAccountsService {
           userId,
         },
       },
-      data: { isActive: false },
+      data: { isActive: false, endDate: new Date() },
     });
 
     await this.prisma.auditLog.create({
