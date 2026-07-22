@@ -40,6 +40,17 @@ type Props = {
   onQrChanged?: () => void;
 };
 
+function normalizeForm(
+  next: Partial<SupplierAccountFormValue> | null | undefined,
+): SupplierAccountFormValue {
+  return {
+    paymentMethod: next?.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+    bankName: next?.bankName ?? '',
+    accountHolder: next?.accountHolder ?? '',
+    accountNumber: next?.accountNumber ?? '',
+  };
+}
+
 /** Compact supplier account fields — no Save button; parent submits via send. */
 export function ProcurementPaymentInfo({
   orderId,
@@ -55,6 +66,14 @@ export function ProcurementPaymentInfo({
   const [active, setActive] = useState<PaymentInfoVersion | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [pendingQr, setPendingQr] = useState<{ file: File; previewUrl: string } | null>(null);
+
+  const form = normalizeForm(value);
+
+  function emitChange(patch: Partial<SupplierAccountFormValue>) {
+    // Keep every field defined for the full lifecycle — never pass undefined/null values.
+    onChange(normalizeForm({ ...form, ...patch }));
+  }
 
   function load() {
     if (!canView) return;
@@ -63,12 +82,14 @@ export function ProcurementPaymentInfo({
         const current = rows.find((v) => v.isActive) ?? rows[0] ?? null;
         setActive(current);
         if (current) {
-          onChange({
-            paymentMethod: current.paymentMethod,
-            bankName: current.bankName ?? '',
-            accountHolder: current.accountHolder ?? '',
-            accountNumber: current.accountNumber ?? '',
-          });
+          onChange(
+            normalizeForm({
+              paymentMethod: current.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+              bankName: current.bankName ?? '',
+              accountHolder: current.accountHolder ?? '',
+              accountNumber: current.accountNumber ?? '',
+            }),
+          );
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -79,24 +100,62 @@ export function ProcurementPaymentInfo({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
+  useEffect(() => {
+    return () => {
+      if (pendingQr?.previewUrl) URL.revokeObjectURL(pendingQr.previewUrl);
+    };
+  }, [pendingQr?.previewUrl]);
+
   async function ensureDraft(method: 'BANK_ACCOUNT' | 'QR_CODE') {
     const saved = await apiFetch<PaymentInfoVersion>(`/procurement/orders/${orderId}/payment-info`, {
       method: 'PUT',
       body: JSON.stringify({
         paymentMethod: method,
-        bankName: method === 'BANK_ACCOUNT' ? value.bankName || undefined : undefined,
-        accountHolder: method === 'BANK_ACCOUNT' ? value.accountHolder || undefined : undefined,
-        accountNumber: method === 'BANK_ACCOUNT' ? value.accountNumber || undefined : undefined,
+        bankName: method === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
+        accountHolder: method === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
+        accountNumber: method === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
       }),
     });
     setActive(saved);
+    onChange(
+      normalizeForm({
+        paymentMethod: saved.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+        // Preserve locally entered bank fields when server clears them for QR mode.
+        bankName: saved.bankName ?? form.bankName,
+        accountHolder: saved.accountHolder ?? form.accountHolder,
+        accountNumber: saved.accountNumber ?? form.accountNumber,
+      }),
+    );
     return saved;
   }
 
+  async function onPaymentMethodChange(nextMethod: 'BANK_ACCOUNT' | 'QR_CODE') {
+    // Update only the method — preserve bank fields already entered.
+    emitChange({ paymentMethod: nextMethod });
+    if (!canEdit) return;
+    // Persist QR method immediately so subsequent QR uploads succeed.
+    // Bank method is persisted on invoice send (account number may still be empty here).
+    if (nextMethod !== 'QR_CODE') return;
+    setBusy(true);
+    setError('');
+    try {
+      await ensureDraft('QR_CODE');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadQr(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const file = event.target.files?.[0] ?? null;
     event.target.value = '';
     if (!file || !canEdit) return;
+
+    if (pendingQr?.previewUrl) URL.revokeObjectURL(pendingQr.previewUrl);
+    const previewUrl = URL.createObjectURL(file);
+    setPendingQr({ file, previewUrl });
+
     setBusy(true);
     setError('');
     try {
@@ -105,7 +164,9 @@ export function ProcurementPaymentInfo({
         version = await ensureDraft('QR_CODE');
       }
       const token = getToken();
-      if (!token) return;
+      if (!token) {
+        throw new Error(t('common.error'));
+      }
       const body = new FormData();
       body.append('file', file);
       const response = await fetch(`${API_URL}/procurement/orders/${orderId}/payment-info/qr`, {
@@ -117,6 +178,8 @@ export function ProcurementPaymentInfo({
         const payload = await response.json().catch(() => ({}));
         throw new Error(payload.message || t('common.error'));
       }
+      URL.revokeObjectURL(previewUrl);
+      setPendingQr(null);
       load();
       onQrChanged?.();
     } catch (err) {
@@ -150,13 +213,10 @@ export function ProcurementPaymentInfo({
       <label className="block">
         <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.paymentMethod')}</span>
         <select
-          value={value.paymentMethod}
+          value={form.paymentMethod || 'BANK_ACCOUNT'}
           disabled={!canEdit || busy}
           onChange={(e) =>
-            onChange({
-              ...value,
-              paymentMethod: e.target.value as 'BANK_ACCOUNT' | 'QR_CODE',
-            })
+            void onPaymentMethodChange(e.target.value === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT')
           }
           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
         >
@@ -165,15 +225,15 @@ export function ProcurementPaymentInfo({
         </select>
       </label>
 
-      {value.paymentMethod === 'BANK_ACCOUNT' ? (
+      {form.paymentMethod === 'BANK_ACCOUNT' ? (
         <div className="grid gap-2 md:grid-cols-3">
           <label className="block md:col-span-1">
             <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.accountNumber')}</span>
             <input
               required
               disabled={!canEdit}
-              value={value.accountNumber}
-              onChange={(e) => onChange({ ...value, accountNumber: e.target.value })}
+              value={form.accountNumber ?? ''}
+              onChange={(e) => emitChange({ accountNumber: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -183,8 +243,8 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={value.bankName}
-              onChange={(e) => onChange({ ...value, bankName: e.target.value })}
+              value={form.bankName ?? ''}
+              onChange={(e) => emitChange({ bankName: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -194,8 +254,8 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={value.accountHolder}
-              onChange={(e) => onChange({ ...value, accountHolder: e.target.value })}
+              value={form.accountHolder ?? ''}
+              onChange={(e) => emitChange({ accountHolder: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -207,25 +267,47 @@ export function ProcurementPaymentInfo({
               {busy ? t('common.loading') : t('procurement.paymentInfo.uploadQr')}
               <input
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png,.webp"
+                accept=".pdf,.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp,application/pdf"
                 className="hidden"
                 disabled={busy}
                 onChange={(e) => void uploadQr(e)}
               />
             </label>
           ) : null}
+          {pendingQr ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-2 text-sm">
+              <p className="font-semibold text-slate-800">{pendingQr.file.name}</p>
+              {pendingQr.file.type.startsWith('image/') ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={pendingQr.previewUrl}
+                  alt={pendingQr.file.name}
+                  className="mt-2 max-h-40 rounded-md border border-slate-100 object-contain"
+                />
+              ) : null}
+              {busy ? <p className="mt-1 text-xs text-slate-500">{t('common.loading')}</p> : null}
+            </div>
+          ) : null}
           {active?.qrCodes?.length ? (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {active.qrCodes.map((qr) => (
                 <div key={qr.id} className="rounded-lg border border-slate-200 bg-white p-2 text-sm">
                   <a
-                    href={`${API_URL}${qr.fileUrl}`}
+                    href={`${API_URL}${qr.fileUrl || ''}`}
                     target="_blank"
                     rel="noreferrer"
                     className="font-semibold text-blue-700"
                   >
-                    {qr.fileName}
+                    {qr.fileName || 'QR'}
                   </a>
+                  {qr.fileUrl && /\.(png|jpe?g|webp)$/i.test(qr.fileUrl) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={`${API_URL}${qr.fileUrl}`}
+                      alt={qr.fileName || 'QR'}
+                      className="mt-2 max-h-40 w-full rounded-md border border-slate-100 object-contain"
+                    />
+                  ) : null}
                   {canEdit ? (
                     <button
                       type="button"
@@ -238,9 +320,9 @@ export function ProcurementPaymentInfo({
                 </div>
               ))}
             </div>
-          ) : (
+          ) : !pendingQr ? (
             <p className="text-xs text-slate-500">{t('procurement.paymentInfo.noQrYet')}</p>
-          )}
+          ) : null}
         </div>
       )}
     </div>

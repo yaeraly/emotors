@@ -232,18 +232,8 @@ export class PaymentInfoService {
     }
 
     let file: Awaited<ReturnType<FastifyRequest['file']>>;
-    let description: string | null = null;
     try {
-      const parts = request.parts();
-      let uploaded: Awaited<ReturnType<FastifyRequest['file']>> | undefined;
-      for await (const part of parts) {
-        if (part.type === 'file' && (part.fieldname === 'file' || !uploaded)) {
-          uploaded = part as Awaited<ReturnType<FastifyRequest['file']>>;
-        } else if (part.type === 'field' && part.fieldname === 'description') {
-          description = String(part.value || '').trim() || null;
-        }
-      }
-      file = uploaded;
+      file = await request.file();
     } catch {
       throw new BadRequestException('File is too large');
     }
@@ -251,13 +241,17 @@ export class PaymentInfoService {
 
     const allowedMimeTypes = new Map<string, string>([
       ['image/jpeg', '.jpg'],
+      ['image/jpg', '.jpg'],
       ['image/png', '.png'],
       ['image/webp', '.webp'],
       ['application/pdf', '.pdf'],
     ]);
     const extensionFromMime = allowedMimeTypes.get(file.mimetype);
-    const originalExtension = extname(file.filename).toLowerCase();
-    if (!extensionFromMime || !['.pdf', '.jpg', '.jpeg', '.png', '.webp'].includes(originalExtension)) {
+    const originalExtension = extname(file.filename || '').toLowerCase();
+    if (
+      !extensionFromMime ||
+      (originalExtension && !['.pdf', '.jpg', '.jpeg', '.png', '.webp'].includes(originalExtension))
+    ) {
       throw new BadRequestException('Invalid QR file format');
     }
 
@@ -266,9 +260,17 @@ export class PaymentInfoService {
       throw new BadRequestException('File is too large');
     }
 
+    const fields = file.fields as Record<string, { value?: string } | undefined>;
+    const description = fields?.description?.value?.trim() || null;
+
     const uploadDirectory = join(process.cwd(), 'uploads', 'procurement');
     await mkdir(uploadDirectory, { recursive: true });
-    const extension = originalExtension === '.jpeg' ? '.jpg' : extensionFromMime;
+    const extension =
+      originalExtension === '.jpeg' || originalExtension === '.jpg'
+        ? '.jpg'
+        : originalExtension === '.png' || originalExtension === '.webp' || originalExtension === '.pdf'
+          ? originalExtension
+          : extensionFromMime;
     const storedName = `${randomUUID()}${extension}`;
     await writeFile(join(uploadDirectory, storedName), buffer);
     const fileUrl = `/uploads/procurement/${storedName}`;
@@ -278,7 +280,7 @@ export class PaymentInfoService {
         data: {
           entityType: FileAttachmentEntityType.PAYMENT_QR,
           entityId: active.id,
-          fileName: file.filename,
+          fileName: file.filename || storedName,
           fileUrl,
           mimeType: file.mimetype,
           size: buffer.length,

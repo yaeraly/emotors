@@ -498,8 +498,20 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
             <ProcurementPaymentInfo
               orderId={order.id}
               user={user}
-              value={accountForm}
-              onChange={setAccountForm}
+              value={{
+                paymentMethod: accountForm.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+                bankName: accountForm.bankName ?? '',
+                accountHolder: accountForm.accountHolder ?? '',
+                accountNumber: accountForm.accountNumber ?? '',
+              }}
+              onChange={(next) =>
+                setAccountForm({
+                  paymentMethod: next.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+                  bankName: next.bankName ?? '',
+                  accountHolder: next.accountHolder ?? '',
+                  accountNumber: next.accountNumber ?? '',
+                })
+              }
               disabled={activeInvoiceRequest}
             />
           </div>
