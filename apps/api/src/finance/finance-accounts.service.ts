@@ -102,7 +102,11 @@ export class FinanceAccountsService {
   async listAccounts(user: AuthUser, query: FinanceAccountQueryDto) {
     const scopeFilter = resolveFinanceScopeFilter(user, query.branchId);
     const assignedAccountIds = await this.getAssignedAccountIds(user);
-    const restrictToAssigned = hasCashierCapability(user) && !canManageFinanceAccounts(user) && !isBranchOwnerUser(user);
+    const roles = resolveUserRoles(user);
+    const restrictToAssigned =
+      (hasCashierCapability(user) || roles.includes(Role.HQ_CASHIER)) &&
+      !canManageFinanceAccounts(user) &&
+      !isBranchOwnerUser(user);
 
     const where: Prisma.FinanceAccountWhereInput = {
       deletedAt: null,
@@ -130,11 +134,63 @@ export class FinanceAccountsService {
 
     const refreshed = await this.prisma.financeAccount.findMany({
       where: { id: { in: accounts.map((account) => account.id) } },
-      include: this.accountInclude(),
+      include: {
+        ...this.accountInclude(),
+        reconciliations: {
+          orderBy: { statementDate: 'desc' },
+          take: 1,
+          select: { statementDate: true, completedAt: true, createdAt: true },
+        },
+      },
       orderBy: [{ scope: 'asc' }, { name: 'asc' }],
     });
 
-    return refreshed.map((account) => this.assertAccountVisible(user, account, assignedAccountIds));
+    const ledgerTotals = await this.prisma.financeLedgerEntry.groupBy({
+      by: ['accountId'],
+      where: { accountId: { in: refreshed.map((account) => account.id) } },
+      _sum: { signedAmount: true },
+    });
+    const incomingTotals = await this.prisma.financeLedgerEntry.groupBy({
+      by: ['accountId'],
+      where: {
+        accountId: { in: refreshed.map((account) => account.id) },
+        signedAmount: { gt: 0 },
+      },
+      _sum: { signedAmount: true },
+    });
+    const outgoingTotals = await this.prisma.financeLedgerEntry.groupBy({
+      by: ['accountId'],
+      where: {
+        accountId: { in: refreshed.map((account) => account.id) },
+        signedAmount: { lt: 0 },
+      },
+      _sum: { signedAmount: true },
+    });
+
+    const ledgerMap = new Map(ledgerTotals.map((row) => [row.accountId, Number(row._sum.signedAmount ?? 0)]));
+    const incomingMap = new Map(incomingTotals.map((row) => [row.accountId, Number(row._sum.signedAmount ?? 0)]));
+    const outgoingMap = new Map(
+      outgoingTotals.map((row) => [row.accountId, Math.abs(Number(row._sum.signedAmount ?? 0))]),
+    );
+
+    return refreshed.map((account) => {
+      const base = this.assertAccountVisible(user, account, assignedAccountIds);
+      const lastReconciliation = account.reconciliations?.[0];
+      const totalIncoming = roundMoney(incomingMap.get(account.id) ?? 0);
+      const totalOutgoing = roundMoney(outgoingMap.get(account.id) ?? 0);
+      const expectedClosingBalance = roundMoney(
+        Number(account.availableBalance ?? account.currentBalance ?? ledgerMap.get(account.id) ?? 0),
+      );
+      return {
+        ...base,
+        totalIncoming,
+        totalOutgoing,
+        expectedClosingBalance,
+        lastReconciliationAt: lastReconciliation
+          ? (lastReconciliation.completedAt || lastReconciliation.statementDate || lastReconciliation.createdAt).toISOString()
+          : null,
+      };
+    });
   }
 
   async getAccount(user: AuthUser, id: string) {

@@ -50,6 +50,7 @@ const FINANCE_VIEW_ROLES = [
   Role.ACCOUNTANT,
   Role.FRANCHISE_OWNER,
   Role.CASHIER,
+  Role.HQ_CASHIER,
 ] as const;
 
 const FINANCE_TRANSFER_VIEW_ROLES = [
@@ -76,6 +77,11 @@ const FINANCE_MANAGE_ROLES = [
   Role.FINANCE_MANAGER,
   Role.HQ_ACCOUNTANT,
   Role.ACCOUNTANT,
+] as const;
+
+const FINANCE_RECONCILIATION_WRITE_ROLES = [
+  ...FINANCE_MANAGE_ROLES,
+  Role.HQ_CASHIER,
 ] as const;
 
 @Controller('finance')
@@ -137,7 +143,7 @@ export class FinanceController {
   }
 
   @Post('reconciliations')
-  @Roles(...FINANCE_MANAGE_ROLES)
+  @Roles(...FINANCE_RECONCILIATION_WRITE_ROLES)
   createReconciliation(@CurrentUser() user: AuthUser, @Body() dto: CreateFinanceReconciliationDto) {
     return this.reconciliationService.createReconciliation(user, dto);
   }

@@ -2,6 +2,7 @@ import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import type { User } from './types';
 import { hasCashierCapability } from './cashier-capability';
 import { canManageFinanceAccounts, isHqFinanceUser } from './finance-rbac';
+import { isHqAccountantUser } from './rbac';
 
 export type FinanceNavSection = ModuleSectionLink & {
   roles: Array<'cashier' | 'manage' | 'view' | 'owner' | 'hq'>;
@@ -101,7 +102,9 @@ export function visibleFinanceNavSections(user: User | null) {
   if (isCashierOnlyFinanceUser(user)) {
     return [];
   }
-  return FINANCE_MAIN_NAV.filter((section) => matchesFinanceRole(user, section.roles));
+  return FINANCE_MAIN_NAV
+    .filter((section) => matchesFinanceRole(user, section.roles))
+    .filter((section) => !(isHqAccountantUser(user) && section.href === '/finance/transfers'));
 }
 
 const CASHIER_FINANCE_PATH_PREFIXES = ['/finance/accounts', '/finance/payments', '/finance/shifts'];

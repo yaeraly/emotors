@@ -73,12 +73,15 @@ assertEqual(
   true,
   'Счета к оплате label key present',
 );
+assertEqual(hqNav.some((s) => s.href === '/finance/transfers'), false, 'HQ Accountant nav hides transfers');
 assertEqual(canAccessFinancePath(hqAccountant, '/finance/bills-to-pay'), true, 'HQ Accountant can open bills-to-pay');
 
 const shell = readFileSync(join(__dirname, '../components/ProtectedShell.tsx'), 'utf8');
 assertEqual(shell.includes('hqAccountantView'), true, 'HQ Accountant sidebar panel exists');
 assertEqual(shell.includes('/finance/bills-to-pay'), true, 'HQ Accountant sidebar links to bills-to-pay');
 assertEqual(shell.includes('finance.billsToPay'), true, 'HQ Accountant sidebar label is Счета к оплате');
+const accountantSidebar = shell.slice(shell.indexOf('hqAccountantView'), shell.indexOf('warehouseManagerView'));
+assertEqual(accountantSidebar.includes('/finance/transfers'), false, 'HQ Accountant sidebar has no transfers link');
 
 assertEqual(FINANCE_PAYMENT_TABS.length, 3, 'payment tabs exclude paid');
 assertEqual(

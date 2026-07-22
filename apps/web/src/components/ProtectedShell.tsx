@@ -304,6 +304,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             ) : hqCashierView ? (
               <>
                 <Link href="/finance/cashier-bills" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.cashierBills')}</Link>
+                <Link href="/finance/accounts" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.myAccounts')}</Link>
                 <Link href="/finance/transfers?status=PENDING_CASHIER" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.transfersCashierQueue')}</Link>
                 <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
                 <Link href="/distribution/branch-balances" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.branchBalances')}</Link>
@@ -316,9 +317,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 </Link>
                 <Link href="/finance/dashboard" className={sidebarNavClass(pathname, '/finance/dashboard')}>
                   {t('nav.finance')}
-                </Link>
-                <Link href="/finance/transfers" className={sidebarNavClass(pathname, '/finance/transfers')}>
-                  {t('finance.transfers')}
                 </Link>
                 <Link href="/tax" className={sidebarNavClass(pathname, '/tax')}>
                   {t('tax.title')}

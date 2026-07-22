@@ -820,6 +820,14 @@ function DetailDrawer({
   const allQrs = Array.isArray(detail.qrCodes) ? detail.qrCodes : [];
   const payments = Array.isArray(detail.payments) ? detail.payments : [];
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
   const isTerminal = ['FULLY_PAID', 'REJECTED', 'CANCELLED'].includes(bill.status);
   const isFinance = bill.source === 'FINANCE_EXPENSE';
   const canTakeReview =
@@ -840,8 +848,16 @@ function DetailDrawer({
     Number(bill.remainingAmount) > 0.009;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40">
-      <div className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-slate-900/40"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
           <div>
             <h3 className="text-lg font-bold text-slate-950">{bill.requestNumber}</h3>
@@ -888,31 +904,6 @@ function DetailDrawer({
               />
             </dl>
           </section>
-
-          {bill.source === 'SUPPLIER_INVOICE' ? (
-            <div className="mt-3 rounded-lg border border-slate-200 p-3 text-sm">
-              <p className="font-semibold">{t('finance.billsToPay.supplierDetails')}</p>
-              <p>
-                {t('finance.billsToPay.totalCny')}: {Number(detail.totalYuan || 0).toFixed(2)}
-              </p>
-              <p>
-                {t('finance.billsToPay.paid')}: {Number(detail.totalPaidYuan || 0).toFixed(2)} CNY
-              </p>
-              <p>
-                {t('finance.billsToPay.remaining')}: {Number(detail.remainingYuan || 0).toFixed(2)} CNY
-              </p>
-              {detail.invoiceReturnReason ? (
-                <p className="mt-1 text-amber-800">
-                  {t('finance.billsToPay.returnReason')}: {detail.invoiceReturnReason}
-                </p>
-              ) : null}
-              {detail.invoiceRejectReason ? (
-                <p className="mt-1 text-red-700">
-                  {t('finance.billsToPay.rejectReason')}: {detail.invoiceRejectReason}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
 
           {cargo ? (
             <div className="mt-3 rounded-lg border border-slate-200 p-3 text-sm">
