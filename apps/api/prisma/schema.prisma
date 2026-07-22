@@ -558,7 +558,9 @@ enum TransportExpenseType {
 enum TransportExpenseStatus {
   DRAFT
   WAITING_ACCOUNTANT
+  UNDER_REVIEW
   RETURNED
+  REJECTED
   PENDING_CASHIER
   PARTIALLY_PAID
   PAID
@@ -694,6 +696,9 @@ enum AlertType {
   FINANCE_RECONCILIATION_DIFFERENCE
   FINANCE_EXPENSE_PENDING
   FINANCE_PAYMENT_ACCEPTED
+  PAYABLE_REQUEST_UNDER_REVIEW
+  PAYABLE_REQUEST_REJECTED
+  PAYABLE_REQUEST_APPROVED
 }
 
 enum NotificationModule {
@@ -2885,6 +2890,12 @@ model ProcurementOrder {
   invoiceSentToAccountantAt             DateTime?
   invoiceSentById                       String?
   invoiceSentBy                         User?                                  @relation("ProcurementInvoiceSender", fields: [invoiceSentById], references: [id])
+  /** Accountant review of the supplier invoice request (not payment tranche status). */
+  invoiceReviewStatus                   String?
+  invoiceReturnReason                   String?
+  invoiceRejectReason                   String?
+  invoiceReviewedAt                     DateTime?
+  invoiceReviewedById                   String?
   items                                 ProcurementOrderItem[]
   receivings                            ProcurementGoodsReceiving[]
   differenceReports                     ProcurementDifferenceReport[]
@@ -2914,6 +2925,7 @@ model ProcurementOrder {
   @@index([svhToHqTransportCompanyId])
   @@index([invoiceSentById])
   @@index([invoiceSentToAccountantAt])
+  @@index([invoiceReviewStatus])
   @@index([supplierPaymentStatus])
   @@index([costConfirmationStatus])
 }

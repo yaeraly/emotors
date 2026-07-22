@@ -51,6 +51,18 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
     module: NotificationModule.SUPPLIER_PAYMENT,
     roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
   },
+  PAYABLE_REQUEST_UNDER_REVIEW: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER, Role.FINANCE_MANAGER],
+  },
+  PAYABLE_REQUEST_REJECTED: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER, Role.FINANCE_MANAGER],
+  },
+  PAYABLE_REQUEST_APPROVED: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER, Role.FINANCE_MANAGER],
+  },
   PAYMENT_RECEIVED: { module: NotificationModule.FINANCE, roles: [Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
   BRANCH_INVOICE_CREATED: { module: NotificationModule.FINANCE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.FINANCE_MANAGER] },
   FINANCE_TRANSFER_PENDING: { module: NotificationModule.FINANCE, roles: [Role.FRANCHISE_OWNER, Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT] },
@@ -215,6 +227,18 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   TRANSPORT_EXPENSE_PAID: {
     title: 'Transport expense paid',
     message: 'A transport expense payment was completed.',
+  },
+  PAYABLE_REQUEST_UNDER_REVIEW: {
+    title: 'Счёт на проверке',
+    message: 'Бухгалтер HQ взял счёт на проверку.',
+  },
+  PAYABLE_REQUEST_REJECTED: {
+    title: 'Счёт отклонён',
+    message: 'Бухгалтер HQ отклонил счёт.',
+  },
+  PAYABLE_REQUEST_APPROVED: {
+    title: 'Счёт одобрен',
+    message: 'Бухгалтер HQ одобрил счёт.',
   },
   BRANCH_REQUEST_NO_PRICING_POLICY: {
     title: 'Требуется ценовая политика',

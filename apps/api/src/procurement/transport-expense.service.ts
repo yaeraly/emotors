@@ -114,7 +114,11 @@ export class TransportExpenseService {
     }
     return this.prisma.procurementTransportExpense
       .findMany({
-        where: { status: TransportExpenseStatus.WAITING_ACCOUNTANT },
+        where: {
+          status: {
+            in: [TransportExpenseStatus.WAITING_ACCOUNTANT, TransportExpenseStatus.UNDER_REVIEW],
+          },
+        },
         include: INCLUDE,
         orderBy: [{ submittedAt: 'asc' }, { createdAt: 'asc' }],
         take: 200,
@@ -611,7 +615,10 @@ export class TransportExpenseService {
     return this.prisma.$transaction(async (tx) => {
       const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
       if (!expense) throw new NotFoundException('Transport expense not found');
-      if (expense.status !== TransportExpenseStatus.WAITING_ACCOUNTANT) {
+      if (
+        expense.status !== TransportExpenseStatus.WAITING_ACCOUNTANT &&
+        expense.status !== TransportExpenseStatus.UNDER_REVIEW
+      ) {
         throw new BadRequestException('Expense is not waiting for accountant');
       }
 
@@ -685,6 +692,7 @@ export class TransportExpenseService {
       if (!expense) throw new NotFoundException('Transport expense not found');
       if (
         expense.status !== TransportExpenseStatus.WAITING_ACCOUNTANT &&
+        expense.status !== TransportExpenseStatus.UNDER_REVIEW &&
         expense.status !== TransportExpenseStatus.PENDING_CASHIER &&
         expense.status !== TransportExpenseStatus.PARTIALLY_PAID
       ) {

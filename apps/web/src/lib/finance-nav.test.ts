@@ -56,6 +56,22 @@ const accountantNav = visibleFinanceNavSections(branchAccountant);
 assertEqual(accountantNav.some((s) => s.href === '/finance/dashboard'), true, 'accountant sees dashboard');
 assertEqual(accountantNav.some((s) => s.href === '/finance/reconciliation'), true, 'accountant sees reconciliation');
 
+const hqAccountant = {
+  id: 'hq-acc-1',
+  email: 'hq-acc@test.com',
+  fullName: 'HQ Accountant',
+  role: 'HQ_ACCOUNTANT' as const,
+  roles: ['HQ_ACCOUNTANT' as const],
+  permissions: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
+} satisfies User;
+const hqNav = visibleFinanceNavSections(hqAccountant);
+assertEqual(hqNav.some((s) => s.href === '/finance/bills-to-pay'), true, 'HQ Accountant sees Счета к оплате');
+assertEqual(
+  hqNav.some((s) => s.labelKey === 'finance.billsToPay'),
+  true,
+  'Счета к оплате label key present',
+);
+
 assertEqual(FINANCE_PAYMENT_TABS.length, 3, 'payment tabs exclude paid');
 assertEqual(
   FINANCE_PAYMENT_TABS.some((tab) => tab.href.includes('PAID')),

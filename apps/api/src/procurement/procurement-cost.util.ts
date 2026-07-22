@@ -27,6 +27,7 @@ const CONFIRMED_PAYMENT = new Set(['ACTIVE', 'PAID', 'COMPLETED', 'CONFIRMED']);
 const OPEN_EXPENSE = new Set<string>([
   TransportExpenseStatus.DRAFT,
   TransportExpenseStatus.WAITING_ACCOUNTANT,
+  TransportExpenseStatus.UNDER_REVIEW,
   TransportExpenseStatus.RETURNED,
   TransportExpenseStatus.PENDING_CASHIER,
   TransportExpenseStatus.PARTIALLY_PAID,

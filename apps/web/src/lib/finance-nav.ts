@@ -11,7 +11,7 @@ export const FINANCE_MAIN_NAV: FinanceNavSection[] = [
   { href: '/finance/dashboard', labelKey: 'finance.dashboard', roles: ['view', 'manage', 'owner', 'hq'] },
   { href: '/finance/accounts', labelKey: 'finance.accounts', roles: ['view', 'manage', 'cashier', 'owner', 'hq'] },
   { href: '/finance/payments', labelKey: 'finance.payments', roles: ['view', 'manage', 'cashier', 'owner', 'hq'] },
-  { href: '/procurement/accountant-payments', labelKey: 'procurement.payments.accountantQueue', roles: ['manage', 'hq'] },
+  { href: '/finance/bills-to-pay', labelKey: 'finance.billsToPay', roles: ['hq'] },
   { href: '/finance/income', labelKey: 'finance.income', roles: ['view', 'manage', 'owner', 'hq'] },
   { href: '/finance/expenses', labelKey: 'finance.expenses', roles: ['view', 'manage', 'owner', 'hq'] },
   { href: '/finance/transfers', labelKey: 'finance.transfers', roles: ['view', 'manage', 'owner', 'hq', 'cashier'] },
@@ -78,8 +78,9 @@ export const FINANCE_REPORT_LINKS: ModuleSectionLink[] = [
 
 function matchesFinanceRole(user: User, roles: FinanceNavSection['roles']) {
   if (hasCashierCapability(user)) return roles.includes('cashier');
+  // HQ finance users must match before generic finance.manage so HQ-only tabs stay HQ-only.
+  if (isHqFinanceUser(user)) return roles.includes('hq') || roles.includes('manage') || roles.includes('view');
   if (canManageFinanceAccounts(user)) return roles.includes('manage') || roles.includes('view');
-  if (isHqFinanceUser(user)) return roles.includes('hq') || roles.includes('view');
   if (user.roles?.includes('FRANCHISE_OWNER') || user.role === 'FRANCHISE_OWNER') {
     return roles.includes('owner') || roles.includes('view');
   }

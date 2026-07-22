@@ -729,7 +729,10 @@ export function canAccessPath(user: User, pathname: string) {
     return canViewProcurement(user) || hasPermission(user, 'reports.view');
   }
   // /procurement/payments redirects to orders; supplier payments live on order detail.
-  if (pathname.startsWith('/procurement/accountant-payments')) {
+  if (
+    pathname.startsWith('/procurement/accountant-payments') ||
+    pathname.startsWith('/finance/bills-to-pay')
+  ) {
     return canCreateSupplierPayment(user);
   }
   if (pathname.startsWith('/procurement/cashier-payments')) {

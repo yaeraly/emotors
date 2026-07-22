@@ -29,6 +29,8 @@ import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto'
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
 import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
 import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
+import { AccountantBillsService, type AccountantBillsQuery } from './accountant-bills.service';
+import type { AccountantBillSource } from './accountant-bills.util';
 import { PaymentInfoService } from './payment-info.service';
 import { ProcurementService } from './procurement.service';
 import { TransportExpenseService } from './transport-expense.service';
@@ -42,6 +44,7 @@ export class ProcurementController {
     private readonly service: ProcurementService,
     private readonly paymentInfoService: PaymentInfoService,
     private readonly transportExpenseService: TransportExpenseService,
+    private readonly accountantBillsService: AccountantBillsService,
   ) {}
 
   @Post('suppliers')
@@ -228,6 +231,71 @@ export class ProcurementController {
   @RequirePermissions('finance.view', 'payments.manage')
   accountantPaymentQueue(@CurrentUser() user: AuthUser) {
     return this.service.listAccountantPaymentQueue(user);
+  }
+
+  @Get('bills-to-pay')
+  @RequirePermissions('finance.view', 'payments.manage')
+  listBillsToPay(@CurrentUser() user: AuthUser, @Query() query: AccountantBillsQuery) {
+    return this.accountantBillsService.list(user, query);
+  }
+
+  @Get('bills-to-pay/summary')
+  @RequirePermissions('finance.view', 'payments.manage')
+  billsToPaySummary(@CurrentUser() user: AuthUser, @Query() query: AccountantBillsQuery) {
+    return this.accountantBillsService.summary(user, query);
+  }
+
+  @Get('bills-to-pay/:source/:id')
+  @RequirePermissions('finance.view', 'payments.manage')
+  getBillToPay(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: AccountantBillSource,
+    @Param('id') id: string,
+  ) {
+    return this.accountantBillsService.getOne(user, source, id);
+  }
+
+  @Post('bills-to-pay/:source/:id/take-review')
+  @RequirePermissions('finance.view', 'payments.manage')
+  takeBillForReview(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: AccountantBillSource,
+    @Param('id') id: string,
+  ) {
+    return this.accountantBillsService.takeForReview(user, source, id);
+  }
+
+  @Post('bills-to-pay/:source/:id/return')
+  @RequirePermissions('finance.view', 'payments.manage')
+  returnBillForCorrection(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: AccountantBillSource,
+    @Param('id') id: string,
+    @Body() dto: { reason?: string },
+  ) {
+    return this.accountantBillsService.returnForCorrection(user, source, id, dto?.reason || '');
+  }
+
+  @Post('bills-to-pay/:source/:id/reject')
+  @RequirePermissions('finance.view', 'payments.manage')
+  rejectBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: AccountantBillSource,
+    @Param('id') id: string,
+    @Body() dto: { reason?: string },
+  ) {
+    return this.accountantBillsService.reject(user, source, id, dto?.reason || '');
+  }
+
+  @Post('bills-to-pay/:source/:id/approve')
+  @RequirePermissions('finance.view', 'payments.manage')
+  approveBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: AccountantBillSource,
+    @Param('id') id: string,
+    @Body() dto: any,
+  ) {
+    return this.accountantBillsService.approve(user, source, id, dto);
   }
 
   @Get('cashier-payment-queue')

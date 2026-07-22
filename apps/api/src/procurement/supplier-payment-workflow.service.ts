@@ -295,13 +295,21 @@ export class SupplierPaymentWorkflowService {
     return this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, orderId);
 
+      const reviewStatus = String(order.invoiceReviewStatus || '').toUpperCase();
+      const canResubmitAfterReturn = reviewStatus === 'RETURNED';
       if (
-        order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
-        order.supplierPaymentStatus === 'AWAITING_CASHIER'
+        !canResubmitAfterReturn &&
+        (order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
+          order.supplierPaymentStatus === 'AWAITING_CASHIER' ||
+          reviewStatus === 'UNDER_REVIEW' ||
+          reviewStatus === 'APPROVED')
       ) {
         throw new BadRequestException(
           'An active supplier payment request already exists for this procurement order',
         );
+      }
+      if (reviewStatus === 'REJECTED') {
+        throw new BadRequestException('Rejected supplier invoice cannot be resubmitted');
       }
 
       const remainingOrTotal = roundMoney(
@@ -413,6 +421,11 @@ export class SupplierPaymentWorkflowService {
           requestedPaymentYuan,
           invoiceSentToAccountantAt: order.invoiceSentToAccountantAt ?? new Date(),
           invoiceSentById: order.invoiceSentById ?? user.id,
+          invoiceReviewStatus: 'SUBMITTED',
+          invoiceReturnReason: null,
+          invoiceRejectReason: null,
+          invoiceReviewedAt: null,
+          invoiceReviewedById: null,
         },
         include: {
           supplier: { select: { id: true, name: true } },
