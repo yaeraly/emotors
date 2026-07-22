@@ -29,7 +29,18 @@ import { planInvestmentEditEffect } from './finance-investments.util';
 type Tx = Prisma.TransactionClient;
 
 const INVESTMENT_INCLUDE = {
-  account: { select: { id: true, name: true, accountNumber: true, branchId: true, status: true, currency: true } },
+  account: {
+    select: {
+      id: true,
+      name: true,
+      accountNumber: true,
+      branchId: true,
+      status: true,
+      currency: true,
+      currentBalance: true,
+      availableBalance: true,
+    },
+  },
   createdBy: { select: { id: true, fullName: true, email: true } },
   deletedBy: { select: { id: true, fullName: true, email: true } },
   ledgerEntry: {
@@ -38,6 +49,7 @@ const INVESTMENT_INCLUDE = {
       entryNumber: true,
       entryType: true,
       amount: true,
+      signedAmount: true,
       beforeBalance: true,
       afterBalance: true,
     },
@@ -214,6 +226,7 @@ export class FinanceInvestmentsService {
           referenceType: 'FinanceInvestmentEditReversal',
           referenceId: existing.id,
           notes: `Investment ${existing.investmentNumber} account change reversal`,
+          allowNegativeBalance: true,
         });
         reversalEntryId = reversal.id;
 
@@ -249,6 +262,7 @@ export class FinanceInvestmentsService {
           reversalEntryNumber: reversal.entryNumber,
         });
       } else if (plan.kind === 'amount_delta') {
+        // Post only the delta once — never re-credit the full investment amount.
         await this.ledgerService.postLedgerEntry(tx, user, {
           accountId: existing.accountId,
           branchId: existing.branchId,
@@ -261,15 +275,7 @@ export class FinanceInvestmentsService {
             plan.delta > 0
               ? `Investment ${existing.investmentNumber} amount increase`
               : `Investment ${existing.investmentNumber} amount decrease`,
-        });
-
-        await tx.financeLedgerEntry.update({
-          where: { id: existing.ledgerEntryId },
-          data: {
-            amount: nextAmount,
-            signedAmount: nextAmount,
-            currency: nextCurrency,
-          },
+          allowNegativeBalance: plan.delta < 0,
         });
 
         await this.audit(tx, user, 'finance.investment.amount_changed', id, {
@@ -335,6 +341,11 @@ export class FinanceInvestmentsService {
       throw new ForbiddenException('Only CEO/Owner can delete investments');
     }
 
+    const reason = String(dto.reason || '').trim();
+    if (reason.length < 3) {
+      throw new BadRequestException('Deletion reason must be at least 3 characters');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.financeInvestment.findUnique({
         where: { id },
@@ -346,7 +357,8 @@ export class FinanceInvestmentsService {
       }
       this.assertNotLocked(existing);
 
-      const amount = Number(existing.amount);
+      const amount = roundMoney(Number(existing.amount));
+      // Always reverse the investment credit on the linked account, even if cash was later spent.
       const reversal = await this.ledgerService.postLedgerEntry(tx, user, {
         accountId: existing.accountId,
         branchId: existing.branchId,
@@ -355,7 +367,8 @@ export class FinanceInvestmentsService {
         currency: existing.currency,
         referenceType: 'FinanceInvestmentDeletionReversal',
         referenceId: existing.id,
-        notes: `Investment ${existing.investmentNumber} deletion: ${dto.reason.trim()}`,
+        notes: `Investment ${existing.investmentNumber} deletion: ${reason}`,
+        allowNegativeBalance: true,
       });
 
       const deleted = await tx.financeInvestment.update({
@@ -363,7 +376,7 @@ export class FinanceInvestmentsService {
         data: {
           deletedAt: new Date(),
           deletedById: user.id,
-          deletionReason: dto.reason.trim(),
+          deletionReason: reason,
         },
         include: INVESTMENT_INCLUDE,
       });
@@ -376,7 +389,7 @@ export class FinanceInvestmentsService {
       }, {
         deletedAt: deleted.deletedAt,
         deletedById: user.id,
-        deletionReason: dto.reason.trim(),
+        deletionReason: reason,
         reversalEntryId: reversal.id,
         reversalEntryNumber: reversal.entryNumber,
       });
@@ -424,10 +437,38 @@ export class FinanceInvestmentsService {
   }
 
   private toResponse(investment: any) {
+    const account = investment.account
+      ? {
+          ...investment.account,
+          currentBalance:
+            investment.account.currentBalance != null
+              ? Number(investment.account.currentBalance)
+              : undefined,
+          availableBalance:
+            investment.account.availableBalance != null
+              ? Number(investment.account.availableBalance)
+              : undefined,
+        }
+      : investment.account;
+    const ledgerEntry = investment.ledgerEntry
+      ? {
+          ...investment.ledgerEntry,
+          amount: Number(investment.ledgerEntry.amount),
+          signedAmount:
+            investment.ledgerEntry.signedAmount != null
+              ? Number(investment.ledgerEntry.signedAmount)
+              : undefined,
+          beforeBalance: Number(investment.ledgerEntry.beforeBalance),
+          afterBalance: Number(investment.ledgerEntry.afterBalance),
+        }
+      : investment.ledgerEntry;
+
     return {
       ...investment,
       amount: Number(investment.amount),
       deleted: !!investment.deletedAt,
+      account,
+      ledgerEntry,
     };
   }
 

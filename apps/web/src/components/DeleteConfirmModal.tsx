@@ -8,6 +8,9 @@ type Props = {
   title: string;
   message: string;
   requireReason?: boolean;
+  /** Minimum trimmed reason length when requireReason is true. */
+  minLength?: number;
+  reasonPlaceholder?: string;
   loading?: boolean;
   onClose: () => void;
   onConfirm: (reason?: string) => void | Promise<void>;
@@ -18,6 +21,8 @@ export function DeleteConfirmModal({
   title,
   message,
   requireReason = false,
+  minLength = 1,
+  reasonPlaceholder,
   loading = false,
   onClose,
   onConfirm,
@@ -44,9 +49,10 @@ export function DeleteConfirmModal({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               required
+              minLength={minLength}
               rows={3}
               className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              placeholder={t('common.deleteReasonPlaceholder')}
+              placeholder={reasonPlaceholder || t('common.deleteReasonPlaceholder')}
             />
           </label>
         ) : null}
@@ -56,7 +62,7 @@ export function DeleteConfirmModal({
           </button>
           <button
             type="submit"
-            disabled={loading || (requireReason && !reason.trim())}
+            disabled={loading || (requireReason && reason.trim().length < minLength)}
             className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-red-300"
           >
             {loading ? t('common.loading') : t('common.delete')}

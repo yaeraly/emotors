@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { FileAttachmentEntityType, FinanceAccountStatus, Role } from '@prisma/client';
 import type { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
@@ -380,9 +380,14 @@ export class FinanceController {
   deleteInvestment(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
-    @Body() dto: DeleteFinanceInvestmentDto,
+    @Body() body: DeleteFinanceInvestmentDto,
+    @Query('reason') reasonQuery?: string,
   ) {
-    return this.investmentsService.deleteInvestment(user, id, dto);
+    const reason = String(body?.reason || reasonQuery || '').trim();
+    if (reason.length < 3) {
+      throw new BadRequestException('Deletion reason must be at least 3 characters');
+    }
+    return this.investmentsService.deleteInvestment(user, id, { reason });
   }
 
   @Get('shifts')

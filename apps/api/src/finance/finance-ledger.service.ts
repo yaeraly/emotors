@@ -19,6 +19,8 @@ export type PostLedgerEntryInput = {
   referenceType?: string;
   referenceId?: string;
   notes?: string;
+  /** When true, allow the resulting account balance to go negative (investment reversals). */
+  allowNegativeBalance?: boolean;
 };
 
 @Injectable()
@@ -35,6 +37,9 @@ export class FinanceLedgerService {
       throw new BadRequestException('Amount must be greater than zero');
     }
 
+    // Serialize balance updates per account so investment credits persist reliably.
+    await tx.$queryRaw`SELECT id FROM "FinanceAccount" WHERE id = ${input.accountId} FOR UPDATE`;
+
     const account = await tx.financeAccount.findFirst({
       where: { id: input.accountId, deletedAt: null },
     });
@@ -46,7 +51,7 @@ export class FinanceLedgerService {
     const beforeBalance = roundMoney(Number(account.currentBalance));
     const afterBalance = roundMoney(beforeBalance + signedAmount);
 
-    if (afterBalance < 0) {
+    if (afterBalance < 0 && !input.allowNegativeBalance) {
       throw new BadRequestException('Insufficient account balance');
     }
 

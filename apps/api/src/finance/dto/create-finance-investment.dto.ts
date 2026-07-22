@@ -69,7 +69,9 @@ export class UpdateFinanceInvestmentDto {
 }
 
 export class DeleteFinanceInvestmentDto {
+  /** Optional here so DELETE can also accept `?reason=` when body is empty. */
+  @IsOptional()
   @IsString()
   @MinLength(3)
-  reason!: string;
+  reason?: string;
 }

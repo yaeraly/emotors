@@ -134,7 +134,7 @@ export default function FinanceInvestmentsPage() {
         });
       }
       resetForm();
-      load(showDeleted);
+      await load(showDeleted);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -143,17 +143,22 @@ export default function FinanceInvestmentsPage() {
   };
 
   const onDelete = async (reason?: string) => {
-    if (!deleteTarget || !reason?.trim()) return;
+    const trimmed = reason?.trim() || '';
+    if (!deleteTarget || trimmed.length < 3) {
+      setError(t('finance.deleteReasonMinLength') || 'Deletion reason must be at least 3 characters');
+      return;
+    }
     setDeleting(true);
     setError('');
     try {
-      await apiFetch(`/finance/investments/${deleteTarget.id}`, {
+      const qs = `?reason=${encodeURIComponent(trimmed)}`;
+      await apiFetch(`/finance/investments/${deleteTarget.id}${qs}`, {
         method: 'DELETE',
-        body: JSON.stringify({ reason: reason.trim() }),
+        body: JSON.stringify({ reason: trimmed }),
       });
       setDeleteTarget(null);
       if (editingId === deleteTarget.id) resetForm();
-      load(showDeleted);
+      await load(showDeleted);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -237,7 +242,7 @@ export default function FinanceInvestmentsPage() {
             <option value="">{t('finance.account')}</option>
             {activeAccounts.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.name}
+                {a.name} — {Number(a.currentBalance || 0).toLocaleString('ru-RU', { minimumFractionDigits: 2 })} {a.currency}
               </option>
             ))}
           </select>
@@ -460,6 +465,8 @@ export default function FinanceInvestmentsPage() {
         title={t('finance.deleteInvestment')}
         message={deleteMessage}
         requireReason
+        minLength={3}
+        reasonPlaceholder={t('finance.deleteReasonMinLength')}
         loading={deleting}
         onClose={() => setDeleteTarget(null)}
         onConfirm={onDelete}

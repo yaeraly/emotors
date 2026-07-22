@@ -79,7 +79,17 @@ export class FinanceAccountsService {
     assignedAccountIds: Set<string>,
   ) {
     assertCanAccessAccountScope(user, account, assignedAccountIds);
-    return account;
+    return this.toAccountResponse(account);
+  }
+
+  private toAccountResponse<T extends Record<string, any>>(account: T) {
+    return {
+      ...account,
+      openingBalance: Number(account.openingBalance ?? 0),
+      currentBalance: Number(account.currentBalance ?? 0),
+      availableBalance: Number(account.availableBalance ?? 0),
+      pendingBalance: Number(account.pendingBalance ?? 0),
+    };
   }
 
   async listAccountTypes() {
@@ -129,7 +139,16 @@ export class FinanceAccountsService {
     });
     if (!account) throw new NotFoundException('Account not found');
     this.assertAccountVisible(user, account, await this.getAssignedAccountIds(user));
-    return account;
+    return this.toAccountResponse({
+      ...account,
+      ledgerEntries: (account.ledgerEntries ?? []).map((entry) => ({
+        ...entry,
+        amount: Number(entry.amount),
+        signedAmount: Number(entry.signedAmount),
+        beforeBalance: Number(entry.beforeBalance),
+        afterBalance: Number(entry.afterBalance),
+      })),
+    });
   }
 
   async createAccount(user: AuthUser, dto: CreateFinanceAccountDto) {
