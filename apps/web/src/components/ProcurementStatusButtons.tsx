@@ -39,11 +39,13 @@ export function ProcurementStatusButtons({ orderStatus, onAction }: Props) {
       path: entry.path,
       labelKey: workflowLabelKey(entry.path),
       state: getProcurementStatusButtonState(orderStatus, entry),
+      readOnly: entry.path === 'mark-paid',
     })),
     {
       path: CANCEL_ACTION.path,
       labelKey: 'distribution.cancel',
       state: getProcurementStatusButtonState(orderStatus, CANCEL_ACTION),
+      readOnly: false,
     },
   ];
 
@@ -51,13 +53,23 @@ export function ProcurementStatusButtons({ orderStatus, onAction }: Props) {
     <div className="flex flex-wrap gap-2">
       {actions.map((action) => {
         const hintKey = statusHintKey(action.state);
+        const disabled = isStatusActionDisabled(action.state) || action.readOnly;
         return (
           <button
             key={action.path}
             type="button"
-            disabled={isStatusActionDisabled(action.state)}
-            onClick={() => onAction(action.path)}
-            title={hintKey ? t(hintKey) : undefined}
+            disabled={disabled}
+            onClick={() => {
+              if (action.readOnly || isStatusActionDisabled(action.state)) return;
+              onAction(action.path);
+            }}
+            title={
+              action.readOnly && action.state !== 'current' && action.state !== 'completed'
+                ? t('procurement.statusButtons.paidReadOnly')
+                : hintKey
+                  ? t(hintKey)
+                  : undefined
+            }
             className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed ${statusButtonClassName(action.state)} ${action.state === 'current' ? 'font-bold' : ''}`}
           >
             {(action.state === 'completed' || action.state === 'current') ? (

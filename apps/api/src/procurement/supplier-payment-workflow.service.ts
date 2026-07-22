@@ -13,6 +13,7 @@ import {
   FileAttachmentEntityType,
   Prisma,
   ProcurementKgsAdjustmentReason,
+  ProcurementOrderStatus,
   ProcurementPaymentInfoMethod,
   ProcurementSupplierPaymentMethod,
   ProcurementSupplierPaymentStatus,
@@ -1312,6 +1313,17 @@ export class SupplierPaymentWorkflowService {
       { invoiceSentToAccountantAt: order.invoiceSentToAccountantAt },
     );
 
+    const fullyPaid =
+      summary.supplierPaymentStatus === 'PAID' || summary.supplierPaymentStatus === 'OVERPAID';
+    const canAdvanceOrderStatusToPaid = (
+      [
+        ProcurementOrderStatus.DRAFT,
+        ProcurementOrderStatus.APPROVED,
+        ProcurementOrderStatus.ORDERED,
+        ProcurementOrderStatus.SENT_TO_SUPPLIER,
+      ] as string[]
+    ).includes(order.status);
+
     const updated = await tx.procurementOrder.update({
       where: { id: order.id },
       data: {
@@ -1320,10 +1332,10 @@ export class SupplierPaymentWorkflowService {
         remainingYuan: summary.remainingYuan,
         weightedAverageYuanRate: summary.weightedAverageYuanRate,
         supplierPaymentStatus: summary.supplierPaymentStatus,
-        paidAt:
-          summary.supplierPaymentStatus === 'PAID' || summary.supplierPaymentStatus === 'OVERPAID'
-            ? order.paidAt ?? new Date()
-            : order.paidAt,
+        ...(fullyPaid && canAdvanceOrderStatusToPaid
+          ? { status: ProcurementOrderStatus.PAID }
+          : {}),
+        paidAt: fullyPaid ? order.paidAt ?? new Date() : order.paidAt,
       },
       include: {
         supplier: { select: { id: true, name: true } },
@@ -1331,6 +1343,15 @@ export class SupplierPaymentWorkflowService {
         supplierPayments: { include: PAYMENT_INCLUDE, orderBy: { sequenceNumber: 'asc' } },
       },
     });
+
+    if (fullyPaid && canAdvanceOrderStatusToPaid && order.status !== ProcurementOrderStatus.PAID) {
+      await this.audit(tx, user, 'PROCUREMENT_STATUS_CHANGE', order.id, {
+        status: order.status,
+      }, {
+        status: ProcurementOrderStatus.PAID,
+        reason: 'Set automatically after supplier payment confirmation',
+      }, reason);
+    }
 
     await this.audit(tx, user, 'SUPPLIER_PAYMENT_TOTALS_RECALCULATED', order.id, {
       totalPaidYuan: Number(order.totalPaidYuan ?? 0),

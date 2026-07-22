@@ -1843,6 +1843,11 @@ export class ProcurementService {
     if (status === ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE) {
       throw new BadRequestException('Use receive-to-hq workflow to post inventory into HQ warehouse');
     }
+    if (status === ProcurementOrderStatus.PAID) {
+      throw new BadRequestException(
+        'Order status PAID is set automatically after supplier payment confirmation',
+      );
+    }
     if (status === ProcurementOrderStatus.ARRIVED) {
       return this.markProcurementArrived(user, id);
     }
@@ -1855,7 +1860,6 @@ export class ProcurementService {
         data.approvedById = user.id;
         data.approvedAt = new Date();
       }
-      if (status === ProcurementOrderStatus.PAID) data.paidAt = new Date();
       if (status === ProcurementOrderStatus.SHIPPED_TO_YIWU) {
         data.shippedAt = new Date();
         await this.auditProcurement(
@@ -3556,6 +3560,19 @@ export class ProcurementService {
         remainingYuan: summary.remainingYuan,
         weightedAverageYuanRate: summary.weightedAverageYuanRate,
         supplierPaymentStatus: summary.supplierPaymentStatus,
+        ...(
+          (summary.supplierPaymentStatus === 'PAID' || summary.supplierPaymentStatus === 'OVERPAID') &&
+          (
+            [
+              ProcurementOrderStatus.DRAFT,
+              ProcurementOrderStatus.APPROVED,
+              ProcurementOrderStatus.ORDERED,
+              ProcurementOrderStatus.SENT_TO_SUPPLIER,
+            ] as string[]
+          ).includes(order.status)
+            ? { status: ProcurementOrderStatus.PAID }
+            : {}
+        ),
         paidAt:
           summary.supplierPaymentStatus === 'PAID' || summary.supplierPaymentStatus === 'OVERPAID'
             ? order.paidAt ?? new Date()

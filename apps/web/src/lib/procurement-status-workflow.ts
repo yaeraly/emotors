@@ -52,6 +52,14 @@ export function getProcurementStatusButtonState(
     return 'current';
   }
 
+  // PAID is set only by supplier payment confirmation — never a manual next step.
+  if (action.path === 'mark-paid') {
+    if (currentIndex > actionIndex) {
+      return 'completed';
+    }
+    return 'unavailable';
+  }
+
   if (currentIndex < 0) {
     return actionIndex === 0 ? 'next' : 'unavailable';
   }
