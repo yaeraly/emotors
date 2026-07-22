@@ -120,10 +120,15 @@ assertEqual(
   1000,
   '11. same approved amount allowed',
 );
+assertEqual(
+  assertCashierCannotMutateApprovedAmount({ approvedAmountKgs: 1000, requestedActualPaidKgs: 900 }),
+  900,
+  '11. underpayment within approved amount allowed',
+);
 assertThrows(
-  () => assertCashierCannotMutateApprovedAmount({ approvedAmountKgs: 1000, requestedActualPaidKgs: 900 }),
+  () => assertCashierCannotMutateApprovedAmount({ approvedAmountKgs: 1000, requestedActualPaidKgs: 1100 }),
   'cannot change the approved payment amount',
-  '11. amount mutation blocked',
+  '11. amount over approved blocked',
 );
 assertThrows(
   () =>
