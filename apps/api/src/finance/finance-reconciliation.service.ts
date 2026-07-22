@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AlertType, FinanceReconciliationStatus } from '@prisma/client';
+import { AlertType, FinanceReconciliationStatus, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,9 +13,11 @@ import {
   canManageFinanceAccounts,
   resolveFinanceScopeFilter,
 } from './finance-access.util';
+import { getActiveAssignmentAccountIds } from './finance-assignment.util';
 import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
 import { CreateFinanceReconciliationDto } from './dto/create-finance-reconciliation.dto';
 import { FinanceReportQueryDto } from './dto/finance-report-query.dto';
+import { resolveUserRoles } from '../rbac/rbac';
 
 @Injectable()
 export class FinanceReconciliationService {
@@ -26,10 +28,17 @@ export class FinanceReconciliationService {
 
   async listReconciliations(user: AuthUser, query: FinanceReportQueryDto & { status?: FinanceReconciliationStatus }) {
     const scopeFilter = resolveFinanceScopeFilter(user, query.branchId);
+    const roles = resolveUserRoles(user);
+    const assignedAccountIds =
+      roles.includes(Role.HQ_CASHIER) && !canManageFinanceAccounts(user)
+        ? await getActiveAssignmentAccountIds(this.prisma, user.id)
+        : null;
+
     return this.prisma.financeReconciliation.findMany({
       where: {
         ...(scopeFilter.branchId ? { branchId: scopeFilter.branchId } : {}),
         ...(query.status ? { status: query.status } : {}),
+        ...(assignedAccountIds ? { accountId: { in: [...assignedAccountIds] } } : {}),
       },
       include: {
         account: { select: { id: true, name: true, accountNumber: true, currency: true } },
@@ -41,7 +50,9 @@ export class FinanceReconciliationService {
   }
 
   async createReconciliation(user: AuthUser, dto: CreateFinanceReconciliationDto) {
-    if (!canManageFinanceAccounts(user)) {
+    const roles = resolveUserRoles(user);
+    const isHqCashier = roles.includes(Role.HQ_CASHIER) && !canManageFinanceAccounts(user);
+    if (!canManageFinanceAccounts(user) && !isHqCashier) {
       throw new ForbiddenException('Forbidden');
     }
 
@@ -49,11 +60,21 @@ export class FinanceReconciliationService {
       where: { id: dto.accountId, deletedAt: null },
     });
     if (!account) throw new NotFoundException('Account not found');
-    assertCanAccessAccountScope(user, account);
 
-    const systemBalance = roundMoney(Number(account.currentBalance));
+    const assignedAccountIds = isHqCashier
+      ? await getActiveAssignmentAccountIds(this.prisma, user.id)
+      : new Set<string>();
+    if (isHqCashier && !assignedAccountIds.has(account.id)) {
+      throw new ForbiddenException('Cashier can only reconcile assigned accounts');
+    }
+    assertCanAccessAccountScope(user, account, assignedAccountIds);
+
+    const systemBalance = roundMoney(Number(account.availableBalance ?? account.currentBalance));
     const actualBalance = roundMoney(Number(dto.actualBalance));
     const difference = roundMoney(actualBalance - systemBalance);
+    if (Math.abs(difference) > 0.009 && (!dto.notes || String(dto.notes).trim().length < 3)) {
+      throw new BadRequestException('Comment is required when the difference is not zero');
+    }
     const status =
       difference === 0 ? FinanceReconciliationStatus.COMPLETED : FinanceReconciliationStatus.DIFFERENCE;
 
@@ -97,7 +118,10 @@ export class FinanceReconciliationService {
         metadata: {
           accountId: account.id,
           branchId: account.branchId,
+          expectedBalance: systemBalance,
+          actualBalance,
           difference,
+          comment: dto.notes ?? null,
           transactionNumber: reconciliation.reconciliationNumber,
         },
       },

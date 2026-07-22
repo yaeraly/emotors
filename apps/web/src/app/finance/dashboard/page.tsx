@@ -6,6 +6,7 @@ import { FinanceLayout, FinanceErrorState, FinanceLoadingState, FinanceMoney } f
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts, isHqFinanceUser } from '@/lib/finance-rbac';
+import { isHqAccountantUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 
 type DashboardData = {
@@ -45,13 +46,19 @@ export default function FinanceDashboardPage() {
       .finally(() => setLoading(false));
   }, [t]);
 
+  const hidePosQr = isHqAccountantUser(user);
+
   const cards = data
     ? [
         { key: 'finance.totalBalance', value: data.cards.totalBalance },
         { key: 'finance.cashBalance', value: data.cards.cashBalance },
         { key: 'finance.bankBalance', value: data.cards.bankBalance },
-        { key: 'finance.qrBalance', value: data.cards.qrBalance },
-        { key: 'finance.posBalance', value: data.cards.posBalance },
+        ...(!hidePosQr
+          ? [
+              { key: 'finance.qrBalance', value: data.cards.qrBalance },
+              { key: 'finance.posBalance', value: data.cards.posBalance },
+            ]
+          : []),
         { key: 'finance.availableBalance', value: data.cards.availableBalance },
         { key: 'finance.pendingBalance', value: data.cards.pendingBalance },
         { key: 'finance.todayIncome', value: data.cards.todayIncome },
@@ -106,7 +113,7 @@ export default function FinanceDashboardPage() {
             </div>
           ) : null}
 
-          {data.branchSummaries.length > 0 ? (
+          {!hidePosQr && data.branchSummaries.length > 0 ? (
             <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-left">
