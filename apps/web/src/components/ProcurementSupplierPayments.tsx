@@ -80,6 +80,7 @@ type ProcurementOrderPayments = {
   supplierInvoiceNumber?: string | null;
   expectedPaymentDate?: string | null;
   invoiceSentToAccountantAt?: string | null;
+  invoiceReviewStatus?: string | null;
   note?: string | null;
   supplierPayments?: SupplierPayment[];
   attachments?: Array<{ id: string; fileName: string; fileUrl: string; entityType?: string }>;
@@ -184,6 +185,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   });
   const [returnTarget, setReturnTarget] = useState<SupplierPayment | null>(null);
   const [returnReason, setReturnReason] = useState('');
+  const [paymentInfoValid, setPaymentInfoValid] = useState(false);
 
   const canPrepare = canCreateSupplierPayment(user);
   const canEdit = canEditSupplierPayment(user);
@@ -194,9 +196,9 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const canVoid = canVoidSupplierPayment(user);
   const canReverse = canReverseSupplierPayment(user);
   const payments = order.supplierPayments ?? [];
-  const activeInvoiceRequest =
-    order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
-    order.supplierPaymentStatus === 'AWAITING_CASHIER';
+  const invoiceAlreadySent = Boolean(order.invoiceSentToAccountantAt);
+  const canResubmitInvoice = String(order.invoiceReviewStatus || '').toUpperCase() === 'RETURNED';
+  const invoiceSendLocked = invoiceAlreadySent && !canResubmitInvoice;
 
   const calculatedKgs = useMemo(() => {
     const yuan = Number(form.amountYuan);
@@ -225,7 +227,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   }, [calculatedKgs, form.approvedAmountKgs]);
 
   async function sendInvoice() {
-    if (activeInvoiceRequest || saving) return;
+    if (invoiceSendLocked || saving || !paymentInfoValid) return;
     if (accountForm.paymentMethod === 'BANK_ACCOUNT' && !accountForm.accountNumber.trim()) {
       setError(t('procurement.paymentInfo.accountNumberRequired'));
       return;
@@ -514,6 +516,17 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       {canSendInvoice ? (
         <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
           <h4 className="text-sm font-semibold text-slate-900">{t('procurement.payments.supplierAccountTitle')}</h4>
+          {invoiceAlreadySent ? (
+            <p className="mt-2 text-sm text-slate-600">
+              {t('procurement.payments.invoiceSentStatus')}
+              {order.invoiceSentToAccountantAt
+                ? `: ${new Date(order.invoiceSentToAccountantAt).toLocaleString()}`
+                : ''}
+              {order.supplierPaymentStatus
+                ? ` · ${t(`procurement.payments.status.${order.supplierPaymentStatus}`)}`
+                : ''}
+            </p>
+          ) : null}
           <div className="mt-2">
             <ProcurementPaymentInfo
               orderId={order.id}
@@ -533,17 +546,18 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                   ),
                 )
               }
-              disabled={activeInvoiceRequest}
+              onValidityChange={setPaymentInfoValid}
+              disabled={invoiceSendLocked}
             />
           </div>
           <button
             type="button"
-            disabled={saving || activeInvoiceRequest}
+            disabled={saving || invoiceSendLocked || !paymentInfoValid}
             onClick={() => void sendInvoice()}
             className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
           >
-            {activeInvoiceRequest
-              ? t('procurement.payments.awaitingAccountant')
+            {invoiceSendLocked
+              ? t('procurement.payments.invoiceSentStatus')
               : t('procurement.payments.sendInvoice')}
           </button>
         </div>
@@ -670,13 +684,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               <th className="px-3 py-3">{t('procurement.payments.paymentDate')}</th>
               <th className="px-3 py-3">{t('procurement.payments.amountYuan')}</th>
               <th className="px-3 py-3">{t('procurement.payments.exchangeRate')}</th>
-              <th className="px-3 py-3">{t('procurement.payments.approvedKgs')}</th>
               <th className="px-3 py-3">{t('procurement.payments.actualPaidKgs')}</th>
-              <th className="px-3 py-3">{t('procurement.payments.recipientName')}</th>
-              <th className="px-3 py-3">{t('procurement.payments.paymentMethod')}</th>
-              <th className="px-3 py-3">{t('procurement.payments.financeAccount')}</th>
-              <th className="px-3 py-3">{t('procurement.payments.accountant')}</th>
-              <th className="px-3 py-3">{t('procurement.payments.cashier')}</th>
               <th className="px-3 py-3">{t('procurement.payments.receipt')}</th>
               <th className="px-3 py-3" />
             </tr>
@@ -688,13 +696,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 <td className="px-3 py-3">{new Date(payment.paidAt ?? payment.paymentDate).toLocaleDateString()}</td>
                 <td className="px-3 py-3">¥{Number(payment.amountYuan).toFixed(2)}</td>
                 <td className="px-3 py-3">{Number(payment.exchangeRate).toFixed(4)}</td>
-                <td className="px-3 py-3">{formatKgs(payment.approvedAmountKgs ?? payment.amountKgs)}</td>
                 <td className="px-3 py-3">{payment.actualPaidKgs != null ? formatKgs(payment.actualPaidKgs) : '-'}</td>
-                <td className="px-3 py-3">{payment.recipientName || '-'}</td>
-                <td className="px-3 py-3">{t(`procurement.payments.method.${payment.paymentMethod}`)}</td>
-                <td className="px-3 py-3">{payment.actualFinanceAccount?.name || payment.intendedFinanceAccount?.name || '-'}</td>
-                <td className="px-3 py-3">{payment.accountant?.fullName || payment.createdBy?.fullName || '-'}</td>
-                <td className="px-3 py-3">{payment.cashier?.fullName || '-'}</td>
                 <td className="px-3 py-3">
                   {payment.attachments?.length ? (
                     <div className="space-y-1">
@@ -751,7 +753,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 </td>
               </tr>
             )) : (
-              <tr><td className="px-4 py-6 text-slate-500" colSpan={13}>{t('procurement.payments.noPayments')}</td></tr>
+              <tr><td className="px-4 py-6 text-slate-500" colSpan={7}>{t('procurement.payments.noPayments')}</td></tr>
             )}
           </tbody>
         </table>

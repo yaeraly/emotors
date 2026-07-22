@@ -22,6 +22,7 @@ import { extname, join } from 'path';
 import type { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
 import { FinanceLedgerService } from '../finance/finance-ledger.service';
+import { assertHqCashierAssignedAccount } from '../finance/finance-assignment.util';
 import { buildFinanceDocumentNumber, roundMoney } from '../finance/finance-number.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -764,6 +765,7 @@ export class TransportExpenseService {
       }
 
       const account = await this.assertHqAccount(tx, dto.financeAccountId);
+      await assertHqCashierAssignedAccount(this.prisma, user, account.id);
       const requestedKgs = Number(expense.amountKgs) > 0 ? Number(expense.amountKgs) : Number(expense.amount);
       const alreadyPaid = Number(expense.paidAmountKgs || 0);
       const remaining = roundMoney(Math.max(requestedKgs - alreadyPaid, 0));

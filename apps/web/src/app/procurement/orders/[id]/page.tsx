@@ -142,6 +142,8 @@ type ProcurementOrder = {
   effectiveYuanRate?: number;
   supplierPaymentStatus?: string;
   yuanRateLocked?: boolean;
+  invoiceSentToAccountantAt?: string | null;
+  invoiceReviewStatus?: string | null;
   supplierPayments?: Array<{
     id: string;
     paymentDate: string;

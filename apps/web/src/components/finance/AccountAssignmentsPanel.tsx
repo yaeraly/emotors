@@ -28,16 +28,19 @@ export function AccountAssignmentsPanel({
   const [form, setForm] = useState({ userId: '', isPrimary: false });
 
   useEffect(() => {
+    const eligiblePath = account.branchId
+      ? `/finance/cashier-eligible-employees?branchId=${encodeURIComponent(account.branchId)}`
+      : '/finance/cashier-eligible-employees';
     void Promise.all([
       apiFetch<User>('/auth/me'),
-      apiFetch<CashierEmployee[]>('/finance/cashier-eligible-employees'),
+      apiFetch<CashierEmployee[]>(eligiblePath),
     ])
       .then(([currentUser, rows]) => {
         setUser(currentUser);
         setEmployees(rows);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
-  }, [t]);
+  }, [account.branchId, account.id, t]);
 
   const canManage = user && canManageFinanceAccounts(user);
 
@@ -106,8 +109,22 @@ export function AccountAssignmentsPanel({
           {account.assignments.map((assignment) => (
             <li key={assignment.id} className="flex items-center justify-between rounded-xl border border-slate-100 px-4 py-3 text-sm">
               <div>
-                <p className="font-semibold">{assignment.user.fullName}</p>
+                <p className="font-semibold">
+                  {assignment.user.fullName}{' '}
+                  <span className="font-normal text-slate-500">({assignment.user.role})</span>
+                </p>
                 <p className="text-slate-500">{assignment.user.email}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {assignment.isActive === false
+                    ? t('finance.assignmentInactive')
+                    : t('finance.assignmentActive')}
+                  {assignment.startDate
+                    ? ` · ${t('finance.assignmentDate')}: ${new Date(assignment.startDate).toLocaleDateString()}`
+                    : null}
+                  {assignment.endDate
+                    ? ` · ${t('finance.unassignmentDate')}: ${new Date(assignment.endDate).toLocaleDateString()}`
+                    : null}
+                </p>
               </div>
               <button type="button" onClick={() => void onUnassign(assignment.user.id)} className="font-semibold text-red-600">
                 {t('finance.removeAssignment')}

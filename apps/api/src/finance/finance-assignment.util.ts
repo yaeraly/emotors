@@ -10,7 +10,12 @@ import {
   hasCashierCapability,
   isAssignmentCurrentlyActive,
 } from '../rbac/cashier-capability.util';
-import { isBranchAccountantUser, isBranchOwnerUser } from '../rbac/rbac';
+import {
+  hasAnyFullAccessRole,
+  isBranchAccountantUser,
+  isBranchOwnerUser,
+  resolveUserRoles,
+} from '../rbac/rbac';
 import { canManageFinanceAccounts } from './finance-access.util';
 
 export async function getActiveAssignmentAccountIds(prisma: PrismaService, userId: string) {
@@ -104,13 +109,72 @@ export function canViewAllBranchAccounts(user: AuthUser) {
 }
 
 export function shouldRestrictToAssignedAccounts(user: AuthUser) {
+  const roles = resolveUserRoles(user);
+  if (roles.includes(Role.HQ_CASHIER) && !canManageFinanceAccounts(user)) {
+    return true;
+  }
   return hasCashierCapability(user) && !canViewAllBranchAccounts(user);
+}
+
+export async function assertHqCashierAssignedAccount(
+  prisma: PrismaService,
+  user: AuthUser,
+  accountId: string,
+) {
+  const roles = resolveUserRoles(user);
+  if (
+    !roles.includes(Role.HQ_CASHIER) ||
+    hasAnyFullAccessRole(roles) ||
+    canManageFinanceAccounts(user)
+  ) {
+    return;
+  }
+  const assignedAccountIds = await getActiveAssignmentAccountIds(prisma, user.id);
+  if (!assignedAccountIds.has(accountId)) {
+    throw new ForbiddenException('Cashier can only access assigned accounts');
+  }
 }
 
 export async function listCashierEligibleEmployees(
   prisma: PrismaService,
-  branchId: string,
+  branchId: string | null,
 ) {
+  if (branchId === null) {
+    const rows = await prisma.user.findMany({
+      where: {
+        branchId: null,
+        deletedAt: null,
+        status: 'ACTIVE',
+        OR: [
+          { role: Role.HQ_CASHIER },
+          {
+            userRoles: {
+              some: {
+                role: { code: Role.HQ_CASHIER },
+              },
+            },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        role: true,
+        userRoles: { include: { role: true } },
+      },
+      orderBy: { fullName: 'asc' },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      fullName: row.fullName,
+      email: row.email,
+      role: row.role,
+      roles: row.userRoles.map((userRole) => userRole.role.code),
+    }));
+  }
+
   const permission = await prisma.permission.findUnique({ where: { code: 'cashier' } });
   if (!permission) return [];
 
