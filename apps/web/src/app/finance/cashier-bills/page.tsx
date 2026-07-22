@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { API_URL, apiFetch } from '@/lib/api';
+import { API_URL, apiFetch, getToken } from '@/lib/api';
 import { canConfirmSupplierPayment } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -294,7 +294,10 @@ function CashierBillsPageContent() {
   }
 
   async function uploadReceipt(row: BillRow, file: File) {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('emotors_token') : null;
+    const token = getToken();
+    if (!token) {
+      throw new Error('Unauthorized');
+    }
     const form = new FormData();
     form.append('file', file);
 
@@ -309,12 +312,14 @@ function CashierBillsPageContent() {
 
     const response = await fetch(url, {
       method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      headers: { Authorization: `Bearer ${token}` },
       body: form,
     });
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || t('common.error'));
+      const payload = await response.json().catch(() => ({} as { message?: string | string[] }));
+      const rawMessage = payload?.message || t('common.error');
+      const message = Array.isArray(rawMessage) ? rawMessage.join(', ') : String(rawMessage);
+      throw new Error(message);
     }
   }
 
