@@ -416,10 +416,7 @@ function CashierBillsPageContent() {
                   <th className="px-3 py-2">№</th>
                   <th className="px-3 py-2">{t('finance.cashierBills.sentAt')}</th>
                   <th className="px-3 py-2">{t('finance.cashierBills.type')}</th>
-                  <th className="px-3 py-2">{t('finance.cashierBills.sender')}</th>
-                  <th className="px-3 py-2">{t('finance.cashierBills.accountant')}</th>
                   <th className="px-3 py-2">{t('finance.cashierBills.recipient')}</th>
-                  <th className="px-3 py-2">{t('finance.cashierBills.basis')}</th>
                   <th className="px-3 py-2">{t('finance.cashierBills.amount')}</th>
                   <th className="px-3 py-2">KGS</th>
                   <th className="px-3 py-2">{t('finance.cashierBills.debitAccount')}</th>
@@ -434,10 +431,7 @@ function CashierBillsPageContent() {
                       <td className="px-3 py-2 font-semibold">{row.paymentNumber}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatDate(row.sentToCashierAt)}</td>
                       <td className="px-3 py-2">{t(`finance.cashierBills.type.${row.requestType}`)}</td>
-                      <td className="px-3 py-2">{row.sender?.fullName || '—'}</td>
-                      <td className="px-3 py-2">{row.accountant?.fullName || '—'}</td>
                       <td className="px-3 py-2">{row.recipientName}</td>
-                      <td className="px-3 py-2 max-w-[220px] truncate" title={row.basis}>{row.basis}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatMoney(row.amount)} {row.currency}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatMoney(row.amountKgs)}</td>
                       <td className="px-3 py-2">{row.debitAccountName || '—'}</td>
