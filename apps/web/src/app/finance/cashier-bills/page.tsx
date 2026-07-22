@@ -773,20 +773,6 @@ function CashierBillsPageContent() {
                 t={t}
               />
 
-              {Array.isArray(selected.previousPayments) && selected.previousPayments.length ? (
-                <section className="mt-4 text-sm">
-                  <h3 className="mb-2 font-semibold">{t('finance.cashierBills.paymentHistory')}</h3>
-                  <ul className="space-y-1">
-                    {selected.previousPayments.map((p: any) => (
-                      <li key={p.id} className="rounded border border-slate-200 px-2 py-1">
-                        {p.paymentNumber}: {formatMoney(p.amountYuan)} CNY / {formatMoney(p.amountKgs)} KGS · {p.status}
-                        {p.receiptCount ? ` · ${t('finance.cashierBills.receiptCount')}: ${p.receiptCount}` : ''}
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              ) : null}
-
               {(() => {
                 const row = selectedAsRow();
                 if (!row || !canAccess) return null;
