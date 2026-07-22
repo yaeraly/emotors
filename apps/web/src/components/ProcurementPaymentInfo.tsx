@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
+import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { User } from '@/lib/types';
 import { canCreateProcurementOrder, canCreateSupplierPayment, hasFullAccess } from '@/lib/rbac';
@@ -38,6 +39,7 @@ type Props = {
   onChange: (value: SupplierAccountFormValue) => void;
   disabled?: boolean;
   onQrChanged?: () => void;
+  onValidityChange?: (valid: boolean) => void;
 };
 
 const EMPTY_FORM: SupplierAccountFormValue = {
@@ -76,6 +78,7 @@ export function ProcurementPaymentInfo({
   onChange,
   disabled = false,
   onQrChanged,
+  onValidityChange,
 }: Props) {
   const { t } = useTranslation();
   const canEdit = (canCreateProcurementOrder(user) || hasFullAccess(user)) && !disabled;
@@ -84,6 +87,10 @@ export function ProcurementPaymentInfo({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [pendingQr, setPendingQr] = useState<{ file: File; previewUrl: string } | null>(null);
+  const [qrPreview, setQrPreview] = useState<{
+    images: Array<{ src: string; alt?: string; label?: string }>;
+    initialIndex: number;
+  } | null>(null);
   const [form, setForm] = useState<SupplierAccountFormValue>(() => normalizeForm(value));
   const formRef = useRef(form);
 
@@ -98,6 +105,18 @@ export function ProcurementPaymentInfo({
     formRef.current = next;
     setForm(next);
     onChange(next);
+  }
+
+  function openQrPreview(index: number) {
+    const codes = active?.qrCodes ?? [];
+    if (!codes.length) return;
+    setQrPreview({
+      images: codes.map((qr) => {
+        const src = qr.fileUrl?.startsWith('http') ? qr.fileUrl : `${API_URL}${qr.fileUrl || ''}`;
+        return { src, alt: qr.fileName || 'QR', label: qr.fileName || 'QR' };
+      }),
+      initialIndex: index,
+    });
   }
 
   function load() {
@@ -135,6 +154,22 @@ export function ProcurementPaymentInfo({
       if (pendingQr?.previewUrl) URL.revokeObjectURL(pendingQr.previewUrl);
     };
   }, [pendingQr?.previewUrl]);
+
+  useEffect(() => {
+    if (!onValidityChange) return;
+    const method = form.paymentMethod;
+    if (method === 'BANK_ACCOUNT') {
+      onValidityChange(Boolean(accountNumber.trim()));
+      return;
+    }
+    const hasStoredQr = Boolean(active?.qrCodes?.length);
+    onValidityChange(hasStoredQr);
+  }, [
+    accountNumber,
+    active?.qrCodes?.length,
+    form.paymentMethod,
+    onValidityChange,
+  ]);
 
   async function ensureDraft(method: 'BANK_ACCOUNT' | 'QR_CODE') {
     const snapshot = formRef.current;
@@ -323,54 +358,46 @@ export function ProcurementPaymentInfo({
           {pendingQr ? (
             <div className="rounded-lg border border-slate-200 bg-white p-2 text-sm">
               <p className="font-semibold text-slate-800">{pendingQr.file.name}</p>
-              {pendingQr.file.type.startsWith('image/') ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={pendingQr.previewUrl}
-                  alt={pendingQr.file.name}
-                  className="mt-2 max-h-40 rounded-md border border-slate-100 object-contain"
-                />
-              ) : null}
               {busy ? <p className="mt-1 text-xs text-slate-500">{t('common.loading')}</p> : null}
             </div>
           ) : null}
           {active?.qrCodes?.length ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {active.qrCodes.map((qr) => (
-                <div key={qr.id} className="rounded-lg border border-slate-200 bg-white p-2 text-sm">
-                  <a
-                    href={`${API_URL}${qr.fileUrl || ''}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-semibold text-blue-700"
+            <ul className="space-y-1">
+              {active.qrCodes.map((qr, index) => (
+                <li key={qr.id} className="flex flex-wrap items-center gap-3 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => openQrPreview(index)}
+                    className="font-semibold text-blue-700 underline-offset-2 hover:underline"
                   >
-                    {qr.fileName || 'QR'}
-                  </a>
-                  {qr.fileUrl && /\.(png|jpe?g|webp)$/i.test(qr.fileUrl) ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={`${API_URL}${qr.fileUrl}`}
-                      alt={qr.fileName || 'QR'}
-                      className="mt-2 max-h-40 w-full rounded-md border border-slate-100 object-contain"
-                    />
-                  ) : null}
+                    {t('procurement.paymentInfo.showQr')}
+                  </button>
                   {canEdit ? (
                     <button
                       type="button"
                       onClick={() => void removeQr(qr.id)}
-                      className="mt-1 block text-xs font-semibold text-red-700"
+                      className="text-xs font-semibold text-red-700"
                     >
                       {t('common.delete')}
                     </button>
                   ) : null}
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : !pendingQr ? (
             <p className="text-xs text-slate-500">{t('procurement.paymentInfo.noQrYet')}</p>
           ) : null}
         </div>
       )}
+
+      {qrPreview ? (
+        <ImagePreviewModal
+          images={qrPreview.images}
+          initialIndex={qrPreview.initialIndex}
+          title={t('procurement.paymentInfo.showQr')}
+          onClose={() => setQrPreview(null)}
+        />
+      ) : null}
     </div>
   );
 }

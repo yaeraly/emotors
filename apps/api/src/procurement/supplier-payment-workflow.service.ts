@@ -338,12 +338,20 @@ export class SupplierPaymentWorkflowService {
 
       const reviewStatus = String(order.invoiceReviewStatus || '').toUpperCase();
       const canResubmitAfterReturn = reviewStatus === 'RETURNED';
+
+      // One send per invoice: once stamped, block repeats except accountant-return resubmit.
+      if (order.invoiceSentToAccountantAt && !canResubmitAfterReturn) {
+        throw new BadRequestException(
+          'Supplier invoice was already sent to the accountant for this procurement order',
+        );
+      }
       if (
         !canResubmitAfterReturn &&
         (order.supplierPaymentStatus === 'AWAITING_ACCOUNTANT' ||
           order.supplierPaymentStatus === 'AWAITING_CASHIER' ||
           reviewStatus === 'UNDER_REVIEW' ||
-          reviewStatus === 'APPROVED')
+          reviewStatus === 'APPROVED' ||
+          reviewStatus === 'SUBMITTED')
       ) {
         throw new BadRequestException(
           'An active supplier payment request already exists for this procurement order',
