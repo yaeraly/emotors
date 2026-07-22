@@ -357,7 +357,6 @@ function BillsToPayPageContent() {
                 <th className="px-3 py-2">{t('finance.billsToPay.date')}</th>
                 <th className="px-3 py-2">{t('finance.billsToPay.type')}</th>
                 <th className="px-3 py-2">{t('finance.billsToPay.sender')}</th>
-                <th className="px-3 py-2">{t('finance.billsToPay.department')}</th>
                 <th className="px-3 py-2">{t('finance.billsToPay.recipient')}</th>
                 <th className="px-3 py-2">{t('finance.billsToPay.amount')}</th>
                 <th className="px-3 py-2">{t('finance.billsToPay.paid')}</th>
@@ -374,7 +373,6 @@ function BillsToPayPageContent() {
                   </td>
                   <td className="px-3 py-2">{t(`finance.billsToPay.type.${row.requestType}`)}</td>
                   <td className="px-3 py-2">{row.sender?.fullName || '—'}</td>
-                  <td className="px-3 py-2">{row.departmentOrBranch || '—'}</td>
                   <td className="px-3 py-2">{row.recipientName}</td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {Number(row.amount).toFixed(2)} {row.currency}
