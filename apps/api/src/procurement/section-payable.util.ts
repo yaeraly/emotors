@@ -27,6 +27,12 @@ const ACTIVE_REQUEST_STATUSES = new Set<string>([
   TransportExpenseStatus.PARTIALLY_PAID,
 ]);
 
+/** Blocks creating a new section invoice while one is in flight or returned for correction. */
+const BLOCKS_NEW_SECTION_REQUEST = new Set<string>([
+  ...ACTIVE_REQUEST_STATUSES,
+  TransportExpenseStatus.RETURNED,
+]);
+
 const COUNTED_FOR_REMAINING = new Set<string>([
   TransportExpenseStatus.DRAFT,
   TransportExpenseStatus.WAITING_ACCOUNTANT,
@@ -52,6 +58,12 @@ export function hasActiveSectionRequest(
   rows: Array<{ status: string }>,
 ): boolean {
   return rows.some((row) => ACTIVE_REQUEST_STATUSES.has(row.status));
+}
+
+export function blocksNewSectionRequest(
+  rows: Array<{ status: string }>,
+): boolean {
+  return rows.some((row) => BLOCKS_NEW_SECTION_REQUEST.has(row.status));
 }
 
 export function summarizeSectionPayments(

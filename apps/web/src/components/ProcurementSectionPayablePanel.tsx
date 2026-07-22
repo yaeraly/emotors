@@ -84,7 +84,15 @@ type Props = {
   showExpenseName?: boolean;
 };
 
-const ACTIVE = new Set(['WAITING_ACCOUNTANT', 'PENDING_CASHIER', 'PARTIALLY_PAID']);
+const ACTIVE = new Set([
+  'WAITING_ACCOUNTANT',
+  'UNDER_REVIEW',
+  'PENDING_CASHIER',
+  'PARTIALLY_PAID',
+  'PAID',
+  'REJECTED',
+]);
+const BLOCKS_NEW_SEND = new Set([...ACTIVE, 'RETURNED']);
 
 function roundMoney2(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -163,6 +171,10 @@ export function ProcurementSectionPayablePanel({
     [rows, expenseType],
   );
   const hasActiveRequest = sectionRows.some((row) => ACTIVE.has(row.status));
+  const blocksNewSend = sectionRows.some((row) => BLOCKS_NEW_SEND.has(row.status) || ACTIVE.has(row.status));
+  const returnedRow = sectionRows.find((row) => row.status === 'RETURNED') ?? null;
+  const sentRow =
+    sectionRows.find((row) => row.status !== 'DRAFT' && row.status !== 'CANCELLED') ?? null;
 
   const cargoTotals = useMemo(
     () => calculateCargoLocal(form.totalWeightKg, form.cargoRateUsdPerKg, form.usdExchangeRate),
@@ -293,7 +305,7 @@ export function ProcurementSectionPayablePanel({
   }
 
   async function sendToAccountant() {
-    if (!canCreate || saving || hasActiveRequest) return;
+    if (!canCreate || saving || blocksNewSend) return;
     if (usesTransportCompany && !selectedCompany?.id) {
       setError(t('procurement.sectionPayable.transportCompanyRequired'));
       return;
@@ -499,6 +511,23 @@ export function ProcurementSectionPayablePanel({
     }
   }
 
+  async function resubmitReturned(expenseId: string) {
+    if (!canCreate || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/procurement/transport-expenses/${expenseId}/submit`, {
+        method: 'POST',
+        body: '{}',
+      });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const companyOptions = useMemo(
     () =>
       companies.map((company) => ({
@@ -513,7 +542,7 @@ export function ProcurementSectionPayablePanel({
       <h4 className="text-sm font-semibold text-slate-900">{t('procurement.sectionPayable.title')}</h4>
       {error ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
-      {canCreate ? (
+      {canCreate && !blocksNewSend ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
           {showExpenseName ? (
             <CompactField
@@ -726,15 +755,39 @@ export function ProcurementSectionPayablePanel({
           <div className="md:col-span-2 lg:col-span-3">
             <button
               type="button"
-              disabled={saving || hasActiveRequest}
+              disabled={saving || blocksNewSend}
               onClick={() => void sendToAccountant()}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
             >
-              {hasActiveRequest
-                ? t('procurement.payments.awaitingAccountant')
-                : t('procurement.payments.sendInvoice')}
+              {t('procurement.payments.sendInvoice')}
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {canCreate && blocksNewSend ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+          <p className="font-semibold">
+            {returnedRow
+              ? t('procurement.sectionPayable.returnedForCorrection')
+              : t('procurement.payments.invoiceSentStatus')}
+          </p>
+          {sentRow?.status ? (
+            <p className="mt-1 text-xs text-slate-500">
+              {translateStatus(t, sentRow.status)}
+              {sentRow.expenseNumber ? ` · ${sentRow.expenseNumber}` : ''}
+            </p>
+          ) : null}
+          {returnedRow ? (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void resubmitReturned(returnedRow.id)}
+              className="mt-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:bg-blue-300"
+            >
+              {t('procurement.payments.sendInvoice')}
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -765,7 +818,17 @@ export function ProcurementSectionPayablePanel({
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {canApprove && row.status === 'WAITING_ACCOUNTANT' ? (
+                  {canCreate && row.status === 'RETURNED' ? (
+                    <button
+                      type="button"
+                      disabled={saving}
+                      className="rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700"
+                      onClick={() => void resubmitReturned(row.id)}
+                    >
+                      {t('procurement.payments.sendInvoice')}
+                    </button>
+                  ) : null}
+                  {canApprove && (row.status === 'WAITING_ACCOUNTANT' || row.status === 'UNDER_REVIEW') ? (
                     <button
                       type="button"
                       className="rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700"

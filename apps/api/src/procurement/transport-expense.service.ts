@@ -46,6 +46,7 @@ import {
 } from './cargo-payment-calc.util';
 import { estimateSectionExpenseCostKgs } from './procurement-cost.util';
 import {
+  blocksNewSectionRequest,
   hasActiveSectionRequest,
   requestTypeForExpenseType,
   summarizeSectionPayments,
@@ -254,6 +255,11 @@ export class TransportExpenseService {
           },
           select: { amount: true, amountKgs: true, status: true },
         });
+        if (blocksNewSectionRequest(siblings)) {
+          throw new BadRequestException(
+            'An active or returned payment request already exists for this section; resubmit the existing invoice',
+          );
+        }
         if (dto.sendToAccountant === true && hasActiveSectionRequest(siblings)) {
           throw new BadRequestException('An active payment request already exists for this section');
         }
@@ -532,6 +538,11 @@ export class TransportExpenseService {
         },
         select: { amount: true, amountKgs: true, status: true },
       });
+      if (blocksNewSectionRequest(siblings)) {
+        throw new BadRequestException(
+          'An active or returned payment request already exists for this section',
+        );
+      }
       if (hasActiveSectionRequest(siblings)) {
         throw new BadRequestException('An active payment request already exists for this section');
       }
@@ -641,6 +652,10 @@ export class TransportExpenseService {
       }
 
       const send = dto.sendToCashier !== false;
+      if (send && !dto.financeAccountId && !expense.financeAccountId) {
+        throw new BadRequestException('Finance account is required before sending to cashier');
+      }
+
       const updated = await tx.procurementTransportExpense.update({
         where: { id },
         data: {
