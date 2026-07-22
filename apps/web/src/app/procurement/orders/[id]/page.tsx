@@ -471,19 +471,22 @@ function ProcurementOrderDetailPageContent() {
 
   const scmProductTableTotals = useMemo(() => {
     let totalQuantity = 0;
-    let totalYuan = 0;
+    let totalCostKgs = 0;
 
-    for (const item of activeOrderItems) {
+    activeOrderItems.forEach((item, index) => {
       totalQuantity += item.quantity;
-      const purchasePriceYuan = Number(item.purchasePriceYuan ?? 0);
-      totalYuan += item.quantity * purchasePriceYuan;
-    }
+      const previewItem = previewTotals?.items?.[index];
+      totalCostKgs +=
+        previewItem?.totalCostKgs != null
+          ? Number(previewItem.totalCostKgs)
+          : Number(item.finalCostKgs ?? 0) * item.quantity;
+    });
 
     return {
       totalQuantity,
-      totalYuan,
+      totalCostKgs,
     };
-  }, [activeOrderItems]);
+  }, [activeOrderItems, previewTotals]);
 
   const landedCostPendingWeight = order?.landedCostStatus === 'PENDING_WEIGHT';
 
@@ -1172,24 +1175,28 @@ function ProcurementOrderDetailPageContent() {
                 <table className="w-full table-fixed divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-500">
                     <tr>
+                      <th className="w-24 px-2 py-2">SKU</th>
                       <th className="px-2 py-2" title={t('procurement.orders.product')}>{t('procurement.orders.product')}</th>
                       <th className="w-14 px-2 py-2 text-right" title={t('procurement.orders.quantity')}>{t('procurement.orders.col.quantityShort')}</th>
                       <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.purchasePriceYuan')}>{t('procurement.orders.col.purchasePriceShort')}</th>
                       <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.priceDifferenceYuan')}>{t('procurement.orders.col.priceDifferenceShort')}</th>
-                      <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.productWeight')}>{t('procurement.orders.col.weightShort')}</th>
-                      <th className="w-20 px-2 py-2 text-right" title={t('procurement.orders.totalYuan')}>{t('procurement.orders.col.totalYuanShort')}</th>
+                      <th className="w-28 px-2 py-2 text-right" title={t('procurement.orders.col.costInSoms')}>{t('procurement.orders.col.costInSoms')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {activeOrderItems.map((row) => {
+                    {activeOrderItems.map((row, index) => {
                       const purchasePriceYuan = Number(row.purchasePriceYuan ?? 0);
                       const referencePriceYuan = getReferencePriceYuan(row);
                       const priceDifferenceYuan = referencePriceYuan != null ? purchasePriceYuan - referencePriceYuan : null;
-                      const unitWeightKg = resolveUnitWeightKg(row);
-                      const lineTotalYuan = row.quantity * purchasePriceYuan;
+                      const previewItem = previewTotals?.items?.[index];
+                      const costInSoms =
+                        previewItem?.totalCostKgs != null
+                          ? Number(previewItem.totalCostKgs)
+                          : Number(row.finalCostKgs ?? 0) * row.quantity;
 
                       return (
                         <tr key={row.id}>
+                          <td className="px-2 py-1.5 font-medium tabular-nums text-slate-800">{row.sku}</td>
                           <td className="px-2 py-1.5">
                             <p className="truncate font-medium text-slate-900" title={row.productName}>
                               {row.productName}
@@ -1200,20 +1207,17 @@ function ProcurementOrderDetailPageContent() {
                           <td className="px-2 py-1.5 text-right tabular-nums">
                             {priceDifferenceYuan != null ? formatPriceDifferenceYuan(priceDifferenceYuan) : '—'}
                           </td>
-                          <td className="px-2 py-1.5 text-right tabular-nums">
-                            {unitWeightKg != null ? formatWeightKg(unitWeightKg) : t('procurement.orders.weightNotSpecified')}
-                          </td>
-                          <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatYuan(lineTotalYuan)}</td>
+                          <td className="px-2 py-1.5 text-right font-semibold tabular-nums">{formatKgs(costInSoms)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                   <tfoot className="border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-700">
                     <tr>
-                      <td className="px-2 py-2">{t('procurement.orders.tableTotals')}</td>
+                      <td className="px-2 py-2" colSpan={2}>{t('procurement.orders.tableTotals')}</td>
                       <td className="px-2 py-2 text-right tabular-nums">{scmProductTableTotals.totalQuantity}</td>
-                      <td className="px-2 py-2" colSpan={3} />
-                      <td className="px-2 py-2 text-right tabular-nums">{formatYuan(scmProductTableTotals.totalYuan)}</td>
+                      <td className="px-2 py-2" colSpan={2} />
+                      <td className="px-2 py-2 text-right tabular-nums">{formatKgs(scmProductTableTotals.totalCostKgs)}</td>
                     </tr>
                   </tfoot>
                 </table>
