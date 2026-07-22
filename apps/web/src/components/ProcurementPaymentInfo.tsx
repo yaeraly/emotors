@@ -86,19 +86,18 @@ export function ProcurementPaymentInfo({
   const [pendingQr, setPendingQr] = useState<{ file: File; previewUrl: string } | null>(null);
   const [form, setForm] = useState<SupplierAccountFormValue>(() => normalizeForm(value));
   const formRef = useRef(form);
-  formRef.current = form;
 
   const accountNumber = form.accountNumber ?? '';
 
   function commitForm(
     updater: (previous: SupplierAccountFormValue) => Partial<SupplierAccountFormValue>,
   ) {
-    setForm((previous) => {
-      const next = normalizeForm(updater(previous), previous);
-      formRef.current = next;
-      onChange(next);
-      return next;
-    });
+    // Compute outside setState so parent onChange is never called during render.
+    const previous = formRef.current;
+    const next = normalizeForm(updater(previous), previous);
+    formRef.current = next;
+    setForm(next);
+    onChange(next);
   }
 
   function load() {
