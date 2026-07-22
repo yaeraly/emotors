@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
 import { sidebarFinanceNavClass, sidebarNavClass, sidebarPaymentsNavClass, sidebarShiftsNavClass } from '@/lib/nav-matching';
@@ -165,6 +165,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const warehouseManagerView = isWarehouseManagerUser(user);
   const hqSalesManagerView = isHqSalesManagerUser(user);
   const hqCashierView = isHqCashierUser(user);
+  const hqAccountantView = isHqAccountantUser(user);
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const branchMasterView = isBranchMasterUser(user);
   const branchCashierView = isBranchCashierUser(user);
@@ -307,6 +308,30 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
                 <Link href="/distribution/branch-balances" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.branchBalances')}</Link>
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.orders')}</Link>
+              </>
+            ) : hqAccountantView ? (
+              <>
+                <Link href="/finance/bills-to-pay" className={sidebarNavClass(pathname, '/finance/bills-to-pay')}>
+                  {t('finance.billsToPay')}
+                </Link>
+                <Link href="/finance/dashboard" className={sidebarNavClass(pathname, '/finance/dashboard')}>
+                  {t('nav.finance')}
+                </Link>
+                <Link href="/finance/transfers" className={sidebarNavClass(pathname, '/finance/transfers')}>
+                  {t('finance.transfers')}
+                </Link>
+                <Link href="/tax" className={sidebarNavClass(pathname, '/tax')}>
+                  {t('tax.title')}
+                </Link>
+                <Link href="/payroll" className={sidebarNavClass(pathname, '/payroll')}>
+                  {t('payroll.title')}
+                </Link>
+                <Link href="/commissions" className={sidebarNavClass(pathname, '/commissions')}>
+                  {t('commissions.title')}
+                </Link>
+                <Link href="/compensation/rules" className={sidebarNavClass(pathname, '/compensation/rules')}>
+                  {t('compensation.rules')}
+                </Link>
               </>
             ) : warehouseManagerView ? (
               <>

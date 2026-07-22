@@ -23,6 +23,11 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
 }
 
 const financeNav = readFileSync(join(__dirname, '../../../web/src/lib/finance-nav.ts'), 'utf8');
+const shell = readFileSync(
+  join(__dirname, '../../../web/src/components/ProtectedShell.tsx'),
+  'utf8',
+);
+const rbac = readFileSync(join(__dirname, '../../../web/src/lib/rbac.ts'), 'utf8');
 const billsPage = readFileSync(
   join(__dirname, '../../../web/src/app/finance/bills-to-pay/page.tsx'),
   'utf8',
@@ -38,6 +43,15 @@ const schema = readFileSync(join(__dirname, '../../prisma/schema.prisma'), 'utf8
 
 assert(financeNav.includes("/finance/bills-to-pay"), '1. HQ Accountant has Счета к оплате navigation');
 assert(financeNav.includes("finance.billsToPay"), '1. nav label key is finance.billsToPay');
+assert(shell.includes('/finance/bills-to-pay'), '1. HQ Accountant sidebar links to Счета к оплате');
+assert(shell.includes("finance.billsToPay"), '1. HQ Accountant sidebar uses finance.billsToPay label');
+assert(shell.includes('isHqAccountantUser'), '1. HQ Accountant panel uses isHqAccountantUser');
+assert(rbac.includes('export function isHqAccountantUser'), '1. isHqAccountantUser role helper exists');
+assert(rbac.includes("hasRole(user, 'HQ_ACCOUNTANT')"), '1. HQ_ACCOUNTANT role mapping present');
+assert(
+  !billsPage.includes('cashier-bills') && !billsPage.includes('PENDING_EXECUTION'),
+  'accountant page must not show cashier execution tasks',
+);
 assert(billsPage.includes('SUPPLIER_PAYMENT'), '2. Supply Manager supplier requests supported');
 assert(billsPage.includes('OTHER_EXPENSE'), '3. other authorized expense types supported');
 assert(billsPage.includes('canCreateSupplierPayment'), '4. unauthorized users are gated');

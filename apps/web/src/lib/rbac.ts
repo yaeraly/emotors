@@ -150,6 +150,12 @@ export function isHqCashierUser(user: Pick<User, 'role' | 'roles'> | null | unde
   return hasRole(user, 'HQ_CASHIER');
 }
 
+/** HQ Accountant panel user (not branch ACCOUNTANT). */
+export function isHqAccountantUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user || hasFullAccess(user)) return false;
+  return hasRole(user, 'HQ_ACCOUNTANT');
+}
+
 const WAREHOUSE_MANAGER_FORBIDDEN_PREFIXES = [
   '/finance',
   '/reports',
@@ -731,16 +737,16 @@ export function canAccessPath(user: User, pathname: string) {
   }
   // /procurement/payments redirects to orders; supplier payments live on order detail.
   if (
-    pathname.startsWith('/procurement/accountant-payments') ||
-    pathname.startsWith('/finance/bills-to-pay')
-  ) {
-    return canCreateSupplierPayment(user);
-  }
-  if (
     pathname.startsWith('/procurement/cashier-payments') ||
     pathname.startsWith('/finance/cashier-bills')
   ) {
     return canConfirmSupplierPayment(user);
+  }
+  if (
+    pathname.startsWith('/procurement/accountant-payments') ||
+    pathname.startsWith('/finance/bills-to-pay')
+  ) {
+    return canCreateSupplierPayment(user);
   }
   if (pathname.startsWith('/procurement/orders/')) {
     return canViewProcurement(user) || canViewSupplierPayments(user);

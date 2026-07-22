@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import type { User } from './types';
 import {
   FINANCE_PAYMENT_TABS,
@@ -71,6 +73,12 @@ assertEqual(
   true,
   'Счета к оплате label key present',
 );
+assertEqual(canAccessFinancePath(hqAccountant, '/finance/bills-to-pay'), true, 'HQ Accountant can open bills-to-pay');
+
+const shell = readFileSync(join(__dirname, '../components/ProtectedShell.tsx'), 'utf8');
+assertEqual(shell.includes('hqAccountantView'), true, 'HQ Accountant sidebar panel exists');
+assertEqual(shell.includes('/finance/bills-to-pay'), true, 'HQ Accountant sidebar links to bills-to-pay');
+assertEqual(shell.includes('finance.billsToPay'), true, 'HQ Accountant sidebar label is Счета к оплате');
 
 assertEqual(FINANCE_PAYMENT_TABS.length, 3, 'payment tabs exclude paid');
 assertEqual(
