@@ -459,10 +459,7 @@ export class TransportExpenseService {
                 : null
               : existing.dueDate,
           comment: dto.comment !== undefined ? dto.comment?.trim() || null : existing.comment,
-          status:
-            existing.status === TransportExpenseStatus.RETURNED
-              ? TransportExpenseStatus.DRAFT
-              : existing.status,
+          // Keep RETURNED until explicit resubmit so SM edits stay on the same invoice.
         },
         include: INCLUDE,
       });
