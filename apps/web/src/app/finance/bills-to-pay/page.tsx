@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -115,11 +114,13 @@ function BillsToPayPageContent() {
   const [reasonModal, setReasonModal] = useState<{ mode: 'return' | 'reject'; bill: BillRow } | null>(null);
   const [reason, setReason] = useState('');
   const [paymentModal, setPaymentModal] = useState<BillRow | null>(null);
+  const [editingPayment, setEditingPayment] = useState<any | null>(null);
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     exchangeRate: '',
     paymentMethod: 'BANK_ACCOUNT',
     financeAccountId: '',
+    recipientName: '',
     accountantComment: '',
   });
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string; availableBalance: number }>>([]);
@@ -213,16 +214,12 @@ function BillsToPayPageContent() {
     }
   }
 
-  async function openPaymentModal(row: BillRow) {
-    setPaymentModal(row);
-    setPaymentFormError('');
-    setPaymentForm({
-      amount: row.remainingAmount > 0 ? String(row.remainingAmount) : '',
-      exchangeRate: '',
-      paymentMethod: 'BANK_ACCOUNT',
-      financeAccountId: '',
-      accountantComment: '',
-    });
+  async function refreshSelected(source: BillSource, id: string) {
+    const detail = await apiFetch<BillDetail>(`/procurement/bills-to-pay/${source}/${id}`);
+    setSelected(detail);
+  }
+
+  async function loadAccounts() {
     try {
       const list = await apiFetch<Array<{ id: string; name: string; availableBalance: number }>>(
         '/procurement/supplier-payment-accounts',
@@ -233,51 +230,176 @@ function BillsToPayPageContent() {
     }
   }
 
-  async function createSupplierPayment() {
-    if (!paymentModal || paymentModal.source !== 'SUPPLIER_INVOICE') return;
+  async function openPaymentModal(row: BillRow) {
+    setPaymentModal(row);
+    setEditingPayment(null);
+    setPaymentFormError('');
+    setPaymentForm({
+      amount: row.remainingAmount > 0 ? String(row.remainingAmount) : '',
+      exchangeRate: '',
+      paymentMethod: 'BANK_ACCOUNT',
+      financeAccountId: '',
+      recipientName: row.recipientName ?? '',
+      accountantComment: '',
+    });
+    await loadAccounts();
+  }
+
+  async function openEditPayment(payment: any) {
+    if (!selected || selected.source !== 'SUPPLIER_INVOICE' || payment?.status !== 'DRAFT') return;
+    setPaymentModal(selected);
+    setEditingPayment(payment);
+    setPaymentFormError('');
+    setPaymentForm({
+      amount: String(payment.amountYuan ?? ''),
+      exchangeRate: String(payment.exchangeRate ?? ''),
+      paymentMethod: payment.paymentMethod || 'BANK_ACCOUNT',
+      financeAccountId: payment.intendedFinanceAccountId || payment.intendedFinanceAccount?.id || '',
+      recipientName: payment.recipientName ?? selected.recipientName ?? '',
+      accountantComment: payment.accountantComment ?? '',
+    });
+    await loadAccounts();
+  }
+
+  function maxPayableAmount(bill: BillRow, draft?: { amountYuan?: number | string } | null) {
+    const remaining = Number(bill.remainingAmount);
+    const draftYuan = draft ? Number(draft.amountYuan || 0) : 0;
+    return remaining + (Number.isFinite(draftYuan) ? draftYuan : 0);
+  }
+
+  function validatePaymentForm(bill: BillRow, options?: { requireBalance?: boolean }) {
     const amount = Number(paymentForm.amount);
-    const remaining = Number(paymentModal.remainingAmount);
+    const maxAmount = maxPayableAmount(bill, editingPayment);
     if (!(amount > 0)) {
       setPaymentFormError(t('finance.billsToPay.amountMustBePositive'));
-      return;
+      return null;
     }
-    if (amount > remaining + 0.009) {
+    if (amount > maxAmount + 0.009) {
       setPaymentFormError(t('finance.billsToPay.amountExceedsRemaining'));
-      return;
+      return null;
     }
     const exchangeRate = Number(paymentForm.exchangeRate);
     if (!(exchangeRate > 0)) {
       setPaymentFormError(t('finance.billsToPay.exchangeRate'));
-      return;
+      return null;
     }
     if (!paymentForm.financeAccountId) {
-      setPaymentFormError(t('finance.billsToPay.financeAccount'));
-      return;
+      setPaymentFormError(t('finance.billsToPay.accountRequired'));
+      return null;
     }
+    if (!paymentForm.recipientName.trim()) {
+      setPaymentFormError(t('finance.billsToPay.recipientRequired'));
+      return null;
+    }
+    const approvedKgs = Math.round(amount * exchangeRate * 100) / 100;
+    if (options?.requireBalance) {
+      const account = accounts.find((item) => item.id === paymentForm.financeAccountId);
+      if (!account || approvedKgs > Number(account.availableBalance) + 0.009) {
+        setPaymentFormError(t('finance.billsToPay.insufficientBalance'));
+        return null;
+      }
+    }
+    return {
+      amountYuan: amount,
+      exchangeRate,
+      approvedAmountKgs: approvedKgs,
+      paymentMethod: paymentForm.paymentMethod,
+      intendedFinanceAccountId: paymentForm.financeAccountId,
+      recipientName: paymentForm.recipientName.trim(),
+      accountantComment: paymentForm.accountantComment.trim() || undefined,
+    };
+  }
+
+  async function savePaymentDraft() {
+    if (!paymentModal || paymentModal.source !== 'SUPPLIER_INVOICE') return;
+    const payload = validatePaymentForm(paymentModal);
+    if (!payload) return;
 
     setSaving(true);
     setActionError('');
     setPaymentFormError('');
     try {
-      await apiFetch(`/procurement/orders/${paymentModal.id}/supplier-payments`, {
-        method: 'POST',
-        body: JSON.stringify({
-          amountYuan: amount,
-          exchangeRate,
-          paymentMethod: paymentForm.paymentMethod,
-          intendedFinanceAccountId: paymentForm.financeAccountId,
-          accountantComment: paymentForm.accountantComment || undefined,
-          sendToCashier: true,
-        }),
-      });
-      setPaymentModal(null);
-      await load();
-      if (selected) {
-        const detail = await apiFetch<BillDetail>(
-          `/procurement/bills-to-pay/${paymentModal.source}/${paymentModal.id}`,
+      if (editingPayment?.id) {
+        await apiFetch(
+          `/procurement/orders/${paymentModal.id}/supplier-payments/${editingPayment.id}`,
+          {
+            method: 'PUT',
+            body: JSON.stringify({
+              ...payload,
+              sendToCashier: false,
+              changeReason: 'Updated draft payment from bills to pay',
+            }),
+          },
         );
-        setSelected(detail);
+      } else {
+        await apiFetch(`/procurement/orders/${paymentModal.id}/supplier-payments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            ...payload,
+            sendToCashier: false,
+          }),
+        });
       }
+      setPaymentModal(null);
+      setEditingPayment(null);
+      await load();
+      await refreshSelected(paymentModal.source, paymentModal.id);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function payDraftPayment(payment: any) {
+    if (!selected || selected.source !== 'SUPPLIER_INVOICE' || payment?.status !== 'DRAFT') return;
+
+    const amountYuan = Number(payment.amountYuan);
+    const exchangeRate = Number(payment.exchangeRate);
+    const accountId = payment.intendedFinanceAccountId || payment.intendedFinanceAccount?.id || '';
+    const recipientName = String(payment.recipientName || '').trim();
+    const approvedKgs = Number(
+      payment.approvedAmountKgs ?? payment.amountKgs ?? amountYuan * exchangeRate,
+    );
+
+    if (!(amountYuan > 0)) {
+      setActionError(t('finance.billsToPay.amountMustBePositive'));
+      return;
+    }
+    if (!(exchangeRate > 0)) {
+      setActionError(t('finance.billsToPay.exchangeRate'));
+      return;
+    }
+    if (!accountId) {
+      setActionError(t('finance.billsToPay.accountRequired'));
+      return;
+    }
+    if (!recipientName) {
+      setActionError(t('finance.billsToPay.recipientRequired'));
+      return;
+    }
+
+    setSaving(true);
+    setActionError('');
+    try {
+      // Refresh accounts so balance check is current before send-to-cashier.
+      const list = await apiFetch<Array<{ id: string; name: string; availableBalance: number }>>(
+        '/procurement/supplier-payment-accounts',
+      );
+      setAccounts(list);
+      const account = list.find((item) => item.id === accountId);
+      if (!account || approvedKgs > Number(account.availableBalance) + 0.009) {
+        setActionError(t('finance.billsToPay.insufficientBalance'));
+        setSaving(false);
+        return;
+      }
+
+      await apiFetch(
+        `/procurement/orders/${selected.id}/supplier-payments/${payment.id}/send-to-cashier`,
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+      await load();
+      await refreshSelected(selected.source, selected.id);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -471,6 +593,8 @@ function BillsToPayPageContent() {
           onReturn={() => setReasonModal({ mode: 'return', bill: selected })}
           onReject={() => setReasonModal({ mode: 'reject', bill: selected })}
           onCreatePayment={() => void openPaymentModal(selected)}
+          onEditPayment={(payment) => void openEditPayment(payment)}
+          onPayPayment={(payment) => void payDraftPayment(payment)}
         />
       ) : null}
 
@@ -501,10 +625,20 @@ function BillsToPayPageContent() {
       ) : null}
 
       {paymentModal ? (
-        <Modal title={t('finance.billsToPay.createPartialPayment')} onClose={() => setPaymentModal(null)}>
+        <Modal
+          title={
+            editingPayment
+              ? t('finance.billsToPay.editPayment')
+              : t('finance.billsToPay.createPartialPayment')
+          }
+          onClose={() => {
+            setPaymentModal(null);
+            setEditingPayment(null);
+          }}
+        >
           <p className="text-xs text-slate-600">
-            {t('finance.billsToPay.remaining')}: {Number(paymentModal.remainingAmount).toFixed(2)}{' '}
-            {paymentModal.currency}
+            {t('finance.billsToPay.remaining')}:{' '}
+            {maxPayableAmount(paymentModal, editingPayment).toFixed(2)} {paymentModal.currency}
           </p>
           {paymentFormError ? (
             <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{paymentFormError}</p>
@@ -549,10 +683,21 @@ function BillsToPayPageContent() {
               <option value="">{t('common.select')}</option>
               {accounts.map((account) => (
                 <option key={account.id} value={account.id}>
-                  {account.name}
+                  {account.name} ({Number(account.availableBalance).toFixed(2)} KGS)
                 </option>
               ))}
             </select>
+          </label>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.recipient')}
+            <input
+              type="text"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              value={paymentForm.recipientName ?? ''}
+              onChange={(e) =>
+                setPaymentForm((prev) => ({ ...prev, recipientName: e.target.value ?? '' }))
+              }
+            />
           </label>
           <label className="mt-2 block text-xs font-semibold">
             {t('finance.billsToPay.exchangeRate')}
@@ -587,11 +732,48 @@ function BillsToPayPageContent() {
             <button
               type="button"
               disabled={saving}
-              onClick={() => void createSupplierPayment()}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+              onClick={() => void savePaymentDraft()}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold disabled:opacity-40"
             >
-              {t('finance.billsToPay.sendToCashier')}
+              {t('finance.billsToPay.saveDraftPayment')}
             </button>
+            {editingPayment?.id ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  const payload = validatePaymentForm(paymentModal, { requireBalance: true });
+                  if (!payload || !editingPayment?.id) return;
+                  setSaving(true);
+                  setActionError('');
+                  setPaymentFormError('');
+                  try {
+                    await apiFetch(
+                      `/procurement/orders/${paymentModal.id}/supplier-payments/${editingPayment.id}`,
+                      {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                          ...payload,
+                          sendToCashier: true,
+                          changeReason: 'Sent draft payment to cashier from bills to pay',
+                        }),
+                      },
+                    );
+                    setPaymentModal(null);
+                    setEditingPayment(null);
+                    await load();
+                    await refreshSelected(paymentModal.source, paymentModal.id);
+                  } catch (err) {
+                    setActionError(err instanceof Error ? err.message : t('common.error'));
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+              >
+                {t('finance.billsToPay.sendToCashier')}
+              </button>
+            ) : null}
           </div>
         </Modal>
       ) : null}
@@ -618,6 +800,8 @@ function DetailDrawer({
   onReturn,
   onReject,
   onCreatePayment,
+  onEditPayment,
+  onPayPayment,
 }: {
   t: (key: string) => string;
   bill: BillDetail;
@@ -628,6 +812,8 @@ function DetailDrawer({
   onReturn: () => void;
   onReject: () => void;
   onCreatePayment: () => void;
+  onEditPayment: (payment: any) => void;
+  onPayPayment: (payment: any) => void;
 }) {
   const detail = bill.detail || {};
   const cargo = detail.cargo;
@@ -803,6 +989,7 @@ function DetailDrawer({
                       <th className="px-2 py-2">{t('finance.billsToPay.accountOrCashbox')}</th>
                       <th className="px-2 py-2">{t('finance.billsToPay.cashier')}</th>
                       <th className="px-2 py-2">{t('finance.billsToPay.statusLabel')}</th>
+                      <th className="px-2 py-2">{t('finance.billsToPay.actions')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -823,6 +1010,7 @@ function DetailDrawer({
                       const statusKey = payment.status
                         ? `finance.billsToPay.paymentStatus.${payment.status}`
                         : '';
+                      const isDraft = payment.status === 'DRAFT';
                       return (
                         <tr key={payment.id}>
                           <td className="px-2 py-2 whitespace-nowrap">
@@ -838,6 +1026,30 @@ function DetailDrawer({
                             <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-700">
                               {statusKey ? t(statusKey) : payment.status || '—'}
                             </span>
+                          </td>
+                          <td className="px-2 py-2">
+                            {isDraft ? (
+                              <div className="flex flex-wrap gap-1">
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  onClick={() => onEditPayment(payment)}
+                                  className="rounded border border-slate-300 px-1.5 py-0.5 font-semibold text-slate-700 disabled:opacity-40"
+                                >
+                                  {t('finance.billsToPay.editPayment')}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={saving}
+                                  onClick={() => onPayPayment(payment)}
+                                  className="rounded border border-emerald-300 px-1.5 py-0.5 font-semibold text-emerald-700 disabled:opacity-40"
+                                >
+                                  {t('finance.billsToPay.pay')}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -902,12 +1114,6 @@ function DetailDrawer({
               {t('finance.billsToPay.createPartialPayment')}
             </button>
           ) : null}
-          <Link
-            href={bill.href}
-            className="rounded-lg border border-blue-200 px-3 py-1.5 text-sm font-semibold text-blue-700"
-          >
-            {t('finance.billsToPay.openSource')}
-          </Link>
         </div>
       </div>
     </div>
