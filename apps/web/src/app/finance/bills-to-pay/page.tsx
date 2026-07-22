@@ -8,6 +8,7 @@ import {
   FinanceLayout,
   FinanceLoadingState,
 } from '@/components/finance/FinanceLayout';
+import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { API_URL, apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canCreateSupplierPayment } from '@/lib/rbac';
@@ -115,6 +116,12 @@ function BillsToPayPageContent() {
   const [reason, setReason] = useState('');
   const [paymentModal, setPaymentModal] = useState<BillRow | null>(null);
   const [editingPayment, setEditingPayment] = useState<any | null>(null);
+  const [transportApproveModal, setTransportApproveModal] = useState<BillDetail | null>(null);
+  const [transportApproveForm, setTransportApproveForm] = useState({
+    financeAccountId: '',
+    exchangeRate: '',
+    accountantComment: '',
+  });
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     exchangeRate: '',
@@ -125,6 +132,10 @@ function BillsToPayPageContent() {
   });
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string; availableBalance: number }>>([]);
   const [paymentFormError, setPaymentFormError] = useState('');
+  const [qrPreview, setQrPreview] = useState<{
+    images: Array<{ src: string; alt?: string; label?: string }>;
+    initialIndex: number;
+  } | null>(null);
 
   const canAccess = canCreateSupplierPayment(user);
 
@@ -227,6 +238,63 @@ function BillsToPayPageContent() {
       setAccounts(list);
     } catch {
       setAccounts([]);
+    }
+  }
+
+  async function openTransportApprove(bill: BillDetail) {
+    setTransportApproveModal(bill);
+    setTransportApproveForm({
+      financeAccountId: bill.detail?.financeAccountId || bill.detail?.financeAccount?.id || '',
+      exchangeRate:
+        bill.currency.toUpperCase() === 'KGS'
+          ? ''
+          : bill.detail?.exchangeRate != null
+            ? String(bill.detail.exchangeRate)
+            : '',
+      accountantComment: bill.detail?.accountantComment || '',
+    });
+    setPaymentFormError('');
+    await loadAccounts();
+  }
+
+  async function submitTransportApprove() {
+    if (!transportApproveModal) return;
+    if (!transportApproveForm.financeAccountId) {
+      setPaymentFormError(t('finance.billsToPay.accountRequired'));
+      return;
+    }
+    const currency = String(transportApproveModal.currency || 'KGS').toUpperCase();
+    if (currency !== 'KGS' && !(Number(transportApproveForm.exchangeRate) > 0)) {
+      setPaymentFormError(t('finance.billsToPay.exchangeRateRequired'));
+      return;
+    }
+    setSaving(true);
+    setActionError('');
+    setPaymentFormError('');
+    try {
+      await apiFetch(
+        `/procurement/bills-to-pay/${transportApproveModal.source}/${transportApproveModal.id}/approve`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            sendToCashier: true,
+            financeAccountId: transportApproveForm.financeAccountId,
+            exchangeRate: transportApproveForm.exchangeRate
+              ? Number(transportApproveForm.exchangeRate)
+              : undefined,
+            accountantComment: transportApproveForm.accountantComment || undefined,
+          }),
+        },
+      );
+      const source = transportApproveModal.source;
+      const id = transportApproveModal.id;
+      setTransportApproveModal(null);
+      await load();
+      await refreshSelected(source, id);
+    } catch (err) {
+      setPaymentFormError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -589,12 +657,19 @@ function BillsToPayPageContent() {
           saving={saving}
           onClose={() => setSelected(null)}
           onTakeReview={() => void runAction('take-review')}
-          onApprove={() => void runAction('approve', { sendToCashier: true })}
+          onApprove={() => {
+            if (selected.source === 'TRANSPORT_EXPENSE') {
+              void openTransportApprove(selected);
+              return;
+            }
+            void runAction('approve', { sendToCashier: true });
+          }}
           onReturn={() => setReasonModal({ mode: 'return', bill: selected })}
           onReject={() => setReasonModal({ mode: 'reject', bill: selected })}
           onCreatePayment={() => void openPaymentModal(selected)}
           onEditPayment={(payment) => void openEditPayment(payment)}
           onPayPayment={(payment) => void payDraftPayment(payment)}
+          onShowQr={(images, initialIndex) => setQrPreview({ images, initialIndex })}
         />
       ) : null}
 
@@ -777,6 +852,91 @@ function BillsToPayPageContent() {
           </div>
         </Modal>
       ) : null}
+
+      {transportApproveModal ? (
+        <Modal
+          title={t('finance.billsToPay.approve')}
+          onClose={() => {
+            setTransportApproveModal(null);
+            setPaymentFormError('');
+          }}
+        >
+          <p className="text-xs text-slate-600">
+            {transportApproveModal.requestNumber} · {Number(transportApproveModal.amount).toFixed(2)}{' '}
+            {transportApproveModal.currency}
+          </p>
+          {paymentFormError ? (
+            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{paymentFormError}</p>
+          ) : null}
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.accountOrCashbox')}
+            <select
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              value={transportApproveForm.financeAccountId}
+              onChange={(e) =>
+                setTransportApproveForm((prev) => ({
+                  ...prev,
+                  financeAccountId: e.target.value,
+                }))
+              }
+            >
+              <option value="">{t('common.select')}</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name} ({Number(account.availableBalance).toFixed(2)} KGS)
+                </option>
+              ))}
+            </select>
+          </label>
+          {String(transportApproveModal.currency || 'KGS').toUpperCase() !== 'KGS' ? (
+            <label className="mt-2 block text-xs font-semibold">
+              {t('finance.billsToPay.exchangeRate')}
+              <input
+                type="number"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                value={transportApproveForm.exchangeRate}
+                onChange={(e) =>
+                  setTransportApproveForm((prev) => ({
+                    ...prev,
+                    exchangeRate: e.target.value,
+                  }))
+                }
+              />
+            </label>
+          ) : null}
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.comment')}
+            <textarea
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              rows={2}
+              value={transportApproveForm.accountantComment}
+              onChange={(e) =>
+                setTransportApproveForm((prev) => ({
+                  ...prev,
+                  accountantComment: e.target.value,
+                }))
+              }
+            />
+          </label>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void submitTransportApprove()}
+            className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {t('finance.billsToPay.sendToCashier')}
+          </button>
+        </Modal>
+      ) : null}
+
+      {qrPreview ? (
+        <ImagePreviewModal
+          images={qrPreview.images}
+          initialIndex={qrPreview.initialIndex}
+          title={t('procurement.paymentInfo.showQr')}
+          onClose={() => setQrPreview(null)}
+        />
+      ) : null}
     </FinanceLayout>
   );
 }
@@ -802,6 +962,7 @@ function DetailDrawer({
   onCreatePayment,
   onEditPayment,
   onPayPayment,
+  onShowQr,
 }: {
   t: (key: string) => string;
   bill: BillDetail;
@@ -814,10 +975,15 @@ function DetailDrawer({
   onCreatePayment: () => void;
   onEditPayment: (payment: any) => void;
   onPayPayment: (payment: any) => void;
+  onShowQr: (
+    images: Array<{ src: string; alt?: string; label?: string }>,
+    initialIndex: number,
+  ) => void;
 }) {
   const detail = bill.detail || {};
   const cargo = detail.cargo;
   const allQrs = Array.isArray(detail.qrCodes) ? detail.qrCodes : [];
+  const invoices = Array.isArray(detail.invoices) ? detail.invoices : [];
   const payments = Array.isArray(detail.payments) ? detail.payments : [];
 
   useEffect(() => {
@@ -830,6 +996,7 @@ function DetailDrawer({
 
   const isTerminal = ['FULLY_PAID', 'REJECTED', 'CANCELLED'].includes(bill.status);
   const isFinance = bill.source === 'FINANCE_EXPENSE';
+  const isTransport = bill.source === 'TRANSPORT_EXPENSE';
   const canTakeReview =
     !isFinance &&
     !isTerminal &&
@@ -837,7 +1004,9 @@ function DetailDrawer({
   const canApprove =
     !isFinance &&
     !isTerminal &&
-    ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED'].includes(bill.status);
+    (isTransport
+      ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status)
+      : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED'].includes(bill.status));
   const canReturnOrReject =
     !isFinance &&
     !isTerminal &&
@@ -902,8 +1071,47 @@ function DetailDrawer({
                 label={t('finance.billsToPay.createdAt')}
                 value={bill.submittedAt ? new Date(bill.submittedAt).toLocaleString() : '—'}
               />
+              {isTransport ? (
+                <>
+                  <Field
+                    label={t('finance.billsToPay.order')}
+                    value={bill.relatedOrderNumber || detail.procurementOrder?.orderNumber || '—'}
+                  />
+                  <Field
+                    label={t('finance.billsToPay.paymentMethod')}
+                    value={
+                      detail.paymentMethod
+                        ? t(`procurement.payments.method.${detail.paymentMethod}`)
+                        : '—'
+                    }
+                  />
+                  <Field
+                    label={t('finance.billsToPay.comment')}
+                    value={detail.comment || detail.expenseName || '—'}
+                  />
+                </>
+              ) : null}
             </dl>
           </section>
+
+          {isTransport && invoices.length ? (
+            <div className="mt-3 text-sm">
+              <p className="font-semibold">{t('finance.billsToPay.supportingDocuments')}</p>
+              <div className="mt-1 space-y-1">
+                {invoices.map((file: { id: string; fileUrl: string; fileName: string }) => (
+                  <a
+                    key={file.id}
+                    href={`${API_URL}${file.fileUrl}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block text-blue-700"
+                  >
+                    {file.fileName}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {cargo ? (
             <div className="mt-3 rounded-lg border border-slate-200 p-3 text-sm">
@@ -948,18 +1156,25 @@ function DetailDrawer({
 
           {allQrs?.length ? (
             <div className="mt-3 text-sm">
-              <p className="font-semibold">QR</p>
-              <div className="mt-1 space-y-1">
-                {allQrs.map((qr: { id: string; fileUrl: string; fileName: string }) => (
-                  <a
+              <p className="font-semibold">{t('finance.cashierBills.qrCodes')}</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {allQrs.map((qr: { id: string; fileUrl: string; fileName: string }, index: number) => (
+                  <button
                     key={qr.id}
-                    href={`${API_URL}${qr.fileUrl}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block text-blue-700"
+                    type="button"
+                    onClick={() => {
+                      const images = allQrs.map((item: { fileName: string; fileUrl: string }) => {
+                        const src = item.fileUrl.startsWith('http')
+                          ? item.fileUrl
+                          : `${API_URL}${item.fileUrl}`;
+                        return { src, alt: item.fileName, label: item.fileName };
+                      });
+                      onShowQr(images, index);
+                    }}
+                    className="rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
                   >
-                    {qr.fileName}
-                  </a>
+                    {t('procurement.paymentInfo.showQr')}
+                  </button>
                 ))}
               </div>
             </div>

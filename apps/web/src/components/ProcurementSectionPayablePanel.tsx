@@ -59,6 +59,12 @@ type SectionExpense = {
   calculatedAmountKgs?: number | null;
   status: string;
   returnReason?: string | null;
+  accountantComment?: string | null;
+  comment?: string | null;
+  submittedAt?: string | null;
+  updatedAt?: string | null;
+  createdAt?: string | null;
+  createdBy?: { id?: string; fullName?: string } | null;
   accountant?: { fullName?: string } | null;
   cashier?: { fullName?: string } | null;
   invoices?: Array<{ id: string; fileName: string; fileUrl: string }>;
@@ -84,7 +90,37 @@ type Props = {
   showExpenseName?: boolean;
 };
 
-const ACTIVE = new Set(['WAITING_ACCOUNTANT', 'PENDING_CASHIER', 'PARTIALLY_PAID']);
+const LOCKED_STATUSES = new Set([
+  'WAITING_ACCOUNTANT',
+  'UNDER_REVIEW',
+  'PENDING_CASHIER',
+  'PARTIALLY_PAID',
+  'PAID',
+  'REJECTED',
+]);
+const EDITABLE_STATUSES = new Set(['DRAFT', 'RETURNED']);
+
+function mapUiInvoiceStatus(status: string): string {
+  switch (status) {
+    case 'WAITING_ACCOUNTANT':
+    case 'UNDER_REVIEW':
+      return 'SENT_TO_ACCOUNTANT';
+    case 'RETURNED':
+      return 'RETURNED_FOR_CORRECTION';
+    case 'PENDING_CASHIER':
+      return 'SENT_TO_CASHIER';
+    case 'PARTIALLY_PAID':
+      return 'PARTIALLY_PAID';
+    case 'PAID':
+      return 'PAID';
+    case 'REJECTED':
+      return 'REJECTED';
+    case 'DRAFT':
+      return 'DRAFT';
+    default:
+      return status;
+  }
+}
 
 function roundMoney2(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -159,15 +195,75 @@ export function ProcurementSectionPayablePanel({
   const [returnReason, setReturnReason] = useState('');
 
   const sectionRows = useMemo(
-    () => rows.filter((row) => row.expenseType === expenseType),
+    () => rows.filter((row) => row.expenseType === expenseType && row.status !== 'CANCELLED'),
     [rows, expenseType],
   );
-  const hasActiveRequest = sectionRows.some((row) => ACTIVE.has(row.status));
+  const primaryExpense = useMemo(() => {
+    if (!sectionRows.length) return null;
+    const ranked = [...sectionRows].sort((a, b) => {
+      const aTime = new Date(a.updatedAt || a.submittedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.submittedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    });
+    return (
+      ranked.find((row) => LOCKED_STATUSES.has(row.status) || row.status === 'RETURNED') ||
+      ranked.find((row) => row.status === 'DRAFT') ||
+      ranked[0]
+    );
+  }, [sectionRows]);
+  const isFormEditable =
+    canCreate && (!primaryExpense || EDITABLE_STATUSES.has(primaryExpense.status));
+  const isFormLocked = Boolean(primaryExpense && LOCKED_STATUSES.has(primaryExpense.status));
+  const isReturned = primaryExpense?.status === 'RETURNED';
+  const showSubmissionSummary = Boolean(
+    primaryExpense &&
+      (primaryExpense.submittedAt || primaryExpense.status !== 'DRAFT'),
+  );
 
   const cargoTotals = useMemo(
     () => calculateCargoLocal(form.totalWeightKg, form.cargoRateUsdPerKg, form.usdExchangeRate),
     [form.totalWeightKg, form.cargoRateUsdPerKg, form.usdExchangeRate],
   );
+
+  const formValid = useMemo(() => {
+    if (usesTransportCompany && !selectedCompany?.id && !primaryExpense?.transportCompanyId) {
+      return false;
+    }
+    if (isCargo) {
+      if (
+        !(Number(form.totalWeightKg) > 0) ||
+        !(Number(form.cargoRateUsdPerKg) > 0) ||
+        !(Number(form.usdExchangeRate) > 0)
+      ) {
+        return false;
+      }
+      const hasCargoReceipt =
+        Boolean(pendingCargoReceipt) || Boolean(primaryExpense?.cargoReceipts?.length);
+      if (!hasCargoReceipt) return false;
+    } else if (!(Number(form.amount) > 0)) {
+      return false;
+    }
+    if (form.paymentMethod === 'BANK_ACCOUNT' && !form.accountNumber.trim()) {
+      return false;
+    }
+    if (form.paymentMethod === 'QR_CODE') {
+      const companyQrCount = selectedCompany?.qrAttachments?.length ?? 0;
+      const hasQr =
+        pendingQrFiles.length > 0 ||
+        Boolean(primaryExpense?.qrCodes?.length) ||
+        companyQrCount > 0;
+      if (!hasQr) return false;
+    }
+    return true;
+  }, [
+    form,
+    isCargo,
+    pendingCargoReceipt,
+    pendingQrFiles.length,
+    primaryExpense,
+    selectedCompany,
+    usesTransportCompany,
+  ]);
 
   function load() {
     apiFetch<SectionExpense[]>(`/procurement/transport-expenses?orderId=${orderId}`)
@@ -205,6 +301,35 @@ export function ProcurementSectionPayablePanel({
       .then(setAccounts)
       .catch(() => setAccounts([]));
   }, [canApprove, canConfirm]);
+
+  useEffect(() => {
+    if (!primaryExpense || !EDITABLE_STATUSES.has(primaryExpense.status)) return;
+    setForm({
+      expenseName: primaryExpense.expenseName || primaryExpense.recipientName || '',
+      amount: String(primaryExpense.amount || ''),
+      currency: primaryExpense.currency || defaultCurrency,
+      paymentMethod: primaryExpense.paymentMethod === 'BANK_ACCOUNT' ? 'BANK_ACCOUNT' : 'QR_CODE',
+      bankName: primaryExpense.bankName || '',
+      accountHolder: primaryExpense.accountHolder || '',
+      accountNumber: primaryExpense.accountNumber || '',
+      totalWeightKg:
+        primaryExpense.totalWeightKg != null ? String(primaryExpense.totalWeightKg) : '',
+      cargoRateUsdPerKg:
+        primaryExpense.cargoRateUsdPerKg != null ? String(primaryExpense.cargoRateUsdPerKg) : '',
+      usdExchangeRate:
+        primaryExpense.usdExchangeRate != null ? String(primaryExpense.usdExchangeRate) : '',
+    });
+    if (primaryExpense.transportCompany) {
+      setSelectedCompany(primaryExpense.transportCompany);
+    } else if (primaryExpense.transportCompanyId) {
+      const match = companies.find((c) => c.id === primaryExpense.transportCompanyId);
+      if (match) setSelectedCompany(match);
+    }
+    setPendingQrFiles([]);
+    setPendingInvoice(null);
+    setPendingCargoReceipt(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primaryExpense?.id, primaryExpense?.status, primaryExpense?.updatedAt]);
 
   function applyCompanyToForm(company: TransportCompany, preserveTouched = true) {
     setSelectedCompany(company);
@@ -293,7 +418,7 @@ export function ProcurementSectionPayablePanel({
   }
 
   async function sendToAccountant() {
-    if (!canCreate || saving || hasActiveRequest) return;
+    if (!canCreate || saving || isFormLocked || !formValid) return;
     if (usesTransportCompany && !selectedCompany?.id) {
       setError(t('procurement.sectionPayable.transportCompanyRequired'));
       return;
@@ -303,7 +428,9 @@ export function ProcurementSectionPayablePanel({
         setError(t('procurement.sectionPayable.cargoInputsRequired'));
         return;
       }
-      if (!pendingCargoReceipt) {
+      const hasCargoReceipt =
+        Boolean(pendingCargoReceipt) || Boolean(primaryExpense?.cargoReceipts?.length);
+      if (!hasCargoReceipt) {
         setError(t('procurement.sectionPayable.cargoReceiptRequired'));
         return;
       }
@@ -316,7 +443,12 @@ export function ProcurementSectionPayablePanel({
       return;
     }
     const companyQrCount = selectedCompany?.qrAttachments?.length ?? 0;
-    if (form.paymentMethod === 'QR_CODE' && pendingQrFiles.length === 0 && companyQrCount === 0) {
+    if (
+      form.paymentMethod === 'QR_CODE' &&
+      pendingQrFiles.length === 0 &&
+      companyQrCount === 0 &&
+      !(primaryExpense?.qrCodes?.length)
+    ) {
       setError(t('procurement.sectionPayable.qrRequired'));
       return;
     }
@@ -329,15 +461,17 @@ export function ProcurementSectionPayablePanel({
         expenseType,
         requestType,
         transportCompanyId: selectedCompany?.id,
-        supplierCarrier: selectedCompany?.name || form.expenseName || t('procurement.sectionPayable.defaultCarrier'),
+        supplierCarrier:
+          selectedCompany?.name || form.expenseName || t('procurement.sectionPayable.defaultCarrier'),
         expenseName: form.expenseName || undefined,
-        recipientName: selectedCompany?.name || undefined,
+        recipientName: selectedCompany?.name || form.expenseName || undefined,
         currency: isCargo ? 'KGS' : form.currency,
         paymentMethod: form.paymentMethod,
         bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
-        accountHolder: form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
-        accountNumber: form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
-        sendToAccountant: form.paymentMethod === 'BANK_ACCOUNT' && !pendingInvoice && !isCargo,
+        accountHolder:
+          form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
+        accountNumber:
+          form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
       };
 
       if (isCargo) {
@@ -352,48 +486,63 @@ export function ProcurementSectionPayablePanel({
         payload.amount = Number(form.amount);
       }
 
-      const created = await apiFetch<SectionExpense>('/procurement/transport-expenses', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
+      let expenseId = primaryExpense?.id ?? null;
+      const editingExisting =
+        Boolean(primaryExpense) && EDITABLE_STATUSES.has(primaryExpense!.status);
+
+      if (editingExisting && expenseId) {
+        await apiFetch(`/procurement/transport-expenses/${expenseId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const created = await apiFetch<SectionExpense>('/procurement/transport-expenses', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...payload,
+            sendToAccountant: form.paymentMethod === 'BANK_ACCOUNT' && !pendingInvoice && !isCargo,
+          }),
+        });
+        expenseId = created.id;
+        if (created.status === 'WAITING_ACCOUNTANT' || created.status === 'UNDER_REVIEW') {
+          setPendingQrFiles([]);
+          setPendingInvoice(null);
+          setPendingCargoReceipt(null);
+          load();
+          return;
+        }
+      }
+
+      if (!expenseId) throw new Error(t('common.error'));
 
       for (const file of pendingQrFiles) {
-        await uploadQrToExpense(created.id, file);
+        await uploadQrToExpense(expenseId, file);
       }
-      if (pendingQrFiles.length === 0 && form.paymentMethod === 'QR_CODE' && selectedCompany?.id && companyQrCount > 0) {
-        await cloneCompanyQr(created.id, selectedCompany.id);
+      if (
+        pendingQrFiles.length === 0 &&
+        form.paymentMethod === 'QR_CODE' &&
+        selectedCompany?.id &&
+        companyQrCount > 0 &&
+        !(primaryExpense?.qrCodes?.length)
+      ) {
+        await cloneCompanyQr(expenseId, selectedCompany.id);
       }
       if (pendingInvoice) {
-        await uploadInvoiceToExpense(created.id, pendingInvoice);
+        await uploadInvoiceToExpense(expenseId, pendingInvoice);
       }
       if (pendingCargoReceipt) {
-        await uploadCargoReceiptToExpense(created.id, pendingCargoReceipt);
+        await uploadCargoReceiptToExpense(expenseId, pendingCargoReceipt);
       }
 
-      if (form.paymentMethod === 'QR_CODE' || pendingInvoice || isCargo) {
-        await apiFetch(`/procurement/transport-expenses/${created.id}/submit`, {
-          method: 'POST',
-          body: '{}',
-        });
-      }
+      await apiFetch(`/procurement/transport-expenses/${expenseId}/submit`, {
+        method: 'POST',
+        body: '{}',
+      });
 
       setPendingQrFiles([]);
       setPendingInvoice(null);
       setPendingCargoReceipt(null);
       setTouchedPaymentFields({ bankName: false, accountHolder: false, accountNumber: false });
-      setSelectedCompany(null);
-      setForm({
-        expenseName: '',
-        amount: '',
-        currency: defaultCurrency,
-        paymentMethod: 'QR_CODE',
-        bankName: '',
-        accountHolder: '',
-        accountNumber: '',
-        totalWeightKg: '',
-        cargoRateUsdPerKg: '',
-        usdExchangeRate: '',
-      });
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -513,7 +662,13 @@ export function ProcurementSectionPayablePanel({
       <h4 className="text-sm font-semibold text-slate-900">{t('procurement.sectionPayable.title')}</h4>
       {error ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
-      {canCreate ? (
+      {isReturned && primaryExpense?.returnReason ? (
+        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {t('procurement.sectionPayable.returnedForCorrection')}: {primaryExpense.returnReason}
+        </p>
+      ) : null}
+
+      {isFormEditable ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2 lg:grid-cols-3">
           {showExpenseName ? (
             <CompactField
@@ -657,6 +812,13 @@ export function ProcurementSectionPayablePanel({
                 {t('procurement.paymentInfo.uploadQr')}
                 <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={onPickQr} />
               </label>
+              {primaryExpense?.qrCodes?.length ? (
+                <ul className="space-y-1 text-xs text-slate-600">
+                  {primaryExpense.qrCodes.map((qr) => (
+                    <li key={qr.id}>{qr.fileName}</li>
+                  ))}
+                </ul>
+              ) : null}
               {pendingQrFiles.length ? (
                 <ul className="space-y-1 text-xs text-slate-600">
                   {pendingQrFiles.map((file, index) => (
@@ -674,7 +836,7 @@ export function ProcurementSectionPayablePanel({
                     </li>
                   ))}
                 </ul>
-              ) : selectedCompany?.qrAttachments?.length ? (
+              ) : selectedCompany?.qrAttachments?.length && !primaryExpense?.qrCodes?.length ? (
                 <p className="text-xs text-slate-600">
                   {t('procurement.sectionPayable.companyQrAvailable')}:{' '}
                   {selectedCompany.qrAttachments.map((qr) => qr.fileName).join(', ')}
@@ -696,6 +858,21 @@ export function ProcurementSectionPayablePanel({
                   onChange={(e) => setPendingCargoReceipt(e.target.files?.[0] ?? null)}
                 />
               </label>
+              {primaryExpense?.cargoReceipts?.length ? (
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-600">
+                  {primaryExpense.cargoReceipts.map((file) => (
+                    <a
+                      key={file.id}
+                      href={`${API_URL}${file.fileUrl}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700"
+                    >
+                      {file.fileName}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
               {pendingCargoReceipt ? (
                 <div className="mt-1 flex items-center gap-2 text-xs text-slate-600">
                   <span>{pendingCargoReceipt.name}</span>
@@ -726,15 +903,65 @@ export function ProcurementSectionPayablePanel({
           <div className="md:col-span-2 lg:col-span-3">
             <button
               type="button"
-              disabled={saving || hasActiveRequest}
+              disabled={saving || !formValid}
               onClick={() => void sendToAccountant()}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-blue-300"
             >
-              {hasActiveRequest
-                ? t('procurement.payments.awaitingAccountant')
-                : t('procurement.payments.sendInvoice')}
+              {t('procurement.payments.sendInvoice')}
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {isFormLocked && primaryExpense ? (
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
+          <p className="font-semibold">{t('procurement.payments.invoiceSentStatus')}</p>
+          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                {t('procurement.sectionPayable.recipient')}
+              </dt>
+              <dd>
+                {primaryExpense.transportCompany?.name ||
+                  primaryExpense.recipientName ||
+                  primaryExpense.supplierCarrier}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                {t('procurement.sectionPayable.amount')}
+              </dt>
+              <dd>
+                {Number(primaryExpense.amount).toFixed(2)} {primaryExpense.currency}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                {t('procurement.paymentInfo.paymentMethod')}
+              </dt>
+              <dd>{t(`procurement.paymentInfo.method.${primaryExpense.paymentMethod}`)}</dd>
+            </div>
+            {primaryExpense.expenseName ? (
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  {t('procurement.sectionPayable.expenseName')}
+                </dt>
+                <dd>{primaryExpense.expenseName}</dd>
+              </div>
+            ) : null}
+          </dl>
+          {primaryExpense.qrCodes?.length ? (
+            <p className="mt-2 text-xs text-slate-500">
+              QR: {primaryExpense.qrCodes.map((qr) => qr.fileName).join(', ')}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            disabled
+            className="mt-3 rounded-lg bg-blue-300 px-4 py-2 text-sm font-semibold text-white"
+          >
+            {t('procurement.payments.sendInvoice')}
+          </button>
         </div>
       ) : null}
 
@@ -748,30 +975,47 @@ export function ProcurementSectionPayablePanel({
                 <div>
                   <p className="font-semibold">
                     {row.expenseNumber} · {Number(row.amount).toFixed(2)} {row.currency}
-                    {row.transportCompany?.name ? ` · ${row.transportCompany.name}` : row.recipientName ? ` · ${row.recipientName}` : ''}
+                    {row.transportCompany?.name
+                      ? ` · ${row.transportCompany.name}`
+                      : row.recipientName
+                        ? ` · ${row.recipientName}`
+                        : ''}
                   </p>
                   <p className="text-xs text-slate-600">
-                    {translateStatus(t, row.status)} · {t(`procurement.paymentInfo.method.${row.paymentMethod}`)}
+                    {translateStatus(t, row.status)} ·{' '}
+                    {t(`procurement.paymentInfo.method.${row.paymentMethod}`)}
                     {row.paidAmountKgs != null && Number(row.paidAmountKgs) > 0
                       ? ` · ${t('procurement.sectionPayable.paid')}: ${Number(row.paidAmountKgs).toFixed(2)} KGS`
                       : ''}
                   </p>
+                  {row.returnReason ? (
+                    <p className="mt-1 text-xs text-amber-800">
+                      {t('procurement.sectionPayable.correctionReason')}: {row.returnReason}
+                    </p>
+                  ) : null}
                   {row.calculatedAmountKgs != null ? (
                     <p className="text-xs text-slate-500">
-                      {Number(row.totalWeightKg || 0).toFixed(3)} kg × {Number(row.cargoRateUsdPerKg || 0).toFixed(4)} USD
+                      {Number(row.totalWeightKg || 0).toFixed(3)} kg ×{' '}
+                      {Number(row.cargoRateUsdPerKg || 0).toFixed(4)} USD
                       {' → '}
-                      {Number(row.calculatedAmountUsd || 0).toFixed(2)} USD / {Number(row.calculatedAmountKgs).toFixed(2)} KGS
+                      {Number(row.calculatedAmountUsd || 0).toFixed(2)} USD /{' '}
+                      {Number(row.calculatedAmountKgs).toFixed(2)} KGS
                     </p>
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {canApprove && row.status === 'WAITING_ACCOUNTANT' ? (
+                  {canApprove &&
+                  (row.status === 'WAITING_ACCOUNTANT' || row.status === 'UNDER_REVIEW') ? (
                     <button
                       type="button"
                       className="rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700"
                       onClick={() => {
                         setApproveTarget(row);
-                        setApproveForm({ exchangeRate: '', financeAccountId: '', accountantComment: '' });
+                        setApproveForm({
+                          exchangeRate: '',
+                          financeAccountId: '',
+                          accountantComment: '',
+                        });
                       }}
                     >
                       {t('procurement.sectionPayable.approve')}
@@ -797,7 +1041,12 @@ export function ProcurementSectionPayablePanel({
                     <>
                       <label className="cursor-pointer rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold">
                         {t('procurement.payments.uploadReceipt')}
-                        <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => void uploadReceipt(row.id, e)} />
+                        <input
+                          type="file"
+                          className="hidden"
+                          accept=".pdf,.jpg,.jpeg,.png,.webp"
+                          onChange={(e) => void uploadReceipt(row.id, e)}
+                        />
                       </label>
                       <button
                         type="button"
@@ -824,9 +1073,17 @@ export function ProcurementSectionPayablePanel({
               </div>
               {row.cargoReceipts?.length ? (
                 <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                  <span className="font-semibold text-slate-600">{t('procurement.sectionPayable.cargoReceipt')}:</span>
+                  <span className="font-semibold text-slate-600">
+                    {t('procurement.sectionPayable.cargoReceipt')}:
+                  </span>
                   {row.cargoReceipts.map((file) => (
-                    <a key={file.id} href={`${API_URL}${file.fileUrl}`} target="_blank" rel="noreferrer" className="text-blue-700">
+                    <a
+                      key={file.id}
+                      href={`${API_URL}${file.fileUrl}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700"
+                    >
                       {file.fileName}
                     </a>
                   ))}
@@ -835,9 +1092,9 @@ export function ProcurementSectionPayablePanel({
               {row.qrCodes?.length ? (
                 <div className="mt-1 flex flex-wrap gap-2 text-xs">
                   {row.qrCodes.map((qr) => (
-                    <a key={qr.id} href={`${API_URL}${qr.fileUrl}`} target="_blank" rel="noreferrer" className="text-blue-700">
+                    <span key={qr.id} className="text-slate-600">
                       {qr.fileName}
-                    </a>
+                    </span>
                   ))}
                 </div>
               ) : null}
@@ -845,6 +1102,71 @@ export function ProcurementSectionPayablePanel({
           ))
         )}
       </div>
+
+      {showSubmissionSummary && primaryExpense ? (
+        <div className="mt-4 rounded-lg border border-slate-300 bg-white p-3 text-sm">
+          <h5 className="font-semibold text-slate-900">
+            {t('procurement.sectionPayable.submissionSummary')}
+          </h5>
+          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+            <SummaryField
+              label={t('procurement.sectionPayable.status')}
+              value={t(
+                `procurement.sectionPayable.invoiceStatus.${mapUiInvoiceStatus(primaryExpense.status)}`,
+              )}
+            />
+            <SummaryField
+              label={t('procurement.sectionPayable.sentAt')}
+              value={
+                primaryExpense.submittedAt
+                  ? new Date(primaryExpense.submittedAt).toLocaleString()
+                  : '—'
+              }
+            />
+            <SummaryField
+              label={t('procurement.sectionPayable.sentBy')}
+              value={primaryExpense.createdBy?.fullName || '—'}
+            />
+            <SummaryField
+              label={t('procurement.sectionPayable.amount')}
+              value={`${Number(primaryExpense.amount).toFixed(2)} ${primaryExpense.currency}`}
+            />
+            <SummaryField
+              label={t('procurement.sectionPayable.recipient')}
+              value={
+                primaryExpense.transportCompany?.name ||
+                primaryExpense.recipientName ||
+                primaryExpense.supplierCarrier ||
+                '—'
+              }
+            />
+            <SummaryField
+              label={t('procurement.sectionPayable.expenseName')}
+              value={primaryExpense.expenseName || primaryExpense.comment || '—'}
+            />
+            <SummaryField
+              label={t('procurement.sectionPayable.accountantStatus')}
+              value={translateStatus(t, primaryExpense.status)}
+            />
+            <SummaryField
+              label={t('procurement.sectionPayable.lastUpdated')}
+              value={
+                primaryExpense.updatedAt
+                  ? new Date(primaryExpense.updatedAt).toLocaleString()
+                  : '—'
+              }
+            />
+            {primaryExpense.returnReason ? (
+              <div className="sm:col-span-2">
+                <SummaryField
+                  label={t('procurement.sectionPayable.correctionReason')}
+                  value={primaryExpense.returnReason}
+                />
+              </div>
+            ) : null}
+          </dl>
+        </div>
+      ) : null}
 
       {showCreateCompany ? (
         <TransportCompanyQuickCreateModal
@@ -1069,6 +1391,15 @@ function CompactField({
         className={`mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm ${readOnly ? 'bg-slate-100 text-slate-700' : ''}`}
       />
     </label>
+  );
+}
+
+function SummaryField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
+      <dd className="font-medium text-slate-900">{value}</dd>
+    </div>
   );
 }
 
