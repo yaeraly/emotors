@@ -178,13 +178,17 @@ export function assertCashierCannotMutateApprovedAmount(input: {
   if (!(approved > 0)) {
     throw new Error('Approved payment amount is missing');
   }
-  if (
-    input.requestedActualPaidKgs != null &&
-    Math.abs(Number(input.requestedActualPaidKgs) - approved) > 0.009
-  ) {
+  if (input.requestedActualPaidKgs == null) {
+    return approved;
+  }
+  const requested = Math.round(Number(input.requestedActualPaidKgs) * 100) / 100;
+  if (!(requested > 0)) {
+    throw new Error('Payment amount must be greater than zero');
+  }
+  if (requested > approved + 0.009) {
     throw new Error('Cashier cannot change the approved payment amount');
   }
-  return approved;
+  return requested;
 }
 
 export function assertCashierCannotMutateFx(input: {

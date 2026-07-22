@@ -9,6 +9,8 @@ import {
   AlertType,
   FileAttachmentEntityType,
   Prisma,
+  ProcurementPaymentInfoMethod,
+  ProcurementSupplierPaymentMethod,
   ProcurementSupplierPaymentStatus,
   Role,
   TransportExpenseStatus,
@@ -16,7 +18,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { canConfirmSupplierPayment, hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
+import { canConfirmSupplierPayment } from '../rbac/rbac';
 import {
   assertCashierCannotMutateApprovedAmount,
   assertCashierCannotMutateFx,
@@ -520,6 +522,7 @@ export class CashierBillsService {
             remainingYuan: Math.max(0, Number(order.totalYuan) - paidYuan),
             // Cost base stays full approved procurement amount.
             costBaseYuan: Number(order.totalYuan),
+            supplierPaymentStatus: order.supplierPaymentStatus,
           }
         : null,
       previousPayments: (order?.supplierPayments || []).map((p) => ({
@@ -816,6 +819,9 @@ export class CashierBillsService {
       currency?: string;
       exchangeRate?: number;
       financeAccountId?: string;
+      paymentMethod?: string;
+      accountChangeReason?: string;
+      actualPaidDifferenceReason?: string;
     },
   ) {
     const payment = await this.prisma.procurementSupplierPayment.findUnique({ where: { id } });
@@ -824,8 +830,9 @@ export class CashierBillsService {
       throw new BadRequestException('Actual payment date is required');
     }
 
+    let actualPaidKgs: number;
     try {
-      assertCashierCannotMutateApprovedAmount({
+      actualPaidKgs = assertCashierCannotMutateApprovedAmount({
         approvedAmountKgs: Number(payment.approvedAmountKgs),
         requestedActualPaidKgs: dto.actualPaidKgs,
       });
@@ -839,26 +846,42 @@ export class CashierBillsService {
       throw new BadRequestException(error instanceof Error ? error.message : 'Invalid payment mutation');
     }
 
-    if (
-      dto.financeAccountId &&
-      payment.intendedFinanceAccountId &&
-      dto.financeAccountId !== payment.intendedFinanceAccountId &&
-      !hasAnyFullAccessRole(resolveUserRoles(user))
-    ) {
-      throw new ForbiddenException('HQ Cashier cannot replace the selected debit account');
+    const financeAccountId = dto.financeAccountId || payment.intendedFinanceAccountId || undefined;
+    if (!financeAccountId) {
+      throw new BadRequestException('Debit account is required');
     }
 
-    const approvedAmountKgs = Number(payment.approvedAmountKgs);
+    const nextPaymentMethod =
+      dto.paymentMethod &&
+      (Object.values(ProcurementSupplierPaymentMethod) as string[]).includes(dto.paymentMethod)
+        ? (dto.paymentMethod as ProcurementSupplierPaymentMethod)
+        : undefined;
+
+    if (nextPaymentMethod || (financeAccountId && financeAccountId !== payment.intendedFinanceAccountId)) {
+      await this.prisma.procurementSupplierPayment.update({
+        where: { id },
+        data: {
+          ...(nextPaymentMethod ? { paymentMethod: nextPaymentMethod } : {}),
+          intendedFinanceAccountId: financeAccountId,
+        },
+      });
+    }
+
     const result = await this.supplierPayments.confirmPayment(
       user,
       payment.procurementOrderId,
       id,
       {
-        actualPaidKgs: approvedAmountKgs,
+        actualPaidKgs,
         paymentDate: dto.paymentDate,
         cashierComment: dto.cashierComment,
         expectedVersion: dto.expectedVersion,
-        financeAccountId: payment.intendedFinanceAccountId || undefined,
+        financeAccountId,
+        accountChangeReason:
+          financeAccountId !== payment.intendedFinanceAccountId
+            ? dto.accountChangeReason?.trim() || 'Selected by cashier during confirmation'
+            : dto.accountChangeReason,
+        actualPaidDifferenceReason: dto.actualPaidDifferenceReason,
       },
     );
 
@@ -885,6 +908,7 @@ export class CashierBillsService {
       paidAmountKgs?: number;
       currency?: string;
       exchangeRate?: number;
+      paymentMethod?: string;
     },
   ) {
     const expense = await this.prisma.procurementTransportExpense.findUnique({ where: { id } });
@@ -892,16 +916,10 @@ export class CashierBillsService {
     if (!dto.paymentDate) {
       throw new BadRequestException('Actual payment date is required');
     }
-    if (!expense.financeAccountId && !dto.financeAccountId) {
+
+    const financeAccountId = dto.financeAccountId || expense.financeAccountId || undefined;
+    if (!financeAccountId) {
       throw new BadRequestException('Debit account is required');
-    }
-    if (
-      dto.financeAccountId &&
-      expense.financeAccountId &&
-      dto.financeAccountId !== expense.financeAccountId &&
-      !hasAnyFullAccessRole(resolveUserRoles(user))
-    ) {
-      throw new ForbiddenException('HQ Cashier cannot replace the selected debit account');
     }
 
     try {
@@ -918,14 +936,33 @@ export class CashierBillsService {
     const requestedKgs = Number(expense.amountKgs) > 0 ? Number(expense.amountKgs) : Number(expense.amount);
     const alreadyPaid = Number(expense.paidAmountKgs || 0);
     const remaining = Math.max(0, requestedKgs - alreadyPaid);
-    // Cashier confirms the prepared remaining task amount; cannot invent a new amount.
-    if (dto.paidAmountKgs != null && Math.abs(Number(dto.paidAmountKgs) - remaining) > 0.009) {
+    const paidAmountKgs =
+      dto.paidAmountKgs != null ? Math.round(Number(dto.paidAmountKgs) * 100) / 100 : remaining;
+    if (!(paidAmountKgs > 0)) {
+      throw new BadRequestException('Payment amount must be greater than zero');
+    }
+    if (paidAmountKgs > remaining + 0.009) {
       throw new BadRequestException('Cashier cannot change the approved payment amount');
     }
 
+    const nextPaymentMethod =
+      dto.paymentMethod === 'BANK_ACCOUNT' || dto.paymentMethod === 'QR_CODE'
+        ? (dto.paymentMethod as ProcurementPaymentInfoMethod)
+        : undefined;
+
+    if (nextPaymentMethod || financeAccountId !== expense.financeAccountId) {
+      await this.prisma.procurementTransportExpense.update({
+        where: { id },
+        data: {
+          ...(nextPaymentMethod ? { paymentMethod: nextPaymentMethod } : {}),
+          financeAccountId,
+        },
+      });
+    }
+
     const result = await this.transportExpenses.confirmPayment(user, id, {
-      financeAccountId: expense.financeAccountId || dto.financeAccountId!,
-      paidAmountKgs: remaining,
+      financeAccountId,
+      paidAmountKgs,
       paidAt: dto.paymentDate,
       cashierComment: dto.cashierComment,
     });

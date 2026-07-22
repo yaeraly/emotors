@@ -422,7 +422,11 @@ export function canChangeSupplierPaymentFinanceAccount(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>,
 ) {
   const roles = resolveUserRoles(user);
-  return hasAnyFullAccessRole(roles) || roles.includes(Role.FINANCE_MANAGER);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    roles.includes(Role.HQ_CASHIER)
+  );
 }
 
 export function canCreateProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

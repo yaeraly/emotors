@@ -162,6 +162,11 @@ function CashierBillsPageContent() {
   const [confirmError, setConfirmError] = useState('');
   const [pinNotice, setPinNotice] = useState('');
   const [pinning, setPinning] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('BANK_ACCOUNT');
+  const [financeAccountId, setFinanceAccountId] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const [differenceReason, setDifferenceReason] = useState('');
+  const [accounts, setAccounts] = useState<Array<{ id: string; name: string; availableBalance: number; typeCode?: string | null }>>([]);
 
   const canAccess = canConfirmSupplierPayment(user);
 
@@ -323,16 +328,107 @@ function CashierBillsPageContent() {
     }
   }
 
-  function openConfirmModal(row: BillRow) {
-    setConfirmModal(row);
+  async function loadAccounts() {
+    try {
+      const list = await apiFetch<Array<{ id: string; name: string; availableBalance: number; typeCode?: string | null }>>(
+        '/procurement/supplier-payment-accounts',
+      );
+      setAccounts(Array.isArray(list) ? list : []);
+    } catch {
+      setAccounts([]);
+    }
+  }
+
+  function remainingPayableKgs(detail: BillDetail | null, row: BillRow) {
+    if (!detail) return Number(row.amountKgs || 0);
+    if (detail.source === 'TRANSPORT_EXPENSE') {
+      return Number(detail.remainingAmountKgs ?? detail.amountKgs ?? row.amountKgs ?? 0);
+    }
+    const approved = Number(detail.approvedAmountKgs ?? detail.amountKgs ?? row.amountKgs ?? 0);
+    const remainingYuan = Number(detail.procurement?.remainingYuan);
+    const rate = Number(detail.exchangeRate || 0);
+    if (Number.isFinite(remainingYuan) && rate > 0) {
+      return Math.min(approved, Math.round(remainingYuan * rate * 100) / 100);
+    }
+    return approved;
+  }
+
+  function resetConfirmFormFields() {
+    setPaymentDate(new Date().toISOString().slice(0, 10));
+    setCashierComment('');
+    setReceiptFile(null);
+    setPaymentMethod('BANK_ACCOUNT');
+    setFinanceAccountId('');
+    setPaymentAmount('');
+    setDifferenceReason('');
     setConfirmError('');
     setPinNotice('');
-    setPaymentDate(new Date().toISOString().slice(0, 10));
-    setCashierComment(selected?.cashierComment || '');
-    setReceiptFile(null);
-    if (!selected || selected.id !== row.id) {
-      void openDetail(row);
+  }
+
+  function openConfirmModal(row: BillRow) {
+    setConfirmModal(row);
+    resetConfirmFormFields();
+    void (async () => {
+      try {
+        await loadAccounts();
+        let detail = selected?.id === row.id ? selected : null;
+        if (!detail) {
+          detail = await apiFetch<BillDetail>(`/procurement/cashier-bills/${row.source}/${row.id}`);
+          setSelected(detail);
+        }
+        setPaymentAmount(String(remainingPayableKgs(detail, row) || ''));
+        setPaymentMethod(detail.paymentMethod || 'BANK_ACCOUNT');
+        setFinanceAccountId(detail.debitAccount?.id || '');
+        setCashierComment(detail.cashierComment || '');
+      } catch (err) {
+        setConfirmError(err instanceof Error ? err.message : t('common.error'));
+      }
+    })();
+  }
+
+  function validateConfirmForm(row: BillRow) {
+    if (!paymentDate.trim()) {
+      setConfirmError(t('finance.cashierBills.paymentDateRequired'));
+      return null;
     }
+    if (!paymentMethod) {
+      setConfirmError(t('finance.cashierBills.paymentMethod'));
+      return null;
+    }
+    if (!financeAccountId) {
+      setConfirmError(t('finance.billsToPay.accountRequired'));
+      return null;
+    }
+    const amount = Number(paymentAmount);
+    if (!(amount > 0)) {
+      setConfirmError(t('finance.billsToPay.amountMustBePositive'));
+      return null;
+    }
+    const maxAmount = remainingPayableKgs(selected?.id === row.id ? selected : null, row);
+    if (amount > maxAmount + 0.009) {
+      setConfirmError(t('finance.billsToPay.amountExceedsRemaining'));
+      return null;
+    }
+    const account = accounts.find((item) => item.id === financeAccountId);
+    if (!account || amount > Number(account.availableBalance) + 0.009) {
+      setConfirmError(t('finance.billsToPay.insufficientBalance'));
+      return null;
+    }
+    const approved = Number(
+      selected?.id === row.id
+        ? selected.approvedAmountKgs ?? selected.amountKgs ?? row.amountKgs
+        : row.amountKgs,
+    );
+    const hasExistingReceipt = Array.isArray(selected?.receiptAttachments) && selected.receiptAttachments.length > 0;
+    if (!receiptFile && !hasExistingReceipt) {
+      setConfirmError(t('finance.cashierBills.receiptRequired'));
+      return null;
+    }
+    if (row.source === 'SUPPLIER_PAYMENT' && Math.abs(amount - approved) > 0.009 && differenceReason.trim().length < 3) {
+      setConfirmError(t('procurement.payments.differenceReason'));
+      return null;
+    }
+    return { amount, approved };
   }
 
   async function pinPayment(row: BillRow) {
@@ -370,34 +466,41 @@ function CashierBillsPageContent() {
     setPinNotice('');
     setActionError('');
 
-    if (!paymentDate.trim()) {
-      setConfirmError(t('finance.cashierBills.paymentDateRequired'));
-      return;
-    }
-    const hasExistingReceipt = Array.isArray(selected?.receiptAttachments) && selected.receiptAttachments.length > 0;
-    if (!receiptFile && !hasExistingReceipt) {
-      setConfirmError(t('finance.cashierBills.receiptRequired'));
-      return;
-    }
+    const validated = validateConfirmForm(row);
+    if (!validated) return;
 
     setSaving(true);
     try {
       if (receiptFile) {
         await uploadReceipt(row, receiptFile);
       }
+      const body =
+        row.source === 'SUPPLIER_PAYMENT'
+          ? {
+              paymentDate,
+              cashierComment: cashierComment || undefined,
+              expectedVersion: selected?.version,
+              actualPaidKgs: validated.amount,
+              financeAccountId,
+              paymentMethod,
+              actualPaidDifferenceReason:
+                Math.abs(validated.amount - validated.approved) > 0.009
+                  ? differenceReason.trim()
+                  : undefined,
+            }
+          : {
+              paymentDate,
+              cashierComment: cashierComment || undefined,
+              paidAmountKgs: validated.amount,
+              financeAccountId,
+              paymentMethod,
+            };
       await apiFetch(`/procurement/cashier-bills/${row.source}/${row.id}/confirm`, {
         method: 'POST',
-        body: JSON.stringify({
-          paymentDate,
-          cashierComment: cashierComment || undefined,
-          expectedVersion: selected?.version,
-        }),
+        body: JSON.stringify(body),
       });
       setConfirmModal(null);
-      setCashierComment('');
-      setReceiptFile(null);
-      setConfirmError('');
-      setPinNotice('');
+      resetConfirmFormFields();
       await refreshAfterAction(row);
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
@@ -626,6 +729,12 @@ function CashierBillsPageContent() {
                   <DetailRow label={t('finance.cashierBills.totalProcurement')} value={`${formatMoney(selected.procurement.totalYuan)} CNY`} />
                   <DetailRow label={t('finance.cashierBills.paidAmount')} value={`${formatMoney(selected.procurement.totalPaidYuan)} CNY`} />
                   <DetailRow label={t('finance.cashierBills.remainingDebt')} value={`${formatMoney(selected.procurement.remainingYuan)} CNY`} />
+                  {selected.procurement.supplierPaymentStatus ? (
+                    <DetailRow
+                      label={t('procurement.payments.paymentStatus')}
+                      value={t(`procurement.payments.status.${selected.procurement.supplierPaymentStatus}`)}
+                    />
+                  ) : null}
                   <DetailRow label={t('finance.cashierBills.costBase')} value={`${formatMoney(selected.procurement.costBaseYuan)} CNY`} />
                 </section>
               ) : null}
@@ -765,13 +874,44 @@ function CashierBillsPageContent() {
             onClose={() => {
               if (saving || pinning) return;
               setConfirmModal(null);
-              setConfirmError('');
-              setPinNotice('');
+              resetConfirmFormFields();
             }}
           >
             <p className="mb-2 text-sm text-slate-600">
               {confirmModal.paymentNumber}: {formatMoney(confirmModal.amount)} {confirmModal.currency} → {formatMoney(confirmModal.amountKgs)} KGS
             </p>
+            <label className="mb-2 block text-xs font-semibold text-slate-600">{t('finance.cashierBills.paymentMethod')}</label>
+            <select
+              className="mb-3 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value)}
+            >
+              <option value="BANK_ACCOUNT">{t('procurement.payments.method.BANK_ACCOUNT')}</option>
+              <option value="QR_CODE">{t('procurement.payments.method.QR_CODE')}</option>
+              <option value="CASH">{t('procurement.payments.method.CASH')}</option>
+            </select>
+            <label className="mb-2 block text-xs font-semibold text-slate-600">{t('finance.billsToPay.accountOrCashbox')}</label>
+            <select
+              className="mb-3 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              value={financeAccountId}
+              onChange={(e) => setFinanceAccountId(e.target.value)}
+            >
+              <option value="">{t('common.select')}</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name} ({formatMoney(Number(account.availableBalance))} KGS)
+                </option>
+              ))}
+            </select>
+            <label className="mb-2 block text-xs font-semibold text-slate-600">{t('finance.cashierBills.amount')}</label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              className="mb-3 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              value={paymentAmount}
+              onChange={(e) => setPaymentAmount(e.target.value)}
+            />
             <label className="mb-2 block text-xs font-semibold text-slate-600">{t('finance.cashierBills.paymentDate')}</label>
             <input
               type="date"
@@ -787,6 +927,18 @@ function CashierBillsPageContent() {
               className="mb-3 block w-full text-sm"
               onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
             />
+            {confirmModal.source === 'SUPPLIER_PAYMENT' &&
+            Math.abs(Number(paymentAmount || 0) - Number(selected?.approvedAmountKgs ?? confirmModal.amountKgs)) > 0.009 ? (
+              <>
+                <label className="mb-2 block text-xs font-semibold text-slate-600">{t('procurement.payments.differenceReason')}</label>
+                <input
+                  type="text"
+                  className="mb-3 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+                  value={differenceReason}
+                  onChange={(e) => setDifferenceReason(e.target.value)}
+                />
+              </>
+            ) : null}
             <label className="mb-2 block text-xs font-semibold text-slate-600">{t('finance.cashierBills.comment')}</label>
             <textarea
               className="mb-3 h-20 w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
