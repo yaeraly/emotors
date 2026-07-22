@@ -47,6 +47,7 @@ function normalizeForm(
     paymentMethod: next?.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
     bankName: next?.bankName ?? '',
     accountHolder: next?.accountHolder ?? '',
+    // Always a string — never undefined/null (avoids controlled → uncontrolled inputs).
     accountNumber: next?.accountNumber ?? '',
   };
 }
@@ -69,10 +70,21 @@ export function ProcurementPaymentInfo({
   const [pendingQr, setPendingQr] = useState<{ file: File; previewUrl: string } | null>(null);
 
   const form = normalizeForm(value);
+  // Stable controlled values for bank inputs (never undefined/null).
+  const accountNumber = form.accountNumber ?? '';
+  const bankName = form.bankName ?? '';
+  const accountHolder = form.accountHolder ?? '';
 
   function emitChange(patch: Partial<SupplierAccountFormValue>) {
     // Keep every field defined for the full lifecycle — never pass undefined/null values.
-    onChange(normalizeForm({ ...form, ...patch }));
+    onChange(
+      normalizeForm({
+        paymentMethod: patch.paymentMethod ?? form.paymentMethod,
+        bankName: patch.bankName !== undefined ? patch.bankName : bankName,
+        accountHolder: patch.accountHolder !== undefined ? patch.accountHolder : accountHolder,
+        accountNumber: patch.accountNumber !== undefined ? patch.accountNumber : accountNumber,
+      }),
+    );
   }
 
   function load() {
@@ -121,17 +133,22 @@ export function ProcurementPaymentInfo({
       normalizeForm({
         paymentMethod: saved.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
         // Preserve locally entered bank fields when server clears them for QR mode.
-        bankName: saved.bankName ?? form.bankName,
-        accountHolder: saved.accountHolder ?? form.accountHolder,
-        accountNumber: saved.accountNumber ?? form.accountNumber,
+        bankName: saved.bankName ?? form.bankName ?? '',
+        accountHolder: saved.accountHolder ?? form.accountHolder ?? '',
+        accountNumber: saved.accountNumber ?? form.accountNumber ?? '',
       }),
     );
     return saved;
   }
 
   async function onPaymentMethodChange(nextMethod: 'BANK_ACCOUNT' | 'QR_CODE') {
-    // Update only the method — preserve bank fields already entered.
-    emitChange({ paymentMethod: nextMethod });
+    // Update only the method — explicitly keep bank fields (including accountNumber).
+    emitChange({
+      paymentMethod: nextMethod,
+      bankName: form.bankName ?? '',
+      accountHolder: form.accountHolder ?? '',
+      accountNumber: form.accountNumber ?? '',
+    });
     if (!canEdit) return;
     // Persist QR method immediately so subsequent QR uploads succeed.
     // Bank method is persisted on invoice send (account number may still be empty here).
@@ -232,7 +249,7 @@ export function ProcurementPaymentInfo({
             <input
               required
               disabled={!canEdit}
-              value={form.accountNumber ?? ''}
+              value={accountNumber}
               onChange={(e) => emitChange({ accountNumber: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
@@ -243,7 +260,7 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={form.bankName ?? ''}
+              value={bankName}
               onChange={(e) => emitChange({ bankName: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
@@ -254,7 +271,7 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={form.accountHolder ?? ''}
+              value={accountHolder}
               onChange={(e) => emitChange({ accountHolder: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
