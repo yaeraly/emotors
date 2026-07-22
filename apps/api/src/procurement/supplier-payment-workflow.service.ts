@@ -281,7 +281,33 @@ export class SupplierPaymentWorkflowService {
       },
       orderBy: { name: 'asc' },
     });
-    return accounts.map((account) => ({
+
+    // Reuse ledger balance sync so investment credits appear in payment selectors.
+    await this.prisma.$transaction(async (tx) => {
+      await this.financeLedgerService.syncAccountBalances(
+        tx,
+        accounts.map((account) => account.id),
+      );
+    });
+
+    const refreshed = await this.prisma.financeAccount.findMany({
+      where: { id: { in: accounts.map((account) => account.id) } },
+      select: {
+        id: true,
+        name: true,
+        accountNumber: true,
+        currency: true,
+        currentBalance: true,
+        availableBalance: true,
+        pendingBalance: true,
+        typeCode: true,
+        status: true,
+        scope: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return refreshed.map((account) => ({
       ...account,
       currentBalance: Number(account.currentBalance),
       availableBalance: Number(account.availableBalance),

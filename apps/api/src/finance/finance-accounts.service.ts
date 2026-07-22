@@ -120,10 +120,28 @@ export class FinanceAccountsService {
       orderBy: [{ scope: 'asc' }, { name: 'asc' }],
     });
 
-    return accounts.map((account) => this.assertAccountVisible(user, account, assignedAccountIds));
+    // Repair drift so investment (and all other) ledger credits are visible everywhere.
+    await this.prisma.$transaction(async (tx) => {
+      await this.ledgerService.syncAccountBalances(
+        tx,
+        accounts.map((account) => account.id),
+      );
+    });
+
+    const refreshed = await this.prisma.financeAccount.findMany({
+      where: { id: { in: accounts.map((account) => account.id) } },
+      include: this.accountInclude(),
+      orderBy: [{ scope: 'asc' }, { name: 'asc' }],
+    });
+
+    return refreshed.map((account) => this.assertAccountVisible(user, account, assignedAccountIds));
   }
 
   async getAccount(user: AuthUser, id: string) {
+    await this.prisma.$transaction(async (tx) => {
+      await this.ledgerService.recalculateAccountBalance(tx, id);
+    });
+
     const account = await this.prisma.financeAccount.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -306,12 +324,13 @@ export class FinanceAccountsService {
         throw new BadRequestException('Opening balance can only be set before transactions');
       }
 
+      // Persist openingBalance metadata only — ledger post is the balance source of truth.
       await tx.financeAccount.update({
         where: { id },
         data: {
           openingBalance: amount,
-          currentBalance: amount,
-          availableBalance: amount,
+          currentBalance: 0,
+          availableBalance: 0,
           pendingBalance: 0,
           updatedById: user.id,
         },
