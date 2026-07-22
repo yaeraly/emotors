@@ -68,9 +68,11 @@ assert(service.includes('PENDING_CASHIER'), '2. payment tasks require PENDING_CA
 assert(!service.includes("WAITING_ACCOUNTANT"), '3. raw employee transport requests excluded from cashier collect');
 assert(!cashierPage.includes('invoiceReviewStatus'), '3. raw employee requests not shown in cashier UI');
 
-assert(!cashierPage.includes("finance.cashierBills.status}</th>"), '4. no separate status column header');
-assert(cashierPage.includes('StatusBadge'), '4. status badge inside actions');
+assert(cashierPage.includes('finance.cashierBills.statusColumn'), '4. status column header');
+assert(cashierPage.includes('StatusBadge'), '4. status badge uses existing status colors');
 assert(cashierPage.includes('filterStatus') || cashierPage.includes('executionStatus'), '5. status filter exists');
+assert(cashierPage.includes('finance.cashierBills.pin'), 'confirm modal has pin action');
+assert(!cashierPage.includes('finance.cashierBills.openSource'), 'drawer does not show open source');
 
 assert(cashierPage.includes('finance.cashierBills.open'), '5. cashier can open payment details');
 assert(cashierPage.includes('accountNumber'), '6. bank account information displayed');
