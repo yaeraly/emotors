@@ -2,6 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
+import { EntityCombobox } from '@/components/EntityCombobox';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { User } from '@/lib/types';
 import {
@@ -121,7 +122,6 @@ export function ProcurementSectionPayablePanel({
   const [rows, setRows] = useState<SectionExpense[]>([]);
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([]);
   const [companies, setCompanies] = useState<TransportCompany[]>([]);
-  const [companyQuery, setCompanyQuery] = useState('');
   const [selectedCompany, setSelectedCompany] = useState<TransportCompany | null>(null);
   const [showCreateCompany, setShowCreateCompany] = useState(false);
   const [error, setError] = useState('');
@@ -195,9 +195,9 @@ export function ProcurementSectionPayablePanel({
 
   useEffect(() => {
     if (!usesTransportCompany || !canCreate) return;
-    void loadCompanies(companyQuery);
+    void loadCompanies();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyQuery, usesTransportCompany, canCreate]);
+  }, [usesTransportCompany, canCreate]);
 
   useEffect(() => {
     if (!canApprove && !canConfirm) return;
@@ -208,7 +208,6 @@ export function ProcurementSectionPayablePanel({
 
   function applyCompanyToForm(company: TransportCompany, preserveTouched = true) {
     setSelectedCompany(company);
-    setCompanyQuery(company.name);
     setForm((current) => ({
       ...current,
       bankName:
@@ -383,7 +382,6 @@ export function ProcurementSectionPayablePanel({
       setPendingCargoReceipt(null);
       setTouchedPaymentFields({ bankName: false, accountHolder: false, accountNumber: false });
       setSelectedCompany(null);
-      setCompanyQuery('');
       setForm({
         expenseName: '',
         amount: '',
@@ -501,15 +499,14 @@ export function ProcurementSectionPayablePanel({
     }
   }
 
-  const filteredCompanies = companies.filter((company) => {
-    const q = companyQuery.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      company.name.toLowerCase().includes(q) ||
-      (company.contactPerson || '').toLowerCase().includes(q) ||
-      (company.phone || '').toLowerCase().includes(q)
-    );
-  });
+  const companyOptions = useMemo(
+    () =>
+      companies.map((company) => ({
+        value: company.id,
+        label: company.companyCode ? `${company.name} (${company.companyCode})` : company.name,
+      })),
+    [companies],
+  );
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -529,75 +526,30 @@ export function ProcurementSectionPayablePanel({
           {usesTransportCompany ? (
             <div className="md:col-span-2 lg:col-span-3">
               <div className="flex flex-wrap items-end gap-2">
-                <label className="block min-w-[220px] flex-1">
-                  <span className="text-xs font-semibold text-slate-700">
-                    {t('procurement.sectionPayable.transportCompany')}
-                  </span>
-                  <input
-                    value={companyQuery}
-                    onChange={(e) => {
-                      setCompanyQuery(e.target.value);
-                      if (selectedCompany && e.target.value !== selectedCompany.name) {
+                <div className="min-w-[220px] flex-1">
+                  <EntityCombobox
+                    label={t('procurement.sectionPayable.transportCompany')}
+                    value={selectedCompany?.id ?? ''}
+                    options={companyOptions}
+                    onChange={(id) => {
+                      if (!id) {
                         setSelectedCompany(null);
+                        return;
                       }
+                      const company = companies.find((row) => row.id === id);
+                      if (company) applyCompanyToForm(company);
                     }}
                     placeholder={t('procurement.sectionPayable.searchTransportCompany')}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                    list={`transport-company-options-${expenseType}`}
                   />
-                  <datalist id={`transport-company-options-${expenseType}`}>
-                    {filteredCompanies.map((company) => (
-                      <option key={company.id} value={company.name}>
-                        {[company.contactPerson, company.phone].filter(Boolean).join(' · ')}
-                      </option>
-                    ))}
-                  </datalist>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const match = filteredCompanies.find(
-                      (company) => company.name.toLowerCase() === companyQuery.trim().toLowerCase(),
-                    );
-                    if (match) applyCompanyToForm(match);
-                  }}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700"
-                >
-                  {t('common.select')}
-                </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => setShowCreateCompany(true)}
-                  className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700"
+                  className="rounded-xl border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700"
                 >
                   {t('procurement.sectionPayable.createTransportCompany')}
                 </button>
               </div>
-              {selectedCompany ? (
-                <p className="mt-1 text-xs text-slate-600">
-                  {selectedCompany.name}
-                  {selectedCompany.contactPerson ? ` · ${selectedCompany.contactPerson}` : ''}
-                  {selectedCompany.phone ? ` · ${selectedCompany.phone}` : ''}
-                </p>
-              ) : null}
-              {!selectedCompany && filteredCompanies.length > 0 && companyQuery.trim() ? (
-                <ul className="mt-1 max-h-36 overflow-auto rounded-lg border border-slate-200 bg-white text-sm">
-                  {filteredCompanies.slice(0, 8).map((company) => (
-                    <li key={company.id}>
-                      <button
-                        type="button"
-                        className="block w-full px-3 py-2 text-left hover:bg-slate-50"
-                        onClick={() => applyCompanyToForm(company)}
-                      >
-                        <span className="font-semibold">{company.name}</span>
-                        <span className="ml-2 text-xs text-slate-500">
-                          {[company.contactPerson, company.phone].filter(Boolean).join(' · ')}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </div>
           ) : (
             <CompactField
@@ -900,8 +852,11 @@ export function ProcurementSectionPayablePanel({
           onClose={() => setShowCreateCompany(false)}
           onCreated={async (company) => {
             setShowCreateCompany(false);
-            const list = await loadCompanies(company.name);
+            const list = await loadCompanies();
             const fresh = list.find((item) => item.id === company.id) || company;
+            setCompanies((current) =>
+              current.some((item) => item.id === fresh.id) ? current : [fresh, ...current],
+            );
             applyCompanyToForm(fresh, false);
           }}
         />
