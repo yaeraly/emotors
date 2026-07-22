@@ -101,7 +101,6 @@ export class FinanceInvestmentsService {
           ledgerEntryId: entry.id,
           createdById: user.id,
         },
-        include: INVESTMENT_INCLUDE,
       });
 
       await tx.financeLedgerEntry.update({
@@ -109,15 +108,24 @@ export class FinanceInvestmentsService {
         data: { referenceType: 'FinanceInvestment', referenceId: investment.id },
       });
 
+      // Ensure selected account balance includes this investment credit.
+      await this.ledgerService.recalculateAccountBalance(tx, account.id);
+
+      const hydrated = await tx.financeInvestment.findUniqueOrThrow({
+        where: { id: investment.id },
+        include: INVESTMENT_INCLUDE,
+      });
+
       await this.audit(tx, user, 'finance.investment.created', investment.id, null, {
-        investmentNumber: investment.investmentNumber,
-        investmentType: investment.investmentType,
+        investmentNumber: hydrated.investmentNumber,
+        investmentType: hydrated.investmentType,
         accountId: account.id,
         amount,
         currency,
-        investorOwnerName: investment.investorOwnerName,
+        investorOwnerName: hydrated.investorOwnerName,
         ledgerEntryId: entry.id,
         ledgerEntryNumber: entry.entryNumber,
+        accountBalanceAfter: Number(hydrated.account?.currentBalance ?? 0),
       });
 
       await this.notifications.notifyInTx(tx, user, {
@@ -125,10 +133,10 @@ export class FinanceInvestmentsService {
         branchId: account.branchId ?? undefined,
         entityType: 'FinanceInvestment',
         entityId: investment.id,
-        referenceNumber: investment.investmentNumber,
+        referenceNumber: hydrated.investmentNumber,
       });
 
-      return this.toResponse(investment);
+      return this.toResponse(hydrated);
     });
   }
 
