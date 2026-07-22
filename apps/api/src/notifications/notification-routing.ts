@@ -51,6 +51,14 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
     module: NotificationModule.SUPPLIER_PAYMENT,
     roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
   },
+  CASHIER_PAYMENT_STARTED: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+  },
+  CASHIER_PAYMENT_FAILED: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+  },
   PAYABLE_REQUEST_UNDER_REVIEW: {
     module: NotificationModule.SUPPLIER_PAYMENT,
     roles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER, Role.FINANCE_MANAGER],
@@ -195,6 +203,14 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   SUPPLIER_PAYMENT_SENT_TO_CASHIER: {
     title: 'Платёж отправлен кассиру',
     message: 'HQ бухгалтер отправил платёж по закупке из Китая кассиру HQ.',
+  },
+  CASHIER_PAYMENT_STARTED: {
+    title: 'Кассир начал оплату',
+    message: 'HQ кассир начал обработку платежа.',
+  },
+  CASHIER_PAYMENT_FAILED: {
+    title: 'Ошибка оплаты кассира',
+    message: 'HQ кассир сообщил об ошибке оплаты.',
   },
   SUPPLIER_PAYMENT_RETURNED_TO_ACCOUNTANT: {
     title: 'Платёж возвращён бухгалтеру',

@@ -587,6 +587,9 @@ export class SupplierPaymentWorkflowService {
             ? ProcurementSupplierPaymentStatus.PENDING_CASHIER
             : ProcurementSupplierPaymentStatus.DRAFT,
           sentToCashierAt: sendToCashier ? new Date() : null,
+          executionStatus: sendToCashier ? 'PENDING_EXECUTION' : null,
+          executionStartedAt: null,
+          failureReason: null,
           accountantId: user.id,
           createdById: user.id,
           idempotencyKey: dto.idempotencyKey?.trim() || null,
@@ -750,6 +753,10 @@ export class SupplierPaymentWorkflowService {
               ? ProcurementSupplierPaymentStatus.DRAFT
               : payment.status,
           sentToCashierAt: sendToCashier ? new Date() : payment.sentToCashierAt,
+          executionStatus: sendToCashier ? 'PENDING_EXECUTION' : payment.executionStatus,
+          executionStartedAt: sendToCashier ? null : payment.executionStartedAt,
+          failureReason: sendToCashier ? null : payment.failureReason,
+          cashierId: sendToCashier ? null : payment.cashierId,
           returnReason: sendToCashier ? null : payment.returnReason,
           returnedAt: sendToCashier ? null : payment.returnedAt,
           version: { increment: 1 },
@@ -818,6 +825,10 @@ export class SupplierPaymentWorkflowService {
         data: {
           status: ProcurementSupplierPaymentStatus.PENDING_CASHIER,
           sentToCashierAt: new Date(),
+          executionStatus: 'PENDING_EXECUTION',
+          executionStartedAt: null,
+          failureReason: null,
+          cashierId: null,
           accountantId: payment.accountantId ?? user.id,
           returnReason: null,
           returnedAt: null,
@@ -833,6 +844,7 @@ export class SupplierPaymentWorkflowService {
       }, {
         paymentId: payment.id,
         status: updatedPayment.status,
+        executionStatus: 'PENDING_EXECUTION',
         approvedAmountKgs,
         intendedFinanceAccountId: payment.intendedFinanceAccountId,
       });
@@ -869,6 +881,7 @@ export class SupplierPaymentWorkflowService {
         where: { id: payment.id },
         data: {
           status: ProcurementSupplierPaymentStatus.RETURNED,
+          executionStatus: 'RETURNED_TO_ACCOUNTANT',
           returnReason: reason,
           returnedAt: new Date(),
           returnedById: user.id,
@@ -1001,6 +1014,7 @@ export class SupplierPaymentWorkflowService {
         where: { id: payment.id },
         data: {
           status: ProcurementSupplierPaymentStatus.ACTIVE,
+          executionStatus: 'COMPLETED',
           actualPaidKgs,
           amountKgs: actualPaidKgs,
           paymentDate: dto.paymentDate ? new Date(dto.paymentDate) : new Date(),
@@ -1012,6 +1026,7 @@ export class SupplierPaymentWorkflowService {
           actualPaidDifferenceReason: dto.actualPaidDifferenceReason?.trim() || null,
           cashierId: user.id,
           ledgerEntryId: ledgerEntry.id,
+          failureReason: null,
           version: { increment: 1 },
         },
         include: PAYMENT_INCLUDE,

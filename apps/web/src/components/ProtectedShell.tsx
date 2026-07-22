@@ -302,7 +302,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : hqCashierView ? (
               <>
-                <Link href="/procurement/cashier-payments" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('procurement.payments.cashierQueue')}</Link>
+                <Link href="/finance/cashier-bills" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.cashierBills')}</Link>
                 <Link href="/finance/transfers?status=PENDING_CASHIER" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.transfersCashierQueue')}</Link>
                 <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
                 <Link href="/distribution/branch-balances" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.branchBalances')}</Link>

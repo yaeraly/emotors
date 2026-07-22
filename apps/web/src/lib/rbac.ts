@@ -303,6 +303,7 @@ const HQ_CASHIER_ALLOWED_PREFIXES = [
   '/change-password',
   '/distribution',
   '/procurement/cashier-payments',
+  '/finance/cashier-bills',
   '/procurement/orders',
   '/finance/transfers',
   '/alerts',
@@ -735,7 +736,10 @@ export function canAccessPath(user: User, pathname: string) {
   ) {
     return canCreateSupplierPayment(user);
   }
-  if (pathname.startsWith('/procurement/cashier-payments')) {
+  if (
+    pathname.startsWith('/procurement/cashier-payments') ||
+    pathname.startsWith('/finance/cashier-bills')
+  ) {
     return canConfirmSupplierPayment(user);
   }
   if (pathname.startsWith('/procurement/orders/')) {

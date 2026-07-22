@@ -651,6 +651,10 @@ export class TransportExpenseService {
           approvedAt: new Date(),
           status: send ? TransportExpenseStatus.PENDING_CASHIER : TransportExpenseStatus.WAITING_ACCOUNTANT,
           sentToCashierAt: send ? new Date() : null,
+          executionStatus: send ? 'PENDING_EXECUTION' : expense.executionStatus,
+          executionStartedAt: send ? null : expense.executionStartedAt,
+          failureReason: send ? null : expense.failureReason,
+          cashierId: send ? null : expense.cashierId,
         },
         include: INCLUDE,
       });
@@ -698,10 +702,14 @@ export class TransportExpenseService {
       ) {
         throw new BadRequestException('Expense cannot be returned in current status');
       }
+      const fromCashier =
+        expense.status === TransportExpenseStatus.PENDING_CASHIER ||
+        expense.status === TransportExpenseStatus.PARTIALLY_PAID;
       const updated = await tx.procurementTransportExpense.update({
         where: { id },
         data: {
           status: TransportExpenseStatus.RETURNED,
+          executionStatus: fromCashier ? 'RETURNED_TO_ACCOUNTANT' : expense.executionStatus,
           returnReason: dto.reason.trim(),
           returnedAt: new Date(),
           returnedById: user.id,
@@ -710,6 +718,7 @@ export class TransportExpenseService {
       });
       await this.audit(tx, user, 'TRANSPORT_EXPENSE_RETURNED', id, { status: expense.status }, {
         status: updated.status,
+        executionStatus: updated.executionStatus,
         returnReason: updated.returnReason,
       });
       await this.notifications.notifyInTx(tx, user, {
@@ -718,7 +727,9 @@ export class TransportExpenseService {
         entityId: id,
         referenceNumber: expense.expenseNumber,
         message: `Transport expense ${expense.expenseNumber} was returned: ${dto.reason.trim()}`,
-        recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
+        recipientRoles: fromCashier
+          ? [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.SUPPLY_CHAIN_MANAGER]
+          : [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
       });
       return this.toResponse(updated, tx);
     });
@@ -784,6 +795,7 @@ export class TransportExpenseService {
         where: { id },
         data: {
           status: fullyPaid ? TransportExpenseStatus.PAID : TransportExpenseStatus.PARTIALLY_PAID,
+          executionStatus: fullyPaid ? 'COMPLETED' : 'PENDING_EXECUTION',
           paidAmountKgs: newPaidTotal,
           financeAccountId: account.id,
           ledgerEntryId: ledger.id,
@@ -791,6 +803,7 @@ export class TransportExpenseService {
           paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
           transactionNumber: dto.transactionNumber?.trim() || null,
           cashierComment: dto.cashierComment?.trim() || null,
+          failureReason: null,
         },
         include: INCLUDE,
       });

@@ -699,6 +699,8 @@ enum AlertType {
   PAYABLE_REQUEST_UNDER_REVIEW
   PAYABLE_REQUEST_REJECTED
   PAYABLE_REQUEST_APPROVED
+  CASHIER_PAYMENT_STARTED
+  CASHIER_PAYMENT_FAILED
 }
 
 enum NotificationModule {
@@ -3041,6 +3043,10 @@ model ProcurementSupplierPayment {
   accountant                 User?                            @relation("ProcurementSupplierPaymentAccountant", fields: [accountantId], references: [id])
   cashierId                  String?
   cashier                    User?                            @relation("ProcurementSupplierPaymentCashier", fields: [cashierId], references: [id])
+  /** Cashier execution lifecycle for accountant-prepared payment tasks. */
+  executionStatus            String?
+  executionStartedAt         DateTime?
+  failureReason              String?
   ledgerEntryId              String?                          @unique
   ledgerEntry                FinanceLedgerEntry?              @relation("ProcurementSupplierPaymentLedgerEntry", fields: [ledgerEntryId], references: [id])
   reversalOfPaymentId        String?
@@ -3068,6 +3074,7 @@ model ProcurementSupplierPayment {
   @@index([actualFinanceAccountId])
   @@index([sentToCashierAt])
   @@index([paymentInfoVersionId])
+  @@index([executionStatus])
 }
 
 model ProcurementTransportExpense {
@@ -3128,6 +3135,10 @@ model ProcurementTransportExpense {
   cashier                   User?                         @relation("TransportExpenseCashier", fields: [cashierId], references: [id])
   returnedById              String?
   returnedBy                User?                         @relation("TransportExpenseReturnedBy", fields: [returnedById], references: [id])
+  /** Cashier execution lifecycle for accountant-prepared payment tasks. */
+  executionStatus           String?
+  executionStartedAt        DateTime?
+  failureReason             String?
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
 
@@ -3142,6 +3153,7 @@ model ProcurementTransportExpense {
   @@index([dueDate])
   @@index([paymentMethod])
   @@index([transportCompanyId])
+  @@index([executionStatus])
 }
 
 model ProcurementCostAdjustment {

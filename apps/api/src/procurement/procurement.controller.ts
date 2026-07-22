@@ -31,6 +31,8 @@ import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
 import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
 import { AccountantBillsService, type AccountantBillsQuery } from './accountant-bills.service';
 import type { AccountantBillSource } from './accountant-bills.util';
+import { CashierBillsService, type CashierBillsQuery } from './cashier-bills.service';
+import type { CashierBillSource } from './cashier-bills.util';
 import { PaymentInfoService } from './payment-info.service';
 import { ProcurementService } from './procurement.service';
 import { TransportExpenseService } from './transport-expense.service';
@@ -45,6 +47,7 @@ export class ProcurementController {
     private readonly paymentInfoService: PaymentInfoService,
     private readonly transportExpenseService: TransportExpenseService,
     private readonly accountantBillsService: AccountantBillsService,
+    private readonly cashierBillsService: CashierBillsService,
   ) {}
 
   @Post('suppliers')
@@ -296,6 +299,71 @@ export class ProcurementController {
     @Body() dto: any,
   ) {
     return this.accountantBillsService.approve(user, source, id, dto);
+  }
+
+  @Get('cashier-bills')
+  @RequirePermissions('payments.manage', 'finance.view')
+  listCashierBills(@CurrentUser() user: AuthUser, @Query() query: CashierBillsQuery) {
+    return this.cashierBillsService.list(user, query);
+  }
+
+  @Get('cashier-bills/summary')
+  @RequirePermissions('payments.manage', 'finance.view')
+  cashierBillsSummary(@CurrentUser() user: AuthUser, @Query() query: CashierBillsQuery) {
+    return this.cashierBillsService.summary(user, query);
+  }
+
+  @Get('cashier-bills/:source/:id')
+  @RequirePermissions('payments.manage', 'finance.view')
+  getCashierBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: CashierBillSource,
+    @Param('id') id: string,
+  ) {
+    return this.cashierBillsService.getOne(user, source, id);
+  }
+
+  @Post('cashier-bills/:source/:id/start')
+  @RequirePermissions('payments.manage', 'finance.view')
+  startCashierBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: CashierBillSource,
+    @Param('id') id: string,
+  ) {
+    return this.cashierBillsService.start(user, source, id);
+  }
+
+  @Post('cashier-bills/:source/:id/confirm')
+  @RequirePermissions('payments.manage', 'finance.view')
+  confirmCashierBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: CashierBillSource,
+    @Param('id') id: string,
+    @Body() dto: any,
+  ) {
+    return this.cashierBillsService.confirm(user, source, id, dto || {});
+  }
+
+  @Post('cashier-bills/:source/:id/return')
+  @RequirePermissions('payments.manage', 'finance.view')
+  returnCashierBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: CashierBillSource,
+    @Param('id') id: string,
+    @Body() dto: { reason?: string },
+  ) {
+    return this.cashierBillsService.returnToAccountant(user, source, id, dto?.reason || '');
+  }
+
+  @Post('cashier-bills/:source/:id/fail')
+  @RequirePermissions('payments.manage', 'finance.view')
+  failCashierBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: CashierBillSource,
+    @Param('id') id: string,
+    @Body() dto: { reason?: string },
+  ) {
+    return this.cashierBillsService.reportFailure(user, source, id, { reason: dto?.reason || '' });
   }
 
   @Get('cashier-payment-queue')
