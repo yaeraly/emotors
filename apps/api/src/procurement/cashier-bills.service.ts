@@ -89,12 +89,21 @@ export class CashierBillsService {
     throw new BadRequestException('Unknown cashier bill source');
   }
 
-  async start(user: AuthUser, source: CashierBillSource, id: string) {
+  async start(
+    user: AuthUser,
+    source: CashierBillSource,
+    id: string,
+    dto: {
+      paymentMethod?: string;
+      financeAccountId?: string;
+      cashierComment?: string;
+    } = {},
+  ) {
     this.assertCashier(user);
     if (source === 'SUPPLIER_PAYMENT') {
-      return this.startSupplierPayment(user, id);
+      return this.startSupplierPayment(user, id, dto);
     }
-    return this.startTransportExpense(user, id);
+    return this.startTransportExpense(user, id, dto);
   }
 
   async confirm(
@@ -680,7 +689,15 @@ export class CashierBillsService {
     };
   }
 
-  private async startSupplierPayment(user: AuthUser, id: string) {
+  private async startSupplierPayment(
+    user: AuthUser,
+    id: string,
+    dto: {
+      paymentMethod?: string;
+      financeAccountId?: string;
+      cashierComment?: string;
+    } = {},
+  ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "ProcurementSupplierPayment" WHERE id = ${id} FOR UPDATE`;
       const payment = await tx.procurementSupplierPayment.findUnique({
@@ -709,6 +726,12 @@ export class CashierBillsService {
         throw new BadRequestException('Payment is not available for execution');
       }
 
+      const nextPaymentMethod =
+        dto.paymentMethod &&
+        (Object.values(ProcurementSupplierPaymentMethod) as string[]).includes(dto.paymentMethod)
+          ? (dto.paymentMethod as ProcurementSupplierPaymentMethod)
+          : undefined;
+
       const updated = await tx.procurementSupplierPayment.update({
         where: { id },
         data: {
@@ -717,26 +740,33 @@ export class CashierBillsService {
           cashierId: user.id,
           failureReason: null,
           version: { increment: 1 },
+          ...(nextPaymentMethod ? { paymentMethod: nextPaymentMethod } : {}),
+          ...(dto.financeAccountId ? { intendedFinanceAccountId: dto.financeAccountId } : {}),
+          ...(dto.cashierComment !== undefined
+            ? { cashierComment: dto.cashierComment.trim() || null }
+            : {}),
         },
       });
 
-      await this.writeAudit(tx, user, 'CASHIER_PAYMENT_STARTED', payment.procurementOrderId, {
-        paymentId: id,
-        oldExecutionStatus: current,
-      }, {
-        paymentId: id,
-        executionStatus: 'IN_PROGRESS',
-        cashierId: user.id,
-      });
+      if (current !== 'IN_PROGRESS') {
+        await this.writeAudit(tx, user, 'CASHIER_PAYMENT_STARTED', payment.procurementOrderId, {
+          paymentId: id,
+          oldExecutionStatus: current,
+        }, {
+          paymentId: id,
+          executionStatus: 'IN_PROGRESS',
+          cashierId: user.id,
+        });
 
-      await this.notifications.notifyInTx(tx, user, {
-        type: AlertType.CASHIER_PAYMENT_STARTED,
-        entityType: 'ProcurementSupplierPayment',
-        entityId: id,
-        referenceNumber: payment.procurementOrder?.orderNumber || id,
-        message: `Cashier started payment PAY-${payment.sequenceNumber} for ${payment.procurementOrder?.orderNumber || id} (${Number(payment.approvedAmountKgs).toFixed(2)} KGS).`,
-        recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
-      });
+        await this.notifications.notifyInTx(tx, user, {
+          type: AlertType.CASHIER_PAYMENT_STARTED,
+          entityType: 'ProcurementSupplierPayment',
+          entityId: id,
+          referenceNumber: payment.procurementOrder?.orderNumber || id,
+          message: `Cashier started payment PAY-${payment.sequenceNumber} for ${payment.procurementOrder?.orderNumber || id} (${Number(payment.approvedAmountKgs).toFixed(2)} KGS).`,
+          recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+        });
+      }
 
       return {
         id: updated.id,
@@ -748,7 +778,15 @@ export class CashierBillsService {
     });
   }
 
-  private async startTransportExpense(user: AuthUser, id: string) {
+  private async startTransportExpense(
+    user: AuthUser,
+    id: string,
+    dto: {
+      paymentMethod?: string;
+      financeAccountId?: string;
+      cashierComment?: string;
+    } = {},
+  ) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "ProcurementTransportExpense" WHERE id = ${id} FOR UPDATE`;
       const expense = await tx.procurementTransportExpense.findUnique({
@@ -772,6 +810,11 @@ export class CashierBillsService {
         );
       }
 
+      const nextPaymentMethod =
+        dto.paymentMethod === 'BANK_ACCOUNT' || dto.paymentMethod === 'QR_CODE'
+          ? (dto.paymentMethod as ProcurementPaymentInfoMethod)
+          : undefined;
+
       const updated = await tx.procurementTransportExpense.update({
         where: { id },
         data: {
@@ -779,24 +822,31 @@ export class CashierBillsService {
           executionStartedAt: expense.executionStartedAt ?? new Date(),
           cashierId: user.id,
           failureReason: null,
+          ...(nextPaymentMethod ? { paymentMethod: nextPaymentMethod } : {}),
+          ...(dto.financeAccountId ? { financeAccountId: dto.financeAccountId } : {}),
+          ...(dto.cashierComment !== undefined
+            ? { cashierComment: dto.cashierComment.trim() || null }
+            : {}),
         },
       });
 
-      await this.writeAudit(tx, user, 'CASHIER_PAYMENT_STARTED', id, {
-        oldExecutionStatus: current,
-      }, {
-        executionStatus: 'IN_PROGRESS',
-        cashierId: user.id,
-      });
+      if (current !== 'IN_PROGRESS') {
+        await this.writeAudit(tx, user, 'CASHIER_PAYMENT_STARTED', id, {
+          oldExecutionStatus: current,
+        }, {
+          executionStatus: 'IN_PROGRESS',
+          cashierId: user.id,
+        });
 
-      await this.notifications.notifyInTx(tx, user, {
-        type: AlertType.CASHIER_PAYMENT_STARTED,
-        entityType: 'ProcurementTransportExpense',
-        entityId: id,
-        referenceNumber: expense.expenseNumber,
-        message: `Cashier started transport payment ${expense.expenseNumber}.`,
-        recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
-      });
+        await this.notifications.notifyInTx(tx, user, {
+          type: AlertType.CASHIER_PAYMENT_STARTED,
+          entityType: 'ProcurementTransportExpense',
+          entityId: id,
+          referenceNumber: expense.expenseNumber,
+          message: `Cashier started transport payment ${expense.expenseNumber}.`,
+          recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+        });
+      }
 
       return {
         id: updated.id,

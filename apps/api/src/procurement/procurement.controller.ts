@@ -329,8 +329,13 @@ export class ProcurementController {
     @CurrentUser() user: AuthUser,
     @Param('source') source: CashierBillSource,
     @Param('id') id: string,
+    @Body() dto?: {
+      paymentMethod?: string;
+      financeAccountId?: string;
+      cashierComment?: string;
+    },
   ) {
-    return this.cashierBillsService.start(user, source, id);
+    return this.cashierBillsService.start(user, source, id, dto || {});
   }
 
   @Post('cashier-bills/:source/:id/confirm')
@@ -717,7 +722,7 @@ export class ProcurementController {
   }
 
   @Post('orders/:id/supplier-payments/:paymentId/attachments')
-  @RequirePermissions('procurement.manage', 'finance.view')
+  @RequirePermissions('procurement.manage', 'finance.view', 'payments.manage')
   uploadSupplierPaymentReceipt(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

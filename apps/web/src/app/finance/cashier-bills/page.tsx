@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
 import { canConfirmSupplierPayment } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -167,6 +168,10 @@ function CashierBillsPageContent() {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [differenceReason, setDifferenceReason] = useState('');
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string; availableBalance: number; typeCode?: string | null }>>([]);
+  const [qrPreview, setQrPreview] = useState<{
+    images: Array<{ src: string; alt?: string; label?: string }>;
+    initialIndex: number;
+  } | null>(null);
 
   const canAccess = canConfirmSupplierPayment(user);
 
@@ -442,13 +447,14 @@ function CashierBillsPageContent() {
         await uploadReceipt(row, receiptFile);
         setReceiptFile(null);
       }
-      const status = selected?.id === row.id ? selected.executionStatus : row.executionStatus;
-      if (status === 'PENDING_EXECUTION') {
-        await apiFetch(`/procurement/cashier-bills/${row.source}/${row.id}/start`, {
-          method: 'POST',
-          body: JSON.stringify({}),
-        });
-      }
+      await apiFetch(`/procurement/cashier-bills/${row.source}/${row.id}/start`, {
+        method: 'POST',
+        body: JSON.stringify({
+          paymentMethod: paymentMethod || undefined,
+          financeAccountId: financeAccountId || undefined,
+          cashierComment: cashierComment || undefined,
+        }),
+      });
       await refreshAfterAction(row);
       setPinNotice(t('finance.cashierBills.pinned'));
     } catch (err) {
@@ -721,24 +727,6 @@ function CashierBillsPageContent() {
                 {selected.failureReason ? <DetailRow label={t('finance.cashierBills.failureReason')} value={selected.failureReason} /> : null}
               </dl>
 
-              {selected.procurement ? (
-                <section className="mt-4 rounded-lg border border-slate-200 p-3 text-sm">
-                  <h3 className="mb-2 font-semibold">{t('finance.cashierBills.supplierDetails')}</h3>
-                  <DetailRow label={t('finance.cashierBills.supplier')} value={selected.supplier?.name} />
-                  <DetailRow label={t('finance.cashierBills.orderNumber')} value={selected.procurement.orderNumber} />
-                  <DetailRow label={t('finance.cashierBills.totalProcurement')} value={`${formatMoney(selected.procurement.totalYuan)} CNY`} />
-                  <DetailRow label={t('finance.cashierBills.paidAmount')} value={`${formatMoney(selected.procurement.totalPaidYuan)} CNY`} />
-                  <DetailRow label={t('finance.cashierBills.remainingDebt')} value={`${formatMoney(selected.procurement.remainingYuan)} CNY`} />
-                  {selected.procurement.supplierPaymentStatus ? (
-                    <DetailRow
-                      label={t('procurement.payments.paymentStatus')}
-                      value={t(`procurement.payments.status.${selected.procurement.supplierPaymentStatus}`)}
-                    />
-                  ) : null}
-                  <DetailRow label={t('finance.cashierBills.costBase')} value={`${formatMoney(selected.procurement.costBaseYuan)} CNY`} />
-                </section>
-              ) : null}
-
               {selected.cargo ? (
                 <section className="mt-4 rounded-lg border border-slate-200 p-3 text-sm">
                   <h3 className="mb-2 font-semibold">{t('finance.cashierBills.cargoDetails')}</h3>
@@ -750,11 +738,30 @@ function CashierBillsPageContent() {
                 </section>
               ) : null}
 
-              <AttachmentBlock
-                title={t('finance.cashierBills.qrCodes')}
-                items={selected.qrAttachments || []}
-                t={t}
-              />
+              {Array.isArray(selected.qrAttachments) && selected.qrAttachments.length ? (
+                <section className="mt-4 text-sm">
+                  <h3 className="mb-2 font-semibold">{t('finance.cashierBills.qrCodes')}</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {selected.qrAttachments.map((file: { id: string; fileName: string; fileUrl: string }, index: number) => (
+                      <button
+                        key={file.id}
+                        type="button"
+                        onClick={() => {
+                          const images = selected.qrAttachments.map((item: { fileName: string; fileUrl: string }) => {
+                            const src = item.fileUrl.startsWith('http') ? item.fileUrl : `${API_URL}${item.fileUrl}`;
+                            return { src, alt: item.fileName, label: item.fileName };
+                          });
+                          setQrPreview({ images, initialIndex: index });
+                        }}
+                        className="rounded border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                      >
+                        {file.fileName || t('finance.cashierBills.qrCodes')}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
               <AttachmentBlock
                 title={t('finance.cashierBills.receipts')}
                 items={selected.receiptAttachments || []}
@@ -970,6 +977,14 @@ function CashierBillsPageContent() {
               </button>
             </div>
           </Modal>
+        ) : null}
+        {qrPreview ? (
+          <ImagePreviewModal
+            images={qrPreview.images}
+            initialIndex={qrPreview.initialIndex}
+            title={t('finance.cashierBills.qrCodes')}
+            onClose={() => setQrPreview(null)}
+          />
         ) : null}
       </div>
     </ProtectedShell>

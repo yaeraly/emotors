@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type PreviewImage = {
   src: string;
@@ -26,6 +27,7 @@ export function ImagePreviewModal({
   subtitle,
   onClose,
 }: ImagePreviewModalProps) {
+  const { t } = useTranslation();
   const [activeIndex, setActiveIndex] = useState(initialIndex);
   const [zoom, setZoom] = useState(1);
   const [touchDistance, setTouchDistance] = useState<number | null>(null);
@@ -115,7 +117,7 @@ export function ImagePreviewModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/80 p-3 backdrop-blur-sm"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -134,7 +136,9 @@ export function ImagePreviewModal({
             <button onClick={zoomIn} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold" type="button">+</button>
             <button onClick={fitToScreen} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold" type="button">Fit</button>
             <button onClick={() => void openFullscreen()} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold" type="button">Fullscreen</button>
-            <button onClick={onClose} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white" type="button">Close</button>
+            <button onClick={onClose} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white" type="button">
+              {t('common.close')}
+            </button>
           </div>
         </header>
 
