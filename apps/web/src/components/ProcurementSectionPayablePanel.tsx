@@ -170,8 +170,7 @@ export function ProcurementSectionPayablePanel({
     () => rows.filter((row) => row.expenseType === expenseType),
     [rows, expenseType],
   );
-  const hasActiveRequest = sectionRows.some((row) => ACTIVE.has(row.status));
-  const blocksNewSend = sectionRows.some((row) => BLOCKS_NEW_SEND.has(row.status) || ACTIVE.has(row.status));
+  const blocksNewSend = sectionRows.some((row) => BLOCKS_NEW_SEND.has(row.status));
   const returnedRow = sectionRows.find((row) => row.status === 'RETURNED') ?? null;
   const sentRow =
     sectionRows.find((row) => row.status !== 'DRAFT' && row.status !== 'CANCELLED') ?? null;
