@@ -370,12 +370,16 @@ function CashierBillsPageContent() {
     setPinNotice('');
   }
 
-  function openConfirmModal(row: BillRow) {
+  async function openConfirmModal(row: BillRow) {
     setConfirmModal(row);
     resetConfirmFormFields();
     void (async () => {
       try {
-        await loadAccounts();
+        const list = await apiFetch<
+          Array<{ id: string; name: string; availableBalance: number; typeCode?: string | null }>
+        >('/procurement/supplier-payment-accounts');
+        const availableAccounts = Array.isArray(list) ? list : [];
+        setAccounts(availableAccounts);
         let detail = selected?.id === row.id ? selected : null;
         if (!detail) {
           detail = await apiFetch<BillDetail>(`/procurement/cashier-bills/${row.source}/${row.id}`);
@@ -383,8 +387,17 @@ function CashierBillsPageContent() {
         }
         setPaymentAmount(String(remainingPayableKgs(detail, row) || ''));
         setPaymentMethod(detail.paymentMethod || 'BANK_ACCOUNT');
-        setFinanceAccountId(detail.debitAccount?.id || '');
+        const intendedId = detail.debitAccount?.id || '';
+        // Only preselect accountant debit account when it is assigned to this HQ Cashier.
+        setFinanceAccountId(
+          intendedId && availableAccounts.some((account) => account.id === intendedId)
+            ? intendedId
+            : '',
+        );
         setCashierComment(detail.cashierComment || '');
+        if (!availableAccounts.length) {
+          setConfirmError(t('finance.billsToPay.accountRequired'));
+        }
       } catch (err) {
         setConfirmError(err instanceof Error ? err.message : t('common.error'));
       }
@@ -908,6 +921,11 @@ function CashierBillsPageContent() {
                 </option>
               ))}
             </select>
+            {!accounts.length ? (
+              <p className="mb-3 text-xs font-semibold text-amber-800">
+                {t('finance.billsToPay.accountRequired')}
+              </p>
+            ) : null}
             <label className="mb-2 block text-xs font-semibold text-slate-600">{t('finance.cashierBills.amount')}</label>
             <input
               type="number"

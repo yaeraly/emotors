@@ -2,7 +2,7 @@ import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import type { User } from './types';
 import { hasCashierCapability } from './cashier-capability';
 import { canManageFinanceAccounts, isHqFinanceUser } from './finance-rbac';
-import { isHqAccountantUser } from './rbac';
+import { isHqAccountantUser, isHqCashierUser } from './rbac';
 
 export type FinanceNavSection = ModuleSectionLink & {
   roles: Array<'cashier' | 'manage' | 'view' | 'owner' | 'hq'>;
@@ -79,6 +79,8 @@ export const FINANCE_REPORT_LINKS: ModuleSectionLink[] = [
 
 function matchesFinanceRole(user: User, roles: FinanceNavSection['roles']) {
   if (hasCashierCapability(user)) return roles.includes('cashier');
+  // HQ Cashier sees only cashier-scoped finance sections (assigned accounts, transfers queue, etc.).
+  if (isHqCashierUser(user)) return roles.includes('cashier');
   // HQ finance users must match before generic finance.manage so HQ-only tabs stay HQ-only.
   if (isHqFinanceUser(user)) return roles.includes('hq') || roles.includes('manage') || roles.includes('view');
   if (canManageFinanceAccounts(user)) return roles.includes('manage') || roles.includes('view');
@@ -94,6 +96,7 @@ export function isCashierOnlyFinanceUser(user: User | null | undefined) {
 }
 
 export function financeRootHrefForUser(user: User | null | undefined) {
+  if (isHqCashierUser(user)) return '/finance/cashier-bills';
   return isCashierOnlyFinanceUser(user) ? '/finance/payments/pending' : '/finance/dashboard';
 }
 
@@ -111,6 +114,17 @@ const CASHIER_FINANCE_PATH_PREFIXES = ['/finance/accounts', '/finance/payments',
 
 export function canAccessFinancePath(user: User, pathname: string) {
   if (!pathname.startsWith('/finance')) return true;
+  // HQ Cashier: assigned accounts + cashier bills/transfers only (path allowlist owned by rbac).
+  if (isHqCashierUser(user)) {
+    if (pathname === '/finance' || pathname === '/finance/') return true;
+    if (pathname.startsWith('/finance/cashier-bills')) return true;
+    if (pathname.startsWith('/finance/accounts') && !pathname.startsWith('/finance/accounts/new')) {
+      return true;
+    }
+    if (pathname.startsWith('/finance/transfers')) return true;
+    if (pathname.startsWith('/finance/reconciliation')) return true;
+    return false;
+  }
   if (isCashierOnlyFinanceUser(user)) {
     if (pathname === '/finance' || pathname === '/finance/') return true;
     if (pathname.match(/^\/finance\/accounts\/[^/]+$/) && !pathname.startsWith('/finance/accounts/new')) {

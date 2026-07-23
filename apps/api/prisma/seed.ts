@@ -180,7 +180,7 @@ const rolePermissions: Record<string, string[]> = {
   HQ_ACCOUNTANT: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
   SUPPLY_CHAIN_MANAGER: ['inventory.view', 'procurement.manage', 'procurement.view', 'distribution.view', 'products.manage'],
   HQ_SALES_MANAGER: ['distribution.manage', 'distribution.view', 'inventory.view', 'products.view'],
-  HQ_CASHIER: ['distribution.view', 'payments.manage'],
+  HQ_CASHIER: ['distribution.view', 'payments.manage', 'finance.view'],
   PROCUREMENT_MANAGER: ['procurement.manage', 'procurement.view'],
   SALESPERSON: ['sales.manage'],
   MARKETING_MANAGER: ['marketing.manage', 'analytics.view'],

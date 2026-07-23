@@ -61,6 +61,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   HQ_CASHIER: [
     'distribution.view',
     'payments.manage',
+    'finance.view',
   ],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],
