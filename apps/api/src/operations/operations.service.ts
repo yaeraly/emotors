@@ -1786,7 +1786,8 @@ export class OperationsService {
         customsCostKgs: dto.customsCostKgs ?? order.customsCostKgs,
         insuranceCostKgs: dto.insuranceCostKgs ?? order.insuranceCostKgs,
         bankFeeCostKgs: dto.bankFeeCostKgs ?? order.bankFeeCostKgs,
-        otherExpenseKgs: dto.otherExpenseKgs ?? order.otherExpenseKgs,
+        // Receiving workflow does not collect/require other expenses; preserve existing value.
+        otherExpenseKgs: order.otherExpenseKgs,
         packagingCostKgs: dto.packagingCostKgs ?? order.packagingCostKgs,
       };
 

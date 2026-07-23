@@ -898,7 +898,6 @@ function ProcurementOrderDetailPageContent() {
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
           bankFeeCostKgs: Number(logisticsForm.bankFeeCostKgs || 0),
-          otherExpenseKgs: Number(logisticsForm.otherExpenseKgs || 0),
           packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
           items: (order.items ?? []).map((item) => ({
             procurementItemId: item.id,
@@ -1068,20 +1067,6 @@ function ProcurementOrderDetailPageContent() {
                 expenseType="LOCAL_DELIVERY"
                 requestType="KYRGYZSTAN_DOMESTIC_TRANSPORT"
                 defaultCurrency="KGS"
-              />
-            ) : null}
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.otherExpenses')}</h3>
-            {canSeePayments ? (
-              <ProcurementSectionPayablePanel
-                orderId={order.id}
-                user={user}
-                expenseType="OTHER_LOGISTICS"
-                requestType="OTHER_EXPENSE"
-                defaultCurrency="KGS"
-                showExpenseName
               />
             ) : null}
           </section>
