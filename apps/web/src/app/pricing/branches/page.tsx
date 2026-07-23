@@ -17,6 +17,7 @@ type FranchiseSalesRow = {
   sku: string;
   categoryName: string;
   costPriceKgs: number;
+  costAvailable?: boolean;
   hqMarkupPercent: number;
   branchPriceKgs: number;
   masterBranchPriceKgs: number;
@@ -35,8 +36,17 @@ type EditableFranchiseRow = FranchiseSalesRow & {
   isDirty: boolean;
 };
 
+/** Existing pricing money formatter — supports decimals; never shows batch totals as integers by truncation alone. */
 function formatPrice(value: number) {
-  return value.toFixed(0);
+  return Number(value).toLocaleString('ru-RU', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
+
+function isCostAvailable(row: Pick<FranchiseSalesRow, 'costAvailable' | 'costPriceKgs'>) {
+  if (row.costAvailable === false) return false;
+  return Number(row.costPriceKgs) > 0;
 }
 
 export default function PricingBranchesPage() {
@@ -71,6 +81,7 @@ export default function PricingBranchesPage() {
     setRows(
       products.map((product) => ({
         ...product,
+        costAvailable: isCostAvailable(product),
         masterBranchPriceKgs: product.masterBranchPriceKgs ?? product.branchPriceKgs,
         effectiveBranchPriceKgs: product.effectiveBranchPriceKgs ?? product.branchPriceKgs,
         ruleApplied: Boolean(product.ruleApplied),
@@ -97,7 +108,9 @@ export default function PricingBranchesPage() {
     setRows((current) =>
       current.map((row) => {
         if (row.id !== productId) return row;
-        const previewMasterPriceKgs = applyHqBranchWholesaleMarkup(row.costPriceKgs, draftMarkup);
+        const previewMasterPriceKgs = isCostAvailable(row)
+          ? applyHqBranchWholesaleMarkup(row.costPriceKgs, draftMarkup)
+          : null;
         return {
           ...row,
           draftMarkup,
@@ -111,6 +124,10 @@ export default function PricingBranchesPage() {
   async function save(productId: string) {
     const row = rows.find((item) => item.id === productId);
     if (!row || !canManage) return;
+    if (!isCostAvailable(row)) {
+      setError(t('pricing.validationCostRequired'));
+      return;
+    }
 
     setSavingId(productId);
     setError('');
@@ -184,13 +201,14 @@ export default function PricingBranchesPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredRows.map((row) => {
+              const costOk = isCostAvailable(row);
               const masterShown = row.isDirty
                 ? (row.previewMasterPriceKgs ?? row.masterBranchPriceKgs)
                 : row.masterBranchPriceKgs;
               const effectiveShown = row.isDirty
                 ? (row.previewMasterPriceKgs ?? row.effectiveBranchPriceKgs)
                 : row.effectiveBranchPriceKgs;
-              const showBadge = !row.isDirty && row.ruleApplied;
+              const showBadge = !row.isDirty && row.ruleApplied && costOk;
 
               return (
                 <tr key={row.id}>
@@ -202,7 +220,12 @@ export default function PricingBranchesPage() {
                     ) : null}
                   </td>
                   <td className="px-3 py-2 text-slate-700">{row.categoryName}</td>
-                  <td className="px-3 py-2 font-medium text-slate-800">{formatPrice(row.costPriceKgs)}</td>
+                  <td
+                    className="px-3 py-2 font-medium text-slate-800"
+                    title={costOk ? undefined : t('pricing.costUnavailable')}
+                  >
+                    {costOk ? formatPrice(row.costPriceKgs) : '—'}
+                  </td>
                   <td className="px-3 py-2">
                     {canManage ? (
                       <input
@@ -211,31 +234,34 @@ export default function PricingBranchesPage() {
                         step="0.01"
                         value={row.draftMarkup}
                         onChange={(e) => updateRow(row.id, Number(e.target.value))}
-                        className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                        disabled={!costOk}
+                        className="w-24 rounded border border-slate-300 px-2 py-1 text-sm disabled:opacity-50"
                       />
                     ) : (
                       <span>{row.hqMarkupPercent}%</span>
                     )}
                   </td>
                   <td className="px-3 py-2 font-medium text-slate-600">
-                    {formatPrice(masterShown)}
-                    {row.isDirty ? (
+                    {costOk ? formatPrice(masterShown) : '—'}
+                    {row.isDirty && costOk ? (
                       <span className="ml-1 text-[10px] text-amber-600">{t('pricing.previewOnly')}</span>
                     ) : null}
                   </td>
                   <td className="px-3 py-2 font-medium text-slate-800">
                     <span className="inline-flex items-center gap-1">
-                      {formatPrice(effectiveShown)}
+                      {costOk ? formatPrice(effectiveShown) : '—'}
                       {showBadge ? (
                         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                           {t('pricing.ruleAppliedBadge')}
                         </span>
                       ) : null}
-                      <PriceExplanationButton
-                        productId={row.id}
-                        branchId={branchId}
-                        priceType="BRANCH_PURCHASE"
-                      />
+                      {costOk ? (
+                        <PriceExplanationButton
+                          productId={row.id}
+                          branchId={branchId}
+                          priceType="BRANCH_PURCHASE"
+                        />
+                      ) : null}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-slate-600">{new Date(row.lastUpdated).toLocaleString()}</td>
@@ -243,7 +269,7 @@ export default function PricingBranchesPage() {
                     {canManage ? (
                       <button
                         type="button"
-                        disabled={savingId === row.id || !row.isDirty}
+                        disabled={savingId === row.id || !row.isDirty || !costOk}
                         onClick={() => void save(row.id)}
                         className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold disabled:opacity-50"
                       >

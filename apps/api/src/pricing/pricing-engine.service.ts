@@ -87,7 +87,8 @@ export class PricingEngineService {
 
     const branchType = branch.branchType as BranchTypeForPricing;
     const cost = await this.fifoService.getLatestHqCostPrice(pricingProduct.id);
-    const baseCostKgs = cost.costPriceKgs;
+    const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
+    const baseCostKgs = costAvailable ? cost.costPriceKgs : 0;
     const baseFranchiseMarkupPercent = Number(pricingProduct.hqBranchWholesaleMarkupPercent ?? 0);
 
     const baseBranchPriceKgs = calculateBaseBranchPriceKgs({
@@ -305,14 +306,16 @@ export class PricingEngineService {
     calculationSteps.push({ step: 'finalPrice', valueKgs: resolvedPriceKgs, detail: priceType });
 
     return {
-      resolvedPriceKgs,
+      resolvedPriceKgs: costAvailable ? resolvedPriceKgs : 0,
       pricingPolicyVersionId: versionId,
       pricingProfileId: branch.priceProfileId,
       pricingProfileName: branch.priceProfile?.name ?? null,
       baseCostKgs,
+      costAvailable,
+      costSource: cost.source,
       baseFranchiseMarkupPercent,
-      baseBranchPriceKgs,
-      effectiveBranchPriceKgs,
+      baseBranchPriceKgs: costAvailable ? baseBranchPriceKgs : 0,
+      effectiveBranchPriceKgs: costAvailable ? effectiveBranchPriceKgs : 0,
       appliedRuleType,
       appliedRuleId,
       appliedAdjustmentMode,

@@ -24,6 +24,9 @@ export type PricingEngineResolveResult = {
   pricingProfileId: string | null;
   pricingProfileName: string | null;
   baseCostKgs: number;
+  /** True when baseCostKgs comes from an authoritative HQ inventory layer. */
+  costAvailable: boolean;
+  costSource: string;
   baseFranchiseMarkupPercent: number;
   baseBranchPriceKgs: number;
   effectiveBranchPriceKgs: number;

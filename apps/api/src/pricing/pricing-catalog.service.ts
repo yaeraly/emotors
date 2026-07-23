@@ -423,9 +423,23 @@ export class PricingCatalogService {
             })
           : null;
 
-        const masterBranchPriceKgs = engine?.baseBranchPriceKgs ?? row.hqBranchWholesalePriceKgs;
-        const effectiveBranchPriceKgs = engine?.resolvedPriceKgs ?? masterBranchPriceKgs;
-        const ruleApplied = this.isRuleApplied(engine?.appliedRuleType, masterBranchPriceKgs, effectiveBranchPriceKgs);
+        const costAvailable = Boolean(
+          engine != null ? engine.costAvailable : row.costAvailable,
+        );
+        const costPriceKgs = costAvailable
+          ? (engine?.baseCostKgs ?? row.costPriceKgs)
+          : 0;
+        const masterBranchPriceKgs = costAvailable
+          ? (engine?.baseBranchPriceKgs ?? row.hqBranchWholesalePriceKgs)
+          : 0;
+        const effectiveBranchPriceKgs = costAvailable
+          ? (engine?.resolvedPriceKgs ?? masterBranchPriceKgs)
+          : 0;
+        const ruleApplied = this.isRuleApplied(
+          engine?.appliedRuleType,
+          masterBranchPriceKgs,
+          effectiveBranchPriceKgs,
+        );
 
         return {
           id: row.id,
@@ -434,7 +448,9 @@ export class PricingCatalogService {
           categoryId: row.categoryId,
           categoryName: row.categoryName,
           isActive: row.isActive,
-          costPriceKgs: engine?.baseCostKgs ?? row.costPriceKgs,
+          costPriceKgs,
+          costAvailable,
+          costSource: engine?.costSource ?? row.costSource,
           hqMarkupPercent: row.hqBranchWholesaleMarkupPercent,
           /** @deprecated use effectiveBranchPriceKgs — kept for backward-compatible clients */
           branchPriceKgs: effectiveBranchPriceKgs,
@@ -466,6 +482,9 @@ export class PricingCatalogService {
     if (!product) throw new NotFoundException('Product not found');
 
     const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    if (!cost.available || cost.costPriceKgs <= 0) {
+      throw new BadRequestException('HQ unit cost is unavailable — product has no HQ inventory layer');
+    }
     const nextMarkups = {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
       minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
@@ -2047,7 +2066,13 @@ export class PricingCatalogService {
         defaultWholesaleMaximumMarkupPercent?: Prisma.Decimal;
       } | null;
     },
-    cost: { costPriceKgs: number; source: string; batchId: string | null; receivedAt: Date | null },
+    cost: {
+      costPriceKgs: number;
+      source: string;
+      batchId: string | null;
+      receivedAt: Date | null;
+      available?: boolean;
+    },
   ) {
     const markups = {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
@@ -2070,6 +2095,7 @@ export class PricingCatalogService {
       categoryName: product.productCategory?.nameRu ?? product.productCategory?.nameEn ?? '-',
       isActive: product.isActive,
       costPriceKgs: cost.costPriceKgs,
+      costAvailable: cost.available !== false && cost.costPriceKgs > 0,
       costSource: cost.source,
       costBatchId: cost.batchId,
       costReceivedAt: cost.receivedAt,

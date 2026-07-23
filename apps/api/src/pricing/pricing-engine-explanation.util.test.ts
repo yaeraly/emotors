@@ -27,6 +27,8 @@ describe('buildPriceExplanation', () => {
         pricingProfileId: 'p1',
         pricingProfileName: 'Gold',
         baseCostKgs: 1000,
+        costAvailable: true,
+        costSource: 'HQ_WAREHOUSE_FIFO_BATCH',
         baseFranchiseMarkupPercent: 20,
         baseBranchPriceKgs: 1200,
         effectiveBranchPriceKgs: 1145,

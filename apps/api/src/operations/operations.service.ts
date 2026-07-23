@@ -1995,6 +1995,7 @@ export class OperationsService {
                 purchaseCostKgs: next.costKgs,
                 transportCostKgs: next.transportCostKgs,
                 finalCostKgs: next.finalCostKgs,
+                costPriceKgs: next.finalCostKgs,
                 marginAmount,
                 marginPercent,
                 priceHistory: {

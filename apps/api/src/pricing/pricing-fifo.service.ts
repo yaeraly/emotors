@@ -3,6 +3,9 @@ import { BranchType, Prisma, StockMovementType, WarehouseType } from '@prisma/cl
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups, resolveHqToBranchPrice } from './pricing-calculator.util';
+import { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
+
+export { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -47,6 +50,10 @@ type FifoPreviewLine = {
   totalPriceKgs: number;
 };
 
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 @Injectable()
 export class PricingFifoService {
   constructor(private readonly prisma: PrismaService) {}
@@ -66,7 +73,7 @@ export class PricingFifoService {
       select: { id: true },
     });
     const warehouseIds = hqWarehouses.map((row) => row.id);
-    if (!warehouseIds.length) return { created: 0 };
+    if (!warehouseIds.length) return { created: 0, repaired: 0 };
 
     const movements = await client.stockMovement.findMany({
       where: {
@@ -79,18 +86,17 @@ export class PricingFifoService {
     });
 
     let created = 0;
+    let repaired = 0;
     for (const movement of movements) {
+      const unitCostKgs = resolveUnitCostFromInventoryLayer({
+        quantity: movement.quantity,
+        unitCostKgs: Number(movement.unitCostKgs),
+        totalCostKgs: Number(movement.totalCostKgs),
+      });
+
       const existing = await client.fifoInventoryBatch.findFirst({
         where: { stockMovementId: movement.id },
       });
-      if (existing) continue;
-
-      const consumed = await client.saleFifoAllocation.aggregate({
-        where: { fifoBatch: { stockMovementId: movement.id } },
-        _sum: { quantity: true },
-      });
-      const consumedQty = consumed._sum.quantity ?? 0;
-      const remaining = Math.max(movement.quantity - consumedQty, 0);
 
       const product = await client.product.findFirst({
         where: { id: movement.productId, deletedAt: null },
@@ -109,8 +115,31 @@ export class PricingFifoService {
         recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
         minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
       };
-      const unitCostKgs = Number(movement.unitCostKgs);
       const batchPrices = this.calculateBatchPrices(unitCostKgs, markups);
+
+      if (existing) {
+        if (Math.abs(Number(existing.unitCostKgs) - unitCostKgs) > 0.009 && unitCostKgs > 0) {
+          await client.fifoInventoryBatch.update({
+            where: { id: existing.id },
+            data: {
+              unitCostKgs,
+              wholesalePriceKgs: batchPrices.wholesalePriceKgs,
+              hqBranchWholesalePriceKgs: batchPrices.hqBranchWholesalePriceKgs,
+              recommendedRetailPriceKgs: batchPrices.recommendedRetailPriceKgs,
+              minimumSellingPriceKgs: batchPrices.minimumSellingPriceKgs,
+            },
+          });
+          repaired += 1;
+        }
+        continue;
+      }
+
+      const consumed = await client.saleFifoAllocation.aggregate({
+        where: { fifoBatch: { stockMovementId: movement.id } },
+        _sum: { quantity: true },
+      });
+      const consumedQty = consumed._sum.quantity ?? 0;
+      const remaining = Math.max(movement.quantity - consumedQty, 0);
 
       const batch = await client.fifoInventoryBatch.create({
         data: {
@@ -160,7 +189,7 @@ export class PricingFifoService {
       }
     }
 
-    return { created };
+    return { created, repaired };
   }
 
   async getLatestHqCostPrice(productId: string, tx?: PrismaTx) {
@@ -171,28 +200,102 @@ export class PricingFifoService {
       where: {
         productId,
         remainingQuantity: { gt: 0 },
-        warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null },
+        warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
       },
       orderBy: { receivedAt: 'asc' },
     });
 
     if (batch) {
-      return {
-        costPriceKgs: Number(batch.unitCostKgs),
-        source: 'HQ_WAREHOUSE_FIFO_BATCH',
-        batchId: batch.id,
-        receivedAt: batch.receivedAt,
-      };
+      let unitCostKgs = Number(batch.unitCostKgs);
+      if (batch.stockMovementId) {
+        const movement = await client.stockMovement.findUnique({
+          where: { id: batch.stockMovementId },
+          select: { quantity: true, unitCostKgs: true, totalCostKgs: true },
+        });
+        if (movement) {
+          unitCostKgs = resolveUnitCostFromInventoryLayer({
+            quantity: movement.quantity,
+            unitCostKgs: Number(movement.unitCostKgs),
+            totalCostKgs: Number(movement.totalCostKgs),
+          });
+          if (Math.abs(unitCostKgs - Number(batch.unitCostKgs)) > 0.009 && unitCostKgs > 0) {
+            const product = await client.product.findFirst({
+              where: { id: productId, deletedAt: null },
+              select: {
+                wholesaleMarkupPercent: true,
+                hqBranchWholesaleMarkupPercent: true,
+                recommendedRetailMarkupPercent: true,
+                minimumSellingMarkupPercent: true,
+              },
+            });
+            const prices = this.calculateBatchPrices(unitCostKgs, {
+              wholesaleMarkupPercent: Number(product?.wholesaleMarkupPercent ?? 0),
+              hqBranchWholesaleMarkupPercent: Number(product?.hqBranchWholesaleMarkupPercent ?? 0),
+              recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
+              minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
+            });
+            await client.fifoInventoryBatch.update({
+              where: { id: batch.id },
+              data: {
+                unitCostKgs,
+                wholesalePriceKgs: prices.wholesalePriceKgs,
+                hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
+                recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
+                minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
+              },
+            });
+          }
+        }
+      }
+
+      if (unitCostKgs > 0) {
+        return {
+          costPriceKgs: unitCostKgs,
+          available: true,
+          source: 'HQ_WAREHOUSE_FIFO_BATCH',
+          batchId: batch.id,
+          receivedAt: batch.receivedAt,
+        };
+      }
     }
 
-    const product = await client.product.findFirst({
-      where: { id: productId, deletedAt: null },
-      select: { finalCostKgs: true },
+    const balance = await client.inventoryBalance.findFirst({
+      where: {
+        productId,
+        quantity: { gt: 0 },
+        warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
+      },
+      orderBy: { lastReceivingAt: 'desc' },
     });
 
+    if (balance) {
+      const qty = Number(balance.quantity);
+      const landed = Number(balance.landedCostKgs || 0);
+      const totalValue = Number(balance.totalValueKgs || 0);
+      let unitCostKgs = landed;
+      // Guard: if landed cost was incorrectly stored as the batch total, derive unit cost.
+      if (qty > 1 && totalValue > 0 && landed > 0 && Math.abs(landed - totalValue) <= 0.05) {
+        unitCostKgs = roundMoney(totalValue / qty);
+      } else if (unitCostKgs <= 0 && qty > 0 && totalValue > 0) {
+        unitCostKgs = roundMoney(totalValue / qty);
+      }
+
+      if (unitCostKgs > 0) {
+        return {
+          costPriceKgs: unitCostKgs,
+          available: true,
+          source: 'HQ_INVENTORY_BALANCE',
+          batchId: null,
+          receivedAt: balance.lastReceivingAt,
+        };
+      }
+    }
+
+    // No HQ stock / no authoritative layer cost — do not invent a stale product fallback.
     return {
-      costPriceKgs: Number(product?.finalCostKgs ?? 0),
-      source: 'PRODUCT_FINAL_COST_FALLBACK',
+      costPriceKgs: 0,
+      available: false,
+      source: 'NO_HQ_STOCK',
       batchId: null,
       receivedAt: null,
     };
@@ -454,6 +557,7 @@ export class PricingFifoService {
       warehouseId: string;
       quantity: number;
       unitCostKgs: Prisma.Decimal | number;
+      totalCostKgs?: Prisma.Decimal | number | null;
       createdAt: Date;
       referenceType?: string | null;
       referenceId?: string | null;
@@ -483,7 +587,11 @@ export class PricingFifoService {
       recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
       minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
     };
-    const unitCostKgs = Number(movement.unitCostKgs);
+    const unitCostKgs = resolveUnitCostFromInventoryLayer({
+      quantity: movement.quantity,
+      unitCostKgs: Number(movement.unitCostKgs),
+      totalCostKgs: movement.totalCostKgs != null ? Number(movement.totalCostKgs) : null,
+    });
     const batchPrices = this.calculateBatchPrices(unitCostKgs, markups);
     const quantity = Math.max(movement.quantity, 0);
 
