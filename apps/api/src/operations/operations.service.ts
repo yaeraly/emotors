@@ -2007,6 +2007,15 @@ export class OperationsService {
             referenceType: movement.referenceType,
             referenceId: movement.referenceId,
           });
+          const fifoLinked = await tx.fifoInventoryBatch.findFirst({
+            where: { stockMovementId: movement.id },
+            select: { id: true },
+          });
+          if (!fifoLinked) {
+            throw new BadRequestException(
+              `FIFO layer was not created for procurement receipt line ${item.sku} (movement ${movement.id})`,
+            );
+          }
           await this.auditInTx(tx, user, 'HQ', 'FIFO_LAYER_CREATED', 'StockMovement', movement.id, {
             productId: item.productId,
             inventoryLayerMovementId: movement.id,

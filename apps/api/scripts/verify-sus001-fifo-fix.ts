@@ -6,6 +6,7 @@ import { PrismaClient } from '@prisma/client';
 import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
 import { buildFifoAllocationLines } from '../src/pricing/pricing-fifo-allocation.util';
 import { resolveUnitCostFromInventoryLayer } from '../src/pricing/pricing-fifo-unit-cost.util';
+import { isSeedStockMovementReference } from '../src/pricing/pricing-fifo-business-layer.util';
 
 const p = new PrismaClient();
 
@@ -69,16 +70,30 @@ async function main() {
       unitLandedCostKgs: n(b.unitCostKgs),
     }));
 
+  const businessBatches = [];
+  for (const b of batches.filter((batch) => batch.remainingQuantity > 0)) {
+    const movement = moves.find((m) => m.id === b.stockMovementId);
+    if (
+      movement &&
+      isSeedStockMovementReference({
+        referenceType: movement.referenceType,
+        referenceId: movement.referenceId,
+        note: movement.note,
+      })
+    ) {
+      continue;
+    }
+    businessBatches.push(b);
+  }
+
   const alloc = buildFifoAllocationLines(
-    batches
-      .filter((b) => b.remainingQuantity > 0)
-      .map((b) => ({
-        batchId: b.id,
-        remainingQuantity: b.remainingQuantity,
-        reservedQuantity: b.reservedQuantity,
-        unitCostKgs: n(b.unitCostKgs),
-      })),
-    Math.min(5, batches.reduce((s, b) => s + b.remainingQuantity, 0)),
+    businessBatches.map((b) => ({
+      batchId: b.id,
+      remainingQuantity: b.remainingQuantity,
+      reservedQuantity: b.reservedQuantity,
+      unitCostKgs: n(b.unitCostKgs),
+    })),
+    Math.min(5, businessBatches.reduce((s, b) => s + b.remainingQuantity, 0)),
     { markupPercent: 20, branchType: 'FRANCHISE', subtractReserved: true },
   );
 

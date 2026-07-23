@@ -5,6 +5,10 @@ import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
+import {
+  isSeedStockMovementReference,
+  SEED_FIFO_REFERENCE_TYPE,
+} from './pricing-fifo-business-layer.util';
 import { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 
 export { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
@@ -75,6 +79,16 @@ export class PricingFifoService {
     let created = 0;
     let repaired = 0;
     for (const movement of movements) {
+      if (
+        isSeedStockMovementReference({
+          referenceType: movement.referenceType,
+          referenceId: movement.referenceId,
+          note: movement.note,
+        })
+      ) {
+        continue;
+      }
+
       const unitCostKgs = resolveUnitCostFromInventoryLayer({
         quantity: Math.abs(Number(movement.quantity)),
         unitCostKgs: Number(movement.unitCostKgs),
@@ -228,12 +242,33 @@ export class PricingFifoService {
     });
 
     for (const batch of batches) {
+      if (batch.referenceType === SEED_FIFO_REFERENCE_TYPE) {
+        continue;
+      }
+
       let unitCostKgs = Number(batch.unitCostKgs);
       if (batch.stockMovementId) {
         const movement = await client.stockMovement.findUnique({
           where: { id: batch.stockMovementId },
-          select: { quantity: true, unitCostKgs: true, totalCostKgs: true },
+          select: {
+            quantity: true,
+            unitCostKgs: true,
+            totalCostKgs: true,
+            referenceType: true,
+            referenceId: true,
+            note: true,
+          },
         });
+        if (
+          movement &&
+          isSeedStockMovementReference({
+            referenceType: movement.referenceType,
+            referenceId: movement.referenceId,
+            note: movement.note,
+          })
+        ) {
+          continue;
+        }
         if (movement) {
           // Prefer original received quantity (initialQuantity) for unit cost; never use remaining.
           const receivedQty =
@@ -344,6 +379,7 @@ export class PricingFifoService {
       },
       orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
+    const businessBatches = await this.filterOutSeedFifoBatches(tx, batches);
 
     const markupPercent = input.isHqOwnedBranch
       ? 0
@@ -359,7 +395,7 @@ export class PricingFifoService {
       let totalCost = 0;
       let totalPrice = 0;
       const lines: FifoPreviewLine[] = [];
-      for (const batch of batches) {
+      for (const batch of businessBatches) {
         if (remainingToAllocate <= 0) break;
         const reserved = Number((batch as { reservedQuantity?: number }).reservedQuantity ?? 0);
         const available = subtractReserved
@@ -415,7 +451,7 @@ export class PricingFifoService {
     }
 
     const built = buildFifoAllocationLines(
-      batches.map((batch) => ({
+      businessBatches.map((batch) => ({
         batchId: batch.id,
         remainingQuantity: batch.remainingQuantity,
         reservedQuantity: Number((batch as { reservedQuantity?: number }).reservedQuantity ?? 0),
@@ -1107,5 +1143,35 @@ export class PricingFifoService {
     }
 
     return { layers, usedAllocations: true };
+  }
+
+  private async filterOutSeedFifoBatches<T extends { id: string; referenceType: string | null; stockMovementId: string | null }>(
+    client: PrismaTx,
+    batches: T[],
+  ): Promise<T[]> {
+    const business: T[] = [];
+    for (const batch of batches) {
+      if (batch.referenceType === SEED_FIFO_REFERENCE_TYPE) continue;
+      if (!batch.stockMovementId) {
+        business.push(batch);
+        continue;
+      }
+      const movement = await client.stockMovement.findUnique({
+        where: { id: batch.stockMovementId },
+        select: { referenceType: true, referenceId: true, note: true },
+      });
+      if (
+        movement &&
+        isSeedStockMovementReference({
+          referenceType: movement.referenceType,
+          referenceId: movement.referenceId,
+          note: movement.note,
+        })
+      ) {
+        continue;
+      }
+      business.push(batch);
+    }
+    return business;
   }
 }
