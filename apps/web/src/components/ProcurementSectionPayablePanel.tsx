@@ -220,7 +220,10 @@ export function ProcurementSectionPayablePanel({
     canCreate && (!primaryExpense || EDITABLE_STATUSES.has(primaryExpense.status));
   const isFormLocked = Boolean(primaryExpense && LOCKED_STATUSES.has(primaryExpense.status));
   const isReturned = primaryExpense?.status === 'RETURNED';
+  /** Accountant/cashier keep the expense action list; SM must not see the TRE detail card. */
   const showExpenseList = canApprove || canConfirm;
+  /** Compact post-submit acknowledgement for Supply Manager (no request/QR details). */
+  const showSmInvoiceSentAck = isCreatorOnlyView && isFormLocked;
   const showSubmissionSummary = Boolean(
     !isCreatorOnlyView &&
       primaryExpense &&
@@ -664,22 +667,24 @@ export function ProcurementSectionPayablePanel({
     [companies],
   );
 
-  // After SM sends the invoice, hide the entire payment-request UI (form, disabled
-  // button, status/QR summary). Records remain; accountant/cashier workflows unchanged.
-  // RETURNED keeps the existing correction form via isFormEditable.
-  if (isCreatorOnlyView && isFormLocked) {
-    return null;
-  }
-
   const panel = (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-      <h4 className="text-sm font-semibold text-slate-900">{t('procurement.sectionPayable.title')}</h4>
+      {!showSmInvoiceSentAck ? (
+        <h4 className="text-sm font-semibold text-slate-900">{t('procurement.sectionPayable.title')}</h4>
+      ) : null}
       {error ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
       {isReturned && primaryExpense?.returnReason ? (
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
           {t('procurement.sectionPayable.returnedForCorrection')}: {primaryExpense.returnReason}
         </p>
+      ) : null}
+
+      {showSmInvoiceSentAck ? (
+        <div className="space-y-2 text-sm text-slate-900">
+          <p className="font-semibold">{t('procurement.payments.invoiceSentStatus')}</p>
+          <p className="font-semibold">{t('procurement.sectionPayable.submissionSummary')}</p>
+        </div>
       ) : null}
 
       {isFormEditable ? (
