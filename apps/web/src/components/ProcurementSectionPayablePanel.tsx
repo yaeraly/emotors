@@ -153,6 +153,8 @@ export function ProcurementSectionPayablePanel({
   const canCreate = canCreateProcurementOrder(user) || hasFullAccess(user);
   const canApprove = canCreateSupplierPayment(user);
   const canConfirm = canConfirmSupplierPayment(user);
+  /** Create-only Supply Manager: hide duplicate post-send cards; keep Sent Invoice summary. */
+  const isCreatorOnlyView = canCreate && !canApprove && !canConfirm;
   const isCargo = expenseType === 'INTERNATIONAL_FREIGHT';
   const usesTransportCompany = expenseType !== 'OTHER_LOGISTICS';
   const [rows, setRows] = useState<SectionExpense[]>([]);
@@ -215,10 +217,13 @@ export function ProcurementSectionPayablePanel({
     canCreate && (!primaryExpense || EDITABLE_STATUSES.has(primaryExpense.status));
   const isFormLocked = Boolean(primaryExpense && LOCKED_STATUSES.has(primaryExpense.status));
   const isReturned = primaryExpense?.status === 'RETURNED';
+  /** Accountant/cashier keep actionable expense rows; SM uses Sent Invoice summary only. */
+  const showExpenseList = canApprove || canConfirm;
   const showSubmissionSummary = Boolean(
     primaryExpense &&
       (primaryExpense.submittedAt || primaryExpense.status !== 'DRAFT'),
   );
+  const showPaymentRequestTitle = !(isCreatorOnlyView && isFormLocked);
 
   const cargoTotals = useMemo(
     () => calculateCargoLocal(form.totalWeightKg, form.cargoRateUsdPerKg, form.usdExchangeRate),
@@ -659,7 +664,9 @@ export function ProcurementSectionPayablePanel({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-      <h4 className="text-sm font-semibold text-slate-900">{t('procurement.sectionPayable.title')}</h4>
+      {showPaymentRequestTitle ? (
+        <h4 className="text-sm font-semibold text-slate-900">{t('procurement.sectionPayable.title')}</h4>
+      ) : null}
       {error ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
       {isReturned && primaryExpense?.returnReason ? (
@@ -913,58 +920,7 @@ export function ProcurementSectionPayablePanel({
         </div>
       ) : null}
 
-      {isFormLocked && primaryExpense ? (
-        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
-          <p className="font-semibold">{t('procurement.payments.invoiceSentStatus')}</p>
-          <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                {t('procurement.sectionPayable.recipient')}
-              </dt>
-              <dd>
-                {primaryExpense.transportCompany?.name ||
-                  primaryExpense.recipientName ||
-                  primaryExpense.supplierCarrier}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                {t('procurement.sectionPayable.amount')}
-              </dt>
-              <dd>
-                {Number(primaryExpense.amount).toFixed(2)} {primaryExpense.currency}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                {t('procurement.paymentInfo.paymentMethod')}
-              </dt>
-              <dd>{t(`procurement.paymentInfo.method.${primaryExpense.paymentMethod}`)}</dd>
-            </div>
-            {primaryExpense.expenseName ? (
-              <div>
-                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  {t('procurement.sectionPayable.expenseName')}
-                </dt>
-                <dd>{primaryExpense.expenseName}</dd>
-              </div>
-            ) : null}
-          </dl>
-          {primaryExpense.qrCodes?.length ? (
-            <p className="mt-2 text-xs text-slate-500">
-              QR: {primaryExpense.qrCodes.map((qr) => qr.fileName).join(', ')}
-            </p>
-          ) : null}
-          <button
-            type="button"
-            disabled
-            className="mt-3 rounded-lg bg-blue-300 px-4 py-2 text-sm font-semibold text-white"
-          >
-            {t('procurement.payments.sendInvoice')}
-          </button>
-        </div>
-      ) : null}
-
+      {showExpenseList ? (
       <div className="mt-4 space-y-2">
         {sectionRows.length === 0 ? (
           <p className="text-xs text-slate-500">{t('procurement.sectionPayable.empty')}</p>
@@ -1102,6 +1058,7 @@ export function ProcurementSectionPayablePanel({
           ))
         )}
       </div>
+      ) : null}
 
       {showSubmissionSummary && primaryExpense ? (
         <div className="mt-4 rounded-lg border border-slate-300 bg-white p-3 text-sm">
