@@ -75,7 +75,7 @@ export class PricingFifoService {
     let repaired = 0;
     for (const movement of movements) {
       const unitCostKgs = resolveUnitCostFromInventoryLayer({
-        quantity: movement.quantity,
+        quantity: Math.abs(Number(movement.quantity)),
         unitCostKgs: Number(movement.unitCostKgs),
         totalCostKgs: Number(movement.totalCostKgs),
       });
@@ -120,12 +120,21 @@ export class PricingFifoService {
         continue;
       }
 
-      const consumed = await client.saleFifoAllocation.aggregate({
+      const saleConsumed = await client.saleFifoAllocation.aggregate({
         where: { fifoBatch: { stockMovementId: movement.id } },
         _sum: { quantity: true },
       });
-      const consumedQty = consumed._sum.quantity ?? 0;
-      const remaining = Math.max(movement.quantity - consumedQty, 0);
+      const distributionConsumed = await client.distributionFifoAllocation.aggregate({
+        where: {
+          fifoBatch: { stockMovementId: movement.id },
+          status: 'CONSUMED',
+        },
+        _sum: { quantity: true },
+      });
+      const consumedQty =
+        Number(saleConsumed._sum.quantity ?? 0) + Number(distributionConsumed._sum.quantity ?? 0);
+      const receivedQty = Math.abs(Number(movement.quantity));
+      const remaining = Math.max(receivedQty - consumedQty, 0);
 
       const batch = await client.fifoInventoryBatch.create({
         data: {
@@ -142,7 +151,7 @@ export class PricingFifoService {
           recommendedRetailPriceKgs: batchPrices.recommendedRetailPriceKgs,
           minimumSellingMarkupPercent: markups.minimumSellingMarkupPercent,
           minimumSellingPriceKgs: batchPrices.minimumSellingPriceKgs,
-          initialQuantity: movement.quantity,
+          initialQuantity: receivedQty,
           remainingQuantity: remaining,
           referenceType: movement.referenceType,
           referenceId: movement.referenceId,
@@ -184,14 +193,19 @@ export class PricingFifoService {
    * (oldest remaining batch). Never averages, never uses product/supplier snapshots
    * or inventory-balance totals. When the active layer is depleted, the next
    * remaining layer is selected automatically on the next read.
+   *
+   * Looks up layers by productId and, if needed, by the same SKU across HQ
+   * inventory product rows so catalog vs warehouse product ID drift cannot hide
+   * the active FIFO layer.
    */
   async getLatestHqCostPrice(productId: string, tx?: PrismaTx) {
     const client = tx ?? this.prisma;
     await this.syncFifoBatchesFromHqStockMovements(client);
 
+    const productIds = await this.resolveHqFifoProductIds(client, productId);
     const batches = await client.fifoInventoryBatch.findMany({
       where: {
-        productId,
+        productId: { in: productIds },
         remainingQuantity: { gt: 0 },
         warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
       },
@@ -206,14 +220,17 @@ export class PricingFifoService {
           select: { quantity: true, unitCostKgs: true, totalCostKgs: true },
         });
         if (movement) {
+          // Prefer original received quantity (initialQuantity) for unit cost; never use remaining.
+          const receivedQty =
+            batch.initialQuantity > 0 ? batch.initialQuantity : Math.abs(Number(movement.quantity));
           unitCostKgs = resolveUnitCostFromInventoryLayer({
-            quantity: movement.quantity,
+            quantity: receivedQty,
             unitCostKgs: Number(movement.unitCostKgs),
             totalCostKgs: Number(movement.totalCostKgs),
           });
           if (Math.abs(unitCostKgs - Number(batch.unitCostKgs)) > 0.009 && unitCostKgs > 0) {
             const product = await client.product.findFirst({
-              where: { id: productId, deletedAt: null },
+              where: { id: batch.productId, deletedAt: null },
               select: {
                 wholesaleMarkupPercent: true,
                 hqBranchWholesaleMarkupPercent: true,
@@ -239,6 +256,9 @@ export class PricingFifoService {
             });
           }
         }
+      } else if (batch.initialQuantity > 0 && Number(batch.unitCostKgs) > 0) {
+        // Layer without movement link: batch.unitCostKgs must already be per-unit.
+        unitCostKgs = Number(batch.unitCostKgs);
       }
 
       if (unitCostKgs > 0) {
@@ -260,6 +280,24 @@ export class PricingFifoService {
       batchId: null,
       receivedAt: null,
     };
+  }
+
+  /** Catalog product ID plus any same-SKU product IDs that hold HQ FIFO layers. */
+  private async resolveHqFifoProductIds(client: PrismaTx | PrismaService, productId: string) {
+    const ids = new Set<string>([productId]);
+    const product = await client.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      select: { id: true, sku: true },
+    });
+    const sku = product?.sku?.trim();
+    if (!sku) return [...ids];
+
+    const siblings = await client.product.findMany({
+      where: { sku, deletedAt: null },
+      select: { id: true },
+    });
+    for (const row of siblings) ids.add(row.id);
+    return [...ids];
   }
 
   async previewFifoAllocation(
