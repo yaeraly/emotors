@@ -56,6 +56,7 @@ import {
 } from './product-code.util';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
+import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -2564,22 +2565,36 @@ export class InventoryService {
     return user ? this.applyProductProfileVisibility(user, response) : response;
   }
 
+  private async resolveDefaultHqWarehouseId() {
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: activeHqWarehouseWhere,
+      select: { id: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return warehouse?.id ?? null;
+  }
+
   /**
    * Product catalog / detail cost: oldest active HQ FIFO unit landed cost.
    * Never Product.finalCostKgs, average, supplier, or warehouse total÷qty.
    */
   private async toProductResponseWithFifoCost(product: any, user?: AuthUser) {
     const base = this.toProductResponse(product, user);
-    const cost = await this.pricingFifoService.getOldestActiveHqFifoCost(product.id);
-    const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
-    return {
+    const hqWarehouseId = await this.resolveDefaultHqWarehouseId();
+    const cost = await this.pricingFifoService.getOldestActiveHqFifoCost({
+      productId: product.id,
+      ...(hqWarehouseId ? { warehouseId: hqWarehouseId } : {}),
+    });
+    const catalogCost = mapProductCatalogFifoCost({ fifo: cost });
+    const response = {
       ...base,
-      finalCostKgs: costAvailable ? cost.costPriceKgs : null,
-      costAvailable,
-      costSource: cost.source,
-      costBatchId: cost.batchId,
-      costReceivedAt: cost.receivedAt,
+      ...catalogCost,
+      // Aggregate snapshots remain in DB for accounting but must not drive catalog display.
+      storedCostPriceKgs: Number(product.costPriceKgs),
+      storedFinalCostKgs: Number(product.finalCostKgs),
     };
+    delete (response as { costPriceKgs?: unknown }).costPriceKgs;
+    return user ? this.applyProductProfileVisibility(user, response) : response;
   }
 
   private shouldHideProductPricingFields(user: AuthUser) {
