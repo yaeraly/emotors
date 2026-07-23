@@ -100,9 +100,18 @@ export function FinanceStatusBadge({ status }: { status: string }) {
   const tone =
     status === 'ACTIVE' || status === 'PAID' || status === 'COMPLETED' || status === 'CLOSED'
       ? 'bg-emerald-50 text-emerald-700'
-      : status === 'PENDING' || status === 'OPEN' || status === 'PARTIAL' || status === 'DEBT'
+      : status === 'PENDING' ||
+          status === 'OPEN' ||
+          status === 'PARTIAL' ||
+          status === 'DEBT' ||
+          status === 'DRAFT' ||
+          status === 'ARCHIVE_REQUESTED'
         ? 'bg-amber-50 text-amber-700'
-        : status === 'INACTIVE' || status === 'REJECTED' || status === 'CANCELLED'
+        : status === 'INACTIVE' ||
+            status === 'BLOCKED' ||
+            status === 'REJECTED' ||
+            status === 'CANCELLED' ||
+            status === 'ARCHIVED'
           ? 'bg-red-50 text-red-700'
           : 'bg-slate-100 text-slate-700';
 

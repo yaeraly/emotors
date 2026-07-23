@@ -38,6 +38,34 @@ export function canManageHqFinanceAccounts(
   return isHqFinanceUser(user) && !user.branchId;
 }
 
+/** Operational HQ account management (create/edit/assign/activate/block/request archive). */
+export function canOperateHqFinanceAccounts(
+  user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
+) {
+  const roles = resolveUserRoles(user);
+  if (user.branchId) return false;
+  return (
+    roles.includes(Role.HQ_ACCOUNTANT) ||
+    roles.includes(Role.FINANCE_MANAGER) ||
+    hasAnyFullAccessRole(roles)
+  );
+}
+
+/**
+ * CEO/Owner approve high-level HQ account lifecycle changes
+ * (archive approval + restoration). Not day-to-day account creation.
+ */
+export function canApproveFinanceAccountLifecycle(
+  user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>,
+) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.OWNER)
+  );
+}
+
 export function canManageBranchFinanceAccounts(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
 ) {

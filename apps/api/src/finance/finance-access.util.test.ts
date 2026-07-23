@@ -1,10 +1,12 @@
 import {
+  canApproveFinanceAccountLifecycle,
   canCancelFinanceTransfer,
   canConfirmFinanceTransfer,
   canCreateOwnerInvestment,
   canManageBranchFinanceAccounts,
   canManageFinanceAccounts,
   canManageFinanceInvestments,
+  canOperateHqFinanceAccounts,
   canPrepareFinanceTransfer,
   canReturnFinanceTransfer,
   canReverseFinanceTransfer,
@@ -115,5 +117,14 @@ assertEqual(canReturnFinanceTransfer(hqAccountant), false, 'HQ Accountant cannot
 assertEqual(canCancelFinanceTransfer(hqAccountant), true, 'HQ Accountant can cancel draft transfers');
 assertEqual(canReverseFinanceTransfer(hqFinance), true, 'Finance Manager can reverse');
 assertEqual(canReverseFinanceTransfer(hqCashier), false, 'HQ Cashier cannot reverse');
+
+assertEqual(canOperateHqFinanceAccounts(hqAccountant), true, 'HQ Accountant operates HQ accounts');
+assertEqual(canOperateHqFinanceAccounts(hqFinance), true, 'Finance Manager operates HQ accounts');
+assertEqual(canOperateHqFinanceAccounts(hqCashier), false, 'HQ Cashier cannot operate HQ accounts');
+assertEqual(canOperateHqFinanceAccounts(branchAccountant), false, 'Branch accountant cannot operate HQ accounts');
+assertEqual(canApproveFinanceAccountLifecycle(hqCeo), true, 'CEO approves archive lifecycle');
+assertEqual(canApproveFinanceAccountLifecycle(hqOwner), true, 'Owner approves archive lifecycle');
+assertEqual(canApproveFinanceAccountLifecycle(hqAccountant), false, 'HQ Accountant cannot approve archive');
+assertEqual(canApproveFinanceAccountLifecycle(hqCashier), false, 'HQ Cashier cannot approve archive');
 
 console.log('finance-access.util.test.ts passed');

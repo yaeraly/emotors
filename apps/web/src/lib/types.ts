@@ -1177,7 +1177,13 @@ export type TimelineEntry =
     };
 
 export type FinanceAccountScope = 'HQ' | 'BRANCH';
-export type FinanceAccountStatus = 'ACTIVE' | 'INACTIVE';
+export type FinanceAccountStatus =
+  | 'DRAFT'
+  | 'ACTIVE'
+  | 'INACTIVE'
+  | 'BLOCKED'
+  | 'ARCHIVE_REQUESTED'
+  | 'ARCHIVED';
 export type FinanceTransferStatus =
   | 'DRAFT'
   | 'PENDING_CASHIER'

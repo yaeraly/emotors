@@ -36,6 +36,26 @@ export function canManageFinanceAccounts(user: Pick<User, 'role' | 'roles' | 'pe
   return isBranchAccountantUser(user) || hasPermission(user, 'finance.manage');
 }
 
+/** HQ Accountant / Finance Manager operational HQ account management. */
+export function canOperateHqFinanceAccounts(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+) {
+  if (!user || user.branchId) return false;
+  return (
+    hasRole(user, 'HQ_ACCOUNTANT') ||
+    hasRole(user, 'FINANCE_MANAGER') ||
+    hasFullAccess(user)
+  );
+}
+
+/** CEO/Owner approve HQ account archive and restoration. */
+export function canApproveFinanceAccountLifecycle(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  if (!user) return false;
+  return hasFullAccess(user) || hasRole(user, 'CEO') || hasRole(user, 'OWNER');
+}
+
 export function canViewFinanceDashboard(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
   if (isBranchCashierUser(user)) return false;

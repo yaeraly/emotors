@@ -32,6 +32,8 @@ export const FINANCE_ACCOUNT_TYPE_TABS: ModuleSectionLink[] = [
   { href: '/finance/accounts?type=POS', labelKey: 'finance.accountsPos' },
   { href: '/finance/accounts?type=OTHER', labelKey: 'finance.accountsOther' },
   { href: '/finance/accounts?status=INACTIVE', labelKey: 'finance.accountsInactive' },
+  { href: '/finance/accounts?status=ARCHIVE_REQUESTED', labelKey: 'finance.accountsArchiveRequested' },
+  { href: '/finance/accounts?status=ARCHIVED', labelKey: 'finance.accountsArchived' },
 ];
 
 export const FINANCE_PAYMENT_TABS: ModuleSectionLink[] = [

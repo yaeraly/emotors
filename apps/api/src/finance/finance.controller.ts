@@ -79,6 +79,11 @@ const FINANCE_MANAGE_ROLES = [
   Role.ACCOUNTANT,
 ] as const;
 
+const FINANCE_ACCOUNT_LIFECYCLE_APPROVE_ROLES = [
+  Role.OWNER,
+  Role.CEO,
+] as const;
+
 const FINANCE_RECONCILIATION_WRITE_ROLES = [
   ...FINANCE_MANAGE_ROLES,
   Role.HQ_CASHIER,
@@ -203,7 +208,31 @@ export class FinanceController {
   @Patch('accounts/:id/deactivate')
   @Roles(...FINANCE_MANAGE_ROLES)
   deactivateAccount(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.accountsService.setAccountStatus(user, id, FinanceAccountStatus.INACTIVE);
+    return this.accountsService.setAccountStatus(user, id, FinanceAccountStatus.BLOCKED);
+  }
+
+  @Patch('accounts/:id/block')
+  @Roles(...FINANCE_MANAGE_ROLES)
+  blockAccount(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.accountsService.setAccountStatus(user, id, FinanceAccountStatus.BLOCKED);
+  }
+
+  @Delete('accounts/:id')
+  @Roles(...FINANCE_MANAGE_ROLES)
+  deleteOrRequestArchive(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.accountsService.deleteOrRequestArchive(user, id);
+  }
+
+  @Post('accounts/:id/approve-archive')
+  @Roles(...FINANCE_ACCOUNT_LIFECYCLE_APPROVE_ROLES)
+  approveArchive(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.accountsService.approveArchive(user, id);
+  }
+
+  @Post('accounts/:id/restore')
+  @Roles(...FINANCE_ACCOUNT_LIFECYCLE_APPROVE_ROLES)
+  restoreAccount(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.accountsService.restoreAccount(user, id);
   }
 
   @Post('accounts/:id/opening-balance')

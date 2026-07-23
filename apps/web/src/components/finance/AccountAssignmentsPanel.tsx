@@ -73,6 +73,14 @@ export function AccountAssignmentsPanel({
   };
 
   if (!canManage) return null;
+  if (
+    account.status === 'ARCHIVED' ||
+    account.status === 'ARCHIVE_REQUESTED' ||
+    account.status === 'BLOCKED' ||
+    account.status === 'INACTIVE'
+  ) {
+    return null;
+  }
 
   return (
     <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">

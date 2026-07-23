@@ -5078,8 +5078,12 @@ enum FinanceAccountScope {
 }
 
 enum FinanceAccountStatus {
+  DRAFT
   ACTIVE
   INACTIVE
+  BLOCKED
+  ARCHIVE_REQUESTED
+  ARCHIVED
 }
 
 enum FinanceLedgerEntryType {

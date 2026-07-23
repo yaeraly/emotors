@@ -22,6 +22,7 @@ import {
 } from '../rbac/cashier-capability.util';
 import {
   assertCanAccessAccountScope,
+  canApproveFinanceAccountLifecycle,
   canManageBranchFinanceAccounts,
   canManageFinanceAccounts,
   canManageHqFinanceAccounts,
@@ -33,6 +34,25 @@ import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
 import { AssignFinanceAccountDto, CreateFinanceAccountDto, FinanceAccountQueryDto, SetOpeningBalanceDto, UpdateFinanceAccountDto } from './dto/finance-account.dto';
 
 type PrismaTx = Prisma.TransactionClient;
+
+const BLOCKED_STATUSES: FinanceAccountStatus[] = [
+  FinanceAccountStatus.BLOCKED,
+  FinanceAccountStatus.INACTIVE,
+];
+
+const ARCHIVED_VISIBILITY_STATUSES: FinanceAccountStatus[] = [
+  FinanceAccountStatus.ARCHIVE_REQUESTED,
+  FinanceAccountStatus.ARCHIVED,
+];
+
+function isBlockedStatus(status: FinanceAccountStatus) {
+  return BLOCKED_STATUSES.includes(status);
+}
+
+function normalizeStatusWrite(status: FinanceAccountStatus) {
+  // Prefer BLOCKED going forward; keep INACTIVE readable for legacy filters.
+  return status === FinanceAccountStatus.INACTIVE ? FinanceAccountStatus.BLOCKED : status;
+}
 
 @Injectable()
 export class FinanceAccountsService {
@@ -57,6 +77,75 @@ export class FinanceAccountsService {
 
   private async getAssignedAccountIds(user: AuthUser) {
     return getActiveAssignmentAccountIds(this.prisma, user.id);
+  }
+
+  private async accountHasUsageHistory(accountId: string) {
+    const [
+      ledgerCount,
+      paymentCount,
+      investmentCount,
+      transferOutCount,
+      transferInCount,
+      expenseCount,
+      reconciliationCount,
+      procurementIntendedCount,
+      procurementActualCount,
+      transportExpenseCount,
+      shiftCount,
+    ] = await Promise.all([
+      this.prisma.financeLedgerEntry.count({ where: { accountId } }),
+      this.prisma.payment.count({ where: { financeAccountId: accountId } }),
+      this.prisma.financeInvestment.count({ where: { accountId, deletedAt: null } }),
+      this.prisma.financeTransfer.count({ where: { sourceAccountId: accountId } }),
+      this.prisma.financeTransfer.count({ where: { destinationAccountId: accountId } }),
+      this.prisma.financeExpense.count({ where: { accountId } }),
+      this.prisma.financeReconciliation.count({ where: { accountId } }),
+      this.prisma.procurementSupplierPayment.count({ where: { intendedFinanceAccountId: accountId } }),
+      this.prisma.procurementSupplierPayment.count({ where: { actualFinanceAccountId: accountId } }),
+      this.prisma.procurementTransportExpense.count({ where: { financeAccountId: accountId } }),
+      this.prisma.cashierShift.count({ where: { accountId } }),
+    ]);
+
+    return (
+      ledgerCount +
+        paymentCount +
+        investmentCount +
+        transferOutCount +
+        transferInCount +
+        expenseCount +
+        reconciliationCount +
+        procurementIntendedCount +
+        procurementActualCount +
+        transportExpenseCount +
+        shiftCount >
+      0
+    );
+  }
+
+  private async writeAccountAudit(
+    user: AuthUser,
+    action: string,
+    account: { id: string; branchId: string | null; accountNumber: string; currentBalance?: unknown },
+    metadata: Record<string, unknown>,
+  ) {
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'FinanceAccount',
+        entityId: account.id,
+        metadata: {
+          accountId: account.id,
+          branchId: account.branchId,
+          employeeId: user.id,
+          role: user.role,
+          amount: Number(account.currentBalance ?? 0),
+          transactionNumber: account.accountNumber,
+          ...metadata,
+        },
+      },
+    });
   }
 
   async listCashierEligibleEmployees(user: AuthUser, branchId?: string) {
@@ -111,14 +200,27 @@ export class FinanceAccountsService {
       !canManageFinanceAccounts(user) &&
       !isBranchOwnerUser(user);
 
+    const statusFilter: Prisma.FinanceAccountWhereInput =
+      query.status === FinanceAccountStatus.INACTIVE || query.status === FinanceAccountStatus.BLOCKED
+        ? { status: { in: BLOCKED_STATUSES } }
+        : query.status
+          ? { status: query.status }
+          : {};
+
     const where: Prisma.FinanceAccountWhereInput = {
       deletedAt: null,
-      ...(query.status ? { status: query.status } : {}),
+      ...statusFilter,
       ...(query.typeCode ? { typeCode: query.typeCode } : {}),
       ...(query.currency ? { currency: query.currency } : {}),
       ...(scopeFilter.scope ? { scope: scopeFilter.scope } : {}),
       ...(scopeFilter.branchId !== undefined ? { branchId: scopeFilter.branchId } : {}),
-      ...(restrictToAssigned ? { id: { in: [...assignedAccountIds] } } : {}),
+      ...(restrictToAssigned
+        ? {
+            id: { in: [...assignedAccountIds] },
+            // Active cashier lists: assigned ACTIVE accounts only (no blocked/archived/draft).
+            status: FinanceAccountStatus.ACTIVE,
+          }
+        : {}),
     };
 
     const accounts = await this.prisma.financeAccount.findMany({
@@ -265,6 +367,11 @@ export class FinanceAccountsService {
           branchId,
           typeCode: dto.typeCode,
           currency: dto.currency ?? 'KGS',
+          // HQ accounts start as Draft; Accountant activates. Branch accounts stay Active.
+          status:
+            scope === FinanceAccountScope.HQ
+              ? FinanceAccountStatus.DRAFT
+              : FinanceAccountStatus.ACTIVE,
           bankName: dto.bankName,
           bankAccountNo: dto.bankAccountNo,
           qrProvider: dto.qrProvider,
@@ -292,6 +399,8 @@ export class FinanceAccountsService {
             operation: 'CREATE_ACCOUNT',
             amount: 0,
             transactionNumber: account.accountNumber,
+            previousValue: null,
+            newValue: { status: account.status, name: account.name, scope: account.scope },
           },
         },
       });
@@ -309,8 +418,24 @@ export class FinanceAccountsService {
     if (user.branchId && existing.branchId && user.branchId !== existing.branchId) {
       throw new ForbiddenException('Branch isolation violation');
     }
+    if (
+      existing.status === FinanceAccountStatus.ARCHIVED ||
+      existing.status === FinanceAccountStatus.ARCHIVE_REQUESTED
+    ) {
+      throw new BadRequestException('Archived or archive-requested accounts cannot be edited');
+    }
 
-    return this.prisma.financeAccount.update({
+    const previousValue = {
+      name: existing.name,
+      bankName: existing.bankName,
+      bankAccountNo: existing.bankAccountNo,
+      qrProvider: existing.qrProvider,
+      qrMerchantId: existing.qrMerchantId,
+      posTerminalId: existing.posTerminalId,
+      notes: existing.notes,
+    };
+
+    const account = await this.prisma.financeAccount.update({
       where: { id },
       data: {
         name: dto.name?.trim(),
@@ -324,6 +449,22 @@ export class FinanceAccountsService {
       },
       include: this.accountInclude(),
     });
+
+    await this.writeAccountAudit(user, 'finance.account.edit', account, {
+      operation: 'EDIT_ACCOUNT',
+      previousValue,
+      newValue: {
+        name: account.name,
+        bankName: account.bankName,
+        bankAccountNo: account.bankAccountNo,
+        qrProvider: account.qrProvider,
+        qrMerchantId: account.qrMerchantId,
+        posTerminalId: account.posTerminalId,
+        notes: account.notes,
+      },
+    });
+
+    return account;
   }
 
   async setAccountStatus(user: AuthUser, id: string, status: FinanceAccountStatus) {
@@ -336,32 +477,155 @@ export class FinanceAccountsService {
       throw new ForbiddenException('Branch isolation violation');
     }
 
+    const nextStatus = normalizeStatusWrite(status);
+    const previousStatus = existing.status;
+
+    if (ARCHIVED_VISIBILITY_STATUSES.includes(existing.status)) {
+      throw new BadRequestException('Use archive approve/restore endpoints for archived accounts');
+    }
+
+    if (nextStatus === FinanceAccountStatus.ACTIVE) {
+      if (
+        existing.status !== FinanceAccountStatus.DRAFT &&
+        !isBlockedStatus(existing.status) &&
+        existing.status !== FinanceAccountStatus.ACTIVE
+      ) {
+        throw new BadRequestException('Account cannot be activated from current status');
+      }
+    } else if (nextStatus === FinanceAccountStatus.BLOCKED) {
+      if (existing.status !== FinanceAccountStatus.ACTIVE && !isBlockedStatus(existing.status)) {
+        throw new BadRequestException('Only active accounts can be blocked');
+      }
+    } else {
+      throw new BadRequestException('Unsupported status transition');
+    }
+
     const account = await this.prisma.financeAccount.update({
       where: { id },
-      data: { status, updatedById: user.id },
+      data: { status: nextStatus, updatedById: user.id },
       include: this.accountInclude(),
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        role: user.role,
-        action: status === FinanceAccountStatus.ACTIVE ? 'finance.account.activate' : 'finance.account.deactivate',
-        entity: 'FinanceAccount',
-        entityId: account.id,
-        metadata: {
-          accountId: account.id,
-          branchId: account.branchId,
-          employeeId: user.id,
-          role: user.role,
-          operation: status,
-          amount: Number(account.currentBalance),
-          transactionNumber: account.accountNumber,
-        },
-      },
+    const action =
+      nextStatus === FinanceAccountStatus.ACTIVE
+        ? 'finance.account.activate'
+        : 'finance.account.block';
+
+    await this.writeAccountAudit(user, action, account, {
+      operation: nextStatus,
+      previousValue: { status: previousStatus },
+      newValue: { status: nextStatus },
     });
 
     return account;
+  }
+
+  /**
+   * Accountant "Delete":
+   * - unused accounts → soft-delete (deletedAt)
+   * - used accounts → Archive Requested (CEO approval required)
+   */
+  async deleteOrRequestArchive(user: AuthUser, id: string) {
+    const existing = await this.prisma.financeAccount.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Account not found');
+    if (!canManageFinanceAccounts(user)) throw new ForbiddenException('Forbidden');
+    if (user.branchId && existing.branchId && user.branchId !== existing.branchId) {
+      throw new ForbiddenException('Branch isolation violation');
+    }
+    if (existing.status === FinanceAccountStatus.ARCHIVED) {
+      throw new BadRequestException('Account is already archived');
+    }
+    if (existing.status === FinanceAccountStatus.ARCHIVE_REQUESTED) {
+      return this.toAccountResponse(existing);
+    }
+
+    const hasHistory = await this.accountHasUsageHistory(id);
+    if (!hasHistory) {
+      const deleted = await this.prisma.financeAccount.update({
+        where: { id },
+        data: { deletedAt: new Date(), updatedById: user.id },
+        include: this.accountInclude(),
+      });
+      await this.writeAccountAudit(user, 'finance.account.delete', deleted, {
+        operation: 'SOFT_DELETE_UNUSED',
+        previousValue: { status: existing.status, deletedAt: null },
+        newValue: { status: deleted.status, deletedAt: deleted.deletedAt },
+      });
+      return this.toAccountResponse(deleted);
+    }
+
+    const account = await this.prisma.financeAccount.update({
+      where: { id },
+      data: { status: FinanceAccountStatus.ARCHIVE_REQUESTED, updatedById: user.id },
+      include: this.accountInclude(),
+    });
+
+    await this.writeAccountAudit(user, 'finance.account.archive_requested', account, {
+      operation: 'ARCHIVE_REQUESTED',
+      previousValue: { status: existing.status },
+      newValue: { status: FinanceAccountStatus.ARCHIVE_REQUESTED },
+    });
+
+    return this.toAccountResponse(account);
+  }
+
+  async approveArchive(user: AuthUser, id: string) {
+    if (!canApproveFinanceAccountLifecycle(user)) {
+      throw new ForbiddenException('Only CEO can approve account archival');
+    }
+    const existing = await this.prisma.financeAccount.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Account not found');
+    if (existing.status !== FinanceAccountStatus.ARCHIVE_REQUESTED) {
+      throw new BadRequestException('Account is not pending archive approval');
+    }
+
+    const account = await this.prisma.financeAccount.update({
+      where: { id },
+      data: { status: FinanceAccountStatus.ARCHIVED, updatedById: user.id },
+      include: this.accountInclude(),
+    });
+
+    await this.writeAccountAudit(user, 'finance.account.archive_approved', account, {
+      operation: 'ARCHIVE_APPROVED',
+      previousValue: { status: existing.status },
+      newValue: { status: FinanceAccountStatus.ARCHIVED },
+    });
+
+    return this.toAccountResponse(account);
+  }
+
+  async restoreAccount(user: AuthUser, id: string) {
+    if (!canApproveFinanceAccountLifecycle(user)) {
+      throw new ForbiddenException('Only CEO can restore archived accounts');
+    }
+    const existing = await this.prisma.financeAccount.findFirst({
+      where: { id, deletedAt: null },
+    });
+    if (!existing) throw new NotFoundException('Account not found');
+    if (
+      existing.status !== FinanceAccountStatus.ARCHIVED &&
+      existing.status !== FinanceAccountStatus.ARCHIVE_REQUESTED
+    ) {
+      throw new BadRequestException('Only archived or archive-requested accounts can be restored');
+    }
+
+    const account = await this.prisma.financeAccount.update({
+      where: { id },
+      data: { status: FinanceAccountStatus.ACTIVE, updatedById: user.id },
+      include: this.accountInclude(),
+    });
+
+    await this.writeAccountAudit(user, 'finance.account.archive_restored', account, {
+      operation: 'ARCHIVE_RESTORED',
+      previousValue: { status: existing.status },
+      newValue: { status: FinanceAccountStatus.ACTIVE },
+    });
+
+    return this.toAccountResponse(account);
   }
 
   async setOpeningBalance(user: AuthUser, id: string, dto: SetOpeningBalanceDto) {
@@ -419,6 +683,13 @@ export class FinanceAccountsService {
     if (!canManageFinanceAccounts(user)) throw new ForbiddenException('Forbidden');
     if (user.branchId && account.branchId && user.branchId !== account.branchId) {
       throw new ForbiddenException('Branch isolation violation');
+    }
+    if (
+      account.status === FinanceAccountStatus.ARCHIVED ||
+      account.status === FinanceAccountStatus.ARCHIVE_REQUESTED ||
+      isBlockedStatus(account.status)
+    ) {
+      throw new BadRequestException('Cannot assign cashiers to blocked or archived accounts');
     }
 
     const eligibleBranchId =
@@ -493,6 +764,12 @@ export class FinanceAccountsService {
           operation: 'ASSIGN_CASHIER',
           assignedUserId: dto.userId,
           transactionNumber: account.accountNumber,
+          previousValue: null,
+          newValue: {
+            userId: dto.userId,
+            isPrimary: assignment.isPrimary,
+            isActive: assignment.isActive,
+          },
         },
       },
     });

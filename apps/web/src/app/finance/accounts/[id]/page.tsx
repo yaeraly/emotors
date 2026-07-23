@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { AccountAssignmentsPanel } from '@/components/finance/AccountAssignmentsPanel';
 import {
   FinanceErrorState,
@@ -14,20 +14,33 @@ import {
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
-import type { FinanceAccount, FinanceLedgerEntry } from '@/lib/types';
+import {
+  canApproveFinanceAccountLifecycle,
+  canManageFinanceAccounts,
+} from '@/lib/finance-rbac';
+import type { FinanceAccount, FinanceLedgerEntry, User } from '@/lib/types';
 
 export default function FinanceAccountDetailsPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
   const [account, setAccount] = useState<FinanceAccount & { ledgerEntries?: FinanceLedgerEntry[] } | null>(null);
   const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('overview');
+  const [busy, setBusy] = useState(false);
 
   const reload = () => {
     setLoading(true);
-    apiFetch<FinanceAccount & { ledgerEntries?: FinanceLedgerEntry[] }>(`/finance/accounts/${params.id}`)
-      .then(setAccount)
+    Promise.all([
+      apiFetch<FinanceAccount & { ledgerEntries?: FinanceLedgerEntry[] }>(`/finance/accounts/${params.id}`),
+      apiFetch<User>('/auth/me'),
+    ])
+      .then(([row, currentUser]) => {
+        setAccount(row);
+        setUser(currentUser);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
   };
@@ -35,6 +48,28 @@ export default function FinanceAccountDetailsPage() {
   useEffect(() => {
     reload();
   }, [params.id, t]);
+
+  const canManage = Boolean(user && canManageFinanceAccounts(user));
+  const canApproveLifecycle = Boolean(user && canApproveFinanceAccountLifecycle(user));
+  const status = account?.status;
+
+  async function runAction(path: string, method: 'PATCH' | 'POST' | 'DELETE', successRedirect?: boolean) {
+    if (busy) return;
+    setBusy(true);
+    setActionError('');
+    try {
+      const result = await apiFetch<FinanceAccount>(path, { method });
+      if (successRedirect && method === 'DELETE' && (result as { deletedAt?: string | null }).deletedAt) {
+        router.push('/finance/accounts');
+        return;
+      }
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const tabs = [
     { href: '#overview', labelKey: 'finance.tabOverview' },
@@ -61,6 +96,65 @@ export default function FinanceAccountDetailsPage() {
             <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.pendingBalance')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={Number(account.pendingBalance)} currency={account.currency} /></p></div>
             <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('distribution.status')}</p><p className="mt-2"><FinanceStatusBadge status={account.status} /></p></div>
           </div>
+
+          {(canManage || canApproveLifecycle) ? (
+            <div className="flex flex-wrap gap-2 rounded-3xl border border-slate-200 bg-white p-4">
+              {actionError ? <div className="w-full"><FinanceErrorState message={actionError} /></div> : null}
+              {canManage && (status === 'DRAFT' || status === 'BLOCKED' || status === 'INACTIVE') ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void runAction(`/finance/accounts/${account.id}/activate`, 'PATCH')}
+                  className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {t('finance.activateAccount')}
+                </button>
+              ) : null}
+              {canManage && status === 'ACTIVE' ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void runAction(`/finance/accounts/${account.id}/block`, 'PATCH')}
+                  className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 disabled:opacity-50"
+                >
+                  {t('finance.blockAccount')}
+                </button>
+              ) : null}
+              {canManage && status !== 'ARCHIVED' && status !== 'ARCHIVE_REQUESTED' ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (!window.confirm(t('finance.deleteOrArchiveAccountConfirm'))) return;
+                    void runAction(`/finance/accounts/${account.id}`, 'DELETE', true);
+                  }}
+                  className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50"
+                >
+                  {t('finance.deleteOrArchiveAccount')}
+                </button>
+              ) : null}
+              {canApproveLifecycle && status === 'ARCHIVE_REQUESTED' ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void runAction(`/finance/accounts/${account.id}/approve-archive`, 'POST')}
+                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {t('finance.approveArchive')}
+                </button>
+              ) : null}
+              {canApproveLifecycle && (status === 'ARCHIVED' || status === 'ARCHIVE_REQUESTED') ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void runAction(`/finance/accounts/${account.id}/restore`, 'POST')}
+                  className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+                >
+                  {t('finance.restoreAccount')}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           <ModuleSectionNav sections={tabs} variant="tabs" />
 
