@@ -24,7 +24,6 @@ import {
   type ChinaReceivingFilters,
   type VerificationFilterStatus,
 } from '@/lib/china-receiving-filters';
-import { CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE } from '@/lib/hq-receiving-validation';
 
 type EditSession = {
   lockedByUserId: string;
@@ -348,7 +347,6 @@ function ChinaReceivingEditableView({
   const { t, language } = useTranslation();
   const router = useRouter();
   const [error, setError] = useState('');
-  const [cargoReceiptError, setCargoReceiptError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -378,14 +376,6 @@ function ChinaReceivingEditableView({
   const readOnly = Boolean(task.readOnly) || !canReceiveProcurementToHq(user);
   const canEdit = canReceiveProcurementToHq(user) && !readOnly;
   const isCeo = hasFullAccess(user);
-  const cargoAttachments = task.cargoAttachments ?? task.documents?.photos ?? [];
-  const hasCargoReceiptAttachment = cargoAttachments.length > 0 || (task.cargoAttachmentCount ?? 0) > 0;
-
-  useEffect(() => {
-    if (hasCargoReceiptAttachment) {
-      setCargoReceiptError('');
-    }
-  }, [hasCargoReceiptAttachment]);
 
   const {
     rows,
@@ -475,27 +465,10 @@ function ChinaReceivingEditableView({
     }
   }
 
-  function resolveReceiveErrorMessage(message: string) {
-    if (
-      message === CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE
-      || message.toLowerCase().includes('cargo receipt')
-      || message.toLowerCase().includes('квитанц')
-    ) {
-      return t('chinaReceiving.cargoReceiptRequired');
-    }
-    return message;
-  }
-
   async function receiveToHq() {
     if (!canEdit || !allSaved) return;
-    if (!hasCargoReceiptAttachment) {
-      setCargoReceiptError(t('chinaReceiving.cargoReceiptRequired'));
-      setError('');
-      return;
-    }
     setLoading(true);
     setError('');
-    setCargoReceiptError('');
     try {
       await apiFetch(`/procurement/orders/${task.id}/receive-to-hq`, {
         method: 'POST',
@@ -522,14 +495,7 @@ function ChinaReceivingEditableView({
       window.localStorage.setItem('emotors_china_receiving_success', t('chinaReceiving.receivedSuccess'));
       router.push('/hq-warehouses/china-receiving');
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('common.error');
-      const friendly = resolveReceiveErrorMessage(message);
-      if (friendly === t('chinaReceiving.cargoReceiptRequired')) {
-        setCargoReceiptError(friendly);
-        setError('');
-      } else {
-        setError(friendly);
-      }
+      setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -815,11 +781,6 @@ function ChinaReceivingEditableView({
           {!allSaved ? (
             <p className="w-full rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
               {t('chinaReceiving.unsavedBlock').replace('{count}', String(unsavedCount))}
-            </p>
-          ) : null}
-          {cargoReceiptError ? (
-            <p className="w-full rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
-              {cargoReceiptError}
             </p>
           ) : null}
           <button

@@ -36,7 +36,6 @@ import {
   canConfirmSvhToHqArrival,
   canApproveSvhTransportCostAdjustment,
   canDeleteProcurementOrder,
-  canReceiveProcurementToHq,
   hasAnyFullAccessRole,
   isFullAccessRole,
   resolveUserRoles,
@@ -107,6 +106,7 @@ import {
   touchesChinaDomesticTransportFields,
 } from './china-domestic-transport-lock.util';
 import { buildHqReceivingValidationResult } from './hq-receiving-validation.util';
+import { listCargoReceiptAttachmentsForOrder } from './cargo-receipt-attachments.util';
 
 type PreparedProcurementItem = {
   productId: string;
@@ -1289,7 +1289,7 @@ export class ProcurementService {
     supplierPaymentId?: string,
   ) {
     if (entityType === FileAttachmentEntityType.CARGO_RECEIPT) {
-      if (!canCreateProcurementOrder(user) && !canReceiveProcurementToHq(user)) {
+      if (!canCreateProcurementOrder(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
         throw new ForbiddenException('You do not have permission to upload cargo receipt attachments');
       }
     } else if (
@@ -3671,6 +3671,29 @@ export class ProcurementService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    const linkedCargoReceipts = await listCargoReceiptAttachmentsForOrder(this.prisma, order.id);
+    const orderCargoAttachments = attachments.filter(
+      (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
+    );
+    const cargoAttachmentById = new Map<string, any>();
+    for (const attachment of orderCargoAttachments) {
+      cargoAttachmentById.set(attachment.id, attachment);
+    }
+    for (const attachment of linkedCargoReceipts) {
+      if (!cargoAttachmentById.has(attachment.id)) {
+        cargoAttachmentById.set(attachment.id, {
+          id: attachment.id,
+          fileName: attachment.fileName,
+          fileUrl: attachment.fileUrl,
+          mimeType: attachment.mimeType,
+          entityType: FileAttachmentEntityType.CARGO_RECEIPT,
+          entityId: attachment.entityId,
+          uploadedBy: attachment.uploadedBy ?? null,
+          replacedBy: attachment.replacedBy ?? null,
+        });
+      }
+    }
+    const cargoAttachments = Array.from(cargoAttachmentById.values());
     const activePaymentCount = order.supplierPayments
       ? order.supplierPayments.filter((payment: any) => isConfirmedSupplierPayment(payment.status)).length
       : await this.prisma.procurementSupplierPayment.count({
@@ -3790,9 +3813,7 @@ export class ProcurementService {
         this.toSupplierPaymentResponse(payment),
       ),
       attachments,
-      cargoAttachments: attachments.filter(
-        (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
-      ),
+      cargoAttachments,
       domesticTransportAttachments: domesticAttachments.current,
       domesticTransportReceiptHistory: domesticAttachments.history,
       svhToHqReceipt: domesticAttachments.currentReceipt,
@@ -3801,9 +3822,6 @@ export class ProcurementService {
         : null,
       domesticTransportTimeline: buildDomesticTransportTimeline(order),
       ...(() => {
-        const cargoAttachments = attachments.filter(
-          (attachment) => attachment.entityType === FileAttachmentEntityType.CARGO_RECEIPT,
-        );
         const receivingValidation = buildHqReceivingValidationResult({
           cargo: {
             cargoTotalWeightKg: order.cargoTotalWeightKg,

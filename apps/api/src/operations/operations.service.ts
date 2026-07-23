@@ -9,7 +9,6 @@ import {
   BranchRequestLineRejectionReason,
   BranchRequestShortageStatus,
   HqStockBookingReleaseReason,
-  FileAttachmentEntityType,
   HqWarrantyDecision,
   Prisma,
   ProcurementOrderStatus,
@@ -59,6 +58,11 @@ import {
   hqReceivingBlockedMessage,
   SVH_TRANSPORT_INCOMPLETE_MESSAGE,
 } from '../procurement/hq-receiving-validation.util';
+import {
+  countCargoReceiptAttachmentsByOrderIds,
+  countCargoReceiptAttachmentsForOrder,
+  listCargoReceiptAttachmentsForOrder,
+} from '../procurement/cargo-receipt-attachments.util';
 import { LandedCostService } from '../procurement/landed-cost.service';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
@@ -1663,13 +1667,7 @@ export class OperationsService {
         );
       }
 
-      const cargoAttachmentCount = await tx.fileAttachment.count({
-        where: {
-          entityId: order.id,
-          entityType: FileAttachmentEntityType.CARGO_RECEIPT,
-          deletedAt: null,
-        },
-      });
+      const cargoAttachmentCount = await countCargoReceiptAttachmentsForOrder(tx, order.id);
 
       const cargoSnapshot = {
         cargoTotalWeightKg: dto.cargoTotalWeightKg ?? order.cargoTotalWeightKg,
@@ -2231,16 +2229,10 @@ export class OperationsService {
       orderBy: [{ hqStockMovementCreatedAt: 'asc' }, { actualArrivalDate: 'desc' }, { createdAt: 'desc' }],
     });
 
-    const attachmentCounts = await this.prisma.fileAttachment.groupBy({
-      by: ['entityId'],
-      where: {
-        entityType: FileAttachmentEntityType.CARGO_RECEIPT,
-        deletedAt: null,
-        entityId: { in: orders.map((order) => order.id) },
-      },
-      _count: { _all: true },
-    });
-    const attachmentCountMap = new Map(attachmentCounts.map((row) => [row.entityId, row._count._all]));
+    const attachmentCountMap = await countCargoReceiptAttachmentsByOrderIds(
+      this.prisma,
+      orders.map((order) => order.id),
+    );
 
     const tasks = [];
     let goodsLeftYiwuVisibleCount = 0;
@@ -2427,13 +2419,7 @@ export class OperationsService {
     const order = await this.loadChinaReceivingOrder(orderId, wmOnlyView);
     await this.assertChinaReceivingAccess(user, order.hqWarehouseId);
 
-    const attachmentCount = await this.prisma.fileAttachment.count({
-      where: {
-        entityId: order.id,
-        entityType: FileAttachmentEntityType.CARGO_RECEIPT,
-        deletedAt: null,
-      },
-    });
+    const attachmentCount = await countCargoReceiptAttachmentsForOrder(this.prisma, order.id);
 
     const enriched = { ...order, cargoAttachmentCount: attachmentCount };
     const validation = buildChinaReceivingValidation(enriched);
@@ -2549,15 +2535,14 @@ export class OperationsService {
             where: { procurementOrderId: order.id },
             include: { lockedByUser: { select: { id: true, fullName: true } } },
           }),
-      this.prisma.fileAttachment.findMany({
-        where: {
-          entityId: order.id,
-          entityType: FileAttachmentEntityType.CARGO_RECEIPT,
-          deletedAt: null,
-        },
-        select: { id: true, fileName: true, fileUrl: true, mimeType: true },
-        orderBy: { createdAt: 'asc' },
-      }),
+      listCargoReceiptAttachmentsForOrder(this.prisma, order.id).then((rows) =>
+        rows.map((row) => ({
+          id: row.id,
+          fileName: row.fileName,
+          fileUrl: row.fileUrl,
+          mimeType: row.mimeType,
+        })),
+      ),
     ]);
 
     if (draftRows.length > 0 && !isCompleted) {
