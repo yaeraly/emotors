@@ -222,9 +222,9 @@ export default function PricingBranchesPage() {
                   <td className="px-3 py-2 text-slate-700">{row.categoryName}</td>
                   <td
                     className="px-3 py-2 font-medium text-slate-800"
-                    title={costOk ? undefined : t('pricing.costUnavailable')}
+                    title={costOk ? undefined : t('pricing.noCalculatedCost')}
                   >
-                    {costOk ? formatPrice(row.costPriceKgs) : '—'}
+                    {costOk ? formatPrice(row.costPriceKgs) : t('pricing.noCalculatedCost')}
                   </td>
                   <td className="px-3 py-2">
                     {canManage ? (

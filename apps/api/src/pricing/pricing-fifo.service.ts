@@ -50,10 +50,6 @@ type FifoPreviewLine = {
   totalPriceKgs: number;
 };
 
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
 @Injectable()
 export class PricingFifoService {
   constructor(private readonly prisma: PrismaService) {}
@@ -192,20 +188,27 @@ export class PricingFifoService {
     return { created, repaired };
   }
 
+  /**
+   * FIFO Dynamic Cost for HQ catalog / Branch Sales pricing.
+   * Always returns the unit landed cost of the current active HQ FIFO layer
+   * (oldest remaining batch). Never averages, never uses product/supplier snapshots
+   * or inventory-balance totals. When the active layer is depleted, the next
+   * remaining layer is selected automatically on the next read.
+   */
   async getLatestHqCostPrice(productId: string, tx?: PrismaTx) {
     const client = tx ?? this.prisma;
     await this.syncFifoBatchesFromHqStockMovements(client);
 
-    const batch = await client.fifoInventoryBatch.findFirst({
+    const batches = await client.fifoInventoryBatch.findMany({
       where: {
         productId,
         remainingQuantity: { gt: 0 },
         warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
       },
-      orderBy: { receivedAt: 'asc' },
+      orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
     });
 
-    if (batch) {
+    for (const batch of batches) {
       let unitCostKgs = Number(batch.unitCostKgs);
       if (batch.stockMovementId) {
         const movement = await client.stockMovement.findUnique({
@@ -252,50 +255,18 @@ export class PricingFifoService {
         return {
           costPriceKgs: unitCostKgs,
           available: true,
-          source: 'HQ_WAREHOUSE_FIFO_BATCH',
+          source: 'HQ_FIFO_ACTIVE_LAYER',
           batchId: batch.id,
           receivedAt: batch.receivedAt,
         };
       }
     }
 
-    const balance = await client.inventoryBalance.findFirst({
-      where: {
-        productId,
-        quantity: { gt: 0 },
-        warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
-      },
-      orderBy: { lastReceivingAt: 'desc' },
-    });
-
-    if (balance) {
-      const qty = Number(balance.quantity);
-      const landed = Number(balance.landedCostKgs || 0);
-      const totalValue = Number(balance.totalValueKgs || 0);
-      let unitCostKgs = landed;
-      // Guard: if landed cost was incorrectly stored as the batch total, derive unit cost.
-      if (qty > 1 && totalValue > 0 && landed > 0 && Math.abs(landed - totalValue) <= 0.05) {
-        unitCostKgs = roundMoney(totalValue / qty);
-      } else if (unitCostKgs <= 0 && qty > 0 && totalValue > 0) {
-        unitCostKgs = roundMoney(totalValue / qty);
-      }
-
-      if (unitCostKgs > 0) {
-        return {
-          costPriceKgs: unitCostKgs,
-          available: true,
-          source: 'HQ_INVENTORY_BALANCE',
-          batchId: null,
-          receivedAt: balance.lastReceivingAt,
-        };
-      }
-    }
-
-    // No HQ stock / no authoritative layer cost — do not invent a stale product fallback.
+    // No active HQ FIFO layer — do not use average, balance, supplier, or product snapshots.
     return {
       costPriceKgs: 0,
       available: false,
-      source: 'NO_HQ_STOCK',
+      source: 'NO_FIFO_LAYER',
       batchId: null,
       receivedAt: null,
     };

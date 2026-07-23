@@ -20,6 +20,7 @@ import {
   UpdateWholesalePricingDto,
 } from './dto/pricing-branch.dto';
 import {
+  applyHqBranchWholesaleMarkup,
   pricesFromMarkups,
   resolveHqToBranchPrice,
   validateMarkups,
@@ -415,22 +416,23 @@ export class PricingCatalogService {
     const rows = await this.listProducts(user);
     return Promise.all(
       rows.map(async (row) => {
-        const engine = displayBranch
-          ? await this.pricingEngine.resolvePrice({
-              productId: row.id,
-              branchId: displayBranch.id,
-              priceType: PricingEnginePriceType.BRANCH_PURCHASE,
-            })
-          : null;
+        // Branch Sales: product cost is always the active HQ FIFO layer (dynamic).
+        const fifoCost = await this.fifoService.getLatestHqCostPrice(row.id);
+        const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
+        const costPriceKgs = costAvailable ? fifoCost.costPriceKgs : 0;
 
-        const costAvailable = Boolean(
-          engine != null ? engine.costAvailable : row.costAvailable,
-        );
-        const costPriceKgs = costAvailable
-          ? (engine?.baseCostKgs ?? row.costPriceKgs)
-          : 0;
+        const engine =
+          displayBranch && costAvailable
+            ? await this.pricingEngine.resolvePrice({
+                productId: row.id,
+                branchId: displayBranch.id,
+                priceType: PricingEnginePriceType.BRANCH_PURCHASE,
+              })
+            : null;
+
         const masterBranchPriceKgs = costAvailable
-          ? (engine?.baseBranchPriceKgs ?? row.hqBranchWholesalePriceKgs)
+          ? (engine?.baseBranchPriceKgs ??
+            applyHqBranchWholesaleMarkup(costPriceKgs, row.hqBranchWholesaleMarkupPercent))
           : 0;
         const effectiveBranchPriceKgs = costAvailable
           ? (engine?.resolvedPriceKgs ?? masterBranchPriceKgs)
@@ -450,7 +452,9 @@ export class PricingCatalogService {
           isActive: row.isActive,
           costPriceKgs,
           costAvailable,
-          costSource: engine?.costSource ?? row.costSource,
+          costSource: fifoCost.source,
+          costBatchId: fifoCost.batchId,
+          costReceivedAt: fifoCost.receivedAt,
           hqMarkupPercent: row.hqBranchWholesaleMarkupPercent,
           /** @deprecated use effectiveBranchPriceKgs — kept for backward-compatible clients */
           branchPriceKgs: effectiveBranchPriceKgs,
