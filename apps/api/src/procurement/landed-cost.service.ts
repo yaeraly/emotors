@@ -30,6 +30,8 @@ import {
 } from './procurement-cost.util';
 import { resolveProcurementLogisticsInput } from './transport-logistics.util';
 import { summarizeSupplierPayments } from './supplier-payment.util';
+import { resolveMovementCostUpdates } from './landed-cost-sync-movements.util';
+import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
 
 export type RecalculateProcurementOrderOptions = {
   reason?: string;
@@ -662,7 +664,6 @@ export class LandedCostService {
     for (const [index, item] of order.items.entries()) {
       const next = calculated.items[index];
       if (!next) continue;
-      const unitCostKgs = Number(next.finalCostKgs || 0);
       const movements = await client.stockMovement.findMany({
         where: {
           productId: item.productId,
@@ -672,14 +673,32 @@ export class LandedCostService {
           referenceType: 'PROCUREMENT_GOODS_RECEIVING',
           referenceId: { in: receivingIds },
         },
+        orderBy: { createdAt: 'asc' },
       });
 
+      const movementUpdates = resolveMovementCostUpdates({
+        orderLineFinalUnitCostKgs: Number(next.finalCostKgs || 0),
+        orderLineTotalCostKgs: Number(next.totalCostKgs || 0),
+        movements: movements.map((movement) => ({
+          id: movement.id,
+          quantity: Math.abs(Number(movement.quantity)),
+          totalCostKgs: Number(movement.totalCostKgs),
+          unitCostKgs: Number(movement.unitCostKgs),
+        })),
+      });
+      const updateByMovementId = new Map(movementUpdates.map((row) => [row.movementId, row]));
+
       let movementValueDelta = 0;
+      let latestActiveUnitCostKgs = Number(next.finalCostKgs || 0);
       for (const movement of movements) {
+        const update = updateByMovementId.get(movement.id);
+        if (!update) continue;
         const qty = Math.abs(Number(movement.quantity));
-        const newTotal = Math.round((qty * unitCostKgs + Number.EPSILON) * 100) / 100;
+        const unitCostKgs = update.unitCostKgs;
+        const newTotal = update.totalCostKgs;
         const oldTotal = Number(movement.totalCostKgs);
         movementValueDelta += newTotal - oldTotal;
+        latestActiveUnitCostKgs = unitCostKgs;
         await client.stockMovement.update({
           where: { id: movement.id },
           data: { unitCostKgs, totalCostKgs: newTotal },
@@ -689,6 +708,11 @@ export class LandedCostService {
           where: { stockMovementId: movement.id },
         });
         if (batch) {
+          const layerUnitCostKgs = resolveUnitCostFromInventoryLayer({
+            quantity: qty,
+            totalCostKgs: newTotal,
+            unitCostKgs,
+          });
           const product = await client.product.findFirst({
             where: { id: item.productId, deletedAt: null },
             select: {
@@ -698,7 +722,7 @@ export class LandedCostService {
               minimumSellingMarkupPercent: true,
             },
           });
-          const prices = pricesFromMarkups(unitCostKgs, {
+          const prices = pricesFromMarkups(layerUnitCostKgs, {
             wholesaleMarkupPercent: Number(product?.wholesaleMarkupPercent ?? 0),
             hqBranchWholesaleMarkupPercent: Number(product?.hqBranchWholesaleMarkupPercent ?? 0),
             recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
@@ -707,7 +731,7 @@ export class LandedCostService {
           await client.fifoInventoryBatch.update({
             where: { id: batch.id },
             data: {
-              unitCostKgs,
+              unitCostKgs: layerUnitCostKgs,
               wholesalePriceKgs: prices.wholesalePriceKgs,
               hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
               recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
@@ -717,6 +741,7 @@ export class LandedCostService {
         }
       }
 
+      const unitCostKgs = latestActiveUnitCostKgs;
       const product = await client.product.findUnique({ where: { id: item.productId } });
       if (product) {
         const sellingPriceKgs = Number(product.sellingPriceKgs);
