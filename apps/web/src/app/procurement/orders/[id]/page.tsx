@@ -972,6 +972,8 @@ function ProcurementOrderDetailPageContent() {
 
           {activeTab === 'transport' ? (
           <>
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.chinaDomestic')}</h3>
             {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
@@ -979,10 +981,12 @@ function ProcurementOrderDetailPageContent() {
                 expenseType="DOMESTIC_CHINA_TRANSPORT"
                 requestType="CHINA_DOMESTIC_TRANSPORT"
                 defaultCurrency="CNY"
-                headingKey="procurement.orders.chinaDomestic"
               />
             ) : null}
+          </section>
 
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.cargoPayment')}</h3>
             {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
@@ -990,10 +994,12 @@ function ProcurementOrderDetailPageContent() {
                 expenseType="INTERNATIONAL_FREIGHT"
                 requestType="CARGO_PAYMENT"
                 defaultCurrency="USD"
-                headingKey="procurement.orders.cargoPayment"
               />
             ) : null}
+          </section>
 
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.domesticTransportKyrgyzstan')}</h3>
             {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
@@ -1001,10 +1007,12 @@ function ProcurementOrderDetailPageContent() {
                 expenseType="LOCAL_DELIVERY"
                 requestType="KYRGYZSTAN_DOMESTIC_TRANSPORT"
                 defaultCurrency="KGS"
-                headingKey="procurement.orders.domesticTransportKyrgyzstan"
               />
             ) : null}
+          </section>
 
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-3 text-base font-bold">{t('procurement.orders.otherExpenses')}</h3>
             {canSeePayments ? (
               <ProcurementSectionPayablePanel
                 orderId={order.id}
@@ -1013,9 +1021,9 @@ function ProcurementOrderDetailPageContent() {
                 requestType="OTHER_EXPENSE"
                 defaultCurrency="KGS"
                 showExpenseName
-                headingKey="procurement.orders.otherExpenses"
               />
             ) : null}
+          </section>
           </>
           ) : null}
 
