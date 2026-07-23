@@ -220,9 +220,9 @@ export function ProcurementSectionPayablePanel({
     canCreate && (!primaryExpense || EDITABLE_STATUSES.has(primaryExpense.status));
   const isFormLocked = Boolean(primaryExpense && LOCKED_STATUSES.has(primaryExpense.status));
   const isReturned = primaryExpense?.status === 'RETURNED';
-  /** Accountant/cashier keep the expense action list; SM must not see the TRE detail card. */
+  /** Accountant/cashier keep the actionable expense list; SM uses the sent-ack card instead. */
   const showExpenseList = canApprove || canConfirm;
-  /** Compact post-submit acknowledgement for Supply Manager (no request/QR details). */
+  /** After SM send: hide form/button, show Invoice Sent + persisted request/QR details. */
   const showSmInvoiceSentAck = isCreatorOnlyView && isFormLocked;
   const showSubmissionSummary = Boolean(
     !isCreatorOnlyView &&
@@ -680,10 +680,50 @@ export function ProcurementSectionPayablePanel({
         </p>
       ) : null}
 
-      {showSmInvoiceSentAck ? (
-        <div className="space-y-2 text-sm text-slate-900">
-          <p className="font-semibold">{t('procurement.payments.invoiceSentStatus')}</p>
-          <p className="font-semibold">{t('procurement.sectionPayable.submissionSummary')}</p>
+      {showSmInvoiceSentAck && primaryExpense ? (
+        <div className="space-y-3 text-sm text-slate-900">
+          <div className="space-y-1">
+            <p className="font-semibold">{t('procurement.payments.invoiceSentStatus')}</p>
+            <p className="font-semibold">{t('procurement.sectionPayable.submissionSummary')}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="font-semibold">
+              {primaryExpense.expenseNumber} · {Number(primaryExpense.amount).toFixed(2)}{' '}
+              {primaryExpense.currency}
+              {primaryExpense.transportCompany?.name
+                ? ` · ${primaryExpense.transportCompany.name}`
+                : primaryExpense.recipientName
+                  ? ` · ${primaryExpense.recipientName}`
+                  : primaryExpense.supplierCarrier
+                    ? ` · ${primaryExpense.supplierCarrier}`
+                    : ''}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              {translateStatus(t, primaryExpense.status)} ·{' '}
+              {t(`procurement.paymentInfo.method.${primaryExpense.paymentMethod}`)}
+            </p>
+            {primaryExpense.qrCodes?.length ? (
+              <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                {primaryExpense.qrCodes.map((qr) =>
+                  qr.fileUrl ? (
+                    <a
+                      key={qr.id}
+                      href={`${API_URL}${qr.fileUrl}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700"
+                    >
+                      {qr.fileName}
+                    </a>
+                  ) : (
+                    <span key={qr.id} className="text-slate-600">
+                      {qr.fileName}
+                    </span>
+                  ),
+                )}
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
