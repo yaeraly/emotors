@@ -8,6 +8,7 @@ import { HqWarehouseAssignmentStatus, Prisma, ProcurementOrderStatus, Role, Stoc
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import {
   activeHqWarehouseWhere,
   hqWarehouseWhere,
@@ -30,6 +31,7 @@ export class HqWarehouseService {
     private readonly prisma: PrismaService,
     private readonly inventoryService: InventoryService,
     private readonly assignmentService: HqWarehouseAssignmentService,
+    private readonly pricingFifoService: PricingFifoService,
   ) {}
 
   dashboard(user: AuthUser) {
@@ -427,6 +429,7 @@ export class HqWarehouseService {
 
   async inventory(user: AuthUser, id: string) {
     await this.getHqWarehouse(user, id);
+    await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
     const balances = await this.prisma.inventoryBalance.findMany({
       where: { warehouseId: id },
       include: {
@@ -443,15 +446,27 @@ export class HqWarehouseService {
       },
       orderBy: { updatedAt: 'desc' },
     });
-    return balances.map((balance) => {
-      const row = {
-        ...this.toInventoryRow(balance),
-        wholesalePriceKgs: Number(balance.product.sellingPriceKgs ?? 0),
-      };
-      return isHqWarehouseLogisticsOnlyUser(user)
-        ? sanitizeHqWarehouseInventoryRow(row)
-        : row;
-    });
+    return Promise.all(
+      balances.map(async (balance) => {
+        const fifoCost = await this.pricingFifoService.getLatestHqCostPrice(balance.productId);
+        const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
+        const unitLandedCostKgs = costAvailable ? fifoCost.costPriceKgs : null;
+        const row = {
+          ...this.toInventoryRow(balance),
+          // Display unit cost = active HQ FIFO layer (not InventoryBalance average/landed snapshot).
+          landedCostKgs: unitLandedCostKgs,
+          averageCostKgs: unitLandedCostKgs,
+          costAvailable,
+          costSource: fifoCost.source,
+          costBatchId: fifoCost.batchId,
+          costReceivedAt: fifoCost.receivedAt,
+          wholesalePriceKgs: Number(balance.product.sellingPriceKgs ?? 0),
+        };
+        return isHqWarehouseLogisticsOnlyUser(user)
+          ? sanitizeHqWarehouseInventoryRow(row)
+          : row;
+      }),
+    );
   }
 
   async receivings(user: AuthUser, id: string) {

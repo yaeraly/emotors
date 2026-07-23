@@ -213,7 +213,7 @@ export class PricingFifoService {
         remainingQuantity: { gt: 0 },
         warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
       },
-      orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
+      orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
 
     for (const batch of batches) {
@@ -331,7 +331,7 @@ export class PricingFifoService {
         warehouseId: input.warehouseId,
         remainingQuantity: { gt: 0 },
       },
-      orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
+      orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
 
     const markupPercent = input.isHqOwnedBranch
@@ -812,7 +812,7 @@ export class PricingFifoService {
         warehouseId: input.warehouseId,
         remainingQuantity: { gt: 0 },
       },
-      orderBy: { receivedAt: 'asc' },
+      orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
 
     for (const batch of batches) {

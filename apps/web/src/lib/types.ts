@@ -610,7 +610,11 @@ export type Product = {
   latestYuanRate: number;
   purchaseCostKgs: number;
   transportCostKgs: number;
-  finalCostKgs: number;
+  finalCostKgs: number | null;
+  costAvailable?: boolean;
+  costSource?: string;
+  costBatchId?: string | null;
+  costReceivedAt?: string | null;
   sellingPriceKgs: number;
   marginAmount: number;
   marginPercent: number;

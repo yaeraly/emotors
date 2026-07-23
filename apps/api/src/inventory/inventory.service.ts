@@ -55,6 +55,7 @@ import {
   resolveCategoryProductCodePrefix,
 } from './product-code.util';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
+import { PricingFifoService } from '../pricing/pricing-fifo.service';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -68,6 +69,7 @@ export class InventoryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly pricingFifoService: PricingFifoService,
   ) {}
 
   async uploadProductImage(request: FastifyRequest) {
@@ -557,8 +559,11 @@ export class InventoryService {
       this.prisma.product.count({ where }),
     ]);
 
+    // Shared HQ FIFO unit-cost resolver — sync once for the page, never per-row sync.
+    await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+
     return {
-      items: items.map((product) => this.toProductResponse(product, user)),
+      items: await Promise.all(items.map((product) => this.toProductResponseWithFifoCost(product, user))),
       total,
       page,
       pageSize,
@@ -606,7 +611,8 @@ export class InventoryService {
       throw new NotFoundException('Product not found');
     }
 
-    return this.toProductResponse(product, user);
+    await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+    return this.toProductResponseWithFifoCost(product, user);
   }
 
   async updateProduct(user: AuthUser, id: string, dto: UpdateProductDto) {
@@ -2214,7 +2220,8 @@ export class InventoryService {
       throw new NotFoundException('Product not found');
     }
 
-    return this.toProductResponse(product, user);
+    await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+    return this.toProductResponseWithFifoCost(product, user);
   }
 
   private async getProductForWrite(tx: PrismaTx | PrismaService, user: AuthUser, id: string) {
@@ -2538,6 +2545,8 @@ export class InventoryService {
       latestYuanRate: Number(product.latestYuanRate),
       purchaseCostKgs: Number(product.purchaseCostKgs),
       transportCostKgs: Number(product.transportCostKgs),
+      // Stale Product.finalCostKgs snapshot — callers that display Себестоимость
+      // must use toProductResponseWithFifoCost (active HQ FIFO layer).
       finalCostKgs: Number(product.finalCostKgs),
       sellingPriceKgs: Number(product.sellingPriceKgs),
       marginAmount: Number(product.marginAmount),
@@ -2553,6 +2562,24 @@ export class InventoryService {
     };
 
     return user ? this.applyProductProfileVisibility(user, response) : response;
+  }
+
+  /**
+   * Product catalog / detail cost: oldest active HQ FIFO unit landed cost.
+   * Never Product.finalCostKgs, average, supplier, or warehouse total÷qty.
+   */
+  private async toProductResponseWithFifoCost(product: any, user?: AuthUser) {
+    const base = this.toProductResponse(product, user);
+    const cost = await this.pricingFifoService.getLatestHqCostPrice(product.id);
+    const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
+    return {
+      ...base,
+      finalCostKgs: costAvailable ? cost.costPriceKgs : null,
+      costAvailable,
+      costSource: cost.source,
+      costBatchId: cost.batchId,
+      costReceivedAt: cost.receivedAt,
+    };
   }
 
   private shouldHideProductPricingFields(user: AuthUser) {

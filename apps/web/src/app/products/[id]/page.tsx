@@ -371,7 +371,16 @@ export default function ProductDetailPage() {
                 <Info label={t('procurement.orders.supplier')} value={product.defaultSupplier?.name ?? '-'} />
                 <Info label={t('procurement.orders.factory')} value={product.defaultFactory?.name ?? '-'} />
                 <Info label={t('inventory.latestYuanRate')} value={String(product.latestYuanRate)} />
-                <Info label={t('inventory.finalCostKgs')} value={formatKgs(product.finalCostKgs)} />
+                <Info
+                  label={t('inventory.finalCostKgs')}
+                  value={
+                    product.finalCostKgs != null &&
+                    product.costAvailable !== false &&
+                    Number(product.finalCostKgs) > 0
+                      ? formatKgs(product.finalCostKgs)
+                      : t('inventory.costNotCalculated')
+                  }
+                />
                 {!hidePricingProfile ? (
                   <>
                     <Info label={t('inventory.sellingPriceKgs')} value={formatKgs(product.sellingPriceKgs)} />

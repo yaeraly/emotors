@@ -199,7 +199,11 @@ export function ProductsListContent() {
                   </td>
                   <td className="hidden px-3 py-2 lg:table-cell">{formatProductUnit(product.unit, language, t)}</td>
                   <td className="px-3 py-2">{product.quantity}</td>
-                  <td className="hidden px-3 py-2 lg:table-cell">{formatKgs(product.finalCostKgs)}</td>
+                  <td className="hidden px-3 py-2 lg:table-cell">
+                    {isProductCostAvailable(product)
+                      ? formatKgs(product.finalCostKgs)
+                      : t('inventory.costNotCalculated')}
+                  </td>
                   <td className="px-3 py-2">
                     <StockBadge quantity={product.quantity} lowStock={product.lowStock} />
                   </td>
@@ -264,6 +268,12 @@ function formatKgs(value: number | string | null | undefined) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   })} сом`;
+}
+
+function isProductCostAvailable(product: Pick<Product, 'finalCostKgs' | 'costAvailable'>) {
+  if (product.costAvailable === false) return false;
+  if (product.finalCostKgs == null) return false;
+  return Number(product.finalCostKgs) > 0;
 }
 
 function categoryName(category: ProductCategory, language: string) {
