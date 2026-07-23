@@ -116,11 +116,19 @@ export function buildLogisticsWithCargo(
     totalCargoCostUsd > 0 && usdRate > 0 ? roundMoney(totalCargoCostUsd * usdRate) : 0;
 
   const resolved: LogisticsCosts = { ...logistics };
+  // Rate×weight and confirmed/persisted cargo describe the same bucket — never overwrite lower.
   if (totalCargoCostKgs > 0) {
-    resolved.chinaExportTransportKgs = totalCargoCostKgs;
+    resolved.chinaExportTransportKgs = Math.max(
+      Number(resolved.chinaExportTransportKgs || 0),
+      totalCargoCostKgs,
+    );
   }
 
-  return { logistics: resolved, totalCargoCostUsd, totalCargoCostKgs };
+  return {
+    logistics: resolved,
+    totalCargoCostUsd,
+    totalCargoCostKgs: Math.max(totalCargoCostKgs, Number(logistics.chinaExportTransportKgs || 0)),
+  };
 }
 
 export function calculateLandedCosts(

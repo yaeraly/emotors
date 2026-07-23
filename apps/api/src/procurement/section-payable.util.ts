@@ -137,9 +137,14 @@ export function validateSectionPayableSubmit(input: {
   return null;
 }
 
-/** Only PAID expenses affect landed cost. */
+/** Only confirmed/paid expenses affect imported inventory landed cost. */
 export function paidExpensesAffectCost(status: string): boolean {
-  return status === TransportExpenseStatus.PAID;
+  const normalized = String(status ?? '').toUpperCase();
+  return (
+    normalized === TransportExpenseStatus.PAID ||
+    normalized === 'COMPLETED' ||
+    normalized === 'CONFIRMED'
+  );
 }
 
 export function weightedAverageRate(totalKgs: number, totalCny: number): number | null {

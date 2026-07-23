@@ -129,8 +129,13 @@ export function buildLogisticsWithCargo(
     totalCargoCostUsd > 0 && usdRate > 0 ? roundMoney(totalCargoCostUsd * usdRate) : 0;
 
   const resolved: LogisticsCosts = { ...logistics };
+  // Rate×weight cargo and confirmed cargo payment describe the same bucket.
+  // Never overwrite a higher confirmed/manual cargo amount with a lower rate calc.
   if (totalCargoCostKgs > 0) {
-    resolved.chinaExportTransportKgs = totalCargoCostKgs;
+    resolved.chinaExportTransportKgs = Math.max(
+      Number(resolved.chinaExportTransportKgs || 0),
+      totalCargoCostKgs,
+    );
   }
 
   return { logistics: resolved, totalCargoCostUsd, totalCargoCostKgs };

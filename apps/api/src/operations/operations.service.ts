@@ -52,19 +52,14 @@ import {
   seedHqProductCatalogFromWarehouseInventory,
 } from '../product-catalog/hq-product-catalog.util';
 import {
-  buildLogisticsWithCargo,
-  calculateLandedCosts,
   CARGO_WEIGHT_LESS_THAN_NET,
-  mapStoredProcurementItemToLandedCostInput,
 } from '../procurement/landed-cost.util';
 import {
   buildHqReceivingValidationResult,
   hqReceivingBlockedMessage,
   SVH_TRANSPORT_INCOMPLETE_MESSAGE,
 } from '../procurement/hq-receiving-validation.util';
-import { buildProcurementLandedCostInputs } from '../procurement/transport-logistics.util';
 import { LandedCostService } from '../procurement/landed-cost.service';
-import { summarizeSupplierPayments } from '../procurement/supplier-payment.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
@@ -1816,35 +1811,60 @@ export class OperationsService {
         packagingCostKgs: dto.packagingCostKgs ?? order.packagingCostKgs,
       };
 
-      const paymentSummary = summarizeSupplierPayments(
-        (order.supplierPayments ?? []).map((payment) => ({
-          amountYuan: Number(payment.amountYuan),
-          exchangeRate: Number(payment.exchangeRate),
-          status: payment.status,
-        })),
-        Number(order.totalYuan),
-      );
-      const effectiveYuanRate =
-        paymentSummary.weightedAverageYuanRate && paymentSummary.totalPaidYuan > 0
-          ? paymentSummary.weightedAverageYuanRate
-          : Number(order.defaultYuanRate);
-      const { logistics, cargo } = buildProcurementLandedCostInputs(mergedOrder, effectiveYuanRate);
-      let recalculated;
-      try {
-        recalculated = calculateLandedCosts(
-          receivedItems.map((item) => mapStoredProcurementItemToLandedCostInput({
-            quantity: item.quantity,
+      // Persist receive-time logistics fields, then recalculate from confirmed expenses + order scalars.
+      await tx.procurementOrder.update({
+        where: { id: order.id },
+        data: {
+          cargoTotalWeightKg: mergedOrder.cargoTotalWeightKg,
+          cargoRateUsdPerKg: mergedOrder.cargoRateUsdPerKg,
+          defaultUsdRate: mergedOrder.defaultUsdRate,
+          cargoCompany: mergedOrder.cargoCompany,
+          cargoReceiptNumber: mergedOrder.cargoReceiptNumber,
+          cargoReceiptDate: mergedOrder.cargoReceiptDate,
+          cargoReceiptNote: mergedOrder.cargoReceiptNote,
+          chinaDomesticTransportYuan: mergedOrder.chinaDomesticTransportYuan,
+          chinaDomesticTransportKgs: mergedOrder.chinaDomesticTransportKgs,
+          customsCostKgs: mergedOrder.customsCostKgs,
+          insuranceCostKgs: mergedOrder.insuranceCostKgs,
+          bankFeeCostKgs: mergedOrder.bankFeeCostKgs,
+          otherExpenseKgs: mergedOrder.otherExpenseKgs,
+          packagingCostKgs: mergedOrder.packagingCostKgs,
+        },
+      });
+
+      for (const item of receivedItems) {
+        await tx.procurementOrderItem.update({
+          where: { id: item.id },
+          data: {
             receivedQuantity: item.receivedQuantity,
-            purchasePriceYuan: item.purchasePriceYuan,
-            yuanRate: effectiveYuanRate,
             unitWeightKg: item.unitWeightKg,
-            weightKg: item.unitWeightKg,
             weightStatus: item.weightStatus,
-          })),
-          logistics,
-          { cargo },
+          },
+        });
+      }
+
+      let recalculated;
+      let costOrder: Record<string, unknown>;
+      try {
+        const result = await this.landedCostService.recalculateProcurementOrder(
+          order.id,
+          {
+            user,
+            reason: 'hq_receive',
+            triggerReason: 'hq_receive',
+            useDraftQuantities: true,
+          },
+          tx,
         );
+        if (result.skipped || !result.calculated || !result.order) {
+          throw new BadRequestException(
+            'Landed cost could not be calculated. Complete import cost sections first.',
+          );
+        }
+        recalculated = result.calculated;
+        costOrder = result.order as Record<string, unknown>;
       } catch (error) {
+        if (error instanceof BadRequestException) throw error;
         if (error instanceof Error && error.message === CARGO_WEIGHT_LESS_THAN_NET) {
           throw new BadRequestException('Cargo total weight cannot be less than product net weight.');
         }
@@ -1853,6 +1873,22 @@ export class OperationsService {
       if (recalculated.totalCostKgs <= 0) {
         throw new BadRequestException('Landed cost must be calculated before receiving to HQ warehouse.');
       }
+
+      const cargo = {
+        usdRate: Number(costOrder.defaultUsdRate ?? mergedOrder.defaultUsdRate ?? 0),
+        cargoRateUsdPerKg: Number(costOrder.cargoRateUsdPerKg ?? mergedOrder.cargoRateUsdPerKg ?? 0),
+        cargoTotalWeightKg: Number(costOrder.cargoTotalWeightKg ?? mergedOrder.cargoTotalWeightKg ?? 0) || null,
+      };
+      const resolvedLogistics = {
+        chinaDomesticTransportKgs: Number(costOrder.chinaDomesticTransportKgs ?? 0),
+        chinaExportTransportKgs: Number(costOrder.chinaExportTransportKgs ?? 0),
+        localTransportKgs: Number(costOrder.localTransportKgs ?? 0),
+        packagingCostKgs: Number(costOrder.packagingCostKgs ?? 0),
+        customsCostKgs: Number(costOrder.customsCostKgs ?? 0),
+        insuranceCostKgs: Number(costOrder.insuranceCostKgs ?? 0),
+        bankFeeCostKgs: Number(costOrder.bankFeeCostKgs ?? 0),
+        otherExpenseKgs: Number(costOrder.otherExpenseKgs ?? 0),
+      };
 
       const receiving = await tx.procurementGoodsReceiving.create({
         data: {
@@ -1864,11 +1900,6 @@ export class OperationsService {
         },
       });
       const cargoTotalWeightKg = Number(cargo.cargoTotalWeightKg ?? 0);
-      const { logistics: resolvedLogistics } = buildLogisticsWithCargo(
-        logistics,
-        cargoTotalWeightKg,
-        cargo,
-      );
       const batchDiscrepancyActIds: string[] = [];
       let allocatedInventoryValueKgs = 0;
       let receivedLineCount = 0;

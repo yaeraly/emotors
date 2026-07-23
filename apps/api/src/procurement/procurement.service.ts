@@ -16,6 +16,7 @@ import {
   StockMovementType,
   SvhToHqTransportStatus,
   TransportCompanyStatus,
+  TransportExpenseType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
@@ -75,6 +76,7 @@ import {
   isConfirmedSupplierPayment,
   summarizeSupplierPayments,
 } from './supplier-payment.util';
+import { sumConfirmedExpenseAmountKgs } from './procurement-cost.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import {
   canUnlockProcurementOrder,
@@ -3675,6 +3677,62 @@ export class ProcurementService {
           where: { procurementOrderId: order.id, status: ProcurementSupplierPaymentStatus.ACTIVE },
         });
 
+    const estimatedRate =
+      order.weightedAverageYuanRate && Number(order.totalPaidYuan) > 0
+        ? Number(order.weightedAverageYuanRate)
+        : Number(order.defaultYuanRate || 0);
+
+    const cargoExpenseRows = await this.prisma.procurementTransportExpense.findMany({
+      where: {
+        procurementOrderId: order.id,
+        expenseType: TransportExpenseType.INTERNATIONAL_FREIGHT,
+        status: { not: 'CANCELLED' },
+      },
+      select: {
+        amount: true,
+        currency: true,
+        exchangeRate: true,
+        amountKgs: true,
+        paidAmountKgs: true,
+        calculatedAmountKgs: true,
+        status: true,
+      },
+    });
+    const confirmedCargoFromPayments = sumConfirmedExpenseAmountKgs(
+      cargoExpenseRows.map((row) => ({
+        amount: Number(row.amount),
+        currency: row.currency,
+        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+        amountKgs: Number(row.amountKgs || row.calculatedAmountKgs || 0),
+        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
+        status: row.status,
+      })),
+      estimatedRate,
+    );
+    // Display/total cargo KGS: confirmed paid cargo payments only (never draft/pending).
+    const confirmedCargoPaymentKgs = confirmedCargoFromPayments;
+    const chinaDomesticKgs = Number(order.chinaDomesticTransportKgs || 0);
+    const localTransportKgs = Math.max(
+      Number(order.localTransportKgs || 0),
+      Number(order.svhToHqTransport?.transportCostKgs || 0),
+    );
+    const customsCostKgs = Number(order.customsCostKgs || 0);
+    const insuranceCostKgs = Number(order.insuranceCostKgs || 0);
+    const bankFeeCostKgs = Number(order.bankFeeCostKgs || 0);
+    const otherExpenseKgs = Number(order.otherExpenseKgs || 0);
+    const totalImportLogisticsKgs =
+      Math.round(
+        (chinaDomesticKgs +
+          confirmedCargoPaymentKgs +
+          localTransportKgs +
+          customsCostKgs +
+          insuranceCostKgs +
+          bankFeeCostKgs +
+          otherExpenseKgs +
+          Number.EPSILON) *
+          100,
+      ) / 100;
+
     return {
       ...order,
       totalYuan: Number(order.totalYuan),
@@ -3691,18 +3749,30 @@ export class ProcurementService {
       estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
       costConfirmationStatus: order.costConfirmationStatus ?? 'PRELIMINARY',
       chinaDomesticTransportYuan: Number(order.chinaDomesticTransportYuan ?? 0),
-      chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs ?? 0),
+      chinaDomesticTransportKgs: chinaDomesticKgs,
       chinaDomesticTransportLocked: isChinaDomesticTransportLockedByStatus(order.status),
       chinaDomesticTransportEditable: canEditChinaDomesticTransport(order),
       chinaDomesticTransportUnlockExpiresAt: order.chinaDomesticTransportUnlockExpiresAt,
       chinaDomesticTransportUnlockReason: order.chinaDomesticTransportUnlockReason,
       chinaDomesticTransportUnlockedBy: order.chinaDomesticTransportUnlockedBy,
       localTransportKgs: Number(order.localTransportKgs ?? 0),
+      // Keep stored rate-based cargo fields for receiving/edit forms; expose confirmed paid separately.
+      totalCargoCostKgs: Number(order.totalCargoCostKgs ?? 0),
+      chinaExportTransportKgs: Number(order.chinaExportTransportKgs ?? 0),
+      confirmedCargoPaymentKgs,
+      totalImportLogisticsKgs,
+      importLogisticsBreakdown: {
+        chinaDomesticTransportKgs: chinaDomesticKgs,
+        cargoPaymentKgs: confirmedCargoPaymentKgs,
+        localTransportKgs,
+        customsCostKgs,
+        insuranceCostKgs,
+        bankFeeCostKgs,
+        otherExpenseKgs,
+        totalImportLogisticsKgs,
+      },
       yuanRateLocked: activePaymentCount > 0,
-      effectiveYuanRate:
-        order.weightedAverageYuanRate && Number(order.totalPaidYuan) > 0
-          ? Number(order.weightedAverageYuanRate)
-          : Number(order.defaultYuanRate),
+      effectiveYuanRate: estimatedRate,
       ...(() => {
         const editState = resolveProcurementEditState(order);
         return {

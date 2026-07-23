@@ -106,6 +106,19 @@ type ProcurementOrder = {
   totalPackagingWeightKg?: string | number;
   totalCargoCostUsd?: string | number;
   totalCargoCostKgs?: string | number;
+  confirmedCargoPaymentKgs?: number;
+  totalImportLogisticsKgs?: number;
+  importLogisticsBreakdown?: {
+    chinaDomesticTransportKgs: number;
+    cargoPaymentKgs: number;
+    localTransportKgs: number;
+    customsCostKgs: number;
+    insuranceCostKgs: number;
+    bankFeeCostKgs: number;
+    otherExpenseKgs: number;
+    totalImportLogisticsKgs: number;
+  };
+  chinaExportTransportKgs?: string | number;
   defaultYuanRate?: string | number;
   defaultUsdRate?: string | number;
   cargoRateUsdPerKg?: string | number;
@@ -407,11 +420,17 @@ function ProcurementOrderDetailPageContent() {
 
   const previewTotals = useMemo(() => {
     try {
+      const persistedCargoKgs = Math.max(
+        Number(order?.confirmedCargoPaymentKgs ?? 0),
+        Number(order?.totalCargoCostKgs ?? 0),
+        Number(order?.chinaExportTransportKgs ?? 0),
+      );
       return calculateLandedCosts(
         previewItems,
         {
           chinaDomesticTransportKgs: previewChinaDomesticTransportKgs,
-          chinaExportTransportKgs: 0,
+          // Prefer confirmed/persisted cargo; rate×weight may still raise it via cargo config.
+          chinaExportTransportKgs: persistedCargoKgs,
           localTransportKgs: previewSvhTransportKgs,
           packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
@@ -424,31 +443,85 @@ function ProcurementOrderDetailPageContent() {
     } catch (err) {
       return null;
     }
-  }, [previewItems, logisticsForm, previewChinaDomesticTransportKgs, previewSvhTransportKgs]);
+  }, [
+    previewItems,
+    logisticsForm,
+    previewChinaDomesticTransportKgs,
+    previewSvhTransportKgs,
+    order?.confirmedCargoPaymentKgs,
+    order?.totalCargoCostKgs,
+    order?.chinaExportTransportKgs,
+  ]);
 
   const confirmedSupplierPaidKgs = useMemo(() => {
     return sumConfirmedSupplierPaymentsKgs(order?.supplierPayments ?? []);
   }, [order?.supplierPayments]);
 
   const confirmedCargoPaymentKgs = useMemo(() => {
-    if (!cargoReceiptCompleted) return 0;
-    return Number(previewTotals?.totalCargoCostKgs ?? order?.totalCargoCostKgs ?? 0);
-  }, [cargoReceiptCompleted, previewTotals?.totalCargoCostKgs, order?.totalCargoCostKgs]);
+    // Backend source of truth: confirmed paid INTERNATIONAL_FREIGHT expenses converted to KGS.
+    const fromApi = Number(order?.confirmedCargoPaymentKgs ?? 0);
+    if (fromApi > 0) return fromApi;
+    const fromBreakdown = Number(order?.importLogisticsBreakdown?.cargoPaymentKgs ?? 0);
+    if (fromBreakdown > 0) return fromBreakdown;
+    return 0;
+  }, [order?.confirmedCargoPaymentKgs, order?.importLogisticsBreakdown?.cargoPaymentKgs]);
 
   const importCostBreakdown = useMemo(() => {
-    if (!previewTotals) return null;
+    const chinaDomestic = previewChinaDomesticTransportKgs;
+    const cargoReceipt = confirmedCargoPaymentKgs;
+    const svhTransport = previewSvhTransportKgs;
+    const insurance = Number(
+      order?.importLogisticsBreakdown?.insuranceCostKgs ?? logisticsForm.insuranceCostKgs ?? 0,
+    );
+    const customs = Number(
+      order?.importLogisticsBreakdown?.customsCostKgs ?? logisticsForm.customsCostKgs ?? 0,
+    );
+    const bankFees = Number(
+      order?.importLogisticsBreakdown?.bankFeeCostKgs ?? logisticsForm.bankFeeCostKgs ?? 0,
+    );
+    const otherExpenses = Number(
+      order?.importLogisticsBreakdown?.otherExpenseKgs ?? logisticsForm.otherExpenseKgs ?? 0,
+    );
+    const totalImportLogistics =
+      Number(order?.totalImportLogisticsKgs ?? 0) > 0
+        ? Number(order?.totalImportLogisticsKgs)
+        : Math.round(
+            (chinaDomestic +
+              cargoReceipt +
+              svhTransport +
+              insurance +
+              customs +
+              bankFees +
+              otherExpenses +
+              Number.EPSILON) *
+              100,
+          ) / 100;
+    const purchaseCost = previewTotals
+      ? previewTotals.items.reduce((sum, item) => sum + item.costKgs * item.effectiveQuantity, 0)
+      : 0;
     return {
-      chinaDomestic: previewChinaDomesticTransportKgs,
-      cargoReceipt: previewTotals.totalCargoCostKgs,
-      svhTransport: previewSvhTransportKgs,
-      insurance: Number(logisticsForm.insuranceCostKgs || 0),
-      customs: Number(logisticsForm.customsCostKgs || 0),
-      bankFees: Number(logisticsForm.bankFeeCostKgs || 0),
-      otherExpenses: Number(logisticsForm.otherExpenseKgs || 0),
-      totalImportLogistics: previewTotals.totalTransportCostKgs,
-      totalLandedCost: previewTotals.totalCostKgs,
+      chinaDomestic,
+      cargoReceipt,
+      svhTransport,
+      insurance,
+      customs,
+      bankFees,
+      otherExpenses,
+      totalImportLogistics,
+      totalLandedCost:
+        previewTotals != null
+          ? Math.round((purchaseCost + totalImportLogistics + Number.EPSILON) * 100) / 100
+          : totalImportLogistics,
     };
-  }, [previewTotals, previewChinaDomesticTransportKgs, previewSvhTransportKgs, logisticsForm]);
+  }, [
+    previewChinaDomesticTransportKgs,
+    confirmedCargoPaymentKgs,
+    previewSvhTransportKgs,
+    logisticsForm,
+    order?.importLogisticsBreakdown,
+    order?.totalImportLogisticsKgs,
+    previewTotals,
+  ]);
 
   const totalPurchaseCostKgs = useMemo(() => {
     if (!previewTotals) return 0;

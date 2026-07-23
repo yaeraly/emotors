@@ -44,7 +44,7 @@ import {
   assertCargoTotalsMatchServer,
   calculateCargoPaymentAmounts,
 } from './cargo-payment-calc.util';
-import { estimateSectionExpenseCostKgs } from './procurement-cost.util';
+import { estimateSectionExpenseCostKgs, sumConfirmedExpenseAmountKgs } from './procurement-cost.util';
 import {
   blocksNewSectionRequest,
   hasActiveSectionRequest,
@@ -1285,6 +1285,7 @@ export class TransportExpenseService {
         exchangeRate: true,
         amountKgs: true,
         calculatedAmountKgs: true,
+        paidAmountKgs: true,
         status: true,
       },
     });
@@ -1304,11 +1305,14 @@ export class TransportExpenseService {
         ? Number(order.chinaDomesticTransportYuan || 0)
         : expense.expenseType === TransportExpenseType.LOCAL_DELIVERY
           ? Number(order.localTransportKgs || 0)
-          : expense.expenseType === TransportExpenseType.OTHER_LOGISTICS
+          : expense.expenseType === TransportExpenseType.OTHER_LOGISTICS ||
+              expense.expenseType === TransportExpenseType.CHINA_WAREHOUSE
             ? Number(order.otherExpenseKgs || 0)
             : expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
               ? Math.max(Number(order.totalCargoCostKgs || 0), maxCargoCalculated)
-              : 0;
+              : expense.expenseType === TransportExpenseType.CUSTOMS_BROKER
+                ? Number(order.customsCostKgs || 0)
+                : 0;
 
     const section = estimateSectionExpenseCostKgs({
       expenses: siblings.map((row) => ({
@@ -1316,6 +1320,7 @@ export class TransportExpenseService {
         currency: row.currency,
         exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
         amountKgs: Number(row.amountKgs),
+        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
         status: row.status,
       })),
       sectionTotalAmount: sectionTotal,
@@ -1324,19 +1329,41 @@ export class TransportExpenseService {
         expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT ? 'CNY' : 'KGS',
     });
 
+    const confirmedKgs = sumConfirmedExpenseAmountKgs(
+      siblings.map((row) => ({
+        amount: Number(row.amount),
+        currency: row.currency,
+        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+        amountKgs: Number(row.amountKgs || row.calculatedAmountKgs || 0),
+        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
+        status: row.status,
+      })),
+      estimatedRate,
+    );
+
     const data: Prisma.ProcurementOrderUpdateInput = {};
     if (expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT) {
-      data.chinaDomesticTransportKgs = section.estimatedSectionCostKgs;
+      data.chinaDomesticTransportKgs = Math.max(
+        confirmedKgs,
+        Number(order.chinaDomesticTransportKgs || 0),
+      );
     } else if (expense.expenseType === TransportExpenseType.LOCAL_DELIVERY) {
-      data.localTransportKgs = section.estimatedSectionCostKgs;
-    } else if (expense.expenseType === TransportExpenseType.OTHER_LOGISTICS) {
-      // Keep the declared other-expense budget; cost engine uses full section estimate.
-      if (section.sectionTotalAmount > Number(order.otherExpenseKgs || 0)) {
-        data.otherExpenseKgs = section.sectionTotalAmount;
-      }
+      data.localTransportKgs = Math.max(confirmedKgs, Number(order.localTransportKgs || 0));
+    } else if (
+      expense.expenseType === TransportExpenseType.OTHER_LOGISTICS ||
+      expense.expenseType === TransportExpenseType.CHINA_WAREHOUSE
+    ) {
+      data.otherExpenseKgs = Math.max(confirmedKgs, Number(order.otherExpenseKgs || 0));
     } else if (expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
-      data.chinaExportTransportKgs = section.estimatedSectionCostKgs;
-      data.totalCargoCostKgs = section.estimatedSectionCostKgs;
+      const cargoKgs = Math.max(
+        confirmedKgs,
+        Number(order.totalCargoCostKgs || 0),
+        maxCargoCalculated,
+      );
+      data.chinaExportTransportKgs = cargoKgs;
+      data.totalCargoCostKgs = cargoKgs;
+    } else if (expense.expenseType === TransportExpenseType.CUSTOMS_BROKER) {
+      data.customsCostKgs = Math.max(confirmedKgs, Number(order.customsCostKgs || 0));
     }
 
     if (Object.keys(data).length > 0) {
@@ -1349,24 +1376,32 @@ export class TransportExpenseService {
         localTransportKgs: Number(order.localTransportKgs),
         otherExpenseKgs: Number(order.otherExpenseKgs),
         totalCargoCostKgs: Number(order.totalCargoCostKgs),
+        customsCostKgs: Number(order.customsCostKgs),
       }, {
         chinaDomesticTransportKgs: Number(updated.chinaDomesticTransportKgs),
         localTransportKgs: Number(updated.localTransportKgs),
         otherExpenseKgs: Number(updated.otherExpenseKgs),
         totalCargoCostKgs: Number(updated.totalCargoCostKgs),
+        customsCostKgs: Number(updated.customsCostKgs),
         sourceExpenseId: expense.id,
         sectionTotalAmount: section.sectionTotalAmount,
         estimatedSectionCostKgs: section.estimatedSectionCostKgs,
+        confirmedSectionCostKgs: confirmedKgs,
         paidSectionAmount: section.paidAmount,
         expenseType: expense.expenseType,
-        note: 'Full section amount used for cost; unpaid balance remains in inventory cost',
+        note: 'Confirmed paid expenses included in inventory landed cost',
       });
     }
 
     try {
       await this.landedCostService.recalculateProcurementOrder(
         order.id,
-        { user, reason: 'transport-expense-paid', triggerReason: 'transport-expense-paid' },
+        {
+          user,
+          reason: 'transport-expense-paid',
+          triggerReason: 'transport-expense-paid',
+          allowAfterFinalize: true,
+        },
         tx,
       );
     } catch {

@@ -4,11 +4,13 @@ import {
   ProcurementLandedCostStatus,
   ProcurementOrderItemStatus,
   ProcurementItemWeightStatus,
+  StockMovementType,
   TransportExpenseStatus,
   TransportExpenseType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { pricesFromMarkups } from '../pricing/pricing-calculator.util';
 import { DEFAULT_EXPENSE_ALLOCATION } from './landed-cost-allocation.util';
 import {
   buildLogisticsWithCargo,
@@ -24,6 +26,7 @@ import {
   estimateSupplierCostKgs,
   expensesFullySettled,
   resolveProcurementCostConfirmationStatus,
+  sumConfirmedExpenseAmountKgs,
 } from './procurement-cost.util';
 import { resolveProcurementLogisticsInput } from './transport-logistics.util';
 import { summarizeSupplierPayments } from './supplier-payment.util';
@@ -34,6 +37,8 @@ export type RecalculateProcurementOrderOptions = {
   useDraftQuantities?: boolean;
   user?: AuthUser;
   finalize?: boolean;
+  /** When true, recalculate item/order costs even after HQ receive (FINALIZED). */
+  allowAfterFinalize?: boolean;
 };
 
 type TxClient = Parameters<Parameters<PrismaService['$transaction']>[0]>[0];
@@ -60,11 +65,17 @@ export class LandedCostService {
         },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
-      if (order.landedCostStatus === ProcurementLandedCostStatus.FINALIZED && !options.finalize) {
+      const alreadyReceived = Boolean(order.hqStockMovementCreatedAt);
+      const allowAfterFinalize = options.allowAfterFinalize || options.finalize || alreadyReceived;
+      if (
+        order.landedCostStatus === ProcurementLandedCostStatus.FINALIZED &&
+        !allowAfterFinalize
+      ) {
         return { order, calculated: null, skipped: true };
       }
 
       const previousSnapshots = order.landedCostSnapshots;
+      const previousTotalCostKgs = Number(order.totalCostKgs ?? 0);
       const paymentInputs = (order.supplierPayments ?? []).map((payment) => ({
         amountYuan: Number(payment.amountYuan),
         exchangeRate: Number(payment.exchangeRate),
@@ -90,6 +101,9 @@ export class LandedCostService {
         currency: expense.currency,
         exchangeRate: expense.exchangeRate != null ? Number(expense.exchangeRate) : null,
         amountKgs: Number(expense.amountKgs),
+        paidAmountKgs: (expense as { paidAmountKgs?: unknown }).paidAmountKgs != null
+          ? Number((expense as { paidAmountKgs?: unknown }).paidAmountKgs)
+          : null,
         status: expense.status,
         expenseType: expense.expenseType,
       }));
@@ -104,9 +118,15 @@ export class LandedCostService {
         (row) => row.expenseType === TransportExpenseType.LOCAL_DELIVERY,
       );
       const otherExpenses = expenseRows.filter(
-        (row) => row.expenseType === TransportExpenseType.OTHER_LOGISTICS,
+        (row) =>
+          row.expenseType === TransportExpenseType.OTHER_LOGISTICS ||
+          row.expenseType === TransportExpenseType.CHINA_WAREHOUSE,
+      );
+      const customsBrokerExpenses = expenseRows.filter(
+        (row) => row.expenseType === TransportExpenseType.CUSTOMS_BROKER,
       );
 
+      // Payment-progress estimates (full section) — used for confirmation status only.
       const chinaSection = estimateSectionExpenseCostKgs({
         expenses: chinaExpenses,
         sectionTotalAmount: Number(order.chinaDomesticTransportYuan || 0),
@@ -132,26 +152,36 @@ export class LandedCostService {
         defaultCurrency: 'KGS',
       });
 
+      // Inventory landed cost: confirmed expenses + saved import-cost scalars (exactly once per bucket).
+      const confirmedChinaKgs = sumConfirmedExpenseAmountKgs(chinaExpenses, effectiveRate);
+      const confirmedCargoKgs = sumConfirmedExpenseAmountKgs(cargoExpenses, effectiveRate);
+      const confirmedLocalKgs = sumConfirmedExpenseAmountKgs(kgExpenses, effectiveRate);
+      const confirmedOtherKgs = sumConfirmedExpenseAmountKgs(otherExpenses, effectiveRate);
+      const confirmedCustomsBrokerKgs = sumConfirmedExpenseAmountKgs(
+        customsBrokerExpenses,
+        effectiveRate,
+      );
+
       const orderForLogistics = {
         ...order,
-        // Prefer full-section estimated KGS from expense requests when present.
-        // Never shrink section cost to paid-only amounts.
-        chinaDomesticTransportKgs:
-          chinaSection.estimatedSectionCostKgs > 0
-            ? chinaSection.estimatedSectionCostKgs
-            : order.chinaDomesticTransportKgs,
-        chinaExportTransportKgs:
-          cargoSection.estimatedSectionCostKgs > 0
-            ? cargoSection.estimatedSectionCostKgs
-            : order.chinaExportTransportKgs,
-        localTransportKgs:
-          kgSection.estimatedSectionCostKgs > 0
-            ? kgSection.estimatedSectionCostKgs
-            : order.localTransportKgs,
-        otherExpenseKgs:
-          otherSection.estimatedSectionCostKgs > 0
-            ? otherSection.estimatedSectionCostKgs
-            : order.otherExpenseKgs,
+        chinaDomesticTransportKgs: Math.max(
+          confirmedChinaKgs,
+          Number(order.chinaDomesticTransportKgs || 0),
+        ),
+        chinaExportTransportKgs: Math.max(
+          confirmedCargoKgs,
+          Number(order.chinaExportTransportKgs || 0),
+          Number(order.totalCargoCostKgs || 0),
+        ),
+        localTransportKgs: Math.max(
+          confirmedLocalKgs,
+          Number(order.localTransportKgs || 0),
+        ),
+        otherExpenseKgs: Math.max(confirmedOtherKgs, Number(order.otherExpenseKgs || 0)),
+        customsCostKgs: Math.max(
+          confirmedCustomsBrokerKgs,
+          Number(order.customsCostKgs || 0),
+        ),
       };
 
       const expensesHaveCompletedPayments = expenseRows.some(
@@ -174,6 +204,29 @@ export class LandedCostService {
       }) as ProcurementCostConfirmationStatus;
 
       const resolved = resolveProcurementLogisticsInput(orderForLogistics, orderForLogistics, effectiveRate);
+      // Re-apply confirmed expense floors after yuan→KGS resolution so CNY order fields cannot
+      // wipe a higher confirmed paid expense amount.
+      resolved.logistics.chinaDomesticTransportKgs = Math.max(
+        Number(resolved.logistics.chinaDomesticTransportKgs || 0),
+        confirmedChinaKgs,
+      );
+      resolved.logistics.chinaExportTransportKgs = Math.max(
+        Number(resolved.logistics.chinaExportTransportKgs || 0),
+        confirmedCargoKgs,
+        Number(order.totalCargoCostKgs || 0),
+      );
+      resolved.logistics.localTransportKgs = Math.max(
+        Number(resolved.logistics.localTransportKgs || 0),
+        confirmedLocalKgs,
+      );
+      resolved.logistics.otherExpenseKgs = Math.max(
+        Number(resolved.logistics.otherExpenseKgs || 0),
+        confirmedOtherKgs,
+      );
+      resolved.logistics.customsCostKgs = Math.max(
+        Number(resolved.logistics.customsCostKgs || 0),
+        confirmedCustomsBrokerKgs,
+      );
       const { logistics, cargo, ...transportResolved } = resolved;
 
       const draftMap = new Map(
@@ -229,7 +282,7 @@ export class LandedCostService {
       const { localTransportKgs: _local, ...logisticsTotals } = resolvedLogistics;
       const nextVersion = (order.landedCostCalculationVersion ?? 0) + 1;
 
-      const landedCostStatus = order.hqStockMovementCreatedAt
+      const landedCostStatus = alreadyReceived
         ? ProcurementLandedCostStatus.FINALIZED
         : calculated.pendingWeight
           ? ProcurementLandedCostStatus.PENDING_WEIGHT
@@ -264,18 +317,23 @@ export class LandedCostService {
         });
       }
 
+      const persistedCargoKgs = Math.max(
+        confirmedCargoKgs,
+        Number(resolvedLogistics.chinaExportTransportKgs || 0),
+        Number(calculated.totalCargoCostKgs || 0),
+      );
+
       const updatedOrder = await client.procurementOrder.update({
         where: { id: order.id },
         data: {
           ...logisticsTotals,
+          otherExpenseKgs: Number(resolvedLogistics.otherExpenseKgs || 0),
+          customsCostKgs: Number(resolvedLogistics.customsCostKgs || 0),
           defaultUsdRate: cargo.usdRate,
           cargoRateUsdPerKg: cargo.cargoRateUsdPerKg,
           cargoTotalWeightKg,
           totalCargoCostUsd: calculated.totalCargoCostUsd,
-          totalCargoCostKgs:
-            cargoSection.estimatedSectionCostKgs > 0
-              ? cargoSection.estimatedSectionCostKgs
-              : calculated.totalCargoCostKgs,
+          totalCargoCostKgs: persistedCargoKgs,
           totalNetWeightKg: calculated.totalNetWeightKg,
           totalPackagingWeightKg: calculated.totalPackagingWeightKg,
           totalYuan: calculated.totalYuan,
@@ -283,7 +341,7 @@ export class LandedCostService {
           totalCostKgs: calculated.totalCostKgs,
           totalWeightKg: calculated.totalShipmentWeightKg,
           costPerKg: calculated.costPerKg,
-          chinaExportTransportKgs: resolvedLogistics.chinaExportTransportKgs,
+          chinaExportTransportKgs: persistedCargoKgs,
           localTransportKgs: transportResolved.localTransportKgs,
           landedCostStatus,
           costConfirmationStatus,
@@ -305,42 +363,64 @@ export class LandedCostService {
         },
       });
 
-      if (!order.hqStockMovementCreatedAt) {
-        for (const [index, item] of order.items.entries()) {
-          const next = calculated.items[index];
-          const draft = draftMap.get(item.id);
-          const actualQty =
-            draft?.actualQuantity ??
-            (item.receivedQuantity != null ? item.receivedQuantity : item.quantity);
-          const snapshotData = {
+      for (const [index, item] of order.items.entries()) {
+        const next = calculated.items[index];
+        const draft = draftMap.get(item.id);
+        const actualQty =
+          draft?.actualQuantity ??
+          (item.receivedQuantity != null ? item.receivedQuantity : item.quantity);
+        const snapshotData = {
+          procurementOrderId: order.id,
+          procurementOrderItemId: item.id,
+          productId: item.productId,
+          actualQty,
+          unitWeightKg: next.hasKnownWeight ? next.netWeightKg : null,
+          totalWeightKg: next.lineShipmentWeightKg ?? 0,
+          basePurchaseCostKgs: next.basePurchaseCostKgs,
+          allocatedChinaTransportKgs: next.chinaDomesticAllocKgs,
+          allocatedCargoKgs: next.chinaExportAllocKgs,
+          allocatedKyrgyzstanTransportKgs: next.localTransportAllocKgs,
+          allocatedInsuranceKgs: next.insuranceAllocKgs,
+          allocatedCustomsKgs: next.customsAllocKgs,
+          allocatedTransportExpensesKgs: next.bankFeeAllocKgs,
+          allocatedPackagingKgs: next.packagingAllocKgs,
+          allocatedOtherExpensesKgs: next.otherAllocKgs,
+          totalLandedCostKgs: next.totalCostKgs,
+          unitLandedCostKgs: next.finalCostKgs,
+          calculationVersion: nextVersion,
+          isFinalized: alreadyReceived,
+          isProvisional: calculated.isProvisional && !alreadyReceived,
+          calculatedAt: new Date(),
+        };
+        await client.procurementLandedCostSnapshot.upsert({
+          where: { procurementOrderItemId: item.id },
+          create: snapshotData,
+          update: snapshotData,
+        });
+      }
+
+      if (alreadyReceived) {
+        await this.syncReceivedInventoryCosts(client, options.user, order, calculated);
+      }
+
+      if (
+        alreadyReceived &&
+        options.user &&
+        Math.abs(previousTotalCostKgs - Number(calculated.totalCostKgs)) > 0.009
+      ) {
+        await client.procurementCostAdjustment.create({
+          data: {
             procurementOrderId: order.id,
-            procurementOrderItemId: item.id,
-            productId: item.productId,
-            actualQty,
-            unitWeightKg: next.hasKnownWeight ? next.netWeightKg : null,
-            totalWeightKg: next.lineShipmentWeightKg ?? 0,
-            basePurchaseCostKgs: next.basePurchaseCostKgs,
-            allocatedChinaTransportKgs: next.chinaDomesticAllocKgs,
-            allocatedCargoKgs: next.chinaExportAllocKgs,
-            allocatedKyrgyzstanTransportKgs: next.localTransportAllocKgs,
-            allocatedInsuranceKgs: next.insuranceAllocKgs,
-            allocatedCustomsKgs: next.customsAllocKgs,
-            allocatedTransportExpensesKgs: next.bankFeeAllocKgs,
-            allocatedPackagingKgs: next.packagingAllocKgs,
-            allocatedOtherExpensesKgs: next.otherAllocKgs,
-            totalLandedCostKgs: next.totalCostKgs,
-            unitLandedCostKgs: next.finalCostKgs,
-            calculationVersion: nextVersion,
-            isFinalized: false,
-            isProvisional: calculated.isProvisional,
-            calculatedAt: new Date(),
-          };
-          await client.procurementLandedCostSnapshot.upsert({
-            where: { procurementOrderItemId: item.id },
-            create: snapshotData,
-            update: snapshotData,
-          });
-        }
+            oldTotalCostKgs: previousTotalCostKgs,
+            newTotalCostKgs: calculated.totalCostKgs,
+            oldWeightedRate: order.weightedAverageYuanRate
+              ? Number(order.weightedAverageYuanRate)
+              : null,
+            newWeightedRate: supplierCost.costYuanRate,
+            reason: options.triggerReason ?? options.reason ?? 'import-expense-recalc',
+            createdById: options.user.id,
+          },
+        });
       }
 
       if (options.user) {
@@ -547,5 +627,160 @@ export class LandedCostService {
       where: { id: procurementOrderId },
       data: { landedCostStatus: ProcurementLandedCostStatus.FINALIZED },
     });
+  }
+
+  /**
+   * After HQ receive, update cost values only on existing stock movements / FIFO layers /
+   * product + warehouse valuation — never create duplicate inventory movements.
+   */
+  private async syncReceivedInventoryCosts(
+    client: TxClient,
+    user: AuthUser | undefined,
+    order: {
+      id: string;
+      hqWarehouseId?: string | null;
+      items: Array<{
+        id: string;
+        productId: string;
+        purchasePriceYuan: unknown;
+        yuanRate: unknown;
+        receivedQuantity?: number | null;
+        quantity: number;
+      }>;
+    },
+    calculated: LandedCostOrderResult,
+  ) {
+    const receivings = await client.procurementGoodsReceiving.findMany({
+      where: { procurementOrderId: order.id, deletedAt: null },
+      select: { id: true, hqWarehouseId: true },
+    });
+    if (!receivings.length) return;
+    const receivingIds = receivings.map((row) => row.id);
+    const warehouseId = order.hqWarehouseId ?? receivings[0]?.hqWarehouseId;
+    if (!warehouseId) return;
+
+    for (const [index, item] of order.items.entries()) {
+      const next = calculated.items[index];
+      if (!next) continue;
+      const unitCostKgs = Number(next.finalCostKgs || 0);
+      const movements = await client.stockMovement.findMany({
+        where: {
+          productId: item.productId,
+          warehouseId,
+          type: StockMovementType.IN,
+          status: 'ACTIVE',
+          referenceType: 'PROCUREMENT_GOODS_RECEIVING',
+          referenceId: { in: receivingIds },
+        },
+      });
+
+      let movementValueDelta = 0;
+      for (const movement of movements) {
+        const qty = Math.abs(Number(movement.quantity));
+        const newTotal = Math.round((qty * unitCostKgs + Number.EPSILON) * 100) / 100;
+        const oldTotal = Number(movement.totalCostKgs);
+        movementValueDelta += newTotal - oldTotal;
+        await client.stockMovement.update({
+          where: { id: movement.id },
+          data: { unitCostKgs, totalCostKgs: newTotal },
+        });
+
+        const batch = await client.fifoInventoryBatch.findFirst({
+          where: { stockMovementId: movement.id },
+        });
+        if (batch) {
+          const product = await client.product.findFirst({
+            where: { id: item.productId, deletedAt: null },
+            select: {
+              wholesaleMarkupPercent: true,
+              hqBranchWholesaleMarkupPercent: true,
+              recommendedRetailMarkupPercent: true,
+              minimumSellingMarkupPercent: true,
+            },
+          });
+          const prices = pricesFromMarkups(unitCostKgs, {
+            wholesaleMarkupPercent: Number(product?.wholesaleMarkupPercent ?? 0),
+            hqBranchWholesaleMarkupPercent: Number(product?.hqBranchWholesaleMarkupPercent ?? 0),
+            recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
+            minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
+          });
+          await client.fifoInventoryBatch.update({
+            where: { id: batch.id },
+            data: {
+              unitCostKgs,
+              wholesalePriceKgs: prices.wholesalePriceKgs,
+              hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
+              recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
+              minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
+            },
+          });
+        }
+      }
+
+      const product = await client.product.findUnique({ where: { id: item.productId } });
+      if (product) {
+        const sellingPriceKgs = Number(product.sellingPriceKgs);
+        const marginAmount =
+          Math.round((sellingPriceKgs - unitCostKgs + Number.EPSILON) * 100) / 100;
+        const marginPercent =
+          sellingPriceKgs === 0
+            ? 0
+            : Math.round(((marginAmount / sellingPriceKgs) * 100 + Number.EPSILON) * 100) / 100;
+        await client.product.update({
+          where: { id: item.productId },
+          data: {
+            purchasePriceYuan: item.purchasePriceYuan as any,
+            latestYuanRate: next.costKgs > 0 ? (item.yuanRate as any) : product.latestYuanRate,
+            purchaseCostKgs: next.costKgs,
+            transportCostKgs: next.transportCostKgs,
+            finalCostKgs: unitCostKgs,
+            marginAmount,
+            marginPercent,
+          },
+        });
+      }
+
+      const balance = await client.inventoryBalance.findFirst({
+        where: { warehouseId, productId: item.productId },
+      });
+      if (balance) {
+        const quantity = Number(balance.quantity);
+        const nextTotalValue =
+          Math.round((Number(balance.totalValueKgs) + movementValueDelta + Number.EPSILON) * 100) /
+          100;
+        const nextAverage =
+          quantity > 0
+            ? Math.round((nextTotalValue / quantity + Number.EPSILON) * 100) / 100
+            : unitCostKgs;
+        await client.inventoryBalance.update({
+          where: { id: balance.id },
+          data: {
+            averageCostKgs: nextAverage,
+            landedCostKgs: unitCostKgs,
+            totalValueKgs: Math.max(0, nextTotalValue),
+          },
+        });
+      }
+
+      if (user) {
+        await client.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'INVENTORY_COST_UPDATED',
+            entity: 'Product',
+            entityId: item.productId,
+            metadata: {
+              procurementOrderId: order.id,
+              productId: item.productId,
+              unitLandedCostKgs: unitCostKgs,
+              totalLandedCostKgs: next.totalCostKgs,
+              previousTotalCostDeltaKgs: movementValueDelta,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+      }
+    }
   }
 }

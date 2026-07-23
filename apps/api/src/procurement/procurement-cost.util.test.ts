@@ -2,6 +2,7 @@ import {
   estimateSectionExpenseCostKgs,
   estimateSupplierCostKgs,
   resolveProcurementCostConfirmationStatus,
+  sumConfirmedExpenseAmountKgs,
   weightedAveragePaidYuanRate,
 } from './procurement-cost.util';
 
@@ -119,6 +120,55 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
     expenses: [{ amount: 15000, currency: 'KGS', status: 'WAITING_ACCOUNTANT' }],
   });
   assertClose(kgsSection.estimatedSectionCostKgs, 50000, '10. unpaid KGS section still full amount');
+}
+
+// Confirmed-only inventory cost: draft/pending excluded; PAID included
+{
+  const confirmed = sumConfirmedExpenseAmountKgs(
+    [
+      { amount: 10000, currency: 'KGS', status: 'PAID' },
+      { amount: 5000, currency: 'KGS', status: 'DRAFT' },
+      { amount: 7000, currency: 'KGS', status: 'WAITING_ACCOUNTANT' },
+      { amount: 3000, currency: 'KGS', status: 'CANCELLED' },
+    ],
+    12,
+  );
+  assertClose(confirmed, 10000, 'confirmed expenses only include PAID rows');
+}
+
+{
+  const confirmedCargo = sumConfirmedExpenseAmountKgs(
+    [
+      {
+        amount: 45000,
+        currency: 'KGS',
+        amountKgs: 45000,
+        status: 'PAID',
+      },
+    ],
+    12,
+  );
+  assertClose(confirmedCargo, 45000, 'confirmed cargo payment included in KGS');
+}
+
+{
+  const partial = sumConfirmedExpenseAmountKgs(
+    [{ amount: 10000, currency: 'KGS', paidAmountKgs: 4000, status: 'PARTIALLY_PAID' }],
+    12,
+  );
+  assertClose(partial, 4000, 'partial cargo includes only paid KGS');
+}
+
+{
+  const otherConfirmed = sumConfirmedExpenseAmountKgs(
+    [
+      { amount: 1200, currency: 'KGS', status: 'PAID' },
+      { amount: 800, currency: 'KGS', status: 'PAID' },
+      { amount: 500, currency: 'KGS', status: 'PENDING_CASHIER' },
+    ],
+    12,
+  );
+  assertClose(otherConfirmed, 2000, 'other import expenses sum confirmed rows only');
 }
 
 // Cost confirmation status

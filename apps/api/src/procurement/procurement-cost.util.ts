@@ -20,6 +20,7 @@ export type SectionExpenseCostInput = {
   currency?: string | null;
   exchangeRate?: number | null;
   amountKgs?: number | null;
+  paidAmountKgs?: number | null;
   status: string;
 };
 
@@ -146,7 +147,7 @@ function expenseAmountKgs(expense: SectionExpenseCostInput, estimatedYuanRate: n
   const amount = Number(expense.amount || 0);
   if (!(amount > 0)) return 0;
   if (currency === 'KGS') return roundMoney(amount);
-  if (expense.amountKgs != null && Number(expense.amountKgs) > 0 && expense.status === 'PAID') {
+  if (expense.amountKgs != null && Number(expense.amountKgs) > 0) {
     return roundMoney(Number(expense.amountKgs));
   }
   const rate =
@@ -157,8 +158,33 @@ function expenseAmountKgs(expense: SectionExpenseCostInput, estimatedYuanRate: n
 }
 
 /**
+ * Sum confirmed (PAID/COMPLETED/CONFIRMED) expense rows in inventory base currency (KGS).
+ * Draft / pending / cancelled / rejected rows are excluded from landed cost.
+ * PARTIALLY_PAID contributes only the already paid KGS amount.
+ */
+export function sumConfirmedExpenseAmountKgs(
+  expenses: SectionExpenseCostInput[],
+  estimatedYuanRate: number,
+): number {
+  return roundMoney(
+    expenses.reduce((sum, row) => {
+      const status = String(row.status ?? '').toUpperCase();
+      if (status === 'PAID' || status === 'COMPLETED' || status === 'CONFIRMED') {
+        return sum + expenseAmountKgs(row, estimatedYuanRate);
+      }
+      if (status === 'PARTIALLY_PAID') {
+        const paid = Number(row.paidAmountKgs ?? 0);
+        return paid > 0 ? sum + roundMoney(paid) : sum;
+      }
+      return sum;
+    }, 0),
+  );
+}
+
+/**
  * Section expense cost uses the FULL requested/approved amount for the section,
- * not only the already-paid portion.
+ * not only the already-paid portion. Used for payment progress / confirmation status.
+ * Inventory landed cost must use {@link sumConfirmedExpenseAmountKgs} instead.
  */
 export function estimateSectionExpenseCostKgs(input: {
   expenses: SectionExpenseCostInput[];
@@ -174,13 +200,16 @@ export function estimateSectionExpenseCostKgs(input: {
   usesWeightedPaidRate: boolean;
 } {
   const rows = input.expenses.filter((row) => OPEN_EXPENSE.has(String(row.status)));
-  const paidRows = rows.filter((row) => row.status === TransportExpenseStatus.PAID);
+  const paidRows = rows.filter((row) => {
+    const status = String(row.status ?? '').toUpperCase();
+    return status === TransportExpenseStatus.PAID || status === 'COMPLETED' || status === 'CONFIRMED';
+  });
   const currency = String(input.defaultCurrency || rows[0]?.currency || 'KGS').toUpperCase();
   const requested = roundMoney(
     rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
   );
   const sectionTotalAmount = roundMoney(
-    Number(input.sectionTotalAmount || 0) > 0 ? Number(input.sectionTotalAmount) : requested,
+    Math.max(Number(input.sectionTotalAmount || 0), requested),
   );
   const paidAmount = roundMoney(paidRows.reduce((sum, row) => sum + Number(row.amount || 0), 0));
   const paidAmountKgs = roundMoney(
@@ -200,7 +229,7 @@ export function estimateSectionExpenseCostKgs(input: {
   }
 
   if (currency === 'KGS') {
-    // Full section amount in KGS is included even if unpaid.
+    // Full section amount in KGS is included even if unpaid (payment progress view).
     return {
       sectionTotalAmount,
       paidAmount,
