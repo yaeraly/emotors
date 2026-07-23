@@ -49,20 +49,23 @@ const EMPTY_FORM: SupplierAccountFormValue = {
   accountNumber: '',
 };
 
-function coercePaymentMethod(value: unknown): 'BANK_ACCOUNT' | 'QR_CODE' {
-  return value === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT';
-}
-
-/** Every field is always a defined string / enum — never undefined or null. */
 function normalizeForm(
   next: Partial<SupplierAccountFormValue> | null | undefined,
   previous?: SupplierAccountFormValue,
 ): SupplierAccountFormValue {
   const base = previous ?? EMPTY_FORM;
   return {
-    paymentMethod: coercePaymentMethod(next?.paymentMethod ?? base.paymentMethod),
+    paymentMethod:
+      next?.paymentMethod === 'QR_CODE'
+        ? 'QR_CODE'
+        : next?.paymentMethod === 'BANK_ACCOUNT'
+          ? 'BANK_ACCOUNT'
+          : base.paymentMethod === 'QR_CODE'
+            ? 'QR_CODE'
+            : 'BANK_ACCOUNT',
     bankName: next?.bankName ?? base.bankName ?? '',
     accountHolder: next?.accountHolder ?? base.accountHolder ?? '',
+    // Always a string for the full lifecycle — never undefined/null.
     accountNumber: next?.accountNumber ?? base.accountNumber ?? '',
   };
 }
@@ -83,57 +86,25 @@ export function ProcurementPaymentInfo({
   const [active, setActive] = useState<PaymentInfoVersion | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-<<<<<<< HEAD
-  const [pendingQrFile, setPendingQrFile] = useState<File | null>(null);
-  const [pendingQrPreviewUrl, setPendingQrPreviewUrl] = useState('');
-=======
   const [pendingQr, setPendingQr] = useState<{ file: File; previewUrl: string } | null>(null);
   const [qrPreview, setQrPreview] = useState<{
     images: Array<{ src: string; alt?: string; label?: string }>;
     initialIndex: number;
   } | null>(null);
->>>>>>> 5005738f269fba787c13d36bb18ad78a3a0c7654
   const [form, setForm] = useState<SupplierAccountFormValue>(() => normalizeForm(value));
   const formRef = useRef(form);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
 
-  function clearPendingQr() {
-    setPendingQrPreviewUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return '';
-    });
-    setPendingQrFile(null);
-  }
+  const accountNumber = form.accountNumber ?? '';
 
-  /**
-   * Functional merge — never replace the whole form with a partial object.
-   * Parent onChange runs after local state is computed (never inside a setState updater).
-   */
-  function patchForm(patch: Partial<SupplierAccountFormValue>) {
+  function commitForm(
+    updater: (previous: SupplierAccountFormValue) => Partial<SupplierAccountFormValue>,
+  ) {
+    // Compute outside setState so parent onChange is never called during render.
     const previous = formRef.current;
-    const next = normalizeForm(
-      {
-        ...previous,
-        paymentMethod: coercePaymentMethod(patch.paymentMethod ?? previous.paymentMethod),
-        bankName: patch.bankName !== undefined ? patch.bankName ?? '' : previous.bankName ?? '',
-        accountHolder:
-          patch.accountHolder !== undefined ? patch.accountHolder ?? '' : previous.accountHolder ?? '',
-        accountNumber:
-          patch.accountNumber !== undefined ? patch.accountNumber ?? '' : previous.accountNumber ?? '',
-      },
-      previous,
-    );
+    const next = normalizeForm(updater(previous), previous);
     formRef.current = next;
-    // Functional merge keeps React state fully controlled for the whole lifecycle.
-    setForm((prev) => ({
-      ...prev,
-      paymentMethod: next.paymentMethod ?? 'BANK_ACCOUNT',
-      bankName: next.bankName ?? '',
-      accountHolder: next.accountHolder ?? '',
-      accountNumber: next.accountNumber ?? '',
-    }));
-    onChangeRef.current(next);
+    setForm(next);
+    onChange(next);
   }
 
   function openQrPreview(index: number) {
@@ -154,14 +125,14 @@ export function ProcurementPaymentInfo({
       .then((rows) => {
         const current = rows.find((v) => v.isActive) ?? rows[0] ?? null;
         setActive(current);
-        if (!current) return;
-        // Merge loaded values into existing form — keep any locally typed fields when API returns null.
-        patchForm({
-          paymentMethod: coercePaymentMethod(current.paymentMethod),
-          bankName: current.bankName ?? formRef.current.bankName ?? '',
-          accountHolder: current.accountHolder ?? formRef.current.accountHolder ?? '',
-          accountNumber: current.accountNumber ?? formRef.current.accountNumber ?? '',
-        });
+        if (current) {
+          commitForm((previous) => ({
+            paymentMethod: current.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+            bankName: current.bankName ?? previous.bankName ?? '',
+            accountHolder: current.accountHolder ?? previous.accountHolder ?? '',
+            accountNumber: current.accountNumber ?? previous.accountNumber ?? '',
+          }));
+        }
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }
@@ -170,9 +141,6 @@ export function ProcurementPaymentInfo({
     const initial = normalizeForm(value);
     formRef.current = initial;
     setForm(initial);
-    clearPendingQr();
-    setActive(null);
-    setError('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
@@ -183,9 +151,9 @@ export function ProcurementPaymentInfo({
 
   useEffect(() => {
     return () => {
-      if (pendingQrPreviewUrl) URL.revokeObjectURL(pendingQrPreviewUrl);
+      if (pendingQr?.previewUrl) URL.revokeObjectURL(pendingQr.previewUrl);
     };
-  }, [pendingQrPreviewUrl]);
+  }, [pendingQr?.previewUrl]);
 
   useEffect(() => {
     if (!onValidityChange) return;
@@ -215,24 +183,24 @@ export function ProcurementPaymentInfo({
       }),
     });
     setActive(saved);
-    // Preserve existing form state when server omits bank fields (e.g. QR mode).
-    patchForm({
-      paymentMethod: coercePaymentMethod(saved.paymentMethod),
-      bankName: saved.bankName ?? snapshot.bankName ?? '',
-      accountHolder: saved.accountHolder ?? snapshot.accountHolder ?? '',
-      accountNumber: saved.accountNumber ?? snapshot.accountNumber ?? '',
-    });
+    commitForm((previous) => ({
+      paymentMethod: saved.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+      // Preserve locally entered bank fields when server clears them for QR mode.
+      bankName: saved.bankName ?? previous.bankName ?? '',
+      accountHolder: saved.accountHolder ?? previous.accountHolder ?? '',
+      accountNumber: saved.accountNumber ?? previous.accountNumber ?? '',
+    }));
     return saved;
   }
 
   async function onPaymentMethodChange(nextMethod: 'BANK_ACCOUNT' | 'QR_CODE') {
     // Update only the method — preserve all other fields including accountNumber.
-    patchForm({
-      paymentMethod: nextMethod ?? 'BANK_ACCOUNT',
-      bankName: formRef.current.bankName ?? '',
-      accountHolder: formRef.current.accountHolder ?? '',
-      accountNumber: formRef.current.accountNumber ?? '',
-    });
+    commitForm((previous) => ({
+      paymentMethod: nextMethod,
+      bankName: previous.bankName ?? '',
+      accountHolder: previous.accountHolder ?? '',
+      accountNumber: previous.accountNumber ?? '',
+    }));
     if (!canEdit) return;
     // Persist QR method immediately so subsequent QR uploads succeed.
     // Bank method is persisted on invoice send (account number may still be empty here).
@@ -253,10 +221,9 @@ export function ProcurementPaymentInfo({
     event.target.value = '';
     if (!file || !canEdit) return;
 
-    if (pendingQrPreviewUrl) URL.revokeObjectURL(pendingQrPreviewUrl);
+    if (pendingQr?.previewUrl) URL.revokeObjectURL(pendingQr.previewUrl);
     const previewUrl = URL.createObjectURL(file);
-    setPendingQrFile(file);
-    setPendingQrPreviewUrl(previewUrl ?? '');
+    setPendingQr({ file, previewUrl });
 
     setBusy(true);
     setError('');
@@ -281,8 +248,7 @@ export function ProcurementPaymentInfo({
         throw new Error(payload.message || t('common.error'));
       }
       URL.revokeObjectURL(previewUrl);
-      setPendingQrFile(null);
-      setPendingQrPreviewUrl('');
+      setPendingQr(null);
       load();
       onQrChanged?.();
     } catch (err) {
@@ -310,21 +276,13 @@ export function ProcurementPaymentInfo({
 
   if (!canView) return null;
 
-  const paymentMethod = form.paymentMethod ?? 'BANK_ACCOUNT';
-  const bankName = form.bankName ?? '';
-  const accountHolder = form.accountHolder ?? '';
-  const accountNumber = form.accountNumber ?? '';
-  const qrFileName = pendingQrFile?.name ?? '';
-  const qrPreview = pendingQrPreviewUrl ?? '';
-  const qrMime = pendingQrFile?.type ?? '';
-
   return (
     <div className="space-y-3">
       {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
       <label className="block">
         <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.paymentMethod')}</span>
         <select
-          value={paymentMethod}
+          value={form.paymentMethod || 'BANK_ACCOUNT'}
           disabled={!canEdit || busy}
           onChange={(e) =>
             void onPaymentMethodChange(e.target.value === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT')
@@ -336,7 +294,7 @@ export function ProcurementPaymentInfo({
         </select>
       </label>
 
-      {paymentMethod === 'BANK_ACCOUNT' ? (
+      {form.paymentMethod === 'BANK_ACCOUNT' ? (
         <div className="grid gap-2 md:grid-cols-3">
           <label className="block md:col-span-1">
             <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.accountNumber')}</span>
@@ -344,7 +302,11 @@ export function ProcurementPaymentInfo({
               required
               disabled={!canEdit}
               value={accountNumber}
-              onChange={(e) => patchForm({ accountNumber: e.target.value ?? '' })}
+              onChange={(e) =>
+                commitForm(() => ({
+                  accountNumber: e.target.value ?? '',
+                }))
+              }
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -354,8 +316,12 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={bankName}
-              onChange={(e) => patchForm({ bankName: e.target.value ?? '' })}
+              value={form.bankName ?? ''}
+              onChange={(e) =>
+                commitForm(() => ({
+                  bankName: e.target.value ?? '',
+                }))
+              }
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -365,8 +331,12 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={accountHolder}
-              onChange={(e) => patchForm({ accountHolder: e.target.value ?? '' })}
+              value={form.accountHolder ?? ''}
+              onChange={(e) =>
+                commitForm(() => ({
+                  accountHolder: e.target.value ?? '',
+                }))
+              }
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -385,21 +355,9 @@ export function ProcurementPaymentInfo({
               />
             </label>
           ) : null}
-          {pendingQrFile && qrPreview ? (
+          {pendingQr ? (
             <div className="rounded-lg border border-slate-200 bg-white p-2 text-sm">
-<<<<<<< HEAD
-              <p className="font-semibold text-slate-800">{qrFileName}</p>
-              {qrMime.startsWith('image/') ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={qrPreview}
-                  alt={qrFileName || 'QR'}
-                  className="mt-2 max-h-40 rounded-md border border-slate-100 object-contain"
-                />
-              ) : null}
-=======
               <p className="font-semibold text-slate-800">{pendingQr.file.name}</p>
->>>>>>> 5005738f269fba787c13d36bb18ad78a3a0c7654
               {busy ? <p className="mt-1 text-xs text-slate-500">{t('common.loading')}</p> : null}
             </div>
           ) : null}
@@ -425,8 +383,6 @@ export function ProcurementPaymentInfo({
                   ) : null}
                 </li>
               ))}
-            </div>
-          ) : !pendingQrFile ? (
             </ul>
           ) : !pendingQr ? (
             <p className="text-xs text-slate-500">{t('procurement.paymentInfo.noQrYet')}</p>

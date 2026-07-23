@@ -64,6 +64,7 @@ const hqAccountant = {
   fullName: 'HQ Accountant',
   role: 'HQ_ACCOUNTANT' as const,
   roles: ['HQ_ACCOUNTANT' as const],
+  branchId: null,
   permissions: ['finance.view', 'finance.manage', 'payments.manage', 'payroll.manage'],
 } satisfies User;
 const hqNav = visibleFinanceNavSections(hqAccountant);
