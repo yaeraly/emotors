@@ -198,9 +198,13 @@ export class PricingFifoService {
    * inventory product rows so catalog vs warehouse product ID drift cannot hide
    * the active FIFO layer.
    */
+  /**
+   * Does not sync FIFO layers. Callers that list many products must call
+   * `syncFifoBatchesFromHqStockMovements` once before looping — syncing here
+   * per product previously caused franchise-sales timeouts (empty UI).
+   */
   async getLatestHqCostPrice(productId: string, tx?: PrismaTx) {
     const client = tx ?? this.prisma;
-    await this.syncFifoBatchesFromHqStockMovements(client);
 
     const productIds = await this.resolveHqFifoProductIds(client, productId);
     const batches = await client.fifoInventoryBatch.findMany({
