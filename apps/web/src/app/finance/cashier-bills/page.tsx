@@ -708,6 +708,10 @@ function CashierBillsPageContent() {
                 <DetailRow label={t('finance.cashierBills.sender')} value={selected.sender?.fullName} />
                 <DetailRow label={t('finance.cashierBills.accountant')} value={selected.accountant?.fullName} />
                 <DetailRow label={t('finance.cashierBills.recipient')} value={selected.recipient?.name} onCopy={() => copyText(selected.recipient?.name)} />
+                <DetailRow
+                  label={t('procurement.sectionPayable.expenseName')}
+                  value={selected.expenseName || selected.basis || '—'}
+                />
                 <DetailRow label={t('finance.cashierBills.amount')} value={`${formatMoney(selected.amount)} ${selected.currency}`} />
                 <DetailRow label={t('finance.cashierBills.exchangeRate')} value={selected.exchangeRate != null ? String(selected.exchangeRate) : '—'} />
                 <DetailRow label="KGS" value={formatMoney(selected.amountKgs || selected.approvedAmountKgs)} />
@@ -719,6 +723,14 @@ function CashierBillsPageContent() {
                   />
                 ) : null}
                 <DetailRow label={t('finance.cashierBills.paymentMethod')} value={selected.paymentMethod} />
+                <DetailRow
+                  label={t('procurement.sectionPayable.sentAt')}
+                  value={selected.submittedAt ? new Date(selected.submittedAt).toLocaleString() : selected.sentToCashierAt ? new Date(selected.sentToCashierAt).toLocaleString() : '—'}
+                />
+                <DetailRow
+                  label={t('procurement.sectionPayable.lastUpdated')}
+                  value={selected.updatedAt ? new Date(selected.updatedAt).toLocaleString() : '—'}
+                />
                 <DetailRow label={t('finance.cashierBills.bankName')} value={selected.recipient?.bankName} onCopy={() => copyText(selected.recipient?.bankName)} />
                 <DetailRow label={t('finance.cashierBills.accountNumber')} value={selected.recipient?.accountNumber} onCopy={() => copyText(selected.recipient?.accountNumber)} />
                 <DetailRow label={t('finance.cashierBills.accountHolder')} value={selected.recipient?.beneficiaryName || selected.recipient?.company} onCopy={() => copyText(selected.recipient?.beneficiaryName || selected.recipient?.company)} />

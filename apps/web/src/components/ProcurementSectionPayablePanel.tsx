@@ -1061,7 +1061,9 @@ export function ProcurementSectionPayablePanel({
       ) : null}
 
       {showSubmissionSummary && primaryExpense ? (
-        <div className="mt-4 rounded-lg border border-slate-300 bg-white p-3 text-sm">
+        <div
+          className={`${showPaymentRequestTitle || isFormEditable || isReturned ? 'mt-4' : ''} rounded-lg border border-slate-300 bg-white p-3 text-sm`}
+        >
           <h5 className="font-semibold text-slate-900">
             {t('procurement.sectionPayable.submissionSummary')}
           </h5>

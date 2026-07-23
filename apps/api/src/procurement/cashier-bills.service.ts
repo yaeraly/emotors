@@ -20,6 +20,11 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { canConfirmSupplierPayment } from '../rbac/rbac';
 import {
+  assertHqCashierAssignedAccount,
+  getActiveAssignmentAccountIds,
+  shouldRestrictToAssignedAccounts,
+} from '../finance/finance-assignment.util';
+import {
   assertCashierCannotMutateApprovedAmount,
   assertCashierCannotMutateFx,
   buildCashierBillsSummaryWithPaidAt,
@@ -63,7 +68,7 @@ export class CashierBillsService {
 
   async list(user: AuthUser, query: CashierBillsQuery = {}) {
     this.assertCashier(user);
-    const { items, paidAtById } = await this.collectBills();
+    const { items, paidAtById } = await this.collectBills(user);
     const filtered = this.applyFilters(items, query);
     const page = paginateItems(filtered, query.page ?? 1, query.pageSize ?? 20);
     return {
@@ -74,7 +79,7 @@ export class CashierBillsService {
 
   async summary(user: AuthUser, query: CashierBillsQuery = {}) {
     this.assertCashier(user);
-    const { items, paidAtById } = await this.collectBills();
+    const { items, paidAtById } = await this.collectBills(user);
     return buildCashierBillsSummaryWithPaidAt(this.applyFilters(items, query), paidAtById);
   }
 
@@ -180,12 +185,16 @@ export class CashierBillsService {
     }
   }
 
-  private async collectBills(): Promise<{
+  private async collectBills(user: AuthUser): Promise<{
     items: CashierBillListItem[];
     paidAtById: Record<string, string | null | undefined>;
   }> {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
+
+    const assignedAccountIds = shouldRestrictToAssignedAccounts(user)
+      ? await getActiveAssignmentAccountIds(this.prisma, user.id)
+      : null;
 
     const [supplierRows, transportRows] = await Promise.all([
       this.prisma.procurementSupplierPayment.findMany({
@@ -336,7 +345,13 @@ export class CashierBillsService {
       };
     });
 
-    const items = [...supplierItems, ...transportItems].sort((a, b) => {
+    const items = [...supplierItems, ...transportItems]
+      .filter((item) => {
+        // HQ cashiers restricted to assigned debit accounts keep branch/franchise isolation.
+        if (!assignedAccountIds) return true;
+        return Boolean(item.debitAccountId && assignedAccountIds.has(item.debitAccountId));
+      })
+      .sort((a, b) => {
       const aTime = a.sentToCashierAt ? new Date(a.sentToCashierAt).getTime() : 0;
       const bTime = b.sentToCashierAt ? new Date(b.sentToCashierAt).getTime() : 0;
       return aTime - bTime;
@@ -433,6 +448,9 @@ export class CashierBillsService {
       payment.status !== ProcurementSupplierPaymentStatus.RETURNED
     ) {
       throw new ForbiddenException('This payment is not available in the cashier queue');
+    }
+    if (payment.intendedFinanceAccountId) {
+      await assertHqCashierAssignedAccount(this.prisma, user, payment.intendedFinanceAccountId);
     }
 
     await this.auditOpen(user, 'SUPPLIER_PAYMENT', id, payment.procurementOrderId);
@@ -581,6 +599,9 @@ export class CashierBillsService {
       },
     });
     if (!expense) throw new NotFoundException('Transport payment task not found');
+    if (expense.financeAccountId) {
+      await assertHqCashierAssignedAccount(this.prisma, user, expense.financeAccountId);
+    }
 
     await this.auditOpen(user, 'TRANSPORT_EXPENSE', id, expense.procurementOrderId);
 
@@ -657,6 +678,9 @@ export class CashierBillsService {
       paymentMethod: expense.paymentMethod,
       amount: Number(expense.amount),
       currency: expense.currency,
+      expenseName: expense.expenseName || expense.comment || null,
+      submittedAt: expense.submittedAt?.toISOString() ?? null,
+      updatedAt: expense.updatedAt?.toISOString() ?? null,
       exchangeRate: expense.exchangeRate != null ? Number(expense.exchangeRate) : null,
       amountKgs: requestedKgs,
       paidAmountKgs,
@@ -799,6 +823,10 @@ export class CashierBillsService {
         expense.status !== TransportExpenseStatus.PARTIALLY_PAID
       ) {
         throw new BadRequestException('Expense is not awaiting cashier execution');
+      }
+      const accountId = dto.financeAccountId || expense.financeAccountId;
+      if (accountId) {
+        await assertHqCashierAssignedAccount(this.prisma, user, accountId);
       }
       const current = normalizeCashierExecutionStatus(expense.executionStatus, expense.status);
       if (current === 'COMPLETED') {
