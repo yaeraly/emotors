@@ -14,6 +14,7 @@ import {
   BranchOrderInstallmentStatus,
   BranchPaymentConfirmationStatus,
   BranchPurchaseRequestStatus,
+  BranchType,
   HqStockBookingReleaseReason,
   HqWarehousePickingTaskStatus,
   Prisma,
@@ -266,6 +267,81 @@ export class DistributionService {
           });
         }
       }
+
+      // Always reserve HQ FIFO layers on approve so shipment consumes the same layers.
+      for (const item of order.items) {
+        const inventoryProduct = await this.resolveSourceInventoryProduct(
+          tx,
+          order.sourceWarehouseId,
+          item.productId,
+          item.sku,
+        );
+        const branch = await tx.branch.findUnique({
+          where: { id: order.branchId },
+          select: { branchType: true, hqToBranchMarkupPercent: true },
+        });
+        const product = await tx.product.findFirst({
+          where: { id: inventoryProduct.productId, deletedAt: null },
+          select: { hqBranchWholesaleMarkupPercent: true },
+        });
+        const productMarkup = Number(product?.hqBranchWholesaleMarkupPercent ?? 0);
+        const branchMarkup = Number(branch?.hqToBranchMarkupPercent ?? 0);
+        const markupPercent = productMarkup > 0 ? productMarkup : branchMarkup;
+        const isHqOwnedBranch = branch
+          ? this.pricingFifoService.isHqBranchType(branch.branchType)
+          : false;
+        try {
+          const reserved = await this.pricingFifoService.reserveFifoForDistribution(tx, {
+            productId: inventoryProduct.productId,
+            warehouseId: order.sourceWarehouseId,
+            quantity: item.quantity,
+            isHqOwnedBranch,
+            branchPricing: branch
+              ? { branchType: branch.branchType, hqToBranchMarkupPercent: markupPercent }
+              : undefined,
+            distributionOrderId: order.id,
+            distributionOrderItemId: item.id,
+            userId: user.id,
+            userRole: user.role,
+          });
+          if (!reserved.alreadyReserved && 'totalCostKgs' in reserved) {
+            const totalCost = this.roundMoney(Number(reserved.totalCostKgs ?? 0));
+            const totalPrice = this.roundMoney(Number(reserved.totalPriceKgs ?? 0));
+            await tx.branchDistributionOrderItem.update({
+              where: { id: item.id },
+              data: {
+                unitCost: item.quantity > 0 ? this.roundMoney(totalCost / item.quantity) : 0,
+                unitPrice: item.quantity > 0 ? this.roundMoney(totalPrice / item.quantity) : 0,
+                totalCost,
+                totalPrice,
+                profit: this.roundMoney(totalPrice - totalCost),
+              },
+            });
+          }
+        } catch (error) {
+          throw new BadRequestException(
+            error instanceof Error ? error.message : `FIFO reservation failed for SKU ${item.sku}`,
+          );
+        }
+      }
+
+      const refreshedItems = await tx.branchDistributionOrderItem.findMany({
+        where: { orderId: order.id },
+      });
+      const totalAmount = this.roundMoney(
+        refreshedItems.reduce((sum, row) => sum + Number(row.totalPrice), 0),
+      );
+      const totalCostSum = this.roundMoney(
+        refreshedItems.reduce((sum, row) => sum + Number(row.totalCost), 0),
+      );
+      await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: {
+          totalAmount,
+          totalCost: totalCostSum,
+          totalProfit: this.roundMoney(totalAmount - totalCostSum),
+        },
+      });
 
       const updated = await tx.branchDistributionOrder.update({
         where: { id: order.id },
@@ -737,21 +813,23 @@ export class DistributionService {
           where: { id: order.branchId },
           select: { code: true, branchType: true, hqToBranchMarkupPercent: true },
         });
+        const product = await tx.product.findFirst({
+          where: { id: inventoryProduct.productId, deletedAt: null },
+          select: { hqBranchWholesaleMarkupPercent: true },
+        });
+        const productMarkup = Number(product?.hqBranchWholesaleMarkupPercent ?? 0);
+        const branchMarkup = Number(branch?.hqToBranchMarkupPercent ?? 0);
+        const markupPercent = productMarkup > 0 ? productMarkup : branchMarkup;
         const branchPricing = branch
           ? {
               branchType: branch.branchType,
-              hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent),
+              hqToBranchMarkupPercent: markupPercent,
             }
           : undefined;
         const isHqOwnedBranch = branch
           ? this.pricingFifoService.isHqBranchType(branch.branchType)
           : false;
-        const overrideUnitPriceKgs = await this.pricingResolutionService.resolveBranchProductUnitPrice(
-          order.branchId,
-          inventoryProduct.productId,
-          tx,
-        );
-        await this.pricingFifoService.consumeFifoForDistribution(tx, {
+        const consumed = await this.pricingFifoService.consumeFifoForDistribution(tx, {
           productId: inventoryProduct.productId,
           warehouseId: order.sourceWarehouseId,
           quantity: item.quantity,
@@ -761,8 +839,21 @@ export class DistributionService {
           distributionOrderItemId: item.id,
           userId: user.id,
           userRole: user.role,
-          overrideUnitPriceKgs,
         });
+
+        // Reconcile order line to the real multi-layer FIFO allocation (historical lock).
+        if (consumed.allocatedQty > 0) {
+          await tx.branchDistributionOrderItem.update({
+            where: { id: item.id },
+            data: {
+              unitCost: this.roundMoney(consumed.totalCostKgs / consumed.allocatedQty),
+              unitPrice: this.roundMoney(consumed.totalPriceKgs / consumed.allocatedQty),
+              totalCost: this.roundMoney(consumed.totalCostKgs),
+              totalPrice: this.roundMoney(consumed.totalPriceKgs),
+              profit: this.roundMoney(consumed.profitKgs),
+            },
+          });
+        }
 
         await tx.inventoryBalance.update({
           where: {
@@ -787,11 +878,24 @@ export class DistributionService {
         })),
       );
 
+      const shippedItems = await tx.branchDistributionOrderItem.findMany({
+        where: { orderId: order.id },
+      });
+      const shippedTotalAmount = this.roundMoney(
+        shippedItems.reduce((sum, row) => sum + Number(row.totalPrice), 0),
+      );
+      const shippedTotalCost = this.roundMoney(
+        shippedItems.reduce((sum, row) => sum + Number(row.totalCost), 0),
+      );
+
       const updated = await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
           status: BranchDistributionOrderStatus.SHIPPED,
           sentAt: new Date(),
+          totalAmount: shippedTotalAmount,
+          totalCost: shippedTotalCost,
+          totalProfit: this.roundMoney(shippedTotalAmount - shippedTotalCost),
         },
         include: this.include(),
       });
@@ -861,6 +965,11 @@ export class DistributionService {
               data: { reservedQuantity: { decrement: item.quantity } },
             });
           }
+          await this.pricingFifoService.releaseFifoReservationsForOrder(tx, {
+            distributionOrderId: id,
+            userId: user.id,
+            userRole: user.role,
+          });
         }
       }
       const updated = await tx.branchDistributionOrder.update({
@@ -2664,19 +2773,20 @@ export class DistributionService {
       }
 
       const fallbackUnitCost = Number(product.finalCostKgs);
-      const fallbackUnitPrice = branchPricing
-        ? this.pricingFifoService.isHqBranchType(branchPricing.branchType)
-          ? fallbackUnitCost
-          : Number(product.hqBranchWholesalePriceKgs)
-        : isHqOwnedBranch
-          ? Number(product.hqBranchWholesalePriceKgs)
-          : Number(product.sellingPriceKgs);
+      const productBranchMarkup = Number(product.hqBranchWholesaleMarkupPercent ?? 0);
+      const branchMarkup = branchPricing?.hqToBranchMarkupPercent ?? productBranchMarkup;
+      // Prefer product Branch-Sales markup so order pricing matches Продажа филиалам.
+      const effectiveMarkup = productBranchMarkup > 0 ? productBranchMarkup : branchMarkup;
+      const layerBranchPricing = branchPricing
+        ? { ...branchPricing, hqToBranchMarkupPercent: effectiveMarkup }
+        : {
+            branchType: (branch?.branchType ?? 'FRANCHISE') as BranchType,
+            hqToBranchMarkupPercent: effectiveMarkup,
+          };
+      const fallbackUnitPrice = this.pricingFifoService.isHqBranchType(layerBranchPricing.branchType)
+        ? fallbackUnitCost
+        : Number(product.hqBranchWholesalePriceKgs);
 
-      const overrideUnitPriceKgs = await this.pricingResolutionService.resolveBranchProductUnitPrice(
-        dto.branchId,
-        item.productId,
-        tx,
-      );
       const priceFreeze = await this.pricingResolutionService.resolveWithFreeze(
         dto.branchId,
         item.productId,
@@ -2691,14 +2801,21 @@ export class DistributionService {
         warehouseId: dto.sourceWarehouseId,
         quantity: Number(item.quantity),
         isHqOwnedBranch,
-        branchPricing,
+        branchPricing: layerBranchPricing,
         fallbackUnitCost,
         fallbackUnitPrice,
-        overrideUnitPriceKgs,
+        preferPerLayerMarkup: true,
+        subtractReserved: true,
       });
 
-      const unitCost = fifoPreview.allocatedQty > 0 ? fifoPreview.unitCost : fallbackUnitCost;
-      const wholesalePrice = fifoPreview.allocatedQty > 0 ? fifoPreview.unitPrice : fallbackUnitPrice;
+      if (fifoPreview.allocatedQty < Number(item.quantity)) {
+        throw new BadRequestException(
+          `Insufficient FIFO stock for SKU ${product.sku}. Requested: ${item.quantity} Available: ${fifoPreview.allocatedQty}`,
+        );
+      }
+
+      // Catalog starting price = active (first) FIFO layer unit selling price.
+      const wholesalePrice = fifoPreview.activeUnitPrice || fifoPreview.unitPrice;
       const requestedPrice = Number(item.unitPrice);
       if (Math.abs(requestedPrice - wholesalePrice) > 0.01) {
         await tx.auditLog.create({
@@ -2722,10 +2839,14 @@ export class DistributionService {
           );
         }
       }
-      const unitPrice = hasAnyFullAccessRole(userRoles) ? requestedPrice : wholesalePrice;
       const quantity = Number(item.quantity);
-      const totalCost = this.roundMoney(unitCost * quantity);
-      const totalPrice = this.roundMoney(unitPrice * quantity);
+      // Multi-layer totals: sum of per-layer cost/price (never average-then-multiply).
+      const totalCost = this.roundMoney(fifoPreview.totalCostKgs);
+      const totalPrice = hasAnyFullAccessRole(userRoles)
+        ? this.roundMoney(requestedPrice * quantity)
+        : this.roundMoney(fifoPreview.totalPriceKgs);
+      const unitCost = this.roundMoney(totalCost / quantity);
+      const unitPrice = this.roundMoney(totalPrice / quantity);
       items.push({
         productId: product.id,
         sku: product.sku,
@@ -2739,8 +2860,8 @@ export class DistributionService {
         pricingPolicyVersionId: priceFreeze.pricingPolicyVersionId,
         pricingProfileId: priceFreeze.pricingProfileId,
         resolvedPriceKgs: priceFreeze.resolvedPriceKgs,
-        baseCostKgs: priceFreeze.baseCostKgs,
-        baseBranchPriceKgs: priceFreeze.baseBranchPriceKgs,
+        baseCostKgs: fifoPreview.activeUnitCost || priceFreeze.baseCostKgs,
+        baseBranchPriceKgs: fifoPreview.activeUnitPrice || priceFreeze.baseBranchPriceKgs,
         appliedRuleType: priceFreeze.appliedRuleType,
         appliedRuleId: priceFreeze.appliedRuleId,
         appliedAdjustmentMode: priceFreeze.appliedAdjustmentMode,

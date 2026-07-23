@@ -2,10 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { BranchType, Prisma, StockMovementType, WarehouseType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
-import { pricesFromMarkups, resolveHqToBranchPrice } from './pricing-calculator.util';
+import { pricesFromMarkups } from './pricing-calculator.util';
+import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 
 export { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
+export { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -21,24 +23,6 @@ export type BranchPricingConfig = {
   hqToBranchMarkupPercent: number;
 };
 
-function resolveDistributionUnitPrice(
-  unitCostKgs: number,
-  wholesalePriceKgs: number,
-  hqBranchWholesalePriceKgs: number,
-  branchPricing?: BranchPricingConfig,
-  legacyIsHqOwnedBranch?: boolean,
-  overrideUnitPriceKgs?: number | null,
-) {
-  if (overrideUnitPriceKgs != null && overrideUnitPriceKgs >= 0) {
-    return overrideUnitPriceKgs;
-  }
-  if (branchPricing) {
-    return resolveHqToBranchPrice(unitCostKgs, branchPricing.branchType, branchPricing.hqToBranchMarkupPercent);
-  }
-  if (legacyIsHqOwnedBranch) return hqBranchWholesalePriceKgs;
-  return wholesalePriceKgs;
-}
-
 type FifoPreviewLine = {
   batchId: string;
   quantity: number;
@@ -48,7 +32,13 @@ type FifoPreviewLine = {
   hqBranchWholesalePriceKgs: number;
   totalCostKgs: number;
   totalPriceKgs: number;
+  markupPercent: number;
+  profitKgs: number;
 };
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
 
 @Injectable()
 export class PricingFifoService {
@@ -282,74 +272,317 @@ export class PricingFifoService {
       branchPricing?: BranchPricingConfig;
       fallbackUnitCost?: number;
       fallbackUnitPrice?: number;
+      /** @deprecated Flat override flattens multi-layer prices — ignored when preferPerLayerMarkup is true (default). */
       overrideUnitPriceKgs?: number | null;
+      /** Apply configured markup independently to each FIFO layer (default true). */
+      preferPerLayerMarkup?: boolean;
+      /** When true (default), respect reservedQuantity so other orders cannot oversell. */
+      subtractReserved?: boolean;
     },
   ) {
+    const preferPerLayerMarkup = input.preferPerLayerMarkup !== false;
+    const subtractReserved = input.subtractReserved !== false;
+
     const batches = await tx.fifoInventoryBatch.findMany({
       where: {
         productId: input.productId,
         warehouseId: input.warehouseId,
         remainingQuantity: { gt: 0 },
       },
-      orderBy: { receivedAt: 'asc' },
+      orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
     });
 
-    let remainingToAllocate = input.quantity;
-    let totalCost = 0;
-    let totalPrice = 0;
-    const lines: FifoPreviewLine[] = [];
+    const markupPercent = input.isHqOwnedBranch
+      ? 0
+      : Number(input.branchPricing?.hqToBranchMarkupPercent ?? 0);
+    const branchType = input.isHqOwnedBranch
+      ? 'HQ_BRANCH'
+      : ((input.branchPricing?.branchType as 'FRANCHISE' | 'DEALER' | 'DISTRIBUTOR' | undefined) ??
+        'FRANCHISE');
 
-    for (const batch of batches) {
-      if (remainingToAllocate <= 0) break;
-      const take = Math.min(batch.remainingQuantity, remainingToAllocate);
-      if (take <= 0) continue;
-
-      const unitCostKgs = Number(batch.unitCostKgs);
-      const wholesalePriceKgs = Number(batch.wholesalePriceKgs);
-      const hqBranchWholesalePriceKgs = Number(batch.hqBranchWholesalePriceKgs);
-      const unitPriceKgs = resolveDistributionUnitPrice(
-        unitCostKgs,
-        wholesalePriceKgs,
-        hqBranchWholesalePriceKgs,
-        input.branchPricing,
-        input.isHqOwnedBranch,
-        input.overrideUnitPriceKgs,
-      );
-      const lineCost = unitCostKgs * take;
-      const linePrice = unitPriceKgs * take;
-
-      totalCost += lineCost;
-      totalPrice += linePrice;
-      remainingToAllocate -= take;
-
-      lines.push({
-        batchId: batch.id,
-        quantity: take,
-        unitCostKgs,
-        unitPriceKgs,
-        wholesalePriceKgs,
-        hqBranchWholesalePriceKgs,
-        totalCostKgs: Math.round((lineCost + Number.EPSILON) * 100) / 100,
-        totalPriceKgs: Math.round((linePrice + Number.EPSILON) * 100) / 100,
-      });
+    // Flat override only for legacy single-layer / non-per-layer mode.
+    if (!preferPerLayerMarkup && input.overrideUnitPriceKgs != null && input.overrideUnitPriceKgs >= 0) {
+      let remainingToAllocate = input.quantity;
+      let totalCost = 0;
+      let totalPrice = 0;
+      const lines: FifoPreviewLine[] = [];
+      for (const batch of batches) {
+        if (remainingToAllocate <= 0) break;
+        const reserved = Number((batch as { reservedQuantity?: number }).reservedQuantity ?? 0);
+        const available = subtractReserved
+          ? Math.max(0, batch.remainingQuantity - reserved)
+          : batch.remainingQuantity;
+        const take = Math.min(available, remainingToAllocate);
+        if (take <= 0) continue;
+        const unitCostKgs = Number(batch.unitCostKgs);
+        const unitPriceKgs = Number(input.overrideUnitPriceKgs);
+        const lineCost = roundMoney(unitCostKgs * take);
+        const linePrice = roundMoney(unitPriceKgs * take);
+        totalCost = roundMoney(totalCost + lineCost);
+        totalPrice = roundMoney(totalPrice + linePrice);
+        remainingToAllocate -= take;
+        lines.push({
+          batchId: batch.id,
+          quantity: take,
+          unitCostKgs,
+          unitPriceKgs,
+          wholesalePriceKgs: Number(batch.wholesalePriceKgs),
+          hqBranchWholesalePriceKgs: Number(batch.hqBranchWholesalePriceKgs),
+          totalCostKgs: lineCost,
+          totalPriceKgs: linePrice,
+          markupPercent,
+          profitKgs: roundMoney(linePrice - lineCost),
+        });
+      }
+      const allocatedQty = input.quantity - remainingToAllocate;
+      if (allocatedQty <= 0) {
+        return {
+          unitCost: input.fallbackUnitCost ?? 0,
+          unitPrice: input.fallbackUnitPrice ?? 0,
+          activeUnitCost: input.fallbackUnitCost ?? 0,
+          activeUnitPrice: input.fallbackUnitPrice ?? 0,
+          totalCostKgs: 0,
+          totalPriceKgs: 0,
+          profitKgs: 0,
+          lines: [] as FifoPreviewLine[],
+          allocatedQty: 0,
+        };
+      }
+      return {
+        unitCost: roundMoney(totalCost / allocatedQty),
+        unitPrice: roundMoney(totalPrice / allocatedQty),
+        activeUnitCost: lines[0]?.unitCostKgs ?? 0,
+        activeUnitPrice: lines[0]?.unitPriceKgs ?? 0,
+        totalCostKgs: totalCost,
+        totalPriceKgs: totalPrice,
+        profitKgs: roundMoney(totalPrice - totalCost),
+        lines,
+        allocatedQty,
+      };
     }
 
-    const allocatedQty = input.quantity - remainingToAllocate;
-    if (allocatedQty <= 0) {
+    const built = buildFifoAllocationLines(
+      batches.map((batch) => ({
+        batchId: batch.id,
+        remainingQuantity: batch.remainingQuantity,
+        reservedQuantity: Number((batch as { reservedQuantity?: number }).reservedQuantity ?? 0),
+        unitCostKgs: Number(batch.unitCostKgs),
+        wholesalePriceKgs: Number(batch.wholesalePriceKgs),
+        hqBranchWholesalePriceKgs: Number(batch.hqBranchWholesalePriceKgs),
+      })),
+      input.quantity,
+      { markupPercent, branchType, subtractReserved },
+    );
+
+    if (built.allocatedQty <= 0) {
       return {
         unitCost: input.fallbackUnitCost ?? 0,
         unitPrice: input.fallbackUnitPrice ?? 0,
+        activeUnitCost: input.fallbackUnitCost ?? 0,
+        activeUnitPrice: input.fallbackUnitPrice ?? 0,
+        totalCostKgs: 0,
+        totalPriceKgs: 0,
+        profitKgs: 0,
         lines: [] as FifoPreviewLine[],
         allocatedQty: 0,
       };
     }
 
     return {
-      unitCost: Math.round((totalCost / allocatedQty + Number.EPSILON) * 100) / 100,
-      unitPrice: Math.round((totalPrice / allocatedQty + Number.EPSILON) * 100) / 100,
-      lines,
-      allocatedQty,
+      // Blended averages kept for backward-compatible unit fields on order lines.
+      unitCost: roundMoney(built.totalCostKgs / built.allocatedQty),
+      unitPrice: roundMoney(built.totalPriceKgs / built.allocatedQty),
+      // Active (first) FIFO layer — matches Продажа филиалам starting cost.
+      activeUnitCost: built.activeUnitCostKgs,
+      activeUnitPrice: built.activeUnitPriceKgs,
+      totalCostKgs: built.totalCostKgs,
+      totalPriceKgs: built.totalPriceKgs,
+      profitKgs: built.profitKgs,
+      lines: built.lines.map((line) => ({
+        batchId: line.batchId,
+        quantity: line.quantity,
+        unitCostKgs: line.unitCostKgs,
+        unitPriceKgs: line.unitPriceKgs,
+        wholesalePriceKgs: line.wholesalePriceKgs ?? line.unitPriceKgs,
+        hqBranchWholesalePriceKgs: line.hqBranchWholesalePriceKgs ?? line.unitPriceKgs,
+        totalCostKgs: line.totalCostKgs,
+        totalPriceKgs: line.totalPriceKgs,
+        markupPercent: line.markupPercent ?? markupPercent,
+        profitKgs: line.profitKgs,
+      })),
+      allocatedQty: built.allocatedQty,
     };
+  }
+
+  /**
+   * Reserve FIFO layers for an approved branch order (oldest first).
+   * Creates DistributionFifoAllocation rows with status=RESERVED.
+   */
+  async reserveFifoForDistribution(
+    tx: PrismaTx,
+    input: {
+      productId: string;
+      warehouseId: string;
+      quantity: number;
+      isHqOwnedBranch: boolean;
+      branchPricing?: BranchPricingConfig;
+      distributionOrderId: string;
+      distributionOrderItemId: string;
+      userId: string;
+      userRole: string;
+    },
+  ) {
+    const existing = await tx.distributionFifoAllocation.findMany({
+      where: {
+        distributionOrderItemId: input.distributionOrderItemId,
+        status: 'RESERVED',
+      },
+    });
+    if (existing.length) {
+      return {
+        lines: existing.map((row) => ({
+          batchId: row.fifoBatchId,
+          quantity: row.quantity,
+          unitCostKgs: Number(row.unitCostKgs),
+          unitPriceKgs: Number(row.unitPriceKgs),
+          totalCostKgs: Number(row.totalCostKgs),
+          totalPriceKgs: Number(row.totalPriceKgs),
+          profitKgs: Number(row.profitKgs),
+        })),
+        alreadyReserved: true,
+      };
+    }
+
+    const preview = await this.previewFifoAllocation(tx, {
+      productId: input.productId,
+      warehouseId: input.warehouseId,
+      quantity: input.quantity,
+      isHqOwnedBranch: input.isHqOwnedBranch,
+      branchPricing: input.branchPricing,
+      preferPerLayerMarkup: true,
+      subtractReserved: true,
+    });
+
+    if (preview.allocatedQty < input.quantity) {
+      throw new Error(
+        `Insufficient FIFO stock for product ${input.productId}. Requested: ${input.quantity}, available: ${preview.allocatedQty}`,
+      );
+    }
+
+    for (const line of preview.lines) {
+      const updated = await tx.fifoInventoryBatch.updateMany({
+        where: {
+          id: line.batchId,
+          // Prevent oversell under concurrency: remaining - reserved >= take
+          remainingQuantity: { gte: line.quantity },
+        },
+        data: { reservedQuantity: { increment: line.quantity } },
+      });
+      if (updated.count !== 1) {
+        throw new Error(`FIFO layer ${line.batchId} could not be reserved (concurrent oversell)`);
+      }
+
+      // Re-check available after increment
+      const batch = await tx.fifoInventoryBatch.findUnique({ where: { id: line.batchId } });
+      if (!batch || batch.reservedQuantity > batch.remainingQuantity) {
+        throw new Error(`FIFO layer ${line.batchId} reserved beyond remaining quantity`);
+      }
+
+      await tx.distributionFifoAllocation.create({
+        data: {
+          distributionOrderId: input.distributionOrderId,
+          distributionOrderItemId: input.distributionOrderItemId,
+          fifoBatchId: line.batchId,
+          productId: input.productId,
+          quantity: line.quantity,
+          unitCostKgs: line.unitCostKgs,
+          unitPriceKgs: line.unitPriceKgs,
+          wholesalePriceKgs: line.wholesalePriceKgs,
+          hqBranchWholesalePriceKgs: line.hqBranchWholesalePriceKgs,
+          totalCostKgs: line.totalCostKgs,
+          totalPriceKgs: line.totalPriceKgs,
+          markupPercent: line.markupPercent,
+          profitKgs: line.profitKgs,
+          status: 'RESERVED',
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: input.userId,
+          role: input.userRole,
+          action: 'FIFO_LAYER_RESERVED',
+          entity: 'FifoInventoryBatch',
+          entityId: line.batchId,
+          metadata: {
+            productId: input.productId,
+            inventoryLayerId: line.batchId,
+            distributionOrderId: input.distributionOrderId,
+            distributionOrderItemId: input.distributionOrderItemId,
+            quantity: line.quantity,
+            unitCost: line.unitCostKgs,
+            unitSellingPrice: line.unitPriceKgs,
+            markup: line.markupPercent,
+            profitKgs: line.profitKgs,
+            userId: input.userId,
+            timestamp: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    return { alreadyReserved: false, ...preview };
+  }
+
+  async releaseFifoReservationsForOrder(
+    tx: PrismaTx,
+    input: { distributionOrderId: string; userId: string; userRole: string },
+  ) {
+    const reserved = await tx.distributionFifoAllocation.findMany({
+      where: {
+        distributionOrderId: input.distributionOrderId,
+        status: 'RESERVED',
+      },
+    });
+
+    for (const row of reserved) {
+      const batch = await tx.fifoInventoryBatch.findUnique({
+        where: { id: row.fifoBatchId },
+        select: { reservedQuantity: true },
+      });
+      const releaseQty = Math.min(row.quantity, Math.max(0, batch?.reservedQuantity ?? 0));
+      if (releaseQty > 0) {
+        await tx.fifoInventoryBatch.update({
+          where: { id: row.fifoBatchId },
+          data: { reservedQuantity: { decrement: releaseQty } },
+        });
+      }
+
+      await tx.distributionFifoAllocation.delete({ where: { id: row.id } });
+
+      await tx.auditLog.create({
+        data: {
+          userId: input.userId,
+          role: input.userRole,
+          action: 'FIFO_RESERVATION_RELEASED',
+          entity: 'FifoInventoryBatch',
+          entityId: row.fifoBatchId,
+          metadata: {
+            productId: row.productId,
+            inventoryLayerId: row.fifoBatchId,
+            distributionOrderId: input.distributionOrderId,
+            distributionOrderItemId: row.distributionOrderItemId,
+            quantity: row.quantity,
+            unitCost: Number(row.unitCostKgs),
+            unitSellingPrice: Number(row.unitPriceKgs),
+            userId: input.userId,
+            timestamp: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    return { released: reserved.length };
   }
 
   async consumeFifoForDistribution(
@@ -367,14 +600,103 @@ export class PricingFifoService {
       overrideUnitPriceKgs?: number | null;
     },
   ) {
+    const reserved = await tx.distributionFifoAllocation.findMany({
+      where: {
+        distributionOrderItemId: input.distributionOrderItemId,
+        status: 'RESERVED',
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (reserved.length) {
+      let totalCostKgs = 0;
+      let totalPriceKgs = 0;
+      const lines: FifoPreviewLine[] = [];
+
+      for (const row of reserved) {
+        await tx.fifoInventoryBatch.update({
+          where: { id: row.fifoBatchId },
+          data: {
+            remainingQuantity: { decrement: row.quantity },
+            reservedQuantity: { decrement: row.quantity },
+          },
+        });
+
+        const profitKgs = Number(row.profitKgs) || roundMoney(Number(row.totalPriceKgs) - Number(row.totalCostKgs));
+        await tx.distributionFifoAllocation.update({
+          where: { id: row.id },
+          data: { status: 'CONSUMED', profitKgs },
+        });
+
+        totalCostKgs = roundMoney(totalCostKgs + Number(row.totalCostKgs));
+        totalPriceKgs = roundMoney(totalPriceKgs + Number(row.totalPriceKgs));
+        lines.push({
+          batchId: row.fifoBatchId,
+          quantity: row.quantity,
+          unitCostKgs: Number(row.unitCostKgs),
+          unitPriceKgs: Number(row.unitPriceKgs),
+          wholesalePriceKgs: Number(row.wholesalePriceKgs),
+          hqBranchWholesalePriceKgs: Number(row.hqBranchWholesalePriceKgs),
+          totalCostKgs: Number(row.totalCostKgs),
+          totalPriceKgs: Number(row.totalPriceKgs),
+          markupPercent: Number(row.markupPercent),
+          profitKgs,
+        });
+
+        await tx.auditLog.create({
+          data: {
+            userId: input.userId,
+            role: input.userRole,
+            action: 'FIFO_LAYER_DEDUCTED',
+            entity: 'FifoInventoryBatch',
+            entityId: row.fifoBatchId,
+            metadata: {
+              productId: input.productId,
+              inventoryLayerId: row.fifoBatchId,
+              distributionOrderId: input.distributionOrderId,
+              distributionOrderItemId: input.distributionOrderItemId,
+              quantity: row.quantity,
+              unitCost: Number(row.unitCostKgs),
+              unitSellingPrice: Number(row.unitPriceKgs),
+              markup: Number(row.markupPercent),
+              profitKgs,
+              userId: input.userId,
+              timestamp: new Date().toISOString(),
+            } as Prisma.InputJsonValue,
+          },
+        });
+      }
+
+      const allocatedQty = lines.reduce((sum, line) => sum + line.quantity, 0);
+      return {
+        unitCost: allocatedQty > 0 ? roundMoney(totalCostKgs / allocatedQty) : 0,
+        unitPrice: allocatedQty > 0 ? roundMoney(totalPriceKgs / allocatedQty) : 0,
+        activeUnitCost: lines[0]?.unitCostKgs ?? 0,
+        activeUnitPrice: lines[0]?.unitPriceKgs ?? 0,
+        totalCostKgs,
+        totalPriceKgs,
+        profitKgs: roundMoney(totalPriceKgs - totalCostKgs),
+        lines,
+        allocatedQty,
+      };
+    }
+
+    // No prior reservation — allocate and consume immediately (legacy path).
     const preview = await this.previewFifoAllocation(tx, {
       productId: input.productId,
       warehouseId: input.warehouseId,
       quantity: input.quantity,
       isHqOwnedBranch: input.isHqOwnedBranch,
       branchPricing: input.branchPricing,
-      overrideUnitPriceKgs: input.overrideUnitPriceKgs,
+      preferPerLayerMarkup: true,
+      subtractReserved: true,
     });
+
+    if (preview.allocatedQty < input.quantity) {
+      throw new Error(
+        `Insufficient FIFO stock for product ${input.productId}. Requested: ${input.quantity}, available: ${preview.allocatedQty}`,
+      );
+    }
 
     for (const line of preview.lines) {
       await tx.fifoInventoryBatch.update({
@@ -395,6 +717,9 @@ export class PricingFifoService {
           hqBranchWholesalePriceKgs: line.hqBranchWholesalePriceKgs,
           totalCostKgs: line.totalCostKgs,
           totalPriceKgs: line.totalPriceKgs,
+          markupPercent: line.markupPercent,
+          profitKgs: line.profitKgs,
+          status: 'CONSUMED',
         },
       });
 
@@ -402,19 +727,20 @@ export class PricingFifoService {
         data: {
           userId: input.userId,
           role: input.userRole,
-          action: 'FIFO_BATCH_PRICE_USED',
+          action: 'FIFO_ALLOCATION_CREATED',
           entity: 'FifoInventoryBatch',
           entityId: line.batchId,
           metadata: {
-            userId: input.userId,
-            role: input.userRole,
             productId: input.productId,
-            batchId: line.batchId,
+            inventoryLayerId: line.batchId,
             distributionOrderId: input.distributionOrderId,
             distributionOrderItemId: input.distributionOrderItemId,
             quantity: line.quantity,
-            unitCostKgs: line.unitCostKgs,
-            unitPriceKgs: line.unitPriceKgs,
+            unitCost: line.unitCostKgs,
+            unitSellingPrice: line.unitPriceKgs,
+            markup: line.markupPercent,
+            profitKgs: line.profitKgs,
+            userId: input.userId,
             timestamp: new Date().toISOString(),
           } as Prisma.InputJsonValue,
         },

@@ -65,6 +65,7 @@ import { LandedCostService } from '../procurement/landed-cost.service';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
+import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import {
   isSubmittedBranchPurchaseStatus,
   resolveBranchPurchasePriceKgs,
@@ -127,6 +128,7 @@ export class OperationsService {
     private readonly distributionService: DistributionService,
     private readonly landedCostService: LandedCostService,
     private readonly pricingResolution: PricingResolutionService,
+    private readonly pricingFifoService: PricingFifoService,
   ) {}
 
   async branchPurchaseRequests(user: AuthUser) {
@@ -1090,23 +1092,55 @@ export class OperationsService {
           auditUser: user,
           auditEntity: 'BranchPurchaseRequestItem',
         });
-        const unitPrice = Number(
-          priceSnapshot.resolvedPriceKgs ?? item.resolvedBranchPriceKgs ?? item.wholesalePriceKgs,
-        );
         const product = await tx.product.findFirst({
           where: { id: item.productId, deletedAt: null },
         });
         if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
-        const unitCost = Number(product.finalCostKgs);
-        const lineCost = Math.round((unitCost * quantity + Number.EPSILON) * 100) / 100;
-        const linePrice = Math.round((unitPrice * quantity + Number.EPSILON) * 100) / 100;
+
+        const branch = await tx.branch.findUnique({
+          where: { id: existing.branchId },
+          select: { branchType: true, hqToBranchMarkupPercent: true },
+        });
+        const productMarkup = Number(product.hqBranchWholesaleMarkupPercent ?? 0);
+        const branchMarkup = Number(branch?.hqToBranchMarkupPercent ?? 0);
+        const markupPercent = productMarkup > 0 ? productMarkup : branchMarkup;
+        const isHqOwnedBranch = branch
+          ? this.pricingFifoService.isHqBranchType(branch.branchType)
+          : false;
+
+        await this.pricingFifoService.syncFifoBatchesFromHqStockMovements(tx);
+        const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
+          productId: product.id,
+          warehouseId: assignedHqWarehouseId,
+          quantity,
+          isHqOwnedBranch,
+          branchPricing: branch
+            ? { branchType: branch.branchType, hqToBranchMarkupPercent: markupPercent }
+            : undefined,
+          preferPerLayerMarkup: true,
+          subtractReserved: true,
+          fallbackUnitCost: Number(product.finalCostKgs),
+          fallbackUnitPrice: Number(priceSnapshot.resolvedPriceKgs ?? item.resolvedBranchPriceKgs ?? 0),
+        });
+
+        if (fifoPreview.allocatedQty < quantity) {
+          throw new BadRequestException(
+            `Insufficient FIFO stock for ${product.sku}. Requested: ${quantity}, available: ${fifoPreview.allocatedQty}`,
+          );
+        }
+
+        // Multi-layer order totals from FIFO allocation (not product.finalCostKgs / not average-first).
+        const lineCost = Math.round((fifoPreview.totalCostKgs + Number.EPSILON) * 100) / 100;
+        const linePrice = Math.round((fifoPreview.totalPriceKgs + Number.EPSILON) * 100) / 100;
+        const unitCost = quantity > 0 ? Math.round((lineCost / quantity + Number.EPSILON) * 100) / 100 : 0;
+        const unitPrice = quantity > 0 ? Math.round((linePrice / quantity + Number.EPSILON) * 100) / 100 : 0;
         totalCost += lineCost;
         totalAmount += linePrice;
 
         await tx.branchPurchaseRequestItem.update({
           where: { id: item.id },
           data: {
-            resolvedBranchPriceKgs: unitPrice,
+            resolvedBranchPriceKgs: fifoPreview.activeUnitPrice || unitPrice,
             pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId ?? item.pricingPolicyVersionId,
             pricingProfileId: priceSnapshot.pricingProfileId ?? item.pricingProfileId,
             appliedRuleType: priceSnapshot.appliedRuleType ?? item.appliedRuleType,
@@ -1130,7 +1164,7 @@ export class OperationsService {
           profit: Math.round((linePrice - lineCost + Number.EPSILON) * 100) / 100,
           pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId,
           pricingProfileId: priceSnapshot.pricingProfileId,
-          resolvedPriceKgs: unitPrice,
+          resolvedPriceKgs: fifoPreview.activeUnitPrice || unitPrice,
           appliedRuleType: priceSnapshot.appliedRuleType,
           appliedRuleId: priceSnapshot.appliedRuleId,
           appliedAdjustmentMode: priceSnapshot.appliedAdjustmentMode,
@@ -1960,6 +1994,27 @@ export class OperationsService {
             referenceType: 'PROCUREMENT_GOODS_RECEIVING',
             referenceId: receiving.id,
             note: `Procurement receiving ${receiving.receivingNumber}`,
+          });
+          // Eager HQ FIFO layer per shipment (do not merge with older layers).
+          await this.pricingFifoService.ensureBranchFifoBatchFromMovementInTx(tx, {
+            id: movement.id,
+            productId: movement.productId,
+            warehouseId: movement.warehouseId,
+            quantity: Math.abs(Number(movement.quantity)),
+            unitCostKgs: Number(movement.unitCostKgs),
+            totalCostKgs: Number(movement.totalCostKgs),
+            createdAt: movement.createdAt,
+            referenceType: movement.referenceType,
+            referenceId: movement.referenceId,
+          });
+          await this.auditInTx(tx, user, 'HQ', 'FIFO_LAYER_CREATED', 'StockMovement', movement.id, {
+            productId: item.productId,
+            inventoryLayerMovementId: movement.id,
+            quantity: item.receivedQuantity,
+            unitCost: Number(movement.unitCostKgs),
+            totalLandedCostKgs: allocatedLineLandedCostKgs,
+            receivingId: receiving.id,
+            timestamp: new Date().toISOString(),
           });
           inventoryBatchCount += 1;
           await this.auditInTx(tx, user, 'HQ', 'STOCK_MOVEMENT_CREATED', 'StockMovement', movement.id, {

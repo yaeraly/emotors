@@ -2167,6 +2167,8 @@ model FifoInventoryBatch {
   minimumSellingPriceKgs         Decimal                      @default(0) @db.Decimal(14, 2)
   initialQuantity                Int
   remainingQuantity              Int
+  /** Qty reserved by approved branch orders; available = remainingQuantity - reservedQuantity */
+  reservedQuantity               Int                          @default(0)
   referenceType                  String?
   referenceId                    String?
   saleAllocations                SaleFifoAllocation[]
@@ -2216,12 +2218,17 @@ model DistributionFifoAllocation {
   hqBranchWholesalePriceKgs Decimal                     @db.Decimal(14, 2)
   totalCostKgs              Decimal                     @db.Decimal(14, 2)
   totalPriceKgs             Decimal                     @db.Decimal(14, 2)
+  markupPercent             Decimal                     @default(0) @db.Decimal(8, 2)
+  profitKgs                 Decimal                     @default(0) @db.Decimal(14, 2)
+  /** RESERVED at order approval; CONSUMED at HQ shipment */
+  status                    String                      @default("CONSUMED")
   createdAt                 DateTime                    @default(now())
 
   @@index([distributionOrderId])
   @@index([distributionOrderItemId])
   @@index([fifoBatchId])
   @@index([productId])
+  @@index([status])
 }
 
 model ProductCategory {
