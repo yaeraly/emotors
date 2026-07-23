@@ -1252,10 +1252,15 @@ function ProcurementOrderDetailPageContent() {
                       const referencePriceYuan = getReferencePriceYuan(row);
                       const priceDifferenceYuan = referencePriceYuan != null ? purchasePriceYuan - referencePriceYuan : null;
                       const previewItem = previewTotals?.items?.[index];
+                      const quantity = Number(row.quantity ?? 0);
+                      // Unit landed cost (KGS): total allocated landed cost ÷ quantity.
+                      // Prefer live preview from existing landed-cost calc; fall back to persisted backend finalCostKgs.
                       const costInSoms =
-                        previewItem?.totalCostKgs != null
-                          ? Number(previewItem.totalCostKgs)
-                          : Number(row.finalCostKgs ?? 0) * row.quantity;
+                        quantity <= 0
+                          ? 0
+                          : previewItem != null
+                            ? Number(previewItem.finalCostKgs ?? 0)
+                            : Number(row.finalCostKgs ?? 0);
 
                       return (
                         <tr key={row.id}>

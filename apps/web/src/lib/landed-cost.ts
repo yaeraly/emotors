@@ -180,9 +180,11 @@ export function calculateLandedCosts(
         ? roundWeight((item.lineNetWeightKg / totalNetWeightKg) * totalPackagingWeightKg)
         : 0;
     const lineShipmentWeightKg = roundWeight(item.lineNetWeightKg + linePackagingWeightKg);
-    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 1;
-    const packagingWeightKg = roundWeight(linePackagingWeightKg / effectiveQty);
-    const unitShipmentWeightKg = roundWeight(lineShipmentWeightKg / effectiveQty);
+    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const packagingWeightKg =
+      effectiveQty > 0 ? roundWeight(linePackagingWeightKg / effectiveQty) : 0;
+    const unitShipmentWeightKg =
+      effectiveQty > 0 ? roundWeight(lineShipmentWeightKg / effectiveQty) : 0;
     return {
       ...item,
       packagingWeightKg,
@@ -267,11 +269,11 @@ export function calculateLandedCosts(
         bankFeeAllocKgs +
         otherAllocKgs,
     );
-    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 1;
-    const transportCostKgs = roundMoney(totalLineLogistics / effectiveQty);
-    const finalCostKgs = roundMoney(item.costKgs + transportCostKgs);
+    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const transportCostKgs = effectiveQty > 0 ? roundMoney(totalLineLogistics / effectiveQty) : 0;
+    const finalCostKgs = effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs) : 0;
     const totalYuan = roundMoney(item.quantity * Number(item.purchasePriceYuan || 0));
-    const totalCostKgs = roundMoney(finalCostKgs * effectiveQty);
+    const totalCostKgs = effectiveQty > 0 ? roundMoney(finalCostKgs * effectiveQty) : 0;
 
     return {
       ...item,
