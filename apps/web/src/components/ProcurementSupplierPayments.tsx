@@ -145,6 +145,25 @@ const emptyForm = (): PaymentForm => ({
   notes: '',
 });
 
+const EMPTY_ACCOUNT_FORM: SupplierAccountFormValue = {
+  paymentMethod: 'BANK_ACCOUNT',
+  bankName: '',
+  accountHolder: '',
+  accountNumber: '',
+};
+
+function normalizeAccountForm(
+  next: Partial<SupplierAccountFormValue> | null | undefined,
+  previous: SupplierAccountFormValue = EMPTY_ACCOUNT_FORM,
+): SupplierAccountFormValue {
+  return {
+    paymentMethod: next?.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
+    bankName: next?.bankName ?? previous.bankName ?? '',
+    accountHolder: next?.accountHolder ?? previous.accountHolder ?? '',
+    accountNumber: next?.accountNumber ?? previous.accountNumber ?? '',
+  };
+}
+
 export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const { t } = useTranslation();
   const [form, setForm] = useState<PaymentForm>(emptyForm);
@@ -153,12 +172,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const [accounts, setAccounts] = useState<FinanceAccountOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [accountForm, setAccountForm] = useState<SupplierAccountFormValue>({
-    paymentMethod: 'BANK_ACCOUNT',
-    bankName: '',
-    accountHolder: '',
-    accountNumber: '',
-  });
+  const [accountForm, setAccountForm] = useState<SupplierAccountFormValue>(EMPTY_ACCOUNT_FORM);
   const [confirmTarget, setConfirmTarget] = useState<SupplierPayment | null>(null);
   const [confirmForm, setConfirmForm] = useState({
     actualPaidKgs: '',
@@ -199,6 +213,12 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       .then(setAccounts)
       .catch(() => setAccounts([]));
   }, [canPrepare, canConfirm]);
+
+  useEffect(() => {
+    // Reset supplier-account modal state when opening another procurement order.
+    setAccountForm(EMPTY_ACCOUNT_FORM);
+    setError('');
+  }, [order.id]);
 
   useEffect(() => {
     if (!form.approvedAmountKgs && calculatedKgs > 0) {
@@ -511,19 +531,20 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
             <ProcurementPaymentInfo
               orderId={order.id}
               user={user}
-              value={{
-                paymentMethod: accountForm.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
-                bankName: accountForm.bankName ?? '',
-                accountHolder: accountForm.accountHolder ?? '',
-                accountNumber: accountForm.accountNumber ?? '',
-              }}
+              value={normalizeAccountForm(accountForm)}
               onChange={(next) =>
-                setAccountForm({
-                  paymentMethod: next.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
-                  bankName: next.bankName ?? '',
-                  accountHolder: next.accountHolder ?? '',
-                  accountNumber: next.accountNumber ?? '',
-                })
+                setAccountForm((prev) =>
+                  normalizeAccountForm(
+                    {
+                      ...prev,
+                      paymentMethod: next.paymentMethod ?? 'BANK_ACCOUNT',
+                      bankName: next.bankName ?? '',
+                      accountHolder: next.accountHolder ?? '',
+                      accountNumber: next.accountNumber ?? '',
+                    },
+                    prev,
+                  ),
+                )
               }
               onValidityChange={setPaymentInfoValid}
               disabled={invoiceSendLocked}
@@ -832,8 +853,8 @@ function Field({
       <input
         type={type}
         step={type === 'number' ? '0.0001' : undefined}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value ?? '')}
         readOnly={label.includes('Рассчитан') || label.toLowerCase().includes('calculated')}
         className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 read-only:bg-slate-100"
       />
