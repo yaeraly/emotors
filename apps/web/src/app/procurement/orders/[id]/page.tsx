@@ -12,7 +12,7 @@ import { ProcurementSectionPayablePanel } from '@/components/ProcurementSectionP
 import { sumConfirmedSupplierPaymentsKgs } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
-import { buildHqReceivingValidationResult, CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE } from '@/lib/hq-receiving-validation';
+import { buildHqReceivingValidationResult } from '@/lib/hq-receiving-validation';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs, effectiveLocalTransportKgs, storedLocalTransportKgsFromOrder } from '@/lib/transport-logistics';
 import {
@@ -330,8 +330,6 @@ function ProcurementOrderDetailPageContent() {
   }, [order, logisticsForm]);
   const cargoReceiptCompleted = hqReceivingReadiness?.cargoReceiptCompleted ?? false;
   const svhTransportCompleted = hqReceivingReadiness?.svhToHqTransportCompleted ?? false;
-  const canReceiveToHq = hqReceivingReadiness?.canReceiveToHq ?? false;
-  const missingCargoAttachment = (hqReceivingReadiness?.cargoReceipt.errors ?? []).includes('cargoAttachment');
   const canSaveSvh = canManageSvh || isCeoUser;
   const finalized = !!order?.hqStockMovementCreatedAt;
   const chinaDomesticEditable = order
@@ -884,11 +882,6 @@ function ProcurementOrderDetailPageContent() {
 
   async function receiveGoods() {
     if (!order || cargoValidationError) return;
-    if (missingCargoAttachment) {
-      setError(t('chinaReceiving.cargoReceiptRequired'));
-      return;
-    }
-    if (!canReceiveToHq) return;
     setError('');
     setSuccess('');
     try {
@@ -919,12 +912,7 @@ function ProcurementOrderDetailPageContent() {
       setSuccess(t('procurement.orders.received'));
       await load();
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('common.error');
-      setError(
-        message === CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE
-          ? t('chinaReceiving.cargoReceiptRequired')
-          : message,
-      );
+      setError(err instanceof Error ? err.message : t('common.error'));
     }
   }
 
@@ -1368,23 +1356,13 @@ function ProcurementOrderDetailPageContent() {
                   );
                 })}
               </div>
-              {!cargoReceiptCompleted ? (
-                <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  {missingCargoAttachment
-                    ? t('chinaReceiving.cargoReceiptRequired')
-                    : t('procurement.receiving.warning.cargo')}
-                </p>
-              ) : null}
-              {!svhTransportCompleted ? (
-                <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('procurement.receiving.warning.svh')}</p>
-              ) : null}
               <ul className="mt-4 space-y-2 text-sm">
-                <li className={cargoReceiptCompleted ? 'text-emerald-700' : 'text-red-700'}>
+                <li className={cargoReceiptCompleted ? 'text-emerald-700' : 'text-slate-600'}>
                   {cargoReceiptCompleted
                     ? t('procurement.receiving.checklist.cargoComplete')
                     : t('procurement.receiving.checklist.cargoIncomplete')}
                 </li>
-                <li className={svhTransportCompleted ? 'text-emerald-700' : 'text-red-700'}>
+                <li className={svhTransportCompleted ? 'text-emerald-700' : 'text-slate-600'}>
                   {svhTransportCompleted
                     ? t('procurement.receiving.checklist.svhComplete')
                     : t('procurement.receiving.checklist.svhIncomplete')}
@@ -1400,7 +1378,7 @@ function ProcurementOrderDetailPageContent() {
               ) : null}
               <button
                 type="button"
-                disabled={!!cargoValidationError || !canReceiveToHq || !landedCostCalculated}
+                disabled={!!cargoValidationError || !landedCostCalculated}
                 onClick={() => void receiveGoods()}
                 className="mt-4 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white disabled:bg-emerald-300"
               >

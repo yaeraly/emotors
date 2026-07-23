@@ -55,8 +55,6 @@ import {
 } from '../procurement/landed-cost.util';
 import {
   buildHqReceivingValidationResult,
-  hqReceivingBlockedMessage,
-  SVH_TRANSPORT_INCOMPLETE_MESSAGE,
 } from '../procurement/hq-receiving-validation.util';
 import {
   countCargoReceiptAttachmentsByOrderIds,
@@ -1701,15 +1699,8 @@ export class OperationsService {
         svhTransportErrors: validation.svhTransport.errors,
       };
 
-      if (!validation.canReceiveToHq) {
-        await this.auditInTx(tx, user, 'HQ', 'HQ_RECEIVING_BLOCKED', 'ProcurementOrder', order.id, {
-          userId: user.id,
-          procurementOrderId: order.id,
-          validationResult,
-        });
-        const message = hqReceivingBlockedMessage(validation);
-        throw new BadRequestException(message ?? SVH_TRANSPORT_INCOMPLETE_MESSAGE);
-      }
+      // Cargo Import Logistics form fill and SVH→HQ completion must not block HQ receiving.
+      // Existing cargo receipt attachments (order / freight payment request) are recognized only.
 
       await this.auditInTx(tx, user, 'HQ', 'GOODS_RECEIVING_STARTED', 'ProcurementOrder', order.id, {
         userId: user.id,
@@ -1719,16 +1710,6 @@ export class OperationsService {
         timestamp: new Date().toISOString(),
       });
 
-      await this.auditInTx(tx, user, 'HQ', 'CARGO_RECEIPT_VALIDATED', 'ProcurementOrder', order.id, {
-        userId: user.id,
-        procurementOrderId: order.id,
-        validationResult,
-      });
-      await this.auditInTx(tx, user, 'HQ', 'SVH_TO_HQ_TRANSPORT_VALIDATED', 'ProcurementOrder', order.id, {
-        userId: user.id,
-        procurementOrderId: order.id,
-        validationResult,
-      });
       await this.auditInTx(tx, user, 'HQ', 'HQ_RECEIVING_ALLOWED', 'ProcurementOrder', order.id, {
         userId: user.id,
         procurementOrderId: order.id,

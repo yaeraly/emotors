@@ -26,6 +26,7 @@ export type HqReceivingValidationResult = {
 export const CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE =
   'Attach the cargo receipt before receiving goods into the HQ warehouse.';
 
+/** Full Import Logistics cargo form completeness (informational; does not block HQ receive). */
 export function validateCargoReceiptComplete(snapshot: CargoReceiptSnapshot): HqReceivingValidationResult {
   const errors: string[] = [];
   if (Number(snapshot.cargoTotalWeightKg ?? 0) <= 0) {
@@ -47,6 +48,10 @@ export function validateCargoReceiptComplete(snapshot: CargoReceiptSnapshot): Hq
     errors.push('cargoAttachment');
   }
   return { valid: errors.length === 0, errors };
+}
+
+export function hasCargoReceiptAttachment(snapshot: CargoReceiptSnapshot): boolean {
+  return (snapshot.cargoAttachmentCount ?? 0) >= 1;
 }
 
 export function validateSvhToHqTransportComplete(snapshot: SvhTransportSnapshot): HqReceivingValidationResult {
@@ -83,13 +88,19 @@ export function buildHqReceivingValidationResult(params: {
   cargo: CargoReceiptSnapshot;
   svh: SvhTransportSnapshot;
 }) {
-  const cargoReceipt = validateCargoReceiptComplete(params.cargo);
+  const cargoForm = validateCargoReceiptComplete(params.cargo);
   const svhTransport = validateSvhToHqTransportComplete(params.svh);
+  const receiptAttached = hasCargoReceiptAttachment(params.cargo);
+  const cargoReceipt: HqReceivingValidationResult = receiptAttached
+    ? { valid: true, errors: [] }
+    : { valid: false, errors: ['cargoAttachment'] };
+
   return {
-    cargoReceiptCompleted: cargoReceipt.valid,
+    cargoReceiptCompleted: receiptAttached,
     svhToHqTransportCompleted: svhTransport.valid,
-    canReceiveToHq: cargoReceipt.valid && svhTransport.valid,
+    canReceiveToHq: true,
     cargoReceipt,
+    cargoForm,
     svhTransport,
   };
 }

@@ -1,4 +1,4 @@
-import { SvhToHqTransportStatus, TransportCompanyStatus } from '@prisma/client';
+import { TransportCompanyStatus } from '@prisma/client';
 import { isSvhTransportCompleted } from './svh-to-hq-transport.util';
 
 export const CARGO_RECEIPT_INCOMPLETE_MESSAGE =
@@ -33,6 +33,7 @@ export type HqReceivingValidationResult = {
   errors: string[];
 };
 
+/** Full Import Logistics cargo form completeness (informational; does not block HQ receive). */
 export function validateCargoReceiptComplete(snapshot: CargoReceiptSnapshot): HqReceivingValidationResult {
   const errors: string[] = [];
   if (Number(snapshot.cargoTotalWeightKg ?? 0) <= 0) {
@@ -54,6 +55,11 @@ export function validateCargoReceiptComplete(snapshot: CargoReceiptSnapshot): Hq
     errors.push('cargoAttachment');
   }
   return { valid: errors.length === 0, errors };
+}
+
+/** Whether a cargo receipt file exists on the order or linked freight payment request. */
+export function hasCargoReceiptAttachment(snapshot: CargoReceiptSnapshot): boolean {
+  return (snapshot.cargoAttachmentCount ?? 0) >= 1;
 }
 
 export function validateSvhToHqTransportComplete(snapshot: SvhTransportSnapshot): HqReceivingValidationResult {
@@ -90,31 +96,32 @@ export function buildHqReceivingValidationResult(params: {
   cargo: CargoReceiptSnapshot;
   svh: SvhTransportSnapshot;
 }) {
-  const cargoReceipt = validateCargoReceiptComplete(params.cargo);
+  const cargoForm = validateCargoReceiptComplete(params.cargo);
   const svhTransport = validateSvhToHqTransportComplete(params.svh);
+  const receiptAttached = hasCargoReceiptAttachment(params.cargo);
+  const cargoReceipt: HqReceivingValidationResult = receiptAttached
+    ? { valid: true, errors: [] }
+    : { valid: false, errors: ['cargoAttachment'] };
+
   return {
-    cargoReceiptCompleted: cargoReceipt.valid,
+    /** True when a cargo receipt file already exists (payment request / order). */
+    cargoReceiptCompleted: receiptAttached,
+    /** Informational only — does not gate HQ warehouse receiving. */
     svhToHqTransportCompleted: svhTransport.valid,
-    canReceiveToHq: cargoReceipt.valid && svhTransport.valid,
+    /**
+     * HQ China receiving must not be blocked by Import Logistics cargo form fields
+     * or SVH→HQ transport completion. Physical receiving uses its own workflow.
+     */
+    canReceiveToHq: true,
     cargoReceipt,
+    cargoForm,
     svhTransport,
   };
 }
 
 export function hqReceivingBlockedMessage(
-  validation: ReturnType<typeof buildHqReceivingValidationResult>,
-) {
-  if (validation.cargoReceipt.errors.includes('cargoAttachment')) {
-    return CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE;
-  }
-  if (!validation.cargoReceipt.valid && !validation.svhTransport.valid) {
-    return `${CARGO_RECEIPT_INCOMPLETE_MESSAGE}. ${SVH_TRANSPORT_INCOMPLETE_MESSAGE}.`;
-  }
-  if (!validation.cargoReceipt.valid) {
-    return CARGO_RECEIPT_INCOMPLETE_MESSAGE;
-  }
-  if (!validation.svhTransport.valid) {
-    return SVH_TRANSPORT_INCOMPLETE_MESSAGE;
-  }
+  _validation: ReturnType<typeof buildHqReceivingValidationResult>,
+): string | null {
+  // Cargo form fill and SVH→HQ completion must not block HQ warehouse receiving.
   return null;
 }

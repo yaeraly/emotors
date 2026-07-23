@@ -96,6 +96,6 @@ export function buildChinaReceivingValidation(order: OrderLike) {
 
 export function isChinaReceivingTaskVisible(order: OrderLike) {
   if (order.hqStockMovementCreatedAt) return true;
-  if (isGoodsLeftYiwuStatus(order.status)) return true;
-  return buildChinaReceivingValidation(order).canReceiveToHq;
+  // HQ receiving readiness no longer depends on Import Logistics / SVH gates.
+  return isGoodsLeftYiwuStatus(order.status);
 }
