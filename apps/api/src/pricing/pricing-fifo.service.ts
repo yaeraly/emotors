@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
+import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 
 export { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
@@ -958,5 +959,143 @@ export class PricingFifoService {
     });
 
     return { batchId: batch.id, created: true };
+  }
+
+  /**
+   * Branch receiving: one branch FIFO layer per HQ distribution allocation.
+   * Never merges different HQ unit costs into a single branch layer.
+   */
+  async ensureBranchFifoLayersFromHqAllocationsInTx(
+    tx: PrismaTx,
+    input: {
+      distributionOrderItemId: string;
+      branchProductId: string;
+      branchWarehouseId: string;
+      acceptedQuantity: number;
+      transportCostPerUnit?: number;
+      receivingNote: string;
+      createMovement: (line: {
+        quantity: number;
+        unitCostKgs: number;
+        totalCostKgs: number;
+        referenceType: string;
+        referenceId: string;
+        note: string;
+      }) => Promise<{
+        id: string;
+        productId: string;
+        warehouseId: string;
+        quantity: number;
+        unitCostKgs: Prisma.Decimal | number;
+        totalCostKgs?: Prisma.Decimal | number | null;
+        createdAt: Date;
+        referenceType?: string | null;
+        referenceId?: string | null;
+      }>;
+    },
+  ) {
+    const allocations = await tx.distributionFifoAllocation.findMany({
+      where: {
+        distributionOrderItemId: input.distributionOrderItemId,
+        status: 'CONSUMED',
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        fifoBatchId: true,
+        quantity: true,
+        unitCostKgs: true,
+      },
+    });
+    if (!allocations.length) {
+      return { layers: [], usedAllocations: false };
+    }
+
+    const receiveLines = buildBranchReceiveLinesFromHqAllocations(
+      allocations.map((row) => ({
+        id: row.id,
+        fifoBatchId: row.fifoBatchId,
+        quantity: row.quantity,
+        unitCostKgs: Number(row.unitCostKgs),
+      })),
+      input.acceptedQuantity,
+      Number(input.transportCostPerUnit ?? 0),
+    );
+
+    const layers: Array<{
+      allocationId: string;
+      hqFifoLayerId: string;
+      branchFifoLayerId: string;
+      quantity: number;
+      transferUnitCostKgs: number;
+      transportCostPerUnit: number;
+      finalBranchUnitCostKgs: number;
+      created: boolean;
+    }> = [];
+
+    for (const line of receiveLines) {
+      const existingMovement = await tx.stockMovement.findFirst({
+        where: {
+          referenceType: 'DISTRIBUTION_FIFO_ALLOCATION',
+          referenceId: line.allocationId,
+          productId: input.branchProductId,
+          warehouseId: input.branchWarehouseId,
+          type: StockMovementType.IN,
+        },
+        select: { id: true },
+      });
+      if (existingMovement) {
+        const existingBatch = await tx.fifoInventoryBatch.findFirst({
+          where: { stockMovementId: existingMovement.id },
+          select: { id: true },
+        });
+        layers.push({
+          allocationId: line.allocationId,
+          hqFifoLayerId: line.hqFifoLayerId,
+          branchFifoLayerId: existingBatch?.id ?? existingMovement.id,
+          quantity: line.quantity,
+          transferUnitCostKgs: line.transferUnitCostKgs,
+          transportCostPerUnit: line.transportCostPerUnit,
+          finalBranchUnitCostKgs: line.finalBranchUnitCostKgs,
+          created: false,
+        });
+        continue;
+      }
+
+      const totalCostKgs = roundMoney(line.quantity * line.finalBranchUnitCostKgs);
+      const movement = await input.createMovement({
+        quantity: line.quantity,
+        unitCostKgs: line.finalBranchUnitCostKgs,
+        totalCostKgs,
+        referenceType: 'DISTRIBUTION_FIFO_ALLOCATION',
+        referenceId: line.allocationId,
+        note: input.receivingNote,
+      });
+
+      const fifoBatch = await this.ensureBranchFifoBatchFromMovementInTx(tx, {
+        id: movement.id,
+        productId: movement.productId,
+        warehouseId: movement.warehouseId,
+        quantity: line.quantity,
+        unitCostKgs: line.finalBranchUnitCostKgs,
+        totalCostKgs,
+        createdAt: movement.createdAt,
+        referenceType: 'HQ_FIFO_LAYER',
+        referenceId: line.hqFifoLayerId,
+      });
+
+      layers.push({
+        allocationId: line.allocationId,
+        hqFifoLayerId: line.hqFifoLayerId,
+        branchFifoLayerId: fifoBatch.batchId,
+        quantity: line.quantity,
+        transferUnitCostKgs: line.transferUnitCostKgs,
+        transportCostPerUnit: line.transportCostPerUnit,
+        finalBranchUnitCostKgs: line.finalBranchUnitCostKgs,
+        created: fifoBatch.created,
+      });
+    }
+
+    return { layers, usedAllocations: true };
   }
 }

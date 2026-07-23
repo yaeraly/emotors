@@ -1224,53 +1224,107 @@ export class DistributionService {
           const branchProductId = resolved.productId;
 
           if (acceptedQuantity > 0) {
-            const existingMovement = await tx.stockMovement.findFirst({
-              where: {
-                referenceType: 'GOODS_RECEIVING_ITEM',
-                referenceId: orderItem.id,
-                productId: branchProductId,
-                warehouseId: warehouse.id,
-                type: StockMovementType.IN,
-                status: StockMovementStatus.ACTIVE,
+            const transportCostPerUnit = transportCost?.transportCostPerUnit ?? 0;
+            const receivingNote = `Receiving ${receiving.receivingNumber}`;
+
+            const fifoLayers = await this.pricingFifoService.ensureBranchFifoLayersFromHqAllocationsInTx(
+              tx,
+              {
+                distributionOrderItemId: orderItem.id,
+                branchProductId,
+                branchWarehouseId: warehouse.id,
+                acceptedQuantity,
+                transportCostPerUnit,
+                receivingNote,
+                createMovement: async (line) =>
+                  this.inventoryService.createStockMovementInTx(
+                    tx,
+                    user,
+                    {
+                      productId: branchProductId,
+                      warehouseId: warehouse.id,
+                      type: StockMovementType.IN,
+                      quantity: line.quantity,
+                      unitCostKgs: line.unitCostKgs,
+                      totalCostKgs: line.totalCostKgs,
+                      referenceType: line.referenceType,
+                      referenceId: line.referenceId,
+                      note: line.note,
+                    },
+                    { branchReceiving: true, branchId: order.branchId },
+                  ),
               },
-            });
-            if (existingMovement) {
-              throw new BadRequestException('This shipment item has already been received');
+            );
+
+            if (!fifoLayers.usedAllocations) {
+              const existingMovement = await tx.stockMovement.findFirst({
+                where: {
+                  referenceType: 'GOODS_RECEIVING_ITEM',
+                  referenceId: orderItem.id,
+                  productId: branchProductId,
+                  warehouseId: warehouse.id,
+                  type: StockMovementType.IN,
+                  status: StockMovementStatus.ACTIVE,
+                },
+              });
+              if (existingMovement) {
+                throw new BadRequestException('This shipment item has already been received');
+              }
+
+              const unitCostWithTransport = transportCost?.finalUnitCostKgs ?? Number(orderItem.unitCost);
+              const movement = await this.inventoryService.createStockMovementInTx(
+                tx,
+                user,
+                {
+                  productId: branchProductId,
+                  warehouseId: warehouse.id,
+                  type: StockMovementType.IN,
+                  quantity: acceptedQuantity,
+                  unitCostKgs: unitCostWithTransport,
+                  referenceType: 'GOODS_RECEIVING_ITEM',
+                  referenceId: orderItem.id,
+                  note: receivingNote,
+                },
+                { branchReceiving: true, branchId: order.branchId },
+              );
+              const fifoBatch = await this.pricingFifoService.ensureBranchFifoBatchFromMovementInTx(
+                tx,
+                movement,
+              );
+              fifoLayers.layers.push({
+                allocationId: orderItem.id,
+                hqFifoLayerId: '',
+                branchFifoLayerId: fifoBatch.batchId,
+                quantity: acceptedQuantity,
+                transferUnitCostKgs: Number(orderItem.unitCost),
+                transportCostPerUnit,
+                finalBranchUnitCostKgs: unitCostWithTransport,
+                created: fifoBatch.created,
+              });
             }
 
-            const movement = await this.inventoryService.createStockMovementInTx(
-              tx,
-              user,
-              {
-                productId: branchProductId,
-                warehouseId: warehouse.id,
-                type: StockMovementType.IN,
-                quantity: acceptedQuantity,
-                unitCostKgs: unitCostWithTransport,
-                referenceType: 'GOODS_RECEIVING_ITEM',
-                referenceId: orderItem.id,
-                note: `Receiving ${receiving.receivingNumber}`,
-              },
-              { branchReceiving: true, branchId: order.branchId },
-            );
-            const fifoBatch = await this.pricingFifoService.ensureBranchFifoBatchFromMovementInTx(tx, movement);
             await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_RECEIVED', order, {
               shipmentItemId: orderItem.id,
               productId: branchProductId,
-              stockMovementId: movement.id,
               acceptedQuantity,
               warehouseId: warehouse.id,
               sourceWarehouseId: order.sourceWarehouseId,
               destinationWarehouseId: warehouse.id,
               dispatchedQuantity: sentQuantity,
+              fifoLayerCount: fifoLayers.layers.length,
             });
-            await this.auditTransfer(tx, user, 'BRANCH_FIFO_LAYER_CREATED', order, {
-              shipmentItemId: orderItem.id,
-              productId: branchProductId,
-              stockMovementId: movement.id,
-              fifoLayerId: fifoBatch.batchId,
-              acceptedQuantity,
-            });
+            for (const layer of fifoLayers.layers) {
+              await this.auditTransfer(tx, user, 'BRANCH_FIFO_LAYER_CREATED', order, {
+                shipmentItemId: orderItem.id,
+                productId: branchProductId,
+                fifoLayerId: layer.branchFifoLayerId,
+                sourceHqFifoLayerId: layer.hqFifoLayerId || undefined,
+                acceptedQuantity: layer.quantity,
+                transferUnitCostKgs: layer.transferUnitCostKgs,
+                allocatedDeliveryCostKgs: this.roundMoney(layer.transportCostPerUnit * layer.quantity),
+                finalBranchUnitCostKgs: layer.finalBranchUnitCostKgs,
+              });
+            }
           }
 
           receivingItems.push({
