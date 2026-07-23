@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PopupFilterButton } from '@/components/PopupFilterButton';
-import { apiFetch, API_URL, getToken } from '@/lib/api';
-import { canCreateProcurementOrder, canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
+import { apiFetch, API_URL } from '@/lib/api';
+import { canReceiveProcurementToHq, hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -349,8 +349,6 @@ function ChinaReceivingEditableView({
   const router = useRouter();
   const [error, setError] = useState('');
   const [cargoReceiptError, setCargoReceiptError] = useState('');
-  const [highlightCargoAttachment, setHighlightCargoAttachment] = useState(false);
-  const [uploadingCargoReceipt, setUploadingCargoReceipt] = useState(false);
   const [loading, setLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [showLoginPrompt, setShowLoginPrompt] = useState(false);
@@ -380,14 +378,12 @@ function ChinaReceivingEditableView({
   const readOnly = Boolean(task.readOnly) || !canReceiveProcurementToHq(user);
   const canEdit = canReceiveProcurementToHq(user) && !readOnly;
   const isCeo = hasFullAccess(user);
-  const canUploadCargoReceipt = canCreateProcurementOrder(user) || canReceiveProcurementToHq(user);
   const cargoAttachments = task.cargoAttachments ?? task.documents?.photos ?? [];
   const hasCargoReceiptAttachment = cargoAttachments.length > 0 || (task.cargoAttachmentCount ?? 0) > 0;
 
   useEffect(() => {
     if (hasCargoReceiptAttachment) {
       setCargoReceiptError('');
-      setHighlightCargoAttachment(false);
     }
   }, [hasCargoReceiptAttachment]);
 
@@ -490,41 +486,10 @@ function ChinaReceivingEditableView({
     return message;
   }
 
-  async function uploadCargoReceipt(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file || !canUploadCargoReceipt) return;
-    const token = getToken();
-    if (!token) return;
-    setUploadingCargoReceipt(true);
-    setError('');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await fetch(`${API_URL}/procurement/orders/${task.id}/attachments/cargo-receipt`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}));
-        throw new Error(payload.message || t('common.error'));
-      }
-      setCargoReceiptError('');
-      setHighlightCargoAttachment(false);
-      await onReload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setUploadingCargoReceipt(false);
-    }
-  }
-
   async function receiveToHq() {
     if (!canEdit || !allSaved) return;
     if (!hasCargoReceiptAttachment) {
       setCargoReceiptError(t('chinaReceiving.cargoReceiptRequired'));
-      setHighlightCargoAttachment(true);
       setError('');
       return;
     }
@@ -561,7 +526,6 @@ function ChinaReceivingEditableView({
       const friendly = resolveReceiveErrorMessage(message);
       if (friendly === t('chinaReceiving.cargoReceiptRequired')) {
         setCargoReceiptError(friendly);
-        setHighlightCargoAttachment(true);
         setError('');
       } else {
         setError(friendly);
@@ -739,25 +703,24 @@ function ChinaReceivingEditableView({
 
       <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
-          <thead className="bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500">
+          <thead className="bg-slate-50 text-left font-bold text-slate-500">
             <tr>
-              <th className="px-2 py-2" title={t('chinaReceiving.col.product')}>{t('chinaReceiving.col.productShort')}</th>
-              <th className="w-14 px-2 py-2" title={t('chinaReceiving.expectedQty')}>{t('chinaReceiving.col.expectedShort')}</th>
-              <th className="w-16 px-2 py-2" title={t('chinaReceiving.actualQty')}>{t('chinaReceiving.col.actualShort')}</th>
-              <th className="w-14 px-2 py-2" title={t('chinaReceiving.damagedQty')}>{t('chinaReceiving.col.damagedShort')}</th>
-              <th className="w-16 px-2 py-2" title={t('chinaReceiving.unitWeightKg')}>{t('chinaReceiving.col.weightShort')}</th>
-              <th className="w-12 px-2 py-2" title={t('chinaReceiving.summary.shortage')}>{t('chinaReceiving.col.shortageShort')}</th>
-              <th className="w-12 px-2 py-2" title={t('chinaReceiving.summary.overage')}>{t('chinaReceiving.col.overageShort')}</th>
-              <th className="w-28 px-2 py-2" title={t('chinaReceiving.notes')}>{t('chinaReceiving.col.notesShort')}</th>
+              <th className="px-2 py-2">{t('chinaReceiving.col.product')}</th>
+              <th className="px-2 py-2">{t('chinaReceiving.col.expectedShort')}</th>
+              <th className="px-2 py-2">{t('chinaReceiving.col.actualShort')}</th>
+              <th className="px-2 py-2">{t('chinaReceiving.col.damagedShort')}</th>
+              <th className="px-2 py-2">{t('chinaReceiving.col.shortageShort')}</th>
+              <th className="px-2 py-2">{t('chinaReceiving.col.overageShort')}</th>
+              <th className="px-2 py-2">{t('chinaReceiving.col.notesShort')}</th>
               {canEdit ? (
-                <th className="w-20 px-2 py-2" title={t('common.actions')}>{t('chinaReceiving.col.actionsShort')}</th>
+                <th className="w-24 px-2 py-2">{t('chinaReceiving.col.actionsShort')}</th>
               ) : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filteredLineItems.length === 0 ? (
               <tr>
-                <td colSpan={canEdit ? 9 : 8} className="px-4 py-8 text-center text-sm text-slate-500">
+                <td colSpan={canEdit ? 8 : 7} className="px-4 py-8 text-center text-sm text-slate-500">
                   {t('chinaReceiving.noFilteredProducts')}
                 </td>
               </tr>
@@ -772,8 +735,6 @@ function ChinaReceivingEditableView({
               const rowStatus = row?.rowStatus ?? 'IN_PROGRESS';
               const bg = row ? rowBackgroundClass(rowStatus, row.saveState, row.isDirty) : '';
               const noteValue = row?.note ?? '';
-              const needsWeight = row?.needsWeightEntry ?? item.needsWeightEntry;
-              const unitWeight = row?.unitWeightKg ?? (item.unitWeightKg != null ? String(item.unitWeightKg) : '');
               return (
                 <tr key={item.id} className={bg}>
                   <td className="px-2 py-2">
@@ -790,7 +751,7 @@ function ChinaReceivingEditableView({
                         value={row?.actualQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'actualQuantity', e.target.value)}
                         className="w-full rounded border border-slate-300 px-1.5 py-1 text-center"
-                        title={t('chinaReceiving.actualQty')}
+                        title={t('chinaReceiving.col.actualShort')}
                       />
                     ) : (
                       <span className="block text-center">{actual}</span>
@@ -804,26 +765,10 @@ function ChinaReceivingEditableView({
                         value={row?.damagedQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'damagedQuantity', e.target.value)}
                         className={`w-full rounded border px-1.5 py-1 text-center ${damaged > 0 ? 'border-orange-300 bg-orange-50 text-orange-800' : 'border-slate-300'}`}
-                        title={t('chinaReceiving.damagedQty')}
+                        title={t('chinaReceiving.col.damagedShort')}
                       />
                     ) : (
                       <span className={`block text-center ${damaged > 0 ? 'font-semibold text-orange-700' : ''}`}>{damaged}</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-2">
-                    {canEdit && needsWeight ? (
-                      <input
-                        type="number"
-                        min={0}
-                        step="0.001"
-                        value={unitWeight}
-                        onChange={(e) => updateRow(item.id, 'unitWeightKg', e.target.value)}
-                        className="w-full rounded border border-amber-300 bg-amber-50 px-1.5 py-1 text-center"
-                        title={t('chinaReceiving.unitWeightKg')}
-                        placeholder="кг"
-                      />
-                    ) : (
-                      <span className="block text-center">{unitWeight || '-'}</span>
                     )}
                   </td>
                   <td className="px-2 py-2 text-center font-semibold text-red-600">
@@ -838,7 +783,7 @@ function ChinaReceivingEditableView({
                         value={noteValue}
                         onChange={(e) => updateRow(item.id, 'note', e.target.value)}
                         className="w-full rounded border border-slate-300 px-1.5 py-1"
-                        title={noteValue || t('chinaReceiving.notes')}
+                        title={noteValue || t('chinaReceiving.col.notesShort')}
                         placeholder={t('chinaReceiving.col.notesShort')}
                       />
                     ) : (
@@ -872,61 +817,11 @@ function ChinaReceivingEditableView({
               {t('chinaReceiving.unsavedBlock').replace('{count}', String(unsavedCount))}
             </p>
           ) : null}
-          <section
-            className={`w-full rounded-2xl border p-4 shadow-sm ${
-              highlightCargoAttachment || cargoReceiptError
-                ? 'border-red-400 bg-red-50'
-                : 'border-slate-200 bg-white'
-            }`}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-bold text-slate-950">{t('chinaReceiving.cargoReceiptSection')}</h3>
-                <p className="mt-1 text-xs text-slate-500">{t('chinaReceiving.cargoReceiptHint')}</p>
-              </div>
-              {canUploadCargoReceipt ? (
-                <label className={`cursor-pointer rounded-xl border px-4 py-2 text-sm font-semibold ${
-                  highlightCargoAttachment || cargoReceiptError
-                    ? 'border-red-300 bg-white text-red-700'
-                    : 'border-blue-200 text-blue-700'
-                }`}>
-                  {uploadingCargoReceipt ? t('common.loading') : t('procurement.payments.attachCargoReceipt')}
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.jpg,.jpeg,.png,.webp"
-                    disabled={uploadingCargoReceipt}
-                    onChange={(e) => void uploadCargoReceipt(e)}
-                  />
-                </label>
-              ) : null}
-            </div>
-            {cargoAttachments.length ? (
-              <ul className="mt-3 space-y-2">
-                {cargoAttachments.map((attachment) => (
-                  <li key={attachment.id}>
-                    <a
-                      href={`${API_URL}${attachment.fileUrl}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-sm font-semibold text-blue-700"
-                    >
-                      {attachment.fileName}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className={`mt-3 text-sm ${cargoReceiptError ? 'font-semibold text-red-700' : 'text-slate-500'}`}>
-                {t('procurement.payments.noCargoAttachments')}
-              </p>
-            )}
-            {cargoReceiptError ? (
-              <p className="mt-3 rounded-xl bg-red-100 px-4 py-3 text-sm font-semibold text-red-800">
-                {cargoReceiptError}
-              </p>
-            ) : null}
-          </section>
+          {cargoReceiptError ? (
+            <p className="w-full rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-800">
+              {cargoReceiptError}
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={loading || !allSaved}
