@@ -22,6 +22,8 @@
     "product-code:migrate:apply": "ts-node prisma/scripts/product-code-migration.ts apply",
     "test": "node --import tsx --test src/**/*.test.ts",
     "test:receiving": "node --import tsx --test src/distribution/branch-receiving.integration.test.ts",
+    "audit:hq-fifo": "tsx scripts/audit-hq-fifo-inventory.ts",
+    "repair:hq-fifo-from-receipts": "tsx scripts/repair-hq-fifo-from-receipts.ts",
     "typecheck": "tsc --noEmit -p tsconfig.build.json"
   },
   "dependencies": {

@@ -28,6 +28,24 @@ export type BranchPricingConfig = {
   hqToBranchMarkupPercent: number;
 };
 
+export type OldestActiveHqFifoCostInput =
+  | string
+  | {
+      productId: string;
+      warehouseId?: string;
+      /** Branch scope when organization/tenant is modeled via branch. */
+      branchId?: string;
+    };
+
+export type OldestActiveHqFifoCostResult = {
+  costPriceKgs: number;
+  available: boolean;
+  source: 'HQ_FIFO_ACTIVE_LAYER' | 'NO_FIFO_LAYER';
+  batchId: string | null;
+  receivedAt: Date | null;
+  warehouseId?: string | null;
+};
+
 type FifoPreviewLine = {
   batchId: string;
   quantity: number;
@@ -219,8 +237,11 @@ export class PricingFifoService {
    *
    * Alias: `getOldestActiveHqFifoCost` — use in catalog, franchise sales, HQ warehouse, branch orders.
    */
-  async getOldestActiveHqFifoCost(productId: string, tx?: PrismaTx) {
-    return this.getLatestHqCostPrice(productId, tx);
+  async getOldestActiveHqFifoCost(
+    input: OldestActiveHqFifoCostInput,
+    tx?: PrismaTx,
+  ): Promise<OldestActiveHqFifoCostResult> {
+    return this.getLatestHqCostPrice(input, tx);
   }
 
   /**
@@ -228,7 +249,13 @@ export class PricingFifoService {
    * `syncFifoBatchesFromHqStockMovements` once before looping — syncing here
    * per product previously caused franchise-sales timeouts (empty UI).
    */
-  async getLatestHqCostPrice(productId: string, tx?: PrismaTx) {
+  async getLatestHqCostPrice(
+    input: OldestActiveHqFifoCostInput,
+    tx?: PrismaTx,
+  ): Promise<OldestActiveHqFifoCostResult> {
+    const productId = typeof input === 'string' ? input : input.productId;
+    const warehouseId = typeof input === 'string' ? undefined : input.warehouseId;
+    const branchId = typeof input === 'string' ? undefined : input.branchId;
     const client = tx ?? this.prisma;
 
     const productIds = await this.resolveHqFifoProductIds(client, productId);
@@ -236,7 +263,13 @@ export class PricingFifoService {
       where: {
         productId: { in: productIds },
         remainingQuantity: { gt: 0 },
-        warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
+        ...(warehouseId ? { warehouseId } : {}),
+        warehouse: {
+          warehouseType: WarehouseType.HQ,
+          deletedAt: null,
+          isActive: true,
+          ...(branchId ? { branchId } : {}),
+        },
       },
       orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
@@ -318,6 +351,7 @@ export class PricingFifoService {
           source: 'HQ_FIFO_ACTIVE_LAYER',
           batchId: batch.id,
           receivedAt: batch.receivedAt,
+          warehouseId: batch.warehouseId,
         };
       }
     }
@@ -329,6 +363,7 @@ export class PricingFifoService {
       source: 'NO_FIFO_LAYER',
       batchId: null,
       receivedAt: null,
+      warehouseId: warehouseId ?? null,
     };
   }
 
