@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
+import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
 import type { User } from '@/lib/types';
 import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
@@ -18,100 +19,126 @@ import { useTranslation } from '@/i18n/useTranslation';
 type ProtectedShellProps = {
   children: ReactNode;
 };
+
+function resolvePathAccess(currentUser: User, pathname: string): {
+  forbidden: boolean;
+  forbiddenReason: 'procurement' | null;
+  redirectTo: string | null;
+  auditForbidden: boolean;
+} {
+  if (currentUser.mustChangePassword && pathname !== '/change-password') {
+    return { forbidden: false, forbiddenReason: null, redirectTo: '/change-password', auditForbidden: false };
+  }
+
+  if (canAccessPath(currentUser, pathname)) {
+    return { forbidden: false, forbiddenReason: null, redirectTo: null, auditForbidden: false };
+  }
+
+  if (isWarehouseManagerUser(currentUser) && isWarehouseManagerForbiddenPath(pathname)) {
+    return { forbidden: true, forbiddenReason: null, redirectTo: null, auditForbidden: false };
+  }
+  if (isBranchSalesManagerUser(currentUser) && isBranchSalesManagerForbiddenPath(pathname)) {
+    return { forbidden: true, forbiddenReason: null, redirectTo: null, auditForbidden: true };
+  }
+  if (isBranchWarehouseOperator(currentUser) && isBranchWarehouseOperatorForbiddenPath(pathname)) {
+    return { forbidden: true, forbiddenReason: null, redirectTo: null, auditForbidden: true };
+  }
+  if (isBranchCashierUser(currentUser) && isBranchCashierForbiddenPath(pathname)) {
+    return { forbidden: true, forbiddenReason: null, redirectTo: null, auditForbidden: true };
+  }
+  if (isBranchAccountantUser(currentUser) && isBranchAccountantForbiddenPath(pathname)) {
+    return { forbidden: true, forbiddenReason: null, redirectTo: null, auditForbidden: true };
+  }
+  if (isBranchOwnerUser(currentUser) && isBranchOwnerForbiddenPath(pathname)) {
+    return {
+      forbidden: true,
+      forbiddenReason: isBranchOwnerProcurementForbiddenPath(pathname) ? 'procurement' : null,
+      redirectTo: null,
+      auditForbidden: true,
+    };
+  }
+
+  return {
+    forbidden: false,
+    forbiddenReason: null,
+    redirectTo: getDefaultRouteForUser(currentUser),
+    auditForbidden: false,
+  };
+}
+
 export function ProtectedShell({ children }: ProtectedShellProps) {
   const router = useRouter();
   const pathname = usePathname();
   const { t } = useTranslation();
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(() => getCachedUser());
+  const [loading, setLoading] = useState(() => !getCachedUser());
   const [forbidden, setForbidden] = useState(false);
   const [forbiddenReason, setForbiddenReason] = useState<'procurement' | null>(null);
 
+  // Load session user once per browser session (cached). Never block navigation remounts on /auth/me.
   useEffect(() => {
     if (!getToken()) {
       router.replace('/login');
       return;
     }
 
-    setLoading(true);
+    let cancelled = false;
+    const hasCache = Boolean(getCachedUser());
+    if (!hasCache) {
+      setLoading(true);
+    }
+
+    fetchCurrentUser()
+      .then((currentUser) => {
+        if (cancelled) return;
+        setUser(currentUser);
+      })
+      .catch(() => {
+        if (!cancelled) router.replace('/login');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  // Path access checks are sync against the cached user — do not remount the shell via loading.
+  useEffect(() => {
+    if (!user) return;
+
     setForbidden(false);
     setForbiddenReason(null);
 
-    apiFetch<User>('/auth/me')
-      .then((currentUser) => {
-        if (currentUser.mustChangePassword && pathname !== '/change-password') {
-          router.replace('/change-password');
-          return;
-        }
-        if (!canAccessPath(currentUser, pathname)) {
-          if (isWarehouseManagerUser(currentUser) && isWarehouseManagerForbiddenPath(pathname)) {
-            setUser(currentUser);
-            setForbidden(true);
-            return;
-          }
-          if (isBranchSalesManagerUser(currentUser) && isBranchSalesManagerForbiddenPath(pathname)) {
-            void apiFetch('/audit/forbidden-route', {
-              method: 'POST',
-              body: JSON.stringify({ pathname }),
-            }).catch(() => null);
-            setUser(currentUser);
-            setForbidden(true);
-            return;
-          }
-          if (isBranchWarehouseOperator(currentUser) && isBranchWarehouseOperatorForbiddenPath(pathname)) {
-            void apiFetch('/audit/forbidden-route', {
-              method: 'POST',
-              body: JSON.stringify({ pathname }),
-            }).catch(() => null);
-            setUser(currentUser);
-            setForbidden(true);
-            return;
-          }
-          if (isBranchCashierUser(currentUser) && isBranchCashierForbiddenPath(pathname)) {
-            void apiFetch('/audit/forbidden-route', {
-              method: 'POST',
-              body: JSON.stringify({ pathname }),
-            }).catch(() => null);
-            setUser(currentUser);
-            setForbidden(true);
-            return;
-          }
-          if (isBranchAccountantUser(currentUser) && isBranchAccountantForbiddenPath(pathname)) {
-            void apiFetch('/audit/forbidden-route', {
-              method: 'POST',
-              body: JSON.stringify({ pathname }),
-            }).catch(() => null);
-            setUser(currentUser);
-            setForbidden(true);
-            return;
-          }
-          if (isBranchOwnerUser(currentUser) && isBranchOwnerForbiddenPath(pathname)) {
-            void apiFetch('/audit/forbidden-route', {
-              method: 'POST',
-              body: JSON.stringify({ pathname }),
-            }).catch(() => null);
-            setUser(currentUser);
-            setForbiddenReason(isBranchOwnerProcurementForbiddenPath(pathname) ? 'procurement' : null);
-            setForbidden(true);
-            return;
-          }
-          router.replace(getDefaultRouteForUser(currentUser));
-          return;
-        }
-        setForbidden(false);
-        setUser(currentUser);
-        if (
-          isBranchSalesManagerUser(currentUser) &&
-          typeof window !== 'undefined' &&
-          !window.sessionStorage.getItem('bsm-menu-audit')
-        ) {
-          window.sessionStorage.setItem('bsm-menu-audit', '1');
-          void apiFetch('/audit/branch-sales-manager-menu', { method: 'POST' }).catch(() => null);
-        }
-      })
-      .catch(() => router.replace('/login'))
-      .finally(() => setLoading(false));
-  }, [pathname, router]);
+    const access = resolvePathAccess(user, pathname);
+    if (access.redirectTo) {
+      router.replace(access.redirectTo);
+      return;
+    }
+    if (access.forbidden) {
+      if (access.auditForbidden) {
+        void apiFetch('/audit/forbidden-route', {
+          method: 'POST',
+          body: JSON.stringify({ pathname }),
+        }).catch(() => null);
+      }
+      setForbiddenReason(access.forbiddenReason);
+      setForbidden(true);
+      return;
+    }
+
+    setForbidden(false);
+    if (
+      isBranchSalesManagerUser(user) &&
+      typeof window !== 'undefined' &&
+      !window.sessionStorage.getItem('bsm-menu-audit')
+    ) {
+      window.sessionStorage.setItem('bsm-menu-audit', '1');
+      void apiFetch('/audit/branch-sales-manager-menu', { method: 'POST' }).catch(() => null);
+    }
+  }, [user, pathname, router]);
 
   async function logout() {
     await apiFetch('/auth/logout', { method: 'POST' }).catch(() => null);
@@ -119,7 +146,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
     router.replace('/login');
   }
 
-  if (loading) {
+  if (loading || !user) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 text-slate-600">
         {t('common.loading')}
@@ -190,7 +217,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               <h1 className="text-xl font-bold text-slate-950">{t('app.name')}</h1>
             </div>
             <div className="flex items-center gap-4">
-              <NotificationBell />
+              <NotificationBell user={user} />
               <LanguageSwitcher />
               <button onClick={logout} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" type="button">
                 {t('common.logout')}
@@ -218,12 +245,12 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             </h1>
           </div>
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationBell user={user} />
             <LanguageSwitcher />
             <div className="text-right text-sm">
-              <p className="font-semibold text-slate-900">{user?.fullName}</p>
+              <p className="font-semibold text-slate-900">{user.fullName}</p>
               <p className="text-slate-500">
-                {roleLabel} · {user?.branch?.name ?? 'HQ'}
+                {roleLabel} · {user.branch?.name ?? 'HQ'}
               </p>
             </div>
             <button

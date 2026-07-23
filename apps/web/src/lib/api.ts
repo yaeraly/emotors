@@ -1,3 +1,5 @@
+import { clearCachedUser } from '@/lib/current-user-cache';
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const TOKEN_KEY = 'emotors_access_token';
 
@@ -15,6 +17,7 @@ export function setToken(token: string) {
 
 export function clearToken() {
   window.localStorage.removeItem(TOKEN_KEY);
+  clearCachedUser();
 }
 
 export function clearAuthState() {

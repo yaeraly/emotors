@@ -2,9 +2,9 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch, getToken, login, setToken } from '@/lib/api';
+import { getToken, login, setToken } from '@/lib/api';
+import { fetchCurrentUser, setCachedUser } from '@/lib/current-user';
 import { getDefaultRouteForUser } from '@/lib/rbac';
-import type { User } from '@/lib/types';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -18,7 +18,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (getToken()) {
-      apiFetch<User>('/auth/me')
+      fetchCurrentUser()
         .then((user) => router.replace(user.mustChangePassword ? '/change-password' : getDefaultRouteForUser(user)))
         .catch(() => router.replace('/login'));
     }
@@ -32,6 +32,7 @@ export default function LoginPage() {
     try {
       const response = await login(email, password);
       setToken(response.accessToken);
+      setCachedUser(response.user);
       router.replace(response.user.mustChangePassword ? '/change-password' : getDefaultRouteForUser(response.user));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('auth.invalidCredentials'));

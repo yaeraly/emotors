@@ -7,7 +7,7 @@ import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import { useTranslation } from '@/i18n/useTranslation';
 import { financeRootHrefForUser, visibleFinanceNavSections } from '@/lib/finance-nav';
-import { apiFetch } from '@/lib/api';
+import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
 import type { User } from '@/lib/types';
 import { useEffect, useState } from 'react';
 
@@ -34,10 +34,10 @@ export function FinanceLayout({
   children,
 }: FinanceLayoutProps) {
   const { t } = useTranslation();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => getCachedUser());
 
   useEffect(() => {
-    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
+    void fetchCurrentUser().then(setUser).catch(() => setUser(null));
   }, []);
 
   const mainNav = visibleFinanceNavSections(user);

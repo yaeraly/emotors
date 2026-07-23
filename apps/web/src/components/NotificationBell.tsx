@@ -8,24 +8,42 @@ import { hasFullAccess } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
-export function NotificationBell() {
+type NotificationBellProps = {
+  user?: User | null;
+};
+
+export function NotificationBell({ user = null }: NotificationBellProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [alerts, setAlerts] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(user);
   const containerRef = useRef<HTMLDivElement>(null);
+  const userRef = useRef<User | null>(user);
+  const currentUserRef = useRef<User | null>(user);
+
+  useEffect(() => {
+    userRef.current = user;
+    if (user) {
+      setCurrentUser(user);
+      currentUserRef.current = user;
+    }
+  }, [user]);
 
   async function loadAlerts() {
     try {
-      const [result, count, me] = await Promise.all([
+      const [result, count] = await Promise.all([
         apiFetch<NotificationItem[]>('/alerts'),
         apiFetch<number>('/alerts/unread-count'),
-        apiFetch<User>('/auth/me'),
       ]);
       setAlerts(result.slice(0, 20));
       setUnreadCount(count);
-      setCurrentUser(me);
+      // Prefer shell-provided session user; only fetch /auth/me as a fallback.
+      if (!userRef.current && !currentUserRef.current) {
+        const me = await apiFetch<User>('/auth/me');
+        currentUserRef.current = me;
+        setCurrentUser(me);
+      }
     } catch {
       setAlerts([]);
       setUnreadCount(0);
