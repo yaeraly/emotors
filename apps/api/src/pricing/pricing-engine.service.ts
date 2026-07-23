@@ -331,6 +331,7 @@ export class PricingEngineService {
 
   async explainPrice(input: PricingEngineResolveInput): Promise<PriceExplanationResult> {
     const priceType = input.priceType ?? PricingEnginePriceType.BRANCH_PURCHASE;
+    await this.fifoService.syncFifoBatchesFromHqStockMovements();
     const result = await this.resolvePrice(input);
     const currency = await this.settingsService.getCurrency().catch(() => 'KGS');
     return buildPriceExplanation(result, {
