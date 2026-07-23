@@ -200,6 +200,16 @@ export class PricingFifoService {
    * the active FIFO layer.
    */
   /**
+   * Shared resolver: oldest active HQ FIFO unit landed cost.
+   * Never InventoryBalance.averageCostKgs, Product.costPriceKgs, or weighted averages.
+   *
+   * Alias: `getOldestActiveHqFifoCost` — use in catalog, franchise sales, HQ warehouse, branch orders.
+   */
+  async getOldestActiveHqFifoCost(productId: string, tx?: PrismaTx) {
+    return this.getLatestHqCostPrice(productId, tx);
+  }
+
+  /**
    * Does not sync FIFO layers. Callers that list many products must call
    * `syncFifoBatchesFromHqStockMovements` once before looping — syncing here
    * per product previously caused franchise-sales timeouts (empty UI).

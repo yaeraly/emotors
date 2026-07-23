@@ -448,7 +448,7 @@ export class HqWarehouseService {
     });
     return Promise.all(
       balances.map(async (balance) => {
-        const fifoCost = await this.pricingFifoService.getLatestHqCostPrice(balance.productId);
+        const fifoCost = await this.pricingFifoService.getOldestActiveHqFifoCost(balance.productId);
         const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
         const unitLandedCostKgs = costAvailable ? fifoCost.costPriceKgs : null;
         const row = {

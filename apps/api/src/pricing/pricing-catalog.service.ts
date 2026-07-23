@@ -447,7 +447,7 @@ export class PricingCatalogService {
 
     return Promise.all(
       products.map(async (product) => {
-        const fifoCost = await this.fifoService.getLatestHqCostPrice(product.id);
+        const fifoCost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
         const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
         // Missing FIFO → null (never present 0 as a real cost).
         const costPriceKgs = costAvailable ? fifoCost.costPriceKgs : null;

@@ -2570,7 +2570,7 @@ export class InventoryService {
    */
   private async toProductResponseWithFifoCost(product: any, user?: AuthUser) {
     const base = this.toProductResponse(product, user);
-    const cost = await this.pricingFifoService.getLatestHqCostPrice(product.id);
+    const cost = await this.pricingFifoService.getOldestActiveHqFifoCost(product.id);
     const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
     return {
       ...base,
