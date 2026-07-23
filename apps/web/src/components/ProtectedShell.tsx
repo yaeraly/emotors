@@ -6,7 +6,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isFranchiseDirectorUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
 import { sidebarFinanceNavClass, sidebarNavClass, sidebarPaymentsNavClass, sidebarShiftsNavClass } from '@/lib/nav-matching';
@@ -155,8 +155,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   }
 
   const canSeeCrm = hasPermission(user, 'crm.manage');
+  const franchiseDirectorView = isFranchiseDirectorUser(user);
   const canSeeSales = hasPermission(user, 'sales.manage');
-  const canSeeInventory = !isCeoUser(user) && (hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view') || canViewProductCatalog(user));
+  const canSeeInventory = !isCeoUser(user) && !franchiseDirectorView && (hasPermission(user, 'inventory.manage') || hasPermission(user, 'inventory.view') || canViewProductCatalog(user));
   const canManageInventory = hasPermission(user, 'inventory.manage');
   const canManageProducts = canManageProductCatalog(user);
   const canSeeService = hasPermission(user, 'service.manage');
@@ -169,13 +170,13 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const canSeeMarketing = hasPermission(user, 'marketing.manage');
   const canSeeProcurement = canViewProcurement(user);
   const canManageProcurementOrders = hasPermission(user, 'procurement.manage');
-  const canSeeDistribution = canViewDistributionMenu(user);
+  const canSeeDistribution = canViewDistributionMenu(user) && !franchiseDirectorView;
   const canManageDistribution = hasPermission(user, 'distribution.manage');
-  const canSeeFinance = hasPermission(user, 'finance.view');
+  const canSeeFinance = hasPermission(user, 'finance.view') && !franchiseDirectorView;
   const canSeeInvestment = hasFullAccess(user);
-  const canSeeExpansion = hasFullAccess(user);
-  const canSeeRoyalty = hasPermission(user, 'branches.manage');
-  const canSeeTax = hasPermission(user, 'finance.view');
+  const canSeeExpansion = hasFullAccess(user) || franchiseDirectorView;
+  const canSeeRoyalty = hasPermission(user, 'branches.manage') && !franchiseDirectorView;
+  const canSeeTax = hasPermission(user, 'finance.view') && !franchiseDirectorView;
   const canSeeAi = hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
   const canSeePayroll = hasPermission(user, 'payroll.manage');
   const canSeePayments = hasPermission(user, 'payments.manage');
@@ -367,6 +368,23 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                   <Link href="/hq-warehouses/china-receiving" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('chinaReceiving.title')}</Link>
                 ) : null}
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t(distributionModuleTitleKey(user))}</Link>
+              </>
+            ) : franchiseDirectorView ? (
+              <>
+                <Link href="/franchise-director" className={sidebarNavClass(pathname, '/franchise-director')}>{t('franchiseDirector.dashboard')}</Link>
+                <Link href="/franchise-director/branches" className={sidebarNavClass(pathname, '/franchise-director/branches')}>{t('franchiseDirector.branches')}</Link>
+                <Link href="/franchise-director/performance" className={sidebarNavClass(pathname, '/franchise-director/performance')}>{t('franchiseDirector.performance')}</Link>
+                <Link href="/franchise-director/monitoring" className={sidebarNavClass(pathname, '/franchise-director/monitoring')}>{t('franchiseDirector.monitoring')}</Link>
+                <Link href="/franchise-director/expansion" className={sidebarNavClass(pathname, '/franchise-director/expansion')}>{t('franchiseDirector.expansion')}</Link>
+                <Link href="/franchise-director/support" className={sidebarNavClass(pathname, '/franchise-director/support')}>{t('franchiseDirector.support')}</Link>
+                <Link href="/franchise-director/academy" className={sidebarNavClass(pathname, '/franchise-director/academy')}>{t('franchiseDirector.academy')}</Link>
+                <Link href="/franchise-director/marketing" className={sidebarNavClass(pathname, '/franchise-director/marketing')}>{t('franchiseDirector.marketing')}</Link>
+                <Link href="/franchise-director/supply" className={sidebarNavClass(pathname, '/franchise-director/supply')}>{t('franchiseDirector.supply')}</Link>
+                <Link href="/franchise-director/finance" className={sidebarNavClass(pathname, '/franchise-director/finance')}>{t('franchiseDirector.finance')}</Link>
+                <Link href="/franchise-director/reports" className={sidebarNavClass(pathname, '/franchise-director/reports')}>{t('franchiseDirector.reports')}</Link>
+                <Link href="/franchise-director/notifications" className={sidebarNavClass(pathname, '/franchise-director/notifications')}>{t('franchiseDirector.notifications')}</Link>
+                <Link href="/kpi" className={sidebarNavClass(pathname, '/kpi')}>{t('nav.kpi')}</Link>
+                <Link href="/academy" className={sidebarNavClass(pathname, '/academy')}>{t('nav.academy')}</Link>
               </>
             ) : branchWarehouseOperatorView ? (
               <>

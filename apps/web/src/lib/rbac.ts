@@ -31,7 +31,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSIONS],
   CEO: [...ALL_PERMISSIONS],
   SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
-  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view'],
+  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view', 'analytics.view'],
   FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
   WAREHOUSE_MANAGER: [
     'inventory.manage',
@@ -117,6 +117,30 @@ export function hasFullAccess(user: Pick<User, 'role' | 'roles'> | null | undefi
 
 export function isCeoUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   return hasFullAccess(user);
+}
+
+export function isFranchiseDirectorUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user) return false;
+  return hasRole(user, 'FRANCHISE_DIRECTOR') && !hasFullAccess(user);
+}
+
+const FRANCHISE_DIRECTOR_ALLOWED_PREFIXES = [
+  '/franchise-director',
+  '/kpi',
+  '/academy',
+  '/reports',
+  '/analytics',
+  '/ai',
+  '/expansion',
+  '/branches',
+  '/notifications',
+] as const;
+
+export function canFranchiseDirectorAccessPath(pathname: string) {
+  if (pathname === '/dashboard' || pathname === '/change-password') return true;
+  return FRANCHISE_DIRECTOR_ALLOWED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
 }
 
 export function canCreateServiceOrder(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
@@ -626,12 +650,13 @@ export function getDefaultRoute(role: Role) {
   if (role === 'PROCUREMENT_MANAGER') return '/procurement';
   if (role === 'ACADEMY_DIRECTOR' || role === 'ACADEMY_MANAGER') return '/academy';
   if (role === 'MARKETING_MANAGER' || role === 'CONTENT_CREATOR') return '/marketing';
-  if (role === 'FRANCHISE_DIRECTOR') return '/branches';
+  if (role === 'FRANCHISE_DIRECTOR') return '/franchise-director';
   return '/dashboard';
 }
 
 export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'>) {
   if (hasFullAccess(user)) return '/dashboard';
+  if (isFranchiseDirectorUser(user)) return '/franchise-director';
   if (isSupplyChainManagerUser(user)) return '/procurement';
   if (isHqSalesManagerUser(user)) return '/branch-purchase-requests';
   if (isHqCashierUser(user)) return '/distribution/invoices';
@@ -656,6 +681,9 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
 
 export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/change-password') return true;
+  if (isFranchiseDirectorUser(user)) {
+    return canFranchiseDirectorAccessPath(pathname);
+  }
   if (isBranchOwnerUser(user) && isBranchOwnerForbiddenPath(pathname)) {
     return false;
   }
@@ -796,9 +824,15 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname.startsWith('/analytics') || pathname.startsWith('/ai')) {
     return hasPermission(user, 'reports.view') || hasPermission(user, 'analytics.view');
   }
+  if (pathname.startsWith('/franchise-director')) {
+    return isFranchiseDirectorUser(user) || hasFullAccess(user) || hasPermission(user, 'branches.manage');
+  }
   if (pathname.startsWith('/academy')) return hasPermission(user, 'academy.manage');
   if (pathname.startsWith('/marketing')) return hasPermission(user, 'marketing.manage');
-  if (pathname.startsWith('/investment') || pathname.startsWith('/expansion')) return hasFullAccess(user);
+  if (pathname.startsWith('/investment')) return hasFullAccess(user);
+  if (pathname.startsWith('/expansion')) {
+    return hasFullAccess(user) || isFranchiseDirectorUser(user);
+  }
   if (pathname.startsWith('/royalty')) return hasPermission(user, 'branches.manage');
   return true;
 }

@@ -187,7 +187,7 @@ const rolePermissions: Record<string, string[]> = {
   CONTENT_CREATOR: ['marketing.manage'],
   ACADEMY_DIRECTOR: ['academy.manage'],
   ACADEMY_MANAGER: ['academy.manage'],
-  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view'],
+  FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view', 'analytics.view'],
   FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
   INVESTMENT_MANAGER: ['analytics.view'],
   EXPANSION_MANAGER: ['analytics.view'],

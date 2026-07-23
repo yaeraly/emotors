@@ -25,8 +25,8 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   DIFFERENCE_ACT_CREATED: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER, Role.HQ_SALES_MANAGER] },
   SHORTAGE_NEEDS_RESOLUTION: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER] },
   REPLACEMENT_GOODS_SHIPPED: { module: NotificationModule.DISTRIBUTION, roles: [Role.WAREHOUSE_OPERATOR] },
-  LOW_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER] },
-  OUT_OF_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER] },
+  LOW_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER, Role.FRANCHISE_DIRECTOR] },
+  OUT_OF_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER, Role.FRANCHISE_DIRECTOR] },
   SUPPLIER_PAYMENT_DUE: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
   SUPPLIER_PAYMENT_COMPLETED: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.CEO, Role.OWNER, Role.FINANCE_MANAGER] },
   SUPPLIER_INVOICE_SENT_TO_ACCOUNTANT: { module: NotificationModule.SUPPLIER_PAYMENT, roles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER] },
@@ -105,6 +105,13 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   FINANCE_PAYMENT_ACCEPTED: { module: NotificationModule.FINANCE, roles: [Role.ACCOUNTANT, Role.FRANCHISE_OWNER] },
   BRANCH_REQUEST_NO_PRICING_POLICY: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
   BRANCH_REQUEST_OUT_OF_STOCK: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.CEO, Role.OWNER] },
+  FRANCHISE_APPLICATION_NEW: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR, Role.CEO, Role.OWNER] },
+  FRANCHISE_KPI_BELOW_TARGET: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR, Role.CEO, Role.OWNER] },
+  FRANCHISE_BRANCH_INACTIVE: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR, Role.CEO, Role.OWNER] },
+  FRANCHISE_REPORT_MISSING: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR] },
+  FRANCHISE_TASK_OVERDUE: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR] },
+  FRANCHISE_CERTIFICATE_EXPIRED: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR, Role.ACADEMY_DIRECTOR, Role.ACADEMY_MANAGER] },
+  FRANCHISE_CRITICAL_SHORTAGE: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR, Role.SUPPLY_CHAIN_MANAGER] },
 };
 
 export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: string; message: string }>> = {
@@ -323,6 +330,34 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   FINANCE_PAYMENT_ACCEPTED: {
     title: 'Payment accepted',
     message: 'A customer payment was accepted.',
+  },
+  FRANCHISE_APPLICATION_NEW: {
+    title: 'New franchise application',
+    message: 'A new franchise lead was submitted.',
+  },
+  FRANCHISE_KPI_BELOW_TARGET: {
+    title: 'Branch KPI below target',
+    message: 'A franchise branch KPI is below target.',
+  },
+  FRANCHISE_BRANCH_INACTIVE: {
+    title: 'Branch inactive',
+    message: 'A franchise branch has no recent activity.',
+  },
+  FRANCHISE_REPORT_MISSING: {
+    title: 'Missing franchise report',
+    message: 'A required franchise report is overdue.',
+  },
+  FRANCHISE_TASK_OVERDUE: {
+    title: 'Franchise task overdue',
+    message: 'A franchise support task is overdue.',
+  },
+  FRANCHISE_CERTIFICATE_EXPIRED: {
+    title: 'Academy certificate expired',
+    message: 'An employee academy certificate has expired.',
+  },
+  FRANCHISE_CRITICAL_SHORTAGE: {
+    title: 'Critical franchise shortage',
+    message: 'A franchise branch has critical inventory shortages.',
   },
 };
 

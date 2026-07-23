@@ -31,6 +31,7 @@ import { SupplyChainModule } from './supply-chain/supply-chain.module';
 import { FinanceModule } from './finance/finance.module';
 import { TaxModule } from './tax/tax.module';
 import { UsersModule } from './users/users.module';
+import { FranchiseDirectorModule } from './franchise-director/franchise-director.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { UsersModule } from './users/users.module';
     HqWarehouseModule,
     BranchWarehouseModule,
     BranchCeoModule,
+    FranchiseDirectorModule,
     BranchAccountantModule,
     SalesModule,
     ServiceModule,
