@@ -58,3 +58,12 @@ export function sumConfirmedSupplierPaymentsKgs(
       .reduce((sum, payment) => sum + resolveSupplierPaymentKgs(payment), 0),
   );
 }
+
+export type GeneralInfoSupplierPaymentStatus = 'PAID' | 'UNPAID';
+
+/** General Info only: any recorded payment (including partial) counts as paid. */
+export function resolveGeneralInfoSupplierPaymentStatus(
+  paidAmountKgs: number,
+): GeneralInfoSupplierPaymentStatus {
+  return Number(paidAmountKgs) > 0 ? 'PAID' : 'UNPAID';
+}

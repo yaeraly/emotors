@@ -9,7 +9,7 @@ import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPa
 import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
 import { ProcurementSectionPayablePanel } from '@/components/ProcurementSectionPayablePanel';
-import { sumConfirmedSupplierPaymentsKgs } from '@/lib/supplier-payment-utils';
+import { resolveGeneralInfoSupplierPaymentStatus, sumConfirmedSupplierPaymentsKgs } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { buildHqReceivingValidationResult } from '@/lib/hq-receiving-validation';
@@ -526,6 +526,36 @@ function ProcurementOrderDetailPageContent() {
     return previewTotals.items.reduce((sum, item) => sum + item.costKgs * item.effectiveQuantity, 0);
   }, [previewTotals]);
 
+  const generalInfoSupplierPayment = useMemo(() => {
+    const estimatedOrderTotalKgs = Number(order?.estimatedSupplierCostKgs ?? 0);
+    const orderTotalKgs =
+      estimatedOrderTotalKgs > 0
+        ? estimatedOrderTotalKgs
+        : totalPurchaseCostKgs > 0
+          ? totalPurchaseCostKgs
+          : Math.round(
+              Number(order?.totalYuan ?? 0) *
+                Number(order?.defaultYuanRate ?? order?.effectiveYuanRate ?? 0) *
+                100,
+            ) / 100;
+    const paidAmountKgs = Number(order?.totalPaidKgs ?? 0);
+    const remainingToPayKgs = Math.max(orderTotalKgs - paidAmountKgs, 0);
+
+    return {
+      orderTotalKgs,
+      paidAmountKgs,
+      remainingToPayKgs,
+      status: resolveGeneralInfoSupplierPaymentStatus(paidAmountKgs),
+    };
+  }, [
+    order?.estimatedSupplierCostKgs,
+    order?.totalPaidKgs,
+    order?.totalYuan,
+    order?.defaultYuanRate,
+    order?.effectiveYuanRate,
+    totalPurchaseCostKgs,
+  ]);
+
   const landedCostCalculated = useMemo(() => {
     if (order?.landedCostStatus === 'CALCULATED' || order?.landedCostStatus === 'FINALIZED') return true;
     if (order?.landedCostStatus === 'PENDING_WEIGHT') return false;
@@ -1001,6 +1031,26 @@ function ProcurementOrderDetailPageContent() {
               <Info
                 label={t('procurement.orders.weightedAverageRate')}
                 value={String(order.weightedAverageYuanRate ?? order.effectiveYuanRate ?? '-')}
+              />
+            </div>
+            <div className="mt-6 grid gap-4 md:grid-cols-4">
+              <Info
+                label={t('procurement.orders.supplierPaymentStatusLabel')}
+                value={t(
+                  `procurement.orders.generalInfoSupplierPaymentStatus.${generalInfoSupplierPayment.status}`,
+                )}
+              />
+              <Info
+                label={t('procurement.orders.orderTotalKgs')}
+                value={formatKgs(generalInfoSupplierPayment.orderTotalKgs)}
+              />
+              <Info
+                label={t('procurement.orders.paidAmountKgs')}
+                value={formatKgs(generalInfoSupplierPayment.paidAmountKgs)}
+              />
+              <Info
+                label={t('procurement.orders.remainingToPayKgs')}
+                value={formatKgs(generalInfoSupplierPayment.remainingToPayKgs)}
               />
             </div>
             <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
