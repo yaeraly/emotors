@@ -376,9 +376,8 @@ export default function ProductDetailPage() {
                   value={
                     (() => {
                       const unitCost =
-                        product.latestReceivedUnitLandedCost != null &&
-                        product.latestReceivedUnitLandedCost > 0
-                          ? product.latestReceivedUnitLandedCost
+                        product.currentFifoUnitCost != null && product.currentFifoUnitCost > 0
+                          ? product.currentFifoUnitCost
                           : product.finalCostKgs;
                       return unitCost != null &&
                         product.costAvailable !== false &&

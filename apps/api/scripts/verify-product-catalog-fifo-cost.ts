@@ -3,11 +3,10 @@
  * Usage: cd apps/api && npx tsx scripts/verify-product-catalog-fifo-cost.ts [--sku=SUS001]
  */
 import { PrismaClient, WarehouseType } from '@prisma/client';
-import { selectOldestActiveFifoUnitCost } from '../src/inventory/product-catalog-fifo-cost.util';
 import {
-  getLatestReceivedUnitLandedCost,
-  mapProductCatalogPurchaseCost,
-} from '../src/inventory/product-catalog-purchase-cost.util';
+  mapProductCatalogFifoCost,
+  selectOldestActiveFifoUnitCost,
+} from '../src/inventory/product-catalog-fifo-cost.util';
 import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
 import { resolveUnitCostFromInventoryLayer } from '../src/pricing/pricing-fifo-unit-cost.util';
 
@@ -64,15 +63,11 @@ async function main() {
 
   const productReports = [];
   for (const product of catalogProducts) {
-    const latest = await getLatestReceivedUnitLandedCost(prisma, {
-      productId: product.id,
-      warehouseId: hqWarehouse?.id,
-    });
-    const catalogFields = mapProductCatalogPurchaseCost({ latest });
     const fifoCost = await fifo.getOldestActiveHqFifoCost({
       productId: product.id,
       warehouseId: hqWarehouse?.id,
     });
+    const catalogFields = mapProductCatalogFifoCost({ fifo: fifoCost });
     const receipts = procurementItems.filter((item) => item.sku === product.sku);
     const fifoLayers = await prisma.fifoInventoryBatch.findMany({
       where: {
@@ -99,10 +94,9 @@ async function main() {
       name: product.name,
       productCatalogApiCost: catalogFields,
       oldestActiveFifoCostKgs: fifoCost.available ? fifoCost.costPriceKgs : null,
-      catalogUsesLatestReceivedNotOldestFifo:
-        catalogFields.latestReceivedUnitLandedCost == null ||
-        fifoCost.costPriceKgs !== catalogFields.latestReceivedUnitLandedCost ||
-        true,
+      catalogMatchesOldestActiveFifo:
+        catalogFields.currentFifoUnitCost != null &&
+        fifoCost.costPriceKgs === catalogFields.currentFifoUnitCost,
       receipts: receipts.map((item) => ({
         procurementOrderItemId: item.id,
         procurementOrderId: item.orderId,

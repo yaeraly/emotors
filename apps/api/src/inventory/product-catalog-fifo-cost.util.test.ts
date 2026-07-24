@@ -105,25 +105,45 @@ describe('product catalog FIFO cost mapping', () => {
     assert.equal(cost, 1662.97);
   });
 
-  it('prefers procurement receipt layer over older manual inventory layer', () => {
+  it('uses strict FIFO oldest layer regardless of reference type', () => {
     const cost = selectOldestActiveFifoUnitCost([
       {
         id: 'manual-old',
         receivedAt: '2026-01-01T10:00:00.000Z',
         createdAt: '2026-01-01T10:00:00.000Z',
         remainingQuantity: 5,
-        unitLandedCostKgs: 3918.7,
+        unitLandedCostKgs: 5000,
         referenceType: 'ADJUSTMENT',
       },
       {
         id: 'procurement',
         receivedAt: '2026-02-01T10:00:00.000Z',
         createdAt: '2026-02-01T10:00:00.000Z',
-        remainingQuantity: 10,
-        unitLandedCostKgs: 13801.15,
+        remainingQuantity: 20,
+        unitLandedCostKgs: 5500,
         referenceType: 'PROCUREMENT_GOODS_RECEIVING',
       },
     ]);
-    assert.equal(cost, 13801.15);
+    assert.equal(cost, 5000);
+  });
+
+  it('advances to the next FIFO layer after the oldest batch is depleted', () => {
+    const cost = selectOldestActiveFifoUnitCost([
+      {
+        id: 'batch-1',
+        receivedAt: '2026-01-01T10:00:00.000Z',
+        createdAt: '2026-01-01T10:00:00.000Z',
+        remainingQuantity: 0,
+        unitLandedCostKgs: 5000,
+      },
+      {
+        id: 'batch-2',
+        receivedAt: '2026-02-01T10:00:00.000Z',
+        createdAt: '2026-02-01T10:00:00.000Z',
+        remainingQuantity: 20,
+        unitLandedCostKgs: 5500,
+      },
+    ]);
+    assert.equal(cost, 5500);
   });
 });

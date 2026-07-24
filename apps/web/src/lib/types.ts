@@ -611,6 +611,8 @@ export type Product = {
   purchaseCostKgs: number;
   transportCostKgs: number;
   finalCostKgs: number | null;
+  /** Oldest active HQ FIFO batch unit landed cost (catalog display). */
+  currentFifoUnitCost?: number | null;
   latestReceivedUnitLandedCost?: number | null;
   costAvailable?: boolean;
   costSource?: string;

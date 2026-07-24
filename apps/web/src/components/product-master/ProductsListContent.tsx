@@ -271,16 +271,16 @@ function formatKgs(value: number | string | null | undefined) {
 }
 
 function productCatalogUnitCost(
-  product: Pick<Product, 'latestReceivedUnitLandedCost' | 'finalCostKgs'>,
+  product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs'>,
 ) {
-  if (product.latestReceivedUnitLandedCost != null && product.latestReceivedUnitLandedCost > 0) {
-    return product.latestReceivedUnitLandedCost;
+  if (product.currentFifoUnitCost != null && product.currentFifoUnitCost > 0) {
+    return product.currentFifoUnitCost;
   }
   return product.finalCostKgs;
 }
 
 function isProductCostAvailable(
-  product: Pick<Product, 'latestReceivedUnitLandedCost' | 'finalCostKgs' | 'costAvailable'>,
+  product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs' | 'costAvailable'>,
 ) {
   if (product.costAvailable === false) return false;
   const cost = productCatalogUnitCost(product);

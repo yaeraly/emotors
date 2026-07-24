@@ -57,10 +57,7 @@ import {
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
-import {
-  getLatestReceivedUnitLandedCost,
-  mapProductCatalogPurchaseCost,
-} from './product-catalog-purchase-cost.util';
+import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -2582,17 +2579,17 @@ export class InventoryService {
   }
 
   /**
-   * Product catalog / detail cost: latest received Supply Manager purchase unit landed cost.
-   * FIFO consumption elsewhere still uses oldest active batch first.
+   * Product catalog / detail cost: oldest active HQ FIFO batch unit landed cost.
+   * Same layer used for FIFO consumption — remainingQuantity > 0, receivedAt ASC.
    */
   private async toProductResponseWithFifoCost(product: any, user?: AuthUser) {
     const base = this.toProductResponse(product, user);
     const hqWarehouseId = await this.resolveDefaultHqWarehouseId();
-    const latest = await getLatestReceivedUnitLandedCost(this.prisma, {
+    const fifo = await this.pricingFifoService.getOldestActiveHqFifoCost({
       productId: product.id,
       ...(hqWarehouseId ? { warehouseId: hqWarehouseId } : {}),
     });
-    const catalogCost = mapProductCatalogPurchaseCost({ latest });
+    const catalogCost = mapProductCatalogFifoCost({ fifo });
     const response = {
       ...base,
       ...catalogCost,

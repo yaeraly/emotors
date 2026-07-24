@@ -1,8 +1,7 @@
 import type { OldestActiveHqFifoCostResult } from '../pricing/pricing-fifo.service';
-import { isBusinessProcurementReceiptReference } from '../pricing/pricing-fifo-business-layer.util';
 
 export type ProductCatalogFifoCostFields = {
-  /** @deprecated Catalog display now uses latestReceivedUnitLandedCost. */
+  /** Oldest active HQ FIFO batch unit landed cost (remainingQuantity > 0). */
   currentFifoUnitCost: number | null;
   finalCostKgs: number | null;
   costAvailable: boolean;
@@ -57,9 +56,5 @@ export function selectOldestActiveFifoUnitCost<
       if (aCreated !== bCreated) return aCreated - bCreated;
       return a.id.localeCompare(b.id);
     });
-  const procurementLayers = active.filter((layer) =>
-    isBusinessProcurementReceiptReference(layer.referenceType),
-  );
-  const candidates = procurementLayers.length > 0 ? procurementLayers : active;
-  return candidates[0]?.unitLandedCostKgs ?? null;
+  return active[0]?.unitLandedCostKgs ?? null;
 }

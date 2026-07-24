@@ -6,7 +6,6 @@ import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
-  isBusinessProcurementReceiptReference,
   isSeedStockMovementReference,
   SEED_FIFO_REFERENCE_TYPE,
 } from './pricing-fifo-business-layer.util';
@@ -297,7 +296,6 @@ export class PricingFifoService {
     const activeLayers: Array<{
       batch: (typeof batches)[number];
       unitCostKgs: number;
-      isProcurementReceipt: boolean;
     }> = [];
 
     for (const batch of batches) {
@@ -365,16 +363,11 @@ export class PricingFifoService {
       }
 
       if (unitCostKgs > 0) {
-        const isProcurementReceipt =
-          isBusinessProcurementReceiptReference(batch.referenceType) ||
-          (movement ? isBusinessProcurementReceiptReference(movement.referenceType) : false);
-        activeLayers.push({ batch, unitCostKgs, isProcurementReceipt });
+        activeLayers.push({ batch, unitCostKgs });
       }
     }
 
-    const procurementLayers = activeLayers.filter((layer) => layer.isProcurementReceipt);
-    const candidateLayers = procurementLayers.length > 0 ? procurementLayers : activeLayers;
-    const selected = candidateLayers[0];
+    const selected = activeLayers[0];
     if (selected) {
       return {
         costPriceKgs: selected.unitCostKgs,
