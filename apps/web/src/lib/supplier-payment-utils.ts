@@ -59,11 +59,60 @@ export function sumConfirmedSupplierPaymentsKgs(
   );
 }
 
-export type GeneralInfoSupplierPaymentStatus = 'PAID' | 'UNPAID';
+export type SupplierPaymentDisplayLabelStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
 
-/** General Info only: any recorded payment (including partial) counts as paid. */
-export function resolveGeneralInfoSupplierPaymentStatus(
+export type SupplierPaymentStatusLabelRole =
+  | 'SUPPLY_CHAIN_MANAGER'
+  | 'ACCOUNTANT'
+  | 'CASHIER'
+  | 'FINANCIAL';
+
+export function resolveFinancialSupplierPaymentDisplayStatus(input: {
+  paidAmountKgs: number;
+  orderTotalKgs: number;
+}): SupplierPaymentDisplayLabelStatus {
+  const paidAmountKgs = roundMoney(Number(input.paidAmountKgs || 0));
+  const orderTotalKgs = roundMoney(Number(input.orderTotalKgs || 0));
+
+  if (paidAmountKgs <= 0) return 'UNPAID';
+  if (orderTotalKgs > 0 && paidAmountKgs >= orderTotalKgs) return 'PAID';
+  return 'PARTIALLY_PAID';
+}
+
+export function resolveSupplyManagerSupplierPaymentDisplayStatus(
   paidAmountKgs: number,
-): GeneralInfoSupplierPaymentStatus {
+): Extract<SupplierPaymentDisplayLabelStatus, 'UNPAID' | 'PAID'> {
   return Number(paidAmountKgs) > 0 ? 'PAID' : 'UNPAID';
+}
+
+/** Display-only label resolver. Does not mutate stored supplier payment status. */
+export function getSupplierPaymentStatusLabel(input: {
+  actualPaymentStatus?: string | null;
+  userRole: SupplierPaymentStatusLabelRole;
+  paidAmountKgs: number;
+  orderTotalKgs: number;
+}): SupplierPaymentDisplayLabelStatus {
+  void input.actualPaymentStatus;
+
+  if (input.userRole === 'SUPPLY_CHAIN_MANAGER') {
+    return resolveSupplyManagerSupplierPaymentDisplayStatus(input.paidAmountKgs);
+  }
+
+  return resolveFinancialSupplierPaymentDisplayStatus({
+    paidAmountKgs: input.paidAmountKgs,
+    orderTotalKgs: input.orderTotalKgs,
+  });
+}
+
+export function getSupplierPaymentStatusTranslationKey(
+  label: SupplierPaymentDisplayLabelStatus,
+): `procurement.payments.status.${SupplierPaymentDisplayLabelStatus}` {
+  return `procurement.payments.status.${label}`;
+}
+
+export function resolveSupplierPaymentRemainingKgs(input: {
+  orderTotalKgs: number;
+  paidAmountKgs: number;
+}) {
+  return Math.max(roundMoney(input.orderTotalKgs) - roundMoney(input.paidAmountKgs), 0);
 }

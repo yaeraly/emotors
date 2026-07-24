@@ -157,6 +157,36 @@ export function isSupplyChainManagerUser(user: Pick<User, 'role' | 'roles'> | nu
   return hasRole(user, 'SUPPLY_CHAIN_MANAGER');
 }
 
+export type SupplierPaymentStatusLabelRole =
+  | 'SUPPLY_CHAIN_MANAGER'
+  | 'ACCOUNTANT'
+  | 'CASHIER'
+  | 'FINANCIAL';
+
+export function resolveSupplierPaymentStatusLabelRole(
+  user: Pick<User, 'role' | 'roles'> | null | undefined,
+): SupplierPaymentStatusLabelRole {
+  if (!user) return 'FINANCIAL';
+
+  if (
+    hasRole(user, 'HQ_ACCOUNTANT') ||
+    hasRole(user, 'ACCOUNTANT') ||
+    hasRole(user, 'FINANCE_MANAGER')
+  ) {
+    return 'ACCOUNTANT';
+  }
+
+  if (hasRole(user, 'HQ_CASHIER') || hasRole(user, 'CASHIER')) {
+    return 'CASHIER';
+  }
+
+  if (isSupplyChainManagerUser(user)) {
+    return 'SUPPLY_CHAIN_MANAGER';
+  }
+
+  return 'FINANCIAL';
+}
+
 export function isWarehouseManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   if (!user || hasFullAccess(user)) return false;
   if (hasRole(user, 'SUPPLY_CHAIN_MANAGER')) return false;
