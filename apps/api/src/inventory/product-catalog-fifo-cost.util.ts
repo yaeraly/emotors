@@ -2,7 +2,7 @@ import type { OldestActiveHqFifoCostResult } from '../pricing/pricing-fifo.servi
 import { isBusinessProcurementReceiptReference } from '../pricing/pricing-fifo-business-layer.util';
 
 export type ProductCatalogFifoCostFields = {
-  /** Oldest active HQ FIFO unit landed cost for catalog display. */
+  /** @deprecated Catalog display now uses latestReceivedUnitLandedCost. */
   currentFifoUnitCost: number | null;
   finalCostKgs: number | null;
   costAvailable: boolean;

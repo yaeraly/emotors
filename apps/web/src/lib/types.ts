@@ -611,7 +611,7 @@ export type Product = {
   purchaseCostKgs: number;
   transportCostKgs: number;
   finalCostKgs: number | null;
-  currentFifoUnitCost?: number | null;
+  latestReceivedUnitLandedCost?: number | null;
   costAvailable?: boolean;
   costSource?: string;
   costBatchId?: string | null;

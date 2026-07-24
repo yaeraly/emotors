@@ -270,15 +270,17 @@ function formatKgs(value: number | string | null | undefined) {
   })} сом`;
 }
 
-function productCatalogUnitCost(product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs'>) {
-  if (product.currentFifoUnitCost != null && product.currentFifoUnitCost > 0) {
-    return product.currentFifoUnitCost;
+function productCatalogUnitCost(
+  product: Pick<Product, 'latestReceivedUnitLandedCost' | 'finalCostKgs'>,
+) {
+  if (product.latestReceivedUnitLandedCost != null && product.latestReceivedUnitLandedCost > 0) {
+    return product.latestReceivedUnitLandedCost;
   }
   return product.finalCostKgs;
 }
 
 function isProductCostAvailable(
-  product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs' | 'costAvailable'>,
+  product: Pick<Product, 'latestReceivedUnitLandedCost' | 'finalCostKgs' | 'costAvailable'>,
 ) {
   if (product.costAvailable === false) return false;
   const cost = productCatalogUnitCost(product);

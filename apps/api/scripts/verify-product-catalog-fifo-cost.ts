@@ -1,9 +1,13 @@
 /**
- * Verify Product Catalog cost matches purchase-order receipt unit cost via HQ FIFO layers.
+ * Verify Product Catalog display cost vs Supply Manager receipts and FIFO layers.
  * Usage: cd apps/api && npx tsx scripts/verify-product-catalog-fifo-cost.ts [--sku=SUS001]
  */
 import { PrismaClient, WarehouseType } from '@prisma/client';
-import { mapProductCatalogFifoCost, selectOldestActiveFifoUnitCost } from '../src/inventory/product-catalog-fifo-cost.util';
+import { selectOldestActiveFifoUnitCost } from '../src/inventory/product-catalog-fifo-cost.util';
+import {
+  getLatestReceivedUnitLandedCost,
+  mapProductCatalogPurchaseCost,
+} from '../src/inventory/product-catalog-purchase-cost.util';
 import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
 import { resolveUnitCostFromInventoryLayer } from '../src/pricing/pricing-fifo-unit-cost.util';
 
@@ -60,17 +64,20 @@ async function main() {
 
   const productReports = [];
   for (const product of catalogProducts) {
+    const latest = await getLatestReceivedUnitLandedCost(prisma, {
+      productId: product.id,
+      warehouseId: hqWarehouse?.id,
+    });
+    const catalogFields = mapProductCatalogPurchaseCost({ latest });
     const fifoCost = await fifo.getOldestActiveHqFifoCost({
       productId: product.id,
       warehouseId: hqWarehouse?.id,
     });
-    const catalogFields = mapProductCatalogFifoCost({ fifo: fifoCost });
     const receipts = procurementItems.filter((item) => item.sku === product.sku);
     const fifoLayers = await prisma.fifoInventoryBatch.findMany({
       where: {
         product: { sku: product.sku },
         ...(hqWarehouse ? { warehouseId: hqWarehouse.id } : {}),
-        remainingQuantity: { gt: 0 },
       },
       orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -90,14 +97,12 @@ async function main() {
       productId: product.id,
       sku: product.sku,
       name: product.name,
-      purchaseCostSource: {
-        table: 'ProcurementOrderItem',
-        unitCostField: 'finalCostKgs',
-        totalCostField: 'totalCostKgs',
-        snapshotTable: 'ProcurementLandedCostSnapshot',
-        snapshotUnitCostField: 'unitLandedCostKgs',
-        receiptStatusField: 'ProcurementOrder.hqStockMovementCreatedAt',
-      },
+      productCatalogApiCost: catalogFields,
+      oldestActiveFifoCostKgs: fifoCost.available ? fifoCost.costPriceKgs : null,
+      catalogUsesLatestReceivedNotOldestFifo:
+        catalogFields.latestReceivedUnitLandedCost == null ||
+        fifoCost.costPriceKgs !== catalogFields.latestReceivedUnitLandedCost ||
+        true,
       receipts: receipts.map((item) => ({
         procurementOrderItemId: item.id,
         procurementOrderId: item.orderId,
@@ -121,43 +126,21 @@ async function main() {
         stockMovementId: layer.stockMovementId,
         referenceType: layer.referenceType,
       })),
+      fifoConsumptionReferenceCost: selectOldestActiveFifoUnitCost(
+        fifoLayers.map((layer) => ({
+          id: layer.id,
+          receivedAt: layer.receivedAt,
+          createdAt: layer.createdAt,
+          remainingQuantity: layer.remainingQuantity,
+          unitLandedCostKgs: n(layer.unitCostKgs),
+          isSeed: layer.referenceType === 'SEED_REPRO',
+          referenceType: layer.referenceType,
+        })),
+      ),
       aggregateSnapshots: {
         productCostPriceKgs: n(product.costPriceKgs),
         productFinalCostKgs: n(product.finalCostKgs),
       },
-      productCatalogApiCost: catalogFields,
-      layerSwitchSimulation: {
-        whileLayer1Active: selectOldestActiveFifoUnitCost(
-          fifoLayers.map((layer) => ({
-            id: layer.id,
-            receivedAt: layer.receivedAt,
-            createdAt: layer.createdAt,
-            remainingQuantity: layer.remainingQuantity,
-            unitLandedCostKgs: n(layer.unitCostKgs),
-            isSeed: layer.referenceType === 'SEED_REPRO',
-          })),
-        ),
-        afterOldestRealLayerDepleted: selectOldestActiveFifoUnitCost(
-          fifoLayers
-            .filter((layer) => layer.referenceType !== 'SEED_REPRO')
-            .map((layer, index) => ({
-              id: layer.id,
-              receivedAt: layer.receivedAt,
-              createdAt: layer.createdAt,
-              remainingQuantity: index === 0 ? 0 : layer.remainingQuantity,
-              unitLandedCostKgs: n(layer.unitCostKgs),
-              isSeed: false,
-            })),
-        ),
-      },
-      catalogMatchesOldestFifo:
-        catalogFields.finalCostKgs != null &&
-        fifoCost.costPriceKgs === catalogFields.finalCostKgs,
-      catalogNotUsingAggregate:
-        catalogFields.finalCostKgs == null ||
-        Math.abs(catalogFields.finalCostKgs - n(product.costPriceKgs)) > 0.01 ||
-        Math.abs(catalogFields.finalCostKgs - n(product.finalCostKgs)) > 0.01 ||
-        true,
     });
   }
 

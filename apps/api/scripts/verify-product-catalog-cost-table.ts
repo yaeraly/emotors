@@ -6,8 +6,7 @@
  *   npx tsx scripts/verify-product-catalog-cost-table.ts --sku=GEN001
  */
 import { PrismaClient, WarehouseType } from '@prisma/client';
-import { mapProductCatalogFifoCost } from '../src/inventory/product-catalog-fifo-cost.util';
-import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
+import { getLatestReceivedUnitLandedCost, mapProductCatalogPurchaseCost } from '../src/inventory/product-catalog-purchase-cost.util';
 
 const EXPECTED_COSTS: Array<{ sku: string; name: string; expectedKgs: number }> = [
   { sku: 'AXL004', name: 'Полуось шляпка 18зуб 58.5см', expectedKgs: 517.8 },
@@ -68,14 +67,11 @@ function parseSkuFilter(argv: string[]) {
 async function main() {
   const skuFilter = parseSkuFilter(process.argv.slice(2));
   const prisma = new PrismaClient();
-  const fifo = new PricingFifoService(prisma as any);
 
   const hqWarehouse = await prisma.warehouse.findFirst({
     where: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
     select: { id: true, name: true },
   });
-
-  await fifo.syncFifoBatchesFromHqStockMovements();
 
   const targets = skuFilter
     ? EXPECTED_COSTS.filter((row) => row.sku.toUpperCase() === skuFilter)
@@ -112,12 +108,12 @@ async function main() {
       continue;
     }
 
-    const fifoCost = await fifo.getOldestActiveHqFifoCost({
+    const latest = await getLatestReceivedUnitLandedCost(prisma, {
       productId: product.id,
       ...(hqWarehouse ? { warehouseId: hqWarehouse.id } : {}),
     });
-    const catalogFields = mapProductCatalogFifoCost({ fifo: fifoCost });
-    const currentCatalogCost = catalogFields.currentFifoUnitCost;
+    const catalogFields = mapProductCatalogPurchaseCost({ latest });
+    const currentCatalogCost = catalogFields.latestReceivedUnitLandedCost;
     const difference =
       currentCatalogCost != null ? roundMoney(currentCatalogCost - expected.expectedKgs) : null;
     const matched =
