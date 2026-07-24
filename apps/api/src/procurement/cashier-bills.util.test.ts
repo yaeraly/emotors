@@ -4,9 +4,12 @@ import {
   assertCashierCannotMutateApprovedAmount,
   assertCashierCannotMutateFx,
   buildCashierBillsSummaryWithPaidAt,
+  compareCashierBills,
   matchesCashierBillSearch,
   normalizeCashierExecutionStatus,
   paginateItems,
+  resolveCashierBillPaymentSortGroup,
+  sortCashierBills,
   type CashierBillListItem,
 } from './cashier-bills.util';
 
@@ -159,6 +162,7 @@ const sample: CashierBillListItem[] = [
     requestNumber: 'PO-1',
     requestType: 'SUPPLIER_PAYMENT',
     sentToCashierAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     sender: { id: 's1', fullName: 'SM User' },
     accountant: { id: 'a1', fullName: 'Acc User' },
     cashier: null,
@@ -172,6 +176,7 @@ const sample: CashierBillListItem[] = [
     debitAccountName: 'HQ Cash',
     debitAccountId: 'acc1',
     executionStatus: 'PENDING_EXECUTION',
+    paymentStatus: 'PENDING_CASHIER',
     relatedOrderNumber: 'PO-1',
     href: '/finance/cashier-bills?source=SUPPLIER_PAYMENT&id=p1',
   },
@@ -182,6 +187,7 @@ const sample: CashierBillListItem[] = [
     requestNumber: 'TE-1',
     requestType: 'CARGO_PAYMENT',
     sentToCashierAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     sender: { id: 's1', fullName: 'SM User' },
     accountant: { id: 'a1', fullName: 'Acc User' },
     cashier: { id: 'c1', fullName: 'Cashier' },
@@ -195,6 +201,7 @@ const sample: CashierBillListItem[] = [
     debitAccountName: 'HQ Bank',
     debitAccountId: 'acc2',
     executionStatus: 'IN_PROGRESS',
+    paymentStatus: 'PENDING_CASHIER',
     relatedOrderNumber: 'PO-1',
     href: '/finance/cashier-bills?source=TRANSPORT_EXPENSE&id=p2',
   },
@@ -205,6 +212,7 @@ const sample: CashierBillListItem[] = [
     requestNumber: 'PO-2',
     requestType: 'SUPPLIER_PAYMENT',
     sentToCashierAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     sender: { id: 's2', fullName: 'Other' },
     accountant: { id: 'a1', fullName: 'Acc User' },
     cashier: { id: 'c1', fullName: 'Cashier' },
@@ -218,6 +226,7 @@ const sample: CashierBillListItem[] = [
     debitAccountName: 'HQ Cash',
     debitAccountId: 'acc1',
     executionStatus: 'COMPLETED',
+    paymentStatus: 'ACTIVE',
     relatedOrderNumber: 'PO-2',
     href: '/finance/cashier-bills?source=SUPPLIER_PAYMENT&id=p3',
   },
@@ -242,6 +251,57 @@ const page = paginateItems(sample, 1, 2);
 assertEqual(page.items.length, 2, 'pagination size');
 assertEqual(page.total, 3, 'pagination total');
 
+assertEqual(resolveCashierBillPaymentSortGroup('PENDING_EXECUTION', 'PENDING_CASHIER'), 'PENDING_PAYMENT', 'sort group pending');
+assertEqual(resolveCashierBillPaymentSortGroup('PENDING_EXECUTION', 'PARTIALLY_PAID'), 'PARTIALLY_PAID', 'sort group partial');
+assertEqual(resolveCashierBillPaymentSortGroup('COMPLETED', 'ACTIVE'), 'PAID', 'sort group paid');
+
+const mixedSortInput: CashierBillListItem[] = [
+  {
+    ...sample[2],
+    id: 'paid-old',
+    createdAt: '2026-01-01T10:00:00.000Z',
+    executionStatus: 'COMPLETED',
+    paymentStatus: 'ACTIVE',
+  },
+  {
+    ...sample[0],
+    id: 'pending-new',
+    createdAt: '2026-01-05T10:00:00.000Z',
+    executionStatus: 'PENDING_EXECUTION',
+    paymentStatus: 'PENDING_CASHIER',
+  },
+  {
+    ...sample[1],
+    id: 'partial',
+    createdAt: '2026-01-03T10:00:00.000Z',
+    executionStatus: 'PENDING_EXECUTION',
+    paymentStatus: 'PARTIALLY_PAID',
+  },
+  {
+    ...sample[2],
+    id: 'paid-new',
+    createdAt: '2026-01-06T10:00:00.000Z',
+    executionStatus: 'COMPLETED',
+    paymentStatus: 'PAID',
+  },
+  {
+    ...sample[0],
+    id: 'pending-old',
+    createdAt: '2026-01-02T10:00:00.000Z',
+    executionStatus: 'PENDING_EXECUTION',
+    paymentStatus: 'PENDING_CASHIER',
+  },
+];
+
+const sortedMixed = sortCashierBills(mixedSortInput);
+assertEqual(sortedMixed.map((item) => item.id).join(','), 'pending-new,pending-old,partial,paid-new,paid-old', 'mixed status sort order');
+assert(compareCashierBills(sortedMixed[0], sortedMixed[1]) <= 0, 'pending items stay above partial');
+assert(compareCashierBills(sortedMixed[2], sortedMixed[3]) < 0, 'partial stays above paid');
+
+const paginatedSorted = paginateItems(sortCashierBills(mixedSortInput), 1, 2);
+assertEqual(paginatedSorted.items.map((item) => item.id).join(','), 'pending-new,pending-old', 'pagination preserves global sort order');
+
+assert(service.includes('sortCashierBills'), '28. cashier bills sorted by payment status before pagination');
 assert(transport.includes("executionStatus: send ? 'PENDING_EXECUTION'"), 'send to cashier sets execution');
 assert(workflow.includes("executionStatus: 'PENDING_EXECUTION'"), 'supplier send sets execution');
 assert(service.includes('existing payment records') || schema.includes('ProcurementSupplierPayment'), '26. existing payment records remain accessible');

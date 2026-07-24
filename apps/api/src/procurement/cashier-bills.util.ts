@@ -26,6 +26,14 @@ export type CashierExecutionStatus = (typeof CASHIER_EXECUTION_STATUSES)[number]
 
 export type CashierBillSource = 'SUPPLIER_PAYMENT' | 'TRANSPORT_EXPENSE';
 
+export const CASHIER_BILL_PAYMENT_SORT_PRIORITY = {
+  PENDING_PAYMENT: 1,
+  PARTIALLY_PAID: 2,
+  PAID: 3,
+} as const;
+
+export type CashierBillPaymentSortGroup = keyof typeof CASHIER_BILL_PAYMENT_SORT_PRIORITY;
+
 export type CashierBillListItem = {
   id: string;
   source: CashierBillSource;
@@ -33,6 +41,7 @@ export type CashierBillListItem = {
   requestNumber: string;
   requestType: CashierBillRequestType;
   sentToCashierAt: string | null;
+  createdAt: string | null;
   sender: { id: string; fullName: string; role?: string | null } | null;
   accountant: { id: string; fullName: string } | null;
   cashier: { id: string; fullName: string } | null;
@@ -46,6 +55,8 @@ export type CashierBillListItem = {
   debitAccountName: string | null;
   debitAccountId: string | null;
   executionStatus: CashierExecutionStatus;
+  /** Raw payment row status from supplier payment or transport expense. */
+  paymentStatus?: string | null;
   relatedOrderNumber?: string | null;
   relatedOrderId?: string | null;
   href: string;
@@ -134,6 +145,45 @@ export function buildCashierBillsSummaryWithPaidAt(
     paidTodayCount: paidToday.length,
     totalPayableKgs: Math.round(totalPayableKgs * 100) / 100,
   };
+}
+
+export function resolveCashierBillPaymentSortGroup(
+  executionStatus: CashierExecutionStatus,
+  paymentStatus?: string | null,
+): CashierBillPaymentSortGroup {
+  const raw = String(paymentStatus || '').toUpperCase();
+  if (executionStatus === 'COMPLETED' || raw === 'ACTIVE' || raw === 'PAID') {
+    return 'PAID';
+  }
+  if (raw === 'PARTIALLY_PAID') {
+    return 'PARTIALLY_PAID';
+  }
+  return 'PENDING_PAYMENT';
+}
+
+export function compareCashierBills(
+  a: Pick<CashierBillListItem, 'executionStatus' | 'paymentStatus' | 'createdAt'>,
+  b: Pick<CashierBillListItem, 'executionStatus' | 'paymentStatus' | 'createdAt'>,
+): number {
+  const statusDifference =
+    CASHIER_BILL_PAYMENT_SORT_PRIORITY[
+      resolveCashierBillPaymentSortGroup(a.executionStatus, a.paymentStatus)
+    ] -
+    CASHIER_BILL_PAYMENT_SORT_PRIORITY[
+      resolveCashierBillPaymentSortGroup(b.executionStatus, b.paymentStatus)
+    ];
+
+  if (statusDifference !== 0) {
+    return statusDifference;
+  }
+
+  const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+  const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+  return bTime - aTime;
+}
+
+export function sortCashierBills<T extends CashierBillListItem>(items: T[]): T[] {
+  return [...items].sort(compareCashierBills);
 }
 
 export function matchesCashierBillSearch(item: CashierBillListItem, search: string): boolean {

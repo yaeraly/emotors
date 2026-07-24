@@ -32,6 +32,7 @@ import {
   matchesCashierBillSearch,
   normalizeCashierExecutionStatus,
   paginateItems,
+  sortCashierBills,
 } from './cashier-bills.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
@@ -65,7 +66,7 @@ export class CashierBillsService {
   async list(user: AuthUser, query: CashierBillsQuery = {}) {
     this.assertCashier(user);
     const { items, paidAtById } = await this.collectBills();
-    const filtered = this.applyFilters(items, query);
+    const filtered = sortCashierBills(this.applyFilters(items, query));
     const page = paginateItems(filtered, query.page ?? 1, query.pageSize ?? 20);
     return {
       ...page,
@@ -272,6 +273,7 @@ export class CashierBillsService {
         requestNumber: row.procurementOrder?.orderNumber || row.id,
         requestType: 'SUPPLIER_PAYMENT',
         sentToCashierAt: row.sentToCashierAt?.toISOString() ?? null,
+        createdAt: row.createdAt?.toISOString() ?? null,
         sender: sender
           ? { id: sender.id, fullName: sender.fullName, role: 'role' in sender ? sender.role : null }
           : null,
@@ -289,6 +291,7 @@ export class CashierBillsService {
         debitAccountName: row.intendedFinanceAccount?.name ?? null,
         debitAccountId: row.intendedFinanceAccount?.id ?? null,
         executionStatus,
+        paymentStatus: row.status,
         relatedOrderNumber: row.procurementOrder?.orderNumber ?? null,
         relatedOrderId: row.procurementOrder?.id ?? null,
         href: `/finance/cashier-bills?source=SUPPLIER_PAYMENT&id=${row.id}`,
@@ -314,6 +317,7 @@ export class CashierBillsService {
         requestNumber: row.expenseNumber,
         requestType,
         sentToCashierAt: row.sentToCashierAt?.toISOString() ?? null,
+        createdAt: row.createdAt?.toISOString() ?? null,
         sender: row.createdBy
           ? { id: row.createdBy.id, fullName: row.createdBy.fullName, role: row.createdBy.role }
           : null,
@@ -331,17 +335,14 @@ export class CashierBillsService {
         debitAccountName: row.financeAccount?.name ?? null,
         debitAccountId: row.financeAccount?.id ?? null,
         executionStatus,
+        paymentStatus: row.status,
         relatedOrderNumber: row.procurementOrder?.orderNumber ?? null,
         relatedOrderId: row.procurementOrder?.id ?? null,
         href: `/finance/cashier-bills?source=TRANSPORT_EXPENSE&id=${row.id}`,
       };
     });
 
-    const items = [...supplierItems, ...transportItems].sort((a, b) => {
-      const aTime = a.sentToCashierAt ? new Date(a.sentToCashierAt).getTime() : 0;
-      const bTime = b.sentToCashierAt ? new Date(b.sentToCashierAt).getTime() : 0;
-      return aTime - bTime;
-    });
+    const items = sortCashierBills([...supplierItems, ...transportItems]);
 
     return { items, paidAtById };
   }
