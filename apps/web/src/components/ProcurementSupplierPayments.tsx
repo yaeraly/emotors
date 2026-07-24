@@ -12,13 +12,8 @@ import {
   canSendProcurementInvoiceToAccountant,
   canSendSupplierPaymentToCashier,
   canVoidSupplierPayment,
-  resolveSupplierPaymentStatusLabelRole,
 } from '@/lib/rbac';
 import type { User } from '@/lib/types';
-import {
-  getSupplierPaymentStatusLabel,
-  getSupplierPaymentStatusTranslationKey,
-} from '@/lib/supplier-payment-utils';
 import { useTranslation } from '@/i18n/useTranslation';
 
 export type SupplierPayment = {
@@ -207,26 +202,6 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const invoiceAlreadySent = Boolean(order.invoiceSentToAccountantAt);
   const canResubmitInvoice = String(order.invoiceReviewStatus || '').toUpperCase() === 'RETURNED';
   const invoiceSendLocked = invoiceAlreadySent && !canResubmitInvoice;
-
-  const supplierPaymentStatusTranslationKey = useMemo(() => {
-    const estimatedOrderTotalKgs = Number(order.estimatedSupplierCostKgs ?? 0);
-    const orderTotalKgs =
-      estimatedOrderTotalKgs > 0
-        ? estimatedOrderTotalKgs
-        : Math.round(
-            Number(order.totalYuan ?? 0) *
-              Number(order.effectiveYuanRate ?? order.weightedAverageYuanRate ?? 0) *
-              100,
-          ) / 100;
-    const statusLabel = getSupplierPaymentStatusLabel({
-      actualPaymentStatus: order.supplierPaymentStatus,
-      userRole: resolveSupplierPaymentStatusLabelRole(user),
-      paidAmountKgs: Number(order.totalPaidKgs ?? 0),
-      orderTotalKgs,
-    });
-
-    return getSupplierPaymentStatusTranslationKey(statusLabel);
-  }, [order, user]);
 
   const calculatedKgs = useMemo(() => {
     const yuan = Number(form.amountYuan);
@@ -537,7 +512,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
         <SummaryCard label={t('procurement.payments.remainingYuan')} value={`¥${Number(order.remainingYuan ?? order.totalYuan).toFixed(2)}`} />
         <SummaryCard
           label={t('procurement.payments.paymentStatus')}
-          value={t(supplierPaymentStatusTranslationKey)}
+          value={t(`procurement.payments.status.${order.supplierPaymentStatus ?? 'UNPAID'}`)}
         />
       </div>
 
@@ -551,7 +526,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 ? `: ${new Date(order.invoiceSentToAccountantAt).toLocaleString()}`
                 : ''}
               {order.supplierPaymentStatus
-                ? ` · ${t(supplierPaymentStatusTranslationKey)}`
+                ? ` · ${t(`procurement.payments.status.${order.supplierPaymentStatus}`)}`
                 : ''}
             </p>
           ) : null}

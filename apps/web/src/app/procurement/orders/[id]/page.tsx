@@ -10,8 +10,8 @@ import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons'
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
 import { ProcurementSectionPayablePanel } from '@/components/ProcurementSectionPayablePanel';
 import {
-  getSupplierPaymentStatusLabel,
   getSupplierPaymentStatusTranslationKey,
+  resolveFinancialSupplierPaymentDisplayStatus,
   resolveSupplierPaymentRemainingKgs,
   sumConfirmedSupplierPaymentsKgs,
 } from '@/lib/supplier-payment-utils';
@@ -31,7 +31,6 @@ import {
   hasFullAccess,
   hasRole,
   isSupplyChainManagerUser,
-  resolveSupplierPaymentStatusLabelRole,
 } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -549,24 +548,26 @@ function ProcurementOrderDetailPageContent() {
       orderTotalKgs,
       paidAmountKgs,
     });
-    const statusLabel = getSupplierPaymentStatusLabel({
-      actualPaymentStatus: order?.supplierPaymentStatus,
-      userRole: resolveSupplierPaymentStatusLabelRole(user),
-      paidAmountKgs,
-      orderTotalKgs,
-    });
+    const statusTranslationKey = isSupplyChainManagerUser(user)
+      ? paidAmountKgs > 0
+        ? 'procurement.orders.generalInfoSupplierPaymentStatus.PAID'
+        : 'procurement.orders.generalInfoSupplierPaymentStatus.UNPAID'
+      : getSupplierPaymentStatusTranslationKey(
+          resolveFinancialSupplierPaymentDisplayStatus({
+            paidAmountKgs,
+            orderTotalKgs,
+          }),
+        );
 
     return {
       orderTotalKgs,
       paidAmountKgs,
       remainingToPayKgs,
-      statusLabel,
-      statusTranslationKey: getSupplierPaymentStatusTranslationKey(statusLabel),
+      statusTranslationKey,
     };
   }, [
     order?.estimatedSupplierCostKgs,
     order?.totalPaidKgs,
-    order?.supplierPaymentStatus,
     order?.totalYuan,
     order?.defaultYuanRate,
     order?.effectiveYuanRate,
