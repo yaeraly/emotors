@@ -148,6 +148,23 @@ export async function listCompletedChinaReceiptItems(
   });
 
   const rows: CompletedReceiptItem[] = [];
+  const procurementItemIds = receivingItems
+    .map((item) => item.procurementItemId)
+    .filter((id): id is string => Boolean(id));
+  const snapshots = procurementItemIds.length
+    ? await client.procurementLandedCostSnapshot.findMany({
+        where: { procurementOrderItemId: { in: procurementItemIds } },
+        select: {
+          procurementOrderItemId: true,
+          totalLandedCostKgs: true,
+          unitLandedCostKgs: true,
+        },
+      })
+    : [];
+  const snapshotByItemId = new Map(
+    snapshots.map((snapshot) => [snapshot.procurementOrderItemId, snapshot]),
+  );
+
   for (const item of receivingItems) {
     const procurementItem = item.procurementItemId
       ? await client.procurementOrderItem.findUnique({
@@ -160,13 +177,27 @@ export async function listCompletedChinaReceiptItems(
           },
         })
       : null;
+    const snapshot = item.procurementItemId
+      ? snapshotByItemId.get(item.procurementItemId)
+      : null;
     const receivedQuantity = item.receivedQuantity;
     const totalLandedCostKgs = roundMoney(
-      n(procurementItem?.totalCostKgs) > 0
-        ? n(procurementItem?.totalCostKgs)
-        : n(procurementItem?.finalCostKgs) * receivedQuantity,
+      n(snapshot?.totalLandedCostKgs) > 0
+        ? n(snapshot?.totalLandedCostKgs)
+        : n(procurementItem?.totalCostKgs) > 0
+          ? n(procurementItem?.totalCostKgs)
+          : n(procurementItem?.finalCostKgs) * receivedQuantity,
     );
     if (receivedQuantity <= 0 || totalLandedCostKgs <= 0) continue;
+
+    const unitLandedCostKgs =
+      n(snapshot?.unitLandedCostKgs) > 0
+        ? roundMoney(n(snapshot?.unitLandedCostKgs))
+        : resolveUnitCostFromInventoryLayer({
+            quantity: receivedQuantity,
+            totalCostKgs: totalLandedCostKgs,
+            unitCostKgs: n(procurementItem?.finalCostKgs),
+          });
 
     rows.push({
       procurementOrderId: item.receiving.procurementOrderId,
@@ -180,10 +211,7 @@ export async function listCompletedChinaReceiptItems(
       branchId: item.receiving.hqWarehouse?.branchId ?? null,
       receivedQuantity,
       totalLandedCostKgs,
-      unitLandedCostKgs: resolveUnitCostFromInventoryLayer({
-        quantity: receivedQuantity,
-        totalCostKgs: totalLandedCostKgs,
-      }),
+      unitLandedCostKgs,
       receivedAt: item.receiving.receivedAt,
     });
   }
@@ -240,6 +268,13 @@ async function selectOldestActiveBusinessFifoCost(
     : [];
   const movementById = new Map(movements.map((movement) => [movement.id, movement]));
 
+  const activeLayers: Array<{
+    batchId: string;
+    unitCostKgs: number;
+    receivedAt: Date;
+    isProcurementReceipt: boolean;
+  }> = [];
+
   for (const batch of batches) {
     const movement = batch.stockMovementId ? movementById.get(batch.stockMovementId) : null;
     if (
@@ -269,8 +304,26 @@ async function selectOldestActiveBusinessFifoCost(
         : n(batch.unitCostKgs);
 
     if (unitCostKgs > 0) {
-      return { batchId: batch.id, unitCostKgs, receivedAt: batch.receivedAt };
+      const isProcurementReceipt =
+        isBusinessProcurementReceiptReference(batch.referenceType) ||
+        (movement ? isBusinessProcurementReceiptReference(movement.referenceType) : false);
+      activeLayers.push({
+        batchId: batch.id,
+        unitCostKgs,
+        receivedAt: batch.receivedAt,
+        isProcurementReceipt,
+      });
     }
+  }
+
+  const procurementLayers = activeLayers.filter((layer) => layer.isProcurementReceipt);
+  const selected = (procurementLayers.length > 0 ? procurementLayers : activeLayers)[0];
+  if (selected) {
+    return {
+      batchId: selected.batchId,
+      unitCostKgs: selected.unitCostKgs,
+      receivedAt: selected.receivedAt,
+    };
   }
   return null;
 }
@@ -559,9 +612,11 @@ export type HqFifoRepairAction =
   | 'would_create_movement'
   | 'would_create_fifo'
   | 'would_repair_fifo'
+  | 'would_repair_movement'
   | 'created_movement'
   | 'created_fifo'
   | 'repaired_fifo'
+  | 'repaired_movement'
   | 'skipped_seed'
   | 'skipped_ambiguous'
   | 'error';
@@ -689,6 +744,49 @@ export async function repairHqFifoFromReceipts(
     }
 
     if (!movementId) continue;
+
+    const linkedMovement = businessMovements[0];
+    if (linkedMovement) {
+      const movementNeedsRepair =
+        Math.abs(n(linkedMovement.unitCostKgs) - receipt.unitLandedCostKgs) > 0.009 ||
+        Math.abs(n(linkedMovement.totalCostKgs) - receipt.totalLandedCostKgs) > 0.009;
+      if (movementNeedsRepair) {
+        if (!apply) {
+          results.push({
+            productId: receipt.productId,
+            sku: receipt.sku,
+            warehouseId: receipt.warehouseId,
+            procurementGoodsReceivingId: receipt.procurementGoodsReceivingId,
+            procurementOrderItemId: receipt.procurementOrderItemId,
+            stockMovementId: movementId,
+            receivedQuantity: receipt.receivedQuantity,
+            unitLandedCostKgs: receipt.unitLandedCostKgs,
+            totalLandedCostKgs: receipt.totalLandedCostKgs,
+            action: 'would_repair_movement',
+          });
+        } else {
+          await client.stockMovement.update({
+            where: { id: movementId },
+            data: {
+              unitCostKgs: receipt.unitLandedCostKgs,
+              totalCostKgs: receipt.totalLandedCostKgs,
+            },
+          });
+          results.push({
+            productId: receipt.productId,
+            sku: receipt.sku,
+            warehouseId: receipt.warehouseId,
+            procurementGoodsReceivingId: receipt.procurementGoodsReceivingId,
+            procurementOrderItemId: receipt.procurementOrderItemId,
+            stockMovementId: movementId,
+            receivedQuantity: receipt.receivedQuantity,
+            unitLandedCostKgs: receipt.unitLandedCostKgs,
+            totalLandedCostKgs: receipt.totalLandedCostKgs,
+            action: 'repaired_movement',
+          });
+        }
+      }
+    }
 
     const existingFifo = await client.fifoInventoryBatch.findFirst({
       where: { stockMovementId: movementId },

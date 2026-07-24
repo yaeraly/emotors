@@ -22,6 +22,7 @@ describe('product catalog FIFO cost mapping', () => {
       },
     });
     assert.equal(mapped.finalCostKgs, 1662.97);
+    assert.equal(mapped.currentFifoUnitCost, 1662.97);
     assert.equal(mapped.costAvailable, true);
     assert.equal(mapped.costSource, 'HQ_FIFO_ACTIVE_LAYER');
   });
@@ -38,6 +39,7 @@ describe('product catalog FIFO cost mapping', () => {
       },
     });
     assert.equal(mapped.finalCostKgs, null);
+    assert.equal(mapped.currentFifoUnitCost, null);
     assert.equal(mapped.costAvailable, false);
   });
 
@@ -97,8 +99,31 @@ describe('product catalog FIFO cost mapping', () => {
         createdAt: '2026-03-01T10:00:00.000Z',
         remainingQuantity: 15,
         unitLandedCostKgs: 1662.97,
+        referenceType: 'PROCUREMENT_GOODS_RECEIVING',
       },
     ]);
     assert.equal(cost, 1662.97);
+  });
+
+  it('prefers procurement receipt layer over older manual inventory layer', () => {
+    const cost = selectOldestActiveFifoUnitCost([
+      {
+        id: 'manual-old',
+        receivedAt: '2026-01-01T10:00:00.000Z',
+        createdAt: '2026-01-01T10:00:00.000Z',
+        remainingQuantity: 5,
+        unitLandedCostKgs: 3918.7,
+        referenceType: 'ADJUSTMENT',
+      },
+      {
+        id: 'procurement',
+        receivedAt: '2026-02-01T10:00:00.000Z',
+        createdAt: '2026-02-01T10:00:00.000Z',
+        remainingQuantity: 10,
+        unitLandedCostKgs: 13801.15,
+        referenceType: 'PROCUREMENT_GOODS_RECEIVING',
+      },
+    ]);
+    assert.equal(cost, 13801.15);
   });
 });

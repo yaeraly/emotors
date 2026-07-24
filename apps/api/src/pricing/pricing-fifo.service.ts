@@ -6,6 +6,7 @@ import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
+  isBusinessProcurementReceiptReference,
   isSeedStockMovementReference,
   SEED_FIFO_REFERENCE_TYPE,
 } from './pricing-fifo-business-layer.util';
@@ -28,15 +29,6 @@ export type BranchPricingConfig = {
   hqToBranchMarkupPercent: number;
 };
 
-export type OldestActiveHqFifoCostInput =
-  | string
-  | {
-      productId: string;
-      warehouseId?: string;
-      /** Branch scope when organization/tenant is modeled via branch. */
-      branchId?: string;
-    };
-
 export type OldestActiveHqFifoCostResult = {
   costPriceKgs: number;
   available: boolean;
@@ -45,6 +37,15 @@ export type OldestActiveHqFifoCostResult = {
   receivedAt: Date | null;
   warehouseId?: string | null;
 };
+
+export type OldestActiveHqFifoCostInput =
+  | string
+  | {
+      productId: string;
+      warehouseId?: string;
+      /** Branch scope when organization/tenant is modeled via branch. */
+      branchId?: string;
+    };
 
 type FifoPreviewLine = {
   batchId: string;
@@ -274,16 +275,14 @@ export class PricingFifoService {
       orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
 
-    for (const batch of batches) {
-      if (batch.referenceType === SEED_FIFO_REFERENCE_TYPE) {
-        continue;
-      }
-
-      let unitCostKgs = Number(batch.unitCostKgs);
-      if (batch.stockMovementId) {
-        const movement = await client.stockMovement.findUnique({
-          where: { id: batch.stockMovementId },
+    const movementIds = batches
+      .map((batch) => batch.stockMovementId)
+      .filter((id): id is string => Boolean(id));
+    const movements = movementIds.length
+      ? await client.stockMovement.findMany({
+          where: { id: { in: movementIds } },
           select: {
+            id: true,
             quantity: true,
             unitCostKgs: true,
             totalCostKgs: true,
@@ -291,53 +290,74 @@ export class PricingFifoService {
             referenceId: true,
             note: true,
           },
-        });
-        if (
-          movement &&
+        })
+      : [];
+    const movementById = new Map(movements.map((movement) => [movement.id, movement]));
+
+    const activeLayers: Array<{
+      batch: (typeof batches)[number];
+      unitCostKgs: number;
+      isProcurementReceipt: boolean;
+    }> = [];
+
+    for (const batch of batches) {
+      if (batch.referenceType === SEED_FIFO_REFERENCE_TYPE) {
+        continue;
+      }
+
+      const movement = batch.stockMovementId ? movementById.get(batch.stockMovementId) : null;
+      if (
+        isSeedStockMovementReference({
+          referenceType: batch.referenceType,
+          referenceId: batch.referenceId,
+          note: movement?.note,
+        }) ||
+        (movement &&
           isSeedStockMovementReference({
             referenceType: movement.referenceType,
             referenceId: movement.referenceId,
             note: movement.note,
-          })
-        ) {
-          continue;
-        }
-        if (movement) {
-          // Prefer original received quantity (initialQuantity) for unit cost; never use remaining.
-          const receivedQty =
-            batch.initialQuantity > 0 ? batch.initialQuantity : Math.abs(Number(movement.quantity));
-          unitCostKgs = resolveUnitCostFromInventoryLayer({
-            quantity: receivedQty,
-            unitCostKgs: Number(movement.unitCostKgs),
-            totalCostKgs: Number(movement.totalCostKgs),
+          }))
+      ) {
+        continue;
+      }
+
+      let unitCostKgs = Number(batch.unitCostKgs);
+      if (movement) {
+        // Prefer original received quantity (initialQuantity) for unit cost; never use remaining.
+        const receivedQty =
+          batch.initialQuantity > 0 ? batch.initialQuantity : Math.abs(Number(movement.quantity));
+        unitCostKgs = resolveUnitCostFromInventoryLayer({
+          quantity: receivedQty,
+          unitCostKgs: Number(movement.unitCostKgs),
+          totalCostKgs: Number(movement.totalCostKgs),
+        });
+        if (Math.abs(unitCostKgs - Number(batch.unitCostKgs)) > 0.009 && unitCostKgs > 0) {
+          const product = await client.product.findFirst({
+            where: { id: batch.productId, deletedAt: null },
+            select: {
+              wholesaleMarkupPercent: true,
+              hqBranchWholesaleMarkupPercent: true,
+              recommendedRetailMarkupPercent: true,
+              minimumSellingMarkupPercent: true,
+            },
           });
-          if (Math.abs(unitCostKgs - Number(batch.unitCostKgs)) > 0.009 && unitCostKgs > 0) {
-            const product = await client.product.findFirst({
-              where: { id: batch.productId, deletedAt: null },
-              select: {
-                wholesaleMarkupPercent: true,
-                hqBranchWholesaleMarkupPercent: true,
-                recommendedRetailMarkupPercent: true,
-                minimumSellingMarkupPercent: true,
-              },
-            });
-            const prices = this.calculateBatchPrices(unitCostKgs, {
-              wholesaleMarkupPercent: Number(product?.wholesaleMarkupPercent ?? 0),
-              hqBranchWholesaleMarkupPercent: Number(product?.hqBranchWholesaleMarkupPercent ?? 0),
-              recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
-              minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
-            });
-            await client.fifoInventoryBatch.update({
-              where: { id: batch.id },
-              data: {
-                unitCostKgs,
-                wholesalePriceKgs: prices.wholesalePriceKgs,
-                hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
-                recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
-                minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
-              },
-            });
-          }
+          const prices = this.calculateBatchPrices(unitCostKgs, {
+            wholesaleMarkupPercent: Number(product?.wholesaleMarkupPercent ?? 0),
+            hqBranchWholesaleMarkupPercent: Number(product?.hqBranchWholesaleMarkupPercent ?? 0),
+            recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
+            minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
+          });
+          await client.fifoInventoryBatch.update({
+            where: { id: batch.id },
+            data: {
+              unitCostKgs,
+              wholesalePriceKgs: prices.wholesalePriceKgs,
+              hqBranchWholesalePriceKgs: prices.hqBranchWholesalePriceKgs,
+              recommendedRetailPriceKgs: prices.recommendedRetailPriceKgs,
+              minimumSellingPriceKgs: prices.minimumSellingPriceKgs,
+            },
+          });
         }
       } else if (batch.initialQuantity > 0 && Number(batch.unitCostKgs) > 0) {
         // Layer without movement link: batch.unitCostKgs must already be per-unit.
@@ -345,15 +365,25 @@ export class PricingFifoService {
       }
 
       if (unitCostKgs > 0) {
-        return {
-          costPriceKgs: unitCostKgs,
-          available: true,
-          source: 'HQ_FIFO_ACTIVE_LAYER',
-          batchId: batch.id,
-          receivedAt: batch.receivedAt,
-          warehouseId: batch.warehouseId,
-        };
+        const isProcurementReceipt =
+          isBusinessProcurementReceiptReference(batch.referenceType) ||
+          (movement ? isBusinessProcurementReceiptReference(movement.referenceType) : false);
+        activeLayers.push({ batch, unitCostKgs, isProcurementReceipt });
       }
+    }
+
+    const procurementLayers = activeLayers.filter((layer) => layer.isProcurementReceipt);
+    const candidateLayers = procurementLayers.length > 0 ? procurementLayers : activeLayers;
+    const selected = candidateLayers[0];
+    if (selected) {
+      return {
+        costPriceKgs: selected.unitCostKgs,
+        available: true,
+        source: 'HQ_FIFO_ACTIVE_LAYER',
+        batchId: selected.batch.id,
+        receivedAt: selected.batch.receivedAt,
+        warehouseId: selected.batch.warehouseId,
+      };
     }
 
     // No active HQ FIFO layer — do not use average, balance, supplier, or product snapshots.

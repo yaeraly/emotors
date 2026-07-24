@@ -374,11 +374,17 @@ export default function ProductDetailPage() {
                 <Info
                   label={t('inventory.finalCostKgs')}
                   value={
-                    product.finalCostKgs != null &&
-                    product.costAvailable !== false &&
-                    Number(product.finalCostKgs) > 0
-                      ? formatKgs(product.finalCostKgs)
-                      : t('inventory.costNotCalculated')
+                    (() => {
+                      const unitCost =
+                        product.currentFifoUnitCost != null && product.currentFifoUnitCost > 0
+                          ? product.currentFifoUnitCost
+                          : product.finalCostKgs;
+                      return unitCost != null &&
+                        product.costAvailable !== false &&
+                        Number(unitCost) > 0
+                        ? formatKgs(unitCost)
+                        : t('inventory.costNotCalculated');
+                    })()
                   }
                 />
                 {!hidePricingProfile ? (

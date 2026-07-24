@@ -1,6 +1,9 @@
 import type { OldestActiveHqFifoCostResult } from '../pricing/pricing-fifo.service';
+import { isBusinessProcurementReceiptReference } from '../pricing/pricing-fifo-business-layer.util';
 
 export type ProductCatalogFifoCostFields = {
+  /** Oldest active HQ FIFO unit landed cost for catalog display. */
+  currentFifoUnitCost: number | null;
   finalCostKgs: number | null;
   costAvailable: boolean;
   costSource: string;
@@ -17,8 +20,10 @@ export function mapProductCatalogFifoCost(input: {
   fifo: OldestActiveHqFifoCostResult;
 }): ProductCatalogFifoCostFields {
   const costAvailable = Boolean(input.fifo.available && input.fifo.costPriceKgs > 0);
+  const currentFifoUnitCost = costAvailable ? input.fifo.costPriceKgs : null;
   return {
-    finalCostKgs: costAvailable ? input.fifo.costPriceKgs : null,
+    currentFifoUnitCost,
+    finalCostKgs: currentFifoUnitCost,
     costAvailable,
     costSource: input.fifo.source,
     costBatchId: input.fifo.batchId,
@@ -38,6 +43,7 @@ export function selectOldestActiveFifoUnitCost<
     createdAt: string | Date;
     id: string;
     isSeed?: boolean;
+    referenceType?: string | null;
   },
 >(layers: T[]) {
   const active = layers
@@ -51,5 +57,9 @@ export function selectOldestActiveFifoUnitCost<
       if (aCreated !== bCreated) return aCreated - bCreated;
       return a.id.localeCompare(b.id);
     });
-  return active[0]?.unitLandedCostKgs ?? null;
+  const procurementLayers = active.filter((layer) =>
+    isBusinessProcurementReceiptReference(layer.referenceType),
+  );
+  const candidates = procurementLayers.length > 0 ? procurementLayers : active;
+  return candidates[0]?.unitLandedCostKgs ?? null;
 }

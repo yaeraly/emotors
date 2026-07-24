@@ -39,9 +39,16 @@ async function main() {
   const afterAudit = args.apply ? await auditHqFifoInventory(prisma, args) : beforeAudit;
 
   const actionable = repairResults.filter((row) =>
-    ['would_create_movement', 'would_create_fifo', 'would_repair_fifo', 'created_movement', 'created_fifo', 'repaired_fifo'].includes(
-      row.action,
-    ),
+    [
+      'would_create_movement',
+      'would_create_fifo',
+      'would_repair_fifo',
+      'would_repair_movement',
+      'created_movement',
+      'created_fifo',
+      'repaired_fifo',
+      'repaired_movement',
+    ].includes(row.action),
   );
 
   console.log(
@@ -60,6 +67,7 @@ async function main() {
           totalActions: repairResults.length,
           wouldCreateOrRepair: actionable.length,
           createdMovements: repairResults.filter((r) => r.action === 'created_movement').length,
+          repairedMovements: repairResults.filter((r) => r.action === 'repaired_movement').length,
           createdFifoLayers: repairResults.filter((r) => r.action === 'created_fifo').length,
           repairedFifoLayers: repairResults.filter((r) => r.action === 'repaired_fifo').length,
           skippedExisting: repairResults.filter((r) => r.action === 'skipped_existing').length,

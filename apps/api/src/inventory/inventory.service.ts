@@ -56,6 +56,7 @@ import {
 } from './product-code.util';
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
+import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
 import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -1798,7 +1799,10 @@ export class InventoryService {
 
     if (dto.totalCostKgs !== undefined) {
       totalCostKgs = this.roundMoney(dto.totalCostKgs);
-      unitCostKgs = quantityAbs > 0 ? totalCostKgs / quantityAbs : 0;
+      unitCostKgs = resolveUnitCostFromInventoryLayer({
+        quantity: quantityAbs,
+        totalCostKgs,
+      });
     } else {
       unitCostKgs = dto.unitCostKgs ?? Number(product.finalCostKgs);
       totalCostKgs = this.roundMoney(quantityAbs * unitCostKgs);

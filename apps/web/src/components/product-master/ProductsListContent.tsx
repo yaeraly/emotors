@@ -201,7 +201,7 @@ export function ProductsListContent() {
                   <td className="px-3 py-2">{product.quantity}</td>
                   <td className="hidden px-3 py-2 lg:table-cell">
                     {isProductCostAvailable(product)
-                      ? formatKgs(product.finalCostKgs)
+                      ? formatKgs(productCatalogUnitCost(product))
                       : t('inventory.costNotCalculated')}
                   </td>
                   <td className="px-3 py-2">
@@ -270,10 +270,20 @@ function formatKgs(value: number | string | null | undefined) {
   })} сом`;
 }
 
-function isProductCostAvailable(product: Pick<Product, 'finalCostKgs' | 'costAvailable'>) {
+function productCatalogUnitCost(product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs'>) {
+  if (product.currentFifoUnitCost != null && product.currentFifoUnitCost > 0) {
+    return product.currentFifoUnitCost;
+  }
+  return product.finalCostKgs;
+}
+
+function isProductCostAvailable(
+  product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs' | 'costAvailable'>,
+) {
   if (product.costAvailable === false) return false;
-  if (product.finalCostKgs == null) return false;
-  return Number(product.finalCostKgs) > 0;
+  const cost = productCatalogUnitCost(product);
+  if (cost == null) return false;
+  return Number(cost) > 0;
 }
 
 function categoryName(category: ProductCategory, language: string) {
