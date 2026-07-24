@@ -14,6 +14,7 @@ import {
   sumConfirmedSupplierPaymentsKgs,
 } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
+import { canShowKyrgyzstanLogistics } from '@/lib/procurement-status-workflow';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
 import { buildHqReceivingValidationResult } from '@/lib/hq-receiving-validation';
 import { calculateLandedCosts, extractCargoConfig } from '@/lib/landed-cost';
@@ -32,7 +33,6 @@ import {
 } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
-import { translateStatus } from '@/lib/translate-status';
 
 type ProcurementOrderItem = {
   id: string;
@@ -556,6 +556,11 @@ function ProcurementOrderDetailPageContent() {
   const isScmOnlyProcurementView = useMemo(
     () => isSupplyChainManagerUser(user) && !hasFullAccess(user),
     [user],
+  );
+
+  const showKyrgyzstanLogistics = useMemo(
+    () => canShowKyrgyzstanLogistics(order?.status ?? ''),
+    [order?.status],
   );
 
   const activeOrderItems = useMemo(
@@ -1084,6 +1089,7 @@ function ProcurementOrderDetailPageContent() {
             ) : null}
           </section>
 
+          {showKyrgyzstanLogistics ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-base font-bold">{t('procurement.orders.cargoPayment')}</h3>
             {canSeePayments ? (
@@ -1096,7 +1102,9 @@ function ProcurementOrderDetailPageContent() {
               />
             ) : null}
           </section>
+          ) : null}
 
+          {showKyrgyzstanLogistics ? (
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="mb-3 text-base font-bold">{t('procurement.orders.domesticTransportKyrgyzstan')}</h3>
             {canSeePayments ? (
@@ -1109,6 +1117,7 @@ function ProcurementOrderDetailPageContent() {
               />
             ) : null}
           </section>
+          ) : null}
           </>
           ) : null}
 

@@ -117,3 +117,12 @@ export function statusButtonClassName(state: StatusButtonVisualState) {
 export function isStatusActionDisabled(state: StatusButtonVisualState) {
   return state === 'current' || state === 'unavailable' || state === 'completed' || state === 'cancelled';
 }
+
+const ARRIVED_STATUS_INDEX = PROCUREMENT_STATUS_WORKFLOW.findIndex((entry) => entry.status === 'ARRIVED');
+
+/** Cargo payment and Kyrgyzstan domestic transport are shown only after arrival is saved. */
+export function canShowKyrgyzstanLogistics(orderStatus: string) {
+  if (!orderStatus || orderStatus === 'CANCELLED') return false;
+  const currentIndex = getWorkflowIndex(orderStatus);
+  return ARRIVED_STATUS_INDEX >= 0 && currentIndex >= ARRIVED_STATUS_INDEX;
+}

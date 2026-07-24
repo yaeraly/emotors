@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { getProcurementStatusButtonState } from './procurement-status-workflow';
+import { getProcurementStatusButtonState, canShowKyrgyzstanLogistics } from './procurement-status-workflow';
 
 describe('getProcurementStatusButtonState with supplier payment', () => {
   it('keeps later stages blocked when nothing is paid', () => {
@@ -61,5 +61,27 @@ describe('getProcurementStatusButtonState with supplier payment', () => {
       }),
       'completed',
     );
+  });
+});
+
+describe('canShowKyrgyzstanLogistics', () => {
+  it('hides cargo and Kyrgyzstan logistics sections before arrival', () => {
+    for (const status of [
+      'APPROVED',
+      'ORDERED',
+      'SENT_TO_SUPPLIER',
+      'PAID',
+      'IN_PRODUCTION',
+      'SHIPPED_TO_YIWU',
+      'IN_TRANSIT',
+    ]) {
+      assert.equal(canShowKyrgyzstanLogistics(status), false, status);
+    }
+  });
+
+  it('shows cargo and Kyrgyzstan logistics sections after arrival is saved', () => {
+    assert.equal(canShowKyrgyzstanLogistics('ARRIVED'), true);
+    assert.equal(canShowKyrgyzstanLogistics('ARRIVED_IN_KYRGYZSTAN'), true);
+    assert.equal(canShowKyrgyzstanLogistics('RECEIVED_TO_HQ_WAREHOUSE'), true);
   });
 });
