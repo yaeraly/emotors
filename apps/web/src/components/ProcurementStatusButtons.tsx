@@ -7,12 +7,18 @@ import {
   statusButtonClassName,
   type StatusButtonVisualState,
 } from '@/lib/procurement-status-workflow';
+import {
+  getSupplierPaymentProgressStepState,
+  getSupplierPaymentStatusTranslationKey,
+  type SupplierPaymentDisplayStatus,
+} from '@/lib/supplier-payment-utils';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const CANCEL_ACTION = { path: 'cancel' as const, status: 'CANCELLED' as const };
 
 type Props = {
   orderStatus: string;
+  supplierPaymentStatus: SupplierPaymentDisplayStatus;
   onAction: (path: string) => void;
 };
 
@@ -31,19 +37,28 @@ function statusHintKey(state: StatusButtonVisualState) {
   }
 }
 
-export function ProcurementStatusButtons({ orderStatus, onAction }: Props) {
+export function ProcurementStatusButtons({ orderStatus, supplierPaymentStatus, onAction }: Props) {
   const { t } = useTranslation();
 
   const actions = [
-    ...PROCUREMENT_STATUS_WORKFLOW.map((entry) => ({
-      path: entry.path,
-      labelKey: workflowLabelKey(entry.path),
-      state: getProcurementStatusButtonState(orderStatus, entry),
-      readOnly: entry.path === 'mark-paid',
-    })),
+    ...PROCUREMENT_STATUS_WORKFLOW.map((entry) => {
+      const isPaymentStep = entry.path === 'mark-paid';
+      const state = isPaymentStep
+        ? getSupplierPaymentProgressStepState(supplierPaymentStatus)
+        : getProcurementStatusButtonState(orderStatus, entry);
+
+      return {
+        path: entry.path,
+        label: isPaymentStep
+          ? t(getSupplierPaymentStatusTranslationKey(supplierPaymentStatus))
+          : t(workflowLabelKey(entry.path)),
+        state,
+        readOnly: isPaymentStep,
+      };
+    }),
     {
       path: CANCEL_ACTION.path,
-      labelKey: 'distribution.cancel',
+      label: t('distribution.cancel'),
       state: getProcurementStatusButtonState(orderStatus, CANCEL_ACTION),
       readOnly: false,
     },
@@ -75,7 +90,7 @@ export function ProcurementStatusButtons({ orderStatus, onAction }: Props) {
             {(action.state === 'completed' || action.state === 'current') ? (
               <span aria-hidden="true">✓</span>
             ) : null}
-            <span>{t(action.labelKey)}</span>
+            <span>{action.label}</span>
             {action.state === 'current' ? (
               <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] uppercase tracking-wide">
                 {t('procurement.statusButtons.currentStatus')}

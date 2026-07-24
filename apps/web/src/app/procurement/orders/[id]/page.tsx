@@ -10,9 +10,7 @@ import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons'
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
 import { ProcurementSectionPayablePanel } from '@/components/ProcurementSectionPayablePanel';
 import {
-  getSupplierPaymentStatusTranslationKey,
-  resolveFinancialSupplierPaymentDisplayStatus,
-  resolveSupplierPaymentRemainingKgs,
+  buildPurchaseOrderSupplierPaymentSummary,
   sumConfirmedSupplierPaymentsKgs,
 } from '@/lib/supplier-payment-utils';
 import { apiFetch, API_URL, getToken } from '@/lib/api';
@@ -531,48 +529,22 @@ function ProcurementOrderDetailPageContent() {
     return previewTotals.items.reduce((sum, item) => sum + item.costKgs * item.effectiveQuantity, 0);
   }, [previewTotals]);
 
-  const generalInfoSupplierPayment = useMemo(() => {
-    const estimatedOrderTotalKgs = Number(order?.estimatedSupplierCostKgs ?? 0);
-    const orderTotalKgs =
-      estimatedOrderTotalKgs > 0
-        ? estimatedOrderTotalKgs
-        : totalPurchaseCostKgs > 0
-          ? totalPurchaseCostKgs
-          : Math.round(
-              Number(order?.totalYuan ?? 0) *
-                Number(order?.defaultYuanRate ?? order?.effectiveYuanRate ?? 0) *
-                100,
-            ) / 100;
-    const paidAmountKgs = Number(order?.totalPaidKgs ?? 0);
-    const remainingToPayKgs = resolveSupplierPaymentRemainingKgs({
-      orderTotalKgs,
-      paidAmountKgs,
+  const supplierPaymentSummary = useMemo(() => {
+    return buildPurchaseOrderSupplierPaymentSummary({
+      estimatedSupplierCostKgs: order?.estimatedSupplierCostKgs,
+      totalYuan: order?.totalYuan,
+      defaultYuanRate: order?.defaultYuanRate,
+      effectiveYuanRate: order?.effectiveYuanRate,
+      totalPurchaseCostKgs,
+      supplierPayments: order?.supplierPayments ?? [],
     });
-    const statusTranslationKey = isSupplyChainManagerUser(user)
-      ? paidAmountKgs > 0
-        ? 'procurement.orders.generalInfoSupplierPaymentStatus.PAID'
-        : 'procurement.orders.generalInfoSupplierPaymentStatus.UNPAID'
-      : getSupplierPaymentStatusTranslationKey(
-          resolveFinancialSupplierPaymentDisplayStatus({
-            paidAmountKgs,
-            orderTotalKgs,
-          }),
-        );
-
-    return {
-      orderTotalKgs,
-      paidAmountKgs,
-      remainingToPayKgs,
-      statusTranslationKey,
-    };
   }, [
     order?.estimatedSupplierCostKgs,
-    order?.totalPaidKgs,
     order?.totalYuan,
     order?.defaultYuanRate,
     order?.effectiveYuanRate,
+    order?.supplierPayments,
     totalPurchaseCostKgs,
-    user,
   ]);
 
   const landedCostCalculated = useMemo(() => {
@@ -1036,7 +1008,7 @@ function ProcurementOrderDetailPageContent() {
             <div className="grid gap-4 md:grid-cols-4">
               <Info label={t('procurement.orders.orderNumber')} value={order.orderNumber} />
               <Info label={t('procurement.orders.orderDate')} value={order.createdAt ? formatOrderDate(order.createdAt) : '-'} />
-              <Info label={t('procurement.orders.status')} value={translateStatus(t, order.status, 'procurement')} />
+              <Info label={t('procurement.orders.status')} value={t(supplierPaymentSummary.statusTranslationKey)} />
               <Info
                 label={t('procurement.orders.warehouse')}
                 value={order.hqWarehouse?.name ?? t('procurement.orders.hqWarehouseNotAssigned')}
@@ -1055,19 +1027,19 @@ function ProcurementOrderDetailPageContent() {
             <div className="mt-6 grid gap-4 md:grid-cols-4">
               <Info
                 label={t('procurement.orders.supplierPaymentStatusLabel')}
-                value={t(generalInfoSupplierPayment.statusTranslationKey)}
+                value={t(supplierPaymentSummary.statusTranslationKey)}
               />
               <Info
                 label={t('procurement.orders.orderTotalKgs')}
-                value={formatKgs(generalInfoSupplierPayment.orderTotalKgs)}
+                value={formatKgs(supplierPaymentSummary.orderTotalKgs)}
               />
               <Info
                 label={t('procurement.orders.paidAmountKgs')}
-                value={formatKgs(generalInfoSupplierPayment.paidAmountKgs)}
+                value={formatKgs(supplierPaymentSummary.paidAmountKgs)}
               />
               <Info
                 label={t('procurement.orders.remainingToPayKgs')}
-                value={formatKgs(generalInfoSupplierPayment.remainingToPayKgs)}
+                value={formatKgs(supplierPaymentSummary.remainingToPayKgs)}
               />
             </div>
             <p className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
@@ -1084,8 +1056,6 @@ function ProcurementOrderDetailPageContent() {
                   totalYuan: Number(order.totalYuan),
                   totalPaidYuan: Number(order.totalPaidYuan ?? 0),
                   totalPaidKgs: Number(order.totalPaidKgs ?? 0),
-                  estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
-                  defaultYuanRate: Number(order.defaultYuanRate ?? 0),
                   remainingYuan: Number(order.remainingYuan ?? order.totalYuan),
                   requestedPaymentYuan:
                     order.requestedPaymentYuan != null
@@ -1382,7 +1352,11 @@ function ProcurementOrderDetailPageContent() {
 
           {activeTab === 'general' && canEditOrder && !finalized ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <ProcurementStatusButtons orderStatus={order.status} onAction={(path) => void action(path)} />
+              <ProcurementStatusButtons
+                orderStatus={order.status}
+                supplierPaymentStatus={supplierPaymentSummary.paymentStatus}
+                onAction={(path) => void action(path)}
+              />
             </section>
           ) : null}
 

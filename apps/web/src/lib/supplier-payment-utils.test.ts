@@ -1,83 +1,97 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  getSupplierPaymentStatusLabel,
-  resolveFinancialSupplierPaymentDisplayStatus,
+  buildPurchaseOrderSupplierPaymentSummary,
+  getSupplierPaymentProgressStepState,
+  getSupplierPaymentStatusTranslationKey,
+  resolveSupplierPaymentDisplayStatus,
   resolveSupplierPaymentRemainingKgs,
-  resolveSupplyManagerSupplierPaymentDisplayStatus,
 } from './supplier-payment-utils';
 
 const ORDER_TOTAL = 100_000;
 const PARTIAL_PAID = 30_000;
 const FULL_PAID = 100_000;
 
-describe('getSupplierPaymentStatusLabel', () => {
-  it('shows unpaid for all roles when no payment exists', () => {
-    for (const userRole of ['SUPPLY_CHAIN_MANAGER', 'ACCOUNTANT', 'CASHIER', 'FINANCIAL'] as const) {
-      assert.equal(
-        getSupplierPaymentStatusLabel({
-          actualPaymentStatus: 'UNPAID',
-          userRole,
-          paidAmountKgs: 0,
-          orderTotalKgs: ORDER_TOTAL,
-        }),
-        'UNPAID',
-      );
-    }
-  });
+const confirmedPayment = (amountKgs: number) => ({
+  status: 'ACTIVE',
+  actualPaidKgs: amountKgs,
+  amountKgs,
+});
 
-  it('shows simplified paid status for Supply Manager on partial payment', () => {
+describe('resolveSupplierPaymentDisplayStatus', () => {
+  it('returns UNPAID when nothing is paid', () => {
     assert.equal(
-      getSupplierPaymentStatusLabel({
-        actualPaymentStatus: 'PARTIALLY_PAID',
-        userRole: 'SUPPLY_CHAIN_MANAGER',
-        paidAmountKgs: PARTIAL_PAID,
+      resolveSupplierPaymentDisplayStatus({
+        paidAmountKgs: 0,
         orderTotalKgs: ORDER_TOTAL,
       }),
-      'PAID',
+      'UNPAID',
     );
   });
 
-  it('shows partial financial status for Accountant and Cashier', () => {
-    for (const userRole of ['ACCOUNTANT', 'CASHIER', 'FINANCIAL'] as const) {
-      assert.equal(
-        getSupplierPaymentStatusLabel({
-          actualPaymentStatus: 'PARTIALLY_PAID',
-          userRole,
-          paidAmountKgs: PARTIAL_PAID,
-          orderTotalKgs: ORDER_TOTAL,
-        }),
-        'PARTIALLY_PAID',
-      );
-    }
-  });
-
-  it('shows paid for all roles when the order is fully paid', () => {
-    for (const userRole of ['SUPPLY_CHAIN_MANAGER', 'ACCOUNTANT', 'CASHIER', 'FINANCIAL'] as const) {
-      assert.equal(
-        getSupplierPaymentStatusLabel({
-          actualPaymentStatus: 'PAID',
-          userRole,
-          paidAmountKgs: FULL_PAID,
-          orderTotalKgs: ORDER_TOTAL,
-        }),
-        'PAID',
-      );
-    }
-  });
-
-  it('does not remap stored partial status for financial roles when amounts are partial', () => {
+  it('returns PARTIALLY_PAID for partial supplier payment', () => {
     assert.equal(
-      resolveFinancialSupplierPaymentDisplayStatus({
+      resolveSupplierPaymentDisplayStatus({
         paidAmountKgs: PARTIAL_PAID,
         orderTotalKgs: ORDER_TOTAL,
       }),
       'PARTIALLY_PAID',
     );
+  });
+
+  it('returns PAID when the full order amount is paid', () => {
     assert.equal(
-      resolveSupplyManagerSupplierPaymentDisplayStatus(PARTIAL_PAID),
+      resolveSupplierPaymentDisplayStatus({
+        paidAmountKgs: FULL_PAID,
+        orderTotalKgs: ORDER_TOTAL,
+      }),
       'PAID',
     );
+  });
+});
+
+describe('buildPurchaseOrderSupplierPaymentSummary', () => {
+  it('uses confirmed supplier payments and purchase order total in KGS', () => {
+    const summary = buildPurchaseOrderSupplierPaymentSummary({
+      estimatedSupplierCostKgs: ORDER_TOTAL,
+      supplierPayments: [confirmedPayment(PARTIAL_PAID)],
+    });
+
+    assert.equal(summary.orderTotalKgs, ORDER_TOTAL);
+    assert.equal(summary.paidAmountKgs, PARTIAL_PAID);
+    assert.equal(summary.remainingToPayKgs, 70_000);
+    assert.equal(summary.paymentStatus, 'PARTIALLY_PAID');
+    assert.equal(
+      summary.statusTranslationKey,
+      getSupplierPaymentStatusTranslationKey('PARTIALLY_PAID'),
+    );
+  });
+
+  it('returns the same status for all three UI consumers', () => {
+    const scenarios = [
+      { payments: [], expected: 'UNPAID' as const },
+      { payments: [confirmedPayment(PARTIAL_PAID)], expected: 'PARTIALLY_PAID' as const },
+      { payments: [confirmedPayment(FULL_PAID)], expected: 'PAID' as const },
+    ];
+
+    for (const scenario of scenarios) {
+      const summary = buildPurchaseOrderSupplierPaymentSummary({
+        estimatedSupplierCostKgs: ORDER_TOTAL,
+        supplierPayments: scenario.payments,
+      });
+      assert.equal(summary.paymentStatus, scenario.expected);
+    }
+  });
+});
+
+describe('getSupplierPaymentProgressStepState', () => {
+  it('keeps the payment step inactive when unpaid', () => {
+    assert.equal(getSupplierPaymentProgressStepState('UNPAID'), 'unavailable');
+  });
+
+  it('marks the payment step completed for partial and full payment', () => {
+    assert.equal(getSupplierPaymentProgressStepState('PARTIALLY_PAID'), 'completed');
+    assert.equal(getSupplierPaymentProgressStepState('PAID'), 'completed');
   });
 });
 

@@ -59,55 +59,51 @@ export function sumConfirmedSupplierPaymentsKgs(
   );
 }
 
-export type SupplierPaymentDisplayLabelStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
+export type SupplierPaymentDisplayStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID';
 
-export type SupplierPaymentStatusLabelRole =
-  | 'SUPPLY_CHAIN_MANAGER'
-  | 'ACCOUNTANT'
-  | 'CASHIER'
-  | 'FINANCIAL';
+export type PurchaseOrderSupplierPaymentSummary = {
+  orderTotalKgs: number;
+  paidAmountKgs: number;
+  remainingToPayKgs: number;
+  paymentStatus: SupplierPaymentDisplayStatus;
+  statusTranslationKey: `procurement.sectionPayable.statusValue.${SupplierPaymentDisplayStatus}`;
+};
 
-export function resolveFinancialSupplierPaymentDisplayStatus(input: {
+export function resolvePurchaseOrderTotalKgs(input: {
+  estimatedSupplierCostKgs?: number | string | null;
+  totalYuan?: number | string | null;
+  defaultYuanRate?: number | string | null;
+  effectiveYuanRate?: number | string | null;
+  totalPurchaseCostKgs?: number;
+}) {
+  const estimatedOrderTotalKgs = Number(input.estimatedSupplierCostKgs ?? 0);
+  if (estimatedOrderTotalKgs > 0) return roundMoney(estimatedOrderTotalKgs);
+
+  const previewTotal = Number(input.totalPurchaseCostKgs ?? 0);
+  if (previewTotal > 0) return roundMoney(previewTotal);
+
+  return roundMoney(
+    Number(input.totalYuan ?? 0) * Number(input.defaultYuanRate ?? input.effectiveYuanRate ?? 0),
+  );
+}
+
+/** Shared payment-status resolver for purchase order UI. */
+export function resolveSupplierPaymentDisplayStatus(input: {
   paidAmountKgs: number;
   orderTotalKgs: number;
-}): SupplierPaymentDisplayLabelStatus {
-  const paidAmountKgs = roundMoney(Number(input.paidAmountKgs || 0));
-  const orderTotalKgs = roundMoney(Number(input.orderTotalKgs || 0));
+}): SupplierPaymentDisplayStatus {
+  const paidAmount = roundMoney(Number(input.paidAmountKgs || 0));
+  const totalAmount = roundMoney(Number(input.orderTotalKgs || 0));
 
-  if (paidAmountKgs <= 0) return 'UNPAID';
-  if (orderTotalKgs > 0 && paidAmountKgs >= orderTotalKgs) return 'PAID';
+  if (paidAmount <= 0) return 'UNPAID';
+  if (totalAmount > 0 && paidAmount >= totalAmount) return 'PAID';
   return 'PARTIALLY_PAID';
 }
 
-export function resolveSupplyManagerSupplierPaymentDisplayStatus(
-  paidAmountKgs: number,
-): Extract<SupplierPaymentDisplayLabelStatus, 'UNPAID' | 'PAID'> {
-  return Number(paidAmountKgs) > 0 ? 'PAID' : 'UNPAID';
-}
-
-/** Display-only label resolver. Does not mutate stored supplier payment status. */
-export function getSupplierPaymentStatusLabel(input: {
-  actualPaymentStatus?: string | null;
-  userRole: SupplierPaymentStatusLabelRole;
-  paidAmountKgs: number;
-  orderTotalKgs: number;
-}): SupplierPaymentDisplayLabelStatus {
-  void input.actualPaymentStatus;
-
-  if (input.userRole === 'SUPPLY_CHAIN_MANAGER') {
-    return resolveSupplyManagerSupplierPaymentDisplayStatus(input.paidAmountKgs);
-  }
-
-  return resolveFinancialSupplierPaymentDisplayStatus({
-    paidAmountKgs: input.paidAmountKgs,
-    orderTotalKgs: input.orderTotalKgs,
-  });
-}
-
 export function getSupplierPaymentStatusTranslationKey(
-  label: SupplierPaymentDisplayLabelStatus,
-): `procurement.payments.status.${SupplierPaymentDisplayLabelStatus}` {
-  return `procurement.payments.status.${label}`;
+  paymentStatus: SupplierPaymentDisplayStatus,
+): `procurement.sectionPayable.statusValue.${SupplierPaymentDisplayStatus}` {
+  return `procurement.sectionPayable.statusValue.${paymentStatus}`;
 }
 
 export function resolveSupplierPaymentRemainingKgs(input: {
@@ -115,4 +111,46 @@ export function resolveSupplierPaymentRemainingKgs(input: {
   paidAmountKgs: number;
 }) {
   return Math.max(roundMoney(input.orderTotalKgs) - roundMoney(input.paidAmountKgs), 0);
+}
+
+export function buildPurchaseOrderSupplierPaymentSummary(input: {
+  estimatedSupplierCostKgs?: number | string | null;
+  totalYuan?: number | string | null;
+  defaultYuanRate?: number | string | null;
+  effectiveYuanRate?: number | string | null;
+  totalPurchaseCostKgs?: number;
+  supplierPayments?: Array<{
+    status?: string | null;
+    amountKgs?: number | string | null;
+    actualPaidKgs?: number | string | null;
+    approvedAmountKgs?: number | string | null;
+    amountYuan?: number | string | null;
+    exchangeRate?: number | string | null;
+  }>;
+}): PurchaseOrderSupplierPaymentSummary {
+  const orderTotalKgs = resolvePurchaseOrderTotalKgs(input);
+  const paidAmountKgs = sumConfirmedSupplierPaymentsKgs(input.supplierPayments ?? []);
+  const paymentStatus = resolveSupplierPaymentDisplayStatus({
+    paidAmountKgs,
+    orderTotalKgs,
+  });
+
+  return {
+    orderTotalKgs,
+    paidAmountKgs,
+    remainingToPayKgs: resolveSupplierPaymentRemainingKgs({ orderTotalKgs, paidAmountKgs }),
+    paymentStatus,
+    statusTranslationKey: getSupplierPaymentStatusTranslationKey(paymentStatus),
+  };
+}
+
+export type SupplierPaymentProgressStepState = 'completed' | 'unavailable';
+
+export function getSupplierPaymentProgressStepState(
+  paymentStatus: SupplierPaymentDisplayStatus,
+): SupplierPaymentProgressStepState {
+  if (paymentStatus === 'PAID' || paymentStatus === 'PARTIALLY_PAID') {
+    return 'completed';
+  }
+  return 'unavailable';
 }
