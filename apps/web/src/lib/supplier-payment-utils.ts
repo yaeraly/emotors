@@ -154,3 +154,7 @@ export function getSupplierPaymentProgressStepState(
   }
   return 'unavailable';
 }
+
+export function canContinueProcurementWorkflow(paymentStatus: SupplierPaymentDisplayStatus) {
+  return paymentStatus === 'PARTIALLY_PAID' || paymentStatus === 'PAID';
+}

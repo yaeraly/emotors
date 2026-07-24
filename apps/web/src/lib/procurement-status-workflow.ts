@@ -1,3 +1,6 @@
+import type { SupplierPaymentDisplayStatus } from './supplier-payment-utils';
+import { canContinueProcurementWorkflow } from './supplier-payment-utils';
+
 export const PROCUREMENT_STATUS_WORKFLOW = [
   { path: 'approve', status: 'APPROVED' },
   { path: 'mark-ordered', status: 'ORDERED' },
@@ -25,6 +28,8 @@ const POST_WORKFLOW_STATUSES = new Set([
   'CLOSED',
 ]);
 
+const PAYMENT_STEP_INDEX = PROCUREMENT_STATUS_WORKFLOW.findIndex((entry) => entry.path === 'mark-paid');
+
 function getWorkflowIndex(status: string) {
   if (status === 'DRAFT') return -1;
   const workflowIndex = PROCUREMENT_STATUS_WORKFLOW.findIndex((entry) => entry.status === status);
@@ -33,9 +38,24 @@ function getWorkflowIndex(status: string) {
   return -1;
 }
 
+function getEffectiveWorkflowIndex(
+  orderStatus: string,
+  supplierPaymentStatus?: SupplierPaymentDisplayStatus,
+) {
+  const currentIndex = getWorkflowIndex(orderStatus);
+  if (currentIndex < 0) return currentIndex;
+
+  if (canContinueProcurementWorkflow(supplierPaymentStatus ?? 'UNPAID') && currentIndex < PAYMENT_STEP_INDEX) {
+    return PAYMENT_STEP_INDEX;
+  }
+
+  return currentIndex;
+}
+
 export function getProcurementStatusButtonState(
   orderStatus: string,
   action: ProcurementWorkflowAction | { path: 'cancel'; status: 'CANCELLED' },
+  options?: { supplierPaymentStatus?: SupplierPaymentDisplayStatus },
 ): StatusButtonVisualState {
   if (action.path === 'cancel') {
     return orderStatus === 'CANCELLED' ? 'cancelled' : 'cancel-available';
@@ -46,29 +66,31 @@ export function getProcurementStatusButtonState(
   }
 
   const currentIndex = getWorkflowIndex(orderStatus);
+  const effectiveIndex = getEffectiveWorkflowIndex(orderStatus, options?.supplierPaymentStatus);
   const actionIndex = PROCUREMENT_STATUS_WORKFLOW.findIndex((entry) => entry.path === action.path);
+  const paymentSatisfied = canContinueProcurementWorkflow(options?.supplierPaymentStatus ?? 'UNPAID');
 
   if (orderStatus === action.status) {
     return 'current';
   }
 
-  // PAID is set only by supplier payment confirmation — never a manual next step.
+  // Payment step is display-only; partial and full payments both unlock later stages.
   if (action.path === 'mark-paid') {
-    if (currentIndex > actionIndex) {
+    if (paymentSatisfied || currentIndex > actionIndex) {
       return 'completed';
     }
     return 'unavailable';
   }
 
-  if (currentIndex < 0) {
+  if (effectiveIndex < 0) {
     return actionIndex === 0 ? 'next' : 'unavailable';
   }
 
-  if (actionIndex < currentIndex) {
+  if (actionIndex < effectiveIndex) {
     return 'completed';
   }
 
-  if (actionIndex === currentIndex + 1) {
+  if (actionIndex === effectiveIndex + 1) {
     return 'next';
   }
 

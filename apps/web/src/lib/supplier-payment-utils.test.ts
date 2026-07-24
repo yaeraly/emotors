@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   buildPurchaseOrderSupplierPaymentSummary,
+  canContinueProcurementWorkflow,
   getSupplierPaymentProgressStepState,
   getSupplierPaymentStatusTranslationKey,
   resolveSupplierPaymentDisplayStatus,
@@ -92,6 +93,14 @@ describe('getSupplierPaymentProgressStepState', () => {
   it('marks the payment step completed for partial and full payment', () => {
     assert.equal(getSupplierPaymentProgressStepState('PARTIALLY_PAID'), 'completed');
     assert.equal(getSupplierPaymentProgressStepState('PAID'), 'completed');
+  });
+});
+
+describe('canContinueProcurementWorkflow', () => {
+  it('allows continuation for partial and full payment only', () => {
+    assert.equal(canContinueProcurementWorkflow('UNPAID'), false);
+    assert.equal(canContinueProcurementWorkflow('PARTIALLY_PAID'), true);
+    assert.equal(canContinueProcurementWorkflow('PAID'), true);
   });
 });
 

@@ -45,7 +45,7 @@ export function ProcurementStatusButtons({ orderStatus, supplierPaymentStatus, o
       const isPaymentStep = entry.path === 'mark-paid';
       const state = isPaymentStep
         ? getSupplierPaymentProgressStepState(supplierPaymentStatus)
-        : getProcurementStatusButtonState(orderStatus, entry);
+        : getProcurementStatusButtonState(orderStatus, entry, { supplierPaymentStatus });
 
       return {
         path: entry.path,
