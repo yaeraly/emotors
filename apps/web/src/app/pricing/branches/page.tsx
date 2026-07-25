@@ -131,6 +131,12 @@ export default function PricingBranchesPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  useEffect(() => {
+    if (!success) return;
+    const timer = window.setTimeout(() => setSuccess(''), 3000);
+    return () => window.clearTimeout(timer);
+  }, [success]);
+
   function updateRow(productId: string, draftMarkup: number) {
     setRows((current) =>
       current.map((row) => {
@@ -145,6 +151,8 @@ export default function PricingBranchesPage() {
   }
 
   async function save(productId: string) {
+    if (savingId === productId) return;
+
     const row = rows.find((item) => item.id === productId);
     if (!row || !canManage) return;
     if (!isCostAvailable(row)) {
@@ -156,16 +164,38 @@ export default function PricingBranchesPage() {
       return;
     }
 
+    const savedMarkup = row.draftMarkup;
     setSavingId(productId);
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/pricing/franchise-sales/${productId}`, {
+      const updated = await apiFetch<FranchiseSalesRow>(`/pricing/franchise-sales/${productId}`, {
         method: 'PUT',
-        body: JSON.stringify({ hqBranchWholesaleMarkupPercent: row.draftMarkup }),
+        body: JSON.stringify({ hqBranchWholesaleMarkupPercent: savedMarkup }),
       });
-      setSuccess(t('pricing.franchiseSaved'));
-      await load(branchId);
+      const branchPrice =
+        updated.branchPriceKgs ??
+        updated.masterBranchPriceKgs ??
+        computeBranchPriceKgs({ ...row, draftMarkup: savedMarkup });
+
+      setRows((current) =>
+        current.map((item) => {
+          if (item.id !== productId) return item;
+          return {
+            ...item,
+            ...updated,
+            costAvailable: isCostAvailable(updated),
+            hqMarkupPercent: Number(updated.hqMarkupPercent ?? savedMarkup),
+            recommendedMarkupPercent: Number(updated.recommendedMarkupPercent ?? savedMarkup),
+            markupConfigured: hasActiveMarkup(savedMarkup),
+            branchPriceKgs: branchPrice,
+            masterBranchPriceKgs: branchPrice,
+            draftMarkup: savedMarkup,
+            isDirty: false,
+          };
+        }),
+      );
+      setSuccess(t('pricing.rowSaved'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -307,7 +337,7 @@ export default function PricingBranchesPage() {
                             onClick={() => void save(row.id)}
                             className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold disabled:opacity-50"
                           >
-                            {savingId === row.id ? '…' : t('common.save')}
+                            {savingId === row.id ? t('common.saving') : t('common.save')}
                           </button>
                         ) : null}
                       </td>
