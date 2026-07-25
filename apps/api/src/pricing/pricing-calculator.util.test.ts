@@ -33,6 +33,11 @@ describe('pricing-calculator.util', () => {
   });
 
   it('rounds raw totals up to nearest 10 KGS', () => {
+    expect(roundUpToTens(1001)).toBe(1010);
+    expect(roundUpToTens(1010)).toBe(1010);
+    expect(roundUpToTens(1011)).toBe(1020);
+    expect(roundUpToTens(1019)).toBe(1020);
+    expect(roundUpToTens(1020)).toBe(1020);
     expect(roundUpToTens(1201)).toBe(1210);
     expect(roundUpToTens(1210)).toBe(1210);
     expect(roundUpToTens(1211)).toBe(1220);

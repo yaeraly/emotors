@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState, type KeyboardEvent } f
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
-import { BranchProductSearch, type BranchProductOption, isBranchPriceConfigured, parseBranchMoney } from '@/components/BranchProductSearch';
+import { BranchProductSearch, type BranchProductOption, isBranchPriceConfigured, parseBranchMoney, resolveBranchDisplayPrice } from '@/components/BranchProductSearch';
 import { branchPurchaseRequestsTitleKey } from '@/lib/distribution-labels';
 import { distributionHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
@@ -252,7 +252,11 @@ export default function BranchPurchaseRequestsPage() {
       setError(t('branchProductRequest.priceNotConfigured'));
       return;
     }
-    const branchPrice = parseBranchMoney(product.branchPriceKgs ?? product.branchPurchasePriceKgs);
+    const branchPrice = resolveBranchDisplayPrice(product);
+    if (branchPrice === null || branchPrice === undefined) {
+      setError(t('branchProductRequest.priceNotConfigured'));
+      return;
+    }
     setError('');
     setLines((current) => {
       const existing = current.find((line) => line.productId === product.id && line.productId);

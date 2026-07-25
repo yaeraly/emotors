@@ -350,6 +350,8 @@ export class OperationsService {
           product.id,
           {
             branchPriceKgs: pricing.branchPurchasePriceKgs,
+            finalBranchPriceKgs: pricing.branchPurchasePriceKgs,
+            finalBranchPrice: pricing.branchPurchasePriceKgs,
             costPriceKgs: pricing.costPriceSnapshot,
             markupPercent: pricing.markupSnapshot,
             markupAmount: pricing.markupAmountSnapshot,
@@ -5198,6 +5200,8 @@ export class OperationsService {
           availableQuantity,
           branchPurchasePriceKgs: pricing.branchPurchasePriceKgs,
           branchPriceKgs: pricing.branchPurchasePriceKgs,
+          finalBranchPriceKgs: pricing.branchPurchasePriceKgs,
+          finalBranchPrice: pricing.branchPurchasePriceKgs,
           costPriceKgs: pricing.costPriceSnapshot,
           markupPercent: pricing.markupSnapshot,
           markupAmount: pricing.markupAmountSnapshot,

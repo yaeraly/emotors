@@ -2,12 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { PricingAppliedRuleType, PricingEnginePriceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
-import { resolveDefaultPriceProfileId } from './pricing-profile-defaults.util';
 import {
   applyPricingAdjustment,
+  applyPricingAdjustmentRaw,
   calculateBaseBranchPriceKgs,
+  calculateBaseBranchPriceKgsRaw,
   calculateRetailPriceKgs,
   calculateWholesalePriceKgs,
+  applyPricingRounding,
   DEFAULT_PRICING_ROUNDING,
   type BranchTypeForPricing,
   type PricingAdjustmentMode,
@@ -87,32 +89,40 @@ export class PricingEngineService {
     const versionId = input.pricingPolicyVersionId ?? (await this.getActiveVersionId());
 
     const branchType = branch.branchType as BranchTypeForPricing;
-    const effectiveProfileId =
-      branch.priceProfileId ?? (await resolveDefaultPriceProfileId(this.prisma, branch.branchType));
-    let profileForRules = branch.priceProfile;
-    if (!profileForRules && effectiveProfileId) {
-      profileForRules = await this.prisma.branchPriceProfile.findFirst({
-        where: { id: effectiveProfileId },
-        include: { categoryDiscounts: true },
-      });
-    }
+    const isBranchPurchase = priceType === PricingEnginePriceType.BRANCH_PURCHASE;
+    const profileId = branch.priceProfileId;
+    const profileForRules =
+      branch.priceProfile ??
+      (profileId
+        ? await this.prisma.branchPriceProfile.findFirst({
+            where: { id: profileId },
+            include: { categoryDiscounts: true },
+          })
+        : null);
 
     const cost = await this.fifoService.getOldestActiveHqFifoCost(pricingProduct.id);
     const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
     const baseCostKgs = costAvailable ? cost.costPriceKgs : 0;
     const baseFranchiseMarkupPercent = Number(pricingProduct.hqBranchWholesaleMarkupPercent ?? 0);
 
-    const baseBranchPriceKgs = calculateBaseBranchPriceKgs({
+    const baseBranchPriceRaw = calculateBaseBranchPriceKgsRaw({
       costPriceKgs: baseCostKgs,
       markupPercent: baseFranchiseMarkupPercent,
       branchType,
     });
+    const baseBranchPriceKgs = isBranchPurchase
+      ? baseBranchPriceRaw
+      : calculateBaseBranchPriceKgs({
+          costPriceKgs: baseCostKgs,
+          markupPercent: baseFranchiseMarkupPercent,
+          branchType,
+        });
 
     const calculationSteps: PricingCalculationStep[] = [
       { step: 'fifoCost', valueKgs: baseCostKgs, detail: cost.source },
       {
         step: 'masterFranchise',
-        valueKgs: baseBranchPriceKgs,
+        valueKgs: isBranchPurchase ? applyPricingRounding(baseBranchPriceRaw, rounding) : baseBranchPriceKgs,
         detail: `markup=${baseFranchiseMarkupPercent}`,
       },
     ];
@@ -133,7 +143,10 @@ export class PricingEngineService {
       appliedRuleType = PricingAppliedRuleType.HQ_COST;
       calculationSteps.push({ step: 'hqBranchExactCost', valueKgs: baseCostKgs });
     } else {
-      const profileId = effectiveProfileId;
+      const applyAdjustment = (base: number, mode: PricingAdjustmentMode, value: number) =>
+        isBranchPurchase
+          ? applyPricingAdjustmentRaw(base, mode, value)
+          : applyPricingAdjustment(base, mode, value, rounding);
 
       const tempOverride = await this.findActiveTempOverride(
         input.branchId,
@@ -142,11 +155,10 @@ export class PricingEngineService {
         versionId,
       );
       if (tempOverride) {
-        effectiveBranchPriceKgs = applyPricingAdjustment(
+        effectiveBranchPriceKgs = applyAdjustment(
           baseBranchPriceKgs,
           tempOverride.mode,
           tempOverride.value,
-          rounding,
         );
         appliedRuleType = PricingAppliedRuleType.TEMP_OVERRIDE;
         appliedRuleId = tempOverride.id;
@@ -173,7 +185,7 @@ export class PricingEngineService {
           if (productRule) {
             const mode = productRule.adjustmentMode as PricingAdjustmentMode;
             const value = Number(productRule.adjustmentValue);
-            effectiveBranchPriceKgs = applyPricingAdjustment(baseBranchPriceKgs, mode, value, rounding);
+            effectiveBranchPriceKgs = applyAdjustment(baseBranchPriceKgs, mode, value);
             appliedRuleType = PricingAppliedRuleType.PRODUCT_RULE;
             appliedRuleId = productRule.id;
             appliedAdjustmentMode = mode;
@@ -197,11 +209,10 @@ export class PricingEngineService {
             });
             if (categoryRule) {
               const value = Number(categoryRule.discountPercent);
-              effectiveBranchPriceKgs = applyPricingAdjustment(
+              effectiveBranchPriceKgs = applyAdjustment(
                 baseBranchPriceKgs,
                 'PERCENTAGE_DISCOUNT',
                 value,
-                rounding,
               );
               appliedRuleType = PricingAppliedRuleType.CATEGORY_RULE;
               appliedRuleId = categoryRule.id;
@@ -225,11 +236,10 @@ export class PricingEngineService {
           );
           const discountPercent = profileDiscount ? Number(profileDiscount.discountPercent) : 0;
           if (discountPercent > 0) {
-            effectiveBranchPriceKgs = applyPricingAdjustment(
+            effectiveBranchPriceKgs = applyAdjustment(
               baseBranchPriceKgs,
               'PERCENTAGE_DISCOUNT',
               discountPercent,
-              rounding,
             );
             appliedRuleType = PricingAppliedRuleType.PRICING_PROFILE;
             appliedRuleId = profileDiscount?.id ?? profileId;
@@ -256,7 +266,16 @@ export class PricingEngineService {
     let resolvedPriceKgs = effectiveBranchPriceKgs;
     switch (priceType) {
       case PricingEnginePriceType.BRANCH_PURCHASE:
-        resolvedPriceKgs = effectiveBranchPriceKgs;
+        resolvedPriceKgs = isBranchPurchase
+          ? applyPricingRounding(effectiveBranchPriceKgs, rounding)
+          : effectiveBranchPriceKgs;
+        if (isBranchPurchase) {
+          calculationSteps.push({
+            step: 'finalBranchRoundup',
+            valueKgs: resolvedPriceKgs,
+            detail: 'ROUNDUP(-1)',
+          });
+        }
         break;
       case PricingEnginePriceType.RETAIL_MINIMUM:
         resolvedPriceKgs = calculateRetailPriceKgs(
@@ -319,13 +338,17 @@ export class PricingEngineService {
     return {
       resolvedPriceKgs: costAvailable ? resolvedPriceKgs : 0,
       pricingPolicyVersionId: versionId,
-      pricingProfileId: effectiveProfileId,
+      pricingProfileId: profileId,
       pricingProfileName: profileForRules?.name ?? branch.priceProfile?.name ?? null,
       baseCostKgs,
       costAvailable,
       costSource: cost.source,
       baseFranchiseMarkupPercent,
-      baseBranchPriceKgs: costAvailable ? baseBranchPriceKgs : 0,
+      baseBranchPriceKgs: costAvailable
+        ? isBranchPurchase
+          ? applyPricingRounding(baseBranchPriceRaw, rounding)
+          : baseBranchPriceKgs
+        : 0,
       effectiveBranchPriceKgs: costAvailable ? effectiveBranchPriceKgs : 0,
       appliedRuleType,
       appliedRuleId,
@@ -354,12 +377,17 @@ export class PricingEngineService {
   }
 
   async getActiveVersionId(): Promise<string | null> {
+    const active = await this.getActiveVersion();
+    return active?.id ?? null;
+  }
+
+  async getActiveVersion(): Promise<{ id: string; versionNumber: number } | null> {
     const active = await this.prisma.pricingPolicyVersion.findFirst({
       where: { status: 'ACTIVE' },
       orderBy: { versionNumber: 'desc' },
-      select: { id: true },
+      select: { id: true, versionNumber: true },
     });
-    return active?.id ?? null;
+    return active ?? null;
   }
 
   private async resolveHqCatalogProduct(product: {

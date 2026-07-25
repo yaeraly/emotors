@@ -457,9 +457,13 @@ export class PricingCatalogService {
         });
         const costAvailable = Boolean(resolution?.costAvailable && resolution.costPrice > 0);
         const costPriceKgs = costAvailable ? resolution!.costPrice : null;
-        const markupConfigured = Boolean(resolution?.priceConfigured);
-        const hqMarkupPercent = resolution?.markupPercent ?? Number(product.hqBranchWholesaleMarkupPercent);
-        const branchPriceKgs = resolution?.priceConfigured ? resolution.branchPrice : null;
+        const priceConfigured = Boolean(resolution?.priceConfigured);
+        const baseFranchiseMarkupPercent =
+          resolution?.baseFranchiseMarkupPercent ?? Number(product.hqBranchWholesaleMarkupPercent);
+        const hqMarkupPercent = baseFranchiseMarkupPercent;
+        const finalBranchPriceKgs = priceConfigured ? resolution!.finalBranchPrice : null;
+        const branchPriceKgs = finalBranchPriceKgs;
+        const baseFranchisePriceKgs = priceConfigured ? resolution!.baseFranchisePrice : null;
 
         const hqAvailableQuantity = await this.resolveHqAvailableQuantity(product.id);
 
@@ -479,14 +483,21 @@ export class PricingCatalogService {
           costAvailable,
           costSource: resolution?.costSource ?? 'NO_FIFO_LAYER',
           costBatchId: resolution?.fifoBatchId ?? null,
-          markupConfigured,
+          markupConfigured: priceConfigured,
           hqMarkupPercent,
-          recommendedMarkupPercent: markupConfigured ? hqMarkupPercent : null,
+          baseFranchiseMarkupPercent,
+          recommendedMarkupPercent: priceConfigured ? hqMarkupPercent : null,
           branchPriceKgs: branchPriceKgs ?? 0,
+          finalBranchPriceKgs,
+          baseFranchisePriceKgs,
           masterBranchPriceKgs: branchPriceKgs ?? 0,
           effectiveBranchPriceKgs: branchPriceKgs ?? 0,
           recommendedBranchPriceKgs: branchPriceKgs,
+          priceConfigured,
+          pricingSource: resolution?.pricingSource ?? null,
+          branchPriceProfileId: resolution?.branchPriceProfileId ?? null,
           pricingPolicyVersionId: resolution?.pricingPolicyVersionId ?? null,
+          pricingPolicyVersionNumber: resolution?.pricingPolicyVersionNumber ?? null,
           displayBranchId: displayBranch?.id ?? null,
           displayBranchName: displayBranch?.name ?? null,
           lastUpdated: product.updatedAt,

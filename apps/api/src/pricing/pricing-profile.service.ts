@@ -18,9 +18,14 @@ import {
   resolveDefaultPriceProfileId,
 } from './pricing-profile-defaults.util';
 
+import { BranchOrderPricingRevisionService } from './branch-order-pricing-revision.service';
+
 @Injectable()
 export class PricingProfileService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly branchOrderPricingRevision: BranchOrderPricingRevisionService,
+  ) {}
 
   async list(user: AuthUser) {
     this.assertCanView(user);
@@ -195,6 +200,7 @@ export class PricingProfileService {
       return next;
     });
 
+    this.branchOrderPricingRevision.bump();
     return {
       id: updated.id,
       name: updated.name,

@@ -15,6 +15,7 @@ import {
   UpdateProductPriceOverrideDto,
   UpsertProductPriceOverrideDto,
 } from './dto/product-price-override.dto';
+import { BranchOrderPricingRevisionService } from './branch-order-pricing-revision.service';
 import { PricingEngineService } from './pricing-engine.service';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class PricingOverrideService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricingEngine: PricingEngineService,
+    private readonly branchOrderPricingRevision: BranchOrderPricingRevisionService,
   ) {}
 
   async list(user: AuthUser, query: ProductPriceOverrideQueryDto = {}) {
@@ -193,6 +195,7 @@ export class PricingOverrideService {
       return override;
     });
 
+    this.branchOrderPricingRevision.bump();
     return this.toResponse(updated);
   }
 
@@ -239,6 +242,7 @@ export class PricingOverrideService {
       return override;
     });
 
+    this.branchOrderPricingRevision.bump();
     return this.toResponse(updated);
   }
 

@@ -34,6 +34,8 @@ export type BranchProductOption = {
   availableQuantity?: number;
   branchPurchasePriceKgs?: number | string | null;
   branchPriceKgs?: number | string | null;
+  finalBranchPriceKgs?: number | string | null;
+  finalBranchPrice?: number | string | null;
   costPriceKgs?: number | string | null;
   markupPercent?: number | string | null;
   markupAmount?: number | string | null;
@@ -54,12 +56,23 @@ export function parseBranchMoney(value: unknown): number | null {
 }
 
 export function isBranchPriceConfigured(product: BranchProductOption): boolean {
-  if (product.priceConfigured === true) return true;
+  const finalPrice = resolveBranchDisplayPrice(product);
+  if (product.priceConfigured === true) {
+    return finalPrice !== null && finalPrice !== undefined;
+  }
   if (product.priceConfigured === false) return false;
   if (product.hasPricingPolicy === true) return true;
   if (product.hasPricingPolicy === false) return false;
-  const branchPrice = parseBranchMoney(product.branchPriceKgs ?? product.branchPurchasePriceKgs);
-  return branchPrice != null && branchPrice > 0;
+  return finalPrice !== null && finalPrice !== undefined && finalPrice > 0;
+}
+
+export function resolveBranchDisplayPrice(product: BranchProductOption): number | null {
+  return parseBranchMoney(
+    product.finalBranchPriceKgs ??
+      product.finalBranchPrice ??
+      product.branchPriceKgs ??
+      product.branchPurchasePriceKgs,
+  );
 }
 
 function formatBranchPriceKgs(value: number) {
@@ -244,7 +257,7 @@ export function BranchProductSearch({
           className="absolute z-20 mt-2 max-h-80 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white py-2 shadow-xl"
         >
           {results.map((product, index) => {
-            const branchPrice = parseBranchMoney(product.branchPriceKgs ?? product.branchPurchasePriceKgs);
+            const branchPrice = resolveBranchDisplayPrice(product);
             const priceConfigured = isBranchPriceConfigured(product);
             return (
               <li key={product.id} role="option" aria-selected={index === highlightedIndex}>

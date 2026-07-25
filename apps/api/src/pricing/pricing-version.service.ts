@@ -17,6 +17,7 @@ import {
   VersionActionDto,
 } from './dto/pricing-policy-version.dto';
 import { pricesFromMarkups } from './pricing-calculator.util';
+import { BranchOrderPricingRevisionService } from './branch-order-pricing-revision.service';
 import { PricingCatalogService } from './pricing-catalog.service';
 import { PricingSchedulerService } from './pricing-scheduler.service';
 import { PricingSettingsService } from './pricing-settings.service';
@@ -30,6 +31,7 @@ export class PricingVersionService {
     private readonly schedulerService: PricingSchedulerService,
     private readonly validationService: PricingValidationService,
     private readonly settingsService: PricingSettingsService,
+    private readonly branchOrderPricingRevision: BranchOrderPricingRevisionService,
   ) {}
 
   async list(user: AuthUser) {
@@ -420,6 +422,7 @@ export class PricingVersionService {
     });
 
     await this.catalogService.refreshCostsAndAutoPrices(user);
+    this.branchOrderPricingRevision.bump();
     return published;
   }
 

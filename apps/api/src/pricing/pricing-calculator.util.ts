@@ -158,6 +158,50 @@ export function calculateBaseBranchPriceKgs(input: {
   );
 }
 
+/** Exact Decimal base franchise price before ROUNDUP (branch-purchase pipeline). */
+export function calculateBaseBranchPriceKgsRaw(input: {
+  costPriceKgs: number;
+  markupPercent: number;
+  branchType: BranchTypeForPricing;
+}): number {
+  if (input.branchType === 'HQ_BRANCH') return input.costPriceKgs;
+  if (input.markupPercent <= 0) return input.costPriceKgs;
+  const raw = toDecimal(input.costPriceKgs).mul(
+    new Prisma.Decimal(1).plus(toDecimal(input.markupPercent).div(100)),
+  );
+  return raw.toNumber();
+}
+
+export function applyPricingAdjustmentRaw(
+  baseBranchPriceKgs: number,
+  mode: PricingAdjustmentMode,
+  adjustmentValue: number,
+): number {
+  if (adjustmentValue < 0) {
+    throw new Error('adjustmentValue cannot be negative');
+  }
+
+  let result: number;
+  switch (mode) {
+    case 'PERCENTAGE_DISCOUNT':
+      result = baseBranchPriceKgs * (1 - adjustmentValue / 100);
+      break;
+    case 'FIXED_AMOUNT_DISCOUNT':
+      result = baseBranchPriceKgs - adjustmentValue;
+      break;
+    case 'FIXED_SELLING_PRICE':
+      result = adjustmentValue;
+      break;
+    default:
+      throw new Error(`Unknown adjustment mode: ${mode}`);
+  }
+
+  if (result < 0) {
+    throw new Error('Resulting price cannot be negative');
+  }
+  return result;
+}
+
 export function calculateRetailPriceKgs(
   effectiveBranchPriceKgs: number,
   retailMarkupPercent: number,

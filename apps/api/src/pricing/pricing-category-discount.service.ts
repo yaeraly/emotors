@@ -10,9 +10,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
 import { UpsertProfileCategoryDiscountsDto } from './dto/pricing-category-discount.dto';
 
+import { BranchOrderPricingRevisionService } from './branch-order-pricing-revision.service';
+
 @Injectable()
 export class PricingCategoryDiscountService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly branchOrderPricingRevision: BranchOrderPricingRevisionService,
+  ) {}
 
   async listForProfile(user: AuthUser, profileId: string) {
     this.assertCanView(user);
@@ -82,6 +87,7 @@ export class PricingCategoryDiscountService {
       });
     });
 
+    this.branchOrderPricingRevision.bump();
     return this.listForProfile(user, profileId);
   }
 

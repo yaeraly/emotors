@@ -3,7 +3,6 @@ import { PricingAppliedRuleType, PricingEnginePriceType, Prisma, type PricingAdj
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingEngineService } from './pricing-engine.service';
 import { PricingFifoService } from './pricing-fifo.service';
-import { resolveDefaultPriceProfileId } from './pricing-profile-defaults.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -24,12 +23,18 @@ export type BranchPricingSource =
   | null;
 
 export type BranchPriceResolution = {
+  productId: string;
+  branchId: string;
   costPrice: number;
+  baseFranchiseMarkupPercent: number;
+  baseFranchisePrice: number;
   markupPercent: number;
   markupAmount: number;
   branchPrice: number;
+  finalBranchPrice: number;
   fifoBatchId: string | null;
   pricingPolicyVersionId: string | null;
+  pricingPolicyVersionNumber: number | null;
   branchPriceProfileId: string | null;
   costAvailable: boolean;
   markupConfigured: boolean;
@@ -81,8 +86,8 @@ export class BranchPriceResolverService {
   ) {}
 
   /**
-   * Single source of truth for branch-sale order price — delegates to PricingEngineService
-   * (same pipeline as Симуляция and HQ Sales branch orders).
+   * Single source of truth for branch-sale price — delegates to PricingEngineService
+   * (same pipeline as HQ Продажа филиалам, Симуляция, and Branch Sales orders).
    */
   async resolveBranchPrice(
     productId: string,
@@ -90,13 +95,16 @@ export class BranchPriceResolverService {
     tx?: PrismaTx,
   ): Promise<BranchPriceResolution> {
     const client = tx ?? this.prisma;
-    const branchId = options?.branchId;
+    const branchId = options?.branchId ?? '';
 
     if (!branchId) {
-      return this.unresolvedResolution('NO_BRANCH_PRICE_PROFILE', null, null);
+      return this.unresolvedResolution(productId, '', 'NO_BRANCH_PRICE_PROFILE', null, null);
     }
 
-    const pricingPolicyVersionId = await this.pricingEngine.getActiveVersionId();
+    const activeVersion = await this.pricingEngine.getActiveVersion();
+    const pricingPolicyVersionId = activeVersion?.id ?? null;
+    const pricingPolicyVersionNumber = activeVersion?.versionNumber ?? null;
+
     if (!pricingPolicyVersionId) {
       const fifo = await this.fifoService.getOldestActiveHqFifoCost(
         {
@@ -105,26 +113,13 @@ export class BranchPriceResolverService {
         },
         tx,
       );
-      return {
+      return this.emptyResolution(productId, branchId, {
         costPrice: fifo.available ? fifo.costPriceKgs : 0,
-        markupPercent: 0,
-        markupAmount: 0,
-        branchPrice: 0,
         fifoBatchId: fifo.batchId,
-        pricingPolicyVersionId: null,
-        branchPriceProfileId: null,
         costAvailable: Boolean(fifo.available && fifo.costPriceKgs > 0),
-        markupConfigured: false,
-        priceConfigured: false,
         priceMissingReason: 'NO_ACTIVE_PRICING_VERSION',
-        pricingSource: null,
-        sourceRuleType: null,
-        sourceRuleId: null,
         costSource: fifo.source,
-        appliedRuleType: null,
-        appliedAdjustmentMode: null,
-        appliedAdjustmentValue: null,
-      };
+      });
     }
 
     const branch = await client.branch.findFirst({
@@ -132,13 +127,23 @@ export class BranchPriceResolverService {
       select: { id: true, branchType: true, priceProfileId: true },
     });
     if (!branch) {
-      return this.unresolvedResolution('NO_BRANCH_PRICE_PROFILE', pricingPolicyVersionId, null);
+      return this.unresolvedResolution(
+        productId,
+        branchId,
+        'NO_BRANCH_PRICE_PROFILE',
+        pricingPolicyVersionId,
+        pricingPolicyVersionNumber,
+      );
     }
 
-    const effectiveProfileId =
-      branch.priceProfileId ?? (await resolveDefaultPriceProfileId(client, branch.branchType));
-    if (!effectiveProfileId && branch.branchType !== 'HQ_BRANCH') {
-      return this.unresolvedResolution('NO_BRANCH_PRICE_PROFILE', pricingPolicyVersionId, null);
+    if (!branch.priceProfileId && branch.branchType !== 'HQ_BRANCH') {
+      return this.unresolvedResolution(
+        productId,
+        branchId,
+        'NO_BRANCH_PRICE_PROFILE',
+        pricingPolicyVersionId,
+        pricingPolicyVersionNumber,
+      );
     }
 
     try {
@@ -150,12 +155,14 @@ export class BranchPriceResolverService {
       });
 
       const costPrice = engineResult.baseCostKgs;
-      const branchPrice = engineResult.resolvedPriceKgs;
-      const markupAmount = roundMoney(branchPrice - costPrice);
-      const markupPercent = deriveEffectiveMarkupPercent(costPrice, branchPrice);
+      const baseFranchiseMarkupPercent = engineResult.baseFranchiseMarkupPercent;
+      const baseFranchisePrice = engineResult.baseBranchPriceKgs;
+      const finalBranchPrice = engineResult.resolvedPriceKgs;
+      const markupAmount = roundMoney(finalBranchPrice - costPrice);
+      const markupPercent = deriveEffectiveMarkupPercent(costPrice, finalBranchPrice);
       const pricingSource = this.mapAppliedRuleToPricingSource(engineResult.appliedRuleType);
       const priceConfigured = Boolean(
-        engineResult.costAvailable && pricingPolicyVersionId && branchPrice > 0,
+        engineResult.costAvailable && pricingPolicyVersionId && finalBranchPrice > 0,
       );
 
       let priceMissingReason: BranchPriceMissingReason = null;
@@ -174,13 +181,19 @@ export class BranchPriceResolverService {
       );
 
       return {
+        productId,
+        branchId,
         costPrice,
+        baseFranchiseMarkupPercent,
+        baseFranchisePrice,
         markupPercent,
         markupAmount,
-        branchPrice,
+        branchPrice: finalBranchPrice,
+        finalBranchPrice,
         fifoBatchId: fifo.batchId,
         pricingPolicyVersionId: engineResult.pricingPolicyVersionId ?? pricingPolicyVersionId,
-        branchPriceProfileId: engineResult.pricingProfileId ?? effectiveProfileId,
+        pricingPolicyVersionNumber,
+        branchPriceProfileId: engineResult.pricingProfileId,
         costAvailable: engineResult.costAvailable,
         markupConfigured: priceConfigured,
         priceConfigured,
@@ -199,7 +212,14 @@ export class BranchPriceResolverService {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return this.unresolvedResolution('NO_BRANCH_MARKUP_RULE', pricingPolicyVersionId, effectiveProfileId);
+      return this.unresolvedResolution(
+        productId,
+        branchId,
+        'NO_BRANCH_MARKUP_RULE',
+        pricingPolicyVersionId,
+        pricingPolicyVersionNumber,
+        branch.priceProfileId,
+      );
     }
   }
 
@@ -219,9 +239,9 @@ export class BranchPriceResolverService {
     return {
       pricingPolicyVersionId: resolution.pricingPolicyVersionId,
       pricingProfileId,
-      resolvedPriceKgs: resolution.branchPrice,
+      resolvedPriceKgs: resolution.finalBranchPrice,
       baseCostKgs: resolution.costPrice,
-      baseBranchPriceKgs: resolution.branchPrice,
+      baseBranchPriceKgs: resolution.baseFranchisePrice,
       appliedRuleType: resolution.appliedRuleType ?? PricingAppliedRuleType.BASE_FRANCHISE,
       appliedRuleId: resolution.sourceRuleId,
       appliedAdjustmentMode: null,
@@ -256,26 +276,48 @@ export class BranchPriceResolverService {
   }
 
   private unresolvedResolution(
+    productId: string,
+    branchId: string,
     reason: BranchPriceMissingReason,
     pricingPolicyVersionId: string | null,
-    branchPriceProfileId: string | null,
+    pricingPolicyVersionNumber: number | null,
+    branchPriceProfileId?: string | null,
+  ): BranchPriceResolution {
+    return this.emptyResolution(productId, branchId, {
+      priceMissingReason: reason,
+      pricingPolicyVersionId,
+      pricingPolicyVersionNumber,
+      branchPriceProfileId: branchPriceProfileId ?? null,
+    });
+  }
+
+  private emptyResolution(
+    productId: string,
+    branchId: string,
+    partial: Partial<BranchPriceResolution> & { priceMissingReason: BranchPriceMissingReason },
   ): BranchPriceResolution {
     return {
-      costPrice: 0,
+      productId,
+      branchId,
+      costPrice: partial.costPrice ?? 0,
+      baseFranchiseMarkupPercent: 0,
+      baseFranchisePrice: 0,
       markupPercent: 0,
       markupAmount: 0,
       branchPrice: 0,
-      fifoBatchId: null,
-      pricingPolicyVersionId,
-      branchPriceProfileId,
-      costAvailable: false,
+      finalBranchPrice: 0,
+      fifoBatchId: partial.fifoBatchId ?? null,
+      pricingPolicyVersionId: partial.pricingPolicyVersionId ?? null,
+      pricingPolicyVersionNumber: partial.pricingPolicyVersionNumber ?? null,
+      branchPriceProfileId: partial.branchPriceProfileId ?? null,
+      costAvailable: partial.costAvailable ?? false,
       markupConfigured: false,
       priceConfigured: false,
-      priceMissingReason: reason,
+      priceMissingReason: partial.priceMissingReason,
       pricingSource: null,
       sourceRuleType: null,
       sourceRuleId: null,
-      costSource: 'NO_FIFO_LAYER',
+      costSource: partial.costSource ?? 'NO_FIFO_LAYER',
       appliedRuleType: null,
       appliedAdjustmentMode: null,
       appliedAdjustmentValue: null,

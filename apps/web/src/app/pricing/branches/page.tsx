@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
-import { calculateBranchPriceFromCost } from '@/lib/pricing-table-utils';
 import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -19,9 +18,13 @@ type FranchiseSalesRow = {
   costAvailable?: boolean;
   markupConfigured?: boolean;
   hqMarkupPercent: number;
+  baseFranchiseMarkupPercent?: number;
   recommendedMarkupPercent?: number | null;
   branchPriceKgs: number | null;
+  finalBranchPriceKgs?: number | null;
   masterBranchPriceKgs?: number | null;
+  priceConfigured?: boolean;
+  pricingPolicyVersionId?: string | null;
   lastUpdated: string;
 };
 
@@ -47,10 +50,12 @@ function hasActiveMarkup(markupPercent: number) {
   return Number.isFinite(markupPercent) && markupPercent > 0;
 }
 
-function computeBranchPriceKgs(row: Pick<EditableFranchiseRow, 'costPriceKgs' | 'costAvailable' | 'draftMarkup'>) {
-  if (!isCostAvailable(row) || !hasActiveMarkup(row.draftMarkup)) return null;
-  const branchPrice = calculateBranchPriceFromCost(Number(row.costPriceKgs), row.draftMarkup);
-  return branchPrice > 0 ? branchPrice : null;
+function resolveDisplayedBranchPriceKgs(row: Pick<FranchiseSalesRow, 'branchPriceKgs' | 'finalBranchPriceKgs' | 'priceConfigured'>) {
+  if (row.priceConfigured !== true) return null;
+  const raw = row.finalBranchPriceKgs ?? row.branchPriceKgs;
+  if (raw === null || raw === undefined) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 export default function PricingBranchesPage() {
@@ -95,7 +100,14 @@ export default function PricingBranchesPage() {
           ...product,
           costAvailable: isCostAvailable(product),
           branchPriceKgs: product.branchPriceKgs ?? product.masterBranchPriceKgs ?? null,
-          draftMarkup: Number(product.hqMarkupPercent ?? product.recommendedMarkupPercent ?? 0),
+          finalBranchPriceKgs: product.finalBranchPriceKgs ?? product.branchPriceKgs ?? null,
+          priceConfigured: product.priceConfigured ?? Boolean(product.branchPriceKgs),
+          draftMarkup: Number(
+            product.baseFranchiseMarkupPercent ??
+              product.hqMarkupPercent ??
+              product.recommendedMarkupPercent ??
+              0,
+          ),
           isDirty: false,
         })),
       );
@@ -173,10 +185,7 @@ export default function PricingBranchesPage() {
         method: 'PUT',
         body: JSON.stringify({ hqBranchWholesaleMarkupPercent: savedMarkup }),
       });
-      const branchPrice =
-        updated.branchPriceKgs ??
-        updated.masterBranchPriceKgs ??
-        computeBranchPriceKgs({ ...row, draftMarkup: savedMarkup });
+      const branchPrice = resolveDisplayedBranchPriceKgs(updated);
 
       setRows((current) =>
         current.map((item) => {
@@ -185,11 +194,18 @@ export default function PricingBranchesPage() {
             ...item,
             ...updated,
             costAvailable: isCostAvailable(updated),
-            hqMarkupPercent: Number(updated.hqMarkupPercent ?? savedMarkup),
+            hqMarkupPercent: Number(
+              updated.baseFranchiseMarkupPercent ?? updated.hqMarkupPercent ?? savedMarkup,
+            ),
+            baseFranchiseMarkupPercent: Number(
+              updated.baseFranchiseMarkupPercent ?? updated.hqMarkupPercent ?? savedMarkup,
+            ),
             recommendedMarkupPercent: Number(updated.recommendedMarkupPercent ?? savedMarkup),
-            markupConfigured: hasActiveMarkup(savedMarkup),
+            markupConfigured: updated.priceConfigured ?? hasActiveMarkup(savedMarkup),
             branchPriceKgs: branchPrice,
+            finalBranchPriceKgs: branchPrice,
             masterBranchPriceKgs: branchPrice,
+            priceConfigured: updated.priceConfigured ?? Boolean(branchPrice),
             draftMarkup: savedMarkup,
             isDirty: false,
           };
@@ -313,7 +329,7 @@ export default function PricingBranchesPage() {
             {!loading
               ? pagedRows.map((row) => {
                   const costOk = isCostAvailable(row);
-                  const branchPriceKgs = computeBranchPriceKgs(row);
+                  const branchPriceKgs = resolveDisplayedBranchPriceKgs(row);
 
                   return (
                     <tr key={row.id}>
