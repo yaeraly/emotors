@@ -7,8 +7,18 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 export type BranchPriceMissingReason =
   | 'NO_FIFO_COST'
-  | 'NO_BRANCH_MARKUP'
+  | 'NO_BRANCH_MARKUP_RULE'
   | 'NO_ACTIVE_PRICING_VERSION'
+  | 'NO_BRANCH_PRICE_PROFILE'
+  | null;
+
+export type BranchPricingSource =
+  | 'BRANCH_PRODUCT_OVERRIDE'
+  | 'BRANCH_PROFILE_PRODUCT_RULE'
+  | 'BRANCH_PROFILE_CATEGORY_RULE'
+  | 'CATEGORY_POLICY'
+  | 'DEFAULT_BRANCH_SALE_RULE'
+  | 'HQ_BRANCH_COST'
   | null;
 
 export type BranchProductOption = {
@@ -26,7 +36,10 @@ export type BranchProductOption = {
   branchPriceKgs?: number | string | null;
   costPriceKgs?: number | string | null;
   markupPercent?: number | string | null;
+  markupAmount?: number | string | null;
   pricingPolicyVersionId?: string | null;
+  branchPriceProfileId?: string | null;
+  pricingSource?: BranchPricingSource;
   hasPricingPolicy?: boolean;
   priceConfigured?: boolean;
   priceMissingReason?: BranchPriceMissingReason;
@@ -46,7 +59,7 @@ export function isBranchPriceConfigured(product: BranchProductOption): boolean {
   if (product.hasPricingPolicy === true) return true;
   if (product.hasPricingPolicy === false) return false;
   const branchPrice = parseBranchMoney(product.branchPriceKgs ?? product.branchPurchasePriceKgs);
-  return branchPrice != null;
+  return branchPrice != null && branchPrice > 0;
 }
 
 function formatBranchPriceKgs(value: number) {

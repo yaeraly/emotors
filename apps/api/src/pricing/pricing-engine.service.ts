@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PricingAppliedRuleType, PricingEnginePriceType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
+import { resolveDefaultPriceProfileId } from './pricing-profile-defaults.util';
 import {
   applyPricingAdjustment,
   calculateBaseBranchPriceKgs,
@@ -86,6 +87,16 @@ export class PricingEngineService {
     const versionId = input.pricingPolicyVersionId ?? (await this.getActiveVersionId());
 
     const branchType = branch.branchType as BranchTypeForPricing;
+    const effectiveProfileId =
+      branch.priceProfileId ?? (await resolveDefaultPriceProfileId(this.prisma, branch.branchType));
+    let profileForRules = branch.priceProfile;
+    if (!profileForRules && effectiveProfileId) {
+      profileForRules = await this.prisma.branchPriceProfile.findFirst({
+        where: { id: effectiveProfileId },
+        include: { categoryDiscounts: true },
+      });
+    }
+
     const cost = await this.fifoService.getOldestActiveHqFifoCost(pricingProduct.id);
     const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
     const baseCostKgs = costAvailable ? cost.costPriceKgs : 0;
@@ -122,7 +133,7 @@ export class PricingEngineService {
       appliedRuleType = PricingAppliedRuleType.HQ_COST;
       calculationSteps.push({ step: 'hqBranchExactCost', valueKgs: baseCostKgs });
     } else {
-      const profileId = branch.priceProfileId;
+      const profileId = effectiveProfileId;
 
       const tempOverride = await this.findActiveTempOverride(
         input.branchId,
@@ -208,8 +219,8 @@ export class PricingEngineService {
         }
 
         // Pricing Profile layer: live profile category discounts when no version rule matched
-        if (!resolvedByRule && pricingProduct.categoryId && branch.priceProfile) {
-          const profileDiscount = branch.priceProfile.categoryDiscounts.find(
+        if (!resolvedByRule && pricingProduct.categoryId && profileForRules) {
+          const profileDiscount = profileForRules.categoryDiscounts.find(
             (row) => row.categoryId === pricingProduct.categoryId,
           );
           const discountPercent = profileDiscount ? Number(profileDiscount.discountPercent) : 0;
@@ -308,8 +319,8 @@ export class PricingEngineService {
     return {
       resolvedPriceKgs: costAvailable ? resolvedPriceKgs : 0,
       pricingPolicyVersionId: versionId,
-      pricingProfileId: branch.priceProfileId,
-      pricingProfileName: branch.priceProfile?.name ?? null,
+      pricingProfileId: effectiveProfileId,
+      pricingProfileName: profileForRules?.name ?? branch.priceProfile?.name ?? null,
       baseCostKgs,
       costAvailable,
       costSource: cost.source,

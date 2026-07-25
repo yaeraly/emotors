@@ -38,8 +38,7 @@ export class PricingResolutionService {
   }
 
   /**
-   * Franchise branch order price: oldest active FIFO cost + product HQ markup.
-   * Used by Продажа филиалам, branch orders, invoices, and installment totals.
+   * Franchise branch order price via PricingEngineService (profile rules, overrides, simulation parity).
    */
   async resolveBranchOrderPrice(
     branchId: string,

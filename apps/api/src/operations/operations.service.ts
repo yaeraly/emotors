@@ -352,7 +352,10 @@ export class OperationsService {
             branchPriceKgs: pricing.branchPurchasePriceKgs,
             costPriceKgs: pricing.costPriceSnapshot,
             markupPercent: pricing.markupSnapshot,
+            markupAmount: pricing.markupAmountSnapshot,
             pricingPolicyVersionId: pricing.pricingPolicyVersionId,
+            branchPriceProfileId: pricing.pricingProfileId,
+            pricingSource: pricing.pricingSource,
             hasPricingPolicy: pricing.hasPricingPolicy,
             priceConfigured: pricing.priceConfigured,
             priceMissingReason: pricing.priceMissingReason,
@@ -5197,7 +5200,10 @@ export class OperationsService {
           branchPriceKgs: pricing.branchPurchasePriceKgs,
           costPriceKgs: pricing.costPriceSnapshot,
           markupPercent: pricing.markupSnapshot,
+          markupAmount: pricing.markupAmountSnapshot,
           pricingPolicyVersionId: pricing.pricingPolicyVersionId,
+          branchPriceProfileId: pricing.pricingProfileId,
+          pricingSource: pricing.pricingSource,
           hasPricingPolicy: pricing.hasPricingPolicy,
           priceConfigured: pricing.priceConfigured,
           priceMissingReason: pricing.priceMissingReason,
@@ -5245,32 +5251,16 @@ export class OperationsService {
       resolvedBranchPriceKgs: branchPurchasePriceKgs,
       costPriceSnapshot: priceConfigured ? resolution.costPrice : null,
       markupSnapshot: priceConfigured ? resolution.markupPercent : null,
+      markupAmountSnapshot: priceConfigured ? resolution.markupAmount : null,
       pricingPolicyVersionId: resolution.pricingPolicyVersionId,
-      pricingProfileId: null as string | null,
-      appliedRuleType: resolution.sourceRuleType
-        ? this.mapBranchSourceRuleToAppliedRuleType(resolution.sourceRuleType)
-        : null,
+      pricingProfileId: resolution.branchPriceProfileId,
+      pricingSource: resolution.pricingSource,
+      appliedRuleType: resolution.appliedRuleType,
       appliedRuleId: resolution.sourceRuleId,
-      appliedAdjustmentMode: null,
-      appliedAdjustmentValue: priceConfigured ? resolution.markupPercent : null,
+      appliedAdjustmentMode: resolution.appliedAdjustmentMode,
+      appliedAdjustmentValue: priceConfigured ? resolution.appliedAdjustmentValue : null,
       priceResolvedAt: priceConfigured ? new Date() : null,
-      sourceRuleType: resolution.sourceRuleType,
     };
-  }
-
-  private mapBranchSourceRuleToAppliedRuleType(
-    sourceRuleType: import('../pricing/branch-price-resolver.service').BranchPriceSourceRuleType,
-  ): PricingAppliedRuleType | null {
-    switch (sourceRuleType) {
-      case 'CATEGORY_BRANCH_MARKUP':
-        return PricingAppliedRuleType.CATEGORY_RULE;
-      case 'PRODUCT_BRANCH_MARKUP':
-      case 'DEFAULT_BRANCH_MARKUP':
-      case 'HQ_BRANCH_COST':
-        return PricingAppliedRuleType.BASE_FRANCHISE;
-      default:
-        return null;
-    }
   }
 
   private async resolveBranchRequestPricingAvailability(
