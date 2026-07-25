@@ -2847,6 +2847,7 @@ export class DistributionService {
         {
           auditUser: user,
           auditEntity: 'BranchDistributionOrderItem',
+          useBranchOrderPrice: true,
         },
       );
 

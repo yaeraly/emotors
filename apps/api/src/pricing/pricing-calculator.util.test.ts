@@ -1,4 +1,6 @@
 import {
+  calculateBranchPriceFromFifoCost,
+  DEFAULT_PRICING_ROUNDING,
   applyCategoryDiscountRoundUp,
   applyHqBranchWholesaleMarkup,
   applyMarkupRoundUp,
@@ -198,6 +200,18 @@ describe('pricing-calculator.util', () => {
   it('HQ branch with zero markup uses exact cost', () => {
     expect(applyHqBranchWholesaleMarkup(1234, 0)).toBe(1234);
     expect(resolveBaseFranchiseBranchPrice(1234, 'HQ_BRANCH', 0)).toBe(1234);
+  });
+
+  it('calculates branch price from FIFO cost and markup with Decimal math', () => {
+    expect(calculateBranchPriceFromFifoCost(10000, 20)).toBe(12000);
+    expect(
+      calculateBranchPriceFromFifoCost(13801.15, 20, {
+        strategy: 'NONE',
+        roundUpPrecision: 2,
+        decimalPrecision: 2,
+      }),
+    ).toBe(16561.38);
+    expect(calculateBranchPriceFromFifoCost(13801.15, 20, DEFAULT_PRICING_ROUNDING)).toBe(16570);
   });
 
   it('validates selling price limits', () => {

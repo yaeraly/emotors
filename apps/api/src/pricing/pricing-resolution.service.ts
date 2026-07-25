@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PricingEnginePriceType, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { BranchPriceResolverService } from './branch-price-resolver.service';
 import { toPriceFreezePayload, type PriceFreezePayload } from './pricing-engine.types';
 import { PricingEngineService } from './pricing-engine.service';
 
@@ -10,6 +11,7 @@ export class PricingResolutionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricingEngine: PricingEngineService,
+    private readonly branchPriceResolver: BranchPriceResolverService,
   ) {}
 
   async resolveBranchProductPrice(
@@ -35,6 +37,34 @@ export class PricingResolutionService {
     return resolved.priceKgs;
   }
 
+  /**
+   * Franchise branch order price: oldest active FIFO cost + product HQ markup.
+   * Used by Продажа филиалам, branch orders, invoices, and installment totals.
+   */
+  async resolveBranchOrderPrice(
+    branchId: string,
+    productId: string,
+    options?: { warehouseId?: string },
+  ): Promise<PriceFreezePayload | null> {
+    const freeze = await this.branchPriceResolver.resolveBranchPriceFreeze(productId, {
+      branchId,
+      warehouseId: options?.warehouseId,
+    });
+    if (!freeze) return null;
+    return {
+      pricingPolicyVersionId: freeze.pricingPolicyVersionId,
+      pricingProfileId: freeze.pricingProfileId,
+      resolvedPriceKgs: freeze.resolvedPriceKgs,
+      baseCostKgs: freeze.baseCostKgs,
+      baseBranchPriceKgs: freeze.baseBranchPriceKgs,
+      appliedRuleType: freeze.appliedRuleType,
+      appliedRuleId: freeze.appliedRuleId,
+      appliedAdjustmentMode: freeze.appliedAdjustmentMode,
+      appliedAdjustmentValue: freeze.appliedAdjustmentValue,
+      priceResolvedAt: freeze.priceResolvedAt,
+    };
+  }
+
   async resolveWithFreeze(
     branchId: string,
     productId: string,
@@ -45,8 +75,29 @@ export class PricingResolutionService {
       auditUser?: AuthUser | null;
       auditEntity?: string;
       auditEntityId?: string;
+      /** When true, branch purchase uses FIFO+markup resolver instead of profile-adjusted engine price. */
+      useBranchOrderPrice?: boolean;
+      warehouseId?: string;
     },
   ): Promise<PriceFreezePayload> {
+    if (options?.useBranchOrderPrice) {
+      const branchFreeze = await this.resolveBranchOrderPrice(branchId, productId, {
+        warehouseId: options?.warehouseId,
+      });
+      if (branchFreeze) {
+        if (options?.auditUser) {
+          await this.auditPriceResolution(options.auditUser, branchFreeze, {
+            branchId,
+            productId,
+            priceType: PricingEnginePriceType.BRANCH_PURCHASE,
+            entity: options.auditEntity,
+            entityId: options.auditEntityId,
+          });
+        }
+        return branchFreeze;
+      }
+    }
+
     const result = await this.pricingEngine.resolvePrice({
       productId,
       branchId,

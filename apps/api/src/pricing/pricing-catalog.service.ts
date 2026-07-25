@@ -25,6 +25,7 @@ import {
   resolveHqToBranchPrice,
   validateMarkups,
 } from './pricing-calculator.util';
+import { BranchPriceResolverService } from './branch-price-resolver.service';
 import { PricingFifoService } from './pricing-fifo.service';
 import { PricingEngineService } from './pricing-engine.service';
 import {
@@ -76,6 +77,7 @@ export class PricingCatalogService {
     private readonly prisma: PrismaService,
     private readonly fifoService: PricingFifoService,
     private readonly pricingEngine: PricingEngineService,
+    private readonly branchPriceResolver: BranchPriceResolverService,
   ) {}
 
   async listCategories(user: AuthUser) {
@@ -447,67 +449,17 @@ export class PricingCatalogService {
 
     return Promise.all(
       products.map(async (product) => {
-        const fifoCost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
-        const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
-        // Missing FIFO → null (never present 0 as a real cost).
-        const costPriceKgs = costAvailable ? fifoCost.costPriceKgs : null;
+        const resolution = await this.branchPriceResolver.resolveBranchPrice(product.id, {
+          branchId: displayBranch?.id,
+        });
+        const costAvailable = Boolean(resolution?.costAvailable && resolution.costPrice > 0);
+        const costPriceKgs = costAvailable ? resolution!.costPrice : null;
+        const markupConfigured = Boolean(resolution?.markupConfigured && resolution.markupPercent > 0);
+        const hqMarkupPercent = resolution?.markupPercent ?? Number(product.hqBranchWholesaleMarkupPercent);
+        const branchPriceKgs =
+          resolution?.markupConfigured && resolution.branchPrice > 0 ? resolution.branchPrice : null;
 
         const hqAvailableQuantity = await this.resolveHqAvailableQuantity(product.id);
-
-        const recommendedMarkupPercent = Number(product.hqBranchWholesaleMarkupPercent);
-        const minimumMarkupPercent = Number(product.minimumWholesaleMarkupPercent);
-        let maximumMarkupPercent: number | null = null;
-        if (product.productCategory) {
-          const maximumPolicy = resolveWholesaleMaximumPolicy(product, product.productCategory);
-          maximumMarkupPercent = isMaximumPolicyActive(maximumPolicy)
-            ? resolveWholesaleMaximumMarkup(product, product.productCategory)
-            : null;
-        } else if (isMaximumPolicyActive(product.wholesaleMaximumPolicy)) {
-          maximumMarkupPercent = Number(product.maximumWholesaleMarkupPercent);
-        }
-        const markupConfigured =
-          recommendedMarkupPercent > 0 ||
-          minimumMarkupPercent > 0 ||
-          (maximumMarkupPercent != null && maximumMarkupPercent > 0);
-
-        let engine: Awaited<ReturnType<PricingEngineService['resolvePrice']>> | null = null;
-        if (displayBranch && costAvailable) {
-          try {
-            engine = await this.pricingEngine.resolvePrice({
-              productId: product.id,
-              branchId: displayBranch.id,
-              priceType: PricingEnginePriceType.BRANCH_PURCHASE,
-            });
-          } catch {
-            engine = null;
-          }
-        }
-
-        const recommendedBranchPriceKgs =
-          costAvailable && costPriceKgs != null
-            ? (engine?.baseBranchPriceKgs ??
-              applyHqBranchWholesaleMarkup(costPriceKgs, recommendedMarkupPercent))
-            : null;
-        const effectiveBranchPriceKgs =
-          costAvailable && costPriceKgs != null
-            ? (engine?.resolvedPriceKgs ?? recommendedBranchPriceKgs)
-            : null;
-        const minimumBranchPriceKgs =
-          costAvailable && costPriceKgs != null && minimumMarkupPercent > 0
-            ? applyHqBranchWholesaleMarkup(costPriceKgs, minimumMarkupPercent)
-            : null;
-        const maximumBranchPriceKgs =
-          costAvailable && costPriceKgs != null && maximumMarkupPercent != null && maximumMarkupPercent > 0
-            ? applyHqBranchWholesaleMarkup(costPriceKgs, maximumMarkupPercent)
-            : null;
-
-        const masterBranchPriceKgs = recommendedBranchPriceKgs ?? 0;
-        const effectiveForRule = effectiveBranchPriceKgs ?? 0;
-        const ruleApplied = this.isRuleApplied(
-          engine?.appliedRuleType,
-          masterBranchPriceKgs,
-          effectiveForRule,
-        );
 
         return {
           id: product.id,
@@ -523,26 +475,16 @@ export class PricingCatalogService {
           hqAvailableQuantity,
           costPriceKgs,
           costAvailable,
-          costSource: fifoCost.source,
-          costBatchId: fifoCost.batchId,
-          costReceivedAt: fifoCost.receivedAt,
+          costSource: resolution?.costSource ?? 'NO_FIFO_LAYER',
+          costBatchId: resolution?.fifoBatchId ?? null,
           markupConfigured,
-          hqMarkupPercent: recommendedMarkupPercent,
-          minimumMarkupPercent: markupConfigured && minimumMarkupPercent > 0 ? minimumMarkupPercent : null,
-          recommendedMarkupPercent: markupConfigured && recommendedMarkupPercent > 0 ? recommendedMarkupPercent : null,
-          maximumMarkupPercent: markupConfigured ? maximumMarkupPercent : null,
-          minimumBranchPriceKgs,
-          recommendedBranchPriceKgs,
-          maximumBranchPriceKgs,
-          /** @deprecated use effectiveBranchPriceKgs — kept for backward-compatible clients */
-          branchPriceKgs: effectiveBranchPriceKgs ?? 0,
-          masterBranchPriceKgs: recommendedBranchPriceKgs ?? 0,
-          effectiveBranchPriceKgs: effectiveBranchPriceKgs ?? 0,
-          ruleApplied,
-          appliedRuleType: engine?.appliedRuleType ?? null,
-          pricingProfileId: engine?.pricingProfileId ?? displayBranch?.priceProfileId ?? null,
-          pricingProfileName: engine?.pricingProfileName ?? displayBranch?.priceProfile?.name ?? null,
-          pricingPolicyVersionId: engine?.pricingPolicyVersionId ?? null,
+          hqMarkupPercent,
+          recommendedMarkupPercent: markupConfigured ? hqMarkupPercent : null,
+          branchPriceKgs: branchPriceKgs ?? 0,
+          masterBranchPriceKgs: branchPriceKgs ?? 0,
+          effectiveBranchPriceKgs: branchPriceKgs ?? 0,
+          recommendedBranchPriceKgs: branchPriceKgs,
+          pricingPolicyVersionId: resolution?.pricingPolicyVersionId ?? null,
           displayBranchId: displayBranch?.id ?? null,
           displayBranchName: displayBranch?.name ?? null,
           lastUpdated: product.updatedAt,
@@ -590,7 +532,7 @@ export class PricingCatalogService {
     if (!product) throw new NotFoundException('Product not found');
 
     await this.fifoService.syncFifoBatchesFromHqStockMovements();
-    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const cost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
     if (!cost.available || cost.costPriceKgs <= 0) {
       throw new BadRequestException('HQ unit cost is unavailable — product has no HQ inventory layer');
     }

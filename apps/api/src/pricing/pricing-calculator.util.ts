@@ -75,10 +75,32 @@ export function applyMarkupRoundUp(
 }
 
 /** HQ wholesale: when markup is 0, return exact cost without ROUNDUP. */
-export function applyHqBranchWholesaleMarkup(costPrice: number, markupPercent: number) {
+export function applyHqBranchWholesaleMarkup(
+  costPrice: number,
+  markupPercent: number,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
+) {
   if (costPrice <= 0) return 0;
-  if (markupPercent === 0) return roundMoney(costPrice);
-  return applyMarkupRoundUp(costPrice, markupPercent);
+  if (markupPercent === 0) return roundMoney(costPrice, config.decimalPrecision);
+  return applyMarkupRoundUp(costPrice, markupPercent, config);
+}
+
+/**
+ * Branch order price: cost × (1 + markup%) with centralized rounding (Prisma Decimal).
+ * Used by BranchPriceResolverService — single source for franchise branch purchase price.
+ */
+export function calculateBranchPriceFromFifoCost(
+  costPriceKgs: number | Prisma.Decimal,
+  markupPercent: number | Prisma.Decimal,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
+) {
+  const cost = toDecimal(costPriceKgs);
+  if (cost.lte(0)) return 0;
+  const markup = toDecimal(markupPercent);
+  if (markup.lt(0)) return 0;
+  if (markup.eq(0)) return roundMoney(cost.toNumber(), config.decimalPrecision);
+  const raw = cost.mul(new Prisma.Decimal(1).plus(markup.div(100)));
+  return applyPricingRounding(raw, config);
 }
 
 export function applyMarkup(costPrice: number, markupPercent: number) {

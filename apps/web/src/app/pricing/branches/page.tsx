@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
-import { PriceExplanationButton } from '@/components/pricing/PriceExplanationButton';
 import { apiFetch } from '@/lib/api';
 import { applyHqBranchWholesaleMarkup } from '@/lib/pricing-table-utils';
 import { canManagePricingPolicy } from '@/lib/rbac';
@@ -15,41 +14,28 @@ type FranchiseSalesRow = {
   id: string;
   name: string;
   sku: string;
-  categoryId?: string;
   categoryName: string;
-  hqAvailableQuantity?: number;
   costPriceKgs: number | null;
   costAvailable?: boolean;
   markupConfigured?: boolean;
   hqMarkupPercent: number;
-  minimumMarkupPercent?: number | null;
   recommendedMarkupPercent?: number | null;
-  maximumMarkupPercent?: number | null;
-  minimumBranchPriceKgs?: number | null;
-  recommendedBranchPriceKgs?: number | null;
-  maximumBranchPriceKgs?: number | null;
-  branchPriceKgs: number;
-  masterBranchPriceKgs: number;
-  effectiveBranchPriceKgs: number;
-  ruleApplied: boolean;
-  appliedRuleType?: string | null;
-  pricingProfileName?: string | null;
-  displayBranchId?: string | null;
-  displayBranchName?: string | null;
+  branchPriceKgs: number | null;
+  masterBranchPriceKgs?: number | null;
   lastUpdated: string;
 };
 
 type EditableFranchiseRow = FranchiseSalesRow & {
   draftMarkup: number;
-  previewMasterPriceKgs: number | null;
+  previewBranchPriceKgs: number | null;
   isDirty: boolean;
 };
 
 function formatPrice(value: number) {
-  return Number(value).toLocaleString('ru-RU', {
-    minimumFractionDigits: 0,
+  return `${Number(value).toLocaleString('ru-RU', {
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  });
+  })} сом`;
 }
 
 function isCostAvailable(row: Pick<FranchiseSalesRow, 'costAvailable' | 'costPriceKgs'>) {
@@ -97,7 +83,6 @@ export default function PricingBranchesPage() {
       setBranches(nonHq);
       const nextBranchId =
         selectedBranchId ||
-        products[0]?.displayBranchId ||
         nonHq[0]?.id ||
         '';
       setBranchId(nextBranchId);
@@ -110,11 +95,9 @@ export default function PricingBranchesPage() {
           ...product,
           costAvailable: isCostAvailable(product),
           markupConfigured: isMarkupConfigured(product),
-          masterBranchPriceKgs: product.masterBranchPriceKgs ?? product.branchPriceKgs,
-          effectiveBranchPriceKgs: product.effectiveBranchPriceKgs ?? product.branchPriceKgs,
-          ruleApplied: Boolean(product.ruleApplied),
+          branchPriceKgs: product.branchPriceKgs ?? product.masterBranchPriceKgs ?? null,
           draftMarkup: product.hqMarkupPercent,
-          previewMasterPriceKgs: null,
+          previewBranchPriceKgs: null,
           isDirty: false,
         })),
       );
@@ -154,13 +137,13 @@ export default function PricingBranchesPage() {
     setRows((current) =>
       current.map((row) => {
         if (row.id !== productId) return row;
-        const previewMasterPriceKgs = isCostAvailable(row)
+        const previewBranchPriceKgs = isCostAvailable(row)
           ? applyHqBranchWholesaleMarkup(Number(row.costPriceKgs), draftMarkup)
           : null;
         return {
           ...row,
           draftMarkup,
-          previewMasterPriceKgs,
+          previewBranchPriceKgs,
           isDirty: draftMarkup !== row.hqMarkupPercent,
         };
       }),
@@ -192,13 +175,10 @@ export default function PricingBranchesPage() {
     }
   }
 
-  function renderMoney(value: number | null | undefined, ok: boolean) {
-    if (!ok || value == null || Number(value) <= 0) return '—';
-    return formatPrice(Number(value));
-  }
-
   function renderMarkup(value: number | null | undefined, configured: boolean) {
-    if (!configured || value == null || Number(value) <= 0) return t('pricing.markupNotConfigured');
+    if (!configured || value == null || Number(value) <= 0) {
+      return t('pricing.markupNotConfiguredShort');
+    }
     return `${Number(value)}%`;
   }
 
@@ -210,7 +190,6 @@ export default function PricingBranchesPage() {
       {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
 
       <p className="text-xs text-slate-500">{t('pricing.franchiseSalesHint')}</p>
-      <p className="text-xs text-slate-500">{t('pricing.catalogEngineHint')}</p>
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="text-sm text-slate-600">
@@ -263,34 +242,29 @@ export default function PricingBranchesPage() {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[1400px] divide-y divide-slate-200 text-sm">
+        <table className="w-full min-w-[960px] divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
             <tr>
+              <th className="px-3 py-2">{t('pricing.colSku')}</th>
               <th className="px-3 py-2">{t('pricing.colProduct')}</th>
               <th className="px-3 py-2">{t('pricing.colCategory')}</th>
-              <th className="px-3 py-2">{t('pricing.colHqQty')}</th>
-              <th className="px-3 py-2">{t('pricing.colCost')}</th>
-              <th className="px-3 py-2">{t('pricing.colMinMarkup')}</th>
-              <th className="px-3 py-2">{t('pricing.colMinimumPrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colRecommendedMarkup')}</th>
-              <th className="px-3 py-2">{t('pricing.colRecommendedPrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colMaxMarkup')}</th>
-              <th className="px-3 py-2">{t('pricing.colMaxWholesalePrice')}</th>
-              <th className="px-3 py-2">{t('pricing.colEffectivePrice')}</th>
+              <th className="px-3 py-2">{t('pricing.colUnitCost')}</th>
+              <th className="px-3 py-2">{t('pricing.colMarkupLabel')}</th>
+              <th className="px-3 py-2">{t('pricing.colBranchPrice')}</th>
               <th className="px-3 py-2">{t('pricing.colActions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
                   {t('common.loading')}
                 </td>
               </tr>
             ) : null}
             {!loading && filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={12} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
                   {t('pricing.productsNotFound')}
                 </td>
               </tr>
@@ -299,25 +273,15 @@ export default function PricingBranchesPage() {
               ? pagedRows.map((row) => {
                   const costOk = isCostAvailable(row);
                   const markupOk = isMarkupConfigured(row);
-                  const recommendedShown = row.isDirty
-                    ? (row.previewMasterPriceKgs ?? row.recommendedBranchPriceKgs ?? row.masterBranchPriceKgs)
-                    : (row.recommendedBranchPriceKgs ?? row.masterBranchPriceKgs);
-                  const effectiveShown = row.isDirty
-                    ? (row.previewMasterPriceKgs ?? row.effectiveBranchPriceKgs)
-                    : row.effectiveBranchPriceKgs;
-                  const showBadge = !row.isDirty && row.ruleApplied && costOk;
+                  const branchPriceShown = row.isDirty
+                    ? row.previewBranchPriceKgs
+                    : row.branchPriceKgs ?? row.masterBranchPriceKgs;
 
                   return (
                     <tr key={row.id}>
-                      <td className="px-3 py-2">
-                        <p className="font-semibold text-slate-900">{row.name}</p>
-                        <p className="text-xs text-slate-500">{row.sku}</p>
-                        {row.pricingProfileName ? (
-                          <p className="text-[11px] text-slate-400">{row.pricingProfileName}</p>
-                        ) : null}
-                      </td>
+                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{row.sku}</td>
+                      <td className="px-3 py-2 font-semibold text-slate-900">{row.name}</td>
                       <td className="px-3 py-2 text-slate-700">{row.categoryName}</td>
-                      <td className="px-3 py-2 text-slate-700">{row.hqAvailableQuantity ?? 0}</td>
                       <td
                         className="px-3 py-2 font-medium text-slate-800"
                         title={costOk ? undefined : t('pricing.noCalculatedCost')}
@@ -325,54 +289,26 @@ export default function PricingBranchesPage() {
                         {costOk ? formatPrice(Number(row.costPriceKgs)) : t('pricing.noCalculatedCost')}
                       </td>
                       <td className="px-3 py-2 text-slate-700">
-                        {renderMarkup(row.minimumMarkupPercent, markupOk)}
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {renderMoney(row.minimumBranchPriceKgs, costOk && markupOk)}
-                      </td>
-                      <td className="px-3 py-2">
-                        {canManage ? (
+                        {canManage && costOk ? (
                           <input
                             type="number"
                             min={0}
                             step="0.01"
                             value={row.draftMarkup}
                             onChange={(e) => updateRow(row.id, Number(e.target.value))}
-                            disabled={!costOk}
-                            className="w-24 rounded border border-slate-300 px-2 py-1 text-sm disabled:opacity-50"
+                            className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
                           />
                         ) : (
-                          <span>{renderMarkup(row.recommendedMarkupPercent ?? row.hqMarkupPercent, markupOk)}</span>
+                          renderMarkup(row.recommendedMarkupPercent ?? row.hqMarkupPercent, markupOk)
                         )}
                       </td>
-                      <td className="px-3 py-2 font-medium text-slate-600">
-                        {renderMoney(recommendedShown, costOk)}
-                        {row.isDirty && costOk ? (
+                      <td className="px-3 py-2 font-medium text-slate-800">
+                        {costOk && markupOk && branchPriceShown != null && Number(branchPriceShown) > 0
+                          ? formatPrice(Number(branchPriceShown))
+                          : '—'}
+                        {row.isDirty && costOk && row.previewBranchPriceKgs != null ? (
                           <span className="ml-1 text-[10px] text-amber-600">{t('pricing.previewOnly')}</span>
                         ) : null}
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {renderMarkup(row.maximumMarkupPercent, markupOk)}
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {renderMoney(row.maximumBranchPriceKgs, costOk && markupOk)}
-                      </td>
-                      <td className="px-3 py-2 font-medium text-slate-800">
-                        <span className="inline-flex items-center gap-1">
-                          {renderMoney(effectiveShown, costOk)}
-                          {showBadge ? (
-                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
-                              {t('pricing.ruleAppliedBadge')}
-                            </span>
-                          ) : null}
-                          {costOk && branchId ? (
-                            <PriceExplanationButton
-                              productId={row.id}
-                              branchId={branchId}
-                              priceType="BRANCH_PURCHASE"
-                            />
-                          ) : null}
-                        </span>
                       </td>
                       <td className="px-3 py-2">
                         {canManage ? (

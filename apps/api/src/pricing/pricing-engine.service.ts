@@ -86,7 +86,7 @@ export class PricingEngineService {
     const versionId = input.pricingPolicyVersionId ?? (await this.getActiveVersionId());
 
     const branchType = branch.branchType as BranchTypeForPricing;
-    const cost = await this.fifoService.getLatestHqCostPrice(pricingProduct.id);
+    const cost = await this.fifoService.getOldestActiveHqFifoCost(pricingProduct.id);
     const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
     const baseCostKgs = costAvailable ? cost.costPriceKgs : 0;
     const baseFranchiseMarkupPercent = Number(pricingProduct.hqBranchWholesaleMarkupPercent ?? 0);

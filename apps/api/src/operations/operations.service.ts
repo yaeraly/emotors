@@ -1091,6 +1091,7 @@ export class OperationsService {
         const priceSnapshot = await this.pricingResolution.resolveWithFreeze(existing.branchId, item.productId, {
           auditUser: user,
           auditEntity: 'BranchPurchaseRequestItem',
+          useBranchOrderPrice: true,
         });
         const product = await tx.product.findFirst({
           where: { id: item.productId, deletedAt: null },
@@ -1108,6 +1109,11 @@ export class OperationsService {
           ? this.pricingFifoService.isHqBranchType(branch.branchType)
           : false;
 
+        const snapshottedUnitPrice =
+          item.resolvedBranchPriceKgs != null && Number(item.resolvedBranchPriceKgs) > 0
+            ? Number(item.resolvedBranchPriceKgs)
+            : null;
+
         await this.pricingFifoService.syncFifoBatchesFromHqStockMovements(tx);
         const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
           productId: product.id,
@@ -1117,10 +1123,13 @@ export class OperationsService {
           branchPricing: branch
             ? { branchType: branch.branchType, hqToBranchMarkupPercent: markupPercent }
             : undefined,
-          preferPerLayerMarkup: true,
+          preferPerLayerMarkup: snapshottedUnitPrice == null,
           subtractReserved: true,
-          fallbackUnitCost: Number(product.finalCostKgs),
-          fallbackUnitPrice: Number(priceSnapshot.resolvedPriceKgs ?? item.resolvedBranchPriceKgs ?? 0),
+          fallbackUnitCost: priceSnapshot.baseCostKgs > 0 ? priceSnapshot.baseCostKgs : Number(product.finalCostKgs),
+          fallbackUnitPrice: Number(
+            snapshottedUnitPrice ?? priceSnapshot.resolvedPriceKgs ?? 0,
+          ),
+          overrideUnitPriceKgs: snapshottedUnitPrice,
         });
 
         if (fifoPreview.allocatedQty < quantity) {
@@ -1131,16 +1140,21 @@ export class OperationsService {
 
         // Multi-layer order totals from FIFO allocation (not product.finalCostKgs / not average-first).
         const lineCost = Math.round((fifoPreview.totalCostKgs + Number.EPSILON) * 100) / 100;
-        const linePrice = Math.round((fifoPreview.totalPriceKgs + Number.EPSILON) * 100) / 100;
+        const linePrice =
+          snapshottedUnitPrice != null
+            ? Math.round((snapshottedUnitPrice * quantity + Number.EPSILON) * 100) / 100
+            : Math.round((fifoPreview.totalPriceKgs + Number.EPSILON) * 100) / 100;
         const unitCost = quantity > 0 ? Math.round((lineCost / quantity + Number.EPSILON) * 100) / 100 : 0;
-        const unitPrice = quantity > 0 ? Math.round((linePrice / quantity + Number.EPSILON) * 100) / 100 : 0;
+        const unitPrice =
+          snapshottedUnitPrice ??
+          (quantity > 0 ? Math.round((linePrice / quantity + Number.EPSILON) * 100) / 100 : 0);
         totalCost += lineCost;
         totalAmount += linePrice;
 
         await tx.branchPurchaseRequestItem.update({
           where: { id: item.id },
           data: {
-            resolvedBranchPriceKgs: fifoPreview.activeUnitPrice || unitPrice,
+            resolvedBranchPriceKgs: unitPrice,
             pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId ?? item.pricingPolicyVersionId,
             pricingProfileId: priceSnapshot.pricingProfileId ?? item.pricingProfileId,
             appliedRuleType: priceSnapshot.appliedRuleType ?? item.appliedRuleType,
@@ -1164,7 +1178,9 @@ export class OperationsService {
           profit: Math.round((linePrice - lineCost + Number.EPSILON) * 100) / 100,
           pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId,
           pricingProfileId: priceSnapshot.pricingProfileId,
-          resolvedPriceKgs: fifoPreview.activeUnitPrice || unitPrice,
+          resolvedPriceKgs: unitPrice,
+          baseCostKgs: priceSnapshot.baseCostKgs,
+          baseBranchPriceKgs: snapshottedUnitPrice ?? priceSnapshot.baseBranchPriceKgs,
           appliedRuleType: priceSnapshot.appliedRuleType,
           appliedRuleId: priceSnapshot.appliedRuleId,
           appliedAdjustmentMode: priceSnapshot.appliedAdjustmentMode,
@@ -4667,6 +4683,7 @@ export class OperationsService {
         const quantity = Number(item.quantity ?? 0);
         const pricing = await this.resolveBranchRequestProductPricing(branchId, product.id);
         const branchPurchasePriceKgs = pricing.branchPurchasePriceKgs ?? 0;
+        const costPriceSnapshot = pricing.costPriceSnapshot ?? 0;
         const totalAmount =
           pricing.hasPricingPolicy && pricing.branchPurchasePriceKgs != null
             ? Math.round((pricing.branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100
@@ -4694,7 +4711,7 @@ export class OperationsService {
           hasPricingPolicyAtSubmit: pricing.hasPricingPolicy,
           weightKg: Number(product.weightKg),
           transportExpenseAllocation: 0,
-          estimatedUnitCost: branchPurchasePriceKgs,
+          estimatedUnitCost: costPriceSnapshot,
           totalAmount,
           note: item.note,
         };
@@ -5163,25 +5180,34 @@ export class OperationsService {
 
   private async resolveBranchRequestProductPricing(branchId: string, catalogProductId: string) {
     try {
-      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, catalogProductId);
-      const hasPricingPolicy = freeze.baseCostKgs > 0;
+      const freeze = await this.pricingResolution.resolveBranchOrderPrice(branchId, catalogProductId);
+      const hasPricingPolicy = Boolean(
+        freeze &&
+          freeze.baseCostKgs > 0 &&
+          Number(freeze.appliedAdjustmentValue ?? 0) > 0 &&
+          freeze.resolvedPriceKgs > 0,
+      );
       return {
         hasPricingPolicy,
-        branchPurchasePriceKgs: hasPricingPolicy ? freeze.resolvedPriceKgs : null,
-        resolvedBranchPriceKgs: hasPricingPolicy ? freeze.resolvedPriceKgs : null,
-        pricingPolicyVersionId: freeze.pricingPolicyVersionId,
-        pricingProfileId: freeze.pricingProfileId,
-        appliedRuleType: freeze.appliedRuleType,
-        appliedRuleId: freeze.appliedRuleId,
-        appliedAdjustmentMode: freeze.appliedAdjustmentMode,
-        appliedAdjustmentValue: freeze.appliedAdjustmentValue,
-        priceResolvedAt: freeze.priceResolvedAt,
+        branchPurchasePriceKgs: hasPricingPolicy ? freeze!.resolvedPriceKgs : null,
+        resolvedBranchPriceKgs: hasPricingPolicy ? freeze!.resolvedPriceKgs : null,
+        costPriceSnapshot: hasPricingPolicy ? freeze!.baseCostKgs : null,
+        markupSnapshot: hasPricingPolicy ? freeze!.appliedAdjustmentValue : null,
+        pricingPolicyVersionId: freeze?.pricingPolicyVersionId ?? null,
+        pricingProfileId: freeze?.pricingProfileId ?? null,
+        appliedRuleType: freeze?.appliedRuleType ?? null,
+        appliedRuleId: freeze?.appliedRuleId ?? null,
+        appliedAdjustmentMode: freeze?.appliedAdjustmentMode ?? null,
+        appliedAdjustmentValue: freeze?.appliedAdjustmentValue ?? null,
+        priceResolvedAt: freeze?.priceResolvedAt ?? null,
       };
     } catch {
       return {
         hasPricingPolicy: false,
         branchPurchasePriceKgs: null as number | null,
         resolvedBranchPriceKgs: null as number | null,
+        costPriceSnapshot: null as number | null,
+        markupSnapshot: null as number | null,
         pricingPolicyVersionId: null as string | null,
         pricingProfileId: null as string | null,
         appliedRuleType: null,
