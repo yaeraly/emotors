@@ -107,10 +107,13 @@ function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
       </span>
     );
   }
-  if (line.pricingPending || line.branchPurchasePriceKgs == null) {
-    return t('branchProductRequest.pricingPending');
+  if (line.pricingPending || line.branchPurchasePriceKgs == null || Number(line.branchPurchasePriceKgs) <= 0) {
+    return t('branchProductRequest.priceNotConfigured');
   }
-  return line.branchPurchasePriceKgs.toFixed(2);
+  return `${Number(line.branchPurchasePriceKgs).toLocaleString('ru-RU', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} сом`;
 }
 
 function emptyLine(): DraftLine {
@@ -243,6 +246,13 @@ export default function BranchPurchaseRequestsPage() {
   }, [t]);
 
   function addProductFromSearch(product: BranchProductOption) {
+    const branchPrice = product.branchPriceKgs ?? product.branchPurchasePriceKgs ?? null;
+    const hasPricing = product.hasPricingPolicy ?? (branchPrice != null && Number(branchPrice) > 0);
+    if (!hasPricing) {
+      setError(t('branchProductRequest.priceNotConfigured'));
+      return;
+    }
+    setError('');
     setLines((current) => {
       const existing = current.find((line) => line.productId === product.id && line.productId);
       if (existing) {
@@ -251,9 +261,9 @@ export default function BranchPurchaseRequestsPage() {
             ? {
                 ...line,
                 quantity: String(Number(line.quantity) + 1),
-                branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
-                wholesalePriceKgs: product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs,
-                pricingPending: product.pricingPending ?? (product.branchPurchasePriceKgs ?? line.branchPurchasePriceKgs) == null,
+                branchPurchasePriceKgs: branchPrice ?? line.branchPurchasePriceKgs,
+                wholesalePriceKgs: branchPrice ?? line.wholesalePriceKgs,
+                pricingPending: false,
                 priceResolving: false,
               }
             : line,
@@ -267,10 +277,10 @@ export default function BranchPurchaseRequestsPage() {
         sku: product.sku,
         unit: product.unit,
         weightKg: 0,
-        branchPurchasePriceKgs: product.branchPurchasePriceKgs ?? null,
-        wholesalePriceKgs: product.branchPurchasePriceKgs ?? null,
-        pricingPending: product.pricingPending ?? product.branchPurchasePriceKgs == null,
-        priceResolving: product.branchPurchasePriceKgs == null && !product.pricingPending,
+        branchPurchasePriceKgs: branchPrice,
+        wholesalePriceKgs: branchPrice,
+        pricingPending: false,
+        priceResolving: false,
         branchStock: 0,
         hqStock: null,
         quantity: '1',
@@ -438,39 +448,52 @@ export default function BranchPurchaseRequestsPage() {
     if (!showForm || !branchOnlyView || !form.branchId || !draftProductIds) return;
 
     setLines((current) =>
-      current.map((line) =>
-        line.productId
-          ? {
-              ...line,
-              priceResolving: true,
-              branchPurchasePriceKgs: null,
-              wholesalePriceKgs: null,
-              pricingPending: false,
-            }
-          : line,
-      ),
+      current.map((line) => {
+        if (!line.productId) return line;
+        if (line.branchPurchasePriceKgs != null && Number(line.branchPurchasePriceKgs) > 0) {
+          return line;
+        }
+        return { ...line, priceResolving: true, pricingPending: false };
+      }),
     );
 
+    type BranchProductPricingSnapshot = {
+      branchPriceKgs: number | null;
+      hasPricingPolicy?: boolean;
+    };
+
     const params = new URLSearchParams({ branchId: form.branchId, productIds: draftProductIds });
-    void apiFetch<Record<string, number | null>>(`/branch-purchase-requests/product-prices?${params.toString()}`)
+    void apiFetch<Record<string, BranchProductPricingSnapshot | number | null>>(
+      `/branch-purchase-requests/product-prices?${params.toString()}`,
+    )
       .then((prices) => {
         setLines((current) =>
-          current.map((line) =>
-            line.productId && prices[line.productId] !== undefined
-              ? {
-                  ...line,
-                  branchPurchasePriceKgs: prices[line.productId],
-                  wholesalePriceKgs: prices[line.productId],
-                  pricingPending: prices[line.productId] == null,
-                  priceResolving: false,
-                }
-              : line,
-          ),
+          current.map((line) => {
+            if (!line.productId || prices[line.productId] === undefined) return line;
+            const entry = prices[line.productId];
+            const branchPrice =
+              typeof entry === 'number' || entry === null ? entry : entry?.branchPriceKgs ?? null;
+            const hasPricing =
+              typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
+                ? Boolean(entry.hasPricingPolicy)
+                : branchPrice != null && Number(branchPrice) > 0;
+            return {
+              ...line,
+              branchPurchasePriceKgs: branchPrice,
+              wholesalePriceKgs: branchPrice,
+              pricingPending: !hasPricing,
+              priceResolving: false,
+            };
+          }),
         );
       })
       .catch(() => {
         setLines((current) =>
-          current.map((line) => (line.productId ? { ...line, priceResolving: false, pricingPending: true } : line)),
+          current.map((line) =>
+            line.productId && (line.branchPurchasePriceKgs == null || Number(line.branchPurchasePriceKgs) <= 0)
+              ? { ...line, priceResolving: false, pricingPending: true }
+              : line,
+          ),
         );
       });
   }, [branchOnlyView, draftProductIds, form.branchId, showForm]);
@@ -664,7 +687,13 @@ export default function BranchPurchaseRequestsPage() {
                         {formatBranchPrice(line, t)}
                       </td>
                       {branchOnlyView ? (
-                        <td className="px-3 py-2 font-semibold text-slate-900">{lineTotal(line).toFixed(2)}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-900">
+                          {lineTotal(line).toLocaleString('ru-RU', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          сом
+                        </td>
                       ) : null}
                       {!branchOnlyView ? (
                         <td className="px-3 py-2">

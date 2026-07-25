@@ -295,6 +295,7 @@ export class OperationsService {
       return baseProducts;
     }
 
+    await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
     return this.enrichBranchProductOptionsWithPricing(resolvedBranchId, baseProducts);
   }
 
@@ -329,13 +330,24 @@ export class OperationsService {
       },
     });
 
+    await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+
     const entries = await Promise.all(
       catalogProducts.map(async (product) => {
         const pricing = await this.resolveBranchRequestProductPricing(
           resolvedBranchId,
           product.id,
         );
-        return [product.id, pricing.branchPurchasePriceKgs] as const;
+        return [
+          product.id,
+          {
+            branchPriceKgs: pricing.branchPurchasePriceKgs,
+            costPriceKgs: pricing.costPriceSnapshot,
+            markupPercent: pricing.markupSnapshot,
+            pricingPolicyVersionId: pricing.pricingPolicyVersionId,
+            hasPricingPolicy: pricing.hasPricingPolicy,
+          },
+        ] as const;
       }),
     );
 
@@ -5171,6 +5183,10 @@ export class OperationsService {
         return {
           ...product,
           branchPurchasePriceKgs: pricing.branchPurchasePriceKgs,
+          branchPriceKgs: pricing.branchPurchasePriceKgs,
+          costPriceKgs: pricing.costPriceSnapshot,
+          markupPercent: pricing.markupSnapshot,
+          pricingPolicyVersionId: pricing.pricingPolicyVersionId,
           hasPricingPolicy: pricing.hasPricingPolicy,
           pricingPending: !pricing.hasPricingPolicy,
         };

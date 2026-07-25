@@ -15,9 +15,20 @@ export type BranchProductOption = {
   productCode?: string | null;
   unit: string;
   branchPurchasePriceKgs?: number | null;
+  branchPriceKgs?: number | null;
+  costPriceKgs?: number | null;
+  markupPercent?: number | null;
+  pricingPolicyVersionId?: string | null;
   hasPricingPolicy?: boolean;
   pricingPending?: boolean;
 };
+
+function formatBranchPriceKgs(value: number) {
+  return `${Number(value).toLocaleString('ru-RU', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} сом`;
+}
 
 type Props = {
   disabled?: boolean;
@@ -103,6 +114,12 @@ export function BranchProductSearch({
   }, []);
 
   function selectProduct(product: BranchProductOption) {
+    const branchPrice = product.branchPriceKgs ?? product.branchPurchasePriceKgs;
+    const canOrder = product.hasPricingPolicy ?? (branchPrice != null && Number(branchPrice) > 0);
+    if (!canOrder) {
+      setError(t('branchProductRequest.priceNotConfigured'));
+      return;
+    }
     onSelect(product);
     setQuery('');
     setResults([]);
@@ -175,7 +192,10 @@ export function BranchProductSearch({
           role="listbox"
           className="absolute z-20 mt-2 max-h-80 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white py-2 shadow-xl"
         >
-          {results.map((product, index) => (
+          {results.map((product, index) => {
+            const branchPrice = product.branchPriceKgs ?? product.branchPurchasePriceKgs;
+            const priceConfigured = product.hasPricingPolicy ?? (branchPrice != null && Number(branchPrice) > 0);
+            return (
             <li key={product.id} role="option" aria-selected={index === highlightedIndex}>
               <button
                 type="button"
@@ -191,9 +211,15 @@ export function BranchProductSearch({
                   {product.category ? ` · ${product.category}` : ''}
                   {product.unit ? ` · ${product.unit}` : ''}
                 </p>
+                <p className="mt-1 text-xs font-medium text-slate-700">
+                  {priceConfigured && branchPrice != null
+                    ? `${t('branchProductRequest.branchPurchasePrice')}: ${formatBranchPriceKgs(Number(branchPrice))}`
+                    : t('branchProductRequest.priceNotConfigured')}
+                </p>
               </button>
             </li>
-          ))}
+            );
+          })}
         </ul>
       ) : null}
     </div>
