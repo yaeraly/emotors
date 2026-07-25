@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
-import { applyHqBranchWholesaleMarkup } from '@/lib/pricing-table-utils';
+import { calculateBranchPriceFromCost } from '@/lib/pricing-table-utils';
 import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -27,7 +27,6 @@ type FranchiseSalesRow = {
 
 type EditableFranchiseRow = FranchiseSalesRow & {
   draftMarkup: number;
-  previewBranchPriceKgs: number | null;
   isDirty: boolean;
 };
 
@@ -44,10 +43,14 @@ function isCostAvailable(row: Pick<FranchiseSalesRow, 'costAvailable' | 'costPri
   return Number(row.costPriceKgs) > 0;
 }
 
-function isMarkupConfigured(row: Pick<FranchiseSalesRow, 'markupConfigured' | 'hqMarkupPercent' | 'recommendedMarkupPercent'>) {
-  if (row.markupConfigured === false) return false;
-  if (row.recommendedMarkupPercent != null && Number(row.recommendedMarkupPercent) > 0) return true;
-  return Number(row.hqMarkupPercent) > 0;
+function hasActiveMarkup(markupPercent: number) {
+  return Number.isFinite(markupPercent) && markupPercent > 0;
+}
+
+function computeBranchPriceKgs(row: Pick<EditableFranchiseRow, 'costPriceKgs' | 'costAvailable' | 'draftMarkup'>) {
+  if (!isCostAvailable(row) || !hasActiveMarkup(row.draftMarkup)) return null;
+  const branchPrice = calculateBranchPriceFromCost(Number(row.costPriceKgs), row.draftMarkup);
+  return branchPrice > 0 ? branchPrice : null;
 }
 
 export default function PricingBranchesPage() {
@@ -81,10 +84,7 @@ export default function PricingBranchesPage() {
       setUser(me);
       const nonHq = branchRows.filter((b) => b.branchType !== 'HQ_BRANCH');
       setBranches(nonHq);
-      const nextBranchId =
-        selectedBranchId ||
-        nonHq[0]?.id ||
-        '';
+      const nextBranchId = selectedBranchId || nonHq[0]?.id || '';
       setBranchId(nextBranchId);
       const categoryNames = Array.from(
         new Set(products.map((p) => p.categoryName).filter(Boolean)),
@@ -94,10 +94,8 @@ export default function PricingBranchesPage() {
         products.map((product) => ({
           ...product,
           costAvailable: isCostAvailable(product),
-          markupConfigured: isMarkupConfigured(product),
           branchPriceKgs: product.branchPriceKgs ?? product.masterBranchPriceKgs ?? null,
-          draftMarkup: product.hqMarkupPercent,
-          previewBranchPriceKgs: null,
+          draftMarkup: Number(product.hqMarkupPercent ?? product.recommendedMarkupPercent ?? 0),
           isDirty: false,
         })),
       );
@@ -137,13 +135,9 @@ export default function PricingBranchesPage() {
     setRows((current) =>
       current.map((row) => {
         if (row.id !== productId) return row;
-        const previewBranchPriceKgs = isCostAvailable(row)
-          ? applyHqBranchWholesaleMarkup(Number(row.costPriceKgs), draftMarkup)
-          : null;
         return {
           ...row,
           draftMarkup,
-          previewBranchPriceKgs,
           isDirty: draftMarkup !== row.hqMarkupPercent,
         };
       }),
@@ -155,6 +149,10 @@ export default function PricingBranchesPage() {
     if (!row || !canManage) return;
     if (!isCostAvailable(row)) {
       setError(t('pricing.validationCostRequired'));
+      return;
+    }
+    if (!hasActiveMarkup(row.draftMarkup)) {
+      setError(t('pricing.validationMarkupNegative'));
       return;
     }
 
@@ -175,11 +173,23 @@ export default function PricingBranchesPage() {
     }
   }
 
-  function renderMarkup(value: number | null | undefined, configured: boolean) {
-    if (!configured || value == null || Number(value) <= 0) {
+  function renderMarkupCell(row: EditableFranchiseRow, costOk: boolean) {
+    if (canManage && costOk) {
+      return (
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          value={row.draftMarkup}
+          onChange={(e) => updateRow(row.id, Number(e.target.value))}
+          className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+        />
+      );
+    }
+    if (!hasActiveMarkup(row.draftMarkup)) {
       return t('pricing.markupNotConfiguredShort');
     }
-    return `${Number(value)}%`;
+    return `${Number(row.draftMarkup)}%`;
   }
 
   return (
@@ -272,10 +282,7 @@ export default function PricingBranchesPage() {
             {!loading
               ? pagedRows.map((row) => {
                   const costOk = isCostAvailable(row);
-                  const markupOk = isMarkupConfigured(row);
-                  const branchPriceShown = row.isDirty
-                    ? row.previewBranchPriceKgs
-                    : row.branchPriceKgs ?? row.masterBranchPriceKgs;
+                  const branchPriceKgs = computeBranchPriceKgs(row);
 
                   return (
                     <tr key={row.id}>
@@ -288,33 +295,15 @@ export default function PricingBranchesPage() {
                       >
                         {costOk ? formatPrice(Number(row.costPriceKgs)) : t('pricing.noCalculatedCost')}
                       </td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {canManage && costOk ? (
-                          <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={row.draftMarkup}
-                            onChange={(e) => updateRow(row.id, Number(e.target.value))}
-                            className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
-                          />
-                        ) : (
-                          renderMarkup(row.recommendedMarkupPercent ?? row.hqMarkupPercent, markupOk)
-                        )}
-                      </td>
+                      <td className="px-3 py-2 text-slate-700">{renderMarkupCell(row, costOk)}</td>
                       <td className="px-3 py-2 font-medium text-slate-800">
-                        {costOk && markupOk && branchPriceShown != null && Number(branchPriceShown) > 0
-                          ? formatPrice(Number(branchPriceShown))
-                          : '—'}
-                        {row.isDirty && costOk && row.previewBranchPriceKgs != null ? (
-                          <span className="ml-1 text-[10px] text-amber-600">{t('pricing.previewOnly')}</span>
-                        ) : null}
+                        {branchPriceKgs != null ? formatPrice(branchPriceKgs) : '—'}
                       </td>
                       <td className="px-3 py-2">
                         {canManage ? (
                           <button
                             type="button"
-                            disabled={savingId === row.id || !row.isDirty || !costOk}
+                            disabled={savingId === row.id || !row.isDirty || !costOk || !hasActiveMarkup(row.draftMarkup)}
                             onClick={() => void save(row.id)}
                             className="rounded border border-slate-300 px-2 py-1 text-xs font-semibold disabled:opacity-50"
                           >

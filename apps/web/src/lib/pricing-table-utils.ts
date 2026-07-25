@@ -20,8 +20,9 @@ export function applyHqBranchWholesaleMarkup(costPrice: number, markupPercent: n
   return applyMarkupRoundUp(costPrice, markupPercent);
 }
 
-export function applyMarkup(costPrice: number, markupPercent: number) {
-  return applyMarkupRoundUp(costPrice, markupPercent);
+/** Branch purchase price: cost × (1 + markup%) with system ROUNDUP to tens. */
+export function calculateBranchPriceFromCost(costPrice: number, markupPercent: number) {
+  return applyHqBranchWholesaleMarkup(costPrice, markupPercent);
 }
 
 export function pricesFromMarkups(
