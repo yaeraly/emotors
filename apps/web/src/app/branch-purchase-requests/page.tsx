@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState, type KeyboardEvent } f
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
-import { BranchProductSearch, type BranchProductOption } from '@/components/BranchProductSearch';
+import { BranchProductSearch, type BranchProductOption, isBranchPriceConfigured, parseBranchMoney } from '@/components/BranchProductSearch';
 import { branchPurchaseRequestsTitleKey } from '@/lib/distribution-labels';
 import { distributionHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
@@ -93,8 +93,9 @@ type DraftLine = {
 
 function lineTotal(line: DraftLine) {
   const quantity = Number(line.quantity) || 0;
-  if (line.pricingPending || line.branchPurchasePriceKgs == null) return 0;
-  return Math.round((line.branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100;
+  const branchPrice = parseBranchMoney(line.branchPurchasePriceKgs);
+  if (line.pricingPending || branchPrice == null) return 0;
+  return Math.round((branchPrice * quantity + Number.EPSILON) * 100) / 100;
 }
 
 function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
@@ -107,10 +108,11 @@ function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
       </span>
     );
   }
-  if (line.pricingPending || line.branchPurchasePriceKgs == null || Number(line.branchPurchasePriceKgs) <= 0) {
+  const branchPrice = parseBranchMoney(line.branchPurchasePriceKgs);
+  if (line.pricingPending || branchPrice == null) {
     return t('branchProductRequest.priceNotConfigured');
   }
-  return `${Number(line.branchPurchasePriceKgs).toLocaleString('ru-RU', {
+  return `${branchPrice.toLocaleString('ru-RU', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })} сом`;
@@ -246,12 +248,11 @@ export default function BranchPurchaseRequestsPage() {
   }, [t]);
 
   function addProductFromSearch(product: BranchProductOption) {
-    const branchPrice = product.branchPriceKgs ?? product.branchPurchasePriceKgs ?? null;
-    const hasPricing = product.hasPricingPolicy ?? (branchPrice != null && Number(branchPrice) > 0);
-    if (!hasPricing) {
+    if (!isBranchPriceConfigured(product)) {
       setError(t('branchProductRequest.priceNotConfigured'));
       return;
     }
+    const branchPrice = parseBranchMoney(product.branchPriceKgs ?? product.branchPurchasePriceKgs);
     setError('');
     setLines((current) => {
       const existing = current.find((line) => line.productId === product.id && line.productId);
@@ -458,8 +459,9 @@ export default function BranchPurchaseRequestsPage() {
     );
 
     type BranchProductPricingSnapshot = {
-      branchPriceKgs: number | null;
+      branchPriceKgs: number | string | null;
       hasPricingPolicy?: boolean;
+      priceConfigured?: boolean;
     };
 
     const params = new URLSearchParams({ branchId: form.branchId, productIds: draftProductIds });
@@ -471,12 +473,17 @@ export default function BranchPurchaseRequestsPage() {
           current.map((line) => {
             if (!line.productId || prices[line.productId] === undefined) return line;
             const entry = prices[line.productId];
-            const branchPrice =
-              typeof entry === 'number' || entry === null ? entry : entry?.branchPriceKgs ?? null;
+            const branchPrice = parseBranchMoney(
+              typeof entry === 'number' || entry === null ? entry : entry?.branchPriceKgs ?? null,
+            );
             const hasPricing =
-              typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
-                ? Boolean(entry.hasPricingPolicy)
-                : branchPrice != null && Number(branchPrice) > 0;
+              typeof entry === 'object' && entry != null && entry.priceConfigured === true
+                ? true
+                : typeof entry === 'object' && entry != null && entry.priceConfigured === false
+                  ? false
+                  : typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
+                    ? Boolean(entry.hasPricingPolicy)
+                    : branchPrice != null;
             return {
               ...line,
               branchPurchasePriceKgs: branchPrice,

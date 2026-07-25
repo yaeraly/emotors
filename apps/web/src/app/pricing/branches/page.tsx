@@ -196,6 +196,7 @@ export default function PricingBranchesPage() {
         }),
       );
       setSuccess(t('pricing.rowSaved'));
+      window.sessionStorage.setItem('branchOrderPricingRevision', String(Date.now()));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {

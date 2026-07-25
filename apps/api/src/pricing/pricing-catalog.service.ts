@@ -25,6 +25,7 @@ import {
   resolveHqToBranchPrice,
   validateMarkups,
 } from './pricing-calculator.util';
+import { BranchOrderPricingRevisionService } from './branch-order-pricing-revision.service';
 import { BranchPriceResolverService } from './branch-price-resolver.service';
 import { PricingFifoService } from './pricing-fifo.service';
 import { PricingEngineService } from './pricing-engine.service';
@@ -78,6 +79,7 @@ export class PricingCatalogService {
     private readonly fifoService: PricingFifoService,
     private readonly pricingEngine: PricingEngineService,
     private readonly branchPriceResolver: BranchPriceResolverService,
+    private readonly branchOrderPricingRevision: BranchOrderPricingRevisionService,
   ) {}
 
   async listCategories(user: AuthUser) {
@@ -124,6 +126,7 @@ export class PricingCatalogService {
       return next;
     });
 
+    this.branchOrderPricingRevision.bump();
     return updated;
   }
 
@@ -454,10 +457,9 @@ export class PricingCatalogService {
         });
         const costAvailable = Boolean(resolution?.costAvailable && resolution.costPrice > 0);
         const costPriceKgs = costAvailable ? resolution!.costPrice : null;
-        const markupConfigured = Boolean(resolution?.markupConfigured && resolution.markupPercent > 0);
+        const markupConfigured = Boolean(resolution?.priceConfigured);
         const hqMarkupPercent = resolution?.markupPercent ?? Number(product.hqBranchWholesaleMarkupPercent);
-        const branchPriceKgs =
-          resolution?.markupConfigured && resolution.branchPrice > 0 ? resolution.branchPrice : null;
+        const branchPriceKgs = resolution?.priceConfigured ? resolution.branchPrice : null;
 
         const hqAvailableQuantity = await this.resolveHqAvailableQuantity(product.id);
 
@@ -567,6 +569,7 @@ export class PricingCatalogService {
     const rows = await this.listFranchiseSalesProducts(user);
     const row = rows.find((item) => item.id === productId);
     if (!row) throw new NotFoundException('Product not found after update');
+    this.branchOrderPricingRevision.bump();
     return row;
   }
 

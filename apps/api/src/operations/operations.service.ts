@@ -10,6 +10,7 @@ import {
   BranchRequestShortageStatus,
   HqStockBookingReleaseReason,
   HqWarrantyDecision,
+  PricingAppliedRuleType,
   Prisma,
   ProcurementOrderStatus,
   ProcurementItemWeightStatus,
@@ -23,6 +24,7 @@ import {
   StockMovementType,
   SupplierClaimStatus,
   WarehouseReleaseOrderStatus,
+  WarehouseType,
   WarrantyClaimStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
@@ -65,6 +67,8 @@ import { LandedCostService } from '../procurement/landed-cost.service';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
+import { BranchOrderPricingRevisionService } from '../pricing/branch-order-pricing-revision.service';
+import { BranchPriceResolverService } from '../pricing/branch-price-resolver.service';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import {
   isSubmittedBranchPurchaseStatus,
@@ -129,6 +133,8 @@ export class OperationsService {
     private readonly landedCostService: LandedCostService,
     private readonly pricingResolution: PricingResolutionService,
     private readonly pricingFifoService: PricingFifoService,
+    private readonly branchPriceResolver: BranchPriceResolverService,
+    private readonly branchOrderPricingRevision: BranchOrderPricingRevisionService,
   ) {}
 
   async branchPurchaseRequests(user: AuthUser) {
@@ -296,7 +302,9 @@ export class OperationsService {
     }
 
     await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
-    return this.enrichBranchProductOptionsWithPricing(resolvedBranchId, baseProducts);
+    const pricingRevision = this.branchOrderPricingRevision.current();
+    const enriched = await this.enrichBranchProductOptionsWithPricing(resolvedBranchId, baseProducts);
+    return enriched.map((product) => ({ ...product, pricingRevision }));
   }
 
   async branchProductPrices(user: AuthUser, branchId: string, productIds: string[]) {
@@ -346,6 +354,9 @@ export class OperationsService {
             markupPercent: pricing.markupSnapshot,
             pricingPolicyVersionId: pricing.pricingPolicyVersionId,
             hasPricingPolicy: pricing.hasPricingPolicy,
+            priceConfigured: pricing.priceConfigured,
+            priceMissingReason: pricing.priceMissingReason,
+            pricingRevision: this.branchOrderPricingRevision.current(),
           },
         ] as const;
       }),
@@ -5176,62 +5187,89 @@ export class OperationsService {
   ) {
     return Promise.all(
       products.map(async (product) => {
-        const pricing = await this.resolveBranchRequestProductPricing(
-          branchId,
-          product.catalogProductId,
-        );
+        const pricing = await this.resolveBranchRequestProductPricing(branchId, product.catalogProductId);
+        const availableQuantity = await this.resolveHqCatalogAvailableQuantity(product.catalogProductId);
         return {
+          productId: product.catalogProductId,
           ...product,
+          availableQuantity,
           branchPurchasePriceKgs: pricing.branchPurchasePriceKgs,
           branchPriceKgs: pricing.branchPurchasePriceKgs,
           costPriceKgs: pricing.costPriceSnapshot,
           markupPercent: pricing.markupSnapshot,
           pricingPolicyVersionId: pricing.pricingPolicyVersionId,
           hasPricingPolicy: pricing.hasPricingPolicy,
-          pricingPending: !pricing.hasPricingPolicy,
+          priceConfigured: pricing.priceConfigured,
+          priceMissingReason: pricing.priceMissingReason,
+          pricingPending: !pricing.priceConfigured,
         };
       }),
     );
   }
 
+  private async resolveHqCatalogAvailableQuantity(catalogProductId: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: catalogProductId, deletedAt: null },
+      select: { id: true, sku: true },
+    });
+    if (!product) return 0;
+    const sku = product.sku?.trim();
+    const ids = new Set<string>([product.id]);
+    if (sku) {
+      const siblings = await this.prisma.product.findMany({
+        where: { sku, deletedAt: null },
+        select: { id: true },
+      });
+      for (const row of siblings) ids.add(row.id);
+    }
+    const balance = await this.prisma.inventoryBalance.aggregate({
+      where: {
+        productId: { in: [...ids] },
+        warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
+      },
+      _sum: { quantity: true },
+    });
+    return Math.max(0, Number(balance._sum.quantity ?? 0));
+  }
+
   private async resolveBranchRequestProductPricing(branchId: string, catalogProductId: string) {
-    try {
-      const freeze = await this.pricingResolution.resolveBranchOrderPrice(branchId, catalogProductId);
-      const hasPricingPolicy = Boolean(
-        freeze &&
-          freeze.baseCostKgs > 0 &&
-          Number(freeze.appliedAdjustmentValue ?? 0) > 0 &&
-          freeze.resolvedPriceKgs > 0,
-      );
-      return {
-        hasPricingPolicy,
-        branchPurchasePriceKgs: hasPricingPolicy ? freeze!.resolvedPriceKgs : null,
-        resolvedBranchPriceKgs: hasPricingPolicy ? freeze!.resolvedPriceKgs : null,
-        costPriceSnapshot: hasPricingPolicy ? freeze!.baseCostKgs : null,
-        markupSnapshot: hasPricingPolicy ? freeze!.appliedAdjustmentValue : null,
-        pricingPolicyVersionId: freeze?.pricingPolicyVersionId ?? null,
-        pricingProfileId: freeze?.pricingProfileId ?? null,
-        appliedRuleType: freeze?.appliedRuleType ?? null,
-        appliedRuleId: freeze?.appliedRuleId ?? null,
-        appliedAdjustmentMode: freeze?.appliedAdjustmentMode ?? null,
-        appliedAdjustmentValue: freeze?.appliedAdjustmentValue ?? null,
-        priceResolvedAt: freeze?.priceResolvedAt ?? null,
-      };
-    } catch {
-      return {
-        hasPricingPolicy: false,
-        branchPurchasePriceKgs: null as number | null,
-        resolvedBranchPriceKgs: null as number | null,
-        costPriceSnapshot: null as number | null,
-        markupSnapshot: null as number | null,
-        pricingPolicyVersionId: null as string | null,
-        pricingProfileId: null as string | null,
-        appliedRuleType: null,
-        appliedRuleId: null as string | null,
-        appliedAdjustmentMode: null,
-        appliedAdjustmentValue: null as number | null,
-        priceResolvedAt: null as Date | null,
-      };
+    const resolution = await this.branchPriceResolver.resolveBranchPrice(catalogProductId, { branchId });
+    const priceConfigured = resolution.priceConfigured;
+    const branchPurchasePriceKgs = priceConfigured ? resolution.branchPrice : null;
+
+    return {
+      hasPricingPolicy: priceConfigured,
+      priceConfigured,
+      priceMissingReason: resolution.priceMissingReason,
+      branchPurchasePriceKgs,
+      resolvedBranchPriceKgs: branchPurchasePriceKgs,
+      costPriceSnapshot: priceConfigured ? resolution.costPrice : null,
+      markupSnapshot: priceConfigured ? resolution.markupPercent : null,
+      pricingPolicyVersionId: resolution.pricingPolicyVersionId,
+      pricingProfileId: null as string | null,
+      appliedRuleType: resolution.sourceRuleType
+        ? this.mapBranchSourceRuleToAppliedRuleType(resolution.sourceRuleType)
+        : null,
+      appliedRuleId: resolution.sourceRuleId,
+      appliedAdjustmentMode: null,
+      appliedAdjustmentValue: priceConfigured ? resolution.markupPercent : null,
+      priceResolvedAt: priceConfigured ? new Date() : null,
+      sourceRuleType: resolution.sourceRuleType,
+    };
+  }
+
+  private mapBranchSourceRuleToAppliedRuleType(
+    sourceRuleType: import('../pricing/branch-price-resolver.service').BranchPriceSourceRuleType,
+  ): PricingAppliedRuleType | null {
+    switch (sourceRuleType) {
+      case 'CATEGORY_BRANCH_MARKUP':
+        return PricingAppliedRuleType.CATEGORY_RULE;
+      case 'PRODUCT_BRANCH_MARKUP':
+      case 'DEFAULT_BRANCH_MARKUP':
+      case 'HQ_BRANCH_COST':
+        return PricingAppliedRuleType.BASE_FRANCHISE;
+      default:
+        return null;
     }
   }
 

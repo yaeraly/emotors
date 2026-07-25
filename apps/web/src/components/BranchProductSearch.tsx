@@ -5,8 +5,15 @@ import { apiFetch } from '@/lib/api';
 import { rankProducts } from '@/lib/product-fuzzy-search';
 import { useTranslation } from '@/i18n/useTranslation';
 
+export type BranchPriceMissingReason =
+  | 'NO_FIFO_COST'
+  | 'NO_BRANCH_MARKUP'
+  | 'NO_ACTIVE_PRICING_VERSION'
+  | null;
+
 export type BranchProductOption = {
   id: string;
+  productId?: string;
   catalogProductId?: string;
   name: string;
   sku: string;
@@ -14,14 +21,33 @@ export type BranchProductOption = {
   category: string;
   productCode?: string | null;
   unit: string;
-  branchPurchasePriceKgs?: number | null;
-  branchPriceKgs?: number | null;
-  costPriceKgs?: number | null;
-  markupPercent?: number | null;
+  availableQuantity?: number;
+  branchPurchasePriceKgs?: number | string | null;
+  branchPriceKgs?: number | string | null;
+  costPriceKgs?: number | string | null;
+  markupPercent?: number | string | null;
   pricingPolicyVersionId?: string | null;
   hasPricingPolicy?: boolean;
+  priceConfigured?: boolean;
+  priceMissingReason?: BranchPriceMissingReason;
   pricingPending?: boolean;
+  pricingRevision?: number;
 };
+
+export function parseBranchMoney(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function isBranchPriceConfigured(product: BranchProductOption): boolean {
+  if (product.priceConfigured === true) return true;
+  if (product.priceConfigured === false) return false;
+  if (product.hasPricingPolicy === true) return true;
+  if (product.hasPricingPolicy === false) return false;
+  const branchPrice = parseBranchMoney(product.branchPriceKgs ?? product.branchPurchasePriceKgs);
+  return branchPrice != null;
+}
 
 function formatBranchPriceKgs(value: number) {
   return `${Number(value).toLocaleString('ru-RU', {
@@ -38,6 +64,7 @@ type Props = {
 };
 
 const DEBOUNCE_MS = 200;
+const PRICING_REVISION_KEY = 'branchOrderPricingRevision';
 
 export function BranchProductSearch({
   disabled = false,
@@ -57,6 +84,8 @@ export function BranchProductSearch({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const [error, setError] = useState('');
 
+  const searchDisabled = disabled || !branchId;
+
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
@@ -66,12 +95,20 @@ export function BranchProductSearch({
       return;
     }
 
+    if (!branchId) {
+      setResults([]);
+      setOpen(false);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     const timer = window.setTimeout(() => {
       const search = query.trim();
-      const params = new URLSearchParams({ search });
-      if (branchId) {
-        params.set('branchId', branchId);
+      const params = new URLSearchParams({ search, branchId });
+      const pricingRevision = window.sessionStorage.getItem(PRICING_REVISION_KEY);
+      if (pricingRevision) {
+        params.set('pricingRevision', pricingRevision);
       }
       void apiFetch<BranchProductOption[]>(`/branch-purchase-requests/product-options?${params.toString()}`)
         .then((items) => {
@@ -114,9 +151,7 @@ export function BranchProductSearch({
   }, []);
 
   function selectProduct(product: BranchProductOption) {
-    const branchPrice = product.branchPriceKgs ?? product.branchPurchasePriceKgs;
-    const canOrder = product.hasPricingPolicy ?? (branchPrice != null && Number(branchPrice) > 0);
-    if (!canOrder) {
+    if (!isBranchPriceConfigured(product)) {
       setError(t('branchProductRequest.priceNotConfigured'));
       return;
     }
@@ -169,7 +204,7 @@ export function BranchProductSearch({
           aria-expanded={open}
           aria-controls={listboxId}
           aria-autocomplete="list"
-          disabled={disabled}
+          disabled={searchDisabled}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onFocus={() => {
@@ -182,6 +217,9 @@ export function BranchProductSearch({
       </label>
 
       <p className="mt-2 text-xs text-slate-500">{t('branchProductRequest.productSearch.hint')}</p>
+      {!branchId ? (
+        <p className="mt-2 text-xs text-slate-500">{t('pricing.selectBranch')}</p>
+      ) : null}
 
       {loading ? <p className="mt-2 text-sm text-slate-500">{t('common.loading')}</p> : null}
       {!loading && error && query.trim() ? <p className="mt-2 text-sm text-slate-500">{error}</p> : null}
@@ -193,31 +231,31 @@ export function BranchProductSearch({
           className="absolute z-20 mt-2 max-h-80 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white py-2 shadow-xl"
         >
           {results.map((product, index) => {
-            const branchPrice = product.branchPriceKgs ?? product.branchPurchasePriceKgs;
-            const priceConfigured = product.hasPricingPolicy ?? (branchPrice != null && Number(branchPrice) > 0);
+            const branchPrice = parseBranchMoney(product.branchPriceKgs ?? product.branchPurchasePriceKgs);
+            const priceConfigured = isBranchPriceConfigured(product);
             return (
-            <li key={product.id} role="option" aria-selected={index === highlightedIndex}>
-              <button
-                type="button"
-                onMouseEnter={() => setHighlightedIndex(index)}
-                onClick={() => selectProduct(product)}
-                className={`w-full px-4 py-3 text-left transition ${
-                  index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'
-                }`}
-              >
-                <p className="font-semibold text-slate-950">{product.name}</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  {t('branchProductRequest.productSearch.sku')}: {product.sku}
-                  {product.category ? ` · ${product.category}` : ''}
-                  {product.unit ? ` · ${product.unit}` : ''}
-                </p>
-                <p className="mt-1 text-xs font-medium text-slate-700">
-                  {priceConfigured && branchPrice != null
-                    ? `${t('branchProductRequest.branchPurchasePrice')}: ${formatBranchPriceKgs(Number(branchPrice))}`
-                    : t('branchProductRequest.priceNotConfigured')}
-                </p>
-              </button>
-            </li>
+              <li key={product.id} role="option" aria-selected={index === highlightedIndex}>
+                <button
+                  type="button"
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onClick={() => selectProduct(product)}
+                  className={`w-full px-4 py-3 text-left transition ${
+                    index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'
+                  }`}
+                >
+                  <p className="font-semibold text-slate-950">{product.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {t('branchProductRequest.productSearch.sku')}: {product.sku}
+                    {product.category ? ` · ${product.category}` : ''}
+                    {product.unit ? ` · ${product.unit}` : ''}
+                  </p>
+                  <p className="mt-1 text-xs font-medium text-slate-700">
+                    {priceConfigured && branchPrice != null
+                      ? `${t('branchProductRequest.branchPurchasePrice')}: ${formatBranchPriceKgs(branchPrice)}`
+                      : t('branchProductRequest.priceNotConfigured')}
+                  </p>
+                </button>
+              </li>
             );
           })}
         </ul>
