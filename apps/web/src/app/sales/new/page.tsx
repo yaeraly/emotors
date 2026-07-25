@@ -79,7 +79,12 @@ export default function NewSalePage() {
     createPaymentPartRow({ method: 'CASH' }),
   ]);
   const [showCreateCustomer, setShowCreateCustomer] = useState(false);
-  const [createCustomerForm, setCreateCustomerForm] = useState({ fullName: '', phone: '', whatsappPhone: '' });
+  const [createCustomerForm, setCreateCustomerForm] = useState({
+    fullName: '',
+    phone: '',
+    whatsappPhone: '',
+    customerType: 'RETAIL' as 'RETAIL' | 'WHOLESALE',
+  });
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [draftSale, setDraftSale] = useState<Sale | null>(null);
   const [paymentsSynced, setPaymentsSynced] = useState(false);
@@ -91,6 +96,9 @@ export default function NewSalePage() {
   const [error, setError] = useState('');
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
+  const isHqBranchSaleContext =
+    user?.branch?.branchType === 'HQ_BRANCH' || user?.branch?.code === 'EMOTORS-HQ';
+  const [hqSaleCustomerType, setHqSaleCustomerType] = useState<'RETAIL' | 'WHOLESALE'>('RETAIL');
   const canApprove = canApproveSale(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
   const canCreateCustomerAction = canCreateCustomer(user);
@@ -566,6 +574,9 @@ export default function NewSalePage() {
           phone: createCustomerForm.phone.trim(),
           whatsappPhone: createCustomerForm.whatsappPhone.trim() || undefined,
           status: 'ACTIVE',
+          ...(isHqBranchSaleContext
+            ? { customerType: createCustomerForm.customerType }
+            : {}),
         }),
       });
       setSelectedCustomer({
@@ -578,7 +589,7 @@ export default function NewSalePage() {
         hasOverdueInstallment: false,
       });
       setShowCreateCustomer(false);
-      setCreateCustomerForm({ fullName: '', phone: '', whatsappPhone: '' });
+      setCreateCustomerForm({ fullName: '', phone: '', whatsappPhone: '', customerType: hqSaleCustomerType });
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -706,10 +717,37 @@ export default function NewSalePage() {
                   </button>
                 ) : null}
               </div>
+              {isHqBranchSaleContext ? (
+                <div className="mt-4 flex flex-wrap gap-4 text-sm">
+                  <label className="flex items-center gap-2 font-semibold text-slate-700">
+                    <input
+                      type="radio"
+                      checked={hqSaleCustomerType === 'RETAIL'}
+                      onChange={() => {
+                        setHqSaleCustomerType('RETAIL');
+                        setSelectedCustomer(null);
+                      }}
+                    />
+                    Розничный клиент
+                  </label>
+                  <label className="flex items-center gap-2 font-semibold text-slate-700">
+                    <input
+                      type="radio"
+                      checked={hqSaleCustomerType === 'WHOLESALE'}
+                      onChange={() => {
+                        setHqSaleCustomerType('WHOLESALE');
+                        setSelectedCustomer(null);
+                      }}
+                    />
+                    Оптовый клиент
+                  </label>
+                </div>
+              ) : null}
               <div className="mt-4">
                 <SaleCustomerSearch
                   disabled={!!selectedCustomer}
                   includeArchived={includeArchivedCustomers}
+                  customerType={isHqBranchSaleContext ? hqSaleCustomerType : undefined}
                   onSelect={handleCustomerSelect}
                 />
               </div>
@@ -782,6 +820,30 @@ export default function NewSalePage() {
                   }
                 />
               </div>
+              {isHqBranchSaleContext ? (
+                <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={createCustomerForm.customerType === 'RETAIL'}
+                      onChange={() =>
+                        setCreateCustomerForm((current) => ({ ...current, customerType: 'RETAIL' }))
+                      }
+                    />
+                    Розничный клиент
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      checked={createCustomerForm.customerType === 'WHOLESALE'}
+                      onChange={() =>
+                        setCreateCustomerForm((current) => ({ ...current, customerType: 'WHOLESALE' }))
+                      }
+                    />
+                    Оптовый клиент
+                  </label>
+                </div>
+              ) : null}
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"

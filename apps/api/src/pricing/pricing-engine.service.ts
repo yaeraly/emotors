@@ -88,17 +88,23 @@ export class PricingEngineService {
 
     const versionId = input.pricingPolicyVersionId ?? (await this.getActiveVersionId());
 
-    const branchType = branch.branchType as BranchTypeForPricing;
+    const branchType = (input.branchTypeOverride ??
+      branch.branchType) as BranchTypeForPricing;
     const isBranchPurchase = priceType === PricingEnginePriceType.BRANCH_PURCHASE;
-    const profileId = branch.priceProfileId;
+    const profileId = input.pricingProfileIdOverride ?? branch.priceProfileId;
     const profileForRules =
-      branch.priceProfile ??
-      (profileId
+      profileId && profileId !== branch.priceProfileId
         ? await this.prisma.branchPriceProfile.findFirst({
             where: { id: profileId },
             include: { categoryDiscounts: true },
           })
-        : null);
+        : branch.priceProfile ??
+          (profileId
+            ? await this.prisma.branchPriceProfile.findFirst({
+                where: { id: profileId },
+                include: { categoryDiscounts: true },
+              })
+            : null);
 
     const cost = await this.fifoService.getOldestActiveHqFifoCost(pricingProduct.id);
     const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);

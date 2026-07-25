@@ -3,6 +3,7 @@ import {
   PricingAppliedRuleType,
   PricingEnginePriceType,
 } from '@prisma/client';
+import type { BranchTypeForPricing } from './pricing-calculator.util';
 
 export type PricingCalculationStep = {
   step: string;
@@ -16,6 +17,10 @@ export type PricingEngineResolveInput = {
   priceType?: PricingEnginePriceType;
   documentDate?: Date;
   pricingPolicyVersionId?: string | null;
+  /** When set, uses this profile for version rules instead of branch assignment. */
+  pricingProfileIdOverride?: string | null;
+  /** When set, uses this branch type for base franchise markup (B2B customer sales). */
+  branchTypeOverride?: BranchTypeForPricing;
 };
 
 export type PricingEngineResolveResult = {

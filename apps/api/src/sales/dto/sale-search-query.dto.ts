@@ -1,5 +1,6 @@
+import { CustomerType } from '@prisma/client';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class SaleCustomerSearchQueryDto {
   @IsOptional()
@@ -10,6 +11,10 @@ export class SaleCustomerSearchQueryDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   includeArchived?: boolean;
+
+  @IsOptional()
+  @IsEnum(CustomerType)
+  customerType?: CustomerType;
 }
 
 export class SaleProductSearchQueryDto {

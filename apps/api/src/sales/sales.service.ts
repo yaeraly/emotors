@@ -7,6 +7,7 @@ import {
 import {
   CustomerEventType,
   CustomerStatus,
+  CustomerType,
   InstallmentStatus,
   PaymentMethod,
   PaymentRecordStatus,
@@ -28,6 +29,7 @@ import { assertBranchCashierCannotManageSales, assertBranchSalesManagerCannotApp
 import { CASHIER_ASSIGNMENT_OPERATIONS } from '../rbac/cashier-capability.util';
 import { assertCashierPaymentAllowed } from '../finance/finance-assignment.util';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
+import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
@@ -56,6 +58,8 @@ export class SalesService {
     assertBranchCashierCannotManageSales(user);
     return this.prisma.$transaction(async (tx) => {
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
+      this.applyHqBranchPricingChannels(customer, dto);
+      this.assertCustomerAllowedForBranchSale(customer, dto.items);
       await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
       await this.validateSaleStock(user, customer.branchId, dto.items);
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
@@ -198,6 +202,24 @@ export class SalesService {
           fullName: { contains: term, mode: 'insensitive' as const },
         })),
       ];
+    }
+
+    where.customerType = {
+      notIn: [CustomerType.DEALER, CustomerType.DISTRIBUTOR],
+    };
+
+    if (query.customerType) {
+      where.customerType = query.customerType;
+    } else if (user.branchId) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: user.branchId, deletedAt: null },
+        select: { branchType: true, code: true },
+      });
+      const isHqBranch =
+        branch?.branchType === 'HQ_BRANCH' || branch?.code === HQ_CATALOG_BRANCH_CODE;
+      if (isHqBranch) {
+        where.customerType = { in: [CustomerType.RETAIL, CustomerType.WHOLESALE] };
+      }
     }
 
     const customers = await this.prisma.customer.findMany({
@@ -411,6 +433,8 @@ export class SalesService {
       }
 
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
+      this.applyHqBranchPricingChannels(customer, dto);
+      this.assertCustomerAllowedForBranchSale(customer, dto.items);
       await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
       await this.validateSaleStock(user, customer.branchId, dto.items);
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
@@ -1255,6 +1279,60 @@ export class SalesService {
 
     this.ensureBranchAccess(user, customer.branchId);
     return customer;
+  }
+
+  private applyHqBranchPricingChannels(
+    customer: {
+      customerType: CustomerType;
+      branch: { branchType: import('@prisma/client').BranchType; code: string };
+    },
+    dto: CreateSaleDto,
+  ) {
+    const isHqBranch =
+      customer.branch.branchType === 'HQ_BRANCH' || customer.branch.code === HQ_CATALOG_BRANCH_CODE;
+    if (!isHqBranch) return;
+
+    const channel =
+      customer.customerType === CustomerType.WHOLESALE ? 'WHOLESALE' : 'RETAIL';
+    for (const item of dto.items) {
+      item.pricingChannel = channel;
+    }
+  }
+
+  private assertCustomerAllowedForBranchSale(
+    customer: {
+      customerType: CustomerType;
+      branch: { branchType: import('@prisma/client').BranchType; code: string };
+    },
+    items: Array<{ pricingChannel?: 'RETAIL' | 'WHOLESALE' }>,
+  ) {
+    if (
+      customer.customerType === CustomerType.DEALER ||
+      customer.customerType === CustomerType.DISTRIBUTOR
+    ) {
+      throw new BadRequestException(
+        'Dealer and Distributor customers must be served through HQ Sales',
+      );
+    }
+
+    const isHqBranch =
+      customer.branch.branchType === 'HQ_BRANCH' || customer.branch.code === HQ_CATALOG_BRANCH_CODE;
+
+    if (isHqBranch) {
+      if (
+        customer.customerType !== CustomerType.RETAIL &&
+        customer.customerType !== CustomerType.WHOLESALE
+      ) {
+        throw new BadRequestException('HQ Branch serves only Retail and Wholesale customers');
+      }
+      const usesWholesale = items.some((item) => item.pricingChannel === 'WHOLESALE');
+      if (usesWholesale && customer.customerType !== CustomerType.WHOLESALE) {
+        throw new BadRequestException('Wholesale sale requires a Wholesale customer');
+      }
+      if (!usesWholesale && customer.customerType === CustomerType.WHOLESALE) {
+        throw new BadRequestException('Wholesale customers require wholesale pricing channel');
+      }
+    }
   }
 
   private async getAccessibleSale(user: AuthUser, id: string) {

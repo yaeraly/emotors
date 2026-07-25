@@ -319,6 +319,7 @@ const HQ_SALES_MANAGER_ALLOWED_PREFIXES = [
   '/inventory',
   '/products',
   '/product-master',
+  '/hq-sales',
   '/alerts',
   '/notifications',
 ];
@@ -637,7 +638,7 @@ const FRANCHISE_OWNER_PASSWORD_RESET_ALLOWED_ROLES: Role[] = [
 export function getDefaultRoute(role: Role) {
   if (role === 'OWNER' || role === 'CEO' || role === 'SYSTEM_ADMINISTRATOR') return '/dashboard';
   if (role === 'SUPPLY_CHAIN_MANAGER') return '/procurement';
-  if (role === 'HQ_SALES_MANAGER') return '/branch-purchase-requests';
+  if (role === 'HQ_SALES_MANAGER') return '/hq-sales/sales';
   if (role === 'HQ_CASHIER') return '/distribution/invoices';
   if (role === 'WAREHOUSE_MANAGER') return '/hq-warehouses';
   if (role === 'FINANCE_MANAGER' || role === 'HQ_ACCOUNTANT' || role === 'ACCOUNTANT') return '/finance/dashboard';
@@ -658,7 +659,7 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (hasFullAccess(user)) return '/dashboard';
   if (isFranchiseDirectorUser(user)) return '/franchise-director';
   if (isSupplyChainManagerUser(user)) return '/procurement';
-  if (isHqSalesManagerUser(user)) return '/branch-purchase-requests';
+  if (isHqSalesManagerUser(user)) return '/hq-sales/sales';
   if (isHqCashierUser(user)) return '/distribution/invoices';
   if (isWarehouseManagerUser(user)) return '/hq-warehouses';
   if (isBranchOwnerUser(user)) return '/branch-ceo/warehouse';
@@ -714,6 +715,12 @@ export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/dashboard') return true;
   if (pathname === '/branch-dashboard') {
     return hasPermission(user, 'crm.manage') || hasPermission(user, 'sales.manage');
+  }
+  if (pathname.startsWith('/hq-sales')) {
+    return isHqSalesManagerUser(user) || hasFullAccess(user) || isCeoUser(user);
+  }
+  if (pathname.startsWith('/hq-accountant')) {
+    return isHqAccountantUser(user) || hasFullAccess(user) || isCeoUser(user);
   }
   if (pathname === '/finance' || pathname.startsWith('/finance/')) {
     return hasPermission(user, 'finance.view') || hasPermission(user, 'finance.manage') || hasPermission(user, 'payments.manage');

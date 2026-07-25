@@ -112,6 +112,13 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   FRANCHISE_TASK_OVERDUE: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR] },
   FRANCHISE_CERTIFICATE_EXPIRED: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR, Role.ACADEMY_DIRECTOR, Role.ACADEMY_MANAGER] },
   FRANCHISE_CRITICAL_SHORTAGE: { module: NotificationModule.FRANCHISE, roles: [Role.FRANCHISE_DIRECTOR, Role.SUPPLY_CHAIN_MANAGER] },
+  HQ_B2B_SALE_SUBMITTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_ACCOUNTANT, Role.CEO, Role.OWNER] },
+  HQ_B2B_PAYMENT_CONFIRMED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER] },
+  HQ_B2B_PAYMENT_REJECTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER] },
+  HQ_B2B_INSTALLMENT_CEO_APPROVED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_ACCOUNTANT, Role.HQ_SALES_MANAGER] },
+  HQ_B2B_INSTALLMENT_CEO_REJECTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER] },
+  HQ_B2B_SALE_WAREHOUSE_READY: { module: NotificationModule.WAREHOUSE, roles: [Role.WAREHOUSE_MANAGER] },
+  HQ_B2B_PAYMENT_CORRECTION_REQUESTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER] },
 };
 
 export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: string; message: string }>> = {

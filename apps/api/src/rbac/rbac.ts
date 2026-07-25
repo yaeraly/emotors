@@ -758,3 +758,34 @@ export function legacyRoleCanAccessRequiredRoles(role: Role, requiredRoles: Role
     permissionsForRole(requiredRole).some((permission) => permissions.has(permission)),
   );
 }
+
+export function canManageHqB2bSales(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_SALES_MANAGER);
+}
+
+export function canViewHqB2bSales(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    canManageHqB2bSales(user) ||
+    roles.includes(Role.HQ_ACCOUNTANT) ||
+    roles.includes(Role.WAREHOUSE_MANAGER) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.FINANCE_MANAGER)
+  );
+}
+
+export function canConfirmHqB2bPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.HQ_ACCOUNTANT);
+}
+
+export function canApproveHqB2bInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO);
+}
+
+export function canConvertCustomerToFranchise(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO);
+}

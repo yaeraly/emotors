@@ -19,6 +19,7 @@ export type SaleCustomerOption = {
 type Props = {
   disabled?: boolean;
   includeArchived?: boolean;
+  customerType?: 'RETAIL' | 'WHOLESALE';
   onSelect: (customer: SaleCustomerOption) => void;
 };
 
@@ -32,6 +33,7 @@ function formatDate(value?: string | null) {
 export function SaleCustomerSearch({
   disabled = false,
   includeArchived = false,
+  customerType,
   onSelect,
 }: Props) {
   const { t } = useTranslation();
@@ -61,6 +63,9 @@ export function SaleCustomerSearch({
       if (includeArchived) {
         params.set('includeArchived', 'true');
       }
+      if (customerType) {
+        params.set('customerType', customerType);
+      }
       void apiFetch<SaleCustomerOption[]>(`/sales/customer-options?${params.toString()}`)
         .then((items) => {
           setResults(items);
@@ -77,7 +82,7 @@ export function SaleCustomerSearch({
     }, DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [query, includeArchived, t]);
+  }, [query, includeArchived, customerType, t]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {

@@ -1062,12 +1062,16 @@ function ProcurementOrderDetailPageContent() {
                   totalPaidYuan: Number(order.totalPaidYuan ?? 0),
                   totalPaidKgs: Number(order.totalPaidKgs ?? 0),
                   remainingYuan: Number(order.remainingYuan ?? order.totalYuan),
+                  estimatedSupplierCostKgs:
+                    order.estimatedSupplierCostKgs != null
+                      ? Number(order.estimatedSupplierCostKgs)
+                      : undefined,
                   requestedPaymentYuan:
                     order.requestedPaymentYuan != null
                       ? Number(order.requestedPaymentYuan)
                       : null,
                   hqStockMovementCreatedAt: order.hqStockMovementCreatedAt,
-                }}
+                } as import('@/components/ProcurementSupplierPayments').ProcurementOrderPayments}
                 user={user}
                 onChanged={load}
               />

@@ -189,6 +189,14 @@ enum CustomerStatus {
   ARCHIVED
 }
 
+enum CustomerType {
+  RETAIL
+  WHOLESALE
+  DEALER
+  DISTRIBUTOR
+  FRANCHISE
+}
+
 enum CustomerEventType {
   NOTE
   CALL
@@ -681,6 +689,13 @@ enum AlertType {
   SALE_INSTALLMENT_APPROVED
   SALE_INSTALLMENT_REJECTED
   SALE_INSTALLMENT_PAID
+  HQ_B2B_SALE_SUBMITTED
+  HQ_B2B_PAYMENT_CONFIRMED
+  HQ_B2B_PAYMENT_REJECTED
+  HQ_B2B_INSTALLMENT_CEO_APPROVED
+  HQ_B2B_INSTALLMENT_CEO_REJECTED
+  HQ_B2B_SALE_WAREHOUSE_READY
+  HQ_B2B_PAYMENT_CORRECTION_REQUESTED
   FINANCE_TRANSFER_PENDING
   FINANCE_TRANSFER_APPROVED
   FINANCE_TRANSFER_REJECTED
@@ -1092,6 +1107,8 @@ model Branch {
   financeInvestments        FinanceInvestment[]
   cashierShifts             CashierShift[]
   franchiseSupportTasks     FranchiseSupportTask[]
+  convertedFromCustomers    Customer[]                    @relation("CustomerFranchiseConversion")
+  hqB2bSales                HqB2bSale[]
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
   deletedAt                 DateTime?
@@ -1166,6 +1183,7 @@ model PricingPolicyVersion {
   productOverrides          ProductPriceOverride[]
   simulations               PricingSimulation[]
   sales                     Sale[]
+  hqB2bSales                HqB2bSale[]
   distributionOrders        BranchDistributionOrder[]
   createdAt                 DateTime                               @default(now())
   updatedAt                 DateTime                               @updatedAt
@@ -1481,6 +1499,12 @@ model User {
   franchiseSupportTasksAssigned                   FranchiseSupportTask[]              @relation("FranchiseSupportTaskAssignee")
   franchiseExpansionLeadsManaged                  FranchiseExpansionLead[]            @relation("FranchiseExpansionResponsible")
   franchiseExpansionLeadsCreated                  FranchiseExpansionLead[]            @relation("FranchiseExpansionCreator")
+  hqB2bSalesCreated                               HqB2bSale[]                         @relation("HqB2bSaleCreator")
+  hqB2bSalesResponsible                           HqB2bSale[]                         @relation("HqB2bSaleResponsible")
+  hqB2bPaymentRequestsSubmitted                   HqB2bPaymentRequest[]               @relation("HqB2bPaymentSubmittedBy")
+  hqB2bPaymentRequestsConfirmed                   HqB2bPaymentRequest[]               @relation("HqB2bPaymentConfirmedBy")
+  hqB2bInstallmentsCeoApproved                    HqB2bInstallmentAgreement[]         @relation("HqB2bInstallmentCeoApprovedBy")
+  hqB2bInstallmentsCeoRejected                    HqB2bInstallmentAgreement[]         @relation("HqB2bInstallmentCeoRejectedBy")
   createdAt                                       DateTime                            @default(now())
   updatedAt                                       DateTime                            @updatedAt
   deletedAt                                       DateTime?
@@ -1603,9 +1627,19 @@ model Customer {
   fullName             String
   phone                String
   whatsappPhone        String?
+  additionalPhone      String?
   branchId             String
   branch               Branch                @relation(fields: [branchId], references: [id])
-  status               CustomerStatus        @default(NEW)
+  customerType         CustomerType            @default(RETAIL)
+  companyName          String?
+  taxId                String?
+  region               String?
+  address              String?
+  contactPerson        String?
+  creditLimit          Decimal?                @db.Decimal(14, 2)
+  convertedToBranchId  String?                 @unique
+  convertedToBranch    Branch?                 @relation("CustomerFranchiseConversion", fields: [convertedToBranchId], references: [id])
+  status               CustomerStatus          @default(NEW)
   notes                String?
   totalPurchaseAmount  Decimal               @default(0) @db.Decimal(14, 2)
   totalProfitAmount    Decimal               @default(0) @db.Decimal(14, 2)
@@ -1618,12 +1652,15 @@ model Customer {
   serviceOrders        ServiceOrder[]
   serviceOrderPayments ServiceOrderPayment[]
   warranties           Warranty[]
+  hqB2bSales           HqB2bSale[]
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   deletedAt            DateTime?
 
   @@index([branchId])
   @@index([branchId, status])
+  @@index([branchId, customerType])
+  @@index([customerType])
   @@index([fullName])
   @@index([phone])
   @@index([whatsappPhone])
@@ -1744,6 +1781,166 @@ model SaleItem {
   @@index([saleId])
   @@index([productId])
   @@index([pricingPolicyVersionId])
+}
+
+enum HqB2bSaleStatus {
+  DRAFT
+  AWAITING_PAYMENT_CONFIRMATION
+  PAYMENT_CONFIRMED
+  PAYMENT_REJECTED
+  AWAITING_CEO_APPROVAL
+  CEO_REJECTED
+  SENT_TO_WAREHOUSE
+  RESERVED
+  PICKING
+  PACKED
+  READY_FOR_SHIPMENT
+  SHIPPED
+  COMPLETED
+  CANCELLED
+}
+
+enum HqB2bPaymentType {
+  FULL_PAYMENT
+  INSTALLMENT
+}
+
+enum HqB2bPaymentRequestStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CORRECTION_REQUESTED
+}
+
+enum HqB2bInstallmentStatus {
+  AWAITING_CEO_APPROVAL
+  CEO_APPROVED
+  CEO_REJECTED
+  AWAITING_DOWN_PAYMENT_CONFIRMATION
+  DOWN_PAYMENT_CONFIRMED
+  ACTIVE
+  OVERDUE
+  PAID
+  CANCELLED
+}
+
+model HqB2bSale {
+  id                     String                @id @default(cuid())
+  saleNumber             String                @unique
+  hqBranchId             String
+  hqBranch               Branch                @relation(fields: [hqBranchId], references: [id])
+  customerId             String
+  customer               Customer              @relation(fields: [customerId], references: [id])
+  customerType           CustomerType
+  customerNameSnapshot   String
+  customerPhoneSnapshot  String?
+  customerCompanySnapshot String?
+  paymentType            HqB2bPaymentType
+  status                 HqB2bSaleStatus       @default(DRAFT)
+  totalAmount            Decimal               @db.Decimal(14, 2)
+  pricingPolicyVersionId String?
+  pricingPolicyVersion   PricingPolicyVersion? @relation(fields: [pricingPolicyVersionId], references: [id])
+  createdById            String
+  createdBy              User                  @relation("HqB2bSaleCreator", fields: [createdById], references: [id])
+  responsibleUserId      String
+  responsibleUser        User                  @relation("HqB2bSaleResponsible", fields: [responsibleUserId], references: [id])
+  notes                  String?
+  submittedAt            DateTime?
+  sentToWarehouseAt      DateTime?
+  completedAt            DateTime?
+  cancelledAt            DateTime?
+  items                  HqB2bSaleItem[]
+  paymentRequests        HqB2bPaymentRequest[]
+  installment            HqB2bInstallmentAgreement?
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  @@index([hqBranchId])
+  @@index([customerId])
+  @@index([status])
+  @@index([createdById])
+  @@index([responsibleUserId])
+  @@index([createdAt])
+}
+
+model HqB2bSaleItem {
+  id                     String                  @id @default(cuid())
+  saleId                 String
+  sale                   HqB2bSale               @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId              String
+  product                Product                 @relation(fields: [productId], references: [id])
+  productNameSnapshot    String
+  skuSnapshot            String
+  categoryNameSnapshot   String?
+  quantity               Int
+  unitPrice              Decimal                 @db.Decimal(14, 2)
+  lineTotal              Decimal                 @db.Decimal(14, 2)
+  costPriceSnapshot      Decimal?                @db.Decimal(14, 2)
+  basePriceSnapshot      Decimal?                @db.Decimal(14, 2)
+  pricingPolicyVersionId String?
+  pricingProfileId       String?
+  pricingSource          String?
+  appliedRuleType        PricingAppliedRuleType?
+  appliedRuleId          String?
+  priceResolvedAt        DateTime?
+  createdAt              DateTime                @default(now())
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model HqB2bPaymentRequest {
+  id                   String                    @id @default(cuid())
+  saleId               String
+  sale                 HqB2bSale                 @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  status               HqB2bPaymentRequestStatus @default(PENDING)
+  expectedAmount       Decimal                   @db.Decimal(14, 2)
+  receivedAmount       Decimal?                  @db.Decimal(14, 2)
+  paymentMethod        PaymentMethod?
+  financeAccountId     String?
+  financeAccount       FinanceAccount?           @relation(fields: [financeAccountId], references: [id])
+  transactionReference String?
+  receiptDocumentUrl   String?
+  paymentDate          DateTime?
+  comment              String?
+  rejectionReason      String?
+  submittedById        String
+  submittedBy          User                      @relation("HqB2bPaymentSubmittedBy", fields: [submittedById], references: [id])
+  confirmedById        String?
+  confirmedBy          User?                     @relation("HqB2bPaymentConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt          DateTime?
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  @@index([saleId])
+  @@index([status])
+}
+
+model HqB2bInstallmentAgreement {
+  id                   String                @id @default(cuid())
+  saleId               String                @unique
+  sale                 HqB2bSale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  status               HqB2bInstallmentStatus @default(AWAITING_CEO_APPROVAL)
+  saleTotal            Decimal               @db.Decimal(14, 2)
+  downPayment          Decimal               @db.Decimal(14, 2)
+  remainingBalance     Decimal               @db.Decimal(14, 2)
+  paidAmount           Decimal               @default(0) @db.Decimal(14, 2)
+  installmentStartDate DateTime
+  paymentFrequency     String
+  numberOfPayments     Int
+  scheduleJson         Json
+  nextPaymentDate      DateTime?
+  overdueAmount        Decimal               @default(0) @db.Decimal(14, 2)
+  ceoApprovedById      String?
+  ceoApprovedBy        User?                 @relation("HqB2bInstallmentCeoApprovedBy", fields: [ceoApprovedById], references: [id])
+  ceoApprovedAt        DateTime?
+  ceoRejectedById      String?
+  ceoRejectedBy        User?                 @relation("HqB2bInstallmentCeoRejectedBy", fields: [ceoRejectedById], references: [id])
+  ceoRejectedAt        DateTime?
+  ceoRejectionReason   String?
+  notes                String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 }
 
 model Payment {
@@ -2042,6 +2239,7 @@ model Product {
   stockMovements                        StockMovement[]
   inventoryBalances                     InventoryBalance[]
   saleItems                             SaleItem[]
+  hqB2bSaleItems                        HqB2bSaleItem[]
   distributionOrderItems                BranchDistributionOrderItem[]
   goodsReceivingItems                   GoodsReceivingItem[]
   shortageReportItems                   ShortageReportItem[]
@@ -5190,6 +5388,7 @@ model FinanceAccount {
   cashierShifts               CashierShift[]
   expenses                    FinanceExpense[]
   payments                    Payment[]
+  hqB2bPaymentRequests        HqB2bPaymentRequest[]
   reconciliations             FinanceReconciliation[]
   investments                 FinanceInvestment[]
   intendedProcurementPayments ProcurementSupplierPayment[]  @relation("ProcurementPaymentIntendedAccount")

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -7,6 +8,7 @@ import {
   CustomerStatus,
   CustomerEvent,
   CustomerEventType,
+  CustomerType,
   FollowUpStatus,
   Prisma,
   SaleStatus,
@@ -20,6 +22,7 @@ import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { canArchiveCustomer } from '../rbac/rbac';
+import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { toRoleAwareCustomerListItem } from './customer-list.presenter';
 
 type CustomerSaleHistory = {
@@ -120,12 +123,36 @@ export class CustomersService {
     const branchId = this.resolveBranchId(user, dto.branchId);
     await this.ensureBranchExists(branchId);
 
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+      select: { branchType: true, code: true },
+    });
+    const customerType = dto.customerType ?? CustomerType.RETAIL;
+    if (
+      customerType === CustomerType.DEALER ||
+      customerType === CustomerType.DISTRIBUTOR
+    ) {
+      throw new BadRequestException(
+        'Dealer and Distributor customers must be created through HQ Sales',
+      );
+    }
+    const isHqBranch =
+      branch?.branchType === 'HQ_BRANCH' || branch?.code === HQ_CATALOG_BRANCH_CODE;
+    if (
+      isHqBranch &&
+      customerType !== CustomerType.RETAIL &&
+      customerType !== CustomerType.WHOLESALE
+    ) {
+      throw new BadRequestException('HQ Branch customers must be Retail or Wholesale');
+    }
+
     const customer = await this.prisma.customer.create({
       data: {
         fullName: dto.fullName,
         phone: dto.phone,
         whatsappPhone: dto.whatsappPhone,
         branchId,
+        customerType,
         status: dto.status,
         notes: dto.notes,
         totalPurchaseAmount: dto.totalPurchaseAmount,

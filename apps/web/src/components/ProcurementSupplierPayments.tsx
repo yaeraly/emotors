@@ -65,7 +65,7 @@ type FinanceAccountOption = {
   currentBalance: number;
 };
 
-type ProcurementOrderPayments = {
+export type ProcurementOrderPayments = {
   id: string;
   orderNumber?: string;
   totalYuan: number;

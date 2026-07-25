@@ -32,6 +32,7 @@ import { FinanceModule } from './finance/finance.module';
 import { TaxModule } from './tax/tax.module';
 import { UsersModule } from './users/users.module';
 import { FranchiseDirectorModule } from './franchise-director/franchise-director.module';
+import { HqB2bSalesModule } from './hq-b2b-sales/hq-b2b-sales.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { FranchiseDirectorModule } from './franchise-director/franchise-director
     BranchWarehouseModule,
     BranchCeoModule,
     FranchiseDirectorModule,
+    HqB2bSalesModule,
     BranchAccountantModule,
     SalesModule,
     ServiceModule,

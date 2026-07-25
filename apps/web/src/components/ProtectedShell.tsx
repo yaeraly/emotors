@@ -299,6 +299,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 ) : null}
                 {ceoOperationalView ? (
                   <div className="border-t border-slate-100 pt-2">
+                    <Link href="/hq-sales/installment-requests" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      Рассрочка HQ Sales (CEO)
+                    </Link>
                     {canManageUsers ? <Link href="/users" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.users')}</Link> : null}
                     {canManageBranches ? <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link> : null}
                     {canSeeFinance ? <Link href="/finance" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.finance')}</Link> : null}
@@ -320,6 +323,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : hqSalesManagerView ? (
               <>
+                <Link href="/hq-sales/sales" className={sidebarNavClass(pathname, '/hq-sales/sales')}>
+                  Продажи (Дилер / Дистрибьютер)
+                </Link>
                 <Link href="/branch-purchase-requests" className={sidebarNavClass(pathname, '/branch-purchase-requests')}>{t('nav.hqBranchOrders')}</Link>
                 <Link href="/branches" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('nav.branches')}</Link>
                 {canSeeBranchWarehouses ? (
@@ -340,6 +346,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               </>
             ) : hqAccountantView ? (
               <>
+                <Link href="/hq-accountant/payment-confirmations" className={sidebarNavClass(pathname, '/hq-accountant/payment-confirmations')}>
+                  Подтверждение платежей (HQ Sales)
+                </Link>
                 <Link href="/finance/bills-to-pay" className={sidebarNavClass(pathname, '/finance/bills-to-pay')}>
                   {t('finance.billsToPay')}
                 </Link>
