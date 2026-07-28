@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
+import { applyHqBranchWholesaleMarkup } from '@/lib/pricing-table-utils';
 import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -50,12 +51,22 @@ function hasActiveMarkup(markupPercent: number) {
   return Number.isFinite(markupPercent) && markupPercent > 0;
 }
 
+function savedMarkupPercent(row: Pick<FranchiseSalesRow, 'baseFranchiseMarkupPercent' | 'hqMarkupPercent'>) {
+  return Number(row.baseFranchiseMarkupPercent ?? row.hqMarkupPercent ?? 0);
+}
+
 function resolveDisplayedBranchPriceKgs(row: Pick<FranchiseSalesRow, 'branchPriceKgs' | 'finalBranchPriceKgs' | 'priceConfigured'>) {
   if (row.priceConfigured !== true) return null;
   const raw = row.finalBranchPriceKgs ?? row.branchPriceKgs;
   if (raw === null || raw === undefined) return null;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function resolveBranchPriceKgs(row: EditableFranchiseRow) {
+  if (!isCostAvailable(row)) return null;
+  if (!hasActiveMarkup(row.draftMarkup)) return null;
+  return applyHqBranchWholesaleMarkup(Number(row.costPriceKgs), row.draftMarkup);
 }
 
 export default function PricingBranchesPage() {
@@ -153,10 +164,11 @@ export default function PricingBranchesPage() {
     setRows((current) =>
       current.map((row) => {
         if (row.id !== productId) return row;
+        const saved = savedMarkupPercent(row);
         return {
           ...row,
           draftMarkup,
-          isDirty: draftMarkup !== row.hqMarkupPercent,
+          isDirty: Math.abs(draftMarkup - saved) > 0.001,
         };
       }),
     );
@@ -243,7 +255,11 @@ export default function PricingBranchesPage() {
     <>
       <PricingHubNav activeTab="branches" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
+      {success ? (
+        <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
+          {success}
+        </div>
+      ) : null}
       {!canManage ? <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p> : null}
 
       <p className="text-xs text-slate-500">{t('pricing.franchiseSalesHint')}</p>
@@ -329,7 +345,7 @@ export default function PricingBranchesPage() {
             {!loading
               ? pagedRows.map((row) => {
                   const costOk = isCostAvailable(row);
-                  const branchPriceKgs = resolveDisplayedBranchPriceKgs(row);
+                  const branchPriceKgs = resolveBranchPriceKgs(row) ?? resolveDisplayedBranchPriceKgs(row);
 
                   return (
                     <tr key={row.id}>
