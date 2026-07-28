@@ -1,3 +1,11 @@
+import { Prisma } from '@prisma/client';
+import {
+  distributeRoundedMoneyAmounts,
+  roundMoneyDecimal,
+  sumRoundedMoney,
+  toMoneyDecimal,
+} from './landed-cost-money.util';
+
 export type ExpenseAllocationMethod = 'BY_WEIGHT' | 'BY_QUANTITY' | 'BY_PURCHASE_VALUE' | 'MANUAL';
 
 export type ExpenseAllocationKey =
@@ -34,10 +42,6 @@ export type AllocationTotals = {
   totalPurchaseValue: number;
 };
 
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
 export function isWeightBasedAllocation(method: ExpenseAllocationMethod) {
   return method === 'BY_WEIGHT';
 }
@@ -48,17 +52,19 @@ export function allocateExpenseAmount(
   line: AllocationLineContext,
   totals: AllocationTotals,
 ): number {
-  if (totalCost <= 0) return 0;
+  const pool = toMoneyDecimal(totalCost);
+  if (pool.lte(0)) return 0;
+
   switch (method) {
     case 'BY_WEIGHT':
       if (!line.hasKnownWeight || totals.totalWeight <= 0 || line.lineShipmentWeightKg <= 0) return 0;
-      return (totalCost * line.lineShipmentWeightKg) / totals.totalWeight;
+      return pool.mul(toMoneyDecimal(line.lineShipmentWeightKg).div(totals.totalWeight)).toNumber();
     case 'BY_QUANTITY':
       if (totals.totalQuantity <= 0 || line.effectiveQuantity <= 0) return 0;
-      return (totalCost * line.effectiveQuantity) / totals.totalQuantity;
+      return pool.mul(toMoneyDecimal(line.effectiveQuantity).div(totals.totalQuantity)).toNumber();
     case 'BY_PURCHASE_VALUE':
       if (totals.totalPurchaseValue <= 0 || line.basePurchaseCostKgs <= 0) return 0;
-      return (totalCost * line.basePurchaseCostKgs) / totals.totalPurchaseValue;
+      return pool.mul(toMoneyDecimal(line.basePurchaseCostKgs).div(totals.totalPurchaseValue)).toNumber();
     case 'MANUAL':
     default:
       return 0;
@@ -66,27 +72,14 @@ export function allocateExpenseAmount(
 }
 
 export function distributeRoundedAmounts(rawAmounts: number[], targetTotal: number): number[] {
-  if (rawAmounts.length === 0) return [];
-  const rounded = rawAmounts.map((amount) => roundMoney(amount));
-  const sum = roundMoney(rounded.reduce((total, amount) => total + amount, 0));
-  const remainder = roundMoney(targetTotal - sum);
-  if (remainder === 0) return rounded;
-
-  for (let index = rounded.length - 1; index >= 0; index -= 1) {
-    if (rawAmounts[index] > 0 || rounded[index] > 0) {
-      rounded[index] = roundMoney(rounded[index] + remainder);
-      break;
-    }
-  }
-
-  return rounded;
+  return distributeRoundedMoneyAmounts(rawAmounts, targetTotal);
 }
 
 export function buildAllocationTotals(lines: AllocationLineContext[]): AllocationTotals {
   return {
     totalWeight: lines.reduce((sum, line) => sum + (line.hasKnownWeight ? line.lineShipmentWeightKg : 0), 0),
     totalQuantity: lines.reduce((sum, line) => sum + line.effectiveQuantity, 0),
-    totalPurchaseValue: lines.reduce((sum, line) => sum + line.basePurchaseCostKgs, 0),
+    totalPurchaseValue: sumRoundedMoney(lines.map((line) => line.basePurchaseCostKgs)),
   };
 }
 

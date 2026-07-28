@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import {
   allocateExpenseAmount,
   buildAllocationTotals,
@@ -8,6 +9,8 @@ import {
   hasPendingWeightForExpense,
   type AllocationLineContext,
 } from './landed-cost-allocation.util';
+import { roundMoneyDecimal, sumRoundedMoney, toMoneyDecimal } from './landed-cost-money.util';
+import { distributeAuthoritativeLineTotal } from '../pricing/product-cost-precision.util';
 
 export type LogisticsCosts = {
   chinaDomesticTransportKgs: number;
@@ -86,8 +89,8 @@ export type LandedCostCalculationOptions = {
 
 export const CARGO_WEIGHT_LESS_THAN_NET = 'CARGO_WEIGHT_LESS_THAN_NET';
 
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+function roundMoney(value: number | Prisma.Decimal) {
+  return roundMoneyDecimal(value);
 }
 
 function roundWeight(value: number) {
@@ -197,8 +200,12 @@ export function calculateLandedCosts(
     const lineNetWeightKg = resolvedWeight.hasKnownWeight
       ? roundWeight(effectiveQuantity * netWeightKg)
       : 0;
-    const costKgs = roundMoney(Number(item.purchasePriceYuan || 0) * Number(item.yuanRate || 0));
-    const basePurchaseCostKgs = roundMoney(costKgs * effectiveQuantity);
+    const costKgs = roundMoney(
+      toMoneyDecimal(item.purchasePriceYuan || 0).mul(toMoneyDecimal(item.yuanRate || 0)),
+    );
+    const basePurchaseCostKgs = roundMoney(
+      toMoneyDecimal(costKgs).mul(toMoneyDecimal(effectiveQuantity)),
+    );
     return {
       ...item,
       effectiveQuantity,
@@ -290,6 +297,17 @@ export function calculateLandedCosts(
     );
   }
 
+  const totalLogisticsCost = sumRoundedMoney([
+    resolvedLogistics.chinaDomesticTransportKgs || 0,
+    resolvedLogistics.chinaExportTransportKgs || 0,
+    resolvedLogistics.localTransportKgs || 0,
+    resolvedLogistics.packagingCostKgs || 0,
+    resolvedLogistics.customsCostKgs || 0,
+    resolvedLogistics.insuranceCostKgs || 0,
+    resolvedLogistics.bankFeeCostKgs || 0,
+    resolvedLogistics.otherExpenseKgs || 0,
+  ]);
+
   const calculatedItems: LandedCostItemResult[] = withShipment.map((item, index) => {
     const chinaDomesticAllocKgs = expenseAllocations.chinaDomesticTransportKgs[index];
     const chinaExportAllocKgs = expenseAllocations.chinaExportTransportKgs[index];
@@ -310,13 +328,15 @@ export function calculateLandedCosts(
         otherAllocKgs,
     );
     const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
-    const transportCostKgs =
-      effectiveQty > 0 ? totalLineLogistics / effectiveQty : 0;
-    const finalCostKgs =
-      effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs) : 0;
-    const totalYuan = roundMoney(item.quantity * Number(item.purchasePriceYuan || 0));
+    const totalYuan = roundMoney(
+      toMoneyDecimal(item.quantity).mul(toMoneyDecimal(item.purchasePriceYuan || 0)),
+    );
     const totalCostKgs =
-      effectiveQty > 0 ? roundMoney(totalLineLogistics + item.basePurchaseCostKgs) : 0;
+      effectiveQty > 0 ? roundMoney(toMoneyDecimal(item.basePurchaseCostKgs).plus(totalLineLogistics)) : 0;
+    const transportCostKgs =
+      effectiveQty > 0 ? roundMoney(toMoneyDecimal(totalLineLogistics).div(effectiveQty)) : 0;
+    const finalCostKgs =
+      effectiveQty > 0 ? roundMoney(toMoneyDecimal(item.costKgs).plus(transportCostKgs)) : 0;
 
     return {
       ...item,
@@ -328,47 +348,39 @@ export function calculateLandedCosts(
       insuranceAllocKgs,
       bankFeeAllocKgs,
       otherAllocKgs,
-      transportCostKgs: effectiveQty > 0 ? roundMoney(transportCostKgs) : 0,
+      transportCostKgs,
       finalCostKgs,
       totalYuan,
       totalCostKgs,
     };
   });
 
+  const totalPurchaseKgs = sumRoundedMoney(prepared.map((item) => item.basePurchaseCostKgs));
+  const authoritativeOrderTotal = sumRoundedMoney([totalPurchaseKgs, totalLogisticsCost]);
   const rawLineTotals = calculatedItems.map((item) => item.totalCostKgs);
-  const reconciledLineTotals = distributeRoundedAmounts(
-    rawLineTotals,
-    roundMoney(rawLineTotals.reduce((sum, amount) => sum + amount, 0)),
-  );
+  const reconciledLineTotals = distributeAuthoritativeLineTotal(rawLineTotals, authoritativeOrderTotal);
   const reconciledItems = calculatedItems.map((item, index) => {
-    const totalCostKgs = reconciledLineTotals[index];
+    const totalCostKgs = reconciledLineTotals[index] ?? 0;
     const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
     const transportCostKgs =
       effectiveQty > 0
-        ? roundMoney(totalCostKgs - item.basePurchaseCostKgs)
+        ? roundMoney(toMoneyDecimal(totalCostKgs).minus(toMoneyDecimal(item.basePurchaseCostKgs)))
         : 0;
     const finalCostKgs =
-      effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs / effectiveQty) : 0;
+      effectiveQty > 0
+        ? roundMoney(toMoneyDecimal(transportCostKgs).div(effectiveQty).plus(toMoneyDecimal(item.costKgs)))
+        : 0;
     return {
       ...item,
-      transportCostKgs: effectiveQty > 0 ? roundMoney(transportCostKgs / effectiveQty) : 0,
+      transportCostKgs:
+        effectiveQty > 0 ? roundMoney(toMoneyDecimal(transportCostKgs).div(effectiveQty)) : 0,
       finalCostKgs,
       totalCostKgs,
     };
   });
 
-  const totalLogisticsCost = roundMoney(
-    Number(resolvedLogistics.chinaDomesticTransportKgs || 0) +
-      Number(resolvedLogistics.chinaExportTransportKgs || 0) +
-      Number(resolvedLogistics.localTransportKgs || 0) +
-      Number(resolvedLogistics.packagingCostKgs || 0) +
-      Number(resolvedLogistics.customsCostKgs || 0) +
-      Number(resolvedLogistics.insuranceCostKgs || 0) +
-      Number(resolvedLogistics.bankFeeCostKgs || 0) +
-      Number(resolvedLogistics.otherExpenseKgs || 0),
-  );
   const costPerKg = allocationBaseWeight > 0 ? roundRate(totalLogisticsCost / allocationBaseWeight) : 0;
-  const totalCostKgs = roundMoney(reconciledItems.reduce((sum, item) => sum + item.totalCostKgs, 0));
+  const totalCostKgs = authoritativeOrderTotal;
   const isProvisional = pendingWeight;
   const landedCostStatus: LandedCostOrderResult['landedCostStatus'] = pendingWeight
     ? 'PENDING_WEIGHT'

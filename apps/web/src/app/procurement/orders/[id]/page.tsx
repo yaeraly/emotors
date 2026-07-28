@@ -497,9 +497,6 @@ function ProcurementOrderDetailPageContent() {
               Number.EPSILON) *
               100,
           ) / 100;
-    const purchaseCost = previewTotals
-      ? previewTotals.items.reduce((sum, item) => sum + item.costKgs * item.effectiveQuantity, 0)
-      : 0;
     return {
       chinaDomestic,
       cargoReceipt,
@@ -510,9 +507,7 @@ function ProcurementOrderDetailPageContent() {
       otherExpenses,
       totalImportLogistics,
       totalLandedCost:
-        previewTotals != null
-          ? Math.round((purchaseCost + totalImportLogistics + Number.EPSILON) * 100) / 100
-          : totalImportLogistics,
+        previewTotals != null ? Number(previewTotals.totalCostKgs) : totalImportLogistics,
     };
   }, [
     previewChinaDomesticTransportKgs,

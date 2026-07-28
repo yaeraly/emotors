@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
+import { distributeRoundedMoneyAmounts } from '../procurement/landed-cost-money.util';
 
 function toDecimal(value: number | Prisma.Decimal) {
   return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
@@ -48,7 +48,7 @@ export function distributeAuthoritativeLineTotal(rawShares: number[], lineTotalC
   if (!rawShares.length) return [];
   const target = roundDisplayMoney(lineTotalCostKgs);
   if (target <= 0) return rawShares.map(() => 0);
-  return distributeRoundedAmounts(rawShares, target);
+  return distributeRoundedMoneyAmounts(rawShares, target);
 }
 
 /**

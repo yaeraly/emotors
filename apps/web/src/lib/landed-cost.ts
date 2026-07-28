@@ -85,6 +85,27 @@ function allocateByWeight(totalCost: number, itemWeight: number, totalWeight: nu
   return roundMoney((totalCost * itemWeight) / totalWeight);
 }
 
+function distributeRoundedAmounts(rawAmounts: number[], targetTotal: number): number[] {
+  if (rawAmounts.length === 0) return [];
+  const rounded = rawAmounts.map((amount) => roundMoney(amount));
+  const sum = roundMoney(rounded.reduce((total, amount) => total + amount, 0));
+  const remainder = roundMoney(targetTotal - sum);
+  if (remainder === 0) return rounded;
+
+  for (let index = rounded.length - 1; index >= 0; index -= 1) {
+    if (rawAmounts[index] > 0 || rounded[index] > 0) {
+      rounded[index] = roundMoney(rounded[index] + remainder);
+      break;
+    }
+  }
+
+  return rounded;
+}
+
+function sumRoundedMoney(values: number[]) {
+  return roundMoney(values.reduce((sum, value) => sum + value, 0));
+}
+
 export function extractCargoConfig(source: Partial<CargoConfig> | Record<string, unknown>): CargoConfig {
   return {
     usdRate: Number((source as CargoConfig).usdRate ?? (source as Record<string, unknown>).defaultUsdRate ?? 0),
@@ -149,12 +170,14 @@ export function calculateLandedCosts(
     const netWeightKg = Number(item.weightKg || 0);
     const lineNetWeightKg = roundWeight(effectiveQuantity * netWeightKg);
     const costKgs = roundMoney(Number(item.purchasePriceYuan || 0) * Number(item.yuanRate || 0));
+    const basePurchaseCostKgs = roundMoney(costKgs * effectiveQuantity);
     return {
       ...item,
       effectiveQuantity,
       netWeightKg,
       lineNetWeightKg,
       costKgs,
+      basePurchaseCostKgs,
     };
   });
 
@@ -270,10 +293,11 @@ export function calculateLandedCosts(
         otherAllocKgs,
     );
     const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const totalYuan = roundMoney(item.quantity * Number(item.purchasePriceYuan || 0));
+    const totalCostKgs =
+      effectiveQty > 0 ? roundMoney(item.basePurchaseCostKgs + totalLineLogistics) : 0;
     const transportCostKgs = effectiveQty > 0 ? roundMoney(totalLineLogistics / effectiveQty) : 0;
     const finalCostKgs = effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs) : 0;
-    const totalYuan = roundMoney(item.quantity * Number(item.purchasePriceYuan || 0));
-    const totalCostKgs = effectiveQty > 0 ? roundMoney(finalCostKgs * effectiveQty) : 0;
 
     return {
       ...item,
@@ -292,11 +316,30 @@ export function calculateLandedCosts(
     };
   });
 
+  const totalPurchaseKgs = sumRoundedMoney(prepared.map((item) => item.basePurchaseCostKgs));
+  const authoritativeOrderTotal = sumRoundedMoney([totalPurchaseKgs, totalLogisticsCost]);
+  const rawLineTotals = calculatedItems.map((item) => item.totalCostKgs);
+  const reconciledLineTotals = distributeRoundedAmounts(rawLineTotals, authoritativeOrderTotal);
+  const reconciledItems = calculatedItems.map((item, index) => {
+    const totalCostKgs = reconciledLineTotals[index] ?? 0;
+    const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
+    const transportCostKgs =
+      effectiveQty > 0 ? roundMoney(totalCostKgs - item.basePurchaseCostKgs) : 0;
+    const finalCostKgs =
+      effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs / effectiveQty) : 0;
+    return {
+      ...item,
+      transportCostKgs: effectiveQty > 0 ? roundMoney(transportCostKgs / effectiveQty) : 0,
+      finalCostKgs,
+      totalCostKgs,
+    };
+  });
+
   return {
-    items: calculatedItems,
-    totalYuan: roundMoney(calculatedItems.reduce((sum, item) => sum + item.totalYuan, 0)),
+    items: reconciledItems,
+    totalYuan: roundMoney(reconciledItems.reduce((sum, item) => sum + item.totalYuan, 0)),
     totalTransportCostKgs: totalLogisticsCost,
-    totalCostKgs: roundMoney(calculatedItems.reduce((sum, item) => sum + item.totalCostKgs, 0)),
+    totalCostKgs: authoritativeOrderTotal,
     totalNetWeightKg,
     totalPackagingWeightKg,
     totalShipmentWeightKg: allocationBaseWeight,
