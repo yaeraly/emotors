@@ -204,7 +204,21 @@ export function BranchProductSearch({
       return;
     }
 
-    if (event.key === 'Enter' || event.key === 'Tab') {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (results.length === 1) {
+        selectProduct(results[0]);
+        return;
+      }
+      if (open && results.length > 0) {
+        const product = results[highlightedIndex];
+        if (product) selectProduct(product);
+      }
+      return;
+    }
+
+    if (event.key === 'Tab') {
       if (!open || !results.length) return;
       event.preventDefault();
       const product = results[highlightedIndex];

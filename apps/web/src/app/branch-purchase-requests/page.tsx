@@ -603,7 +603,7 @@ export default function BranchPurchaseRequestsPage() {
         {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
 
         {showForm ? (
-          <form onSubmit={(event) => void submitRequest(event, false)} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <form onSubmit={(event) => event.preventDefault()} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">{t('distribution.branch')}</span>
@@ -752,7 +752,7 @@ export default function BranchPurchaseRequestsPage() {
             </label>
 
             <div className="flex flex-wrap gap-2">
-              <button type="submit" className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('distribution.submitOrder')}</button>
+              <button type="button" onClick={(event) => void submitRequest(event, false)} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('distribution.submitOrder')}</button>
               <button type="button" onClick={(event) => void submitRequest(event, true)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('distribution.saveDraft')}</button>
               <button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
             </div>
@@ -910,7 +910,7 @@ export default function BranchPurchaseRequestsPage() {
       {hqSalesView ? (
         <HqSalesBranchOrdersSection
           actions={
-            canCreate ? (
+            canCreate && !showForm ? (
               <button type="button" onClick={() => setShowForm(true)} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
                 {t('branchProductRequest.newRequest')}
               </button>
@@ -928,7 +928,7 @@ export default function BranchPurchaseRequestsPage() {
                 {ceoInspectorView ? t('nav.hqBranchOrders') : t('operations.branchPurchaseRequests')}
               </h2>
             </div>
-            {canCreate ? (
+            {canCreate && !showForm ? (
               <button type="button" onClick={() => setShowForm(true)} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
                 {t('branchProductRequest.newRequest')}
               </button>
