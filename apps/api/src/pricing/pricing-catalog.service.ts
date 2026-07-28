@@ -455,15 +455,52 @@ export class PricingCatalogService {
         const resolution = await this.branchPriceResolver.resolveBranchPrice(product.id, {
           branchId: displayBranch?.id,
         });
-        const costAvailable = Boolean(resolution?.costAvailable && resolution.costPrice > 0);
-        const costPriceKgs = costAvailable ? resolution!.costPrice : null;
-        const priceConfigured = Boolean(resolution?.priceConfigured);
+        const storedMarkupPercent = Number(product.hqBranchWholesaleMarkupPercent);
+        const storedBranchPriceKgs = Number(product.hqBranchWholesalePriceKgs);
+        const engineMarkupPercent = Number(resolution?.baseFranchiseMarkupPercent ?? 0);
+
+        let costAvailable = Boolean(resolution?.costAvailable && resolution.costPrice > 0);
+        let costPriceKgs = costAvailable ? resolution!.costPrice : null;
+        if (!costAvailable) {
+          const fifoCost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
+          if (fifoCost.available && fifoCost.costPriceKgs > 0) {
+            costAvailable = true;
+            costPriceKgs = fifoCost.costPriceKgs;
+          }
+        }
+
         const baseFranchiseMarkupPercent =
-          resolution?.baseFranchiseMarkupPercent ?? Number(product.hqBranchWholesaleMarkupPercent);
+          storedMarkupPercent > 0
+            ? storedMarkupPercent
+            : engineMarkupPercent > 0
+              ? engineMarkupPercent
+              : storedMarkupPercent;
         const hqMarkupPercent = baseFranchiseMarkupPercent;
-        const finalBranchPriceKgs = priceConfigured ? resolution!.finalBranchPrice : null;
+
+        let finalBranchPriceKgs =
+          resolution?.priceConfigured && resolution.finalBranchPrice > 0
+            ? resolution.finalBranchPrice
+            : null;
+        if (!finalBranchPriceKgs && storedBranchPriceKgs > 0) {
+          finalBranchPriceKgs = storedBranchPriceKgs;
+        }
+        if (!finalBranchPriceKgs && costPriceKgs && baseFranchiseMarkupPercent > 0) {
+          finalBranchPriceKgs = applyHqBranchWholesaleMarkup(
+            costPriceKgs,
+            baseFranchiseMarkupPercent,
+          );
+        }
+
         const branchPriceKgs = finalBranchPriceKgs;
-        const baseFranchisePriceKgs = priceConfigured ? resolution!.baseFranchisePrice : null;
+        const baseFranchisePriceKgs =
+          resolution?.priceConfigured && resolution.baseFranchisePrice > 0
+            ? resolution.baseFranchisePrice
+            : storedBranchPriceKgs > 0
+              ? storedBranchPriceKgs
+              : branchPriceKgs;
+        const priceConfigured = Boolean(
+          branchPriceKgs != null && branchPriceKgs > 0 && (baseFranchiseMarkupPercent > 0 || storedBranchPriceKgs > 0),
+        );
 
         const hqAvailableQuantity = await this.resolveHqAvailableQuantity(product.id);
 
@@ -483,15 +520,15 @@ export class PricingCatalogService {
           costAvailable,
           costSource: resolution?.costSource ?? 'NO_FIFO_LAYER',
           costBatchId: resolution?.fifoBatchId ?? null,
-          markupConfigured: priceConfigured,
+          markupConfigured: baseFranchiseMarkupPercent > 0,
           hqMarkupPercent,
           baseFranchiseMarkupPercent,
-          recommendedMarkupPercent: priceConfigured ? hqMarkupPercent : null,
-          branchPriceKgs: branchPriceKgs ?? 0,
+          recommendedMarkupPercent: baseFranchiseMarkupPercent > 0 ? hqMarkupPercent : null,
+          branchPriceKgs,
           finalBranchPriceKgs,
           baseFranchisePriceKgs,
-          masterBranchPriceKgs: branchPriceKgs ?? 0,
-          effectiveBranchPriceKgs: branchPriceKgs ?? 0,
+          masterBranchPriceKgs: branchPriceKgs,
+          effectiveBranchPriceKgs: branchPriceKgs,
           recommendedBranchPriceKgs: branchPriceKgs,
           priceConfigured,
           pricingSource: resolution?.pricingSource ?? null,
@@ -532,7 +569,12 @@ export class PricingCatalogService {
     return Math.max(0, Number(balance._sum.quantity ?? 0));
   }
 
-  async updateFranchiseSalesProduct(user: AuthUser, productId: string, dto: UpdateFranchiseSalesDto) {
+  async updateFranchiseSalesProduct(
+    user: AuthUser,
+    productId: string,
+    dto: UpdateFranchiseSalesDto,
+    branchId?: string,
+  ) {
     this.assertCanManage(user);
     if (dto.hqBranchWholesaleMarkupPercent < 0) {
       throw new BadRequestException('Markup must be >= 0');
@@ -577,7 +619,7 @@ export class PricingCatalogService {
       });
     });
 
-    const rows = await this.listFranchiseSalesProducts(user);
+    const rows = await this.listFranchiseSalesProducts(user, branchId);
     const row = rows.find((item) => item.id === productId);
     if (!row) throw new NotFoundException('Product not found after update');
     this.branchOrderPricingRevision.bump();

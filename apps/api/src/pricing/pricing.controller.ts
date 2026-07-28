@@ -173,8 +173,9 @@ export class PricingController {
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: UpdateFranchiseSalesDto,
+    @Query('branchId') branchId?: string,
   ) {
-    return this.pricingCatalogService.updateFranchiseSalesProduct(user, id, dto);
+    return this.pricingCatalogService.updateFranchiseSalesProduct(user, id, dto, branchId);
   }
 
   @Get('branches')

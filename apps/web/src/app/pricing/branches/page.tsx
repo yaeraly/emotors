@@ -34,6 +34,8 @@ type EditableFranchiseRow = FranchiseSalesRow & {
   isDirty: boolean;
 };
 
+const BRANCH_SELECTION_KEY = 'pricingFranchiseSalesBranchId';
+
 function formatPrice(value: number) {
   return `${Number(value).toLocaleString('ru-RU', {
     minimumFractionDigits: 2,
@@ -52,12 +54,33 @@ function hasActiveMarkup(markupPercent: number) {
 }
 
 function savedMarkupPercent(row: Pick<FranchiseSalesRow, 'baseFranchiseMarkupPercent' | 'hqMarkupPercent'>) {
-  return Number(row.baseFranchiseMarkupPercent ?? row.hqMarkupPercent ?? 0);
+  const candidates = [row.baseFranchiseMarkupPercent, row.hqMarkupPercent];
+  for (const value of candidates) {
+    if (value == null) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
 }
 
-function resolveDisplayedBranchPriceKgs(row: Pick<FranchiseSalesRow, 'branchPriceKgs' | 'finalBranchPriceKgs' | 'priceConfigured'>) {
-  if (row.priceConfigured !== true) return null;
-  const raw = row.finalBranchPriceKgs ?? row.branchPriceKgs;
+function resolveDraftMarkupFromProduct(product: FranchiseSalesRow) {
+  const candidates = [
+    product.baseFranchiseMarkupPercent,
+    product.hqMarkupPercent,
+    product.recommendedMarkupPercent,
+  ];
+  for (const value of candidates) {
+    if (value == null) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 0;
+}
+
+function resolveDisplayedBranchPriceKgs(
+  row: Pick<FranchiseSalesRow, 'branchPriceKgs' | 'finalBranchPriceKgs' | 'masterBranchPriceKgs'>,
+) {
+  const raw = row.finalBranchPriceKgs ?? row.branchPriceKgs ?? row.masterBranchPriceKgs;
   if (raw === null || raw === undefined) return null;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -87,40 +110,31 @@ export default function PricingBranchesPage() {
 
   const canManage = canManagePricingPolicy(user);
 
-  async function load(selectedBranchId?: string) {
+  async function loadProducts(selectedBranchId: string) {
     setLoading(true);
     setError('');
     try {
-      const query = selectedBranchId ? `?branchId=${encodeURIComponent(selectedBranchId)}` : '';
-      const [products, me, branchRows] = await Promise.all([
-        apiFetch<FranchiseSalesRow[]>(`/pricing/franchise-sales${query}`),
-        apiFetch<User>('/auth/me'),
-        apiFetch<BranchOption[]>('/branches'),
-      ]);
-      setUser(me);
-      const nonHq = branchRows.filter((b) => b.branchType !== 'HQ_BRANCH');
-      setBranches(nonHq);
-      const nextBranchId = selectedBranchId || nonHq[0]?.id || '';
-      setBranchId(nextBranchId);
+      const query = `?branchId=${encodeURIComponent(selectedBranchId)}`;
+      const products = await apiFetch<FranchiseSalesRow[]>(`/pricing/franchise-sales${query}`);
       const categoryNames = Array.from(
         new Set(products.map((p) => p.categoryName).filter(Boolean)),
       ).sort((a, b) => a.localeCompare(b, 'ru'));
       setCategories(categoryNames);
       setRows(
-        products.map((product) => ({
-          ...product,
-          costAvailable: isCostAvailable(product),
-          branchPriceKgs: product.branchPriceKgs ?? product.masterBranchPriceKgs ?? null,
-          finalBranchPriceKgs: product.finalBranchPriceKgs ?? product.branchPriceKgs ?? null,
-          priceConfigured: product.priceConfigured ?? Boolean(product.branchPriceKgs),
-          draftMarkup: Number(
-            product.baseFranchiseMarkupPercent ??
-              product.hqMarkupPercent ??
-              product.recommendedMarkupPercent ??
-              0,
-          ),
-          isDirty: false,
-        })),
+        products.map((product) => {
+          const displayedPrice = resolveDisplayedBranchPriceKgs(product);
+          const draftMarkup = resolveDraftMarkupFromProduct(product);
+          return {
+            ...product,
+            costAvailable: isCostAvailable(product),
+            branchPriceKgs: displayedPrice,
+            finalBranchPriceKgs: displayedPrice,
+            masterBranchPriceKgs: displayedPrice,
+            priceConfigured: product.priceConfigured ?? Boolean(displayedPrice),
+            draftMarkup,
+            isDirty: false,
+          };
+        }),
       );
       setPage(1);
     } finally {
@@ -128,11 +142,42 @@ export default function PricingBranchesPage() {
     }
   }
 
-  useEffect(() => {
-    void load().catch((err) => {
+  async function initialize() {
+    setLoading(true);
+    setError('');
+    try {
+      const [me, branchRows] = await Promise.all([
+        apiFetch<User>('/auth/me'),
+        apiFetch<BranchOption[]>('/branches'),
+      ]);
+      setUser(me);
+      const nonHq = branchRows.filter((b) => b.branchType !== 'HQ_BRANCH');
+      setBranches(nonHq);
+
+      const persistedBranchId = window.sessionStorage.getItem(BRANCH_SELECTION_KEY);
+      const nextBranchId =
+        (persistedBranchId && nonHq.some((branch) => branch.id === persistedBranchId)
+          ? persistedBranchId
+          : null) ||
+        nonHq[0]?.id ||
+        '';
+      setBranchId(nextBranchId);
+
+      if (nextBranchId) {
+        await loadProducts(nextBranchId);
+      } else {
+        setRows([]);
+        setCategories([]);
+        setLoading(false);
+      }
+    } catch (err) {
       setLoading(false);
       setError(err instanceof Error ? err.message : t('common.error'));
-    });
+    }
+  }
+
+  useEffect(() => {
+    void initialize();
   }, [t]);
 
   const filteredRows = useMemo(() => {
@@ -193,11 +238,13 @@ export default function PricingBranchesPage() {
     setError('');
     setSuccess('');
     try {
-      const updated = await apiFetch<FranchiseSalesRow>(`/pricing/franchise-sales/${productId}`, {
+      const query = branchId ? `?branchId=${encodeURIComponent(branchId)}` : '';
+      const updated = await apiFetch<FranchiseSalesRow>(`/pricing/franchise-sales/${productId}${query}`, {
         method: 'PUT',
         body: JSON.stringify({ hqBranchWholesaleMarkupPercent: savedMarkup }),
       });
       const branchPrice = resolveDisplayedBranchPriceKgs(updated);
+      const persistedMarkup = resolveDraftMarkupFromProduct(updated);
 
       setRows((current) =>
         current.map((item) => {
@@ -206,19 +253,17 @@ export default function PricingBranchesPage() {
             ...item,
             ...updated,
             costAvailable: isCostAvailable(updated),
-            hqMarkupPercent: Number(
-              updated.baseFranchiseMarkupPercent ?? updated.hqMarkupPercent ?? savedMarkup,
-            ),
-            baseFranchiseMarkupPercent: Number(
-              updated.baseFranchiseMarkupPercent ?? updated.hqMarkupPercent ?? savedMarkup,
-            ),
-            recommendedMarkupPercent: Number(updated.recommendedMarkupPercent ?? savedMarkup),
-            markupConfigured: updated.priceConfigured ?? hasActiveMarkup(savedMarkup),
-            branchPriceKgs: branchPrice,
-            finalBranchPriceKgs: branchPrice,
-            masterBranchPriceKgs: branchPrice,
-            priceConfigured: updated.priceConfigured ?? Boolean(branchPrice),
-            draftMarkup: savedMarkup,
+            hqMarkupPercent: persistedMarkup > 0 ? persistedMarkup : item.hqMarkupPercent,
+            baseFranchiseMarkupPercent:
+              persistedMarkup > 0 ? persistedMarkup : item.baseFranchiseMarkupPercent,
+            recommendedMarkupPercent:
+              persistedMarkup > 0 ? persistedMarkup : item.recommendedMarkupPercent,
+            markupConfigured: updated.markupConfigured ?? persistedMarkup > 0,
+            branchPriceKgs: branchPrice ?? item.branchPriceKgs,
+            finalBranchPriceKgs: branchPrice ?? item.finalBranchPriceKgs,
+            masterBranchPriceKgs: branchPrice ?? item.masterBranchPriceKgs,
+            priceConfigured: updated.priceConfigured ?? Boolean(branchPrice ?? item.branchPriceKgs),
+            draftMarkup: persistedMarkup > 0 ? persistedMarkup : savedMarkup,
             isDirty: false,
           };
         }),
@@ -272,7 +317,8 @@ export default function PricingBranchesPage() {
             onChange={(e) => {
               const next = e.target.value;
               setBranchId(next);
-              void load(next).catch((err) =>
+              window.sessionStorage.setItem(BRANCH_SELECTION_KEY, next);
+              void loadProducts(next).catch((err) =>
                 setError(err instanceof Error ? err.message : t('common.error')),
               );
             }}
