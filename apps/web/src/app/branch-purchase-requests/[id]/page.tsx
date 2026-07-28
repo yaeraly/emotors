@@ -46,6 +46,7 @@ type RequestItem = {
   wholesalePriceKgs?: number;
   transportExpenseAllocation?: number;
   estimatedUnitCost?: number;
+  estimatedLineProductCostKgs?: number;
   totalAmount?: number;
   weightKg: number;
   note?: string | null;
@@ -81,6 +82,7 @@ type RequestDetail = {
   transportNotes?: string | null;
   totalQuantity?: number;
   totalEstimatedAmount?: number;
+  totalProductCostKgs?: number;
   convertedOrderId?: string | null;
   reviewedAt?: string | null;
   bookingExpiresAt?: string | null;
@@ -578,6 +580,14 @@ export default function BranchPurchaseRequestDetailPage() {
           </div>
           {!branchOnlyView ? (
             <div>
+              <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalProductCost')}</p>
+              <p className="mt-1 font-semibold text-slate-900">
+                {Number(request.totalProductCostKgs ?? 0).toFixed(2)} KGS
+              </p>
+            </div>
+          ) : null}
+          {!branchOnlyView ? (
+            <div>
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.estimatedAmount')}</p>
               <p className="mt-1 font-semibold text-slate-900">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)} KGS</p>
             </div>
@@ -795,7 +805,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.wholesalePrice')}</th>
                     <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.transportAllocation')}</th>
                     <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.estimatedUnitCost')}</th>
-                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.totalAmount')}</th>
+                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.totalProductCost')}</th>
                   </>
                 ) : null}
                 {branchOnlyView && !reviewed ? (
@@ -957,7 +967,9 @@ export default function BranchPurchaseRequestDetailPage() {
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.wholesalePriceKgs ?? 0).toFixed(2)}</td>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.transportExpenseAllocation ?? 0).toFixed(2)}</td>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.estimatedUnitCost ?? 0).toFixed(2)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.totalAmount ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>
+                          {Number(item.estimatedLineProductCostKgs ?? 0).toFixed(2)}
+                        </td>
                       </>
                     ) : null}
                     {branchOnlyView && !reviewed ? (

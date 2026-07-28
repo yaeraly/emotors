@@ -50,3 +50,14 @@ export function distributeAuthoritativeLineTotal(rawShares: number[], lineTotalC
   if (target <= 0) return rawShares.map(() => 0);
   return distributeRoundedAmounts(rawShares, target);
 }
+
+/**
+ * Reconcile rounded FIFO layer line costs so their sum matches the authoritative proportional total.
+ * Assigns any currency remainder to the final allocation line.
+ */
+export function reconcileAuthoritativeLineCosts(rawLineCosts: number[]): number[] {
+  if (!rawLineCosts.length) return [];
+  const target = sumDisplayMoneyTotals(rawLineCosts);
+  if (target <= 0) return rawLineCosts.map(() => 0);
+  return distributeAuthoritativeLineTotal(rawLineCosts, target);
+}

@@ -2,6 +2,7 @@ import { applyHqBranchWholesaleMarkup, resolveHqToBranchPrice } from './pricing-
 import {
   allocateProportionalCost,
   deriveDisplayUnitCost,
+  reconcileAuthoritativeLineCosts,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from './product-cost-precision.util';
@@ -61,7 +62,7 @@ export function buildFifoAllocationLines(
 } {
   let remainingToAllocate = Math.max(0, quantity);
   const lines: FifoAllocationLineResult[] = [];
-  let totalCostKgs = 0;
+  const rawLineCosts: number[] = [];
   let totalPriceKgs = 0;
 
   for (const layer of layers) {
@@ -82,7 +83,9 @@ export function buildFifoAllocationLines(
         ? Number(layer.layerTotalCostKgs)
         : Number(layer.unitCostKgs) * layerBaseQty;
 
-    const lineCost = roundDisplayMoney(allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take));
+    const rawLineCost = allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take);
+    rawLineCosts.push(rawLineCost);
+    const lineCost = roundDisplayMoney(rawLineCost);
     const unitCostKgs = deriveDisplayUnitCost(lineCost, take);
     const unitPriceKgs =
       options.branchType === 'HQ_BRANCH'
@@ -109,10 +112,39 @@ export function buildFifoAllocationLines(
       profitKgs,
     });
 
-    totalCostKgs += lineCost;
     totalPriceKgs += linePrice;
     remainingToAllocate -= take;
   }
+
+  if (lines.length > 0) {
+    const reconciledCosts = reconcileAuthoritativeLineCosts(rawLineCosts);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]!;
+      const lineCost = reconciledCosts[index] ?? 0;
+      const unitCostKgs = deriveDisplayUnitCost(lineCost, line.quantity);
+      const unitPriceKgs =
+        options.branchType === 'HQ_BRANCH'
+          ? unitCostKgs
+          : resolveHqToBranchPrice(unitCostKgs, options.branchType ?? 'FRANCHISE', options.markupPercent);
+      const linePrice =
+        options.branchType === 'HQ_BRANCH' ? lineCost : roundDisplayMoney(unitPriceKgs * line.quantity);
+      line.unitCostKgs = unitCostKgs;
+      line.unitPriceKgs = unitPriceKgs;
+      line.wholesalePriceKgs = roundMoney(Number(line.wholesalePriceKgs ?? unitPriceKgs));
+      line.hqBranchWholesalePriceKgs = roundMoney(
+        Number(
+          line.hqBranchWholesalePriceKgs ??
+            applyHqBranchWholesaleMarkup(unitCostKgs, options.markupPercent),
+        ),
+      );
+      line.totalCostKgs = lineCost;
+      line.totalPriceKgs = linePrice;
+      line.profitKgs = roundDisplayMoney(linePrice - lineCost);
+    }
+    totalPriceKgs = sumDisplayMoneyTotals(lines.map((line) => line.totalPriceKgs));
+  }
+
+  let totalCostKgs = 0;
 
   const allocatedQty = quantity - remainingToAllocate;
   const first = lines[0];

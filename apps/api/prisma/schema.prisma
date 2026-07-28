@@ -4772,6 +4772,7 @@ model BranchPurchaseRequestItem {
   wholesalePriceKgs          Decimal                           @default(0) @db.Decimal(14, 2)
   transportExpenseAllocation Decimal                           @default(0) @db.Decimal(14, 2)
   estimatedUnitCost          Decimal                           @default(0) @db.Decimal(14, 2)
+  estimatedLineProductCostKgs Decimal                          @default(0) @db.Decimal(14, 2)
   totalAmount                Decimal                           @default(0) @db.Decimal(14, 2)
   weightKg                   Decimal                           @default(0) @db.Decimal(14, 3)
   note                       String?

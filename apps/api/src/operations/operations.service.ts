@@ -4717,6 +4717,7 @@ export class OperationsService {
         const pricing = await this.resolveBranchRequestProductPricing(branchId, product.id);
         const branchPurchasePriceKgs = pricing.branchPurchasePriceKgs ?? 0;
         const costPriceSnapshot = pricing.costPriceSnapshot ?? 0;
+        let estimatedLineProductCostKgs = 0;
         let estimatedUnitCost = costPriceSnapshot;
         if (assignedHqWarehouseId && quantity > 0) {
           await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
@@ -4739,6 +4740,7 @@ export class OperationsService {
             fallbackUnitPrice: branchPurchasePriceKgs,
           });
           if (fifoPreview.allocatedQty > 0) {
+            estimatedLineProductCostKgs = fifoPreview.totalCostKgs;
             estimatedUnitCost = deriveDisplayUnitCost(fifoPreview.totalCostKgs, quantity);
           }
         }
@@ -4769,7 +4771,8 @@ export class OperationsService {
           hasPricingPolicyAtSubmit: pricing.hasPricingPolicy,
           weightKg: Number(product.weightKg),
           transportExpenseAllocation: 0,
-          estimatedUnitCost: costPriceSnapshot,
+          estimatedUnitCost,
+          estimatedLineProductCostKgs,
           totalAmount,
           note: item.note,
         };

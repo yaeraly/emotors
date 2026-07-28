@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
-import { deriveDisplayUnitCost } from './product-cost-precision.util';
+import { allocateProportionalCost, deriveDisplayUnitCost } from './product-cost-precision.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
   isSeedStockMovementReference,
@@ -465,7 +465,11 @@ export class PricingFifoService {
         if (take <= 0) continue;
         const unitCostKgs = Number(batch.unitCostKgs);
         const unitPriceKgs = Number(input.overrideUnitPriceKgs);
-        const lineCost = roundMoney(unitCostKgs * take);
+        const layerBaseQty = batch.initialQuantity > 0 ? batch.initialQuantity : take;
+        const layerTotalCostKgs = Number(batch.unitCostKgs) * layerBaseQty;
+        const lineCost = roundMoney(
+          allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take),
+        );
         const linePrice = roundMoney(unitPriceKgs * take);
         totalCost = roundMoney(totalCost + lineCost);
         totalPrice = roundMoney(totalPrice + linePrice);
