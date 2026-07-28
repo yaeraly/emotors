@@ -2569,25 +2569,15 @@ export class InventoryService {
     return user ? this.applyProductProfileVisibility(user, response) : response;
   }
 
-  private async resolveDefaultHqWarehouseId() {
-    const warehouse = await this.prisma.warehouse.findFirst({
-      where: activeHqWarehouseWhere,
-      select: { id: true },
-      orderBy: { createdAt: 'asc' },
-    });
-    return warehouse?.id ?? null;
-  }
-
   /**
    * Product catalog / detail cost: oldest active HQ FIFO batch unit landed cost.
    * Same layer used for FIFO consumption — remainingQuantity > 0, receivedAt ASC.
    */
   private async toProductResponseWithFifoCost(product: any, user?: AuthUser) {
     const base = this.toProductResponse(product, user);
-    const hqWarehouseId = await this.resolveDefaultHqWarehouseId();
     const fifo = await this.pricingFifoService.getOldestActiveHqFifoCost({
       productId: product.id,
-      ...(hqWarehouseId ? { warehouseId: hqWarehouseId } : {}),
+      useStoredBatchUnitCost: true,
     });
     const catalogCost = mapProductCatalogFifoCost({ fifo });
     const response = {

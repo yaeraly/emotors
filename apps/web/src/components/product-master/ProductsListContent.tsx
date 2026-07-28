@@ -270,22 +270,18 @@ function formatKgs(value: number | string | null | undefined) {
   })} сом`;
 }
 
-function productCatalogUnitCost(
-  product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs'>,
-) {
-  if (product.currentFifoUnitCost != null && product.currentFifoUnitCost > 0) {
-    return product.currentFifoUnitCost;
-  }
-  return product.finalCostKgs;
-}
-
 function isProductCostAvailable(
-  product: Pick<Product, 'currentFifoUnitCost' | 'finalCostKgs' | 'costAvailable'>,
+  product: Pick<Product, 'currentFifoUnitCost' | 'costAvailable'>,
 ) {
-  if (product.costAvailable === false) return false;
-  const cost = productCatalogUnitCost(product);
+  if (product.costAvailable !== true) return false;
+  const cost = product.currentFifoUnitCost;
   if (cost == null) return false;
   return Number(cost) > 0;
+}
+
+function productCatalogUnitCost(product: Pick<Product, 'currentFifoUnitCost' | 'costAvailable'>) {
+  if (!isProductCostAvailable(product)) return null;
+  return product.currentFifoUnitCost!;
 }
 
 function categoryName(category: ProductCategory, language: string) {

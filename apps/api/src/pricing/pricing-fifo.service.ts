@@ -45,6 +45,11 @@ export type OldestActiveHqFifoCostInput =
       warehouseId?: string;
       /** Branch scope when organization/tenant is modeled via branch. */
       branchId?: string;
+      /**
+       * Product catalog display: read frozen `FifoInventoryBatch.unitCostKgs` only.
+       * Skips movement reconciliation and never mutates batch costs on read.
+       */
+      useStoredBatchUnitCost?: boolean;
     };
 
 type FifoPreviewLine = {
@@ -257,6 +262,8 @@ export class PricingFifoService {
     const productId = typeof input === 'string' ? input : input.productId;
     const warehouseId = typeof input === 'string' ? undefined : input.warehouseId;
     const branchId = typeof input === 'string' ? undefined : input.branchId;
+    const useStoredBatchUnitCost =
+      typeof input === 'string' ? false : Boolean(input.useStoredBatchUnitCost);
     const client = tx ?? this.prisma;
 
     const productIds = await this.resolveHqFifoProductIds(client, productId);
@@ -322,7 +329,7 @@ export class PricingFifoService {
       }
 
       let unitCostKgs = Number(batch.unitCostKgs);
-      if (movement) {
+      if (!useStoredBatchUnitCost && movement) {
         // Prefer original received quantity (initialQuantity) for unit cost; never use remaining.
         const receivedQty =
           batch.initialQuantity > 0 ? batch.initialQuantity : Math.abs(Number(movement.quantity));
