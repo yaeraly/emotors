@@ -17,3 +17,27 @@ export function resolveUnitCostFromInventoryLayer(input: {
   }
   return roundDisplayMoney(Number(input.unitCostKgs ?? 0));
 }
+
+/**
+ * Authoritative per-unit landed cost for a FIFO layer.
+ * Prefers StockMovement.totalCostKgs ÷ received quantity (Prisma Decimal path).
+ * Falls back to stored batch.unitCostKgs when movement totals are unavailable.
+ */
+export function resolveAuthoritativeFifoLayerUnitCost(input: {
+  initialQuantity: number;
+  batchUnitCostKgs: number;
+  movementQuantity?: number | null;
+  movementUnitCostKgs?: number | null;
+  movementTotalCostKgs?: number | null;
+}) {
+  const receivedQty =
+    input.initialQuantity > 0
+      ? input.initialQuantity
+      : Math.abs(Number(input.movementQuantity ?? 0));
+  if (receivedQty <= 0) return 0;
+  return resolveUnitCostFromInventoryLayer({
+    quantity: receivedQty,
+    unitCostKgs: input.movementUnitCostKgs ?? input.batchUnitCostKgs,
+    totalCostKgs: input.movementTotalCostKgs,
+  });
+}

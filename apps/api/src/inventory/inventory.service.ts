@@ -2577,7 +2577,7 @@ export class InventoryService {
     const base = this.toProductResponse(product, user);
     const fifo = await this.pricingFifoService.getOldestActiveHqFifoCost({
       productId: product.id,
-      useStoredBatchUnitCost: true,
+      catalogReadOnly: true,
     });
     const catalogCost = mapProductCatalogFifoCost({ fifo });
     const response = {

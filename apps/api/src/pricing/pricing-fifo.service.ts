@@ -10,7 +10,7 @@ import {
   isSeedStockMovementReference,
   SEED_FIFO_REFERENCE_TYPE,
 } from './pricing-fifo-business-layer.util';
-import { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
+import { resolveUnitCostFromInventoryLayer, resolveAuthoritativeFifoLayerUnitCost } from './pricing-fifo-unit-cost.util';
 
 export { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 export { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
@@ -46,10 +46,10 @@ export type OldestActiveHqFifoCostInput =
       /** Branch scope when organization/tenant is modeled via branch. */
       branchId?: string;
       /**
-       * Product catalog display: read frozen `FifoInventoryBatch.unitCostKgs` only.
-       * Skips movement reconciliation and never mutates batch costs on read.
+       * Product catalog: derive unit cost from movement landed total ÷ received qty.
+       * Never mutates FifoInventoryBatch on read.
        */
-      useStoredBatchUnitCost?: boolean;
+      catalogReadOnly?: boolean;
     };
 
 type FifoPreviewLine = {
@@ -262,8 +262,8 @@ export class PricingFifoService {
     const productId = typeof input === 'string' ? input : input.productId;
     const warehouseId = typeof input === 'string' ? undefined : input.warehouseId;
     const branchId = typeof input === 'string' ? undefined : input.branchId;
-    const useStoredBatchUnitCost =
-      typeof input === 'string' ? false : Boolean(input.useStoredBatchUnitCost);
+    const catalogReadOnly =
+      typeof input === 'string' ? false : Boolean(input.catalogReadOnly);
     const client = tx ?? this.prisma;
 
     const productIds = await this.resolveHqFifoProductIds(client, productId);
@@ -328,17 +328,16 @@ export class PricingFifoService {
         continue;
       }
 
-      let unitCostKgs = Number(batch.unitCostKgs);
-      if (!useStoredBatchUnitCost && movement) {
-        // Prefer original received quantity (initialQuantity) for unit cost; never use remaining.
-        const receivedQty =
-          batch.initialQuantity > 0 ? batch.initialQuantity : Math.abs(Number(movement.quantity));
-        unitCostKgs = resolveUnitCostFromInventoryLayer({
-          quantity: receivedQty,
-          unitCostKgs: Number(movement.unitCostKgs),
-          totalCostKgs: Number(movement.totalCostKgs),
-        });
-        if (Math.abs(unitCostKgs - Number(batch.unitCostKgs)) > 0.009 && unitCostKgs > 0) {
+      const unitCostKgs = resolveAuthoritativeFifoLayerUnitCost({
+        initialQuantity: batch.initialQuantity,
+        batchUnitCostKgs: Number(batch.unitCostKgs),
+        movementQuantity: movement?.quantity,
+        movementUnitCostKgs: movement ? Number(movement.unitCostKgs) : null,
+        movementTotalCostKgs: movement ? Number(movement.totalCostKgs) : null,
+      });
+
+      if (movement && !catalogReadOnly && unitCostKgs > 0) {
+        if (Math.abs(unitCostKgs - Number(batch.unitCostKgs)) > 0.009) {
           const product = await client.product.findFirst({
             where: { id: batch.productId, deletedAt: null },
             select: {
@@ -365,9 +364,6 @@ export class PricingFifoService {
             },
           });
         }
-      } else if (batch.initialQuantity > 0 && Number(batch.unitCostKgs) > 0) {
-        // Layer without movement link: batch.unitCostKgs must already be per-unit.
-        unitCostKgs = Number(batch.unitCostKgs);
       }
 
       if (unitCostKgs > 0) {
