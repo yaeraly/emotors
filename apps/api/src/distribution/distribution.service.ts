@@ -2897,9 +2897,10 @@ export class DistributionService {
       const quantity = Number(item.quantity);
       // Multi-layer totals: sum of per-layer cost/price (never average-then-multiply).
       const totalCost = this.roundMoney(fifoPreview.totalCostKgs);
-      const totalPrice = hasAnyFullAccessRole(userRoles)
-        ? this.roundMoney(requestedPrice * quantity)
-        : this.roundMoney(fifoPreview.totalPriceKgs);
+      const totalPrice =
+        isHqOwnedBranch || !hasAnyFullAccessRole(userRoles)
+          ? this.roundMoney(fifoPreview.totalPriceKgs)
+          : this.roundMoney(requestedPrice * quantity);
       const unitCost = this.roundMoney(totalCost / quantity);
       const unitPrice = this.roundMoney(totalPrice / quantity);
       items.push({

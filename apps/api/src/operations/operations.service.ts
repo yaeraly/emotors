@@ -1138,9 +1138,13 @@ export class OperationsService {
           : false;
 
         const snapshottedUnitPrice =
-          item.resolvedBranchPriceKgs != null && Number(item.resolvedBranchPriceKgs) > 0
+          !isHqOwnedBranch &&
+          item.resolvedBranchPriceKgs != null &&
+          Number(item.resolvedBranchPriceKgs) > 0
             ? Number(item.resolvedBranchPriceKgs)
             : null;
+        const hqBranchFallbackUnitCost =
+          priceSnapshot.baseCostKgs > 0 ? priceSnapshot.baseCostKgs : Number(product.finalCostKgs);
 
         await this.pricingFifoService.syncFifoBatchesFromHqStockMovements(tx);
         const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
@@ -1151,12 +1155,12 @@ export class OperationsService {
           branchPricing: branch
             ? { branchType: branch.branchType, hqToBranchMarkupPercent: markupPercent }
             : undefined,
-          preferPerLayerMarkup: snapshottedUnitPrice == null,
+          preferPerLayerMarkup: isHqOwnedBranch || snapshottedUnitPrice == null,
           subtractReserved: true,
-          fallbackUnitCost: priceSnapshot.baseCostKgs > 0 ? priceSnapshot.baseCostKgs : Number(product.finalCostKgs),
-          fallbackUnitPrice: Number(
-            snapshottedUnitPrice ?? priceSnapshot.resolvedPriceKgs ?? 0,
-          ),
+          fallbackUnitCost: hqBranchFallbackUnitCost,
+          fallbackUnitPrice: isHqOwnedBranch
+            ? hqBranchFallbackUnitCost
+            : Number(snapshottedUnitPrice ?? priceSnapshot.resolvedPriceKgs ?? 0),
           overrideUnitPriceKgs: snapshottedUnitPrice,
         });
 
@@ -1168,14 +1172,10 @@ export class OperationsService {
 
         // Multi-layer order totals from FIFO allocation (not product.finalCostKgs / not average-first).
         const lineCost = Math.round((fifoPreview.totalCostKgs + Number.EPSILON) * 100) / 100;
-        const linePrice =
-          snapshottedUnitPrice != null
-            ? Math.round((snapshottedUnitPrice * quantity + Number.EPSILON) * 100) / 100
-            : Math.round((fifoPreview.totalPriceKgs + Number.EPSILON) * 100) / 100;
+        const linePrice = Math.round((fifoPreview.totalPriceKgs + Number.EPSILON) * 100) / 100;
         const unitCost = quantity > 0 ? Math.round((lineCost / quantity + Number.EPSILON) * 100) / 100 : 0;
         const unitPrice =
-          snapshottedUnitPrice ??
-          (quantity > 0 ? Math.round((linePrice / quantity + Number.EPSILON) * 100) / 100 : 0);
+          quantity > 0 ? Math.round((linePrice / quantity + Number.EPSILON) * 100) / 100 : 0;
         totalCost += lineCost;
         totalAmount += linePrice;
 

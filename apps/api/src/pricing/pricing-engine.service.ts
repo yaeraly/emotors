@@ -124,11 +124,15 @@ export class PricingEngineService {
           branchType,
         });
 
+    const isHqBranchTransfer = branchType === 'HQ_BRANCH';
     const calculationSteps: PricingCalculationStep[] = [
       { step: 'fifoCost', valueKgs: baseCostKgs, detail: cost.source },
       {
         step: 'masterFranchise',
-        valueKgs: isBranchPurchase ? applyPricingRounding(baseBranchPriceRaw, rounding) : baseBranchPriceKgs,
+        valueKgs:
+          isBranchPurchase && !isHqBranchTransfer
+            ? applyPricingRounding(baseBranchPriceRaw, rounding)
+            : baseBranchPriceKgs,
         detail: `markup=${baseFranchiseMarkupPercent}`,
       },
     ];
@@ -272,10 +276,13 @@ export class PricingEngineService {
     let resolvedPriceKgs = effectiveBranchPriceKgs;
     switch (priceType) {
       case PricingEnginePriceType.BRANCH_PURCHASE:
-        resolvedPriceKgs = isBranchPurchase
-          ? applyPricingRounding(effectiveBranchPriceKgs, rounding)
-          : effectiveBranchPriceKgs;
-        if (isBranchPurchase) {
+        resolvedPriceKgs =
+          isHqBranchTransfer
+            ? effectiveBranchPriceKgs
+            : isBranchPurchase
+              ? applyPricingRounding(effectiveBranchPriceKgs, rounding)
+              : effectiveBranchPriceKgs;
+        if (isBranchPurchase && !isHqBranchTransfer) {
           calculationSteps.push({
             step: 'finalBranchRoundup',
             valueKgs: resolvedPriceKgs,
@@ -351,7 +358,7 @@ export class PricingEngineService {
       costSource: cost.source,
       baseFranchiseMarkupPercent,
       baseBranchPriceKgs: costAvailable
-        ? isBranchPurchase
+        ? isBranchPurchase && !isHqBranchTransfer
           ? applyPricingRounding(baseBranchPriceRaw, rounding)
           : baseBranchPriceKgs
         : 0,

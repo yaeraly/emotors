@@ -41,6 +41,18 @@ describe('buildFifoAllocationLines — multi-layer branch order', () => {
     assert.equal(result.activeUnitCostKgs, 6000);
   });
 
+  it('HQ branch transfer uses exact FIFO cost without markup or ROUNDUP', () => {
+    const result = buildFifoAllocationLines(
+      [{ batchId: 'L1', remainingQuantity: 5, unitCostKgs: 1234 }],
+      3,
+      { markupPercent: 20, branchType: 'HQ_BRANCH', subtractReserved: true },
+    );
+    assert.equal(result.lines[0].unitCostKgs, 1234);
+    assert.equal(result.lines[0].unitPriceKgs, 1234);
+    assert.equal(result.totalPriceKgs, 3702);
+    assert.equal(result.profitKgs, 0);
+  });
+
   it('never averages costs before markup', () => {
     const result = buildFifoAllocationLines(
       [
