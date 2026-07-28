@@ -120,7 +120,6 @@ export class PricingFifoService {
           referenceType: movement.referenceType,
           referenceId: movement.referenceId,
           productId: movement.productId,
-          initialQuantity: Math.abs(Number(movement.quantity)),
           unitCostKgs: Number(movement.unitCostKgs),
         },
         {

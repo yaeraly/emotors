@@ -3,6 +3,16 @@ import { describe, it } from 'node:test';
 import { resolveMovementCostUpdates } from './landed-cost-sync-movements.util';
 
 describe('resolveMovementCostUpdates — preserve per-shipment FIFO unit costs', () => {
+  it('single movement uses authoritative order-line unit cost (not total÷qty)', () => {
+    const updates = resolveMovementCostUpdates({
+      orderLineFinalUnitCostKgs: 1944.17,
+      orderLineTotalCostKgs: 19441.7,
+      movements: [{ id: 'm1', quantity: 10, totalCostKgs: 19442.3, unitCostKgs: 1944.23 }],
+    });
+    assert.equal(updates[0]?.unitCostKgs, 1944.17);
+    assert.equal(updates[0]?.totalCostKgs, 19441.7);
+  });
+
   it('single movement uses order-line unit cost', () => {
     const updates = resolveMovementCostUpdates({
       orderLineFinalUnitCostKgs: 400,

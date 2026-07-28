@@ -1,171 +1,162 @@
 /**
- * Regression tests: GEN001 13801.15 vs stale 6129.40, FIFO layer transitions.
+ * Regression tests: unit-cost precision (TRA002 1944.17 vs 1944.23 drift).
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Prisma } from '@prisma/client';
 import {
+  resolveStoredFifoCatalogUnitCostFromSources,
+  resolveCurrentProductCatalogUnitCost,
+} from './product-catalog-current-cost.util';
+import {
   resolveOldestActiveFifoCatalogUnitCost,
   simulateFifoCatalogConsumption,
   type FifoCatalogLayerInput,
 } from './product-catalog-fifo-cost.util';
+import { resolveMovementCostUpdates } from '../procurement/landed-cost-sync-movements.util';
 import {
-  resolveProcurementLayerUnitCostFromSources,
-  resolveCurrentProductCatalogUnitCost,
-} from './product-catalog-current-cost.util';
-import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+} from '../pricing/product-cost-precision.util';
 
-const GEN001_LANDED = 13801.15;
-const GEN001_STALE = 6129.4;
-const BATCH2_LANDED = 15000;
+const TRA002_UNIT = 1944.17;
+const TRA002_DRIFT_UNIT = 1944.23;
+const BATCH2_UNIT = 2100.35;
 
-describe('product catalog current cost — GEN001 stale movement regression', () => {
-  it('Test 1: prefers finalized snapshot over stale movement/batch purchase-only cost', () => {
-    const unit = resolveProcurementLayerUnitCostFromSources({
-      snapshotUnitLandedCostKgs: GEN001_LANDED,
-      orderLineTotalCostKgs: GEN001_LANDED * 10,
-      orderLineQuantity: 10,
-      orderLineFinalUnitCostKgs: GEN001_STALE,
-      receivedQuantity: 10,
-      movementTotalCostKgs: GEN001_STALE * 10,
-      movementQuantity: 10,
-      movementUnitCostKgs: GEN001_STALE,
-      batchUnitCostKgs: GEN001_STALE,
+describe('TRA002 — Редуктор 20 зуб 5 кг unit cost precision', () => {
+  it('Test 1: purchase costing unit 1944.17 beats total/qty drift 1944.23', () => {
+    const derivedFromRoundedTotal = deriveDisplayUnitCost(19442.3, 10);
+    assert.equal(derivedFromRoundedTotal, TRA002_DRIFT_UNIT);
+
+    const catalogUnit = resolveStoredFifoCatalogUnitCostFromSources({
+      snapshotUnitLandedCostKgs: TRA002_UNIT,
+      orderLineFinalUnitCostKgs: TRA002_UNIT,
+      batchUnitCostKgs: TRA002_DRIFT_UNIT,
+      movementUnitCostKgs: TRA002_DRIFT_UNIT,
     });
-    assert.equal(unit, GEN001_LANDED);
-    assert.notEqual(unit, GEN001_STALE);
+
+    assert.equal(catalogUnit, TRA002_UNIT);
+    assert.notEqual(catalogUnit, TRA002_DRIFT_UNIT);
+    assert.equal(roundDisplayMoney(catalogUnit - TRA002_UNIT), 0);
   });
 
-  it('Test 1b: catalog API mapping from authoritative resolver output', () => {
-    const unit = resolveProcurementLayerUnitCostFromSources({
-      snapshotUnitLandedCostKgs: GEN001_LANDED,
-      receivedQuantity: 10,
-      movementTotalCostKgs: GEN001_STALE * 10,
-      batchUnitCostKgs: GEN001_STALE,
+  it('Test 2: no recalculation drift — exact stored unit returned', () => {
+    const stored = resolveStoredFifoCatalogUnitCostFromSources({
+      batchUnitCostKgs: TRA002_UNIT,
+      movementUnitCostKgs: TRA002_DRIFT_UNIT,
     });
-    assert.equal(unit, GEN001_LANDED);
+    assert.equal(stored, TRA002_UNIT);
+    assert.equal(roundDisplayMoney(stored - TRA002_UNIT), 0);
+  });
+
+  it('movement sync uses authoritative finalCostKgs, not total÷qty', () => {
+    const updates = resolveMovementCostUpdates({
+      orderLineFinalUnitCostKgs: TRA002_UNIT,
+      orderLineTotalCostKgs: 19441.7,
+      movements: [{ id: 'm1', quantity: 10, totalCostKgs: 19442.3, unitCostKgs: TRA002_DRIFT_UNIT }],
+    });
+    assert.equal(updates[0]?.unitCostKgs, TRA002_UNIT);
+    assert.notEqual(updates[0]?.unitCostKgs, TRA002_DRIFT_UNIT);
   });
 });
 
-function gen001Layers(
-  batch1Remaining: number,
-  batch2Remaining = 10,
-): FifoCatalogLayerInput[] {
+function tra002Layers(batch1Remaining: number, batch2Remaining = 10): FifoCatalogLayerInput[] {
   return [
     {
-      id: 'gen-batch-1',
+      id: 'tra-batch-1',
       receivedAt: '2026-01-01T10:00:00.000Z',
       createdAt: '2026-01-01T10:00:00.000Z',
       remainingQuantity: batch1Remaining,
       initialQuantity: 10,
-      batchUnitCostKgs: GEN001_STALE,
-      movementTotalCostKgs: GEN001_LANDED * 10,
+      batchUnitCostKgs: TRA002_UNIT,
+      movementTotalCostKgs: TRA002_UNIT * 10,
       movementQuantity: 10,
       referenceType: 'PROCUREMENT_GOODS_RECEIVING',
     },
     {
-      id: 'gen-batch-2',
+      id: 'tra-batch-2',
       receivedAt: '2026-02-01T10:00:00.000Z',
       createdAt: '2026-02-01T10:00:00.000Z',
       remainingQuantity: batch2Remaining,
       initialQuantity: 10,
-      batchUnitCostKgs: BATCH2_LANDED,
-      movementTotalCostKgs: BATCH2_LANDED * 10,
+      batchUnitCostKgs: BATCH2_UNIT,
+      movementTotalCostKgs: BATCH2_UNIT * 10,
       movementQuantity: 10,
       referenceType: 'PROCUREMENT_GOODS_RECEIVING',
     },
   ];
 }
 
-function catalogUnitFromLayersWithSnapshot(layers: FifoCatalogLayerInput[]) {
-  const oldest = layers
-    .filter((l) => l.remainingQuantity > 0)
-    .sort((a, b) => new Date(a.receivedAt).getTime() - new Date(b.receivedAt).getTime())[0];
-  if (!oldest) return null;
-  return resolveProcurementLayerUnitCostFromSources({
-    snapshotUnitLandedCostKgs:
-      oldest.id === 'gen-batch-1' ? GEN001_LANDED : BATCH2_LANDED,
-    receivedQuantity: oldest.initialQuantity,
-    movementTotalCostKgs: oldest.movementTotalCostKgs,
-    movementQuantity: oldest.movementQuantity,
-    batchUnitCostKgs: oldest.batchUnitCostKgs,
-  });
-}
-
-describe('product catalog FIFO transition — GEN001', () => {
-  it('Test 2a: Batch 1 remaining 10 → directory cost = 13,801.15', () => {
-    const cost = catalogUnitFromLayersWithSnapshot(gen001Layers(10));
-    assert.equal(cost, GEN001_LANDED);
+describe('TRA002 — FIFO transition (Test 3)', () => {
+  it('Batch 1 remaining > 0 → 1944.17', () => {
+    const unit = resolveStoredFifoCatalogUnitCostFromSources({
+      batchUnitCostKgs: TRA002_UNIT,
+    });
+    assert.equal(unit, TRA002_UNIT);
   });
 
-  it('Test 2b: Batch 1 remaining 1 → directory cost = 13,801.15', () => {
-    const cost = catalogUnitFromLayersWithSnapshot(gen001Layers(1));
-    assert.equal(cost, GEN001_LANDED);
+  it('Batch 1 remaining 1 → still 1944.17', () => {
+    const layers = tra002Layers(1);
+    const oldest = resolveOldestActiveFifoCatalogUnitCost(layers);
+    assert.equal(
+      resolveStoredFifoCatalogUnitCostFromSources({ batchUnitCostKgs: oldest.unitCostKgs }),
+      TRA002_UNIT,
+    );
   });
 
-  it('Test 2c: Batch 1 remaining 0 → directory cost = 15,000.00', () => {
-    const cost = catalogUnitFromLayersWithSnapshot(gen001Layers(0));
-    assert.equal(cost, BATCH2_LANDED);
+  it('Batch 1 remaining 0 → 2100.35', () => {
+    const layers = tra002Layers(0);
+    const oldest = resolveOldestActiveFifoCatalogUnitCost(layers);
+    assert.equal(oldest.unitCostKgs, BATCH2_UNIT);
   });
 
-  it('Test 2d: after partial consumption, oldest layer cost unchanged', () => {
-    const afterFive = simulateFifoCatalogConsumption(gen001Layers(10), 5);
-    assert.equal(afterFive.find((l) => l.id === 'gen-batch-1')?.remainingQuantity, 5);
-    const cost = catalogUnitFromLayersWithSnapshot(afterFive);
-    assert.equal(cost, GEN001_LANDED);
+  it('after partial sale, oldest layer unit unchanged', () => {
+    const afterFive = simulateFifoCatalogConsumption(tra002Layers(10), 5);
+    const oldest = resolveOldestActiveFifoCatalogUnitCost(afterFive);
+    assert.equal(
+      resolveStoredFifoCatalogUnitCostFromSources({ batchUnitCostKgs: oldest.unitCostKgs }),
+      TRA002_UNIT,
+    );
   });
 });
 
-describe('product catalog — multiple products (Test 3)', () => {
+describe('multiple products — stored unit parity (Test 4)', () => {
   const products = [
-    { sku: 'GEN001', landed: 13801.15, stale: 6129.4 },
-    { sku: 'MT001', landed: 5817.44, stale: 2500 },
-    { sku: 'SUS001', landed: 1636.13, stale: 407.53 },
+    { sku: 'TRA002', unit: 1944.17, drift: 1944.23 },
+    { sku: 'GEN001', unit: 13801.15, drift: 6129.4 },
+    { sku: 'SUS001', unit: 1636.13, drift: 407.53 },
   ];
 
-  for (const product of products) {
-    it(`${product.sku}: snapshot landed cost beats stale movement cost`, () => {
-      const unit = resolveProcurementLayerUnitCostFromSources({
-        snapshotUnitLandedCostKgs: product.landed,
-        receivedQuantity: 10,
-        movementTotalCostKgs: product.stale * 10,
-        batchUnitCostKgs: product.stale,
+  for (const row of products) {
+    it(`${row.sku}: snapshot unit matches catalog without total÷qty`, () => {
+      const unit = resolveStoredFifoCatalogUnitCostFromSources({
+        snapshotUnitLandedCostKgs: row.unit,
+        batchUnitCostKgs: row.drift,
+        movementUnitCostKgs: row.drift,
       });
-      assert.equal(unit, product.landed);
+      assert.equal(unit, row.unit);
+      assert.equal(roundDisplayMoney(unit - row.unit), 0);
     });
   }
 });
 
-describe('product catalog — CNY conversion + import expenses in landed unit', () => {
-  it('includes allocated import costs in per-unit landed cost', () => {
-    const cnyPurchaseKgs = roundDisplayMoney(new Prisma.Decimal(100).mul(12.5));
-    const importKgs = 750;
-    const totalLanded = roundDisplayMoney(cnyPurchaseKgs + importKgs);
-    const unit = resolveProcurementLayerUnitCostFromSources({
-      snapshotUnitLandedCostKgs: roundDisplayMoney(totalLanded / 10),
-      orderLineTotalCostKgs: totalLanded,
-      orderLineQuantity: 10,
-      receivedQuantity: 10,
-      movementTotalCostKgs: cnyPurchaseKgs,
-      batchUnitCostKgs: cnyPurchaseKgs / 10,
-    });
-    assert.equal(unit, 200);
-    assert.notEqual(unit, roundDisplayMoney(cnyPurchaseKgs / 10));
-  });
-});
-
-describe('product catalog — system consistency (Test 4)', () => {
-  it('in-memory oldest layer selection matches procurement authoritative unit', () => {
-    const layers = gen001Layers(10);
-    const oldestId = resolveOldestActiveFifoCatalogUnitCost(layers).batchId;
-    assert.equal(oldestId, 'gen-batch-1');
-    const catalogUnit = catalogUnitFromLayersWithSnapshot(layers);
-    assert.equal(catalogUnit, GEN001_LANDED);
-  });
-});
-
 describe('resolveCurrentProductCatalogUnitCost', () => {
-  it('exports authoritative resolver for inventory API', () => {
+  it('exports authoritative resolver', () => {
     assert.equal(typeof resolveCurrentProductCatalogUnitCost, 'function');
+  });
+});
+
+describe('fractional allocation — exact stored unit (Test 2 extended)', () => {
+  it('preserves purchase-costing unit when line total has remainder', () => {
+    const qty = 11;
+    const unit = 1662.97;
+    const lineTotal = roundDisplayMoney(new Prisma.Decimal(unit).mul(qty));
+    const wrongDerived = deriveDisplayUnitCost(lineTotal, qty);
+    const stored = resolveStoredFifoCatalogUnitCostFromSources({
+      orderLineFinalUnitCostKgs: unit,
+      batchUnitCostKgs: wrongDerived,
+    });
+    assert.equal(stored, unit);
+    assert.equal(roundDisplayMoney(stored - unit), 0);
   });
 });

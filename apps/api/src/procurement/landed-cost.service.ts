@@ -708,11 +708,14 @@ export class LandedCostService {
           where: { stockMovementId: movement.id },
         });
         if (batch) {
-          const layerUnitCostKgs = resolveUnitCostFromInventoryLayer({
-            quantity: qty,
-            totalCostKgs: newTotal,
-            unitCostKgs,
-          });
+          const layerUnitCostKgs =
+            unitCostKgs > 0
+              ? unitCostKgs
+              : resolveUnitCostFromInventoryLayer({
+                  quantity: qty,
+                  totalCostKgs: newTotal,
+                  unitCostKgs: Number(next.finalCostKgs || 0),
+                });
           const product = await client.product.findFirst({
             where: { id: item.productId, deletedAt: null },
             select: {

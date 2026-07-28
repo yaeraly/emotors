@@ -11,7 +11,6 @@ import { PrismaClient } from '@prisma/client';
 import {
   findProductCatalogCostMismatches,
   resolveCurrentProductCatalogUnitCost,
-  resolveFifoLayerCatalogUnitCost,
 } from '../src/inventory/product-catalog-current-cost.util';
 import { roundDisplayMoney } from '../src/pricing/product-cost-precision.util';
 
@@ -76,6 +75,10 @@ async function main() {
     if (!batch) continue;
 
     const authoritativeUnit = row.expectedFifoCost;
+    const snapshotUnit =
+      row.snapshotUnitLandedCostKgs != null && row.snapshotUnitLandedCostKgs > 0
+        ? row.snapshotUnitLandedCostKgs
+        : authoritativeUnit;
 
     if (batch.stockMovementId) {
       const movement = await prisma.stockMovement.findUnique({
@@ -91,7 +94,7 @@ async function main() {
         },
       });
       if (movement) {
-        const reconciledUnit = await resolveFifoLayerCatalogUnitCost(prisma, batch, movement);
+        const reconciledUnit = snapshotUnit > 0 ? snapshotUnit : authoritativeUnit;
         const unitCostKgs = reconciledUnit > 0 ? reconciledUnit : authoritativeUnit;
         const receivedQty = Math.abs(n(movement.quantity));
         const newTotal = roundDisplayMoney(unitCostKgs * receivedQty);
@@ -109,10 +112,10 @@ async function main() {
       }
     }
 
-    if (Math.abs(n(batch.unitCostKgs) - authoritativeUnit) > 0.009) {
+    if (Math.abs(n(batch.unitCostKgs) - snapshotUnit) > 0.009) {
       await prisma.fifoInventoryBatch.update({
         where: { id: batch.id },
-        data: { unitCostKgs: authoritativeUnit },
+        data: { unitCostKgs: snapshotUnit },
       });
       batchesUpdated += 1;
     }

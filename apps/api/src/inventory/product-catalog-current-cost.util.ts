@@ -5,10 +5,6 @@ import {
   isSeedStockMovementReference,
   SEED_FIFO_REFERENCE_TYPE,
 } from '../pricing/pricing-fifo-business-layer.util';
-import {
-  resolveAuthoritativeFifoLayerUnitCost,
-  resolveUnitCostFromInventoryLayer,
-} from '../pricing/pricing-fifo-unit-cost.util';
 import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
@@ -52,43 +48,25 @@ function n(value: unknown) {
 }
 
 /**
- * Authoritative per-unit landed cost for a procurement receipt layer.
- * Supply Manager «Себестоимость» uses finalized ProcurementLandedCostSnapshot —
- * not stale StockMovement purchase-only snapshots.
+ * Product catalog unit cost — exact stored unit fields only.
+ * Never recalculates rounded totalCostKgs ÷ quantity (avoids 0.06 drift).
  */
-export function resolveProcurementLayerUnitCostFromSources(input: {
-  snapshotUnitLandedCostKgs?: number | null;
-  orderLineTotalCostKgs?: number | null;
-  orderLineQuantity?: number | null;
-  orderLineFinalUnitCostKgs?: number | null;
-  receivedQuantity: number;
-  movementTotalCostKgs?: number | null;
-  movementQuantity?: number | null;
-  movementUnitCostKgs?: number | null;
-  batchUnitCostKgs: number;
+export function resolveStoredFifoCatalogUnitCostFromSources(input: {
+  batchUnitCostKgs?: Prisma.Decimal | number | null;
+  snapshotUnitLandedCostKgs?: Prisma.Decimal | number | null;
+  orderLineFinalUnitCostKgs?: Prisma.Decimal | number | null;
+  movementUnitCostKgs?: Prisma.Decimal | number | null;
 }) {
-  const snapshotUnit = n(input.snapshotUnitLandedCostKgs);
-  if (snapshotUnit > 0) {
-    return roundDisplayMoney(snapshotUnit);
+  for (const raw of [
+    input.snapshotUnitLandedCostKgs,
+    input.orderLineFinalUnitCostKgs,
+    input.batchUnitCostKgs,
+    input.movementUnitCostKgs,
+  ]) {
+    const value = roundDisplayMoney(raw ?? 0);
+    if (value > 0) return value;
   }
-
-  const orderQty = Math.abs(n(input.orderLineQuantity));
-  const orderTotal = n(input.orderLineTotalCostKgs);
-  if (orderTotal > 0 && orderQty > 0) {
-    return resolveUnitCostFromInventoryLayer({
-      quantity: orderQty,
-      totalCostKgs: orderTotal,
-      unitCostKgs: input.orderLineFinalUnitCostKgs,
-    });
-  }
-
-  return resolveAuthoritativeFifoLayerUnitCost({
-    initialQuantity: input.receivedQuantity,
-    batchUnitCostKgs: input.batchUnitCostKgs,
-    movementQuantity: input.movementQuantity,
-    movementUnitCostKgs: input.movementUnitCostKgs,
-    movementTotalCostKgs: input.movementTotalCostKgs,
-  });
+  return 0;
 }
 
 export async function resolveProcurementReceiptLayerUnitCost(
@@ -96,75 +74,58 @@ export async function resolveProcurementReceiptLayerUnitCost(
   input: {
     receivingId: string;
     productId: string;
-    initialQuantity: number;
-    movementQuantity?: number | null;
-    movementUnitCostKgs?: number | null;
-    movementTotalCostKgs?: number | null;
     batchUnitCostKgs: number;
+    movementUnitCostKgs?: number | null;
   },
 ) {
   const receivingItem = await client.procurementGoodsReceivingItem.findFirst({
     where: { receivingId: input.receivingId, productId: input.productId },
-    select: { procurementItemId: true, receivedQuantity: true },
+    select: { procurementItemId: true },
   });
 
   if (!receivingItem?.procurementItemId) {
-    return resolveAuthoritativeFifoLayerUnitCost({
-      initialQuantity: input.initialQuantity,
+    return resolveStoredFifoCatalogUnitCostFromSources({
       batchUnitCostKgs: input.batchUnitCostKgs,
-      movementQuantity: input.movementQuantity,
       movementUnitCostKgs: input.movementUnitCostKgs,
-      movementTotalCostKgs: input.movementTotalCostKgs,
     });
   }
 
   const [snapshot, orderItem] = await Promise.all([
     client.procurementLandedCostSnapshot.findUnique({
       where: { procurementOrderItemId: receivingItem.procurementItemId },
-      select: { unitLandedCostKgs: true, totalLandedCostKgs: true },
+      select: { unitLandedCostKgs: true },
     }),
     client.procurementOrderItem.findUnique({
       where: { id: receivingItem.procurementItemId },
-      select: { totalCostKgs: true, finalCostKgs: true, quantity: true },
+      select: { finalCostKgs: true },
     }),
   ]);
 
-  return resolveProcurementLayerUnitCostFromSources({
-    snapshotUnitLandedCostKgs: snapshot ? n(snapshot.unitLandedCostKgs) : null,
-    orderLineTotalCostKgs: orderItem ? n(orderItem.totalCostKgs) : null,
-    orderLineQuantity: orderItem?.quantity,
-    orderLineFinalUnitCostKgs: orderItem ? n(orderItem.finalCostKgs) : null,
-    receivedQuantity: receivingItem.receivedQuantity ?? input.initialQuantity,
-    movementTotalCostKgs: input.movementTotalCostKgs,
-    movementQuantity: input.movementQuantity,
-    movementUnitCostKgs: input.movementUnitCostKgs,
+  return resolveStoredFifoCatalogUnitCostFromSources({
     batchUnitCostKgs: input.batchUnitCostKgs,
+    snapshotUnitLandedCostKgs: snapshot?.unitLandedCostKgs,
+    orderLineFinalUnitCostKgs: orderItem?.finalCostKgs,
+    movementUnitCostKgs: input.movementUnitCostKgs,
   });
 }
 
 export async function resolveFifoLayerCatalogUnitCost(
   client: DbClient,
-  batch: Pick<FifoBatchRow, 'referenceType' | 'referenceId' | 'productId' | 'initialQuantity' | 'unitCostKgs'>,
+  batch: Pick<FifoBatchRow, 'referenceType' | 'referenceId' | 'productId' | 'unitCostKgs'>,
   movement: MovementRow | null,
 ) {
   if (isBusinessProcurementReceiptReference(batch.referenceType) && batch.referenceId) {
     return resolveProcurementReceiptLayerUnitCost(client, {
       receivingId: batch.referenceId,
       productId: batch.productId,
-      initialQuantity: batch.initialQuantity,
-      movementQuantity: movement?.quantity,
-      movementUnitCostKgs: movement ? n(movement.unitCostKgs) : null,
-      movementTotalCostKgs: movement ? n(movement.totalCostKgs) : null,
       batchUnitCostKgs: n(batch.unitCostKgs),
+      movementUnitCostKgs: movement ? n(movement.unitCostKgs) : null,
     });
   }
 
-  return resolveAuthoritativeFifoLayerUnitCost({
-    initialQuantity: batch.initialQuantity,
-    batchUnitCostKgs: n(batch.unitCostKgs),
-    movementQuantity: movement?.quantity,
-    movementUnitCostKgs: movement ? n(movement.unitCostKgs) : null,
-    movementTotalCostKgs: movement ? n(movement.totalCostKgs) : null,
+  return resolveStoredFifoCatalogUnitCostFromSources({
+    batchUnitCostKgs: batch.unitCostKgs,
+    movementUnitCostKgs: movement ? movement.unitCostKgs : null,
   });
 }
 
@@ -186,9 +147,9 @@ async function resolveHqFifoProductIds(client: DbClient, productId: string) {
 }
 
 /**
- * Single authoritative backend source for Справочник товаров current unit cost.
- * Oldest HQ FIFO layer with remainingQuantity > 0; unit cost from finalized
- * procurement landed-cost snapshot when applicable.
+ * Authoritative backend source for Справочник товаров current unit cost.
+ * Returns exact FifoInventoryBatch.unitCostKgs (or equivalent stored unit fields).
+ * Never divides rounded line totals by quantity.
  */
 export async function resolveCurrentProductCatalogUnitCost(
   client: DbClient,
@@ -292,6 +253,7 @@ export type ProductCatalogCostMismatch = {
   sku: string;
   currentDirectoryCost: number | null;
   expectedFifoCost: number | null;
+  difference: number | null;
   fifoBatchId: string | null;
   procurementOrderItemId: string | null;
   availableQuantity: number;
@@ -363,22 +325,34 @@ export async function findProductCatalogCostMismatches(
 
     const storedDirectoryCost = n(product.finalCostKgs) > 0 ? n(product.finalCostKgs) : n(product.costPriceKgs);
     const batchStored = oldestBatch ? n(oldestBatch.unitCostKgs) : null;
+    const difference =
+      expected != null && storedDirectoryCost > 0
+        ? roundDisplayMoney(storedDirectoryCost - expected)
+        : expected != null
+          ? null
+          : null;
 
     const directoryMismatch =
       expected != null &&
-      (Math.abs(storedDirectoryCost - expected) > 0.01 ||
-        (batchStored != null && Math.abs(batchStored - expected) > 0.01) ||
-        (movementUnitCostKgs != null && Math.abs(movementUnitCostKgs - expected) > 0.01));
+      (Math.abs(storedDirectoryCost - expected) > 0.009 ||
+        (batchStored != null && Math.abs(batchStored - expected) > 0.009) ||
+        (movementUnitCostKgs != null && Math.abs(movementUnitCostKgs - expected) > 0.009) ||
+        (snapshotUnitLandedCostKgs != null &&
+          Math.abs(snapshotUnitLandedCostKgs - expected) > 0.009));
 
     if (!directoryMismatch && expected == null) continue;
 
-    if (directoryMismatch || (expected != null && storedDirectoryCost !== expected)) {
+    if (directoryMismatch || (expected != null && Math.abs(storedDirectoryCost - expected) > 0.009)) {
       mismatches.push({
         productId: product.id,
         productName: product.name,
         sku: product.sku,
         currentDirectoryCost: storedDirectoryCost > 0 ? storedDirectoryCost : null,
         expectedFifoCost: expected,
+        difference:
+          expected != null && storedDirectoryCost > 0
+            ? roundDisplayMoney(storedDirectoryCost - expected)
+            : null,
         fifoBatchId: resolved.batchId,
         procurementOrderItemId: resolved.procurementOrderItemId,
         availableQuantity: oldestBatch?.remainingQuantity ?? 0,

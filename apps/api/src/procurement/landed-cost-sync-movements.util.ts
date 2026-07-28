@@ -35,7 +35,11 @@ export function resolveMovementCostUpdates(input: {
     const movement = movements[0]!;
     const qty = Math.abs(Number(movement.quantity));
     const totalCostKgs = roundDisplayMoney(Number(input.orderLineTotalCostKgs));
-    const unitCostKgs = resolveUnitCostFromInventoryLayer({ quantity: qty, totalCostKgs });
+    const authoritativeUnit = roundDisplayMoney(Number(input.orderLineFinalUnitCostKgs));
+    const unitCostKgs =
+      authoritativeUnit > 0
+        ? authoritativeUnit
+        : resolveUnitCostFromInventoryLayer({ quantity: qty, totalCostKgs });
     return [{ movementId: movement.id, unitCostKgs, totalCostKgs }];
   }
 
