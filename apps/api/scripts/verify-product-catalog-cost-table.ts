@@ -7,7 +7,7 @@
  */
 import { PrismaClient, WarehouseType } from '@prisma/client';
 import { mapProductCatalogFifoCost } from '../src/inventory/product-catalog-fifo-cost.util';
-import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
+import { resolveCurrentProductCatalogUnitCost } from '../src/inventory/product-catalog-current-cost.util';
 
 const EXPECTED_COSTS: Array<{ sku: string; name: string; expectedKgs: number }> = [
   { sku: 'AXL004', name: 'Полуось шляпка 18зуб 58.5см', expectedKgs: 517.8 },
@@ -68,7 +68,6 @@ function parseSkuFilter(argv: string[]) {
 async function main() {
   const skuFilter = parseSkuFilter(process.argv.slice(2));
   const prisma = new PrismaClient();
-  const pricingFifo = new PricingFifoService(prisma as any);
 
   const hqWarehouse = await prisma.warehouse.findFirst({
     where: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
@@ -110,9 +109,8 @@ async function main() {
       continue;
     }
 
-    const fifo = await pricingFifo.getOldestActiveHqFifoCost({
+    const fifo = await resolveCurrentProductCatalogUnitCost(prisma, {
       productId: product.id,
-      ...(hqWarehouse ? { warehouseId: hqWarehouse.id } : {}),
     });
     const catalogFields = mapProductCatalogFifoCost({ fifo });
     const currentCatalogCost = catalogFields.currentFifoUnitCost;

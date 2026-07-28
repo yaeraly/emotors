@@ -10,7 +10,8 @@ import {
   isSeedStockMovementReference,
   SEED_FIFO_REFERENCE_TYPE,
 } from './pricing-fifo-business-layer.util';
-import { resolveUnitCostFromInventoryLayer, resolveAuthoritativeFifoLayerUnitCost } from './pricing-fifo-unit-cost.util';
+import { resolveFifoLayerCatalogUnitCost } from '../inventory/product-catalog-current-cost.util';
+import { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 
 export { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 export { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
@@ -113,11 +114,25 @@ export class PricingFifoService {
         continue;
       }
 
-      const unitCostKgs = resolveUnitCostFromInventoryLayer({
-        quantity: Math.abs(Number(movement.quantity)),
-        unitCostKgs: Number(movement.unitCostKgs),
-        totalCostKgs: Number(movement.totalCostKgs),
-      });
+      const unitCostKgs = await resolveFifoLayerCatalogUnitCost(
+        client,
+        {
+          referenceType: movement.referenceType,
+          referenceId: movement.referenceId,
+          productId: movement.productId,
+          initialQuantity: Math.abs(Number(movement.quantity)),
+          unitCostKgs: Number(movement.unitCostKgs),
+        },
+        {
+          id: movement.id,
+          quantity: movement.quantity,
+          unitCostKgs: movement.unitCostKgs,
+          totalCostKgs: movement.totalCostKgs,
+          referenceType: movement.referenceType,
+          referenceId: movement.referenceId,
+          note: movement.note,
+        },
+      );
 
       const existing = await client.fifoInventoryBatch.findFirst({
         where: { stockMovementId: movement.id },
@@ -328,15 +343,9 @@ export class PricingFifoService {
         continue;
       }
 
-      const unitCostKgs = resolveAuthoritativeFifoLayerUnitCost({
-        initialQuantity: batch.initialQuantity,
-        batchUnitCostKgs: Number(batch.unitCostKgs),
-        movementQuantity: movement?.quantity,
-        movementUnitCostKgs: movement ? Number(movement.unitCostKgs) : null,
-        movementTotalCostKgs: movement ? Number(movement.totalCostKgs) : null,
-      });
+      const unitCostKgs = await resolveFifoLayerCatalogUnitCost(client, batch, movement ?? null);
 
-      if (movement && !catalogReadOnly && unitCostKgs > 0) {
+      if (!catalogReadOnly && unitCostKgs > 0) {
         if (Math.abs(unitCostKgs - Number(batch.unitCostKgs)) > 0.009) {
           const product = await client.product.findFirst({
             where: { id: batch.productId, deletedAt: null },

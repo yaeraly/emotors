@@ -58,6 +58,7 @@ import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_N
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
 import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
+import { resolveCurrentProductCatalogUnitCost } from './product-catalog-current-cost.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -2575,11 +2576,19 @@ export class InventoryService {
    */
   private async toProductResponseWithFifoCost(product: any, user?: AuthUser) {
     const base = this.toProductResponse(product, user);
-    const fifo = await this.pricingFifoService.getOldestActiveHqFifoCost({
+    const fifo = await resolveCurrentProductCatalogUnitCost(this.prisma, {
       productId: product.id,
-      catalogReadOnly: true,
     });
-    const catalogCost = mapProductCatalogFifoCost({ fifo });
+    const catalogCost = mapProductCatalogFifoCost({
+      fifo: {
+        costPriceKgs: fifo.costPriceKgs,
+        available: fifo.available,
+        source: fifo.source,
+        batchId: fifo.batchId,
+        receivedAt: fifo.receivedAt,
+        warehouseId: fifo.warehouseId,
+      },
+    });
     const response = {
       ...base,
       ...catalogCost,
