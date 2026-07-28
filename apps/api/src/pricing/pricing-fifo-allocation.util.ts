@@ -1,4 +1,10 @@
 import { applyHqBranchWholesaleMarkup, resolveHqToBranchPrice } from './pricing-calculator.util';
+import {
+  allocateProportionalCost,
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+  sumDisplayMoneyTotals,
+} from './product-cost-precision.util';
 
 export type FifoAllocationLineInput = {
   batchId: string;
@@ -17,7 +23,7 @@ export type FifoAllocationLineResult = FifoAllocationLineInput & {
 };
 
 function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  return roundDisplayMoney(value);
 }
 
 /**
@@ -30,6 +36,10 @@ export function buildFifoAllocationLines(
     remainingQuantity: number;
     reservedQuantity?: number;
     unitCostKgs: number;
+    /** Authoritative movement/batch total cost (preferred over unit × qty). */
+    layerTotalCostKgs?: number;
+    /** Quantity basis for layerTotalCostKgs (initial received qty). */
+    layerBaseQuantity?: number;
     wholesalePriceKgs?: number;
     hqBranchWholesalePriceKgs?: number;
   }>,
@@ -63,14 +73,26 @@ export function buildFifoAllocationLines(
     const take = Math.min(available, remainingToAllocate);
     if (take <= 0) continue;
 
-    const unitCostKgs = roundMoney(Number(layer.unitCostKgs));
+    const layerBaseQty =
+      Number(layer.layerBaseQuantity ?? 0) > 0
+        ? Number(layer.layerBaseQuantity)
+        : Math.max(layer.remainingQuantity, take);
+    const layerTotalCostKgs =
+      Number(layer.layerTotalCostKgs ?? 0) > 0
+        ? Number(layer.layerTotalCostKgs)
+        : Number(layer.unitCostKgs) * layerBaseQty;
+
+    const lineCost = roundDisplayMoney(allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take));
+    const unitCostKgs = deriveDisplayUnitCost(lineCost, take);
     const unitPriceKgs =
       options.branchType === 'HQ_BRANCH'
         ? unitCostKgs
         : resolveHqToBranchPrice(unitCostKgs, options.branchType ?? 'FRANCHISE', options.markupPercent);
-    const lineCost = roundMoney(unitCostKgs * take);
-    const linePrice = roundMoney(unitPriceKgs * take);
-    const profitKgs = roundMoney(linePrice - lineCost);
+    const linePrice =
+      options.branchType === 'HQ_BRANCH'
+        ? lineCost
+        : roundDisplayMoney(unitPriceKgs * take);
+    const profitKgs = roundDisplayMoney(linePrice - lineCost);
 
     lines.push({
       batchId: layer.batchId,
@@ -87,19 +109,21 @@ export function buildFifoAllocationLines(
       profitKgs,
     });
 
-    totalCostKgs = roundMoney(totalCostKgs + lineCost);
-    totalPriceKgs = roundMoney(totalPriceKgs + linePrice);
+    totalCostKgs += lineCost;
+    totalPriceKgs += linePrice;
     remainingToAllocate -= take;
   }
 
   const allocatedQty = quantity - remainingToAllocate;
   const first = lines[0];
+  const summedCostKgs = sumDisplayMoneyTotals(lines.map((line) => line.totalCostKgs));
+  const summedPriceKgs = sumDisplayMoneyTotals(lines.map((line) => line.totalPriceKgs));
   return {
     lines,
     allocatedQty,
-    totalCostKgs,
-    totalPriceKgs,
-    profitKgs: roundMoney(totalPriceKgs - totalCostKgs),
+    totalCostKgs: summedCostKgs,
+    totalPriceKgs: summedPriceKgs,
+    profitKgs: roundDisplayMoney(summedPriceKgs - summedCostKgs),
     activeUnitCostKgs: first?.unitCostKgs ?? 0,
     activeUnitPriceKgs: first?.unitPriceKgs ?? 0,
   };

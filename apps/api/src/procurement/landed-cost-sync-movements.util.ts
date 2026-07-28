@@ -1,8 +1,9 @@
 import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
-
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
+import {
+  allocateProportionalCost,
+  distributeAuthoritativeLineTotal,
+  roundDisplayMoney,
+} from '../pricing/product-cost-precision.util';
 
 export type MovementCostRow = {
   id: string;
@@ -33,24 +34,30 @@ export function resolveMovementCostUpdates(input: {
   if (movements.length === 1) {
     const movement = movements[0]!;
     const qty = Math.abs(Number(movement.quantity));
-    const unitCostKgs = roundMoney(Number(input.orderLineFinalUnitCostKgs));
-    const totalCostKgs = roundMoney(qty * unitCostKgs);
+    const totalCostKgs = roundDisplayMoney(Number(input.orderLineTotalCostKgs));
+    const unitCostKgs = resolveUnitCostFromInventoryLayer({ quantity: qty, totalCostKgs });
     return [{ movementId: movement.id, unitCostKgs, totalCostKgs }];
   }
 
   const oldLineTotal = movements.reduce((sum, row) => sum + Number(row.totalCostKgs), 0);
-  const newLineTotal = roundMoney(Number(input.orderLineTotalCostKgs));
+  const newLineTotal = roundDisplayMoney(Number(input.orderLineTotalCostKgs));
   const totalQty = movements.reduce((sum, row) => sum + Math.abs(Number(row.quantity)), 0);
 
-  return movements.map((movement) => {
+  const rawShares = movements.map((movement) => {
     const qty = Math.abs(Number(movement.quantity));
-    const valueShare =
-      oldLineTotal > 0
-        ? Number(movement.totalCostKgs) / oldLineTotal
-        : totalQty > 0
-          ? qty / totalQty
-          : 0;
-    const totalCostKgs = roundMoney(newLineTotal * valueShare);
+    if (oldLineTotal > 0) {
+      return allocateProportionalCost(newLineTotal, oldLineTotal, Number(movement.totalCostKgs));
+    }
+    if (totalQty > 0) {
+      return allocateProportionalCost(newLineTotal, totalQty, qty);
+    }
+    return 0;
+  });
+  const reconciledTotals = distributeAuthoritativeLineTotal(rawShares, newLineTotal);
+
+  return movements.map((movement, index) => {
+    const qty = Math.abs(Number(movement.quantity));
+    const totalCostKgs = reconciledTotals[index] ?? 0;
     const unitCostKgs = resolveUnitCostFromInventoryLayer({ quantity: qty, totalCostKgs });
     return { movementId: movement.id, unitCostKgs, totalCostKgs };
   });

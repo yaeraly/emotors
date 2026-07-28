@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
+import { deriveDisplayUnitCost } from './product-cost-precision.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
   isSeedStockMovementReference,
@@ -438,6 +439,7 @@ export class PricingFifoService {
       orderBy: [{ receivedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
     const businessBatches = await this.filterOutSeedFifoBatches(tx, batches);
+    const allocationLayers = await this.mapBatchesToAllocationLayers(tx, businessBatches);
 
     const markupPercent = input.isHqOwnedBranch
       ? 0
@@ -509,14 +511,7 @@ export class PricingFifoService {
     }
 
     const built = buildFifoAllocationLines(
-      businessBatches.map((batch) => ({
-        batchId: batch.id,
-        remainingQuantity: batch.remainingQuantity,
-        reservedQuantity: Number((batch as { reservedQuantity?: number }).reservedQuantity ?? 0),
-        unitCostKgs: Number(batch.unitCostKgs),
-        wholesalePriceKgs: Number(batch.wholesalePriceKgs),
-        hqBranchWholesalePriceKgs: Number(batch.hqBranchWholesalePriceKgs),
-      })),
+      allocationLayers,
       input.quantity,
       { markupPercent, branchType, subtractReserved },
     );
@@ -537,8 +532,8 @@ export class PricingFifoService {
 
     return {
       // Blended averages kept for backward-compatible unit fields on order lines.
-      unitCost: roundMoney(built.totalCostKgs / built.allocatedQty),
-      unitPrice: roundMoney(built.totalPriceKgs / built.allocatedQty),
+      unitCost: deriveDisplayUnitCost(built.totalCostKgs, built.allocatedQty),
+      unitPrice: deriveDisplayUnitCost(built.totalPriceKgs, built.allocatedQty),
       // Active (first) FIFO layer — matches Продажа филиалам starting cost.
       activeUnitCost: built.activeUnitCostKgs,
       activeUnitPrice: built.activeUnitPriceKgs,
@@ -977,6 +972,56 @@ export class PricingFifoService {
 
   isHqOwnedBranch(branchCode: string | null | undefined) {
     return branchCode === HQ_CATALOG_BRANCH_CODE;
+  }
+
+  private async mapBatchesToAllocationLayers(
+    tx: PrismaTx,
+    batches: Array<{
+      id: string;
+      remainingQuantity: number;
+      initialQuantity: number;
+      unitCostKgs: unknown;
+      stockMovementId?: string | null;
+      wholesalePriceKgs: unknown;
+      hqBranchWholesalePriceKgs: unknown;
+      reservedQuantity?: number;
+    }>,
+  ) {
+    const movementIds = batches
+      .map((batch) => batch.stockMovementId)
+      .filter((id): id is string => Boolean(id));
+    const movements = movementIds.length
+      ? await tx.stockMovement.findMany({
+          where: { id: { in: movementIds } },
+          select: { id: true, quantity: true, totalCostKgs: true },
+        })
+      : [];
+    const movementById = new Map(movements.map((movement) => [movement.id, movement]));
+
+    return batches.map((batch) => {
+      const movement = batch.stockMovementId ? movementById.get(batch.stockMovementId) : null;
+      const layerBaseQuantity =
+        batch.initialQuantity > 0
+          ? batch.initialQuantity
+          : movement
+            ? Math.abs(Number(movement.quantity))
+            : batch.remainingQuantity;
+      const layerTotalCostKgs =
+        movement && Number(movement.totalCostKgs) > 0
+          ? Number(movement.totalCostKgs)
+          : Number(batch.unitCostKgs) * layerBaseQuantity;
+
+      return {
+        batchId: batch.id,
+        remainingQuantity: batch.remainingQuantity,
+        reservedQuantity: Number(batch.reservedQuantity ?? 0),
+        unitCostKgs: Number(batch.unitCostKgs),
+        layerTotalCostKgs,
+        layerBaseQuantity,
+        wholesalePriceKgs: Number(batch.wholesalePriceKgs),
+        hqBranchWholesalePriceKgs: Number(batch.hqBranchWholesalePriceKgs),
+      };
+    });
   }
 
   async resolveHqCatalogProductIds(tx?: PrismaTx) {

@@ -14,7 +14,7 @@ describe('resolveMovementCostUpdates — preserve per-shipment FIFO unit costs',
     assert.equal(updates[0]?.totalCostKgs, 40000);
   });
 
-  it('two shipments keep distinct unit costs instead of one averaged value', () => {
+  it('two shipments keep distinct unit costs and reconcile to line total', () => {
     const updates = resolveMovementCostUpdates({
       orderLineFinalUnitCostKgs: 450,
       orderLineTotalCostKgs: 90000,
@@ -26,6 +26,10 @@ describe('resolveMovementCostUpdates — preserve per-shipment FIFO unit costs',
     assert.equal(updates.length, 2);
     assert.equal(updates[0]?.unitCostKgs, 400);
     assert.equal(updates[1]?.unitCostKgs, 500);
+    assert.equal(
+      updates.reduce((sum, row) => sum + row.totalCostKgs, 0),
+      90000,
+    );
     assert.notEqual(updates[0]?.unitCostKgs, updates[1]?.unitCostKgs);
     assert.notEqual(updates[0]?.unitCostKgs, 450);
   });

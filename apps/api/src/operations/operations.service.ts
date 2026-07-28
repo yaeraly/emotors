@@ -70,6 +70,7 @@ import { PricingResolutionService } from '../pricing/pricing-resolution.service'
 import { BranchOrderPricingRevisionService } from '../pricing/branch-order-pricing-revision.service';
 import { BranchPriceResolverService } from '../pricing/branch-price-resolver.service';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
+import { deriveDisplayUnitCost, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
 import {
   isSubmittedBranchPurchaseStatus,
   resolveBranchPurchasePriceKgs,
@@ -4699,6 +4700,10 @@ export class OperationsService {
     }
 
     const assignedHqWarehouseId = await this.getBranchAssignedHqWarehouseId(branchId);
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+      select: { branchType: true, hqToBranchMarkupPercent: true },
+    });
     const hqStockMetrics = assignedHqWarehouseId
       ? await this.inventoryService.getHqWarehouseStockMetricsMap(
           assignedHqWarehouseId,
@@ -4712,6 +4717,31 @@ export class OperationsService {
         const pricing = await this.resolveBranchRequestProductPricing(branchId, product.id);
         const branchPurchasePriceKgs = pricing.branchPurchasePriceKgs ?? 0;
         const costPriceSnapshot = pricing.costPriceSnapshot ?? 0;
+        let estimatedUnitCost = costPriceSnapshot;
+        if (assignedHqWarehouseId && quantity > 0) {
+          await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+          const fifoPreview = await this.pricingFifoService.previewFifoAllocation(this.prisma, {
+            productId: product.id,
+            warehouseId: assignedHqWarehouseId,
+            quantity,
+            isHqOwnedBranch: branch
+              ? this.pricingFifoService.isHqBranchType(branch.branchType)
+              : false,
+            branchPricing: branch
+              ? {
+                  branchType: branch.branchType,
+                  hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent ?? 0),
+                }
+              : undefined,
+            preferPerLayerMarkup: true,
+            subtractReserved: true,
+            fallbackUnitCost: costPriceSnapshot,
+            fallbackUnitPrice: branchPurchasePriceKgs,
+          });
+          if (fifoPreview.allocatedQty > 0) {
+            estimatedUnitCost = deriveDisplayUnitCost(fifoPreview.totalCostKgs, quantity);
+          }
+        }
         const totalAmount =
           pricing.hasPricingPolicy && pricing.branchPurchasePriceKgs != null
             ? Math.round((pricing.branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100
@@ -4950,50 +4980,91 @@ export class OperationsService {
             .hasPricingPolicyAtSubmit,
         })),
       );
-
-      const enrichedItems = request.items.map((item) => {
-        const metrics = stockMetrics.get(item.productId);
-        const generalAvailable = metrics?.generalAvailableQuantity ?? 0;
-        const bookedQuantity = bookedMap.get(item.id) ?? (item as { bookedQuantity?: number }).bookedQuantity ?? 0;
-        const availableForThisRequest = this.hqStockBookingService.availableForRequestLine(
-          generalAvailable,
-          bookedQuantity,
-        );
-        const approved = item.approvedQuantity ?? null;
-        const missingQty =
-          approved !== null
-            ? Math.max(item.quantity - approved, 0)
-            : Math.max(item.quantity - availableForThisRequest, 0);
-
-        this.logger.log({
-          message: 'HQ_STOCK_RESOLVED_FOR_REQUEST',
-          requestId: request.id,
-          requestLineId: item.id,
-          productId: item.productId,
-          resolvedProductId: metrics?.resolvedProductId,
-          hqWarehouseId: assignedHqWarehouseId,
-          physicalQuantity: metrics?.physicalQuantity ?? 0,
-          totalBookedQuantity: metrics?.totalActiveBookedQuantity ?? 0,
-          thisRequestBookedQuantity: bookedQuantity,
-          availableForThisRequest,
-        });
-
-        return {
-          ...item,
-          bookedQuantity,
-          hqPhysicalStock: metrics?.physicalQuantity ?? null,
-          totalActiveBookedQuantity: metrics?.totalActiveBookedQuantity ?? 0,
-          hqAvailableStock: generalAvailable,
-          availableForThisRequest,
-          missingQty,
-          pricingPolicyAvailable: pricingAvailability.get(item.id) ?? false,
-        };
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: request.branchId, deletedAt: null },
+        select: { branchType: true, hqToBranchMarkupPercent: true },
       });
+      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+
+      const enrichedItems = await Promise.all(
+        request.items.map(async (item) => {
+          const metrics = stockMetrics.get(item.productId);
+          const generalAvailable = metrics?.generalAvailableQuantity ?? 0;
+          const bookedQuantity =
+            bookedMap.get(item.id) ?? (item as { bookedQuantity?: number }).bookedQuantity ?? 0;
+          const availableForThisRequest = this.hqStockBookingService.availableForRequestLine(
+            generalAvailable,
+            bookedQuantity,
+          );
+          const approved = item.approvedQuantity ?? null;
+          const missingQty =
+            approved !== null
+              ? Math.max(item.quantity - approved, 0)
+              : Math.max(item.quantity - availableForThisRequest, 0);
+          const lineQuantity = approved ?? item.quantity;
+          let estimatedLineProductCostKgs = 0;
+          let estimatedUnitCost = Number((item as { estimatedUnitCost?: unknown }).estimatedUnitCost ?? 0);
+          if (lineQuantity > 0) {
+            const fifoPreview = await this.pricingFifoService.previewFifoAllocation(this.prisma, {
+              productId: item.productId,
+              warehouseId: assignedHqWarehouseId,
+              quantity: lineQuantity,
+              isHqOwnedBranch: branch
+                ? this.pricingFifoService.isHqBranchType(branch.branchType)
+                : false,
+              branchPricing: branch
+                ? {
+                    branchType: branch.branchType,
+                    hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent ?? 0),
+                  }
+                : undefined,
+              preferPerLayerMarkup: true,
+              subtractReserved: true,
+              fallbackUnitCost: estimatedUnitCost,
+            });
+            if (fifoPreview.allocatedQty > 0) {
+              estimatedLineProductCostKgs = fifoPreview.totalCostKgs;
+              estimatedUnitCost = deriveDisplayUnitCost(fifoPreview.totalCostKgs, lineQuantity);
+            }
+          }
+
+          this.logger.log({
+            message: 'HQ_STOCK_RESOLVED_FOR_REQUEST',
+            requestId: request.id,
+            requestLineId: item.id,
+            productId: item.productId,
+            resolvedProductId: metrics?.resolvedProductId,
+            hqWarehouseId: assignedHqWarehouseId,
+            physicalQuantity: metrics?.physicalQuantity ?? 0,
+            totalBookedQuantity: metrics?.totalActiveBookedQuantity ?? 0,
+            thisRequestBookedQuantity: bookedQuantity,
+            availableForThisRequest,
+          });
+
+          return {
+            ...item,
+            bookedQuantity,
+            hqPhysicalStock: metrics?.physicalQuantity ?? null,
+            totalActiveBookedQuantity: metrics?.totalActiveBookedQuantity ?? 0,
+            hqAvailableStock: generalAvailable,
+            availableForThisRequest,
+            missingQty,
+            pricingPolicyAvailable: pricingAvailability.get(item.id) ?? false,
+            estimatedLineProductCostKgs,
+            estimatedUnitCost,
+          };
+        }),
+      );
+
+      const totalProductCostKgs = sumDisplayMoneyTotals(
+        enrichedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+      );
 
       return {
         ...request,
         hqStockStatus: 'loaded' as const,
         bookingExpiresAt: (request as { bookingExpiresAt?: Date | null }).bookingExpiresAt ?? null,
+        totalProductCostKgs,
         items: enrichedItems,
       };
     } catch (error) {

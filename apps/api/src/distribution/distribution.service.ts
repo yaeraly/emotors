@@ -3346,14 +3346,20 @@ export class DistributionService {
         landedUnitCostKgs,
         transferCostKgs: unitCost,
         deliveryCostKgs: transportExpenseAllocation,
-        totalLandedCostKgs: landedUnitCostKgs * Number(item.quantity),
+        totalLandedCostKgs:
+          Number(item.totalCost ?? unitCost * Number(item.quantity)) + transportExpenseAllocation,
       };
     });
-    const productCostTotal = items?.reduce((sum: number, item: any) => sum + item.unitCost * item.quantity, 0) ?? 0;
+    const productCostTotal =
+      items?.reduce((sum: number, item: any) => sum + Number(item.totalCost ?? 0), 0) ?? 0;
     const deliveryCostTotal =
       items?.reduce((sum: number, item: any) => sum + item.transportExpenseAllocation, 0) ?? transportCostKgs;
     const landedCostTotal =
-      items?.reduce((sum: number, item: any) => sum + item.landedUnitCostKgs * item.quantity, 0) ?? productCostTotal;
+      items?.reduce(
+        (sum: number, item: any) =>
+          sum + Number(item.totalCost ?? 0) + Number(item.transportExpenseAllocation ?? 0),
+        0,
+      ) ?? productCostTotal;
     const costPerKg =
       totalShipmentWeightKg > 0 && transportCostKgs > 0
         ? Math.round((transportCostKgs / totalShipmentWeightKg + Number.EPSILON) * 100) / 100

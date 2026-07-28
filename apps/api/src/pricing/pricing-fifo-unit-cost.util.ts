@@ -1,7 +1,8 @@
+import { deriveDisplayUnitCost, roundDisplayMoney } from './product-cost-precision.util';
+
 /**
- * Authoritative HQ inventory layer unit cost:
- * layer total landed cost ÷ layer quantity.
- * Prefer movement.totalCostKgs / qty when the movement carries a positive total.
+ * Authoritative HQ inventory layer unit cost for display/storage:
+ * derived from layer total landed cost ÷ layer quantity (never round unit then multiply).
  */
 export function resolveUnitCostFromInventoryLayer(input: {
   quantity: number;
@@ -12,7 +13,7 @@ export function resolveUnitCostFromInventoryLayer(input: {
   if (qty <= 0) return 0;
   const total = Number(input.totalCostKgs ?? 0);
   if (total > 0) {
-    return Math.round((total / qty + Number.EPSILON) * 100) / 100;
+    return deriveDisplayUnitCost(total, qty);
   }
-  return Math.round((Number(input.unitCostKgs ?? 0) + Number.EPSILON) * 100) / 100;
+  return roundDisplayMoney(Number(input.unitCostKgs ?? 0));
 }
