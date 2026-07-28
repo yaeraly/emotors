@@ -27,7 +27,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
 type RequestItem = {
-  id: string;
+  id?: string;
   productId: string;
   sku: string;
   productName: string;
@@ -37,6 +37,7 @@ type RequestItem = {
   currentBranchStock: number;
   hqAvailableStock?: number | null;
   wholesalePriceKgs: number;
+  branchPurchasePriceKgs?: number;
   transportExpenseAllocation: number;
   estimatedUnitCost: number;
   totalAmount: number;
@@ -137,6 +138,34 @@ function emptyLine(): DraftLine {
   };
 }
 
+function linesFromRequest(request: BranchPurchaseRequest): DraftLine[] {
+  if (!request.items.length) return [emptyLine()];
+  return request.items.map((item) => {
+    const branchPrice =
+      item.branchPurchasePriceKgs != null && Number(item.branchPurchasePriceKgs) > 0
+        ? Number(item.branchPurchasePriceKgs)
+        : item.wholesalePriceKgs > 0
+          ? Number(item.wholesalePriceKgs)
+          : null;
+    return {
+      key: item.id ?? `${item.productId}-${Math.random()}`,
+      productId: item.productId,
+      productName: item.productName,
+      sku: item.sku,
+      unit: item.unit || 'pcs',
+      weightKg: item.weightKg ?? 0,
+      branchPurchasePriceKgs: branchPrice,
+      wholesalePriceKgs: branchPrice,
+      pricingPending: branchPrice == null,
+      priceResolving: false,
+      branchStock: item.currentBranchStock ?? 0,
+      hqStock: item.hqAvailableStock ?? null,
+      quantity: String(item.quantity),
+      note: item.note ?? '',
+    };
+  });
+}
+
 function isSubmittedStatus(status: string) {
   return status === 'SUBMITTED' || status === 'SUBMITTED_TO_HQ';
 }
@@ -199,6 +228,7 @@ export default function BranchPurchaseRequestsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
   const [form, setForm] = useState({
     branchId: '',
@@ -302,36 +332,115 @@ export default function BranchPurchaseRequestsPage() {
     setLines((current) => (current.length <= 1 ? current : current.filter((line) => line.key !== key)));
   }
 
-  function buildPayload(asDraft: boolean) {
+  function resetCreateForm() {
+    setEditingDraftId(null);
+    setLines([emptyLine()]);
+    setForm((current) => ({ ...current, note: '' }));
+    setShowForm(false);
+  }
+
+  function openNewRequestForm() {
+    setEditingDraftId(null);
+    setLines([emptyLine()]);
+    setForm((current) => ({ ...current, note: '' }));
+    setError('');
+    setShowForm(true);
+  }
+
+  function openDraftForEdit(request: BranchPurchaseRequest) {
+    if (request.status !== 'DRAFT') {
+      openRequest(request.id);
+      return;
+    }
+    setEditingDraftId(request.id);
+    setForm({
+      branchId: request.branchId,
+      branchWarehouseId: request.branchWarehouseId ?? form.branchWarehouseId,
+      note: request.note ?? '',
+    });
+    setLines(linesFromRequest(request));
+    setError('');
+    setSuccess('');
+    setShowForm(true);
+  }
+
+  function buildItemsPayload() {
     const validLines = lines.filter((line) => line.productId && Number(line.quantity) > 0);
     if (!validLines.length) {
       throw new Error(t('branchProductRequest.validation.productsRequired'));
     }
+    return validLines.map((line) => ({
+      productId: line.productId,
+      quantity: Number(line.quantity),
+      note: line.note || undefined,
+    }));
+  }
+
+  function buildPayload(asDraft: boolean) {
     return {
       branchId: form.branchId,
       branchWarehouseId: form.branchWarehouseId,
       note: form.note,
       status: asDraft ? 'DRAFT' : 'SUBMITTED_TO_HQ',
-      items: validLines.map((line) => ({
-        productId: line.productId,
-        quantity: Number(line.quantity),
-        note: line.note || undefined,
-      })),
+      items: buildItemsPayload(),
     };
+  }
+
+  function buildUpdatePayload() {
+    return {
+      branchWarehouseId: form.branchWarehouseId,
+      note: form.note,
+      items: buildItemsPayload(),
+    };
+  }
+
+  async function saveDraftChanges(event: FormEvent) {
+    event.preventDefault();
+    if (!editingDraftId) return;
+    setError('');
+    try {
+      const payload = buildUpdatePayload();
+      await apiFetch(`/branch-purchase-requests/${editingDraftId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      setSuccess(t('branchProductRequest.saveChangesSuccess'));
+      await load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(localizeBranchRequestError(message));
+    }
   }
 
   async function submitRequest(event: FormEvent, asDraft = false) {
     event.preventDefault();
     setError('');
     try {
+      if (editingDraftId) {
+        const payload = buildUpdatePayload();
+        await apiFetch(`/branch-purchase-requests/${editingDraftId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+        if (asDraft) {
+          setSuccess(t('branchProductRequest.saveChangesSuccess'));
+          await load();
+          return;
+        }
+        await apiFetch(`/branch-purchase-requests/${editingDraftId}/submit`, { method: 'POST' });
+        setSuccess(t('distribution.branchOrderSubmitted'));
+        resetCreateForm();
+        await load();
+        return;
+      }
+
       const payload = buildPayload(asDraft);
       await apiFetch('/branch-purchase-requests', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
       setSuccess(asDraft ? t('distribution.saveDraft') : t('distribution.branchOrderSubmitted'));
-      setShowForm(false);
-      setLines([emptyLine()]);
+      resetCreateForm();
       await load();
     } catch (err) {
       const message = err instanceof Error ? err.message : t('common.error');
@@ -438,10 +547,18 @@ export default function BranchPurchaseRequestsPage() {
     router.push(detailHref(requestId));
   }
 
-  function handleOrderRowKeyDown(event: KeyboardEvent, requestId: string) {
+  function handleRequestRowActivate(request: BranchPurchaseRequest) {
+    if (request.status === 'DRAFT' && canCreate) {
+      openDraftForEdit(request);
+      return;
+    }
+    openRequest(request.id);
+  }
+
+  function handleOrderRowKeyDown(event: KeyboardEvent, request: BranchPurchaseRequest) {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      openRequest(requestId);
+      handleRequestRowActivate(request);
     }
   }
   const draftProductIds = lines
@@ -604,6 +721,12 @@ export default function BranchPurchaseRequestsPage() {
 
         {showForm ? (
           <form onSubmit={(event) => event.preventDefault()} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            {editingDraftId ? (
+              <p className="text-sm font-semibold text-slate-600">
+                {t('branchProductRequest.editingDraft')}:{' '}
+                {requests.find((row) => row.id === editingDraftId)?.requestNumber ?? editingDraftId}
+              </p>
+            ) : null}
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">{t('distribution.branch')}</span>
@@ -753,8 +876,14 @@ export default function BranchPurchaseRequestsPage() {
 
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={(event) => void submitRequest(event, false)} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('distribution.submitOrder')}</button>
-              <button type="button" onClick={(event) => void submitRequest(event, true)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('distribution.saveDraft')}</button>
-              <button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
+              {editingDraftId ? (
+                <button type="button" onClick={(event) => void saveDraftChanges(event)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">
+                  {t('branchProductRequest.saveChanges')}
+                </button>
+              ) : (
+                <button type="button" onClick={(event) => void submitRequest(event, true)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('distribution.saveDraft')}</button>
+              )}
+              <button type="button" onClick={() => resetCreateForm()} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
             </div>
           </form>
         ) : null}
@@ -813,8 +942,8 @@ export default function BranchPurchaseRequestsPage() {
                 return (
                 <tr
                   key={request.id}
-                  onClick={() => openRequest(request.id)}
-                  onKeyDown={(event) => handleOrderRowKeyDown(event, request.id)}
+                  onClick={() => handleRequestRowActivate(request)}
+                  onKeyDown={(event) => handleOrderRowKeyDown(event, request)}
                   tabIndex={0}
                   role="link"
                   title={hqSalesView ? hqOrderRowHint(t, request.status) : undefined}
@@ -866,9 +995,19 @@ export default function BranchPurchaseRequestsPage() {
                   {!hqSalesView ? (
                   <td className={hqTdClass(hqSalesView)} onClick={(event) => event.stopPropagation()}>
                     <div className="flex flex-wrap gap-2">
-                      <Link href={detailHref(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
+                      {request.status === 'DRAFT' && canCreate ? (
+                        <button
+                          type="button"
+                          onClick={() => openDraftForEdit(request)}
+                          className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold"
+                        >
+                          {t('common.open')}
+                        </button>
+                      ) : (
+                        <Link href={detailHref(request.id)} className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold">
+                          {t('common.open')}
+                        </Link>
+                      )}
                       {canCreate && request.status === 'DRAFT' ? (
                         <>
                           <button type="button" onClick={() => void submitDraft(request.id)} className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white">{t('distribution.submitOrder')}</button>
@@ -911,7 +1050,7 @@ export default function BranchPurchaseRequestsPage() {
         <HqSalesBranchOrdersSection
           actions={
             canCreate && !showForm ? (
-              <button type="button" onClick={() => setShowForm(true)} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
+              <button type="button" onClick={() => openNewRequestForm()} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
                 {t('branchProductRequest.newRequest')}
               </button>
             ) : null
@@ -929,7 +1068,7 @@ export default function BranchPurchaseRequestsPage() {
               </h2>
             </div>
             {canCreate && !showForm ? (
-              <button type="button" onClick={() => setShowForm(true)} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
+              <button type="button" onClick={() => openNewRequestForm()} className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white">
                 {t('branchProductRequest.newRequest')}
               </button>
             ) : null}
