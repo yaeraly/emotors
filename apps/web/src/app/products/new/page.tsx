@@ -278,6 +278,18 @@ export default function NewProductPage() {
             allowClear={false}
             required
           />
+          <EntityCombobox
+            label={t('procurement.orders.supplier')}
+            value={form.defaultSupplierId}
+            options={supplierOptions}
+            onChange={(value) => setField('defaultSupplierId', value)}
+          />
+          <EntityCombobox
+            label={t('procurement.orders.factory')}
+            value={form.defaultFactoryId}
+            options={factoryOptions}
+            onChange={(value) => setField('defaultFactoryId', value)}
+          />
           <Input
             label={t('inventory.weightPerUnitKg')}
             type="number"
@@ -295,18 +307,6 @@ export default function NewProductPage() {
               onChange={(value) => setField('purchasePriceYuan', value)}
             />
           ) : null}
-          <EntityCombobox
-            label={t('procurement.orders.supplier')}
-            value={form.defaultSupplierId}
-            options={supplierOptions}
-            onChange={(value) => setField('defaultSupplierId', value)}
-          />
-          <EntityCombobox
-            label={t('procurement.orders.factory')}
-            value={form.defaultFactoryId}
-            options={factoryOptions}
-            onChange={(value) => setField('defaultFactoryId', value)}
-          />
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">{t('common.status')}</span>
             <select
