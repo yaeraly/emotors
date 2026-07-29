@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { CenteredDialog } from '@/components/CenteredDialog';
 import { apiFetch } from '@/lib/api';
+import { shouldHideCustomerProfit } from '@/lib/rbac';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 import type {
@@ -17,6 +18,7 @@ import type {
   PurchaseHistoryRow,
   ServiceHistory,
   TimelineEntry,
+  User,
 } from '@/lib/types';
 
 const eventTypes: CustomerEventType[] = [
@@ -76,10 +78,10 @@ export default function CustomerDetailPage() {
   const [activeDialog, setActiveDialog] = useState<'reminder' | 'event' | 'whatsapp' | null>(
     null,
   );
-  const [currentUser, setCurrentUser] = useState<{ role: string; roles?: string[]; branchId?: string | null } | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
-    void apiFetch<{ role: string; roles?: string[]; branchId?: string | null }>('/auth/me')
+    void apiFetch<User>('/auth/me')
       .then(setCurrentUser)
       .catch(() => null);
     void loadDetail();
@@ -190,6 +192,7 @@ export default function CustomerDetailPage() {
   }
 
   const canEditProfile = Boolean(currentUser);
+  const hideCustomerProfit = shouldHideCustomerProfit(currentUser);
 
   return (
     <ProtectedShell>
@@ -355,7 +358,9 @@ export default function CustomerDetailPage() {
                     label={t('crm.totalPurchaseAmount')}
                     value={customer.totalPurchases}
                   />
-                  <Amount label={t('crm.totalProfitAmount')} value={customer.totalProfit} />
+                  {!hideCustomerProfit ? (
+                    <Amount label={t('crm.totalProfitAmount')} value={customer.totalProfit} />
+                  ) : null}
                   <Amount label={t('crm.totalDebtAmount')} value={customer.totalDebt} />
                   <Amount
                     label={t('sales.paidAmount')}
@@ -401,7 +406,7 @@ export default function CustomerDetailPage() {
                       <th className="px-4 py-3">Products</th>
                       <th className="px-4 py-3">Quantity</th>
                       <th className="px-4 py-3">Total Amount</th>
-                      <th className="px-4 py-3">Profit</th>
+                      {!hideCustomerProfit ? <th className="px-4 py-3">Profit</th> : null}
                       <th className="px-4 py-3">{t('common.status')}</th>
                     </tr>
                   </thead>
@@ -409,7 +414,7 @@ export default function CustomerDetailPage() {
                     {purchaseHistory.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={hideCustomerProfit ? 6 : 7}
                           className="px-4 py-8 text-center text-slate-500"
                         >
                           {t('crm.noPurchaseRows')}
@@ -431,9 +436,11 @@ export default function CustomerDetailPage() {
                           <td className="px-4 py-3">
                             {formatKgs(purchase.totalAmount)}
                           </td>
-                          <td className="px-4 py-3">
-                            {formatKgs(purchase.profit)}
-                          </td>
+                          {!hideCustomerProfit ? (
+                            <td className="px-4 py-3">
+                              {formatKgs(purchase.profit)}
+                            </td>
+                          ) : null}
                           <td className="px-4 py-3">
                             {t(`paymentStatus.${purchase.paymentStatus}`)}
                           </td>

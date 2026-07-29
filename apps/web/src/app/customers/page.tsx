@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer, canCreateCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canArchiveCustomer, canCreateCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser, shouldHideCustomerProfit } from '@/lib/rbac';
 import {
   getCustomerListColumns,
   shouldShowCustomerListEditButton,
@@ -118,6 +118,7 @@ function CustomersPageContent() {
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchOwnerView = isBranchOwnerUser(currentUser);
+  const hideCustomerProfit = shouldHideCustomerProfit(currentUser);
   const usesRouteArchiveNav = branchSalesManagerView || branchOwnerView;
   const visibleColumns = getCustomerListColumns(currentUser);
   const showListEditButton = shouldShowCustomerListEditButton(currentUser) && !archiveView;
@@ -903,6 +904,7 @@ function CustomersPageContent() {
         {selectedCustomer ? (
           <CustomerProfileDrawer
             customer={selectedCustomer}
+            hideProfit={hideCustomerProfit}
             onClose={() => setSelectedCustomer(null)}
           />
         ) : null}
@@ -981,9 +983,11 @@ function CustomersPageContent() {
 
 function CustomerProfileDrawer({
   customer,
+  hideProfit,
   onClose,
 }: {
   customer: Customer;
+  hideProfit: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -1030,7 +1034,9 @@ function CustomerProfileDrawer({
         <Panel title={t('crm.financialSummary')}>
           <div className="grid gap-3 md:grid-cols-2">
             <Metric label={t('crm.totalPurchaseAmount')} value={formatKgs(customer.totalPurchases)} />
-            <Metric label={t('crm.totalProfitAmount')} value={formatKgs(customer.totalProfit)} />
+            {!hideProfit ? (
+              <Metric label={t('crm.totalProfitAmount')} value={formatKgs(customer.totalProfit)} />
+            ) : null}
             <Metric label={t('crm.totalDebtAmount')} value={formatKgs(customer.totalDebt)} />
             <Metric label={t('sales.paidAmount')} value={formatKgs(totalPayments)} />
             <Metric label="Average Order Value" value={formatKgs(averageOrderValue)} />

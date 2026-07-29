@@ -407,6 +407,13 @@ export function shouldHideSaleProfitColumn(
   return isBranchSalesManagerUser(user) || isBranchCashierUser(user);
 }
 
+/** Branch Sales must not see customer profit on the Clients (Клиенты) pages. */
+export function shouldHideCustomerProfit(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  return isBranchSalesManagerUser(user);
+}
+
 /** Branch Cashier must not see product cost or sale profit anywhere in the panel. */
 export function canViewCostAndProfit(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,

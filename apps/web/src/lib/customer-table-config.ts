@@ -28,7 +28,16 @@ const hqColumns: CustomerListColumnKey[] = [
   'actions',
 ];
 
-const branchScopedColumns: CustomerListColumnKey[] = [
+const branchSalesColumns: CustomerListColumnKey[] = [
+  'fullName',
+  'status',
+  'totalPurchases',
+  'totalDebt',
+  'createdAt',
+  'actions',
+];
+
+const branchOwnerColumns: CustomerListColumnKey[] = [
   'fullName',
   'status',
   'totalPurchases',
@@ -41,8 +50,11 @@ const branchScopedColumns: CustomerListColumnKey[] = [
 export function getCustomerListColumns(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ): CustomerListColumnKey[] {
-  if (isBranchOwnerUser(user) || isBranchSalesManagerUser(user)) {
-    return branchScopedColumns;
+  if (isBranchSalesManagerUser(user)) {
+    return branchSalesColumns;
+  }
+  if (isBranchOwnerUser(user)) {
+    return branchOwnerColumns;
   }
   return hqColumns;
 }
