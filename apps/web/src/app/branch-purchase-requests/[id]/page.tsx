@@ -528,7 +528,7 @@ export default function BranchPurchaseRequestDetailPage() {
             {canCreate && request.status === 'PENDING_BRANCH_CONFIRMATION' ? (
               <>
                 <button type="button" disabled={submitting} onClick={() => void confirmBranchOrder()} className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
-                  {t('branchProductRequest.confirmOrder')}
+                  {submitting ? t('common.loading') : t('branchProductRequest.confirmOrder')}
                 </button>
                 <button type="button" disabled={submitting} onClick={() => void declineBranchOrder()} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 disabled:opacity-60">
                   {t('branchProductRequest.declineOrder')}
