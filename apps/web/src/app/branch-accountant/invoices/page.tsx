@@ -1,12 +1,22 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
 import { translateStatus } from '@/lib/translate-status';
 import type { AccountantInvoiceWorkflowStatus, BranchAccountantInvoice } from '@/lib/types';
+
+type PendingConfirmedOrder = {
+  id: string;
+  requestNumber: string;
+  branchConfirmedAt: string | null;
+  totalEstimatedAmount: number;
+  itemCount: number;
+  distributionOrderId: string | null;
+  orderNumber: string | null;
+};
 
 const workflowStatuses: AccountantInvoiceWorkflowStatus[] = [
   'PENDING_ACCOUNTANT_REVIEW',
@@ -24,7 +34,10 @@ export default function BranchAccountantInvoicesPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<BranchAccountantInvoice[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<PendingConfirmedOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingLoading, setPendingLoading] = useState(true);
+  const [creatingInvoiceFor, setCreatingInvoiceFor] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({
     search: '',
@@ -46,12 +59,40 @@ export default function BranchAccountantInvoicesPage() {
   }, [filters]);
 
   useEffect(() => {
+    setPendingLoading(true);
+    apiFetch<PendingConfirmedOrder[]>('/branch-accountant/pending-orders')
+      .then(setPendingOrders)
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
+      .finally(() => setPendingLoading(false));
+  }, [t]);
+
+  useEffect(() => {
     setLoading(true);
     apiFetch<BranchAccountantInvoice[]>(`/branch-accountant/invoices${query}`)
       .then(setInvoices)
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
   }, [query, t]);
+
+  const handleCreateInvoice = useCallback(
+    async (requestId: string) => {
+      setCreatingInvoiceFor(requestId);
+      setError('');
+      try {
+        const invoice = await apiFetch<BranchAccountantInvoice>(
+          `/branch-accountant/pending-orders/${requestId}/create-invoice`,
+          { method: 'POST' },
+        );
+        setPendingOrders((rows) => rows.filter((row) => row.id !== requestId));
+        router.push(`/branch-accountant/invoices/${invoice.id}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('common.error'));
+      } finally {
+        setCreatingInvoiceFor(null);
+      }
+    },
+    [router, t],
+  );
 
   return (
     <ProtectedShell>
@@ -62,6 +103,56 @@ export default function BranchAccountantInvoicesPage() {
         </div>
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+
+        <div className="overflow-hidden rounded-3xl border border-amber-200 bg-amber-50/60 shadow-sm">
+          <div className="border-b border-amber-200 px-5 py-4">
+            <h3 className="text-lg font-bold text-amber-950">{t('branchAccountant.pendingOrdersTitle')}</h3>
+            <p className="mt-1 text-sm text-amber-900/80">{t('branchAccountant.pendingOrdersDescription')}</p>
+          </div>
+          {pendingLoading ? (
+            <p className="p-6 text-center text-sm text-amber-900/70">{t('common.loading')}</p>
+          ) : pendingOrders.length === 0 ? (
+            <p className="p-6 text-center text-sm text-amber-900/70">{t('branchAccountant.pendingOrdersEmpty')}</p>
+          ) : (
+            <table className="min-w-full divide-y divide-amber-200 text-sm">
+              <thead className="bg-amber-100/60 text-left text-xs font-bold uppercase tracking-wide text-amber-900/70">
+                <tr>
+                  <th className="px-4 py-3">{t('branchAccountant.orderNo')}</th>
+                  <th className="px-4 py-3">{t('branchAccountant.date')}</th>
+                  <th className="px-4 py-3">{t('branchAccountant.positions')}</th>
+                  <th className="px-4 py-3">{t('branchAccountant.amount')}</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-amber-100 bg-white/80">
+                {pendingOrders.map((order) => (
+                  <tr key={order.id}>
+                    <td className="px-4 py-3 font-bold">{order.requestNumber}</td>
+                    <td className="px-4 py-3">
+                      {order.branchConfirmedAt
+                        ? new Date(order.branchConfirmedAt).toLocaleDateString()
+                        : '—'}
+                    </td>
+                    <td className="px-4 py-3">{order.itemCount}</td>
+                    <td className="px-4 py-3">{formatKgs(order.totalEstimatedAmount)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        disabled={creatingInvoiceFor === order.id}
+                        onClick={() => handleCreateInvoice(order.id)}
+                        className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+                      >
+                        {creatingInvoiceFor === order.id
+                          ? t('common.loading')
+                          : t('branchAccountant.createInvoice')}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
 
         <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-5">
           <input

@@ -592,7 +592,12 @@ export function canRequestBranchOrderInstallment(user: Pick<AuthUser, 'role' | '
 
 export function canApproveBranchOrderInstallment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
-  return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO) || roles.includes(Role.OWNER);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.CEO) ||
+    roles.includes(Role.OWNER) ||
+    roles.includes(Role.FINANCE_MANAGER)
+  );
 }
 
 export function canRecordDistributionPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

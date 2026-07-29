@@ -1,6 +1,7 @@
 import { BranchPurchaseRequestStatus } from '@prisma/client';
 import { canManageOwnBranchProductRequest } from '../rbac/rbac';
 import type { AuthUser } from '../auth/auth.types';
+import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 
 export function canSeeHqStockInBranchRequests(user: AuthUser, canViewAll: boolean) {
   return canViewAll;
@@ -44,7 +45,12 @@ export function resolveBranchDisplayStatus(
   if (status === BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION) {
     return 'PENDING_BRANCH_CONFIRMATION';
   }
-  if (status === BranchPurchaseRequestStatus.BRANCH_CONFIRMED) return 'INVOICE_CREATED';
+  const workflowLabel = resolveBranchPurchaseWorkflowLabel(status);
+  if (workflowLabel === 'WAITING_FOR_BRANCH_ACCOUNTANT') return 'WAITING_FOR_BRANCH_ACCOUNTANT';
+  if (workflowLabel === 'WAITING_FOR_BRANCH_PAYMENT') return 'WAITING_FOR_PAYMENT';
+  if (workflowLabel === 'WAITING_FOR_INSTALLMENT_APPROVAL') return 'INSTALLMENT_REQUESTED';
+  if (workflowLabel === 'WAITING_FOR_HQ_ACCOUNTANT_CONFIRMATION') return 'PAYMENT_SUBMITTED';
+  if (status === BranchPurchaseRequestStatus.BRANCH_CONFIRMED) return 'WAITING_FOR_BRANCH_ACCOUNTANT';
   if (status === BranchPurchaseRequestStatus.BRANCH_DECLINED) return 'BRANCH_DECLINED';
   if (status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE) return 'READY_FOR_HQ_WAREHOUSE';
   if (status === BranchPurchaseRequestStatus.PENDING_PAYMENT) return 'WAITING_FOR_PAYMENT';

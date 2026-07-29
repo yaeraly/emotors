@@ -2427,8 +2427,15 @@ export class DistributionService {
         nextStatus = BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL;
         break;
       case 'INSTALLMENT_APPROVED':
-        nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
-        break;
+        await this.hqStockBookingService.extendBookingsAfterPayment(linkedRequest.id, tx);
+        await this.promoteBranchRequestToReadyForWarehouse(
+          tx,
+          user,
+          linkedRequest,
+          distributionOrderId,
+          'INSTALLMENT_APPROVED',
+        );
+        return;
       case 'INSTALLMENT_REJECTED':
         nextStatus = BranchPurchaseRequestStatus.PENDING_PAYMENT;
         break;
@@ -2461,7 +2468,53 @@ export class DistributionService {
           },
         },
       });
+      await this.promoteBranchRequestToReadyForWarehouse(tx, user, linkedRequest, distributionOrderId, 'FULL_PAYMENT');
+      return;
     }
+  }
+
+  private async promoteBranchRequestToReadyForWarehouse(
+    tx: PrismaTx,
+    user: AuthUser,
+    linkedRequest: { id: string; branchId: string; status: BranchPurchaseRequestStatus },
+    distributionOrderId: string,
+    reason: 'FULL_PAYMENT' | 'INSTALLMENT_APPROVED',
+  ) {
+    if (linkedRequest.status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE) {
+      return;
+    }
+
+    await tx.branchPurchaseRequest.update({
+      where: { id: linkedRequest.id },
+      data: { status: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE',
+        entity: 'BranchPurchaseRequest',
+        entityId: linkedRequest.id,
+        metadata: {
+          distributionOrderId,
+          reason,
+          oldStatus: linkedRequest.status,
+          newStatus: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
+
+    await this.createWorkflowAlert(tx, user, {
+      branchId: linkedRequest.branchId,
+      type: AlertType.BRANCH_ORDER_READY_FOR_WAREHOUSE,
+      title: 'Заказ готов к комплектации на складе HQ',
+      message: 'Финансовое согласование завершено. Заказ готов к комплектации на складе HQ.',
+      entityType: 'BranchPurchaseRequest',
+      entityId: linkedRequest.id,
+      recipientRoles: [Role.WAREHOUSE_MANAGER],
+    });
   }
 
   async requestInvoiceInstallment(user: AuthUser, invoiceId: string, dto: RequestBranchInstallmentDto) {
@@ -2537,7 +2590,7 @@ export class DistributionService {
         message: `Филиал запросил рассрочку по счёту ${invoice.invoiceNumber}`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
-        recipientRoles: [Role.CEO, Role.OWNER],
+        recipientRoles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER],
       });
 
       const updated = await tx.branchInvoice.findUniqueOrThrow({
@@ -2595,7 +2648,7 @@ export class DistributionService {
         branchId: invoice.branchId,
         type: AlertType.BRANCH_INSTALLMENT_APPROVED,
         title: 'Рассрочка утверждена',
-        message: `CEO утвердил рассрочку по счёту ${invoice.invoiceNumber}`,
+        message: `Рассрочка по счёту ${invoice.invoiceNumber} утверждена`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
         recipientRoles: [Role.ACCOUNTANT, Role.MANAGER],

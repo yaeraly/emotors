@@ -98,6 +98,124 @@ export class BranchAccountantService {
     return this.attachLinkedRequest(invoice);
   }
 
+  async listPendingConfirmedOrders(user: AuthUser) {
+    this.assertBranchAccountant(user);
+    const requests = await this.prisma.branchPurchaseRequest.findMany({
+      where: {
+        branchId: user.branchId!,
+        deletedAt: null,
+        status: 'BRANCH_CONFIRMED',
+        convertedOrderId: { not: null },
+      },
+      include: { items: true },
+      orderBy: { branchConfirmedAt: 'desc' },
+    });
+
+    const orderIds = requests.map((r) => r.convertedOrderId!).filter(Boolean);
+    const orders = orderIds.length
+      ? await this.prisma.branchDistributionOrder.findMany({
+          where: { id: { in: orderIds }, deletedAt: null },
+          include: {
+            branchInvoices: {
+              where: { deletedAt: null, invoiceCategory: 'PRODUCT_ORDER' },
+              select: { id: true, invoiceNumber: true, sentToBranchAt: true },
+            },
+          },
+        })
+      : [];
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+
+    return requests
+      .filter((request) => {
+        const order = request.convertedOrderId ? orderById.get(request.convertedOrderId) : null;
+        if (!order || order.status !== 'DRAFT') return false;
+        const invoice = order.branchInvoices?.[0];
+        return !invoice?.sentToBranchAt;
+      })
+      .map((request) => {
+        const order = request.convertedOrderId ? orderById.get(request.convertedOrderId) : null;
+        return {
+          id: request.id,
+          requestNumber: request.requestNumber,
+          branchConfirmedAt: request.branchConfirmedAt,
+          totalEstimatedAmount: Number(request.totalEstimatedAmount ?? 0),
+          itemCount: request.items.length,
+          distributionOrderId: request.convertedOrderId,
+          orderNumber: order?.orderNumber ?? null,
+        };
+      });
+  }
+
+  async createInvoiceFromConfirmedOrder(user: AuthUser, requestId: string) {
+    this.assertBranchAccountant(user);
+
+    const request = await this.prisma.branchPurchaseRequest.findFirst({
+      where: {
+        id: requestId,
+        deletedAt: null,
+        branchId: user.branchId!,
+        status: 'BRANCH_CONFIRMED',
+      },
+    });
+    if (!request?.convertedOrderId) {
+      throw new NotFoundException('Согласованный заказ не найден');
+    }
+
+    const order = await this.prisma.branchDistributionOrder.findFirst({
+      where: { id: request.convertedOrderId, deletedAt: null, branchId: user.branchId! },
+      include: { branchInvoices: { where: { deletedAt: null } } },
+    });
+    if (!order) throw new NotFoundException('Заказ распределения не найден');
+    if (order.status !== 'DRAFT') {
+      throw new BadRequestException('Счёт по этому заказу уже создан');
+    }
+
+    const existingProductInvoice = order.branchInvoices?.find(
+      (row) => !row.invoiceCategory || row.invoiceCategory === 'PRODUCT_ORDER',
+    );
+    if (existingProductInvoice?.sentToBranchAt) {
+      throw new BadRequestException('Счёт уже доступен бухгалтеру');
+    }
+
+    await this.distributionService.approve(user, order.id, {
+      skipStockReservation: true,
+      skipPermissionCheck: true,
+    });
+    await this.distributionService.sendInvoice(user, order.id, { skipPermissionCheck: true });
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'BRANCH_INVOICE_CREATED_BY_ACCOUNTANT',
+        entity: 'BranchPurchaseRequest',
+        entityId: request.id,
+        metadata: {
+          branchId: request.branchId,
+          distributionOrderId: order.id,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
+
+    const invoice = await this.prisma.branchInvoice.findFirst({
+      where: {
+        distributionOrderId: order.id,
+        deletedAt: null,
+        invoiceCategory: 'PRODUCT_ORDER',
+      },
+    });
+    if (!invoice) throw new NotFoundException('Счёт не создан');
+
+    const enriched = await this.attachLinkedRequest(
+      await this.prisma.branchInvoice.findFirstOrThrow({
+        where: { id: invoice.id },
+        include: this.invoiceInclude(),
+      }),
+    );
+    return sanitizeAccountantInvoice(enriched);
+  }
+
   async listInvoices(user: AuthUser, query: BranchAccountantInvoiceQueryDto) {
     this.assertBranchAccountant(user);
     const where: Prisma.BranchInvoiceWhereInput = {

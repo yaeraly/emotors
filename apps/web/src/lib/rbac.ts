@@ -1534,7 +1534,7 @@ export function canRequestBranchOrderInstallment(user: Pick<User, 'role' | 'role
 
 export function canApproveBranchOrderInstallment(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
-  return hasFullAccess(user) || hasRole(user, 'CEO') || hasRole(user, 'OWNER');
+  return hasFullAccess(user) || hasRole(user, 'CEO') || hasRole(user, 'OWNER') || hasRole(user, 'FINANCE_MANAGER');
 }
 
 export function canManageBranchPurchaseRequests(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

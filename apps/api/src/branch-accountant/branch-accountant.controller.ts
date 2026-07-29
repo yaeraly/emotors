@@ -22,6 +22,18 @@ export class BranchAccountantController {
     return this.service.listInvoices(user, query);
   }
 
+  @Get('pending-orders')
+  @Roles(Role.ACCOUNTANT)
+  listPendingOrders(@CurrentUser() user: AuthUser) {
+    return this.service.listPendingConfirmedOrders(user);
+  }
+
+  @Post('pending-orders/:requestId/create-invoice')
+  @Roles(Role.ACCOUNTANT)
+  createInvoiceFromOrder(@CurrentUser() user: AuthUser, @Param('requestId') requestId: string) {
+    return this.service.createInvoiceFromConfirmedOrder(user, requestId);
+  }
+
   @Get('invoices/:id')
   @Roles(Role.ACCOUNTANT, Role.OWNER, Role.CEO)
   getInvoice(@CurrentUser() user: AuthUser, @Param('id') id: string) {

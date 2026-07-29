@@ -1103,7 +1103,7 @@ export class OperationsService {
       throw new BadRequestException('Заказ не ожидает согласования филиалом');
     }
     if (existing.convertedOrderId) {
-      throw new BadRequestException('Invoice already created for this request');
+      throw new BadRequestException('Order already confirmed and linked to distribution');
     }
 
     const hasApprovedLines = existing.items.some((item) => (item.approvedQuantity ?? 0) > 0);
@@ -1281,29 +1281,31 @@ export class OperationsService {
 
       await this.auditInTx(tx, user, existing.branchId, 'BRANCH_ORDER_CONFIRMED', 'BranchPurchaseRequest', existing.id, {
         distributionOrderId: createdOrder.id,
+        workflowStage: 'WAITING_FOR_BRANCH_ACCOUNTANT',
       });
 
       return { request, createdOrder };
     });
 
-    const approvedOrder = await this.distributionService.approve(user, result.createdOrder.id, {
-      skipStockReservation: true,
-      skipPermissionCheck: true,
+    await this.notificationsService.notify(user, {
+      type: AlertType.BRANCH_ORDER_APPROVED,
+      branchId: existing.branchId,
+      entityType: 'BranchPurchaseRequest',
+      entityId: existing.id,
+      referenceNumber: existing.requestNumber,
+      title: 'Филиал согласовал заказ',
+      message: `Филиал согласовал заказ ${existing.requestNumber}. Требуется выставление счёта.`,
+      recipientRoles: [Role.HQ_SALES_MANAGER],
     });
-    await this.distributionService.sendInvoice(user, result.createdOrder.id, { skipPermissionCheck: true });
-
     await this.notificationsService.notify(user, {
       type: AlertType.BRANCH_INVOICE_CREATED,
       branchId: existing.branchId,
-      entityType: 'BranchInvoice',
-      entityId: approvedOrder.branchInvoice?.id ?? result.createdOrder.id,
+      entityType: 'BranchPurchaseRequest',
+      entityId: existing.id,
       referenceNumber: existing.requestNumber,
-      title: 'Новый счёт на оплату',
-      message: `Новый счет на оплату №${approvedOrder.branchInvoice?.invoiceNumber ?? existing.requestNumber}`,
+      title: 'Создайте счёт по заказу',
+      message: `Заказ ${existing.requestNumber} согласован филиалом. Создайте счёт и передадите кассиру.`,
       recipientRoles: [Role.ACCOUNTANT],
-    });
-    await this.auditBranchRequest(user, existing.branchId, 'BRANCH_INVOICE_CREATED', 'BranchPurchaseRequest', existing.id, {
-      distributionOrderId: result.createdOrder.id,
     });
 
     return result.request;
@@ -1378,12 +1380,23 @@ export class OperationsService {
 
     return this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.extendBookingsAfterPayment(request.id, tx);
-      return tx.branchPurchaseRequest.update({
+      const updated = await tx.branchPurchaseRequest.update({
         where: { id: request.id },
         data: {
-          status: BranchPurchaseRequestStatus.PAYMENT_CONFIRMED,
+          status: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE,
         },
       });
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_ORDER_PAYMENT_CONFIRMED',
+          entity: 'BranchPurchaseRequest',
+          entityId: request.id,
+          metadata: { roles: user.roles ?? [user.role] },
+        },
+      });
+      return updated;
     });
   }
 
@@ -1521,10 +1534,9 @@ export class OperationsService {
     if (!request) throw new NotFoundException('Branch purchase request not found');
     await this.assertBranchPurchaseRequestAccess(user, request);
     if (
-      request.status !== BranchPurchaseRequestStatus.PAYMENT_CONFIRMED &&
       request.status !== BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE
     ) {
-      throw new BadRequestException('Order must be paid and financially cleared before HQ warehouse fulfillment');
+      throw new BadRequestException('Order must be financially cleared before HQ warehouse fulfillment');
     }
 
     const hasApprovedLines = request.items.some((item) => (item.approvedQuantity ?? 0) > 0);
@@ -1551,8 +1563,7 @@ export class OperationsService {
 
     if (
       request.convertedOrderId &&
-      (request.status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE ||
-        request.status === BranchPurchaseRequestStatus.PAYMENT_CONFIRMED)
+      request.status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE
     ) {
       if (!assignedWarehouseManagerId && !dto.confirmNoManager && !hasAnyFullAccessRole(resolveUserRoles(user))) {
         throw new BadRequestException(NO_HQ_WAREHOUSE_MANAGER_ASSIGNED);
