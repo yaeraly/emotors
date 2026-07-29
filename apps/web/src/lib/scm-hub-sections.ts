@@ -16,6 +16,12 @@ export const hqWarehouseHubSections: ModuleSectionLink[] = [
   { href: '/hq-warehouses', labelKey: 'scm.hub.hqWarehouses.history' },
 ];
 
+/** Branch Sales «Заказ товаров» hub — existing routes only. */
+export const branchSalesDistributionHubSections: ModuleSectionLink[] = [
+  { href: '/branch-purchase-requests', labelKey: 'nav.distributionBranchRequests' },
+  { href: '/branch-manager/shipments', labelKey: 'branchManager.incomingShipments' },
+];
+
 export const distributionHubSections: ModuleSectionLink[] = [
   { href: '/branch-purchase-requests', labelKey: 'scm.hub.distribution.branchOrders' },
   { href: '/distribution/orders', labelKey: 'scm.hub.distribution.shipmentOrders' },
