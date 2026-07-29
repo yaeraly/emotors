@@ -1463,6 +1463,8 @@ model User {
   rejectedInventoryCounts                         InventoryCountSession[]             @relation("InventoryCountRejecter")
   createdProcurementDifferenceReports             ProcurementDifferenceReport[]       @relation("ProcurementDifferenceReportCreator")
   chinaReceivingDraftRowsSaved                    ChinaReceivingDraftRow[]            @relation("ChinaReceivingDraftRowSaver")
+  branchDistributionReceivingDraftRowsSaved       BranchDistributionReceivingDraftRow[] @relation("BranchDistributionReceivingDraftRowSaver")
+  branchDistributionReceivingDiscrepanciesCreated BranchDistributionReceivingDiscrepancy[] @relation("BranchDistributionReceivingDiscrepancyCreator")
   chinaReceivingEditSessions                      ChinaReceivingEditSession[]         @relation("ChinaReceivingEditSessionUser")
   createdPricingPolicies                          ProductPricingPolicy[]              @relation("PricingPolicyCreator")
   updatedPricingPolicies                          ProductPricingPolicy[]              @relation("PricingPolicyUpdater")
@@ -3626,6 +3628,8 @@ model BranchDistributionOrder {
   branchInvoices              BranchInvoice[]
   pickingTask                 HqWarehousePickingTask?
   stockBookings               HqStockBooking[]
+  receivingDraftRows          BranchDistributionReceivingDraftRow[]
+  receivingDiscrepancies      BranchDistributionReceivingDiscrepancy[]
   createdAt                   DateTime                      @default(now())
   updatedAt                   DateTime                      @updatedAt
   deletedAt                   DateTime?
@@ -3637,6 +3641,61 @@ model BranchDistributionOrder {
   @@index([createdById])
   @@index([approvedById])
   @@index([pricingPolicyVersionId])
+}
+
+model BranchDistributionReceivingDraftRow {
+  id                      String                      @id @default(cuid())
+  distributionOrderId     String
+  distributionOrder       BranchDistributionOrder     @relation(fields: [distributionOrderId], references: [id], onDelete: Cascade)
+  distributionOrderItemId String
+  distributionOrderItem   BranchDistributionOrderItem @relation(fields: [distributionOrderItemId], references: [id], onDelete: Cascade)
+  productId               String
+  branchId                String
+  acceptedQuantity        Int
+  damagedQuantity         Int                         @default(0)
+  missingQuantity         Int                         @default(0)
+  note                    String?
+  isSaved                 Boolean                     @default(false)
+  isChecked               Boolean                     @default(false)
+  lastSavedAt             DateTime?
+  lastSavedById           String?
+  lastSavedBy             User?                       @relation("BranchDistributionReceivingDraftRowSaver", fields: [lastSavedById], references: [id])
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+
+  @@unique([distributionOrderId, distributionOrderItemId])
+  @@unique([distributionOrderItemId])
+  @@index([distributionOrderId])
+  @@index([distributionOrderItemId])
+  @@index([productId])
+  @@index([branchId])
+  @@index([lastSavedById])
+}
+
+model BranchDistributionReceivingDiscrepancy {
+  id                      String                      @id @default(cuid())
+  distributionOrderId     String
+  distributionOrder       BranchDistributionOrder     @relation(fields: [distributionOrderId], references: [id], onDelete: Cascade)
+  distributionOrderItemId String                      @unique
+  distributionOrderItem   BranchDistributionOrderItem @relation(fields: [distributionOrderItemId], references: [id], onDelete: Cascade)
+  productId               String
+  branchId                String
+  expectedQuantity        Int
+  receivedQuantity        Int
+  differenceQuantity      Int
+  type                    ShortageReportItemType
+  note                    String?
+  createdById             String
+  createdBy               User                        @relation("BranchDistributionReceivingDiscrepancyCreator", fields: [createdById], references: [id])
+  shortageReportItemId    String?                     @unique
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
+
+  @@index([distributionOrderId])
+  @@index([productId])
+  @@index([branchId])
+  @@index([createdById])
+  @@index([type])
 }
 
 model HqWarehousePickingTask {
@@ -3692,6 +3751,8 @@ model BranchDistributionOrderItem {
   priceResolvedAt             DateTime?
   goodsReceivingItems         GoodsReceivingItem[]
   distributionFifoAllocations DistributionFifoAllocation[]
+  receivingDraftRow           BranchDistributionReceivingDraftRow?
+  receivingDiscrepancy        BranchDistributionReceivingDiscrepancy?
   createdAt                   DateTime                     @default(now())
   updatedAt                   DateTime                     @updatedAt
 

@@ -1,6 +1,5 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMinSize,
   IsArray,
   IsDateString,
   IsInt,
@@ -91,9 +90,9 @@ export class ReceiveDistributionOrderDto {
   @IsString()
   transportNotes?: string;
 
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => ReceiveDistributionOrderItemDto)
-  items!: ReceiveDistributionOrderItemDto[];
+  items?: ReceiveDistributionOrderItemDto[];
 }

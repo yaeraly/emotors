@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -68,6 +69,7 @@ import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
 import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
+import { SaveBranchReceivingDraftRowDto } from './dto/save-branch-receiving-draft-row.dto';
 import { SendDistributionOrderDto } from './dto/send-distribution-order.dto';
 import { EnterReceivingTransportDto } from './dto/enter-receiving-transport.dto';
 import { allocateBranchReceivingTransportCost } from './branch-receiving-transport.util';
@@ -82,10 +84,15 @@ import {
 import {
   normalizeReceivingLine,
   resolveReceivingDifferenceQuantity,
-  resolveShipmentItemId,
 } from './branch-receiving.util';
 import { resolveMasterProductForReceivingInTx } from './branch-receiving-product.util';
 import { sanitizeDistributionOrderForBranchCeo } from './branch-ceo-distribution.presenter';
+import {
+  buildBranchReceivingDiscrepancyPayload,
+  mapDraftRowToLineItem,
+  normalizeBranchReceivingDraftInput,
+} from './branch-receiving-draft.util';
+import { buildReceivingProgress, resolveReceivingRowStatus } from './receiving-draft.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -180,7 +187,9 @@ export class DistributionService {
       throw new ForbiddenException('Недостаточно прав для просмотра заказа распределения');
     }
     const order = await this.getAccessibleOrder(user, id);
-    return this.toResponse(order, user);
+    const response = this.toResponse(order, user);
+    const receivingExtras = await this.buildBranchReceivingDetailExtras(order);
+    return { ...response, ...receivingExtras };
   }
 
   update(user: AuthUser, id: string, dto: CreateDistributionOrderDto) {
@@ -1080,15 +1089,24 @@ export class DistributionService {
           sourceWarehouseId: order.sourceWarehouseId,
         });
 
+        const draftRows = await tx.branchDistributionReceivingDraftRow.findMany({
+          where: { distributionOrderId: order.id },
+        });
+        const savedDraftIds = new Set(
+          draftRows.filter((row) => row.isSaved).map((row) => row.distributionOrderItemId),
+        );
+        const unsavedOrderItems = order.items.filter((item) => !savedDraftIds.has(item.id));
+        if (unsavedOrderItems.length > 0) {
+          throw new BadRequestException(
+            `All receiving rows must be saved before final receive. Unsaved: ${unsavedOrderItems.length}`,
+          );
+        }
+
         const receivedMap = new Map<string, ReturnType<typeof normalizeReceivingLine>>();
-        for (const item of dto.items) {
-          const shipmentItemId = resolveShipmentItemId(item);
-          if (!shipmentItemId) {
-            throw new BadRequestException('Shipment item not found');
-          }
-          const orderItem = order.items.find((line) => line.id === shipmentItemId);
-          if (!orderItem) {
-            throw new BadRequestException('Shipment item not found');
+        for (const orderItem of order.items) {
+          const draft = draftRows.find((row) => row.distributionOrderItemId === orderItem.id);
+          if (!draft?.isSaved) {
+            throw new BadRequestException('All order items must be saved before receiving');
           }
 
           this.logger.debug(
@@ -1105,12 +1123,21 @@ export class DistributionService {
             throw new BadRequestException('Product reference is missing from shipment item');
           }
           const dispatchedQuantity = Number(orderItem.dispatchedQuantity ?? orderItem.quantity);
-          receivedMap.set(orderItem.id, normalizeReceivingLine(item, dispatchedQuantity));
+          receivedMap.set(
+            orderItem.id,
+            normalizeReceivingLine(
+              {
+                shipmentItemId: orderItem.id,
+                acceptedQuantity: draft.acceptedQuantity,
+                damagedQuantity: draft.damagedQuantity,
+                missingQuantity: draft.missingQuantity,
+                note: draft.note ?? undefined,
+              },
+              dispatchedQuantity,
+            ),
+          );
         }
 
-        if (receivedMap.size !== order.items.length) {
-          throw new BadRequestException('All order items must be included');
-        }
         for (const item of order.items) {
           if (!receivedMap.has(item.id)) {
             throw new BadRequestException('Shipment item not found');
@@ -1203,6 +1230,7 @@ export class DistributionService {
 
         const receivingItems = [];
         const shortageItems = [];
+        const shortageOrderItemIds: string[] = [];
 
         for (const orderItem of order.items) {
           const received = receivedMap.get(orderItem.id)!;
@@ -1350,6 +1378,7 @@ export class DistributionService {
               received.discrepancyReason ?? received.note,
             );
             if (!differenceType) continue;
+            shortageOrderItemIds.push(orderItem.id);
             shortageItems.push({
               productId: branchProductId,
               sku: orderItem.sku,
@@ -1379,6 +1408,18 @@ export class DistributionService {
           },
           include: this.shortageInclude(),
         });
+        for (let index = 0; index < shortageReport.items.length; index += 1) {
+          const reportItem = shortageReport.items[index];
+          const orderItemId = shortageOrderItemIds[index];
+          if (!orderItemId) continue;
+          await tx.branchDistributionReceivingDiscrepancy.updateMany({
+            where: {
+              distributionOrderId: order.id,
+              distributionOrderItemId: orderItemId,
+            },
+            data: { shortageReportItemId: reportItem.id },
+          });
+        }
       }
 
       await tx.branchDistributionOrder.update({
@@ -1567,6 +1608,211 @@ export class DistributionService {
       }).catch(() => null);
       throw error;
     }
+  }
+
+  async saveBranchReceivingDraftRow(
+    user: AuthUser,
+    orderId: string,
+    itemId: string,
+    dto: SaveBranchReceivingDraftRowDto,
+  ) {
+    if (!canReceiveBranchDistribution(user)) {
+      throw new ForbiddenException('Only Branch Warehouse Operator can receive goods at branch');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: {
+          id: orderId,
+          deletedAt: null,
+          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
+        },
+        include: { items: { include: { product: true } } },
+      });
+      if (!order) {
+        if (user.branchId) {
+          throw new ForbiddenException('You do not have access to this shipment');
+        }
+        throw new NotFoundException('Shipment not found');
+      }
+      if (
+        order.status !== BranchDistributionOrderStatus.SENT &&
+        order.status !== BranchDistributionOrderStatus.SHIPPED
+      ) {
+        throw new BadRequestException('Order must be SHIPPED before receiving');
+      }
+
+      const existingReceiving = await tx.goodsReceiving.findFirst({
+        where: { distributionOrderId: order.id, deletedAt: null },
+        select: { id: true },
+      });
+      if (existingReceiving) {
+        throw new BadRequestException('Shipment has already been received');
+      }
+
+      const orderItem = order.items.find((item) => item.id === itemId);
+      if (!orderItem) {
+        throw new NotFoundException('Shipment item not found');
+      }
+
+      const existing = await tx.branchDistributionReceivingDraftRow.findUnique({
+        where: {
+          distributionOrderId_distributionOrderItemId: {
+            distributionOrderId: orderId,
+            distributionOrderItemId: itemId,
+          },
+        },
+      });
+
+      if (dto.expectedUpdatedAt && existing) {
+        const expectedMs = new Date(dto.expectedUpdatedAt).getTime();
+        const currentMs = existing.updatedAt.getTime();
+        if (Number.isFinite(expectedMs) && currentMs > expectedMs) {
+          throw new ConflictException('BRANCH_RECEIVING_DRAFT_CONFLICT');
+        }
+      }
+
+      const dispatchedQuantity = Number(orderItem.dispatchedQuantity ?? orderItem.quantity);
+      const normalized = normalizeBranchReceivingDraftInput(dto, dispatchedQuantity);
+
+      const saved = await tx.branchDistributionReceivingDraftRow.upsert({
+        where: {
+          distributionOrderId_distributionOrderItemId: {
+            distributionOrderId: orderId,
+            distributionOrderItemId: itemId,
+          },
+        },
+        create: {
+          distributionOrderId: orderId,
+          distributionOrderItemId: itemId,
+          productId: orderItem.productId,
+          branchId: order.branchId,
+          acceptedQuantity: normalized.acceptedQuantity,
+          damagedQuantity: normalized.damagedQuantity,
+          missingQuantity: normalized.missingQuantity,
+          note: normalized.note ?? null,
+          isSaved: true,
+          isChecked: true,
+          lastSavedAt: new Date(),
+          lastSavedById: user.id,
+        },
+        update: {
+          productId: orderItem.productId,
+          branchId: order.branchId,
+          acceptedQuantity: normalized.acceptedQuantity,
+          damagedQuantity: normalized.damagedQuantity,
+          missingQuantity: normalized.missingQuantity,
+          note: normalized.note ?? null,
+          isSaved: true,
+          isChecked: true,
+          lastSavedAt: new Date(),
+          lastSavedById: user.id,
+        },
+        include: { lastSavedBy: { select: { id: true, fullName: true } } },
+      });
+
+      const discrepancyPayload = buildBranchReceivingDiscrepancyPayload(
+        orderItem,
+        order,
+        dispatchedQuantity,
+        normalized.acceptedQuantity,
+        normalized.damagedQuantity,
+        normalized.missingQuantity,
+        normalized.note,
+      );
+      let discrepancyCreated = false;
+      if (discrepancyPayload) {
+        const existingDiscrepancy = await tx.branchDistributionReceivingDiscrepancy.findUnique({
+          where: { distributionOrderItemId: itemId },
+        });
+        await tx.branchDistributionReceivingDiscrepancy.upsert({
+          where: { distributionOrderItemId: itemId },
+          create: {
+            ...discrepancyPayload,
+            createdById: user.id,
+          },
+          update: {
+            expectedQuantity: discrepancyPayload.expectedQuantity,
+            receivedQuantity: discrepancyPayload.receivedQuantity,
+            differenceQuantity: discrepancyPayload.differenceQuantity,
+            type: discrepancyPayload.type,
+            note: discrepancyPayload.note ?? null,
+            productId: discrepancyPayload.productId,
+            branchId: discrepancyPayload.branchId,
+          },
+        });
+        discrepancyCreated = !existingDiscrepancy;
+      } else {
+        await tx.branchDistributionReceivingDiscrepancy.deleteMany({
+          where: { distributionOrderItemId: itemId },
+        });
+      }
+
+      const auditAction = existing
+        ? 'BRANCH_RECEIVING_DRAFT_UPDATED'
+        : 'BRANCH_RECEIVING_DRAFT_CREATED';
+      await this.auditTransfer(tx, user, auditAction, order, {
+        shipmentItemId: itemId,
+        productId: orderItem.productId,
+        acceptedQuantity: normalized.acceptedQuantity,
+        damagedQuantity: normalized.damagedQuantity,
+        missingQuantity: normalized.missingQuantity,
+        note: normalized.note ?? null,
+      });
+
+      if (discrepancyCreated) {
+        await this.createWorkflowAlert(tx, user, {
+          branchId: order.branchId,
+          type: AlertType.SHORTAGE_NEEDS_RESOLUTION,
+          title: 'Расхождение при приёмке филиала',
+          message: `Расхождение по товару ${orderItem.sku} в заказе ${order.orderNumber}`,
+          entityType: 'BranchDistributionOrder',
+          entityId: order.id,
+          recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_SALES_MANAGER],
+        });
+      }
+
+      const draftRows = await tx.branchDistributionReceivingDraftRow.findMany({
+        where: { distributionOrderId: order.id },
+      });
+      const progress = buildReceivingProgress(
+        order.items.map((item) => ({
+          id: item.id,
+          expectedQuantity: Number(item.dispatchedQuantity ?? item.quantity),
+        })),
+        draftRows.map((row) => ({
+          itemId: row.distributionOrderItemId,
+          acceptedQuantity: row.acceptedQuantity,
+          damagedQuantity: row.damagedQuantity,
+          missingQuantity: row.missingQuantity,
+          note: row.note,
+          isSaved: row.isSaved,
+          lastSavedAt: row.lastSavedAt,
+        })),
+      );
+
+      return {
+        id: saved.id,
+        distributionOrderId: saved.distributionOrderId,
+        distributionOrderItemId: saved.distributionOrderItemId,
+        acceptedQuantity: saved.acceptedQuantity,
+        damagedQuantity: saved.damagedQuantity,
+        missingQuantity: saved.missingQuantity,
+        note: saved.note,
+        isSaved: saved.isSaved,
+        lastSavedAt: saved.lastSavedAt?.toISOString() ?? null,
+        updatedAt: saved.updatedAt.toISOString(),
+        lastSavedBy: saved.lastSavedBy,
+        rowStatus: resolveReceivingRowStatus(
+          saved.acceptedQuantity,
+          dispatchedQuantity,
+          saved.damagedQuantity,
+          saved.isSaved,
+        ),
+        difference: saved.acceptedQuantity - dispatchedQuantity,
+        receivingProgress: progress,
+      };
+    });
   }
 
   async enterReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {
@@ -3288,6 +3534,71 @@ export class DistributionService {
         lastPaymentAt: paymentAggregate._max.paidAt,
       },
     });
+  }
+
+  private async buildBranchReceivingDetailExtras(order: {
+    id: string;
+    status: BranchDistributionOrderStatus;
+    items?: Array<{
+      id: string;
+      productId: string;
+      sku: string;
+      productName: string;
+      quantity: number;
+      dispatchedQuantity: number | null;
+      product?: { unit?: string | null } | null;
+    }>;
+  }) {
+    const receivingStatuses: BranchDistributionOrderStatus[] = [
+      BranchDistributionOrderStatus.SHIPPED,
+      BranchDistributionOrderStatus.SENT,
+    ];
+    if (!receivingStatuses.includes(order.status) || !order.items?.length) {
+      return {
+        receivingLineItems: undefined,
+        receivingProgress: undefined,
+        canCompleteReceiving: false,
+      };
+    }
+
+    const existingReceiving = await this.prisma.goodsReceiving.findFirst({
+      where: { distributionOrderId: order.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (existingReceiving) {
+      return {
+        receivingLineItems: undefined,
+        receivingProgress: undefined,
+        canCompleteReceiving: false,
+      };
+    }
+
+    const drafts = await this.prisma.branchDistributionReceivingDraftRow.findMany({
+      where: { distributionOrderId: order.id },
+    });
+    const draftByItemId = new Map(drafts.map((row) => [row.distributionOrderItemId, row]));
+    const receivingLineItems = order.items.map((item) =>
+      mapDraftRowToLineItem(item, draftByItemId.get(item.id) ?? null),
+    );
+    const receivingProgress = buildReceivingProgress(
+      order.items.map((item) => ({
+        id: item.id,
+        expectedQuantity: Number(item.dispatchedQuantity ?? item.quantity),
+      })),
+      drafts.map((row) => ({
+        itemId: row.distributionOrderItemId,
+        acceptedQuantity: row.acceptedQuantity,
+        damagedQuantity: row.damagedQuantity,
+        missingQuantity: row.missingQuantity,
+        note: row.note,
+        isSaved: row.isSaved,
+        lastSavedAt: row.lastSavedAt,
+      })),
+    );
+    const canCompleteReceiving =
+      receivingProgress.products > 0 && receivingProgress.checked === receivingProgress.products;
+
+    return { receivingLineItems, receivingProgress, canCompleteReceiving };
   }
 
   private async getAccessibleOrder(user: AuthUser, id: string) {

@@ -41,19 +41,64 @@ async function login(email: string, password: string) {
   return body.accessToken!;
 }
 
+async function saveDraftViaApi(
+  token: string,
+  orderId: string,
+  itemId: string,
+  payload: {
+    acceptedQuantity: number;
+    damagedQuantity?: number;
+    missingQuantity?: number;
+    note?: string;
+  },
+) {
+  const response = await fetch(
+    `${API}/distribution/orders/${orderId}/receiving-draft-rows/${itemId}`,
+    {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        damagedQuantity: 0,
+        ...payload,
+      }),
+    },
+  );
+  const body = await response.json();
+  return { status: response.status, body };
+}
+
 async function receiveViaApi(
   token: string,
   orderId: string,
   warehouseId: string,
-  items: Array<{ shipmentItemId: string; acceptedQuantity: number }>,
+  items: Array<{
+    shipmentItemId: string;
+    acceptedQuantity: number;
+    damagedQuantity?: number;
+    missingQuantity?: number;
+    note?: string;
+  }>,
 ) {
+  for (const item of items) {
+    const draftResult = await saveDraftViaApi(token, orderId, item.shipmentItemId, {
+      acceptedQuantity: item.acceptedQuantity,
+      damagedQuantity: item.damagedQuantity ?? 0,
+      missingQuantity: item.missingQuantity,
+      note: item.note,
+    });
+    assert.ok([200, 201].includes(draftResult.status), JSON.stringify(draftResult.body));
+  }
+
   const response = await fetch(`${API}/distribution/orders/${orderId}/receive`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ warehouseId, items }),
+    body: JSON.stringify({ warehouseId }),
   });
   const body = await response.json();
   return { status: response.status, body };

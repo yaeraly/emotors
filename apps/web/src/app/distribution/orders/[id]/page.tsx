@@ -17,26 +17,17 @@ import {
   isHqWarehouseLogisticsOnlyUser,
 } from '@/lib/rbac';
 import { ReceivingTransportCostSection } from '@/components/distribution/ReceivingTransportCostSection';
+import { BranchReceivingWorkspace } from '@/components/distribution/BranchReceivingWorkspace';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
-
-type ReceiveItemForm = {
-  shipmentItemId: string;
-  sentQuantity: number;
-  acceptedQuantity: string;
-  damagedQuantity: string;
-  missingQuantity: string;
-  discrepancyReason: string;
-};
 
 export default function DistributionOrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const [order, setOrder] = useState<BranchDistributionOrder | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [receiveItems, setReceiveItems] = useState<ReceiveItemForm[]>([]);
   const [dispatchForm, setDispatchForm] = useState({
     transportCompany: '',
     driverName: '',
@@ -47,7 +38,6 @@ export default function DistributionOrderDetailPage() {
   const [shortageReport, setShortageReport] = useState<ShortageReport | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [submittingReceive, setSubmittingReceive] = useState(false);
 
   async function load() {
     try {
@@ -57,16 +47,6 @@ export default function DistributionOrderDetailPage() {
       ]);
       setCurrentUser(me);
       setOrder(result);
-      setReceiveItems(
-        result.items?.map((item) => ({
-          shipmentItemId: item.id,
-          sentQuantity: Number(item.dispatchedQuantity ?? item.quantity),
-          acceptedQuantity: String(item.dispatchedQuantity ?? item.quantity),
-          damagedQuantity: '0',
-          missingQuantity: '0',
-          discrepancyReason: '',
-        })) ?? [],
-      );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -118,52 +98,6 @@ export default function DistributionOrderDetailPage() {
     });
   }
 
-  function updateReceiveItem(index: number, updates: Partial<ReceiveItemForm>) {
-    setReceiveItems((current) =>
-      current.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...updates } : item,
-      ),
-    );
-  }
-
-  async function completeReceiving() {
-    if (!order) return;
-    setError('');
-    setSuccess('');
-    setSubmittingReceive(true);
-    try {
-      const result = await apiFetch<{
-        receiving: GoodsReceiving;
-        shortageReport: ShortageReport | null;
-      }>(`/distribution/orders/${order.id}/receive`, {
-        method: 'POST',
-        body: JSON.stringify({
-          warehouseId: order.destinationWarehouseId,
-          note: '',
-          items: receiveItems.map((item) => ({
-            shipmentItemId: item.shipmentItemId,
-            acceptedQuantity: Number(item.acceptedQuantity || 0),
-            damagedQuantity: Number(item.damagedQuantity || 0),
-            missingQuantity: Number(item.missingQuantity || 0),
-            discrepancyReason: item.discrepancyReason || undefined,
-          })),
-        }),
-      });
-      setReceiving(result.receiving);
-      setShortageReport(result.shortageReport);
-      setSuccess(
-        result.shortageReport
-          ? t('distribution.hasDifferences')
-          : t('distribution.goodsReceivingCreated'),
-      );
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setSubmittingReceive(false);
-    }
-  }
-
   const canApprove = canManageDistributionOrders(currentUser);
   const canDispatch = canDispatchFromHq(currentUser);
   const canReceiveAtBranch = canReceiveBranchDistribution(currentUser);
@@ -179,6 +113,9 @@ export default function DistributionOrderDetailPage() {
     (order?.status === 'SHIPPED' || order?.status === 'SENT') &&
     !receiving &&
     !['RECEIVED', 'RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE', 'COMPLETED'].includes(order?.status ?? '');
+  const showReceivingWorkspace =
+    canReceive && canReceiveAtBranch && operatorView && Boolean(order?.receivingLineItems?.length);
+  const showItemsTable = !showReceivingWorkspace;
   const showDeliveryCostSummary =
     showFinancials &&
     Boolean(order?.deliveryCostSummary && Number(order.deliveryCostSummary.transportCostKgs) > 0);
@@ -335,6 +272,7 @@ export default function DistributionOrderDetailPage() {
                 ) : null}
               </section>
             ) : null}
+            {showItemsTable ? (
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h3 className="text-lg font-bold">{t('distribution.items')}</h3>
               <div className="mt-4 overflow-x-auto">
@@ -384,88 +322,25 @@ export default function DistributionOrderDetailPage() {
                 </table>
               </div>
             </section>
-            {canReceive && canReceiveAtBranch ? (
-              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
-                <h3 className="text-lg font-bold">{t('distribution.receiveGoods')}</h3>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-sm">
-                    <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
-                      <tr>
-                        <th className="px-4 py-3">SKU</th>
-                        <th className="px-4 py-3">{t('sales.product')}</th>
-                        <th className="px-4 py-3">{t('distribution.sentQuantity')}</th>
-                        <th className="px-4 py-3">{t('distribution.acceptedQuantity')}</th>
-                        <th className="px-4 py-3">{t('distribution.damagedQuantity')}</th>
-                        <th className="px-4 py-3">{t('distribution.missingQuantity')}</th>
-                        <th className="px-4 py-3">{t('distribution.difference')}</th>
-                        <th className="px-4 py-3">{t('crm.notes')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {order.items?.map((item, index) => {
-                        const form = receiveItems[index];
-                        const sentQuantity = Number(item.dispatchedQuantity ?? item.quantity);
-                        const acceptedQuantity = Number(form?.acceptedQuantity || 0);
-                        const damagedQuantity = Number(form?.damagedQuantity || 0);
-                        const missingQuantity = Number(form?.missingQuantity || 0);
-                        return (
-                          <tr key={item.id}>
-                            <td className="px-4 py-3">{item.sku}</td>
-                            <td className="px-4 py-3">{item.productName}</td>
-                            <td className="px-4 py-3">{sentQuantity}</td>
-                            <td className="px-4 py-3">
-                              <input
-                                value={form?.acceptedQuantity ?? ''}
-                                onChange={(event) => updateReceiveItem(index, { acceptedQuantity: event.target.value })}
-                                type="number"
-                                min="0"
-                                className="w-28 rounded-xl border border-slate-300 px-3 py-2"
-                              />
-                            </td>
-                            <td className="px-4 py-3">
-                              <input
-                                value={form?.damagedQuantity ?? ''}
-                                onChange={(event) => updateReceiveItem(index, { damagedQuantity: event.target.value })}
-                                type="number"
-                                min="0"
-                                className="w-28 rounded-xl border border-slate-300 px-3 py-2"
-                              />
-                            </td>
-                            <td className="px-4 py-3">
-                              <input
-                                value={form?.missingQuantity ?? ''}
-                                onChange={(event) => updateReceiveItem(index, { missingQuantity: event.target.value })}
-                                type="number"
-                                min="0"
-                                className="w-28 rounded-xl border border-slate-300 px-3 py-2"
-                              />
-                            </td>
-                            <td className="px-4 py-3 font-semibold">
-                              {acceptedQuantity + damagedQuantity + missingQuantity - sentQuantity}
-                            </td>
-                            <td className="px-4 py-3">
-                              <input
-                                value={form?.discrepancyReason ?? ''}
-                                onChange={(event) => updateReceiveItem(index, { discrepancyReason: event.target.value })}
-                                className="min-w-40 rounded-xl border border-slate-300 px-3 py-2"
-                                placeholder={t('crm.notes')}
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <button
-                  onClick={() => void completeReceiving()}
-                  disabled={submittingReceive}
-                  className="mt-4 rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:bg-blue-300"
-                  type="button"
-                >
-                  {submittingReceive ? t('common.loading') : t('distribution.completeReceiving')}
-                </button>
-              </section>
+            ) : null}
+            {showReceivingWorkspace && order ? (
+              <BranchReceivingWorkspace
+                orderId={order.id}
+                destinationWarehouseId={order.destinationWarehouseId}
+                lineItems={order.receivingLineItems!}
+                initialProgress={order.receivingProgress}
+                canCompleteReceiving={order.canCompleteReceiving}
+                onCompleted={(result) => {
+                  setReceiving(result.receiving);
+                  setShortageReport(result.shortageReport);
+                  setSuccess(
+                    result.shortageReport
+                      ? t('distribution.hasDifferences')
+                      : t('distribution.goodsReceivingCreated'),
+                  );
+                  void load();
+                }}
+              />
             ) : null}
             {order && (canEnterTransport || operatorView) ? (
               <ReceivingTransportCostSection

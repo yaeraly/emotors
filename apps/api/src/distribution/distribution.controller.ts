@@ -12,6 +12,7 @@ import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
 import { DistributionReportQueryDto } from './dto/distribution-report-query.dto';
 import { PickingTaskQueryDto } from './dto/picking-task-query.dto';
 import { ReceiveDistributionOrderDto } from './dto/receive-distribution-order.dto';
+import { SaveBranchReceivingDraftRowDto } from './dto/save-branch-receiving-draft-row.dto';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { RejectBranchInstallmentDto, RequestBranchInstallmentDto } from './dto/request-branch-installment.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
@@ -170,6 +171,17 @@ export class DistributionController {
     @Body() dto: ReceiveDistributionOrderDto,
   ) {
     return this.distributionService.receive(user, id, dto);
+  }
+
+  @Put('orders/:id/receiving-draft-rows/:itemId')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_OPERATOR)
+  saveBranchReceivingDraftRow(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: SaveBranchReceivingDraftRowDto,
+  ) {
+    return this.distributionService.saveBranchReceivingDraftRow(user, id, itemId, dto);
   }
 
   @Post('orders/:id/complete')

@@ -748,6 +748,46 @@ export type DistributionDeliveryCostSummary = {
   landedCostTotal: number;
 };
 
+export type BranchReceivingRowStatus =
+  | 'ACCEPTED'
+  | 'IN_PROGRESS'
+  | 'SHORTAGE'
+  | 'OVERAGE'
+  | 'DAMAGED';
+
+export type BranchReceivingProgress = {
+  products: number;
+  checked: number;
+  remaining: number;
+  saved: number;
+  unsaved: number;
+  progress: number;
+  expectedQty: number;
+  receivedQty: number;
+  shortage: number;
+  overage: number;
+  damaged: number;
+  discrepancyLines: number;
+};
+
+export type BranchReceivingLineItem = {
+  id: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  unit: string;
+  expectedQuantity: number;
+  acceptedQuantity?: number | null;
+  damagedQuantity?: number;
+  missingQuantity?: number | null;
+  note?: string | null;
+  isSaved?: boolean;
+  lastSavedAt?: string | null;
+  updatedAt?: string | null;
+  rowStatus?: BranchReceivingRowStatus;
+  difference?: number;
+};
+
 export type BranchDistributionOrderItem = {
   id: string;
   orderId: string;
@@ -806,6 +846,9 @@ export type BranchDistributionOrder = {
   sentAt?: string | null;
   cancelledAt?: string | null;
   items?: BranchDistributionOrderItem[];
+  receivingLineItems?: BranchReceivingLineItem[];
+  receivingProgress?: BranchReceivingProgress;
+  canCompleteReceiving?: boolean;
   branchInvoice?: BranchInvoice | null;
   createdAt: string;
   updatedAt: string;

@@ -127,6 +127,8 @@ export const DELETE_STEPS = [
 
   // Procurement / receiving drafts
   'chinaReceivingDraftRow',
+  'branchDistributionReceivingDraftRow',
+  'branchDistributionReceivingDiscrepancy',
   'chinaReceivingEditSession',
   'procurementGoodsReceivingItem',
   'procurementGoodsReceiving',
