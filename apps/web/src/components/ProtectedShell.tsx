@@ -8,10 +8,9 @@ import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
 import type { User } from '@/lib/types';
 import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isFranchiseDirectorUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
-import { usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
+import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
 import { sidebarFinanceNavClass, sidebarNavClass, sidebarPaymentsNavClass, sidebarShiftsNavClass } from '@/lib/nav-matching';
 import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
-import { UnifiedSidebarModuleLinks } from './UnifiedSidebarModuleLinks';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
 import { ForbiddenView } from './ForbiddenView';
@@ -465,9 +464,45 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 ) : null}
               </>
             ) : branchSalesManagerView ? (
-              <UnifiedSidebarModuleLinks modules={unifiedSidebarModules} user={user} />
+              <>
+                {unifiedSidebarModules.map((module) => {
+                  const active = isUnifiedNavModuleActive(pathname, module);
+                  const href = sidebarHrefForModule(module, user!);
+                  return (
+                    <Link
+                      key={module.id}
+                      href={href}
+                      className={
+                        active
+                          ? 'block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700'
+                          : 'block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                      }
+                    >
+                      {t(module.labelKey)}
+                    </Link>
+                  );
+                })}
+              </>
             ) : branchOwnerView ? (
-              <UnifiedSidebarModuleLinks modules={unifiedSidebarModules} user={user} />
+              <>
+                {unifiedSidebarModules.map((module) => {
+                  const active = isUnifiedNavModuleActive(pathname, module);
+                  const href = sidebarHrefForModule(module, user!);
+                  return (
+                    <Link
+                      key={module.id}
+                      href={href}
+                      className={
+                        active
+                          ? 'block rounded-xl bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700'
+                          : 'block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                      }
+                    >
+                      {t(module.labelKey)}
+                    </Link>
+                  );
+                })}
+              </>
             ) : (
               <>
             {canSeeCrm ? (

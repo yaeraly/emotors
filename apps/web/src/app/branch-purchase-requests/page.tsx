@@ -8,7 +8,7 @@ import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { BranchProductSearch, type BranchProductOption, isBranchPriceConfigured, parseBranchMoney, resolveBranchDisplayPrice } from '@/components/BranchProductSearch';
 import { branchPurchaseRequestsTitleKey } from '@/lib/distribution-labels';
-import { distributionHubSections, branchSalesDistributionHubSections } from '@/lib/scm-hub-sections';
+import { distributionHubSections } from '@/lib/scm-hub-sections';
 import { apiFetch } from '@/lib/api';
 import {
   canManageBranchPurchaseRequests,
@@ -888,7 +888,6 @@ export default function BranchPurchaseRequestsPage() {
           </form>
         ) : null}
 
-        {!branchSalesManagerView ? (
         <div className={`${hqSalesView ? 'rounded-xl' : 'rounded-3xl'} border border-slate-200 bg-white shadow-sm overflow-x-auto`}>
           {loading ? (
             <p className="px-6 py-10 text-sm text-slate-600">
@@ -1042,7 +1041,6 @@ export default function BranchPurchaseRequestsPage() {
           </table>
           )}
         </div>
-        ) : null}
     </>
   );
 
@@ -1077,9 +1075,6 @@ export default function BranchPurchaseRequestsPage() {
           </div>
           {!branchSalesManagerView && !branchWarehouseView && !branchOwnerView && !ceoInspectorView ? (
             <ModuleSectionNav sections={distributionHubSections} />
-          ) : null}
-          {branchSalesManagerView ? (
-            <ModuleSectionNav sections={branchSalesDistributionHubSections} />
           ) : null}
           {pageBody}
         </section>
