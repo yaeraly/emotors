@@ -227,6 +227,7 @@ export default function BranchPurchaseRequestsPage() {
   const [listError, setListError] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
@@ -414,7 +415,10 @@ export default function BranchPurchaseRequestsPage() {
 
   async function submitRequest(event: FormEvent, asDraft = false) {
     event.preventDefault();
+    if (submitting) return;
     setError('');
+    setSuccess('');
+    setSubmitting(true);
     try {
       if (editingDraftId) {
         const payload = buildUpdatePayload();
@@ -452,17 +456,24 @@ export default function BranchPurchaseRequestsPage() {
             ? message
             : t('branchProductRequest.submitFailed'),
       );
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function submitDraft(id: string) {
+    if (submitting) return;
     setError('');
+    setSubmitting(true);
     try {
       await apiFetch(`/branch-purchase-requests/${id}/submit`, { method: 'POST' });
       setSuccess(t('distribution.branchOrderSubmitted'));
       await load();
     } catch (err) {
-      setError(t('branchProductRequest.submitFailed'));
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(localizeBranchRequestError(message));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -875,13 +886,13 @@ export default function BranchPurchaseRequestsPage() {
             </label>
 
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={(event) => void submitRequest(event, false)} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white">{t('distribution.submitOrder')}</button>
+              <button type="button" disabled={submitting} onClick={(event) => void submitRequest(event, false)} className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-60">{t('distribution.submitOrder')}</button>
               {editingDraftId ? (
-                <button type="button" onClick={(event) => void saveDraftChanges(event)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">
+                <button type="button" onClick={(event) => void saveDraftChanges(event)} disabled={submitting} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold disabled:opacity-60">
                   {t('branchProductRequest.saveChanges')}
                 </button>
               ) : (
-                <button type="button" onClick={(event) => void submitRequest(event, true)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('distribution.saveDraft')}</button>
+                <button type="button" onClick={(event) => void submitRequest(event, true)} disabled={submitting} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold disabled:opacity-60">{t('distribution.saveDraft')}</button>
               )}
               <button type="button" onClick={() => resetCreateForm()} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
             </div>

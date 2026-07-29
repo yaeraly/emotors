@@ -216,6 +216,7 @@ export default function BranchPurchaseRequestDetailPage() {
   const [forbidden, setForbidden] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [lineDecisions, setLineDecisions] = useState<Record<string, LineDecision>>({});
 
   function localizeBranchRequestError(message: string) {
@@ -313,32 +314,42 @@ export default function BranchPurchaseRequestDetailPage() {
   }
 
   async function confirmBranchOrder() {
-    if (!request) return;
+    if (!request || submitting) return;
     setError('');
+    setSuccess('');
+    setSubmitting(true);
     try {
       await apiFetch(`/branch-purchase-requests/${request.id}/confirm`, { method: 'POST', body: JSON.stringify({}) });
       setSuccess(t('branchProductRequest.branchConfirmed'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function declineBranchOrder() {
-    if (!request) return;
+    if (!request || submitting) return;
     setError('');
+    setSuccess('');
+    setSubmitting(true);
     try {
       await apiFetch(`/branch-purchase-requests/${request.id}/decline`, { method: 'POST', body: JSON.stringify({}) });
       setSuccess(t('branchProductRequest.branchDeclined'));
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+    } finally {
+      setSubmitting(false);
     }
   }
 
   async function submitReview() {
-    if (!request) return;
+    if (!request || submitting) return;
     setError('');
+    setSuccess('');
+    setSubmitting(true);
     try {
       const body = {
         items: request.items.map((item) => {
@@ -359,6 +370,8 @@ export default function BranchPurchaseRequestDetailPage() {
       await load();
     } catch (err) {
       setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -504,20 +517,20 @@ export default function BranchPurchaseRequestDetailPage() {
           <div className="flex flex-wrap gap-2">
             {canActOnRequest && reviewable ? (
               <>
-                <button type="button" onClick={() => void submitReview()} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white">
+                <button type="button" disabled={submitting} onClick={() => void submitReview()} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
                   {t('branchProductRequest.submitReview')}
                 </button>
-                <button type="button" onClick={() => void rejectWholeRequest()} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-600">
+                <button type="button" disabled={submitting} onClick={() => void rejectWholeRequest()} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 disabled:opacity-60">
                   {t('branchProductRequest.rejectWholeRequest')}
                 </button>
               </>
             ) : null}
             {canCreate && request.status === 'PENDING_BRANCH_CONFIRMATION' ? (
               <>
-                <button type="button" onClick={() => void confirmBranchOrder()} className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white">
+                <button type="button" disabled={submitting} onClick={() => void confirmBranchOrder()} className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">
                   {t('branchProductRequest.confirmOrder')}
                 </button>
-                <button type="button" onClick={() => void declineBranchOrder()} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-600">
+                <button type="button" disabled={submitting} onClick={() => void declineBranchOrder()} className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-600 disabled:opacity-60">
                   {t('branchProductRequest.declineOrder')}
                 </button>
               </>

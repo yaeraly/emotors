@@ -82,6 +82,11 @@ import {
   isSubmittedBranchPurchaseStatus,
   resolveBranchPurchasePriceKgs,
 } from './branch-product-request.util';
+import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-item.util';
+import {
+  assertBranchPurchaseBranchContext,
+  assertBranchPurchaseRequestItems,
+} from './branch-purchase-request.validation';
 import {
   buildChinaReceivingValidation,
   isChinaReceivingTaskVisible,
@@ -383,12 +388,14 @@ export class OperationsService {
       await this.auditBranchRequest(user, user.branchId, 'BRANCH_ORDER_CREATE_DENIED', 'BranchPurchaseRequest', 'create');
       throw new ForbiddenException('Only Branch Manager can create HQ product requests');
     }
-    const branchId = this.resolveBranchId(user, dto.branchId);
+    const branchId = this.assertBranchPurchaseBranchContext(user, dto.branchId);
     if (dto.assignedHqWarehouseId || dto.sourceWarehouseId) {
       throw new BadRequestException(MANUAL_HQ_WAREHOUSE_SELECTION_FORBIDDEN);
     }
+    this.assertBranchPurchaseRequestItems(dto.items);
     const branchWarehouseId = dto.branchWarehouseId ?? (await this.resolveDefaultBranchWarehouseId(branchId));
     const resolvedItems = await this.resolveBranchPurchaseItems(branchId, branchWarehouseId, dto.items ?? []);
+    const itemCreates = resolvedItems.map((item) => toBranchPurchaseRequestItemCreate(item));
     const status =
       dto.status === BranchPurchaseRequestStatus.DRAFT
         ? BranchPurchaseRequestStatus.DRAFT
@@ -400,35 +407,36 @@ export class OperationsService {
     const totalQuantity = resolvedItems.reduce((sum, item) => sum + item.quantity, 0);
     const totalEstimatedAmount = resolvedItems.reduce((sum, item) => sum + Number(item.totalAmount), 0);
 
-    const request = await this.prisma.branchPurchaseRequest.create({
-      data: {
-        requestNumber: dto.requestNumber ?? `BPR-${Date.now()}`,
-        branchId,
-        branchWarehouseId,
-        assignedHqWarehouseId,
-        status,
-        createdById: user.id,
-        note: dto.note,
-        transportCompany: null,
-        transportCostKgs: 0,
-        driverName: null,
-        vehicleNumber: null,
-        dispatchDate: undefined,
-        transportNotes: null,
-        totalQuantity,
-        totalEstimatedAmount,
-        items: { create: resolvedItems },
-      },
-      include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
-    });
+    const request = await this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
 
-    if (status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ && assignedHqWarehouseId) {
-      await this.prisma.$transaction(async (tx) => {
+      const created = await tx.branchPurchaseRequest.create({
+        data: {
+          requestNumber: dto.requestNumber ?? `BPR-${Date.now()}`,
+          branchId,
+          branchWarehouseId,
+          assignedHqWarehouseId,
+          status,
+          createdById: user.id,
+          note: dto.note,
+          transportCompany: null,
+          transportCostKgs: 0,
+          driverName: null,
+          vehicleNumber: null,
+          transportNotes: null,
+          totalQuantity,
+          totalEstimatedAmount,
+          items: { create: itemCreates },
+        },
+        include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+      });
+
+      if (status === BranchPurchaseRequestStatus.SUBMITTED_TO_HQ && assignedHqWarehouseId) {
         const bookingResults = await this.hqStockBookingService.createBookingsForRequestSubmit(tx, user, {
-          requestId: request.id,
+          requestId: created.id,
           branchId,
           warehouseId: assignedHqWarehouseId,
-          lines: request.items.map((item) => ({
+          lines: created.items.map((item) => ({
             requestLineId: item.id,
             productId: item.productId,
             sku: item.sku,
@@ -437,19 +445,26 @@ export class OperationsService {
         });
         const bookingExpiresAt = bookingResults.find((row) => row.expiresAt)?.expiresAt ?? null;
         await tx.branchPurchaseRequest.update({
-          where: { id: request.id },
+          where: { id: created.id },
           data: { bookingExpiresAt },
         });
         for (const result of bookingResults) {
           if (!result.bookingId) continue;
           await this.auditInTx(tx, user, branchId, 'HQ_STOCK_BOOKING_CREATED', 'HqStockBooking', result.bookingId, {
-            requestId: request.id,
+            requestId: created.id,
             requestLineId: result.requestLineId,
             bookedQuantity: result.bookedQuantity,
           });
         }
-      });
-    }
+
+        return tx.branchPurchaseRequest.findFirstOrThrow({
+          where: { id: created.id },
+          include: { items: true, createdBy: { select: { id: true, fullName: true, role: true } } },
+        });
+      }
+
+      return created;
+    });
 
     await this.auditBranchRequest(user, branchId, 'BRANCH_PRODUCT_REQUEST_CREATED', 'BranchPurchaseRequest', request.id);
     await this.auditBranchRequest(user, branchId, 'BRANCH_ORDER_CREATED', 'BranchPurchaseRequest', request.id);
@@ -532,6 +547,7 @@ export class OperationsService {
     const resolvedItems = dto.items
       ? await this.resolveBranchPurchaseItems(existing.branchId, branchWarehouseId, dto.items)
       : undefined;
+    const itemCreates = resolvedItems?.map((item) => toBranchPurchaseRequestItemCreate(item));
     const totalQuantity = resolvedItems?.reduce((sum, item) => sum + item.quantity, 0);
     const totalEstimatedAmount = resolvedItems?.reduce((sum, item) => sum + Number(item.totalAmount), 0);
 
@@ -546,13 +562,13 @@ export class OperationsService {
         vehicleNumber: null,
         dispatchDate: null,
         transportNotes: null,
-        ...(resolvedItems
+        ...(resolvedItems && itemCreates
           ? {
               totalQuantity,
               totalEstimatedAmount,
               items: {
                 deleteMany: {},
-                create: resolvedItems,
+                create: itemCreates,
               },
             }
           : {}),
@@ -4717,6 +4733,22 @@ export class OperationsService {
         } as Prisma.InputJsonValue,
       },
     });
+  }
+
+  private assertBranchPurchaseBranchContext(user: AuthUser, dtoBranchId?: string) {
+    try {
+      return assertBranchPurchaseBranchContext(this.resolveBranchId(user, dtoBranchId));
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Branch context is required');
+    }
+  }
+
+  private assertBranchPurchaseRequestItems(items: unknown) {
+    try {
+      assertBranchPurchaseRequestItems(items);
+    } catch (error) {
+      throw new BadRequestException(error instanceof Error ? error.message : 'Invalid request items');
+    }
   }
 
   private resolveBranchId(user: AuthUser, branchId?: string) {
