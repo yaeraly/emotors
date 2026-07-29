@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   appliedPriceLabelKey,
   customerTypeLabelKey,
+  preserveSaleLineQuantity,
   resolvePricingChannelFromCustomerType,
 } from './sale-customer-pricing';
 
@@ -21,5 +22,13 @@ describe('sale-customer-pricing', () => {
     assert.equal(customerTypeLabelKey('WHOLESALE'), 'customers.customerTypeWholesale');
     assert.equal(appliedPriceLabelKey('RETAIL'), 'sales.appliedPriceRetail');
     assert.equal(appliedPriceLabelKey('WHOLESALE'), 'sales.appliedPriceWholesale');
+  });
+
+  it('preserves quantity when refreshing draft line prices', () => {
+    const existing = { quantity: '5', unitPrice: '100' };
+    const refreshed = { quantity: '1', unitPrice: '80' };
+    const merged = preserveSaleLineQuantity(existing, refreshed);
+    assert.equal(merged.quantity, '5');
+    assert.equal(merged.unitPrice, '80');
   });
 });

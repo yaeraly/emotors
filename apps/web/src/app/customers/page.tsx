@@ -10,6 +10,7 @@ import {
   shouldShowCustomerListEditButton,
   type CustomerListColumnKey,
 } from '@/lib/customer-table-config';
+import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
 import type { Branch, Customer, CustomerStatus, CustomerType, User } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -1040,6 +1041,10 @@ function CustomerProfileDrawer({
           <Info label={t('crm.whatsappPhone')} value={customer.whatsappPhone ?? '-'} />
           <Info label={t('crm.branch')} value={customer.branch?.name ?? customer.branchId} />
           <Info label={t('crm.status')} value={t(`status.${customer.status}`)} />
+          <Info
+            label={t('customers.customerType')}
+            value={t(customerTypeLabelKey(customer.customerType))}
+          />
           <Info label={t('common.createdDate')} value={formatDate(customer.createdAt)} />
         </div>
 
@@ -1114,21 +1119,33 @@ function CustomerForm({
       />
 
       {showCustomerType ? (
-        <label className="block">
-          <span className="text-sm font-semibold text-slate-700">{t('customers.customerType')}</span>
-          <select
-            value={form.customerType}
-            disabled={!customerTypeEditable}
-            required
-            onChange={(event) =>
-              onChange({ customerType: event.target.value as CustomerType })
-            }
-            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2 disabled:bg-slate-100"
-          >
-            <option value="RETAIL">{t('customers.customerTypeRetail')}</option>
-            <option value="WHOLESALE">{t('customers.customerTypeWholesale')}</option>
-          </select>
-        </label>
+        <div className="block">
+          <span className="text-sm font-semibold text-slate-700">
+            {t('customers.customerType')} *
+          </span>
+          <div className="mt-2 flex flex-wrap gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                required
+                disabled={!customerTypeEditable}
+                checked={form.customerType === 'RETAIL'}
+                onChange={() => onChange({ customerType: 'RETAIL' })}
+              />
+              {t('customers.customerTypeRetail')}
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                required
+                disabled={!customerTypeEditable}
+                checked={form.customerType === 'WHOLESALE'}
+                onChange={() => onChange({ customerType: 'WHOLESALE' })}
+              />
+              {t('customers.customerTypeWholesale')}
+            </label>
+          </div>
+        </div>
       ) : null}
 
       <label className="block">

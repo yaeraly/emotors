@@ -17,3 +17,11 @@ export function customerTypeLabelKey(customerType?: BranchSaleCustomerType | str
 export function appliedPriceLabelKey(channel: SalePricingChannel) {
   return channel === 'WHOLESALE' ? 'sales.appliedPriceWholesale' : 'sales.appliedPriceRetail';
 }
+
+/** Preserve draft line quantity when refreshing prices for a new customer type. */
+export function preserveSaleLineQuantity<T extends { quantity: string }>(
+  existing: T,
+  refreshed: T,
+): T {
+  return { ...refreshed, quantity: existing.quantity };
+}

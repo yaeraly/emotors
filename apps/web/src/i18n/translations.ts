@@ -4890,7 +4890,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.noPayments': 'Платежей пока нет.',
     'sales.noInstallments': 'Графика рассрочки нет.',
     'sales.registerSaleHint': 'Быстрый поиск клиента и товаров',
-    'sales.appliedPriceType': 'Применяемая цена',
+    'sales.appliedPriceType': 'Тип цены',
     'sales.appliedPriceRetail': 'Розничная',
     'sales.appliedPriceWholesale': 'Оптовая',
     'sales.saveDraft': 'Сохранить черновик',

@@ -12,6 +12,7 @@ import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
   appliedPriceLabelKey,
   customerTypeLabelKey,
+  preserveSaleLineQuantity,
   resolvePricingChannelFromCustomerType,
 } from '@/lib/sale-customer-pricing';
 import {
@@ -277,7 +278,7 @@ export default function NewSalePage() {
           if (!product) {
             return { ...item, hasPricingPolicy: false };
           }
-          return buildSaleItemFromProduct(product, item.quantity);
+          return preserveSaleLineQuantity(item, buildSaleItemFromProduct(product, item.quantity));
         } catch {
           return { ...item, hasPricingPolicy: false };
         }

@@ -221,8 +221,14 @@ export class CustomersService {
         'Customer',
         id,
         {
+          customerId: id,
+          previousCustomerType: existing.customerType,
+          newCustomerType: dto.customerType,
           from: existing.customerType,
           to: dto.customerType,
+          changedBy: user.id,
+          changedByName: user.fullName,
+          changedAt: new Date().toISOString(),
         },
       );
     }

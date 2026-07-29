@@ -7,13 +7,15 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { CenteredDialog } from '@/components/CenteredDialog';
 import { apiFetch } from '@/lib/api';
-import { shouldHideCustomerProfit } from '@/lib/rbac';
+import { shouldHideCustomerProfit, canEditCustomerType } from '@/lib/rbac';
+import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 import type {
   Customer,
   CustomerEvent,
   CustomerEventType,
+  CustomerType,
   FollowUp,
   PurchaseHistoryRow,
   ServiceHistory,
@@ -73,6 +75,7 @@ export default function CustomerDetailPage() {
     phone: '',
     whatsappPhone: '',
     status: 'ACTIVE',
+    customerType: 'RETAIL' as CustomerType,
     notes: '',
   });
   const [activeDialog, setActiveDialog] = useState<'reminder' | 'event' | 'whatsapp' | null>(
@@ -102,6 +105,7 @@ export default function CustomerDetailPage() {
         phone: result.customer.phone,
         whatsappPhone: result.customer.whatsappPhone ?? '',
         status: result.customer.status,
+        customerType: result.customer.customerType ?? 'RETAIL',
         notes: result.customer.notes ?? '',
       });
       setEvents(result.events);
@@ -179,6 +183,9 @@ export default function CustomerDetailPage() {
           phone: editForm.phone.trim(),
           whatsappPhone: editForm.whatsappPhone.trim() || undefined,
           status: editForm.status,
+          ...(canEditCustomerType(currentUser)
+            ? { customerType: editForm.customerType }
+            : {}),
           notes: editForm.notes.trim() || undefined,
         }),
       });
@@ -192,6 +199,7 @@ export default function CustomerDetailPage() {
   }
 
   const canEditProfile = Boolean(currentUser);
+  const canEditType = canEditCustomerType(currentUser);
   const hideCustomerProfit = shouldHideCustomerProfit(currentUser);
 
   return (
@@ -310,6 +318,37 @@ export default function CustomerDetailPage() {
                           ))}
                         </select>
                       </label>
+                      {canEditType ? (
+                        <div className="block md:col-span-2">
+                          <span className="text-sm font-semibold text-slate-700">
+                            {t('customers.customerType')} *
+                          </span>
+                          <div className="mt-2 flex flex-wrap gap-4 text-sm">
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                required
+                                checked={editForm.customerType === 'RETAIL'}
+                                onChange={() =>
+                                  setEditForm({ ...editForm, customerType: 'RETAIL' })
+                                }
+                              />
+                              {t('customers.customerTypeRetail')}
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                required
+                                checked={editForm.customerType === 'WHOLESALE'}
+                                onChange={() =>
+                                  setEditForm({ ...editForm, customerType: 'WHOLESALE' })
+                                }
+                              />
+                              {t('customers.customerTypeWholesale')}
+                            </label>
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                     <label className="block">
                       <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
@@ -344,6 +383,10 @@ export default function CustomerDetailPage() {
                     value={customer.branch?.name ?? customer.branchId}
                   />
                   <Info label={t('crm.status')} value={t(`status.${customer.status}`)} />
+                  <Info
+                    label={t('customers.customerType')}
+                    value={t(customerTypeLabelKey(customer.customerType))}
+                  />
                   <Info
                     label={t('common.createdDate')}
                     value={new Date(customer.createdAt).toLocaleDateString()}
