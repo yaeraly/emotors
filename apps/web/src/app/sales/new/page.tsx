@@ -10,6 +10,11 @@ import { apiFetch } from '@/lib/api';
 import { canApproveSale, canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser } from '@/lib/rbac';
 import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
+  appliedPriceLabelKey,
+  customerTypeLabelKey,
+  resolvePricingChannelFromCustomerType,
+} from '@/lib/sale-customer-pricing';
+import {
   computeRemainingDebt,
   draftLooksLikeInstallment,
   installmentBlocksCompletion,
@@ -96,9 +101,6 @@ export default function NewSalePage() {
   const [error, setError] = useState('');
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
-  const isHqBranchSaleContext =
-    user?.branch?.branchType === 'HQ_BRANCH' || user?.branch?.code === 'EMOTORS-HQ';
-  const [hqSaleCustomerType, setHqSaleCustomerType] = useState<'RETAIL' | 'WHOLESALE'>('RETAIL');
   const canApprove = canApproveSale(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
   const canCreateCustomerAction = canCreateCustomer(user);
@@ -222,9 +224,78 @@ export default function NewSalePage() {
         !hasMissingPricing
       : installmentApproved || installmentApproval?.status === 'ACTIVE');
 
-  function handleCustomerSelect(customer: SaleCustomerOption) {
+  const appliedPricingChannel = useMemo(
+    () => resolvePricingChannelFromCustomerType(selectedCustomer?.customerType),
+    [selectedCustomer?.customerType],
+  );
+
+  function buildSaleItemFromProduct(
+    product: SaleProductOption,
+    quantity = '1',
+  ): SaleItemForm {
+    const recommendedPrice = product.recommendedRetailPriceKgs ?? product.sellingPriceKgs;
+    const minimumPrice =
+      product.minimumRetailPriceKgs ?? product.minimumSellingPriceKgs ?? recommendedPrice;
+    const maximumPrice = product.maximumRetailPriceKgs ?? null;
+
+    return {
+      productId: product.id,
+      productName: product.name,
+      productSku: product.sku,
+      unit: product.unit,
+      quantity,
+      listPrice: recommendedPrice,
+      minimumPrice,
+      recommendedPrice,
+      maximumPrice,
+      hasMaximumPrice: Boolean(product.hasMaximumRetailPrice && maximumPrice),
+      discountPercent: '0',
+      unitPrice: formatPriceInput(recommendedPrice),
+      unitPriceManuallyEdited: false,
+      unitCost: '0',
+      availableQty: product.availableQty,
+      maxDiscountPercent: product.maximumDiscountPercent,
+      hasPricingPolicy: product.hasRecommendedPrice !== false && recommendedPrice > 0,
+    };
+  }
+
+  async function recalculateDraftPricesForCustomer(customer: SaleCustomerOption) {
+    if (items.length === 0) return;
+
+    const channel = resolvePricingChannelFromCustomerType(customer.customerType);
+    const refreshedItems = await Promise.all(
+      items.map(async (item) => {
+        try {
+          const params = new URLSearchParams({
+            search: item.productSku,
+            pricingChannel: channel,
+          });
+          const products = await apiFetch<SaleProductOption[]>(
+            `/sales/product-options?${params.toString()}`,
+          );
+          const product = products.find((row) => row.id === item.productId);
+          if (!product) {
+            return { ...item, hasPricingPolicy: false };
+          }
+          return buildSaleItemFromProduct(product, item.quantity);
+        } catch {
+          return { ...item, hasPricingPolicy: false };
+        }
+      }),
+    );
+
+    setItems(refreshedItems);
+    if (refreshedItems.some((item) => !item.hasPricingPolicy)) {
+      setError(t('sales.noPricingPolicy'));
+    }
+  }
+
+  async function handleCustomerSelect(customer: SaleCustomerOption) {
     setSelectedCustomer(customer);
     setError('');
+    if (items.length > 0) {
+      await recalculateDraftPricesForCustomer(customer);
+    }
   }
 
   function handleProductSelect(product: SaleProductOption) {
@@ -233,10 +304,6 @@ export default function NewSalePage() {
       setError(t('sales.noRecommendedPrice'));
       return;
     }
-
-    const minimumPrice =
-      product.minimumRetailPriceKgs ?? product.minimumSellingPriceKgs ?? recommendedPrice;
-    const maximumPrice = product.maximumRetailPriceKgs ?? null;
 
     const existingIndex = items.findIndex((item) => item.productId === product.id);
     if (existingIndex >= 0) {
@@ -251,28 +318,7 @@ export default function NewSalePage() {
       return;
     }
 
-    setItems((current) => [
-      ...current,
-      {
-        productId: product.id,
-        productName: product.name,
-        productSku: product.sku,
-        unit: product.unit,
-        quantity: '1',
-        listPrice: recommendedPrice,
-        minimumPrice,
-        recommendedPrice,
-        maximumPrice,
-        hasMaximumPrice: Boolean(product.hasMaximumRetailPrice && maximumPrice),
-        discountPercent: '0',
-        unitPrice: formatPriceInput(recommendedPrice),
-        unitPriceManuallyEdited: false,
-        unitCost: '0',
-        availableQty: product.availableQty,
-        maxDiscountPercent: product.maximumDiscountPercent,
-        hasPricingPolicy: product.hasRecommendedPrice !== false && recommendedPrice > 0,
-      },
-    ]);
+    setItems((current) => [...current, buildSaleItemFromProduct(product)]);
     setError('');
   }
 
@@ -574,9 +620,7 @@ export default function NewSalePage() {
           phone: createCustomerForm.phone.trim(),
           whatsappPhone: createCustomerForm.whatsappPhone.trim() || undefined,
           status: 'ACTIVE',
-          ...(isHqBranchSaleContext
-            ? { customerType: createCustomerForm.customerType }
-            : {}),
+          customerType: createCustomerForm.customerType,
         }),
       });
       setSelectedCustomer({
@@ -585,11 +629,18 @@ export default function NewSalePage() {
         phone: customer.phone,
         whatsappPhone: customer.whatsappPhone,
         status: customer.status,
+        customerType:
+          customer.customerType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
         totalDebtAmount: Number(customer.totalDebtAmount ?? 0),
         hasOverdueInstallment: false,
       });
       setShowCreateCustomer(false);
-      setCreateCustomerForm({ fullName: '', phone: '', whatsappPhone: '', customerType: hqSaleCustomerType });
+      setCreateCustomerForm({
+        fullName: '',
+        phone: '',
+        whatsappPhone: '',
+        customerType: 'RETAIL',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -650,6 +701,27 @@ export default function NewSalePage() {
     }
 
     try {
+      if (selectedCustomer) {
+        const refreshedCustomer = await apiFetch<Customer>(`/customers/${selectedCustomer.id}`);
+        const nextCustomer: SaleCustomerOption = {
+          id: refreshedCustomer.id,
+          fullName: refreshedCustomer.fullName,
+          phone: refreshedCustomer.phone,
+          whatsappPhone: refreshedCustomer.whatsappPhone,
+          status: refreshedCustomer.status,
+          customerType:
+            refreshedCustomer.customerType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
+          totalDebtAmount: Number(refreshedCustomer.totalDebtAmount ?? 0),
+          hasOverdueInstallment: selectedCustomer.hasOverdueInstallment,
+        };
+        if (nextCustomer.customerType !== selectedCustomer.customerType) {
+          setSelectedCustomer(nextCustomer);
+          await recalculateDraftPricesForCustomer(nextCustomer);
+          const saved = await saveDraft();
+          if (!saved) return;
+        }
+      }
+
       const finalized = await apiFetch<Sale>(`/sales/${draftSale.id}/finalize`, {
         method: 'POST',
       });
@@ -678,7 +750,7 @@ export default function NewSalePage() {
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t('sales.newSale')}
+              {t('sales.registerSale')}
             </p>
             <h2 className="text-3xl font-bold text-slate-950">
               {t('sales.registerSale')}
@@ -717,38 +789,11 @@ export default function NewSalePage() {
                   </button>
                 ) : null}
               </div>
-              {isHqBranchSaleContext ? (
-                <div className="mt-4 flex flex-wrap gap-4 text-sm">
-                  <label className="flex items-center gap-2 font-semibold text-slate-700">
-                    <input
-                      type="radio"
-                      checked={hqSaleCustomerType === 'RETAIL'}
-                      onChange={() => {
-                        setHqSaleCustomerType('RETAIL');
-                        setSelectedCustomer(null);
-                      }}
-                    />
-                    Розничный клиент
-                  </label>
-                  <label className="flex items-center gap-2 font-semibold text-slate-700">
-                    <input
-                      type="radio"
-                      checked={hqSaleCustomerType === 'WHOLESALE'}
-                      onChange={() => {
-                        setHqSaleCustomerType('WHOLESALE');
-                        setSelectedCustomer(null);
-                      }}
-                    />
-                    Оптовый клиент
-                  </label>
-                </div>
-              ) : null}
               <div className="mt-4">
                 <SaleCustomerSearch
                   disabled={!!selectedCustomer}
                   includeArchived={includeArchivedCustomers}
-                  customerType={isHqBranchSaleContext ? hqSaleCustomerType : undefined}
-                  onSelect={handleCustomerSelect}
+                  onSelect={(customer) => void handleCustomerSelect(customer)}
                 />
               </div>
               <label className="mt-4 flex items-center gap-2 text-sm text-slate-600">
@@ -771,6 +816,14 @@ export default function NewSalePage() {
                     </p>
                     <p className="mt-2 text-lg font-bold text-slate-950">{selectedCustomer.fullName}</p>
                     <p className="mt-1 text-sm text-slate-700">{selectedCustomer.phone}</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {t('customers.customerType')}:{' '}
+                      {t(customerTypeLabelKey(selectedCustomer.customerType))}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {t('sales.appliedPriceType')}:{' '}
+                      {t(appliedPriceLabelKey(appliedPricingChannel))}
+                    </p>
                     <p className="mt-2 text-sm text-slate-600">
                       {t(`status.${selectedCustomer.status}`)}
                     </p>
@@ -820,30 +873,35 @@ export default function NewSalePage() {
                   }
                 />
               </div>
-              {isHqBranchSaleContext ? (
-                <div className="mt-3 flex flex-wrap gap-4 text-sm">
+              <div className="mt-3">
+                <span className="text-sm font-semibold text-slate-700">
+                  {t('customers.customerType')}
+                </span>
+                <div className="mt-2 flex flex-wrap gap-4 text-sm">
                   <label className="flex items-center gap-2">
                     <input
                       type="radio"
+                      required
                       checked={createCustomerForm.customerType === 'RETAIL'}
                       onChange={() =>
                         setCreateCustomerForm((current) => ({ ...current, customerType: 'RETAIL' }))
                       }
                     />
-                    Розничный клиент
+                    {t('customers.customerTypeRetail')}
                   </label>
                   <label className="flex items-center gap-2">
                     <input
                       type="radio"
+                      required
                       checked={createCustomerForm.customerType === 'WHOLESALE'}
                       onChange={() =>
                         setCreateCustomerForm((current) => ({ ...current, customerType: 'WHOLESALE' }))
                       }
                     />
-                    Оптовый клиент
+                    {t('customers.customerTypeWholesale')}
                   </label>
                 </div>
-              ) : null}
+              </div>
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
@@ -872,6 +930,7 @@ export default function NewSalePage() {
             <SaleProductSearch
               disabled={!selectedCustomer}
               inputRef={productSearchRef}
+              pricingChannel={appliedPricingChannel}
               onSelect={handleProductSelect}
               showRecommendedPriceLabel={branchSalesManagerView}
             />

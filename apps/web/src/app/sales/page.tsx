@@ -84,7 +84,7 @@ export default function SalesPage() {
               href="/sales/new"
               className="rounded-xl bg-blue-600 px-5 py-3 text-center font-semibold text-white hover:bg-blue-700"
             >
-              {t('sales.newSale')}
+              {t('sales.registerSale')}
             </Link>
           ) : null}
         </div>

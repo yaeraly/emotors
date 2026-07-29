@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AlertType,
   CustomerEventType,
   CustomerStatus,
   CustomerType,
@@ -21,6 +22,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PricingCatalogService } from '../pricing/pricing-catalog.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PricingService } from '../pricing/pricing.service';
@@ -34,6 +36,13 @@ import { AddPaymentDto } from './dto/add-payment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
 import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
+import {
+  assertBranchSaleCustomerTypeAllowed,
+  assertSalePricingChannelMatchesCustomer,
+  missingSalePricingPolicyMessage,
+  resolvePricingChannelFromCustomerType,
+  type SalePricingChannel,
+} from './sale-customer-pricing.util';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -48,6 +57,7 @@ export class SalesService {
     private readonly pricingCatalogService: PricingCatalogService,
     private readonly pricingResolution: PricingResolutionService,
     private readonly saleInstallmentApprovalService: SaleInstallmentApprovalService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -58,10 +68,11 @@ export class SalesService {
     assertBranchCashierCannotManageSales(user);
     return this.prisma.$transaction(async (tx) => {
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
-      this.applyHqBranchPricingChannels(customer, dto);
+      this.applyCustomerPricingChannels(customer, dto);
       this.assertCustomerAllowedForBranchSale(customer, dto.items);
       await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
       await this.validateSaleStock(user, customer.branchId, dto.items);
+      await this.assertSaleItemsResolvablePricing(user, customer.branchId, dto.items);
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? new Date();
       const receiptNumber = await this.generateReceiptNumber(tx, saleDate);
@@ -230,6 +241,7 @@ export class SalesService {
         phone: true,
         whatsappPhone: true,
         status: true,
+        customerType: true,
         totalDebtAmount: true,
         sales: {
           where: { deletedAt: null, status: SaleStatus.FINALIZED },
@@ -267,6 +279,7 @@ export class SalesService {
       phone: customer.phone,
       whatsappPhone: customer.whatsappPhone,
       status: customer.status,
+      customerType: customer.customerType,
       lastPurchaseDate: customer.sales[0]?.saleDate ?? null,
       totalDebtAmount: Number(customer.totalDebtAmount),
       hasOverdueInstallment: overdueCustomerIds.has(customer.id),
@@ -342,19 +355,18 @@ export class SalesService {
     const productOptions = await Promise.all(
       balances.map(async (balance) => {
         const availableQty = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
-        const recommendedRetailPriceKgs = await this.resolveRecommendedRetailPrice(
-          branchId,
-          balance.product.id,
-        );
-        const minimumRetailPriceKgs = await this.resolveRetailMinimumPrice(
-          branchId,
-          balance.product.id,
-        );
-        const maximumRetailPriceKgs = await this.resolveRetailMaximumPrice(
-          branchId,
-          balance.product.id,
-        );
-        const sellingPriceKgs = recommendedRetailPriceKgs ?? 0;
+        const pricingChannel = query.pricingChannel ?? 'RETAIL';
+        const isWholesale = pricingChannel === 'WHOLESALE';
+        const recommendedPriceKgs = isWholesale
+          ? await this.resolveRecommendedWholesalePrice(branchId, balance.product.id)
+          : await this.resolveRecommendedRetailPrice(branchId, balance.product.id);
+        const minimumPriceKgs = isWholesale
+          ? await this.resolveWholesaleMinimumPrice(branchId, balance.product.id)
+          : await this.resolveRetailMinimumPrice(branchId, balance.product.id);
+        const maximumPriceKgs = isWholesale
+          ? await this.resolveWholesaleMaximumPrice(branchId, balance.product.id)
+          : await this.resolveRetailMaximumPrice(branchId, balance.product.id);
+        const sellingPriceKgs = recommendedPriceKgs ?? 0;
 
         return {
           id: balance.product.id,
@@ -365,13 +377,14 @@ export class SalesService {
           productCode: balance.product.productCategory?.code ?? null,
           availableQty,
           sellingPriceKgs,
-          recommendedRetailPriceKgs,
-          hasRecommendedPrice: recommendedRetailPriceKgs !== null,
-          minimumRetailPriceKgs,
-          maximumRetailPriceKgs,
-          hasMaximumRetailPrice: maximumRetailPriceKgs !== null,
+          pricingChannel,
+          recommendedRetailPriceKgs: recommendedPriceKgs,
+          hasRecommendedPrice: recommendedPriceKgs !== null,
+          minimumRetailPriceKgs: minimumPriceKgs,
+          maximumRetailPriceKgs: maximumPriceKgs,
+          hasMaximumRetailPrice: maximumPriceKgs !== null,
           minimumSellingPriceKgs:
-            minimumRetailPriceKgs ??
+            minimumPriceKgs ??
             Number(balance.product.minimumSellingPriceKgs || 0),
           maximumDiscountPercent: Number(balance.product.maximumDiscountPercent || 0),
           enableMaximumRetailPrice: Boolean(balance.product.enableMaximumRetailPrice),
@@ -420,6 +433,42 @@ export class SalesService {
     }
   }
 
+  private async resolveWholesaleMinimumPrice(branchId: string, productId: string) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: PricingEnginePriceType.WHOLESALE_MINIMUM,
+      });
+      const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveRecommendedWholesalePrice(branchId: string, productId: string) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: PricingEnginePriceType.WHOLESALE_RECOMMENDED,
+      });
+      const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveWholesaleMaximumPrice(branchId: string, productId: string) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: PricingEnginePriceType.WHOLESALE_MAXIMUM,
+      });
+      const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
+  }
+
   async updateDraft(user: AuthUser, id: string, dto: CreateSaleDto) {
     assertBranchCashierCannotManageSales(user);
     return this.prisma.$transaction(async (tx) => {
@@ -433,10 +482,11 @@ export class SalesService {
       }
 
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
-      this.applyHqBranchPricingChannels(customer, dto);
+      this.applyCustomerPricingChannels(customer, dto);
       this.assertCustomerAllowedForBranchSale(customer, dto.items);
       await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
       await this.validateSaleStock(user, customer.branchId, dto.items);
+      await this.assertSaleItemsResolvablePricing(user, customer.branchId, dto.items);
       await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
       const saleDate = dto.saleDate ?? sale.saleDate;
       const totals = await this.calculateSaleWithFreeze(user, customer.branchId, dto);
@@ -888,9 +938,11 @@ export class SalesService {
           unitCost: Number(item.unitCost),
           priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? undefined,
           priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? undefined,
+          pricingChannel: this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
         }));
 
         await this.validateSaleStock(user, refreshedSale.branchId, finalizeItems);
+        await this.assertSaleItemsResolvablePricing(user, refreshedSale.branchId, finalizeItems);
         await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems);
       }
 
@@ -1281,19 +1333,15 @@ export class SalesService {
     return customer;
   }
 
-  private applyHqBranchPricingChannels(
-    customer: {
-      customerType: CustomerType;
-      branch: { branchType: import('@prisma/client').BranchType; code: string };
-    },
+  private resolvePricingChannelFromCustomer(customerType: CustomerType): SalePricingChannel {
+    return resolvePricingChannelFromCustomerType(customerType);
+  }
+
+  private applyCustomerPricingChannels(
+    customer: { customerType: CustomerType },
     dto: CreateSaleDto,
   ) {
-    const isHqBranch =
-      customer.branch.branchType === 'HQ_BRANCH' || customer.branch.code === HQ_CATALOG_BRANCH_CODE;
-    if (!isHqBranch) return;
-
-    const channel =
-      customer.customerType === CustomerType.WHOLESALE ? 'WHOLESALE' : 'RETAIL';
+    const channel = this.resolvePricingChannelFromCustomer(customer.customerType);
     for (const item of dto.items) {
       item.pricingChannel = channel;
     }
@@ -1302,37 +1350,78 @@ export class SalesService {
   private assertCustomerAllowedForBranchSale(
     customer: {
       customerType: CustomerType;
-      branch: { branchType: import('@prisma/client').BranchType; code: string };
     },
-    items: Array<{ pricingChannel?: 'RETAIL' | 'WHOLESALE' }>,
+    items: Array<{ pricingChannel?: SalePricingChannel }>,
   ) {
-    if (
-      customer.customerType === CustomerType.DEALER ||
-      customer.customerType === CustomerType.DISTRIBUTOR
-    ) {
+    try {
+      assertBranchSaleCustomerTypeAllowed(customer.customerType);
+      for (const item of items) {
+        assertSalePricingChannelMatchesCustomer(
+          customer.customerType,
+          item.pricingChannel,
+        );
+      }
+    } catch (error) {
       throw new BadRequestException(
-        'Dealer and Distributor customers must be served through HQ Sales',
+        error instanceof Error ? error.message : 'Invalid customer type for branch sale',
       );
     }
+  }
 
-    const isHqBranch =
-      customer.branch.branchType === 'HQ_BRANCH' || customer.branch.code === HQ_CATALOG_BRANCH_CODE;
+  private async assertSaleItemsResolvablePricing(
+    user: AuthUser,
+    branchId: string,
+    items: Array<{ productId?: string; pricingChannel?: 'RETAIL' | 'WHOLESALE' }>,
+  ) {
+    if (hasAnyFullAccessRole(resolveUserRoles(user))) {
+      return;
+    }
 
-    if (isHqBranch) {
-      if (
-        customer.customerType !== CustomerType.RETAIL &&
-        customer.customerType !== CustomerType.WHOLESALE
-      ) {
-        throw new BadRequestException('HQ Branch serves only Retail and Wholesale customers');
+    for (const item of items) {
+      if (!item.productId) continue;
+      const channel = item.pricingChannel ?? 'RETAIL';
+      const isWholesale = channel === 'WHOLESALE';
+      const priceType = isWholesale
+        ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
+        : PricingEnginePriceType.RETAIL_RECOMMENDED;
+
+      let resolvedPrice: number | null = null;
+      try {
+        const freeze = await this.pricingResolution.resolveWithFreeze(branchId, item.productId, {
+          priceType,
+        });
+        resolvedPrice = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      } catch {
+        resolvedPrice = null;
       }
-      const usesWholesale = items.some((item) => item.pricingChannel === 'WHOLESALE');
-      if (usesWholesale && customer.customerType !== CustomerType.WHOLESALE) {
-        throw new BadRequestException('Wholesale sale requires a Wholesale customer');
-      }
-      if (!usesWholesale && customer.customerType === CustomerType.WHOLESALE) {
-        throw new BadRequestException('Wholesale customers require wholesale pricing channel');
+
+      if (!resolvedPrice || resolvedPrice <= 0) {
+        await this.notifyMissingSalePricingPolicy(user, branchId, item.productId, channel);
+        throw new BadRequestException(missingSalePricingPolicyMessage(channel));
       }
     }
+  }
+
+  private async notifyMissingSalePricingPolicy(
+    user: AuthUser,
+    branchId: string,
+    productId: string,
+    channel: 'RETAIL' | 'WHOLESALE',
+  ) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, deletedAt: null },
+      select: { sku: true, name: true },
+    });
+    const label = channel === 'WHOLESALE' ? 'оптовая' : 'розничная';
+    await this.notificationsService.notify(user, {
+      type: AlertType.BRANCH_REQUEST_NO_PRICING_POLICY,
+      branchId,
+      title: 'Требуется ценовая политика',
+      message: `При продаже товара ${product?.sku ?? productId} (${product?.name ?? ''}) не настроена ${label} ценовая политика.`,
+      entityType: 'Product',
+      entityId: productId,
+      recipientRoles: [Role.CEO, Role.OWNER],
+    });
   }
 
   private async getAccessibleSale(user: AuthUser, id: string) {

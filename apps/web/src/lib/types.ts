@@ -33,6 +33,8 @@ export type CustomerStatus =
   | 'INACTIVE'
   | 'ARCHIVED';
 
+export type CustomerType = 'RETAIL' | 'WHOLESALE' | 'DEALER' | 'DISTRIBUTOR' | 'FRANCHISE';
+
 export type CustomerEventType =
   | 'NOTE'
   | 'CALL'
@@ -275,6 +277,7 @@ export type Customer = {
   branchId: string;
   branch?: Branch;
   status: CustomerStatus;
+  customerType?: CustomerType;
   notes?: string | null;
   totalPurchases: number;
   totalProfit: number;

@@ -25,6 +25,7 @@ export type SaleProductOption = {
 
 type Props = {
   disabled?: boolean;
+  pricingChannel?: 'RETAIL' | 'WHOLESALE';
   onSelect: (product: SaleProductOption) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
   showRecommendedPriceLabel?: boolean;
@@ -34,6 +35,7 @@ const DEBOUNCE_MS = 200;
 
 export function SaleProductSearch({
   disabled = false,
+  pricingChannel = 'RETAIL',
   onSelect,
   inputRef,
   showRecommendedPriceLabel = false,
@@ -62,7 +64,7 @@ export function SaleProductSearch({
     setLoading(true);
     const timer = window.setTimeout(() => {
       const search = query.trim();
-      const params = new URLSearchParams({ search });
+      const params = new URLSearchParams({ search, pricingChannel });
       void apiFetch<SaleProductOption[]>(`/sales/product-options?${params.toString()}`)
         .then((items) => {
           const searchable = items.map((item) => ({
@@ -95,7 +97,7 @@ export function SaleProductSearch({
     }, DEBOUNCE_MS);
 
     return () => window.clearTimeout(timer);
-  }, [query, t]);
+  }, [query, pricingChannel, t]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {

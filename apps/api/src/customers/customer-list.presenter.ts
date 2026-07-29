@@ -7,6 +7,7 @@ type CustomerListBase = {
   phone: string;
   whatsappPhone: string | null;
   status: string;
+  customerType?: string;
   branchId: string;
   branch: { id: string; name: string; code: string };
   totalPurchases: number;
@@ -27,6 +28,7 @@ export function toRoleAwareCustomerListItem(user: AuthUser, customer: CustomerLi
       id: customer.id,
       fullName: customer.fullName,
       status: customer.status,
+      customerType: customer.customerType,
       totalPurchases: customer.totalPurchases,
       totalProfit: customer.totalProfit,
       totalDebt: customer.totalDebt,

@@ -1,6 +1,6 @@
 import { CustomerType } from '@prisma/client';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 
 export class SaleCustomerSearchQueryDto {
   @IsOptional()
@@ -21,4 +21,8 @@ export class SaleProductSearchQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsIn(['RETAIL', 'WHOLESALE'])
+  pricingChannel?: 'RETAIL' | 'WHOLESALE';
 }

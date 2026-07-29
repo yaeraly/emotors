@@ -1,4 +1,4 @@
-import { CustomerStatus } from '@prisma/client';
+import { CustomerStatus, CustomerType } from '@prisma/client';
 import {
   IsEnum,
   IsNumber,
@@ -27,6 +27,10 @@ export class UpdateCustomerDto {
   @IsOptional()
   @IsEnum(CustomerStatus)
   status?: CustomerStatus;
+
+  @IsOptional()
+  @IsEnum(CustomerType)
+  customerType?: CustomerType;
 
   @IsOptional()
   @IsString()

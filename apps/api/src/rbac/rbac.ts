@@ -655,6 +655,15 @@ export function canArchiveCustomer(user: Pick<AuthUser, 'role' | 'roles' | 'bran
   return hasAnyFullAccessRole(roles) || roles.includes(Role.FRANCHISE_OWNER);
 }
 
+export function canEditCustomerType(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
+  const roles = resolveUserRoles(user);
+  return (
+    hasAnyFullAccessRole(roles) ||
+    roles.includes(Role.FRANCHISE_OWNER) ||
+    roles.includes(Role.MANAGER)
+  );
+}
+
 export function canBranchSalesManagerModifyStock(user: Pick<AuthUser, 'role' | 'roles' | 'branchId'>) {
   return !isBranchSalesManagerUser(user);
 }

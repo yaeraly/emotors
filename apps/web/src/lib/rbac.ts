@@ -1063,6 +1063,14 @@ export function canCreateCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'
   );
 }
 
+export function canEditCustomerType(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  return (
+    hasFullAccess(user) ||
+    hasRole(user, 'FRANCHISE_OWNER') ||
+    hasRole(user, 'MANAGER')
+  );
+}
+
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
 }

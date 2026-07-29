@@ -21,7 +21,8 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
-import { canArchiveCustomer } from '../rbac/rbac';
+import { canArchiveCustomer, canEditCustomerType } from '../rbac/rbac';
+import { isBranchRetailWholesaleCustomerType } from '../sales/sale-customer-pricing.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { toRoleAwareCustomerListItem } from './customer-list.presenter';
 
@@ -86,6 +87,7 @@ export class CustomersService {
         phone: true,
         whatsappPhone: true,
         status: true,
+        customerType: true,
         branchId: true,
         branch: {
           select: {
@@ -172,7 +174,27 @@ export class CustomersService {
   }
 
   async update(user: AuthUser, id: string, dto: UpdateCustomerDto) {
-    await this.getAccessibleCustomer(user, id);
+    const existing = await this.getAccessibleCustomer(user, id);
+
+    if (dto.customerType !== undefined && dto.customerType !== existing.customerType) {
+      if (!canEditCustomerType(user)) {
+        throw new ForbiddenException('У вас нет прав изменять тип клиента');
+      }
+      if (
+        dto.customerType === CustomerType.DEALER ||
+        dto.customerType === CustomerType.DISTRIBUTOR
+      ) {
+        throw new BadRequestException(
+          'Dealer and Distributor customers must be created through HQ Sales',
+        );
+      }
+      const branch = existing.branch;
+      const isHqBranch =
+        branch?.branchType === 'HQ_BRANCH' || branch?.code === HQ_CATALOG_BRANCH_CODE;
+      if (isHqBranch && !isBranchRetailWholesaleCustomerType(dto.customerType)) {
+        throw new BadRequestException('HQ Branch customers must be Retail or Wholesale');
+      }
+    }
 
     const customer = await this.prisma.customer.update({
       where: { id },
@@ -185,11 +207,25 @@ export class CustomersService {
         totalPurchaseAmount: dto.totalPurchaseAmount,
         totalProfitAmount: dto.totalProfitAmount,
         totalDebtAmount: dto.totalDebtAmount,
+        ...(dto.customerType !== undefined ? { customerType: dto.customerType } : {}),
       },
       include: { branch: true, events: true, sales: true },
     });
 
     await this.audit(user, customer.branchId, 'CUSTOMER_UPDATED', 'Customer', id);
+    if (dto.customerType !== undefined && dto.customerType !== existing.customerType) {
+      await this.audit(
+        user,
+        customer.branchId,
+        'CUSTOMER_TYPE_CHANGED',
+        'Customer',
+        id,
+        {
+          from: existing.customerType,
+          to: dto.customerType,
+        },
+      );
+    }
     return this.toCustomerProfile(customer, customer.events, customer.sales);
   }
 
@@ -452,7 +488,14 @@ export class CustomersService {
     }
   }
 
-  private audit(user: AuthUser, branchId: string, action: string, entity: string, entityId: string) {
+  private audit(
+    user: AuthUser,
+    branchId: string,
+    action: string,
+    entity: string,
+    entityId: string,
+    extraMetadata?: Record<string, unknown>,
+  ) {
     return this.prisma.auditLog.create({
       data: {
         userId: user.id,
@@ -463,6 +506,7 @@ export class CustomersService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
+          ...extraMetadata,
         },
       },
     });
@@ -519,6 +563,7 @@ export class CustomersService {
       phone: string;
       whatsappPhone: string | null;
       status: string;
+      customerType?: CustomerType;
       branchId: string;
       branch: { id: string; name: string; code: string };
       totalPurchaseAmount: Prisma.Decimal;
@@ -540,6 +585,7 @@ export class CustomersService {
       phone: customer.phone,
       whatsappPhone: customer.whatsappPhone,
       status: customer.status,
+      customerType: customer.customerType ?? CustomerType.RETAIL,
       branchId: customer.branchId,
       branch: customer.branch,
       totalPurchases,
@@ -564,6 +610,7 @@ export class CustomersService {
       branchId: string;
       branch: { id: string; name: string; code: string };
       status: string;
+      customerType?: CustomerType;
       notes: string | null;
       totalPurchaseAmount: Prisma.Decimal;
       totalProfitAmount: Prisma.Decimal;
@@ -589,6 +636,7 @@ export class CustomersService {
       branchId: customer.branchId,
       branch: customer.branch,
       status: customer.status,
+      customerType: customer.customerType ?? CustomerType.RETAIL,
       notes: customer.notes,
       totalPurchases,
       totalProfit,

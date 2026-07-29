@@ -4,13 +4,13 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer, canCreateCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser, shouldHideCustomerProfit } from '@/lib/rbac';
+import { canArchiveCustomer, canCreateCustomer, canEditCustomerType, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser, shouldHideCustomerProfit } from '@/lib/rbac';
 import {
   getCustomerListColumns,
   shouldShowCustomerListEditButton,
   type CustomerListColumnKey,
 } from '@/lib/customer-table-config';
-import type { Branch, Customer, CustomerStatus, User } from '@/lib/types';
+import type { Branch, Customer, CustomerStatus, CustomerType, User } from '@/lib/types';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -31,6 +31,7 @@ type CustomerFormFields = {
   phone: string;
   whatsappPhone: string;
   status: CustomerStatus;
+  customerType: CustomerType;
   notes: string;
 };
 
@@ -60,6 +61,7 @@ const initialCustomerFormFields: CustomerFormFields = {
   phone: '',
   whatsappPhone: '',
   status: 'ACTIVE',
+  customerType: 'RETAIL',
   notes: '',
 };
 
@@ -123,6 +125,7 @@ function CustomersPageContent() {
   const visibleColumns = getCustomerListColumns(currentUser);
   const showListEditButton = shouldShowCustomerListEditButton(currentUser) && !archiveView;
   const canCreate = canCreateCustomer(currentUser) && !archiveView;
+  const canEditType = canEditCustomerType(currentUser) && !archiveView;
   const columnVisible = (key: CustomerListColumnKey) => visibleColumns.includes(key);
   const statusFilterOptions = archiveView
     ? (['ARCHIVED'] as CustomerStatus[])
@@ -227,6 +230,7 @@ function CustomersPageContent() {
           whatsappPhone: form.whatsappPhone.trim() || undefined,
           branchId: form.branchId || currentUser?.branchId || undefined,
           status: form.status,
+          customerType: form.customerType,
           notes: form.notes.trim() || undefined,
           totalPurchaseAmount: Number(form.totalPurchaseAmount || 0),
           totalProfitAmount: Number(form.totalProfitAmount || 0),
@@ -263,6 +267,7 @@ function CustomersPageContent() {
       phone: customer.phone,
       whatsappPhone: customer.whatsappPhone ?? '',
       status: customer.status,
+      customerType: customer.customerType ?? 'RETAIL',
       notes: customer.notes ?? '',
     });
   }
@@ -319,6 +324,9 @@ function CustomersPageContent() {
             phone: editForm.phone.trim(),
             whatsappPhone: editForm.whatsappPhone.trim(),
             status: editForm.status,
+            ...(canEditType
+              ? { customerType: editForm.customerType }
+              : {}),
             notes: editForm.notes.trim(),
           }),
         });
@@ -827,6 +835,8 @@ function CustomersPageContent() {
                 <CustomerForm
                   form={form}
                   onChange={(updates) => setForm({ ...form, ...updates })}
+                  showCustomerType
+                  customerTypeEditable
                 />
                 {branches.length > 1 && !isBranchPanel ? (
                   <label className="block">
@@ -943,6 +953,8 @@ function CustomersPageContent() {
                   onChange={(updates) =>
                     setEditForm({ ...editForm, ...updates })
                   }
+                  showCustomerType
+                  customerTypeEditable={canEditType}
                 />
               </div>
 
@@ -1071,9 +1083,13 @@ function CustomerProfileDrawer({
 function CustomerForm({
   form,
   onChange,
+  showCustomerType = false,
+  customerTypeEditable = false,
 }: {
   form: CustomerFormFields;
   onChange: (updates: Partial<CustomerFormFields>) => void;
+  showCustomerType?: boolean;
+  customerTypeEditable?: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -1096,6 +1112,24 @@ function CustomerForm({
         value={form.whatsappPhone}
         onChange={(value) => onChange({ whatsappPhone: value })}
       />
+
+      {showCustomerType ? (
+        <label className="block">
+          <span className="text-sm font-semibold text-slate-700">{t('customers.customerType')}</span>
+          <select
+            value={form.customerType}
+            disabled={!customerTypeEditable}
+            required
+            onChange={(event) =>
+              onChange({ customerType: event.target.value as CustomerType })
+            }
+            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2 disabled:bg-slate-100"
+          >
+            <option value="RETAIL">{t('customers.customerTypeRetail')}</option>
+            <option value="WHOLESALE">{t('customers.customerTypeWholesale')}</option>
+          </select>
+        </label>
+      ) : null}
 
       <label className="block">
         <span className="text-sm font-semibold text-slate-700">{t('crm.status')}</span>
