@@ -32,6 +32,7 @@ export type LandedCostItemResult = LandedCostItemInput & {
   linePackagingWeightKg: number;
   lineShipmentWeightKg: number;
   costKgs: number;
+  basePurchaseCostKgs: number;
   totalWeightKg: number;
   chinaDomesticAllocKgs: number;
   chinaExportAllocKgs: number;
@@ -323,13 +324,13 @@ export function calculateLandedCosts(
   const reconciledItems = calculatedItems.map((item, index) => {
     const totalCostKgs = reconciledLineTotals[index] ?? 0;
     const effectiveQty = item.effectiveQuantity > 0 ? item.effectiveQuantity : 0;
-    const transportCostKgs =
+    const transportLineKgs =
       effectiveQty > 0 ? roundMoney(totalCostKgs - item.basePurchaseCostKgs) : 0;
     const finalCostKgs =
-      effectiveQty > 0 ? roundMoney(item.costKgs + transportCostKgs / effectiveQty) : 0;
+      effectiveQty > 0 ? roundMoney(item.costKgs + transportLineKgs / effectiveQty) : 0;
     return {
       ...item,
-      transportCostKgs: effectiveQty > 0 ? roundMoney(transportCostKgs / effectiveQty) : 0,
+      transportCostKgs: effectiveQty > 0 ? roundMoney(transportLineKgs / effectiveQty) : 0,
       finalCostKgs,
       totalCostKgs,
     };

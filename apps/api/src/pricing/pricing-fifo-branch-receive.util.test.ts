@@ -42,17 +42,14 @@ describe('buildBranchReceiveLinesFromHqAllocations', () => {
     assert.equal(lines[0].finalBranchUnitCostKgs, 5050);
   });
 
-  it('depletes HQ allocations in FIFO order on partial receive', () => {
+  it('preserves authoritative HQ allocation line total on partial branch receive', () => {
     const lines = buildBranchReceiveLinesFromHqAllocations(
-      [
-        { id: 'a1', fifoBatchId: 'hq-L1', quantity: 3, unitCostKgs: 5000 },
-        { id: 'a2', fifoBatchId: 'hq-L2', quantity: 2, unitCostKgs: 6000 },
-      ],
-      4,
+      [{ id: 'a1', fifoBatchId: 'hq-L1', quantity: 11, unitCostKgs: 83123.45, totalCostKgs: 914369.8 }],
+      11,
       0,
     );
-    assert.equal(lines.length, 2);
-    assert.equal(lines[0].quantity, 3);
-    assert.equal(lines[1].quantity, 1);
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0].lineTotalCostKgs, 914369.8);
+    assert.notEqual(lines[0].lineTotalCostKgs, lines[0].finalBranchUnitCostKgs * lines[0].quantity);
   });
 });

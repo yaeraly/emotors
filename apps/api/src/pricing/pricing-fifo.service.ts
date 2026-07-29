@@ -462,6 +462,7 @@ export class PricingFifoService {
 
     // Flat override only for legacy single-layer / non-per-layer mode.
     if (!preferPerLayerMarkup && input.overrideUnitPriceKgs != null && input.overrideUnitPriceKgs >= 0) {
+      const layerByBatchId = new Map(allocationLayers.map((layer) => [layer.batchId, layer]));
       let remainingToAllocate = input.quantity;
       let totalCost = 0;
       let totalPrice = 0;
@@ -474,10 +475,14 @@ export class PricingFifoService {
           : batch.remainingQuantity;
         const take = Math.min(available, remainingToAllocate);
         if (take <= 0) continue;
+        const mappedLayer = layerByBatchId.get(batch.id);
         const unitCostKgs = Number(batch.unitCostKgs);
         const unitPriceKgs = Number(input.overrideUnitPriceKgs);
-        const layerBaseQty = batch.initialQuantity > 0 ? batch.initialQuantity : take;
-        const layerTotalCostKgs = Number(batch.unitCostKgs) * layerBaseQty;
+        const layerBaseQty =
+          mappedLayer?.layerBaseQuantity ??
+          (batch.initialQuantity > 0 ? batch.initialQuantity : take);
+        const layerTotalCostKgs =
+          mappedLayer?.layerTotalCostKgs ?? Number(batch.unitCostKgs) * layerBaseQty;
         const lineCost = roundMoney(
           allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take),
         );
@@ -1169,6 +1174,7 @@ export class PricingFifoService {
         fifoBatchId: true,
         quantity: true,
         unitCostKgs: true,
+        totalCostKgs: true,
       },
     });
     if (!allocations.length) {
@@ -1226,7 +1232,7 @@ export class PricingFifoService {
         continue;
       }
 
-      const totalCostKgs = roundMoney(line.quantity * line.finalBranchUnitCostKgs);
+      const totalCostKgs = line.lineTotalCostKgs;
       const movement = await input.createMovement({
         quantity: line.quantity,
         unitCostKgs: line.finalBranchUnitCostKgs,

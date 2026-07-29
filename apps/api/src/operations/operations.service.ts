@@ -69,6 +69,7 @@ import {
   planProcurementReceiveInventoryReconciliation,
   sumReceiveMovementTotals,
 } from '../procurement/procurement-receive-inventory-reconcile.util';
+import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
 import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
@@ -2213,24 +2214,21 @@ export class OperationsService {
             },
           });
         }
+      }
 
-        await tx.inventoryBalance.update({
-          where: {
-            branchId_warehouseId_productId: {
-              branchId: plan.branchId,
-              warehouseId: plan.warehouseId,
-              productId: plan.productId,
-            },
-          },
-          data: {
-            totalValueKgs: { increment: plan.deltaKgs },
-            landedCostKgs: plan.reconciledUnitCostKgs,
-            averageCostKgs:
-              plan.quantity > 0
-                ? roundDisplayMoney(plan.reconciledTotalCostKgs / plan.quantity)
-                : plan.reconciledUnitCostKgs,
-          },
+      const affectedBalances = new Map<
+        string,
+        { branchId: string; warehouseId: string; productId: string }
+      >();
+      for (const snap of receivedMovementSnapshots) {
+        affectedBalances.set(`${snap.branchId}:${snap.warehouseId}:${snap.productId}`, {
+          branchId: snap.branchId,
+          warehouseId: snap.warehouseId,
+          productId: snap.productId,
         });
+      }
+      for (const balanceKey of affectedBalances.values()) {
+        await recomputeInventoryBalanceValuationInTx(tx, balanceKey);
       }
 
       const confirmedFullLandedCostKgs = roundDisplayMoney(recalculated.totalCostKgs);

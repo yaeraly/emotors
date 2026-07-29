@@ -1,3 +1,9 @@
+import {
+  allocateProportionalCost,
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+} from './product-cost-precision.util';
+
 export type HqAllocationReceiveLine = {
   allocationId: string;
   hqFifoLayerId: string;
@@ -5,11 +11,9 @@ export type HqAllocationReceiveLine = {
   transferUnitCostKgs: number;
   transportCostPerUnit: number;
   finalBranchUnitCostKgs: number;
+  /** Authoritative branch receive line total (transfer + transport), not unit×qty. */
+  lineTotalCostKgs: number;
 };
-
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
 
 /**
  * Build branch receive lines from HQ distribution FIFO allocations (oldest first).
@@ -21,6 +25,7 @@ export function buildBranchReceiveLinesFromHqAllocations(
     fifoBatchId: string;
     quantity: number;
     unitCostKgs: number;
+    totalCostKgs?: number;
   }>,
   acceptedQuantity: number,
   transportCostPerUnit = 0,
@@ -36,15 +41,24 @@ export function buildBranchReceiveLinesFromHqAllocations(
     const take = Math.min(Math.max(0, row.quantity), remaining);
     if (take <= 0) continue;
 
-    const transferUnitCostKgs = roundMoney(Number(row.unitCostKgs));
-    const transport = roundMoney(Number(transportCostPerUnit));
+    const transferUnitCostKgs = roundDisplayMoney(Number(row.unitCostKgs));
+    const transport = roundDisplayMoney(Number(transportCostPerUnit));
+    const allocationLineTotal =
+      Number(row.totalCostKgs ?? 0) > 0
+        ? roundDisplayMoney(allocateProportionalCost(Number(row.totalCostKgs), row.quantity, take))
+        : roundDisplayMoney(transferUnitCostKgs * take);
+    const transportLineTotal = roundDisplayMoney(transport * take);
+    const lineTotalCostKgs = roundDisplayMoney(allocationLineTotal + transportLineTotal);
+    const finalBranchUnitCostKgs = deriveDisplayUnitCost(lineTotalCostKgs, take);
+
     lines.push({
       allocationId: row.id,
       hqFifoLayerId: row.fifoBatchId,
       quantity: take,
       transferUnitCostKgs,
       transportCostPerUnit: transport,
-      finalBranchUnitCostKgs: roundMoney(transferUnitCostKgs + transport),
+      finalBranchUnitCostKgs,
+      lineTotalCostKgs,
     });
     remaining -= take;
   }
