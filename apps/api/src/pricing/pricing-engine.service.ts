@@ -32,6 +32,10 @@ import {
   resolveWholesaleMaximumMarkup,
   resolveWholesaleMaximumPolicy,
 } from './pricing-policy-resolution.util';
+import {
+  isCustomerSalePriceType,
+  shouldUseHqBranchInventoryCostForPriceType,
+} from './shared-franchise-pricing-branch.util';
 
 /**
  * Single source of truth for price resolution.
@@ -111,20 +115,29 @@ export class PricingEngineService {
     const baseCostKgs = costAvailable ? cost.costPriceKgs : 0;
     const baseFranchiseMarkupPercent = Number(pricingProduct.hqBranchWholesaleMarkupPercent ?? 0);
 
+    const isHqBranchTransfer = branchType === 'HQ_BRANCH';
+    const useHqBranchInventoryCost = shouldUseHqBranchInventoryCostForPriceType(
+      branchType,
+      priceType,
+    );
+    const pricingBranchType: BranchTypeForPricing =
+      branchType === 'HQ_BRANCH' && isCustomerSalePriceType(priceType)
+        ? 'FRANCHISE'
+        : branchType;
+
     const baseBranchPriceRaw = calculateBaseBranchPriceKgsRaw({
       costPriceKgs: baseCostKgs,
       markupPercent: baseFranchiseMarkupPercent,
-      branchType,
+      branchType: pricingBranchType,
     });
     const baseBranchPriceKgs = isBranchPurchase
       ? baseBranchPriceRaw
       : calculateBaseBranchPriceKgs({
           costPriceKgs: baseCostKgs,
           markupPercent: baseFranchiseMarkupPercent,
-          branchType,
+          branchType: pricingBranchType,
         });
 
-    const isHqBranchTransfer = branchType === 'HQ_BRANCH';
     const calculationSteps: PricingCalculationStep[] = [
       { step: 'fifoCost', valueKgs: baseCostKgs, detail: cost.source },
       {
@@ -148,7 +161,7 @@ export class PricingEngineService {
     let pricingProfileDiscountPercent: number | null = null;
     let temporaryOverrideApplied = false;
 
-    if (branchType === 'HQ_BRANCH') {
+    if (useHqBranchInventoryCost) {
       effectiveBranchPriceKgs = baseCostKgs;
       appliedRuleType = PricingAppliedRuleType.HQ_COST;
       calculationSteps.push({ step: 'hqBranchExactCost', valueKgs: baseCostKgs });

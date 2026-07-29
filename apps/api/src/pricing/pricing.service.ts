@@ -30,6 +30,7 @@ import {
   resolveWholesaleMaximumPolicy,
 } from './pricing-policy-resolution.util';
 import { PricingEngineService } from './pricing-engine.service';
+import { PricingResolutionService } from './pricing-resolution.service';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -47,6 +48,7 @@ export class PricingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pricingEngine: PricingEngineService,
+    private readonly pricingResolution: PricingResolutionService,
   ) {}
 
   list(user: AuthUser) {
@@ -297,33 +299,40 @@ export class PricingService {
         ? resolveWholesaleMaximumPolicy(product, category)
         : resolveRetailMaximumPolicy(product, category);
 
-      const [minResult, recommendedResult] = await Promise.all([
-        this.pricingEngine.resolvePrice({
-          productId: item.productId,
-          branchId,
-          priceType: isWholesale
-            ? PricingEnginePriceType.WHOLESALE_MINIMUM
-            : PricingEnginePriceType.RETAIL_MINIMUM,
+      const minPriceType = isWholesale
+        ? PricingEnginePriceType.WHOLESALE_MINIMUM
+        : PricingEnginePriceType.RETAIL_MINIMUM;
+      const recommendedPriceType = isWholesale
+        ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
+        : PricingEnginePriceType.RETAIL_RECOMMENDED;
+      const pricingBranchId = await this.pricingResolution.resolvePricingBranchId(
+        branchId,
+        recommendedPriceType,
+      );
+
+      const [minFreeze, recommendedFreeze] = await Promise.all([
+        this.pricingResolution.resolveWithFreeze(pricingBranchId, item.productId, {
+          priceType: minPriceType,
         }),
-        this.pricingEngine.resolvePrice({
-          productId: item.productId,
-          branchId,
-          priceType: isWholesale
-            ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
-            : PricingEnginePriceType.RETAIL_RECOMMENDED,
+        this.pricingResolution.resolveWithFreeze(pricingBranchId, item.productId, {
+          priceType: recommendedPriceType,
         }),
       ]);
+      const minResult = { resolvedPriceKgs: minFreeze.resolvedPriceKgs };
+      const recommendedResult = { resolvedPriceKgs: recommendedFreeze.resolvedPriceKgs };
 
       let maximumPriceKgs: number | null = null;
       if (isMaximumPolicyActive(maximumPolicy)) {
-        const maxResult = await this.pricingEngine.resolvePrice({
-          productId: item.productId,
-          branchId,
-          priceType: isWholesale
-            ? PricingEnginePriceType.WHOLESALE_MAXIMUM
-            : PricingEnginePriceType.RETAIL_MAXIMUM,
-        });
-        maximumPriceKgs = maxResult.resolvedPriceKgs;
+        const maxFreeze = await this.pricingResolution.resolveWithFreeze(
+          pricingBranchId,
+          item.productId,
+          {
+            priceType: isWholesale
+              ? PricingEnginePriceType.WHOLESALE_MAXIMUM
+              : PricingEnginePriceType.RETAIL_MAXIMUM,
+          },
+        );
+        maximumPriceKgs = maxFreeze.resolvedPriceKgs;
       }
 
       const validation = validateSellingPriceLimits({

@@ -29,8 +29,8 @@ export function assertSalePricingChannelMatchesCustomer(
 
 export function missingSalePricingPolicyMessage(channel: SalePricingChannel) {
   return channel === 'WHOLESALE'
-    ? 'Для товара не настроена оптовая ценовая политика.'
-    : 'Для товара не настроена розничная ценовая политика.';
+    ? 'Для товара не настроена единая оптовая цена.'
+    : 'Для товара не настроена единая розничная цена.';
 }
 
 export function isBranchRetailWholesaleCustomerType(customerType: CustomerType) {

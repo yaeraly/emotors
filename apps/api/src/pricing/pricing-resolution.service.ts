@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { PricingEnginePriceType, Prisma } from '@prisma/client';
+import { BranchType, PricingEnginePriceType, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { BranchPriceResolverService } from './branch-price-resolver.service';
 import { toPriceFreezePayload, type PriceFreezePayload } from './pricing-engine.types';
 import { PricingEngineService } from './pricing-engine.service';
+import {
+  isCustomerSalePriceType,
+  SHARED_FRANCHISE_PRICING_BRANCH_WHERE,
+} from './shared-franchise-pricing-branch.util';
 
 @Injectable()
 export class PricingResolutionService {
@@ -99,7 +103,7 @@ export class PricingResolutionService {
 
     const result = await this.pricingEngine.resolvePrice({
       productId,
-      branchId,
+      branchId: await this.resolvePricingBranchId(branchId, options?.priceType),
       priceType: options?.priceType,
       documentDate: options?.documentDate,
       pricingPolicyVersionId: options?.pricingPolicyVersionId,
@@ -117,6 +121,39 @@ export class PricingResolutionService {
     }
 
     return freeze;
+  }
+
+  /**
+   * HQ Branch customer sales use the same shared franchise-network price resolver
+   * as franchise branches (reference branch profile + centralized policy).
+   * Inventory receipt / branch purchase stays on the operating branch id.
+   */
+  async resolvePricingBranchId(
+    operatingBranchId: string,
+    priceType?: PricingEnginePriceType,
+  ): Promise<string> {
+    if (!isCustomerSalePriceType(priceType)) {
+      return operatingBranchId;
+    }
+
+    const operatingBranch = await this.prisma.branch.findFirst({
+      where: { id: operatingBranchId, deletedAt: null },
+      select: { branchType: true },
+    });
+    if (operatingBranch?.branchType !== BranchType.HQ_BRANCH) {
+      return operatingBranchId;
+    }
+
+    const referenceBranch = await this.findSharedFranchisePricingBranch();
+    return referenceBranch?.id ?? operatingBranchId;
+  }
+
+  private async findSharedFranchisePricingBranch() {
+    return this.prisma.branch.findFirst({
+      where: SHARED_FRANCHISE_PRICING_BRANCH_WHERE,
+      orderBy: { name: 'asc' },
+      select: { id: true },
+    });
   }
 
   private async auditPriceResolution(

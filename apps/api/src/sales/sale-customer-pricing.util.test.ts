@@ -42,14 +42,14 @@ describe('sale-customer-pricing.util', () => {
     assert.doesNotThrow(() => assertBranchSaleCustomerTypeAllowed(CustomerType.WHOLESALE));
   });
 
-  it('returns clear missing-policy messages per channel', () => {
+  it('returns clear missing shared-price messages per channel', () => {
     assert.equal(
       missingSalePricingPolicyMessage('RETAIL'),
-      'Для товара не настроена розничная ценовая политика.',
+      'Для товара не настроена единая розничная цена.',
     );
     assert.equal(
       missingSalePricingPolicyMessage('WHOLESALE'),
-      'Для товара не настроена оптовая ценовая политика.',
+      'Для товара не настроена единая оптовая цена.',
     );
   });
 });
