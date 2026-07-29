@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
+import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { apiFetch } from '@/lib/api';
 import {
   canDispatchFromHq,
@@ -13,6 +13,7 @@ import {
   canRecordDistributionPayment,
   canViewProductCost,
   isBranchWarehouseOperator,
+  isHqSalesManagerUser,
   isHqWarehouseLogisticsOnlyUser,
 } from '@/lib/rbac';
 import { ReceivingTransportCostSection } from '@/components/distribution/ReceivingTransportCostSection';
@@ -170,6 +171,7 @@ export default function DistributionOrderDetailPage() {
   const canPay = canRecordDistributionPayment(currentUser);
   const showFinancials = canViewProductCost(currentUser) && !isHqWarehouseLogisticsOnlyUser(currentUser);
   const operatorView = isBranchWarehouseOperator(currentUser);
+  const hqSalesView = isHqSalesManagerUser(currentUser);
   const weightSummary = order?.shipmentWeightSummary;
 
   const invoiceSent = Boolean(order?.branchInvoice?.sentToBranchAt);
@@ -181,18 +183,20 @@ export default function DistributionOrderDetailPage() {
     showFinancials &&
     Boolean(order?.deliveryCostSummary && Number(order.deliveryCostSummary.transportCostKgs) > 0);
 
-  return (
-    <ProtectedShell>
-      <section className="space-y-6">
-        <HqSalesBranchOrdersNav />
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(currentUser))}</p>
-          <h2 className="text-3xl font-bold text-slate-950">{order?.orderNumber ?? '-'}</h2>
-        </div>
-        {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-        {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
-        {order ? (
-          <>
+  const pageContent = (
+    <>
+      <div>
+        {!hqSalesView ? (
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+            {t(distributionModuleTitleKey(currentUser))}
+          </p>
+        ) : null}
+        <h2 className="text-3xl font-bold text-slate-950">{order?.orderNumber ?? '-'}</h2>
+      </div>
+      {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {success ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{success}</p> : null}
+      {order ? (
+        <>
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="grid gap-4 md:grid-cols-4">
                 <Info label={t('distribution.branch')} value={order.branch?.name ?? ''} />
@@ -488,7 +492,16 @@ export default function DistributionOrderDetailPage() {
             ) : null}
           </>
         ) : null}
-      </section>
+    </>
+  );
+
+  return (
+    <ProtectedShell>
+      {hqSalesView ? (
+        <HqSalesBranchOrdersSection>{pageContent}</HqSalesBranchOrdersSection>
+      ) : (
+        <section className="space-y-6">{pageContent}</section>
+      )}
     </ProtectedShell>
   );
 }

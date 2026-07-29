@@ -53,6 +53,7 @@ type ProcurementOrderItem = {
   totalWeightKg: string | number;
   transportCostKgs: string | number;
   finalCostKgs: string | number;
+  totalCostKgs?: string | number;
 };
 
 type TransportCompany = {
