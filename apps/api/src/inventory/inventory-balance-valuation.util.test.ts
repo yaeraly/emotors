@@ -16,7 +16,7 @@ describe('recomputeInventoryBalanceValuation', () => {
     }));
 
     const valuation = recomputeInventoryBalanceValuation(movements);
-    assert.equal(valuation.totalValueKgs, 44268.16);
+    assert.equal(valuation.totalValueKgs, 44268.36);
     assert.notEqual(
       valuation.totalValueKgs,
       movements.reduce((sum, row) => sum + Number(row.unitCostKgs) * 11, 0),

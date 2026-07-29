@@ -2237,6 +2237,9 @@ export class OperationsService {
       );
       const differenceKgs = roundDisplayMoney(allocatedInventoryValueKgs - confirmedFullLandedCostKgs);
       if (differenceKgs !== 0) {
+        this.logger.warn(
+          `Inventory cost reconciliation failed. Purchase cost and created inventory value do not match. purchaseId=${order.id} purchaseTotal=${confirmedFullLandedCostKgs} inventoryTotal=${allocatedInventoryValueKgs} difference=${differenceKgs}`,
+        );
         throw new BadRequestException(
           `Стоимость принятого товара не совпадает с подтверждённой полной себестоимостью. Разница: ${differenceKgs.toFixed(2)} сом`,
         );

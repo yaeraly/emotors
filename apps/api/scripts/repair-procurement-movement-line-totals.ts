@@ -10,6 +10,7 @@ import { PrismaClient, StockMovementType } from '@prisma/client';
 import { recomputeInventoryBalanceValuationInTx } from '../src/inventory/inventory-balance-valuation.repair';
 import { resolveMovementCostUpdates } from '../src/procurement/landed-cost-sync-movements.util';
 import { planProcurementReceiveInventoryReconciliation } from '../src/procurement/procurement-receive-inventory-reconcile.util';
+import { roundDisplayMoney } from '../src/pricing/product-cost-precision.util';
 
 type Args = { orderId?: string; apply: boolean };
 
@@ -55,8 +56,11 @@ async function main() {
 
   const repairs: Array<Record<string, unknown>> = [];
   const balanceKeys = new Set<string>();
+  const orderSummaries: Array<Record<string, unknown>> = [];
 
   for (const order of orders) {
+    const expectedInventoryTotal = n(order.totalCostKgs);
+    let currentMovementTotal = 0;
     const movementSnapshots: Array<{
       movementId: string;
       productId: string;
@@ -71,7 +75,15 @@ async function main() {
       if (lineTotal <= 0) continue;
 
       const receivingItems = await prisma.procurementGoodsReceivingItem.findMany({
-        where: { procurementItemId: item.id },
+        where: {
+          OR: [
+            { procurementItemId: item.id },
+            {
+              productId: item.productId,
+              receiving: { procurementOrderId: order.id },
+            },
+          ],
+        },
         select: { receivingId: true, productId: true },
       });
 
@@ -165,17 +177,41 @@ async function main() {
 
     if (!movementSnapshots.length) continue;
 
-    const reconciliationPlan = planProcurementReceiveInventoryReconciliation(
-      movementSnapshots.map((row) => ({
-        movementId: row.movementId,
-        productId: row.productId,
-        warehouseId: row.warehouseId,
-        branchId: row.branchId,
-        quantity: row.quantity,
-        totalCostKgs: row.totalCostKgs,
-      })),
-      n(order.totalCostKgs),
+    const refreshedSnapshots = movementSnapshots.map((snap) => ({ ...snap }));
+    if (args.apply) {
+      const refreshedRows = await prisma.stockMovement.findMany({
+        where: { id: { in: movementSnapshots.map((row) => row.movementId) } },
+        select: { id: true, totalCostKgs: true },
+      });
+      const totalById = new Map(refreshedRows.map((row) => [row.id, n(row.totalCostKgs)]));
+      for (const snap of refreshedSnapshots) {
+        const refreshedTotal = totalById.get(snap.movementId);
+        if (refreshedTotal !== undefined) {
+          snap.totalCostKgs = refreshedTotal;
+        }
+      }
+    }
+
+    currentMovementTotal = roundDisplayMoney(
+      refreshedSnapshots.reduce((sum, row) => sum + row.totalCostKgs, 0),
     );
+    orderSummaries.push({
+      purchaseId: order.id,
+      orderNumber: order.orderNumber,
+      currentInventoryTotal: currentMovementTotal,
+      expectedInventoryTotal,
+      difference: roundDisplayMoney(expectedInventoryTotal - currentMovementTotal),
+      affectedMovementIds: refreshedSnapshots.map((row) => row.movementId),
+    });
+
+    const needsOrderReconciliation =
+      Math.abs(currentMovementTotal - expectedInventoryTotal) >= 0.009;
+    const reconciliationPlan = needsOrderReconciliation
+      ? planProcurementReceiveInventoryReconciliation(
+          refreshedSnapshots,
+          expectedInventoryTotal,
+        )
+      : [];
 
     for (const plan of reconciliationPlan) {
       if (Math.abs(plan.deltaKgs) < 0.009) continue;
@@ -206,7 +242,7 @@ async function main() {
       }
     }
 
-    for (const snap of movementSnapshots) {
+    for (const snap of refreshedSnapshots) {
       balanceKeys.add(`${snap.branchId}:${snap.warehouseId}:${snap.productId}`);
     }
   }
@@ -244,10 +280,44 @@ async function main() {
     }
   }
 
+  const postApplyVerification: Array<Record<string, unknown>> = [];
+  if (args.apply && orders.length) {
+    for (const order of orders) {
+      const receivingIds = (
+        await prisma.procurementGoodsReceiving.findMany({
+          where: { procurementOrderId: order.id },
+          select: { id: true },
+        })
+      ).map((row) => row.id);
+      const productIds = order.items.map((item) => item.productId);
+      const movements = await prisma.stockMovement.findMany({
+        where: {
+          referenceType: 'PROCUREMENT_GOODS_RECEIVING',
+          referenceId: { in: receivingIds },
+          productId: { in: productIds },
+          type: StockMovementType.IN,
+        },
+        select: { totalCostKgs: true },
+      });
+      const newInventoryTotal = roundDisplayMoney(
+        movements.reduce((sum, row) => sum + n(row.totalCostKgs), 0),
+      );
+      const expectedInventoryTotal = n(order.totalCostKgs);
+      postApplyVerification.push({
+        purchaseId: order.id,
+        newInventoryTotal,
+        expectedInventoryTotal,
+        difference: roundDisplayMoney(expectedInventoryTotal - newInventoryTotal),
+      });
+    }
+  }
+
   console.log(
     JSON.stringify(
       {
         dryRun: !args.apply,
+        orderSummaries,
+        postApplyVerification,
         movementRepairCount: repairs.length,
         balanceRepairCount: balanceRepairs.length,
         movementRepairs: repairs,
