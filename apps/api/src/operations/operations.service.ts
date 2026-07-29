@@ -13,6 +13,7 @@ import {
   PricingAppliedRuleType,
   Prisma,
   ProcurementOrderStatus,
+  ProcurementOrderItemStatus,
   ProcurementItemWeightStatus,
   ProcurementLandedCostStatus,
   ProcurementShortageReason,
@@ -64,6 +65,11 @@ import {
   listCargoReceiptAttachmentsForOrder,
 } from '../procurement/cargo-receipt-attachments.util';
 import { LandedCostService } from '../procurement/landed-cost.service';
+import {
+  planProcurementReceiveInventoryReconciliation,
+  sumReceiveMovementTotals,
+} from '../procurement/procurement-receive-inventory-reconcile.util';
+import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
@@ -1823,7 +1829,9 @@ export class OperationsService {
       const snapshotMap = new Map(
         (order.landedCostSnapshots ?? []).map((snapshot) => [snapshot.procurementOrderItemId, snapshot]),
       );
-      const receivedItems = order.items.map((item) => {
+      const receivedItems = order.items
+        .filter((item) => item.status === ProcurementOrderItemStatus.ACTIVE)
+        .map((item) => {
         const draft = draftMap.get(item.id);
         const snapshot = snapshotMap.get(item.id);
         const received: any = receivedMap.get(item.id) ?? receivedMap.get(item.productId) ?? {};
@@ -1960,7 +1968,14 @@ export class OperationsService {
       });
       const cargoTotalWeightKg = Number(cargo.cargoTotalWeightKg ?? 0);
       const batchDiscrepancyActIds: string[] = [];
-      let allocatedInventoryValueKgs = 0;
+      const receivedMovementSnapshots: Array<{
+        movementId: string;
+        productId: string;
+        warehouseId: string;
+        branchId: string;
+        quantity: number;
+        totalCostKgs: number;
+      }> = [];
       let receivedLineCount = 0;
       let inventoryBatchCount = 0;
 
@@ -2029,7 +2044,6 @@ export class OperationsService {
         if (item.receivedQuantity > 0) {
           receivedLineCount += 1;
           const allocatedLineLandedCostKgs = next.totalCostKgs;
-          allocatedInventoryValueKgs += allocatedLineLandedCostKgs;
           const movement = await this.inventoryService.createStockMovementInTx(tx, user, {
             productId: item.productId,
             warehouseId: hqWarehouseId,
@@ -2071,6 +2085,14 @@ export class OperationsService {
             timestamp: new Date().toISOString(),
           });
           inventoryBatchCount += 1;
+          receivedMovementSnapshots.push({
+            movementId: movement.id,
+            productId: item.productId,
+            warehouseId: hqWarehouseId,
+            branchId: movement.branchId,
+            quantity: item.receivedQuantity,
+            totalCostKgs: Number(movement.totalCostKgs),
+          });
           await this.auditInTx(tx, user, 'HQ', 'STOCK_MOVEMENT_CREATED', 'StockMovement', movement.id, {
             userId: user.id,
             roles: user.roles ?? [user.role],
@@ -2142,13 +2164,80 @@ export class OperationsService {
         batchDiscrepancyActIds.push(...lineActs.map((act) => act.id));
       }
 
-      const confirmedFullLandedCostKgs =
-        Math.round((recalculated.totalCostKgs + Number.EPSILON) * 100) / 100;
-      const allocatedInventoryValueRounded =
-        Math.round((allocatedInventoryValueKgs + Number.EPSILON) * 100) / 100;
-      const differenceKgs =
-        Math.round((allocatedInventoryValueRounded - confirmedFullLandedCostKgs + Number.EPSILON) * 100) /
-        100;
+      const reconciliationPlan = planProcurementReceiveInventoryReconciliation(
+        receivedMovementSnapshots,
+        recalculated.totalCostKgs,
+      );
+      for (const plan of reconciliationPlan) {
+        if (plan.deltaKgs === 0) continue;
+
+        await tx.stockMovement.update({
+          where: { id: plan.movementId },
+          data: {
+            unitCostKgs: plan.reconciledUnitCostKgs,
+            totalCostKgs: plan.reconciledTotalCostKgs,
+          },
+        });
+
+        const fifoBatch = await tx.fifoInventoryBatch.findFirst({
+          where: { stockMovementId: plan.movementId },
+          select: { id: true },
+        });
+        if (fifoBatch) {
+          const product = await tx.product.findFirst({
+            where: { id: plan.productId, deletedAt: null },
+            select: {
+              wholesaleMarkupPercent: true,
+              hqBranchWholesaleMarkupPercent: true,
+              recommendedRetailMarkupPercent: true,
+              minimumSellingMarkupPercent: true,
+            },
+          });
+          const batchPrices = this.pricingFifoService.calculateBatchPrices(
+            plan.reconciledUnitCostKgs,
+            {
+              wholesaleMarkupPercent: Number(product?.wholesaleMarkupPercent ?? 0),
+              hqBranchWholesaleMarkupPercent: Number(product?.hqBranchWholesaleMarkupPercent ?? 0),
+              recommendedRetailMarkupPercent: Number(product?.recommendedRetailMarkupPercent ?? 0),
+              minimumSellingMarkupPercent: Number(product?.minimumSellingMarkupPercent ?? 0),
+            },
+          );
+          await tx.fifoInventoryBatch.update({
+            where: { id: fifoBatch.id },
+            data: {
+              unitCostKgs: plan.reconciledUnitCostKgs,
+              wholesalePriceKgs: batchPrices.wholesalePriceKgs,
+              hqBranchWholesalePriceKgs: batchPrices.hqBranchWholesalePriceKgs,
+              recommendedRetailPriceKgs: batchPrices.recommendedRetailPriceKgs,
+              minimumSellingPriceKgs: batchPrices.minimumSellingPriceKgs,
+            },
+          });
+        }
+
+        await tx.inventoryBalance.update({
+          where: {
+            branchId_warehouseId_productId: {
+              branchId: plan.branchId,
+              warehouseId: plan.warehouseId,
+              productId: plan.productId,
+            },
+          },
+          data: {
+            totalValueKgs: { increment: plan.deltaKgs },
+            landedCostKgs: plan.reconciledUnitCostKgs,
+            averageCostKgs:
+              plan.quantity > 0
+                ? roundDisplayMoney(plan.reconciledTotalCostKgs / plan.quantity)
+                : plan.reconciledUnitCostKgs,
+          },
+        });
+      }
+
+      const confirmedFullLandedCostKgs = roundDisplayMoney(recalculated.totalCostKgs);
+      const allocatedInventoryValueKgs = sumReceiveMovementTotals(
+        reconciliationPlan.map((row) => ({ totalCostKgs: row.reconciledTotalCostKgs })),
+      );
+      const differenceKgs = roundDisplayMoney(allocatedInventoryValueKgs - confirmedFullLandedCostKgs);
       if (differenceKgs !== 0) {
         throw new BadRequestException(
           `Стоимость принятого товара не совпадает с подтверждённой полной себестоимостью. Разница: ${differenceKgs.toFixed(2)} сом`,
@@ -2213,7 +2302,7 @@ export class OperationsService {
         hqWarehouseId,
         recalculatedLandedCost: true,
         confirmedFullLandedCostKgs,
-        allocatedInventoryValueKgs: allocatedInventoryValueRounded,
+        allocatedInventoryValueKgs: allocatedInventoryValueKgs,
         differenceKgs,
         receivedLineCount,
         inventoryBatchCount,

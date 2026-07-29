@@ -10,7 +10,7 @@ import {
   type AllocationLineContext,
 } from './landed-cost-allocation.util';
 import { roundMoneyDecimal, sumRoundedMoney, toMoneyDecimal } from './landed-cost-money.util';
-import { distributeAuthoritativeLineTotal } from '../pricing/product-cost-precision.util';
+import { distributeAuthoritativeLineTotal, deriveDisplayUnitCost } from '../pricing/product-cost-precision.util';
 
 export type LogisticsCosts = {
   chinaDomesticTransportKgs: number;
@@ -368,7 +368,7 @@ export function calculateLandedCosts(
         : 0;
     const finalCostKgs =
       effectiveQty > 0
-        ? roundMoney(toMoneyDecimal(transportCostKgs).div(effectiveQty).plus(toMoneyDecimal(item.costKgs)))
+        ? deriveDisplayUnitCost(totalCostKgs, effectiveQty)
         : 0;
     return {
       ...item,

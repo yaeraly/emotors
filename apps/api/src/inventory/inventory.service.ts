@@ -57,6 +57,7 @@ import {
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
+import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
 import { resolveCurrentProductCatalogUnitCost } from './product-catalog-current-cost.util';
 
@@ -1799,28 +1800,28 @@ export class InventoryService {
     let unitCostKgs: number;
 
     if (dto.totalCostKgs !== undefined) {
-      totalCostKgs = this.roundMoney(dto.totalCostKgs);
+      totalCostKgs = roundDisplayMoney(dto.totalCostKgs);
       unitCostKgs = resolveUnitCostFromInventoryLayer({
         quantity: quantityAbs,
         totalCostKgs,
       });
     } else {
       unitCostKgs = dto.unitCostKgs ?? Number(product.finalCostKgs);
-      totalCostKgs = this.roundMoney(quantityAbs * unitCostKgs);
+      totalCostKgs = roundDisplayMoney(quantityAbs * unitCostKgs);
     }
 
     const currentTotalValue = Number(current?.totalValueKgs ?? 0);
     const nextAverageCost =
       quantityDelta > 0
-        ? this.roundMoney(
+        ? roundDisplayMoney(
             (currentQuantity * Number(current?.averageCostKgs ?? 0) + totalCostKgs) /
               Math.max(currentQuantity + quantityDelta, 1),
           )
         : Number(current?.averageCostKgs ?? product.finalCostKgs);
     const nextTotalValue =
       quantityDelta > 0
-        ? this.roundMoney(currentTotalValue + totalCostKgs)
-        : this.roundMoney(nextQuantity * nextAverageCost);
+        ? roundDisplayMoney(currentTotalValue + totalCostKgs)
+        : roundDisplayMoney(nextQuantity * nextAverageCost);
 
     const movement = await tx.stockMovement.create({
       data: {
