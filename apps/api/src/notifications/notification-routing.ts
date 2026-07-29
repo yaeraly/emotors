@@ -22,7 +22,7 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   PICKING_TASK_ASSIGNED: { module: NotificationModule.WAREHOUSE, roles: [Role.WAREHOUSE_MANAGER] },
   GOODS_SHIPPED: { module: NotificationModule.DISTRIBUTION, roles: [Role.WAREHOUSE_OPERATOR] },
   BRANCH_GOODS_RECEIVED: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER] },
-  DIFFERENCE_ACT_CREATED: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER, Role.HQ_SALES_MANAGER] },
+  DIFFERENCE_ACT_CREATED: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER, Role.HQ_SALES_MANAGER, Role.WAREHOUSE_MANAGER] },
   SHORTAGE_NEEDS_RESOLUTION: { module: NotificationModule.DISTRIBUTION, roles: [Role.SUPPLY_CHAIN_MANAGER] },
   REPLACEMENT_GOODS_SHIPPED: { module: NotificationModule.DISTRIBUTION, roles: [Role.WAREHOUSE_OPERATOR] },
   LOW_STOCK: { module: NotificationModule.WAREHOUSE, roles: [Role.SUPPLY_CHAIN_MANAGER, Role.CEO, Role.OWNER, Role.FRANCHISE_DIRECTOR] },

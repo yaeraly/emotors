@@ -12,6 +12,7 @@ import {
   HqWarrantyDecision,
   PricingAppliedRuleType,
   Prisma,
+  Product,
   ProcurementOrderStatus,
   ProcurementOrderItemStatus,
   ProcurementItemWeightStatus,
@@ -83,6 +84,7 @@ import {
   resolveBranchPurchasePriceKgs,
 } from './branch-product-request.util';
 import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-item.util';
+import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
 import {
   assertBranchPurchaseBranchContext,
   assertBranchPurchaseRequestItems,
@@ -1098,17 +1100,23 @@ export class OperationsService {
         branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
       },
     });
-    if (!existing) throw new NotFoundException('Branch purchase request not found');
+    if (!existing) throw new NotFoundException('Order not found');
+    if (!this.canViewAllBranchPurchaseRequests(user) && existing.branchId !== user.branchId) {
+      throw new ForbiddenException('Order does not belong to your branch');
+    }
+    if (!existing.reviewedAt || !existing.reviewedById) {
+      throw new BadRequestException('Order has not been reviewed by HQ Sales');
+    }
     if (existing.status !== BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION) {
-      throw new BadRequestException('Заказ не ожидает согласования филиалом');
+      throw new ConflictException('Order cannot be confirmed in its current status');
     }
     if (existing.convertedOrderId) {
-      throw new BadRequestException('Order already confirmed and linked to distribution');
+      throw new ConflictException('Order already confirmed and linked to distribution');
     }
 
     const hasApprovedLines = existing.items.some((item) => (item.approvedQuantity ?? 0) > 0);
     if (!hasApprovedLines) {
-      throw new BadRequestException('No approved quantity available to confirm');
+      throw new BadRequestException('Order has no approved items');
     }
 
     const assignedHqWarehouseId =
@@ -1132,118 +1140,57 @@ export class OperationsService {
 
     const result = await this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
-      const orderItems = [];
-      let totalAmount = 0;
-      let totalCost = 0;
-
+      const productsById = new Map<string, Pick<Product, 'id' | 'sku' | 'name' | 'finalCostKgs'>>();
       for (const item of existing.items) {
-        const quantity = item.approvedQuantity ?? 0;
-        if (quantity <= 0) continue;
-
-        const priceSnapshot = await this.pricingResolution.resolveWithFreeze(existing.branchId, item.productId, {
-          auditUser: user,
-          auditEntity: 'BranchPurchaseRequestItem',
-          useBranchOrderPrice: true,
-        });
+        if ((item.approvedQuantity ?? 0) <= 0) continue;
         const product = await tx.product.findFirst({
           where: { id: item.productId, deletedAt: null },
         });
         if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
+        productsById.set(product.id, product);
+      }
 
-        const branch = await tx.branch.findUnique({
-          where: { id: existing.branchId },
-          select: { branchType: true, hqToBranchMarkupPercent: true },
-        });
-        const productMarkup = Number(product.hqBranchWholesaleMarkupPercent ?? 0);
-        const branchMarkup = Number(branch?.hqToBranchMarkupPercent ?? 0);
-        const markupPercent = productMarkup > 0 ? productMarkup : branchMarkup;
-        const isHqOwnedBranch = branch
-          ? this.pricingFifoService.isHqBranchType(branch.branchType)
-          : false;
-
-        const snapshottedUnitPrice =
-          !isHqOwnedBranch &&
-          item.resolvedBranchPriceKgs != null &&
-          Number(item.resolvedBranchPriceKgs) > 0
-            ? Number(item.resolvedBranchPriceKgs)
-            : null;
-        const hqBranchFallbackUnitCost =
-          priceSnapshot.baseCostKgs > 0 ? priceSnapshot.baseCostKgs : Number(product.finalCostKgs);
-
-        await this.pricingFifoService.syncFifoBatchesFromHqStockMovements(tx);
-        const fifoPreview = await this.pricingFifoService.previewFifoAllocation(tx, {
-          productId: product.id,
-          warehouseId: assignedHqWarehouseId,
-          quantity,
-          isHqOwnedBranch,
-          branchPricing: branch
-            ? { branchType: branch.branchType, hqToBranchMarkupPercent: markupPercent }
-            : undefined,
-          preferPerLayerMarkup: isHqOwnedBranch || snapshottedUnitPrice == null,
-          subtractReserved: true,
-          fallbackUnitCost: hqBranchFallbackUnitCost,
-          fallbackUnitPrice: isHqOwnedBranch
-            ? hqBranchFallbackUnitCost
-            : Number(snapshottedUnitPrice ?? priceSnapshot.resolvedPriceKgs ?? 0),
-          overrideUnitPriceKgs: snapshottedUnitPrice,
-        });
-
-        if (fifoPreview.allocatedQty < quantity) {
-          throw new BadRequestException(
-            `Insufficient FIFO stock for ${product.sku}. Requested: ${quantity}, available: ${fifoPreview.allocatedQty}`,
-          );
+      let builtLines;
+      try {
+        builtLines = buildDistributionLinesFromConfirmedRequestItems(existing.items, productsById);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('Approved price missing')) {
+          throw new BadRequestException(error.message);
         }
-
-        // Multi-layer order totals from FIFO allocation (not product.finalCostKgs / not average-first).
-        const lineCost = Math.round((fifoPreview.totalCostKgs + Number.EPSILON) * 100) / 100;
-        const linePrice = Math.round((fifoPreview.totalPriceKgs + Number.EPSILON) * 100) / 100;
-        const unitCost = quantity > 0 ? Math.round((lineCost / quantity + Number.EPSILON) * 100) / 100 : 0;
-        const unitPrice =
-          quantity > 0 ? Math.round((linePrice / quantity + Number.EPSILON) * 100) / 100 : 0;
-        totalCost += lineCost;
-        totalAmount += linePrice;
-
-        await tx.branchPurchaseRequestItem.update({
-          where: { id: item.id },
-          data: {
-            resolvedBranchPriceKgs: unitPrice,
-            pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId ?? item.pricingPolicyVersionId,
-            pricingProfileId: priceSnapshot.pricingProfileId ?? item.pricingProfileId,
-            appliedRuleType: priceSnapshot.appliedRuleType ?? item.appliedRuleType,
-            appliedRuleId: priceSnapshot.appliedRuleId ?? item.appliedRuleId,
-            appliedAdjustmentMode: priceSnapshot.appliedAdjustmentMode ?? item.appliedAdjustmentMode,
-            appliedAdjustmentValue: priceSnapshot.appliedAdjustmentValue ?? item.appliedAdjustmentValue,
-            priceResolvedAt: new Date(),
-            approvedLineTotalKgs: linePrice,
-          },
-        });
-
-        orderItems.push({
-          productId: product.id,
-          sku: product.sku,
-          productName: product.name,
-          quantity,
-          unitCost,
-          unitPrice,
-          totalCost: lineCost,
-          totalPrice: linePrice,
-          profit: Math.round((linePrice - lineCost + Number.EPSILON) * 100) / 100,
-          pricingPolicyVersionId: priceSnapshot.pricingPolicyVersionId,
-          pricingProfileId: priceSnapshot.pricingProfileId,
-          resolvedPriceKgs: unitPrice,
-          baseCostKgs: priceSnapshot.baseCostKgs,
-          baseBranchPriceKgs: snapshottedUnitPrice ?? priceSnapshot.baseBranchPriceKgs,
-          appliedRuleType: priceSnapshot.appliedRuleType,
-          appliedRuleId: priceSnapshot.appliedRuleId,
-          appliedAdjustmentMode: priceSnapshot.appliedAdjustmentMode,
-          appliedAdjustmentValue: priceSnapshot.appliedAdjustmentValue,
-          priceResolvedAt: new Date(),
-        });
+        throw error;
+      }
+      if (!builtLines.length) {
+        throw new BadRequestException('Order has no approved items');
       }
 
-      if (!orderItems.length) {
-        throw new BadRequestException('No approved quantity available to confirm');
+      let totalAmount = 0;
+      let totalCost = 0;
+      for (const line of builtLines) {
+        totalAmount += line.totalPrice;
+        totalCost += line.totalCost;
       }
+
+      const orderItems = builtLines.map((line) => ({
+        productId: line.productId,
+        sku: line.sku,
+        productName: line.productName,
+        quantity: line.quantity,
+        unitCost: line.unitCost,
+        unitPrice: line.unitPrice,
+        totalCost: line.totalCost,
+        totalPrice: line.totalPrice,
+        profit: line.profit,
+        pricingPolicyVersionId: line.pricingPolicyVersionId,
+        pricingProfileId: line.pricingProfileId,
+        resolvedPriceKgs: line.resolvedPriceKgs,
+        baseCostKgs: line.baseCostKgs,
+        baseBranchPriceKgs: line.baseBranchPriceKgs,
+        appliedRuleType: line.appliedRuleType,
+        appliedRuleId: line.appliedRuleId,
+        appliedAdjustmentMode: line.appliedAdjustmentMode,
+        appliedAdjustmentValue: line.appliedAdjustmentValue,
+        priceResolvedAt: line.priceResolvedAt,
+      }));
 
       const createdOrder = await tx.branchDistributionOrder.create({
         data: {
@@ -1263,7 +1210,7 @@ export class OperationsService {
       });
 
       await this.hqStockBookingService.linkBookingsToDistributionOrder(tx, existing.id, createdOrder.id);
-      await this.hqStockBookingService.extendBookingsForPayment(existing.id, tx);
+      await this.hqStockBookingService.extendBookingsForBranchConfirmation(existing.id, tx);
 
       const request = await tx.branchPurchaseRequest.update({
         where: { id: existing.id },
@@ -1284,28 +1231,28 @@ export class OperationsService {
         workflowStage: 'WAITING_FOR_BRANCH_ACCOUNTANT',
       });
 
-      return { request, createdOrder };
-    });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.BRANCH_ORDER_APPROVED,
+        branchId: existing.branchId,
+        entityType: 'BranchPurchaseRequest',
+        entityId: existing.id,
+        referenceNumber: existing.requestNumber,
+        title: 'Филиал согласовал заказ',
+        message: `Филиал согласовал заказ ${existing.requestNumber}. Требуется выставление счёта.`,
+        recipientRoles: [Role.HQ_SALES_MANAGER],
+      });
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.BRANCH_INVOICE_CREATED,
+        branchId: existing.branchId,
+        entityType: 'BranchPurchaseRequest',
+        entityId: existing.id,
+        referenceNumber: existing.requestNumber,
+        title: 'Создайте счёт по заказу',
+        message: `Заказ ${existing.requestNumber} согласован филиалом. Создайте счёт и передадите кассиру.`,
+        recipientRoles: [Role.ACCOUNTANT],
+      });
 
-    await this.notificationsService.notify(user, {
-      type: AlertType.BRANCH_ORDER_APPROVED,
-      branchId: existing.branchId,
-      entityType: 'BranchPurchaseRequest',
-      entityId: existing.id,
-      referenceNumber: existing.requestNumber,
-      title: 'Филиал согласовал заказ',
-      message: `Филиал согласовал заказ ${existing.requestNumber}. Требуется выставление счёта.`,
-      recipientRoles: [Role.HQ_SALES_MANAGER],
-    });
-    await this.notificationsService.notify(user, {
-      type: AlertType.BRANCH_INVOICE_CREATED,
-      branchId: existing.branchId,
-      entityType: 'BranchPurchaseRequest',
-      entityId: existing.id,
-      referenceNumber: existing.requestNumber,
-      title: 'Создайте счёт по заказу',
-      message: `Заказ ${existing.requestNumber} согласован филиалом. Создайте счёт и передадите кассиру.`,
-      recipientRoles: [Role.ACCOUNTANT],
+      return { request, createdOrder };
     });
 
     return result.request;
