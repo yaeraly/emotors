@@ -573,7 +573,9 @@ function ProcurementOrderDetailPageContent() {
       totalCostKgs +=
         previewItem?.totalCostKgs != null
           ? Number(previewItem.totalCostKgs)
-          : Number(item.finalCostKgs ?? 0) * item.quantity;
+          : Number(item.totalCostKgs ?? 0) > 0
+            ? Number(item.totalCostKgs)
+            : Number(item.finalCostKgs ?? 0) * item.quantity;
     });
 
     return {
