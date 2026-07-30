@@ -4,6 +4,10 @@ import type {
   PricingAdjustmentMode,
   Product,
 } from '@prisma/client';
+import {
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+} from '../pricing/product-cost-precision.util';
 
 export type ConfirmedDistributionLineInput = {
   productId: string;
@@ -38,6 +42,7 @@ export function buildDistributionLinesFromConfirmedRequestItems(
       | 'resolvedBranchPriceKgs'
       | 'approvedLineTotalKgs'
       | 'estimatedUnitCost'
+      | 'estimatedLineProductCostKgs'
       | 'pricingPolicyVersionId'
       | 'pricingProfileId'
       | 'appliedRuleType'
@@ -66,12 +71,20 @@ export function buildDistributionLinesFromConfirmedRequestItems(
     }
     const linePrice =
       item.approvedLineTotalKgs != null
-        ? Math.round((Number(item.approvedLineTotalKgs) + Number.EPSILON) * 100) / 100
-        : Math.round((unitPrice * quantity + Number.EPSILON) * 100) / 100;
+        ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
+        : roundDisplayMoney(unitPrice * quantity);
+
+    const authoritativeLineCost =
+      item.estimatedLineProductCostKgs != null && Number(item.estimatedLineProductCostKgs) > 0
+        ? roundDisplayMoney(Number(item.estimatedLineProductCostKgs))
+        : null;
     const unitCostRaw =
-      Number(item.estimatedUnitCost ?? 0) > 0 ? Number(item.estimatedUnitCost) : Number(product.finalCostKgs);
-    const unitCost = Math.round((unitCostRaw + Number.EPSILON) * 100) / 100;
-    const lineCost = Math.round((unitCost * quantity + Number.EPSILON) * 100) / 100;
+      Number(item.estimatedUnitCost ?? 0) > 0
+        ? Number(item.estimatedUnitCost)
+        : Number(product.finalCostKgs);
+    const lineCost =
+      authoritativeLineCost ?? roundDisplayMoney(unitCostRaw * quantity);
+    const unitCost = deriveDisplayUnitCost(lineCost, quantity);
 
     lines.push({
       productId: product.id,
@@ -82,7 +95,7 @@ export function buildDistributionLinesFromConfirmedRequestItems(
       unitPrice,
       totalCost: lineCost,
       totalPrice: linePrice,
-      profit: Math.round((linePrice - lineCost + Number.EPSILON) * 100) / 100,
+      profit: roundDisplayMoney(linePrice - lineCost),
       pricingPolicyVersionId: item.pricingPolicyVersionId,
       pricingProfileId: item.pricingProfileId,
       resolvedPriceKgs: unitPrice,

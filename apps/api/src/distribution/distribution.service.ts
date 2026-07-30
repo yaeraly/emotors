@@ -62,6 +62,11 @@ import {
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import {
+  BRANCH_ORDER_COST_MISMATCH_MESSAGE,
+  logBranchTransferReconciliationFailure,
+  reconcileBranchTransferCost,
+} from '../pricing/cost-reconciliation.util';
+import {
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
@@ -352,6 +357,26 @@ export class DistributionService {
           totalProfit: roundDisplayMoney(totalAmount - totalCostSum),
         },
       });
+
+      const fifoAllocations = await tx.distributionFifoAllocation.findMany({
+        where: {
+          distributionOrderItem: { orderId: order.id },
+          status: { in: ['RESERVED', 'CONSUMED'] },
+        },
+        select: { totalCostKgs: true },
+      });
+      const transferReconciliation = reconcileBranchTransferCost(
+        fifoAllocations.map((row) => Number(row.totalCostKgs)),
+        totalCostSum,
+        'branch distribution approve',
+      );
+      if (!transferReconciliation.ok) {
+        logBranchTransferReconciliationFailure(this.logger, transferReconciliation, {
+          orderId: order.id,
+          warehouseId: order.sourceWarehouseId,
+        });
+        throw new BadRequestException(BRANCH_ORDER_COST_MISMATCH_MESSAGE);
+      }
 
       const updated = await tx.branchDistributionOrder.update({
         where: { id: order.id },

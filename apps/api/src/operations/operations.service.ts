@@ -74,20 +74,27 @@ import {
   sumReceiveMovementTotals,
 } from '../procurement/procurement-receive-inventory-reconcile.util';
 import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
-import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
+import { deriveDisplayUnitCost, roundDisplayMoney, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
+import {
+  compareAuthoritativeCostTotals,
+  BRANCH_ORDER_COST_MISMATCH_MESSAGE,
+} from '../pricing/cost-reconciliation.util';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import { HqSalesManagerAssignmentService } from '../hq-warehouse/hq-sales-manager-assignment.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { BranchOrderPricingRevisionService } from '../pricing/branch-order-pricing-revision.service';
 import { BranchPriceResolverService } from '../pricing/branch-price-resolver.service';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
-import { deriveDisplayUnitCost, sumDisplayMoneyTotals } from '../pricing/product-cost-precision.util';
 import {
   isSubmittedBranchPurchaseStatus,
   resolveBranchPurchasePriceKgs,
 } from './branch-product-request.util';
 import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-item.util';
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
+import {
+  resolveBranchPurchaseFifoLineCost,
+  sumBranchPurchaseLineProductCosts,
+} from './branch-purchase-fifo-cost.util';
 import {
   assertBranchPurchaseBranchContext,
   assertBranchPurchaseRequestItems,
@@ -836,6 +843,11 @@ export class OperationsService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
+      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+      const reviewBranch = await tx.branch.findFirst({
+        where: { id: existing.branchId, deletedAt: null },
+        select: { branchType: true, hqToBranchMarkupPercent: true },
+      });
       const resolvedLines: Array<{
         itemId: string;
         lineStatus: BranchPurchaseRequestLineStatus;
@@ -884,6 +896,22 @@ export class OperationsService {
           throw new BadRequestException(`A public comment is required for line ${item.sku}`);
         }
 
+        let estimatedLineProductCostKgs = 0;
+        let estimatedUnitCost = 0;
+        if (resolved.approvedQuantity > 0) {
+          const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, tx, {
+            productId: item.productId,
+            warehouseId: assignedHqWarehouseId,
+            quantity: resolved.approvedQuantity,
+            branchType: reviewBranch?.branchType,
+            hqToBranchMarkupPercent: Number(reviewBranch?.hqToBranchMarkupPercent ?? 0),
+            fallbackUnitCost: Number(item.estimatedUnitCost ?? 0),
+            fallbackUnitPrice: Number(item.resolvedBranchPriceKgs ?? 0),
+          });
+          estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
+          estimatedUnitCost = fifoCost.estimatedUnitCost;
+        }
+
         await tx.branchPurchaseRequestItem.update({
           where: { id: item.id },
           data: {
@@ -897,14 +925,14 @@ export class OperationsService {
             hasPricingPolicyAtReview: hasPricingPolicy,
             approvedLineTotalKgs:
               resolved.approvedQuantity > 0 && item.resolvedBranchPriceKgs != null
-                ? Math.round(
-                    (Number(item.resolvedBranchPriceKgs) * resolved.approvedQuantity + Number.EPSILON) * 100,
-                  ) / 100
+                ? roundDisplayMoney(Number(item.resolvedBranchPriceKgs) * resolved.approvedQuantity)
                 : null,
             bookingExpiresAt:
               resolved.approvedQuantity > 0 ? branchConfirmationExpiresAt : null,
             bookedQuantity:
               resolved.approvedQuantity > 0 ? resolved.approvedQuantity : 0,
+            estimatedLineProductCostKgs,
+            estimatedUnitCost,
           },
         });
 
@@ -1143,19 +1171,65 @@ export class OperationsService {
 
     const result = await this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
+      const branch = await tx.branch.findFirst({
+        where: { id: existing.branchId, deletedAt: null },
+        select: { branchType: true, hqToBranchMarkupPercent: true },
+      });
+      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+
       const productsById = new Map<string, Pick<Product, 'id' | 'sku' | 'name' | 'finalCostKgs'>>();
+      const fifoLineCosts: number[] = [];
+      const itemsWithFifoCosts = [];
+
       for (const item of existing.items) {
-        if ((item.approvedQuantity ?? 0) <= 0) continue;
+        const approvedQuantity = item.approvedQuantity ?? 0;
+        if (approvedQuantity <= 0) {
+          itemsWithFifoCosts.push(item);
+          continue;
+        }
+
         const product = await tx.product.findFirst({
           where: { id: item.productId, deletedAt: null },
         });
         if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
         productsById.set(product.id, product);
+
+        const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, tx, {
+          productId: item.productId,
+          warehouseId: assignedHqWarehouseId,
+          quantity: approvedQuantity,
+          branchType: branch?.branchType,
+          hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
+          fallbackUnitCost: Number(item.estimatedUnitCost ?? 0),
+          fallbackUnitPrice: Number(item.resolvedBranchPriceKgs ?? 0),
+        });
+        if (fifoCost.allocatedQty < approvedQuantity) {
+          throw new BadRequestException(
+            `Insufficient FIFO stock for SKU ${item.sku}. Requested: ${approvedQuantity} Available: ${fifoCost.allocatedQty}`,
+          );
+        }
+
+        fifoLineCosts.push(fifoCost.estimatedLineProductCostKgs);
+        await tx.branchPurchaseRequestItem.update({
+          where: { id: item.id },
+          data: {
+            estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
+            estimatedUnitCost: fifoCost.estimatedUnitCost,
+          },
+        });
+        itemsWithFifoCosts.push({
+          ...item,
+          estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
+          estimatedUnitCost: fifoCost.estimatedUnitCost,
+        });
       }
 
       let builtLines;
       try {
-        builtLines = buildDistributionLinesFromConfirmedRequestItems(existing.items, productsById);
+        builtLines = buildDistributionLinesFromConfirmedRequestItems(
+          itemsWithFifoCosts as typeof existing.items,
+          productsById,
+        );
       } catch (error) {
         if (error instanceof Error && error.message.includes('Approved price missing')) {
           throw new BadRequestException(error.message);
@@ -1166,12 +1240,27 @@ export class OperationsService {
         throw new BadRequestException('Order has no approved items');
       }
 
-      let totalAmount = 0;
-      let totalCost = 0;
-      for (const line of builtLines) {
-        totalAmount += line.totalPrice;
-        totalCost += line.totalCost;
+      const fifoOrderTotal = sumBranchPurchaseLineProductCosts(fifoLineCosts);
+      const orderTransferTotal = sumDisplayMoneyTotals(builtLines.map((line) => line.totalCost));
+      const reconciliation = compareAuthoritativeCostTotals(
+        fifoOrderTotal,
+        orderTransferTotal,
+        'branch purchase confirm',
+      );
+      if (!reconciliation.ok) {
+        this.logger.error({
+          message: 'BRANCH_ORDER_COST_RECONCILIATION_FAILED',
+          branchPurchaseRequestNumber: existing.requestNumber,
+          warehouseId: assignedHqWarehouseId,
+          expectedTotal: reconciliation.expectedKgs,
+          actualTotal: reconciliation.actualKgs,
+          differenceKgs: reconciliation.differenceKgs,
+        });
+        throw new BadRequestException(BRANCH_ORDER_COST_MISMATCH_MESSAGE);
       }
+
+      const totalAmount = sumDisplayMoneyTotals(builtLines.map((line) => line.totalPrice));
+      const totalCost = sumDisplayMoneyTotals(builtLines.map((line) => line.totalCost));
 
       const orderItems = builtLines.map((line) => ({
         productId: line.productId,
@@ -1206,7 +1295,7 @@ export class OperationsService {
           note: existing.note,
           totalAmount,
           totalCost,
-          totalProfit: Math.round((totalAmount - totalCost + Number.EPSILON) * 100) / 100,
+          totalProfit: roundDisplayMoney(totalAmount - totalCost),
           items: { create: orderItems },
         },
         include: { items: true },
@@ -1567,9 +1656,16 @@ export class OperationsService {
     }
 
     const order = await this.prisma.$transaction(async (tx) => {
+      const branch = await tx.branch.findFirst({
+        where: { id: request.branchId, deletedAt: null },
+        select: { branchType: true, hqToBranchMarkupPercent: true },
+      });
+      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+
       const orderItems = [];
-      let totalAmount = 0;
-      let totalCost = 0;
+      const lineCosts: number[] = [];
+      const linePrices: number[] = [];
+
       for (const item of request.items) {
         const quantity = item.approvedQuantity ?? item.quantity;
         if (quantity <= 0) continue;
@@ -1577,12 +1673,31 @@ export class OperationsService {
           where: { id: item.productId, deletedAt: null },
         });
         if (!product) throw new NotFoundException(`Product not found: ${item.productId}`);
-        const unitCost = Number(product.finalCostKgs);
-        const unitPrice = Number(product.sellingPriceKgs);
-        const lineCost = Math.round((unitCost * quantity + Number.EPSILON) * 100) / 100;
-        const linePrice = Math.round((unitPrice * quantity + Number.EPSILON) * 100) / 100;
-        totalCost += lineCost;
-        totalAmount += linePrice;
+
+        const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, tx, {
+          productId: item.productId,
+          warehouseId: assignedHqWarehouseId,
+          quantity,
+          branchType: branch?.branchType,
+          hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
+          fallbackUnitCost: Number(item.estimatedUnitCost ?? product.finalCostKgs),
+          fallbackUnitPrice: Number(item.resolvedBranchPriceKgs ?? product.sellingPriceKgs),
+        });
+        if (fifoCost.allocatedQty < quantity) {
+          throw new BadRequestException(
+            `Insufficient FIFO stock for SKU ${item.sku}. Requested: ${quantity} Available: ${fifoCost.allocatedQty}`,
+          );
+        }
+
+        const unitCost = fifoCost.estimatedUnitCost;
+        const unitPrice = Number(item.resolvedBranchPriceKgs ?? product.sellingPriceKgs);
+        const lineCost = fifoCost.estimatedLineProductCostKgs;
+        const linePrice =
+          item.approvedLineTotalKgs != null
+            ? roundDisplayMoney(Number(item.approvedLineTotalKgs))
+            : roundDisplayMoney(unitPrice * quantity);
+        lineCosts.push(lineCost);
+        linePrices.push(linePrice);
         orderItems.push({
           productId: product.id,
           sku: product.sku,
@@ -1592,13 +1707,16 @@ export class OperationsService {
           unitPrice,
           totalCost: lineCost,
           totalPrice: linePrice,
-          profit: Math.round((linePrice - lineCost + Number.EPSILON) * 100) / 100,
+          profit: roundDisplayMoney(linePrice - lineCost),
         });
       }
 
       if (!orderItems.length) {
         throw new BadRequestException('No approved quantity available to send to HQ warehouse');
       }
+
+      const totalAmount = sumDisplayMoneyTotals(linePrices);
+      const totalCost = sumDisplayMoneyTotals(lineCosts);
 
       const createdOrder = await tx.branchDistributionOrder.create({
         data: {
@@ -1611,7 +1729,7 @@ export class OperationsService {
           note: request.note,
           totalAmount,
           totalCost,
-          totalProfit: Math.round((totalAmount - totalCost + Number.EPSILON) * 100) / 100,
+          totalProfit: roundDisplayMoney(totalAmount - totalCost),
           items: { create: orderItems },
         },
       });

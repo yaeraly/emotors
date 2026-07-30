@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
 import {
-  assertAuthoritativeCostTotals,
+  BRANCH_ORDER_COST_MISMATCH_MESSAGE,
   compareAuthoritativeCostTotals,
-  sumAuthoritativeLineCosts,
+  reconcileBranchTransferCost,
 } from './cost-reconciliation.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import {
@@ -34,7 +34,18 @@ describe('cost-reconciliation.util', () => {
   });
 
   it('passes when totals match exactly', () => {
-    assertAuthoritativeCostTotals(CHINA_BATCH_TOTAL, CHINA_BATCH_TOTAL, 'HQ inventory');
+    const result = compareAuthoritativeCostTotals(CHINA_BATCH_TOTAL, CHINA_BATCH_TOTAL, 'HQ inventory');
+    assert.equal(result.ok, true);
+  });
+
+  it('reconcileBranchTransferCost blocks 0.82 drift', () => {
+    const result = reconcileBranchTransferCost([CHINA_BATCH_TOTAL], 914368.98, 'branch transfer');
+    assert.equal(result.ok, false);
+    assert.equal(result.differenceKgs, -0.82);
+  });
+
+  it('exports Russian reconciliation message', () => {
+    assert.match(BRANCH_ORDER_COST_MISMATCH_MESSAGE, /Себестоимость заказа/);
   });
 });
 
@@ -78,12 +89,12 @@ describe('China batch branch transfer parity', () => {
     );
     assert.equal(authoritative, CHINA_BATCH_TOTAL);
     assert.notEqual(authoritative, unitTimesQtyTotal);
-    assertAuthoritativeCostTotals(CHINA_BATCH_TOTAL, authoritative, 'branch order transfer');
+    const reconciliation = compareAuthoritativeCostTotals(CHINA_BATCH_TOTAL, authoritative, 'branch order transfer');
+    assert.equal(reconciliation.ok, true);
   });
 
-  it('sumAuthoritativeLineCosts matches sumDisplayMoneyTotals', () => {
+  it('sumDisplayMoneyTotals preserves china batch total', () => {
     const costs = lines.map((line) => line.totalCostKgs);
-    assert.equal(sumAuthoritativeLineCosts(costs), sumDisplayMoneyTotals(costs));
-    assert.equal(sumAuthoritativeLineCosts(costs), CHINA_BATCH_TOTAL);
+    assert.equal(sumDisplayMoneyTotals(costs), CHINA_BATCH_TOTAL);
   });
 });
