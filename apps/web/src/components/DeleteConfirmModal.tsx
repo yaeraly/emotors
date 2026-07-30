@@ -13,6 +13,8 @@ type Props = {
   reasonPlaceholder?: string;
   /** When set, user must type this exact phrase to confirm. */
   confirmPhrase?: string;
+  /** Label shown above the confirmation phrase input. */
+  confirmPhraseLabel?: string;
   loading?: boolean;
   onClose: () => void;
   onConfirm: (reason?: string) => void | Promise<void>;
@@ -26,6 +28,7 @@ export function DeleteConfirmModal({
   minLength = 1,
   reasonPlaceholder,
   confirmPhrase,
+  confirmPhraseLabel,
   loading = false,
   onClose,
   onConfirm,
@@ -65,7 +68,7 @@ export function DeleteConfirmModal({
         {confirmPhrase ? (
           <label className="mt-4 block">
             <span className="text-sm font-semibold text-slate-700">
-              {t('common.typeToConfirm')}: {confirmPhrase}
+              {confirmPhraseLabel ?? t('common.typeToConfirm')}: {confirmPhrase}
             </span>
             <input
               type="text"

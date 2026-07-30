@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
+import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import {
   FinanceEmptyState,
   FinanceErrorState,
@@ -460,9 +460,8 @@ export default function FinanceInvestmentsPage() {
         </div>
       ) : null}
 
-      <DeleteConfirmModal
+      <PermanentDeleteConfirmModal
         open={!!deleteTarget}
-        title={t('finance.deleteInvestment')}
         message={deleteMessage}
         requireReason
         minLength={3}

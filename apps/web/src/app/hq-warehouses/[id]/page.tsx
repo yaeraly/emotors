@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
+import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { formatHqWarehouseContactPerson } from '@/lib/hq-warehouse';
 import { canDeleteHqGoodsReceiving, canDeleteHqWarehouse, canEditWarehouseInfo, canManageHqWarehouse, hasFullAccess, isWarehouseManagerUser } from '@/lib/rbac';
@@ -397,10 +398,8 @@ export default function HqWarehouseDetailPage() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={confirmDeleteReceiving}
       />
-      <DeleteConfirmModal
+      <PermanentDeleteConfirmModal
         open={deleteWarehouseOpen}
-        title={t('common.deleteConfirmTitle')}
-        message={t('common.deleteConfirmMessage')}
         requireReason={deleteWarehouseRequireReason}
         loading={deletingWarehouse}
         onClose={() => setDeleteWarehouseOpen(false)}

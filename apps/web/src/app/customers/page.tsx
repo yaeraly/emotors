@@ -12,6 +12,7 @@ import {
 } from '@/lib/customer-table-config';
 import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
 import type { Branch, Customer, CustomerStatus, CustomerType, User } from '@/lib/types';
+import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -117,6 +118,7 @@ function CustomersPageContent() {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Customer | null>(null);
 
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
@@ -365,12 +367,25 @@ function CustomersPageContent() {
     }
   }
 
-  async function archiveCustomer(customer: Customer) {
-    const permanent = canPermanentDeleteCustomer(currentUser);
-    if (!window.confirm(permanent ? t('common.permanentDeleteConfirmMessage') : t('crm.confirmDelete'))) {
+  function requestArchiveCustomer(customer: Customer) {
+    if (canPermanentDeleteCustomer(currentUser)) {
+      setPermanentDeleteTarget(customer);
       return;
     }
+    if (!window.confirm(t('crm.confirmDelete'))) {
+      return;
+    }
+    void executeArchiveCustomer(customer, false);
+  }
 
+  async function confirmPermanentDeleteCustomer() {
+    const customer = permanentDeleteTarget;
+    if (!customer) return;
+    await executeArchiveCustomer(customer, true);
+    setPermanentDeleteTarget(null);
+  }
+
+  async function executeArchiveCustomer(customer: Customer, permanent: boolean) {
     setDeletingCustomerId(customer.id);
     setError('');
 
@@ -764,7 +779,7 @@ function CustomersPageContent() {
                                 ) : null}
                                 {(canArchiveCustomer(currentUser) || canPermanentDeleteCustomer(currentUser)) ? (
                                   <button
-                                    onClick={() => void archiveCustomer(customer)}
+                                    onClick={() => requestArchiveCustomer(customer)}
                                     disabled={deletingCustomerId === customer.id}
                                     className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:bg-red-50"
                                     type="button"
@@ -993,6 +1008,12 @@ function CustomersPageContent() {
           </div>
         ) : null}
       </section>
+      <PermanentDeleteConfirmModal
+        open={!!permanentDeleteTarget}
+        loading={permanentDeleteTarget !== null && deletingCustomerId === permanentDeleteTarget.id}
+        onClose={() => setPermanentDeleteTarget(null)}
+        onConfirm={() => void confirmPermanentDeleteCustomer()}
+      />
     </ProtectedShell>
   );
 }

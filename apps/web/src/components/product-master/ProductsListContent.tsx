@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
+import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { API_URL, clearToken, getToken, apiFetch } from '@/lib/api';
 import { formatProductUnit } from '@/lib/product-unit';
 import { canDeleteProduct } from '@/lib/rbac';
@@ -22,6 +23,7 @@ export function ProductsListContent() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+  const [deleteTargetProduct, setDeleteTargetProduct] = useState<Product | null>(null);
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
 
   const query = useMemo(() => {
@@ -62,7 +64,12 @@ export function ProductsListContent() {
   }, [query]);
 
   async function deleteProduct(product: Product) {
-    if (!window.confirm(t('common.permanentDeleteConfirmMessage'))) return;
+    setDeleteTargetProduct(product);
+  }
+
+  async function confirmDeleteProduct(reason?: string) {
+    const product = deleteTargetProduct;
+    if (!product) return;
 
     const token = getToken();
     if (!token) {
@@ -110,6 +117,7 @@ export function ProductsListContent() {
         result.deactivated ? t('inventory.productDeactivated') : t('inventory.productDeleted'),
       );
       await loadProducts();
+      setDeleteTargetProduct(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('inventory.deleteFailed'));
     } finally {
@@ -242,6 +250,12 @@ export function ProductsListContent() {
           onClose={() => setPreviewProduct(null)}
         />
       ) : null}
+      <PermanentDeleteConfirmModal
+        open={!!deleteTargetProduct}
+        loading={deletingProductId !== null}
+        onClose={() => setDeleteTargetProduct(null)}
+        onConfirm={confirmDeleteProduct}
+      />
     </div>
   );
 }

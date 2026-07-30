@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { API_URL, apiFetch, clearToken, getToken } from '@/lib/api';
 import {
   canAssignBranchHqWarehouse,
@@ -103,6 +104,7 @@ export default function BranchDetailPage() {
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [branchWarehouseId, setBranchWarehouseId] = useState<string | null>(null);
   const [branchWarehouseMissing, setBranchWarehouseMissing] = useState(false);
   const [branchWarehouseLoading, setBranchWarehouseLoading] = useState(false);
@@ -311,8 +313,8 @@ export default function BranchDetailPage() {
     }
   }
 
-  async function deleteBranch() {
-    if (!branch || !window.confirm(t('common.permanentDeleteConfirmMessage'))) return;
+  async function confirmDeleteBranch() {
+    if (!branch) return;
 
     const token = getToken();
     if (!token) {
@@ -353,6 +355,7 @@ export default function BranchDetailPage() {
       }
 
       window.localStorage.setItem('emotors-branch-deleted', t('branches.deletedSuccess'));
+      setDeleteModalOpen(false);
       router.replace('/branches');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('branches.deleteFailed'));
@@ -385,7 +388,7 @@ export default function BranchDetailPage() {
                 <button
                   type="button"
                   disabled={deleting}
-                  onClick={() => void deleteBranch()}
+                  onClick={() => setDeleteModalOpen(true)}
                   className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50"
                 >
                   {deleting ? t('common.loading') : t('common.delete')}
@@ -608,6 +611,12 @@ export default function BranchDetailPage() {
           </div>
         ) : null}
       </section>
+      <PermanentDeleteConfirmModal
+        open={deleteModalOpen}
+        loading={deleting}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={() => void confirmDeleteBranch()}
+      />
     </ProtectedShell>
   );
 }

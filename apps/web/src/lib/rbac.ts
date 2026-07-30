@@ -879,6 +879,7 @@ export function canAccessPath(user: User, pathname: string) {
     return hasFullAccess(user) || isFranchiseDirectorUser(user);
   }
   if (pathname.startsWith('/royalty')) return hasPermission(user, 'branches.manage');
+  if (pathname.startsWith('/sysadmin')) return isSysAdminUser(user);
   return true;
 }
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
+import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { canCreateProcurementOrder, canDeleteProcurementOrder, canDeleteSupplier, canManageProcurement, canManageTransportCompany, canViewTransportCompany } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
@@ -396,7 +396,7 @@ export function ProcurementOrdersListPanel() {
           </tbody>
         </table>
       </div>
-      <DeleteConfirmModal open={!!deleteTarget} title={t('common.deleteConfirmTitle')} message={t('common.permanentDeleteConfirmMessage')} requireReason={deleteRequireReason} loading={deleting} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} />
+      <PermanentDeleteConfirmModal open={!!deleteTarget} requireReason={deleteRequireReason} loading={deleting} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} />
     </>
   );
 }
