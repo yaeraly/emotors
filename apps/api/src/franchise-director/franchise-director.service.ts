@@ -62,6 +62,14 @@ export class FranchiseDirectorService {
   }
 
   private async branchPerformance(branchId: string, from?: Date, to?: Date) {
+    const saleDate =
+      from || to
+        ? {
+            ...(from ? { gte: from } : {}),
+            ...(to ? { lte: to } : {}),
+          }
+        : { gte: this.monthStart() };
+
     const createdAt =
       from || to
         ? {
@@ -73,7 +81,7 @@ export class FranchiseDirectorService {
     const [sales, serviceOrders, customers, inventory, warranties, employees, nps, targets] =
       await Promise.all([
         this.prisma.sale.findMany({
-          where: { branchId, deletedAt: null, status: SaleStatus.FINALIZED, createdAt },
+          where: { branchId, deletedAt: null, status: SaleStatus.FINALIZED, saleDate },
           select: { totalAmount: true, profitAmount: true, customerId: true },
         }),
         this.prisma.serviceOrder.count({
@@ -704,7 +712,7 @@ export class FranchiseDirectorService {
               branchId: branch.id,
               deletedAt: null,
               status: SaleStatus.FINALIZED,
-              createdAt: { gte: from, lte: to },
+              saleDate: { gte: from, lte: to },
             },
             select: { totalAmount: true, profitAmount: true, debtAmount: true },
           }),

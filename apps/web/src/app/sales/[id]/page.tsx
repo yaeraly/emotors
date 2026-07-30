@@ -11,6 +11,7 @@ import {
   canCancelSale,
   canManageSaleWorkflow,
   canSubmitSaleInstallmentRequest,
+  canUpdateBusinessDate,
   canVoidPayment,
   shouldHideSaleProfitColumn,
 } from '@/lib/rbac';
@@ -27,6 +28,7 @@ import {
 import type { PaymentMethod, Sale, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
+import { BusinessDateField } from '@/components/BusinessDateField';
 
 export default function SaleDetailPage() {
   const { t } = useTranslation();
@@ -241,8 +243,15 @@ export default function SaleDetailPage() {
                   <h2 className="mt-2 text-3xl font-bold text-slate-950">
                     {sale.receiptNumber}
                   </h2>
-                  <p className="mt-2 text-slate-500">
-                    {new Date(sale.saleDate).toLocaleString()}
+                  <p className="mt-2">
+                    <BusinessDateField
+                      entityType="Sale"
+                      entityId={sale.id}
+                      fieldName="saleDate"
+                      value={sale.saleDate}
+                      canEdit={canUpdateBusinessDate(currentUser)}
+                      onUpdated={loadSale}
+                    />
                   </p>
                 </div>
                 <span className="h-fit rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-700">
@@ -484,9 +493,16 @@ export default function SaleDetailPage() {
                             ) : null}
                           </div>
                         </div>
-                        <p className="mt-1 text-sm text-slate-500">
-                          {new Date(payment.paidAt).toLocaleString()}
-                        </p>
+                        <div className="mt-1">
+                          <BusinessDateField
+                            entityType="Payment"
+                            entityId={payment.id}
+                            fieldName="paidAt"
+                            value={payment.paidAt}
+                            canEdit={canUpdateBusinessDate(currentUser) && payment.status !== 'VOID'}
+                            onUpdated={loadSale}
+                          />
+                        </div>
                         {payment.note ? (
                           <p className="mt-2 text-sm text-slate-700">
                             {payment.note}

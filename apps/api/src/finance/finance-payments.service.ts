@@ -67,7 +67,7 @@ export class FinancePaymentsService {
         paidAt: payment.paidAt,
         createdBy: payment.createdBy,
       })),
-      date: sale.createdAt,
+      date: sale.saleDate,
       canAccept: hasCashierCapability(user) && Number(sale.debtAmount) > 0,
     }));
   }

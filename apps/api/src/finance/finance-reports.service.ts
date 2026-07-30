@@ -4,6 +4,7 @@ import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canViewFinanceReports, isHqFinanceUser, resolveFinanceScopeFilter } from './finance-access.util';
 import { FinanceReportQueryDto } from './dto/finance-report-query.dto';
+import { buildLedgerBusinessDateWhere } from './finance-ledger-business-date.util';
 
 const TRANSFER_TYPES: FinanceLedgerEntryType[] = [
   FinanceLedgerEntryType.TRANSFER_IN,
@@ -44,16 +45,14 @@ export class FinanceReportsService {
     });
 
     const branchIds = [...new Set(accounts.map((a) => a.branchId).filter(Boolean))] as string[];
+    const businessDateWhere = await buildLedgerBusinessDateWhere(
+      this.prisma,
+      query.dateFrom,
+      query.dateTo,
+    );
     const ledgerWhere = {
       ...(scopeFilter.branchId ? { branchId: scopeFilter.branchId } : {}),
-      ...(query.dateFrom || query.dateTo
-        ? {
-            createdAt: {
-              ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
-              ...(query.dateTo ? { lte: new Date(`${query.dateTo}T23:59:59.999Z`) } : {}),
-            },
-          }
-        : {}),
+      ...(businessDateWhere ?? {}),
     };
 
     const [incomeAgg, expenseAgg] = await Promise.all([
@@ -103,18 +102,16 @@ export class FinanceReportsService {
 
   async getCashFlow(user: AuthUser, query: FinanceReportQueryDto) {
     const scopeFilter = resolveFinanceScopeFilter(user, query.branchId);
+    const businessDateWhere = await buildLedgerBusinessDateWhere(
+      this.prisma,
+      query.dateFrom,
+      query.dateTo,
+    );
     const entries = await this.prisma.financeLedgerEntry.findMany({
       where: {
         ...(scopeFilter.branchId ? { branchId: scopeFilter.branchId } : {}),
         entryType: { notIn: TRANSFER_TYPES },
-        ...(query.dateFrom || query.dateTo
-          ? {
-              createdAt: {
-                ...(query.dateFrom ? { gte: new Date(query.dateFrom) } : {}),
-                ...(query.dateTo ? { lte: new Date(`${query.dateTo}T23:59:59.999Z`) } : {}),
-              },
-            }
-          : {}),
+        ...(businessDateWhere ?? {}),
       },
       include: {
         account: { select: { id: true, name: true, accountNumber: true } },

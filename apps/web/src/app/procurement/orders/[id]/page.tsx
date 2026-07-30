@@ -26,6 +26,7 @@ import {
   canManageSvhToHqTransport,
   canReceiveProcurementToHq,
   canUnlockProcurementOrder,
+  canUpdateBusinessDate,
   canViewSupplierPayments,
   hasFullAccess,
   hasRole,
@@ -33,6 +34,7 @@ import {
 } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { BusinessDateField } from '@/components/BusinessDateField';
 
 type ProcurementOrderItem = {
   id: string;
@@ -96,6 +98,7 @@ type ProcurementOrder = {
   id: string;
   orderNumber: string;
   createdAt?: string;
+  purchaseDate?: string | null;
   status: string;
   totalYuan: string | number;
   totalCostKgs: string | number;
@@ -1010,7 +1013,23 @@ function ProcurementOrderDetailPageContent() {
             <h3 className="mb-4 text-lg font-bold">{t('procurement.orders.generalInfo')}</h3>
             <div className="grid gap-4 md:grid-cols-4">
               <Info label={t('procurement.orders.orderNumber')} value={order.orderNumber} />
-              <Info label={t('procurement.orders.orderDate')} value={order.createdAt ? formatOrderDate(order.createdAt) : '-'} />
+              <div>
+                {order.purchaseDate ? (
+                  <BusinessDateField
+                    entityType="ProcurementOrder"
+                    entityId={order.id}
+                    fieldName="purchaseDate"
+                    value={order.purchaseDate}
+                    canEdit={canUpdateBusinessDate(user)}
+                    onUpdated={() => void load()}
+                  />
+                ) : (
+                  <Info
+                    label={t('procurement.orders.orderDate')}
+                    value={order.createdAt ? formatOrderDate(order.createdAt) : '-'}
+                  />
+                )}
+              </div>
               <Info label={t('procurement.orders.status')} value={t(supplierPaymentSummary.statusTranslationKey)} />
               <Info
                 label={t('procurement.orders.warehouse')}

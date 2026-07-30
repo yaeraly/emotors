@@ -8,6 +8,8 @@ import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canViewFinanceReports, isHqFinanceUser, resolveFinanceScopeFilter } from './finance-access.util';
 import { FinanceReportQueryDto } from './dto/finance-report-query.dto';
+import { buildLedgerBusinessDateWhere } from './finance-ledger-business-date.util';
+import { formatLocalDateInput } from '../business-date/business-date-range.util';
 
 const OPERATING_INCOME_TYPES: FinanceLedgerEntryType[] = [
   FinanceLedgerEntryType.INCOME,
@@ -29,8 +31,6 @@ export class FinanceDashboardService {
     }
 
     const scopeFilter = resolveFinanceScopeFilter(user, query.branchId);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
 
     const accounts = await this.prisma.financeAccount.findMany({
       where: {
@@ -50,13 +50,16 @@ export class FinanceDashboardService {
       ...(scopeFilter.branchId ? { branchId: scopeFilter.branchId } : {}),
     };
 
+    const today = formatLocalDateInput(new Date());
+    const todayLedgerWhere = await buildLedgerBusinessDateWhere(this.prisma, today, today);
+
     const [todayIncome, todayExpenses, openShifts, pendingTransfers, pendingReconciliations] =
       await Promise.all([
         this.prisma.financeLedgerEntry.aggregate({
           where: {
             ...ledgerBase,
             entryType: { in: OPERATING_INCOME_TYPES },
-            createdAt: { gte: todayStart },
+            ...(todayLedgerWhere ?? {}),
           },
           _sum: { amount: true },
         }),
@@ -64,7 +67,7 @@ export class FinanceDashboardService {
           where: {
             ...ledgerBase,
             entryType: { in: OPERATING_EXPENSE_TYPES },
-            createdAt: { gte: todayStart },
+            ...(todayLedgerWhere ?? {}),
           },
           _sum: { amount: true },
         }),

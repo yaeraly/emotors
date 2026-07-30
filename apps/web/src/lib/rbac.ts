@@ -25,13 +25,17 @@ const ALL_PERMISSIONS = [
   'academy.manage',
   'marketing.manage',
   'analytics.view',
-  'data.permanent_delete',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSIONS],
   CEO: [...ALL_PERMISSIONS],
-  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view', 'data.permanent_delete'],
+  SYSTEM_ADMINISTRATOR: [
+    'users.manage',
+    'reports.view',
+    'data.permanent_delete',
+    'businessDate.update.hqAdmin',
+  ],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view', 'analytics.view'],
   FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
   WAREHOUSE_MANAGER: [
@@ -160,6 +164,14 @@ export function canPermanentDeleteBusinessData(
 ) {
   if (!user) return false;
   return isHqAdminUser(user) || hasPermission(user, 'data.permanent_delete');
+}
+
+/** HQ Admin — edit historical business transaction dates for reporting corrections. */
+export function canUpdateBusinessDate(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+) {
+  if (!user) return false;
+  return isHqAdminUser(user) || hasPermission(user, 'businessDate.update.hqAdmin');
 }
 
 export function canDeleteEmployee(user: Pick<User, 'role' | 'roles'> | null | undefined) {

@@ -34,6 +34,7 @@ import { UsersModule } from './users/users.module';
 import { FranchiseDirectorModule } from './franchise-director/franchise-director.module';
 import { HqB2bSalesModule } from './hq-b2b-sales/hq-b2b-sales.module';
 import { DevAdminModule } from './dev-admin/dev-admin.module';
+import { BusinessDateModule } from './business-date/business-date.module';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { DevAdminModule } from './dev-admin/dev-admin.module';
     UsersModule,
     AiModule,
     DevAdminModule,
+    BusinessDateModule,
   ],
 })
 export class AppModule {}
