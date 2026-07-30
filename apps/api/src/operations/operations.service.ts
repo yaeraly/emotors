@@ -59,6 +59,9 @@ import {
 } from '../procurement/landed-cost.util';
 import {
   buildHqReceivingValidationResult,
+  buildHqReceivingBlockedMessages,
+  HQ_RECEIVING_BLOCKED,
+  validateHqReceivingInvoicePrerequisites,
 } from '../procurement/hq-receiving-validation.util';
 import {
   countCargoReceiptAttachmentsByOrderIds,
@@ -1683,6 +1686,51 @@ export class OperationsService {
       await this.auditReceivingDenied(user, procurementOrderId, null, 'Only assigned HQ Warehouse Manager can receive goods into HQ warehouse');
       throw new ForbiddenException('Only assigned HQ Warehouse Manager can receive goods into HQ warehouse');
     }
+
+    const precheckOrder = await this.prisma.procurementOrder.findFirst({
+      where: { id: procurementOrderId, deletedAt: null },
+      include: {
+        svhToHqTransport: true,
+        transportExpenses: {
+          select: {
+            procurementOrderId: true,
+            expenseType: true,
+            amount: true,
+            amountKgs: true,
+            status: true,
+          },
+        },
+      },
+    });
+    if (!precheckOrder) throw new NotFoundException('Procurement order not found');
+
+    const invoiceGate = validateHqReceivingInvoicePrerequisites({
+      procurementOrderId: precheckOrder.id,
+      transportExpenses: precheckOrder.transportExpenses,
+      cargoSectionTotal: Number(precheckOrder.totalCargoCostKgs ?? 0),
+      kyrgyzstanSectionTotal: Number(
+        precheckOrder.localTransportKgs ?? precheckOrder.svhToHqTransport?.transportCostKgs ?? 0,
+      ),
+    });
+    if (!invoiceGate.canReceiveToHq) {
+      await this.auditReceivingBlocked(
+        user,
+        precheckOrder.id,
+        precheckOrder.hqWarehouseId,
+        invoiceGate,
+      );
+      throw new BadRequestException({
+        message: HQ_RECEIVING_BLOCKED,
+        messages: buildHqReceivingBlockedMessages(invoiceGate.blockingInvoices),
+        blockingInvoices: invoiceGate.blockingInvoices.map((row) => ({
+          requestType: row.requestType,
+          displayName: row.displayName,
+          state: row.state,
+          status: row.status,
+        })),
+      });
+    }
+
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.procurementOrder.findFirst({
         where: { id: procurementOrderId, deletedAt: null },
@@ -1691,11 +1739,41 @@ export class OperationsService {
           supplierPayments: true,
           svhToHqTransport: { include: { transportCompany: true } },
           landedCostSnapshots: { where: { isFinalized: false } },
+          transportExpenses: {
+            select: {
+              procurementOrderId: true,
+              expenseType: true,
+              amount: true,
+              amountKgs: true,
+              status: true,
+            },
+          },
         },
       });
       if (!order) throw new NotFoundException('Procurement order not found');
       if (order.hqStockMovementCreatedAt) {
         throw new BadRequestException('Procurement stock has already been received');
+      }
+
+      const txInvoiceGate = validateHqReceivingInvoicePrerequisites({
+        procurementOrderId: order.id,
+        transportExpenses: order.transportExpenses,
+        cargoSectionTotal: Number(order.totalCargoCostKgs ?? 0),
+        kyrgyzstanSectionTotal: Number(
+          order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
+        ),
+      });
+      if (!txInvoiceGate.canReceiveToHq) {
+        throw new BadRequestException({
+          message: HQ_RECEIVING_BLOCKED,
+          messages: buildHqReceivingBlockedMessages(txInvoiceGate.blockingInvoices),
+          blockingInvoices: txInvoiceGate.blockingInvoices.map((row) => ({
+            requestType: row.requestType,
+            displayName: row.displayName,
+            state: row.state,
+            status: row.status,
+          })),
+        });
       }
 
       const activeItems = order.items.filter((item) => item.status === 'ACTIVE');
@@ -1749,6 +1827,12 @@ export class OperationsService {
       const validation = buildHqReceivingValidationResult({
         cargo: cargoSnapshot,
         svh: svhSnapshot,
+        procurementOrderId: order.id,
+        transportExpenses: order.transportExpenses,
+        cargoSectionTotal: Number(order.totalCargoCostKgs ?? 0),
+        kyrgyzstanSectionTotal: Number(
+          order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
+        ),
       });
 
       const validationResult = {
@@ -2381,6 +2465,15 @@ export class OperationsService {
           where: { deletedAt: null },
           include: { items: true },
         },
+        transportExpenses: {
+          select: {
+            procurementOrderId: true,
+            expenseType: true,
+            amount: true,
+            amountKgs: true,
+            status: true,
+          },
+        },
       },
       orderBy: [{ hqStockMovementCreatedAt: 'asc' }, { actualArrivalDate: 'desc' }, { createdAt: 'desc' }],
     });
@@ -2433,7 +2526,12 @@ export class OperationsService {
           !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
         canViewOnly: isScm && !isCeo,
         arrivalMarked: Boolean(order.actualArrivalDate),
-        validation: wmOnlyView ? { canReceiveToHq: validation.canReceiveToHq } : validation,
+        validation: wmOnlyView
+        ? {
+            canReceiveToHq: validation.canReceiveToHq,
+            invoicePrerequisites: validation.invoicePrerequisites,
+          }
+        : validation,
       });
     }
 
@@ -2891,7 +2989,12 @@ export class OperationsService {
       hqWarehouse: order.hqWarehouse,
       receivingStatus: resolveChinaReceivingListStatus(enriched),
       draftState: resolveChinaReceivingDraftState(order.hqStockMovementCreatedAt),
-      validation: wmOnlyView ? { canReceiveToHq: validation.canReceiveToHq } : validation,
+      validation: wmOnlyView
+        ? {
+            canReceiveToHq: validation.canReceiveToHq,
+            invoicePrerequisites: validation.invoicePrerequisites,
+          }
+        : validation,
       canReceive: !order.hqStockMovementCreatedAt && isWm && !isScm,
       canMarkArrival:
         !order.hqStockMovementCreatedAt && isWm && !isScm && isGoodsLeftYiwuStatus(order.status),
@@ -3876,6 +3979,15 @@ export class OperationsService {
           where: { deletedAt: null },
           include: { items: true },
         },
+        transportExpenses: {
+          select: {
+            procurementOrderId: true,
+            expenseType: true,
+            amount: true,
+            amountKgs: true,
+            status: true,
+          },
+        },
       },
     });
     if (!order) throw new NotFoundException('Procurement order not found');
@@ -4665,6 +4777,38 @@ export class OperationsService {
       });
     }
     return resolved;
+  }
+
+  private auditReceivingBlocked(
+    user: AuthUser,
+    procurementOrderId: string,
+    warehouseId: string | null,
+    gate: ReturnType<typeof validateHqReceivingInvoicePrerequisites>,
+    tx: PrismaTx | PrismaService = this.prisma,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'HQ_RECEIVING_BLOCKED',
+        entity: 'ProcurementOrder',
+        entityId: procurementOrderId,
+        metadata: {
+          shipmentId: procurementOrderId,
+          purchaseOrderId: procurementOrderId,
+          warehouseId,
+          action: 'HQ_RECEIVING_BLOCKED',
+          blockingInvoiceTypes: gate.blockingInvoices.map((row) => row.requestType),
+          blockingInvoiceStatuses: gate.blockingInvoices.map((row) => row.status),
+          attemptedBy: user.id,
+          attemptedAt: new Date().toISOString(),
+          userId: user.id,
+          roles: user.roles ?? [user.role],
+          procurementOrderId,
+          timestamp: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   private auditReceivingDenied(

@@ -78,6 +78,17 @@ export async function apiFetch<T>(
         errorBody.messages.en;
       throw new Error(localized);
     }
+    if (message === 'HQ_RECEIVING_BLOCKED' && errorBody?.messages) {
+      const storedLanguage =
+        typeof window !== 'undefined'
+          ? window.localStorage.getItem('emotors-language')
+          : null;
+      const localized =
+        errorBody.messages[storedLanguage === 'ky' || storedLanguage === 'ru' ? storedLanguage : 'en'] ??
+        errorBody.messages.ru ??
+        errorBody.messages.en;
+      throw new Error(localized);
+    }
     throw new Error(message);
   }
 

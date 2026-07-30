@@ -1,5 +1,50 @@
-import { TransportCompanyStatus } from '@prisma/client';
+import { TransportCompanyStatus, TransportExpenseStatus, TransportExpenseType } from '@prisma/client';
 import { isSvhTransportCompleted } from './svh-to-hq-transport.util';
+import {
+  expenseTypeForRequestType,
+  summarizeSectionPayments,
+} from './section-payable.util';
+
+export const HQ_RECEIVING_BLOCKED = 'HQ_RECEIVING_BLOCKED';
+
+export const HQ_RECEIVING_INVOICE_PREREQUISITES = [
+  'CARGO_PAYMENT',
+  'KYRGYZSTAN_DOMESTIC_TRANSPORT',
+] as const;
+
+export type HqReceivingInvoiceRequestType = (typeof HQ_RECEIVING_INVOICE_PREREQUISITES)[number];
+
+export const HQ_RECEIVING_INVOICE_DISPLAY_NAMES: Record<HqReceivingInvoiceRequestType, string> = {
+  CARGO_PAYMENT: 'Оплата карго',
+  KYRGYZSTAN_DOMESTIC_TRANSPORT: 'Внутренний транспорт Кыргызстана',
+};
+
+export type HqReceivingInvoiceBlockState = 'closed' | 'missing' | 'open' | 'partial';
+
+export type HqReceivingTransportExpenseSnapshot = {
+  procurementOrderId?: string | null;
+  expenseType: TransportExpenseType | string;
+  amount: number | string | { toString(): string };
+  amountKgs?: number | string | { toString(): string } | null;
+  status: string;
+};
+
+export type HqReceivingInvoicePrerequisite = {
+  requestType: HqReceivingInvoiceRequestType;
+  displayName: string;
+  state: HqReceivingInvoiceBlockState;
+  status: string | null;
+  closed: boolean;
+};
+
+export type HqReceivingInvoiceGateResult = {
+  canReceiveToHq: boolean;
+  prerequisites: HqReceivingInvoicePrerequisite[];
+  blockingInvoices: HqReceivingInvoicePrerequisite[];
+};
+
+export const HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE =
+  'Перед приемкой товара на склад Supply Manager должен закрыть счета «Оплата карго» и «Внутренний транспорт Кыргызстана».';
 
 export const CARGO_RECEIPT_INCOMPLETE_MESSAGE =
   'Fill cargo receipt before receiving to HQ warehouse';
@@ -92,9 +137,175 @@ export function validateSvhToHqTransportComplete(snapshot: SvhTransportSnapshot)
   return { valid: errors.length === 0, errors };
 }
 
+/** Final closed status for section transport invoices (authoritative for HQ receiving). */
+export function isTransportExpenseInvoiceClosed(status: string): boolean {
+  return String(status ?? '').toUpperCase() === TransportExpenseStatus.PAID;
+}
+
+function normalizeExpenseStatus(status: string): string {
+  return String(status ?? '').toUpperCase();
+}
+
+function expensesForOrderSection(
+  expenses: HqReceivingTransportExpenseSnapshot[],
+  procurementOrderId: string,
+  expenseType: TransportExpenseType,
+): HqReceivingTransportExpenseSnapshot[] {
+  return expenses.filter((row) => {
+    if (row.procurementOrderId !== procurementOrderId) return false;
+    if (row.expenseType !== expenseType) return false;
+    const status = normalizeExpenseStatus(row.status);
+    return status !== TransportExpenseStatus.CANCELLED;
+  });
+}
+
+export function evaluateHqReceivingInvoiceSection(
+  expenses: HqReceivingTransportExpenseSnapshot[],
+  procurementOrderId: string,
+  requestType: HqReceivingInvoiceRequestType,
+  sectionTotal?: number | null,
+): HqReceivingInvoicePrerequisite {
+  const expenseType = expenseTypeForRequestType(requestType);
+  const displayName = HQ_RECEIVING_INVOICE_DISPLAY_NAMES[requestType];
+  const orderExpenses = expensesForOrderSection(expenses, procurementOrderId, expenseType);
+
+  if (orderExpenses.length === 0) {
+    return {
+      requestType,
+      displayName,
+      state: 'missing',
+      status: null,
+      closed: false,
+    };
+  }
+
+  const summary = summarizeSectionPayments(
+    orderExpenses.map((row) => ({
+      amount: Number(row.amount),
+      amountKgs: row.amountKgs != null ? Number(row.amountKgs) : null,
+      status: row.status,
+    })),
+    sectionTotal,
+  );
+
+  if (summary.status === 'PAID') {
+    return {
+      requestType,
+      displayName,
+      state: 'closed',
+      status: TransportExpenseStatus.PAID,
+      closed: true,
+    };
+  }
+
+  const hasPartial =
+    summary.status === 'PARTIALLY_PAID' ||
+    orderExpenses.some(
+      (row) => normalizeExpenseStatus(row.status) === TransportExpenseStatus.PARTIALLY_PAID,
+    );
+
+  if (hasPartial) {
+    return {
+      requestType,
+      displayName,
+      state: 'partial',
+      status: TransportExpenseStatus.PARTIALLY_PAID,
+      closed: false,
+    };
+  }
+
+  const dominantStatus = orderExpenses[0]?.status ?? TransportExpenseStatus.DRAFT;
+  return {
+    requestType,
+    displayName,
+    state: 'open',
+    status: dominantStatus,
+    closed: false,
+  };
+}
+
+export function validateHqReceivingInvoicePrerequisites(input: {
+  procurementOrderId: string;
+  transportExpenses: HqReceivingTransportExpenseSnapshot[];
+  cargoSectionTotal?: number | string | null;
+  kyrgyzstanSectionTotal?: number | string | null;
+}): HqReceivingInvoiceGateResult {
+  const prerequisites = HQ_RECEIVING_INVOICE_PREREQUISITES.map((requestType) => {
+    if (requestType === 'CARGO_PAYMENT') {
+      return evaluateHqReceivingInvoiceSection(
+        input.transportExpenses,
+        input.procurementOrderId,
+        requestType,
+        Number(input.cargoSectionTotal ?? 0),
+      );
+    }
+    return evaluateHqReceivingInvoiceSection(
+      input.transportExpenses,
+      input.procurementOrderId,
+      requestType,
+      Number(input.kyrgyzstanSectionTotal ?? 0),
+    );
+  });
+  const blockingInvoices = prerequisites.filter((row) => !row.closed);
+  return {
+    canReceiveToHq: blockingInvoices.length === 0,
+    prerequisites,
+    blockingInvoices,
+  };
+}
+
+function formatBlockedInvoiceLines(blocking: HqReceivingInvoicePrerequisite[]): string {
+  return blocking.map((row) => `— ${row.displayName}`).join('\n');
+}
+
+function buildBlockedInvoiceAction(blocking: HqReceivingInvoicePrerequisite[]): string {
+  const missing = blocking.filter((row) => row.state === 'missing');
+  const needsClose = blocking.filter((row) => row.state !== 'missing');
+  const parts: string[] = [];
+  if (missing.length > 0) {
+    parts.push(
+      missing.length === 1
+        ? 'Supply Manager должен создать и закрыть счет:'
+        : 'Supply Manager должен создать и закрыть счета:',
+    );
+    parts.push(formatBlockedInvoiceLines(missing));
+  }
+  if (needsClose.length > 0) {
+    parts.push(
+      needsClose.length === 1
+        ? 'Supply Manager должен закрыть счет:'
+        : 'Supply Manager должен закрыть счета:',
+    );
+    parts.push(formatBlockedInvoiceLines(needsClose));
+  }
+  return parts.join('\n');
+}
+
+export function buildHqReceivingBlockedMessages(
+  blockingInvoices: HqReceivingInvoicePrerequisite[],
+): { ru: string; ky: string; en: string } {
+  if (blockingInvoices.length === 0) {
+    return {
+      ru: HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE,
+      ky: HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE,
+      en: HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE,
+    };
+  }
+
+  const body = buildBlockedInvoiceAction(blockingInvoices);
+  const ru = `Невозможно принять товар на склад.\n\n${body}`;
+  const ky = `Товарды складга кабыл алуу мүмкүн эмес.\n\n${body}`;
+  const en = `Cannot receive goods into the warehouse.\n\n${body.replaceAll('Supply Manager', 'Supply Manager')}`;
+  return { ru, ky, en };
+}
+
 export function buildHqReceivingValidationResult(params: {
   cargo: CargoReceiptSnapshot;
   svh: SvhTransportSnapshot;
+  procurementOrderId?: string;
+  transportExpenses?: HqReceivingTransportExpenseSnapshot[];
+  cargoSectionTotal?: number | string | null;
+  kyrgyzstanSectionTotal?: number | string | null;
 }) {
   const cargoForm = validateCargoReceiptComplete(params.cargo);
   const svhTransport = validateSvhToHqTransportComplete(params.svh);
@@ -103,16 +314,25 @@ export function buildHqReceivingValidationResult(params: {
     ? { valid: true, errors: [] }
     : { valid: false, errors: ['cargoAttachment'] };
 
+  const invoiceGate =
+    params.procurementOrderId && params.transportExpenses
+      ? validateHqReceivingInvoicePrerequisites({
+          procurementOrderId: params.procurementOrderId,
+          transportExpenses: params.transportExpenses,
+          cargoSectionTotal: params.cargoSectionTotal,
+          kyrgyzstanSectionTotal: params.kyrgyzstanSectionTotal,
+        })
+      : null;
+
   return {
     /** True when a cargo receipt file already exists (payment request / order). */
     cargoReceiptCompleted: receiptAttached,
     /** Informational only — does not gate HQ warehouse receiving. */
     svhToHqTransportCompleted: svhTransport.valid,
-    /**
-     * HQ China receiving must not be blocked by Import Logistics cargo form fields
-     * or SVH→HQ transport completion. Physical receiving uses its own workflow.
-     */
-    canReceiveToHq: true,
+    /** HQ China receiving requires closed cargo payment and Kyrgyzstan transport invoices. */
+    canReceiveToHq: invoiceGate?.canReceiveToHq ?? false,
+    invoicePrerequisites: invoiceGate?.prerequisites ?? [],
+    blockingInvoices: invoiceGate?.blockingInvoices ?? [],
     cargoReceipt,
     cargoForm,
     svhTransport,
@@ -120,8 +340,8 @@ export function buildHqReceivingValidationResult(params: {
 }
 
 export function hqReceivingBlockedMessage(
-  _validation: ReturnType<typeof buildHqReceivingValidationResult>,
+  validation: ReturnType<typeof buildHqReceivingValidationResult>,
 ): string | null {
-  // Cargo form fill and SVH→HQ completion must not block HQ warehouse receiving.
-  return null;
+  if (validation.canReceiveToHq) return null;
+  return buildHqReceivingBlockedMessages(validation.blockingInvoices).ru;
 }

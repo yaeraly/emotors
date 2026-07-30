@@ -61,6 +61,19 @@ type ReceivingDocuments = {
   }>;
 };
 
+type HqReceivingInvoicePrerequisite = {
+  requestType: 'CARGO_PAYMENT' | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  displayName: string;
+  state: 'closed' | 'missing' | 'open' | 'partial';
+  status: string | null;
+  closed: boolean;
+};
+
+type HqReceivingValidation = {
+  canReceiveToHq?: boolean;
+  invoicePrerequisites?: HqReceivingInvoicePrerequisite[];
+};
+
 export type ChinaReceivingDetail = {
   id: string;
   orderNumber: string;
@@ -71,6 +84,7 @@ export type ChinaReceivingDetail = {
   receivingStatus: string;
   draftState?: 'DRAFT' | 'COMPLETED';
   canReceive: boolean;
+  validation?: HqReceivingValidation | null;
   landedCostStatus?: string;
   landedCostPendingWeight?: boolean;
   hqStockMovementCreatedAt?: string | null;
@@ -465,6 +479,10 @@ function ChinaReceivingEditableView({
     }
   }
 
+  const invoicePrerequisites = task.validation?.invoicePrerequisites ?? [];
+  const canReceiveToHq = task.validation?.canReceiveToHq ?? false;
+  const receiveBlocked = invoicePrerequisites.length > 0 && !canReceiveToHq;
+
   async function receiveToHq() {
     if (!canEdit || !allSaved) return;
     setLoading(true);
@@ -548,7 +566,7 @@ function ChinaReceivingEditableView({
         </p>
       ) : null}
 
-      {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {error ? <p className="whitespace-pre-line rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
       {hasDifference && canEdit ? (
         <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
           {t('chinaReceiving.differenceAutoWarning')}
@@ -590,6 +608,25 @@ function ChinaReceivingEditableView({
           />
         </div>
       </div>
+
+      {canEdit && invoicePrerequisites.length > 0 ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-sm font-semibold text-slate-800">{t('chinaReceiving.invoicePrerequisitesTitle')}</p>
+          <ul className="mt-3 space-y-2 text-sm">
+            {invoicePrerequisites.map((row) => (
+              <li
+                key={row.requestType}
+                className={row.closed ? 'text-emerald-700' : 'text-red-700'}
+              >
+                {row.displayName}: {row.closed ? t('chinaReceiving.invoiceClosed') : t('chinaReceiving.invoiceNotClosed')}
+              </li>
+            ))}
+          </ul>
+          {receiveBlocked ? (
+            <p className="mt-3 text-sm text-amber-800">{t('chinaReceiving.invoicePrerequisitesWarning')}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-end gap-3">
@@ -785,7 +822,7 @@ function ChinaReceivingEditableView({
           ) : null}
           <button
             type="button"
-            disabled={loading || !allSaved}
+            disabled={loading || !allSaved || receiveBlocked}
             onClick={() => void receiveToHq()}
             className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
           >

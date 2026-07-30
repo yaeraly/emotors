@@ -23,6 +23,14 @@ export type HqReceivingValidationResult = {
   errors: string[];
 };
 
+export type HqReceivingInvoicePrerequisite = {
+  requestType: 'CARGO_PAYMENT' | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  displayName: string;
+  state: 'closed' | 'missing' | 'open' | 'partial';
+  status: string | null;
+  closed: boolean;
+};
+
 export const CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE =
   'Attach the cargo receipt before receiving goods into the HQ warehouse.';
 
@@ -87,6 +95,8 @@ export function validateSvhToHqTransportComplete(snapshot: SvhTransportSnapshot)
 export function buildHqReceivingValidationResult(params: {
   cargo: CargoReceiptSnapshot;
   svh: SvhTransportSnapshot;
+  canReceiveToHq?: boolean;
+  invoicePrerequisites?: HqReceivingInvoicePrerequisite[];
 }) {
   const cargoForm = validateCargoReceiptComplete(params.cargo);
   const svhTransport = validateSvhToHqTransportComplete(params.svh);
@@ -98,7 +108,8 @@ export function buildHqReceivingValidationResult(params: {
   return {
     cargoReceiptCompleted: receiptAttached,
     svhToHqTransportCompleted: svhTransport.valid,
-    canReceiveToHq: true,
+    canReceiveToHq: params.canReceiveToHq ?? false,
+    invoicePrerequisites: params.invoicePrerequisites ?? [],
     cargoReceipt,
     cargoForm,
     svhTransport,

@@ -50,6 +50,7 @@ export function sanitizeChinaReceivingListTask<T extends Record<string, unknown>
     validation: validation
       ? {
           canReceiveToHq: (validation as { canReceiveToHq?: boolean }).canReceiveToHq,
+          invoicePrerequisites: (validation as { invoicePrerequisites?: unknown }).invoicePrerequisites,
         }
       : undefined,
   } as unknown as T;

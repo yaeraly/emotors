@@ -1,5 +1,8 @@
 import { ProcurementOrderStatus } from '@prisma/client';
-import { buildHqReceivingValidationResult } from '../procurement/hq-receiving-validation.util';
+import {
+  buildHqReceivingValidationResult,
+  type HqReceivingTransportExpenseSnapshot,
+} from '../procurement/hq-receiving-validation.util';
 
 export type ChinaReceivingListStatus =
   | 'READY_FOR_RECEIVING'
@@ -42,6 +45,10 @@ type OrderLike = {
     transportCompany?: { status?: string | null } | null;
   } | null;
   cargoAttachmentCount?: number;
+  id?: string;
+  totalCargoCostKgs?: unknown;
+  localTransportKgs?: unknown;
+  transportExpenses?: HqReceivingTransportExpenseSnapshot[];
 };
 
 export function isGoodsLeftYiwuStatus(status?: string | null) {
@@ -91,6 +98,12 @@ export function buildChinaReceivingValidation(order: OrderLike) {
           transportCompanyStatus: order.svhToHqTransport.transportCompany?.status ?? null,
         }
       : null,
+    procurementOrderId: order.id,
+    transportExpenses: order.transportExpenses ?? [],
+    cargoSectionTotal: asNumeric(order.totalCargoCostKgs),
+    kyrgyzstanSectionTotal:
+      asNumeric(order.localTransportKgs) ??
+      asNumeric(order.svhToHqTransport?.transportCostKgs),
   });
 }
 
