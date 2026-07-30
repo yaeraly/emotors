@@ -30,6 +30,10 @@ export class RolesGuard implements CanActivate {
 
     const userRoles = user?.roles?.length ? user.roles : user ? [user.role] : [];
 
+    if (userRoles.includes(Role.SYSTEM_ADMINISTRATOR)) {
+      return true;
+    }
+
     const roleAllowed = user && rolesCanAccessRequiredRoles(userRoles, requiredRoles);
     const permissionAllowed =
       user &&

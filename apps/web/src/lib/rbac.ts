@@ -31,8 +31,7 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSIONS],
   CEO: [...ALL_PERMISSIONS],
   SYSTEM_ADMINISTRATOR: [
-    'users.manage',
-    'reports.view',
+    ...ALL_PERMISSIONS,
     'data.permanent_delete',
     'businessDate.update.hqAdmin',
   ],
@@ -156,6 +155,11 @@ export function canCreateServiceOrder(user: Pick<User, 'role' | 'roles' | 'permi
 export function isHqAdminUser(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return hasRole(user, 'SYSTEM_ADMINISTRATOR');
+}
+
+/** HQ SysAdmin (SYSTEM_ADMINISTRATOR) — testing access, permanent delete, business-date edit. */
+export function isSysAdminUser(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return isHqAdminUser(user);
 }
 
 /** HQ Admin — permanent business-data deletion for system testing. */
@@ -715,6 +719,7 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
 
 export function canAccessPath(user: User, pathname: string) {
   if (pathname === '/change-password') return true;
+  if (isSysAdminUser(user)) return true;
   if (isFranchiseDirectorUser(user)) {
     return canFranchiseDirectorAccessPath(pathname);
   }

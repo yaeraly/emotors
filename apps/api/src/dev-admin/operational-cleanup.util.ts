@@ -1,4 +1,4 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient, Role } from '@prisma/client';
 
 /** Configuration tables and master data preserved during development cleanup. */
 export const PRESERVED_TABLES = [
@@ -214,16 +214,15 @@ export const DELETE_STEPS = [
   'campaign',
   'marketingAsset',
 
-  // Operational logs
-  'auditLog',
-  'loginHistory',
+  // Operational logs — preserved for audit trail (PERMANENT_DELETE, BUSINESS_DATE_CHANGED)
+  // auditLog and loginHistory are intentionally excluded from bulk cleanup
 ] as const;
 
 /** Operational tables targeted by development cleanup (alias of DELETE_STEPS for reporting). */
 export const CLEANED_TABLES = DELETE_STEPS;
 
 type PrismaTx = Prisma.TransactionClient;
-type DeleteStep = (typeof DELETE_STEPS)[number];
+export type DeleteStep = (typeof DELETE_STEPS)[number];
 
 async function deleteAll(tx: PrismaTx, model: DeleteStep) {
   const delegate = tx[model] as { deleteMany: (args?: unknown) => Promise<{ count: number }> };
@@ -308,6 +307,109 @@ export async function runDevDatabaseCleanup(prisma: PrismaClient): Promise<DevDa
   );
 
   return { deleted, reset };
+}
+
+export type TestDataCleanupCounts = Record<string, number>;
+
+export async function getTestDataCleanupCounts(prisma: PrismaClient): Promise<TestDataCleanupCounts> {
+  const [
+    sales,
+    payments,
+    procurementOrders,
+    stockMovements,
+    customers,
+    products,
+    productCategories,
+    users,
+    ledgerEntries,
+    fifoBatches,
+    branchOrders,
+  ] = await Promise.all([
+    prisma.sale.count(),
+    prisma.payment.count(),
+    prisma.procurementOrder.count(),
+    prisma.stockMovement.count(),
+    prisma.customer.count(),
+    prisma.product.count(),
+    prisma.productCategory.count(),
+    prisma.user.count({ where: { deletedAt: null } }),
+    prisma.financeLedgerEntry.count(),
+    prisma.fifoInventoryBatch.count(),
+    prisma.branchDistributionOrder.count(),
+  ]);
+
+  return {
+    sale: sales,
+    payment: payments,
+    procurementOrder: procurementOrders,
+    stockMovement: stockMovements,
+    customer: customers,
+    product: products,
+    productCategory: productCategories,
+    user: users,
+    financeLedgerEntry: ledgerEntries,
+    fifoInventoryBatch: fifoBatches,
+    branchDistributionOrder: branchOrders,
+  };
+}
+
+export async function runCategoryTestDataCleanup(
+  prisma: PrismaClient,
+  category: string,
+  options?: { excludeUserId?: string },
+): Promise<Record<string, number>> {
+  const deleted: Record<string, number> = {};
+
+  if (category === 'all') {
+    const result = await runDevDatabaseCleanup(prisma);
+    return { ...result.deleted, ...result.reset };
+  }
+
+  const { CLEANUP_CATEGORY_STEPS } = await import('./test-data-cleanup.categories');
+  const steps = CLEANUP_CATEGORY_STEPS[category as keyof typeof CLEANUP_CATEGORY_STEPS];
+  if (!steps) {
+    throw new Error(`Unknown cleanup category: ${category}`);
+  }
+
+  await prisma.$transaction(
+    async (tx) => {
+      for (const model of steps) {
+        deleted[model] = await deleteAll(tx, model);
+      }
+
+      if (category === 'products') {
+        const products = await tx.product.deleteMany();
+        deleted.product = products.count;
+        const categories = await tx.productCategory.deleteMany();
+        deleted.productCategory = categories.count;
+      }
+
+      if (category === 'employees' && options?.excludeUserId) {
+        const sysAdminUserIds = await tx.userRole.findMany({
+          where: { role: { code: Role.SYSTEM_ADMINISTRATOR } },
+          select: { userId: true },
+        });
+        const protectedIds = new Set([
+          options.excludeUserId,
+          ...sysAdminUserIds.map((r) => r.userId),
+        ]);
+        const loginHistory = await tx.loginHistory.deleteMany({
+          where: { userId: { notIn: [...protectedIds] } },
+        });
+        deleted.loginHistory = loginHistory.count;
+        const removedUsers = await tx.user.deleteMany({
+          where: {
+            id: { notIn: [...protectedIds] },
+            role: { not: Role.SYSTEM_ADMINISTRATOR },
+          },
+        });
+        deleted.user = removedUsers.count;
+      }
+    },
+    { maxWait: 120_000, timeout: 600_000 },
+  );
+
+  return deleted;
 }
 
 export async function verifyDevDatabaseCleanup(prisma: PrismaClient): Promise<DevDatabaseCleanupVerification> {

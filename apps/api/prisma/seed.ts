@@ -169,8 +169,7 @@ const permissionCodes = [
 const rolePermissions: Record<string, string[]> = {
   CEO: permissionCodes,
   SYSTEM_ADMINISTRATOR: [
-    'users.manage',
-    'reports.view',
+    ...ALL_PERMISSION_CODES,
     'data.permanent_delete',
     'businessDate.update.hqAdmin',
   ],

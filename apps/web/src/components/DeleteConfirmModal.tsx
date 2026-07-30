@@ -11,6 +11,8 @@ type Props = {
   /** Minimum trimmed reason length when requireReason is true. */
   minLength?: number;
   reasonPlaceholder?: string;
+  /** When set, user must type this exact phrase to confirm. */
+  confirmPhrase?: string;
   loading?: boolean;
   onClose: () => void;
   onConfirm: (reason?: string) => void | Promise<void>;
@@ -23,14 +25,18 @@ export function DeleteConfirmModal({
   requireReason = false,
   minLength = 1,
   reasonPlaceholder,
+  confirmPhrase,
   loading = false,
   onClose,
   onConfirm,
 }: Props) {
   const { t } = useTranslation();
   const [reason, setReason] = useState('');
+  const [phrase, setPhrase] = useState('');
 
   if (!open) return null;
+
+  const phraseOk = !confirmPhrase || phrase === confirmPhrase;
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -56,13 +62,27 @@ export function DeleteConfirmModal({
             />
           </label>
         ) : null}
+        {confirmPhrase ? (
+          <label className="mt-4 block">
+            <span className="text-sm font-semibold text-slate-700">
+              {t('common.typeToConfirm')}: {confirmPhrase}
+            </span>
+            <input
+              type="text"
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value)}
+              required
+              className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            />
+          </label>
+        ) : null}
         <div className="mt-6 flex justify-end gap-3">
           <button type="button" onClick={onClose} disabled={loading} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">
             {t('common.cancel')}
           </button>
           <button
             type="submit"
-            disabled={loading || (requireReason && reason.trim().length < minLength)}
+            disabled={loading || (requireReason && reason.trim().length < minLength) || !phraseOk}
             className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-red-300"
           >
             {loading ? t('common.loading') : t('common.delete')}

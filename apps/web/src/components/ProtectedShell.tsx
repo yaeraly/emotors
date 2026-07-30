@@ -6,7 +6,8 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isFranchiseDirectorUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isFranchiseDirectorUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser, isSysAdminUser } from '@/lib/rbac';
+import { SYSADMIN_NAV_SECTIONS } from '@/lib/sysadmin-nav';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
 import { sidebarFinanceNavClass, sidebarNavClass, sidebarPaymentsNavClass, sidebarShiftsNavClass } from '@/lib/nav-matching';
@@ -200,6 +201,7 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
   const branchAccountantView = isBranchAccountantUser(user);
   const branchWarehouseOperatorView = isBranchWarehouseOperator(user);
   const branchOwnerView = isBranchOwnerUser(user);
+  const sysAdminView = isSysAdminUser(user);
   const unifiedNavView = usesUnifiedNav(user);
   const unifiedSidebarModules = visibleUnifiedSidebarModules(user);
   const forbiddenMessage =
@@ -271,7 +273,28 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             {t('nav.modules')}
           </p>
           <nav className="space-y-2">
-            {supplyChainManagerView || ceoOperationalView ? (
+            {sysAdminView ? (
+              <>
+                {SYSADMIN_NAV_SECTIONS.map((section) => (
+                  <div key={section.titleKey} className="border-t border-slate-100 pt-2 first:border-0 first:pt-0">
+                    <p className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-400">
+                      {t(section.titleKey)}
+                    </p>
+                    <div className="space-y-1">
+                      {section.links.map((link) => (
+                        <Link
+                          key={link.href}
+                          href={link.href}
+                          className={sidebarNavClass(pathname, link.href)}
+                        >
+                          {link.labelKey ? t(link.labelKey) : link.label}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
+            ) : supplyChainManagerView || ceoOperationalView ? (
               <>
                 {canSeeHqWarehouse ? (
                   <Link href="/hq-warehouses" className={sidebarNavClass(pathname, '/hq-warehouses')}>{t('scm.sidebar.hqWarehouses')}</Link>

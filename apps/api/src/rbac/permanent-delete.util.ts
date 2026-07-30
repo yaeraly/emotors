@@ -8,7 +8,7 @@ type AuditClient = Prisma.TransactionClient | PrismaService;
 
 export function assertCanPermanentDeleteBusinessData(user: AuthUser) {
   if (!canPermanentDeleteBusinessData(user)) {
-    throw new ForbiddenException('Only HQ Admin can permanently delete business data');
+    throw new ForbiddenException('Only HQ SysAdmin can permanently delete business data');
   }
 }
 
@@ -19,19 +19,22 @@ export async function auditPermanentDelete(
   entityId: string,
   metadata?: Record<string, unknown>,
 ) {
+  const deletedAt = new Date().toISOString();
   return client.auditLog.create({
     data: {
       userId: user.id,
       role: user.role,
-      action: 'DELETE',
+      action: 'PERMANENT_DELETE',
       entity,
       entityId,
       metadata: {
-        userId: user.id,
-        role: user.role,
-        entity,
+        entityType: entity,
         entityId,
-        timestamp: new Date().toISOString(),
+        deletedByUserId: user.id,
+        deletedByRole: user.role,
+        deletedAt,
+        reason: metadata?.reason ?? null,
+        recordSnapshot: metadata?.recordSnapshot ?? metadata?.summary ?? null,
         ...metadata,
       } as Prisma.InputJsonValue,
     },
