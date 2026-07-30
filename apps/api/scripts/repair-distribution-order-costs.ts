@@ -39,7 +39,7 @@ async function main() {
     include: {
       items: {
         include: {
-          fifoAllocations: {
+          distributionFifoAllocations: {
             where: { status: { in: ['RESERVED', 'CONSUMED'] } },
           },
         },
@@ -55,7 +55,6 @@ async function main() {
   for (const order of orders) {
     if (order.sourceWarehouse?.warehouseType !== 'HQ') continue;
 
-    let nextItemCostTotal = 0;
     const itemUpdates: Array<{
       itemId: string;
       oldTotal: number;
@@ -65,15 +64,11 @@ async function main() {
 
     for (const item of order.items) {
       const allocationTotal = sumDisplayMoneyTotals(
-        item.fifoAllocations.map((row) => n(row.totalCostKgs)),
+        item.distributionFifoAllocations.map((row) => n(row.totalCostKgs)),
       );
       const currentTotal = roundDisplayMoney(n(item.totalCost));
-      const nextTotal =
-        allocationTotal > 0
-          ? allocationTotal
-          : currentTotal;
+      const nextTotal = allocationTotal > 0 ? allocationTotal : currentTotal;
 
-      nextItemCostTotal += nextTotal;
       if (Math.abs(nextTotal - currentTotal) > 0.001) {
         itemUpdates.push({
           itemId: item.id,
@@ -87,7 +82,7 @@ async function main() {
     const nextOrderTotal = sumDisplayMoneyTotals(
       order.items.map((item) => {
         const allocationTotal = sumDisplayMoneyTotals(
-          item.fifoAllocations.map((row) => n(row.totalCostKgs)),
+          item.distributionFifoAllocations.map((row) => n(row.totalCostKgs)),
         );
         return allocationTotal > 0 ? allocationTotal : n(item.totalCost);
       }),
