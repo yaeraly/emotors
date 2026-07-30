@@ -25,12 +25,13 @@ const ALL_PERMISSIONS = [
   'academy.manage',
   'marketing.manage',
   'analytics.view',
+  'data.permanent_delete',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSIONS],
   CEO: [...ALL_PERMISSIONS],
-  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
+  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view', 'data.permanent_delete'],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view', 'analytics.view'],
   FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
   WAREHOUSE_MANAGER: [
@@ -148,8 +149,21 @@ export function canCreateServiceOrder(user: Pick<User, 'role' | 'roles' | 'permi
   return hasPermission(user, 'service.manage') && !hasFullAccess(user);
 }
 
+export function isHqAdminUser(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  if (!user) return false;
+  return hasRole(user, 'SYSTEM_ADMINISTRATOR');
+}
+
+/** HQ Admin — permanent business-data deletion for system testing. */
+export function canPermanentDeleteBusinessData(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+) {
+  if (!user) return false;
+  return isHqAdminUser(user) || hasPermission(user, 'data.permanent_delete');
+}
+
 export function canDeleteEmployee(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasFullAccess(user);
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function isSupplyChainManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
@@ -924,7 +938,11 @@ export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissio
 }
 
 export function canDeleteCategory(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasFullAccess(user);
+  return canPermanentDeleteBusinessData(user);
+}
+
+export function canDeleteProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function canEditSellingPrice(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
@@ -1326,7 +1344,7 @@ export function canViewDistributionMenu(user: Pick<User, 'role' | 'roles' | 'per
 }
 
 export function canDeleteInventoryCount(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return hasFullAccess(user);
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function canAssignHqWarehouseManager(user: Pick<User, 'role' | 'roles'> | null | undefined) {
@@ -1371,11 +1389,23 @@ export function canUnlockProcurementOrder(user: Pick<User, 'role' | 'roles' | 'p
 }
 
 export function canDeleteProcurementOrder(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return canUnlockProcurementOrder(user);
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function canDeleteHqWarehouse(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return canUnlockProcurementOrder(user);
+  return canPermanentDeleteBusinessData(user);
+}
+
+export function canDeleteSupplier(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canPermanentDeleteBusinessData(user);
+}
+
+export function canDeleteBranch(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canPermanentDeleteBusinessData(user);
+}
+
+export function canPermanentDeleteCustomer(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function isBranchPanelUser(user: Pick<User, 'branchId'> | null | undefined) {
@@ -1388,7 +1418,7 @@ export function canManageYuanRate(user: Pick<User, 'role' | 'roles' | 'permissio
 }
 
 export function canDeleteHqGoodsReceiving(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return canUnlockProcurementOrder(user);
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function canManageTransportCompany(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

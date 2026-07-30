@@ -29,7 +29,21 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ensureHqCatalogBranch } from '../product-catalog/hq-product-catalog.util';
 import { ensureBranchProductForReceivingInTx } from '../distribution/branch-receiving-product.util';
 import { HQ_WAREHOUSE_ACCESS_DENIED, HQ_WAREHOUSE_ACCESS_DENIED_MESSAGES } from '../hq-warehouse/hq-warehouse-assignment.constants';
-import { canArchiveProduct, canBranchSalesManagerModifyStock, canCreateProduct, canEditProductUnit, canEditPurchasePriceYuan, canEditSellingPrice, canManageProductCatalog, canViewProductCatalog, hasAnyFullAccessRole, isFullAccessRole, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
+import {
+  canArchiveProduct,
+  canBranchSalesManagerModifyStock,
+  canCreateProduct,
+  canEditProductUnit,
+  canEditPurchasePriceYuan,
+  canEditSellingPrice,
+  canManageProductCatalog,
+  canViewProductCatalog,
+  hasAnyFullAccessRole,
+  isFullAccessRole,
+  isBranchWarehouseOperator,
+  resolveUserRoles,
+} from '../rbac/rbac';
+import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -256,13 +270,7 @@ export class InventoryService {
   }
 
   async deleteCategory(user: AuthUser, id: string) {
-    const roles = user.roles?.length ? user.roles : [user.role];
-    if (!hasAnyFullAccessRole(roles)) {
-      await this.auditCategory(user, 'CATEGORY_DELETE_DENIED', id, {
-        reason: 'Only CEO can delete or archive categories',
-      });
-      throw new ForbiddenException('Only CEO can delete or archive categories');
-    }
+    assertCanPermanentDeleteBusinessData(user);
     const category = await this.category(id);
 
     if (category.productCount > 0) {
@@ -275,6 +283,7 @@ export class InventoryService {
     }
 
     await this.auditCategory(user, 'CATEGORY_DISABLED', id, { categoryId: id, oldValue: category });
+    await auditPermanentDelete(this.prisma, user, 'ProductCategory', id, { categoryId: id });
     return this.prisma.productCategory.delete({ where: { id } });
   }
 
@@ -914,15 +923,7 @@ export class InventoryService {
   }
 
   async deleteProduct(user: AuthUser, id: string) {
-    if (!canArchiveProduct(user)) {
-      const product = await this.prisma.product.findFirst({ where: { id, deletedAt: null } });
-      await this.auditProductAccessDenied(user, id, product?.branchId ?? null, 'PRODUCT_DELETE_DENIED', {
-        productId: id,
-        oldValue: product ? { name: product.name, sku: product.sku, isActive: product.isActive } : null,
-        newValue: null,
-      });
-      throw new ForbiddenException('You do not have permission to archive products');
-    }
+    assertCanPermanentDeleteBusinessData(user);
     const product = await this.getProductForWrite(this.prisma, user, id);
     const [stockMovements, saleItems, balances, priceHistory] =
       await Promise.all([
@@ -933,6 +934,22 @@ export class InventoryService {
       ]);
     const hasHistory =
       stockMovements > 0 || saleItems > 0 || balances > 0 || priceHistory > 0;
+
+    if (!hasHistory) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.product.delete({ where: { id } });
+        await auditPermanentDelete(tx, user, 'Product', id, {
+          sku: product.sku,
+          branchId: product.branchId,
+          permanent: true,
+        });
+      });
+      return {
+        success: true,
+        message: 'Product deleted successfully',
+        deactivated: false,
+      };
+    }
 
     await this.prisma.product.update({
       where: { id },

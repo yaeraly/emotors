@@ -33,6 +33,7 @@ import { TaxModule } from './tax/tax.module';
 import { UsersModule } from './users/users.module';
 import { FranchiseDirectorModule } from './franchise-director/franchise-director.module';
 import { HqB2bSalesModule } from './hq-b2b-sales/hq-b2b-sales.module';
+import { DevAdminModule } from './dev-admin/dev-admin.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { HqB2bSalesModule } from './hq-b2b-sales/hq-b2b-sales.module';
     FinanceModule,
     UsersModule,
     AiModule,
+    DevAdminModule,
   ],
 })
 export class AppModule {}

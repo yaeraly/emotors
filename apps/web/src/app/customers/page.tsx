@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer, canCreateCustomer, canEditCustomerType, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser, shouldHideCustomerProfit } from '@/lib/rbac';
+import { canArchiveCustomer, canCreateCustomer, canEditCustomerType, canPermanentDeleteCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser, shouldHideCustomerProfit } from '@/lib/rbac';
 import {
   getCustomerListColumns,
   shouldShowCustomerListEditButton,
@@ -366,7 +366,8 @@ function CustomersPageContent() {
   }
 
   async function archiveCustomer(customer: Customer) {
-    if (!window.confirm(t('crm.confirmDelete'))) {
+    const permanent = canPermanentDeleteCustomer(currentUser);
+    if (!window.confirm(permanent ? t('common.permanentDeleteConfirmMessage') : t('crm.confirmDelete'))) {
       return;
     }
 
@@ -388,7 +389,9 @@ function CustomersPageContent() {
         );
       }
 
-      const url = `${process.env.NEXT_PUBLIC_API_URL}/customers/${customer.id}`;
+      const url = permanent
+        ? `${process.env.NEXT_PUBLIC_API_URL}/customers/${customer.id}/permanent`
+        : `${process.env.NEXT_PUBLIC_API_URL}/customers/${customer.id}`;
       console.log('Archiving customer URL:', url);
 
       let response: Response;
@@ -759,7 +762,7 @@ function CustomersPageContent() {
                                     {t('common.edit')}
                                   </button>
                                 ) : null}
-                                {canArchiveCustomer(currentUser) ? (
+                                {(canArchiveCustomer(currentUser) || canPermanentDeleteCustomer(currentUser)) ? (
                                   <button
                                     onClick={() => void archiveCustomer(customer)}
                                     disabled={deletingCustomerId === customer.id}

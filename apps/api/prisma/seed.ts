@@ -168,7 +168,7 @@ const permissionCodes = [
 
 const rolePermissions: Record<string, string[]> = {
   CEO: permissionCodes,
-  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
+  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view', 'data.permanent_delete'],
   OWNER: permissionCodes,
   FRANCHISE_OWNER: ['users.manage', 'crm.manage', 'sales.manage', 'inventory.manage', 'inventory.view', 'products.view', 'service.manage', 'finance.view', 'payments.manage', 'kpi.view', 'reports.view'],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],

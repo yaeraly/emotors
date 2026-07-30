@@ -18,6 +18,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
+import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import {
   activeBranchWarehouseWhere,
   inventoryBranchIdForWarehouse,
@@ -1183,25 +1184,7 @@ export class InventoryCountService {
   }
 
   async remove(user: AuthUser, id: string, reason?: string) {
-    const roles = resolveUserRoles(user);
-    if (!hasAnyFullAccessRole(roles)) {
-      await this.prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          role: user.role,
-          action: 'INVENTORY_DELETE_DENIED',
-          entity: 'InventoryCountSession',
-          entityId: id,
-          metadata: {
-            userId: user.id,
-            roles,
-            reason: 'Only CEO can delete or archive inventory sessions',
-            timestamp: new Date().toISOString(),
-          },
-        },
-      });
-      throw new ForbiddenException('Only CEO can delete or archive inventory sessions');
-    }
+    assertCanPermanentDeleteBusinessData(user);
 
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.inventoryCountSession.findUnique({
@@ -1222,6 +1205,10 @@ export class InventoryCountService {
 
       if (canHardDelete) {
         await tx.inventoryCountSession.delete({ where: { id } });
+        await auditPermanentDelete(tx, user, 'InventoryCountSession', id, {
+          warehouseId: session.warehouseId,
+          reason: reason?.trim() || null,
+        });
         await this.audit(tx, user, 'INVENTORY_DELETED', id, {
           warehouseId: session.warehouseId,
           oldValue,

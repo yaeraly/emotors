@@ -22,6 +22,7 @@ import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { canArchiveCustomer, canEditCustomerType } from '../rbac/rbac';
+import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import { isBranchRetailWholesaleCustomerType } from '../sales/sale-customer-pricing.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { toRoleAwareCustomerListItem } from './customer-list.presenter';
@@ -233,6 +234,25 @@ export class CustomersService {
       );
     }
     return this.toCustomerProfile(customer, customer.events, customer.sales);
+  }
+
+  async permanentDelete(user: AuthUser, id: string) {
+    assertCanPermanentDeleteBusinessData(user);
+    const existing = await this.getAccessibleCustomer(user, id);
+    const finalizedSales = await this.prisma.sale.count({
+      where: { customerId: id, deletedAt: null, status: SaleStatus.FINALIZED },
+    });
+    if (finalizedSales > 0) {
+      throw new BadRequestException('Customer with finalized sales cannot be permanently deleted');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.followUp.deleteMany({ where: { customerId: id } });
+      await tx.customerEvent.deleteMany({ where: { customerId: id } });
+      await tx.customer.delete({ where: { id } });
+      await auditPermanentDelete(tx, user, 'Customer', id, { branchId: existing.branchId });
+    });
+    return { success: true, id };
   }
 
   async softDelete(user: AuthUser, id: string) {

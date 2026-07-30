@@ -57,6 +57,12 @@ export class CustomersController {
     return this.customersService.update(user, id, dto);
   }
 
+  @Delete(':id/permanent')
+  @Roles(Role.SYSTEM_ADMINISTRATOR)
+  permanentDelete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.customersService.permanentDelete(user, id);
+  }
+
   @Delete(':id')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   softDelete(@CurrentUser() user: AuthUser, @Param('id') id: string) {

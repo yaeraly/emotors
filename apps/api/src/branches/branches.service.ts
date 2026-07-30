@@ -17,6 +17,7 @@ import {
   hasAnyHqRole,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { BranchQueryDto } from './dto/branch-query.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
@@ -469,6 +470,7 @@ export class BranchesService {
   }
 
   async delete(user: AuthUser, id: string) {
+    assertCanPermanentDeleteBusinessData(user);
     const branch = await this.prisma.branch.findFirst({
       where: { id, deletedAt: null },
     });
@@ -520,6 +522,10 @@ export class BranchesService {
           timestamp: new Date().toISOString(),
         },
       },
+    });
+    await auditPermanentDelete(this.prisma, user, 'Branch', id, {
+      deletionType: 'soft_delete',
+      hasRelatedData,
     });
 
     return {

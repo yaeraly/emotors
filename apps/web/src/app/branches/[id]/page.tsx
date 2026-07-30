@@ -8,6 +8,7 @@ import { API_URL, apiFetch, clearToken, getToken } from '@/lib/api';
 import {
   canAssignBranchHqWarehouse,
   canChangeBranchType,
+  canDeleteBranch,
   canManageBranches,
   canInspectAnyBranchWarehouse,
 } from '@/lib/rbac';
@@ -166,6 +167,7 @@ export default function BranchDetailPage() {
   }, [id, user]);
 
   const canManage = canManageBranches(user);
+  const canDelete = canDeleteBranch(user);
   const canAssign = canAssignBranchHqWarehouse(user);
   const canEditBranchType = canChangeBranchType(user);
   const canInspectWarehouse = canInspectAnyBranchWarehouse(user);
@@ -310,7 +312,7 @@ export default function BranchDetailPage() {
   }
 
   async function deleteBranch() {
-    if (!branch || !window.confirm(t('branches.confirmDelete'))) return;
+    if (!branch || !window.confirm(t('common.permanentDeleteConfirmMessage'))) return;
 
     const token = getToken();
     if (!token) {
@@ -368,23 +370,27 @@ export default function BranchDetailPage() {
             <p className="mt-2 text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('branches.detail')}</p>
             <h2 className="text-3xl font-bold text-slate-950">{branch?.name ?? dashboard?.branch?.name ?? '-'}</h2>
           </div>
-          {canManage ? (
+          {(canManage || canDelete) ? (
             <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setEditing((current) => !current)}
-                className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700"
-              >
-                {editing ? t('common.cancel') : t('common.edit')}
-              </button>
-              <button
-                type="button"
-                disabled={deleting}
-                onClick={() => void deleteBranch()}
-                className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50"
-              >
-                {deleting ? t('common.loading') : t('common.delete')}
-              </button>
+              {canManage ? (
+                <button
+                  type="button"
+                  onClick={() => setEditing((current) => !current)}
+                  className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700"
+                >
+                  {editing ? t('common.cancel') : t('common.edit')}
+                </button>
+              ) : null}
+              {canDelete ? (
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => void deleteBranch()}
+                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50"
+                >
+                  {deleting ? t('common.loading') : t('common.delete')}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

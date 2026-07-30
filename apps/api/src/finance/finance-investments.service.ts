@@ -17,6 +17,7 @@ import {
   canCreateOwnerInvestment,
   canManageFinanceInvestments,
 } from './finance-access.util';
+import { canPermanentDeleteBusinessData } from '../rbac/rbac';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
 import {
@@ -345,8 +346,8 @@ export class FinanceInvestmentsService {
   }
 
   async deleteInvestment(user: AuthUser, id: string, dto: DeleteFinanceInvestmentDto) {
-    if (!canManageFinanceInvestments(user)) {
-      throw new ForbiddenException('Only CEO/Owner can delete investments');
+    if (!canPermanentDeleteBusinessData(user)) {
+      throw new ForbiddenException('Only HQ Admin can delete investments');
     }
 
     const reason = String(dto.reason || '').trim();

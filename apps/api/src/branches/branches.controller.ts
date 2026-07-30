@@ -52,7 +52,7 @@ export class BranchesController {
   }
 
   @Delete(':id')
-  @Roles(Role.OWNER, Role.CEO, Role.FRANCHISE_DIRECTOR)
+  @Roles(Role.SYSTEM_ADMINISTRATOR)
   delete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.branchesService.delete(user, id);
   }

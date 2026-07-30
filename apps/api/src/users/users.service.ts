@@ -18,6 +18,7 @@ import {
   uniqueRoles,
   userHasPermission,
 } from '../rbac/rbac';
+import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import { EMPLOYEE_ID_GENERATION_FAILED, generateBranchEmployeeId } from './employee-id.util';
 import { BRANCH_CODE_GENERATION_FAILED, generateBranchCode } from '../branches/branch-code.util';
 
@@ -279,9 +280,7 @@ export class UsersService {
   }
 
   async removeEmployee(user: AuthUser, id: string, reason?: string) {
-    if (!this.hasFullAccess(user)) {
-      throw new ForbiddenException('Only CEO can delete employees');
-    }
+    assertCanPermanentDeleteBusinessData(user);
     if (user.id === id) {
       throw new BadRequestException('You cannot delete your own account');
     }
@@ -326,6 +325,11 @@ export class UsersService {
         await tx.userRole.deleteMany({ where: { userId: id } });
         await tx.hqWarehouseManagerAssignment.deleteMany({ where: { userId: id } });
         await tx.user.delete({ where: { id } });
+        await auditPermanentDelete(tx, user, 'User', id, {
+          entityType: 'User',
+          oldValue,
+          reason: reason?.trim() || null,
+        });
         await this.auditInTx(tx, user, 'EMPLOYEE_DELETED', 'User', id, {
           entityType: 'User',
           oldValue,
@@ -554,9 +558,7 @@ export class UsersService {
   }
 
   async deleteBranchOwner(user: AuthUser, id: string) {
-    if (!this.hasFullAccess(user)) {
-      throw new ForbiddenException('Only CEO can delete branch owners');
-    }
+    assertCanPermanentDeleteBusinessData(user);
 
     const existing = await this.prisma.user.findFirst({
       where: { id },

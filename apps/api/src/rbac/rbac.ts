@@ -69,7 +69,7 @@ export const ALL_PERMISSION_CODES = [
 export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   OWNER: [...ALL_PERMISSION_CODES],
   CEO: [...ALL_PERMISSION_CODES],
-  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view'],
+  SYSTEM_ADMINISTRATOR: ['users.manage', 'reports.view', 'data.permanent_delete'],
   FRANCHISE_DIRECTOR: ['branches.manage', 'academy.manage', 'kpi.view', 'reports.view', 'analytics.view'],
   FINANCE_MANAGER: ['finance.view', 'finance.manage', 'payroll.manage', 'kpi.view', 'reports.view', 'products.view'],
   WAREHOUSE_MANAGER: [
@@ -470,12 +470,22 @@ export function canUnlockProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' 
   return hasAnyFullAccessRole(roles) || roles.includes(Role.CEO) || roles.includes(Role.OWNER);
 }
 
+export function isHqAdminUser(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  const roles = resolveUserRoles(user);
+  return roles.includes(Role.SYSTEM_ADMINISTRATOR);
+}
+
+/** HQ Admin (SYSTEM_ADMINISTRATOR) — permanent business-data deletion for testing. */
+export function canPermanentDeleteBusinessData(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return isHqAdminUser(user) || userHasPermission(user, 'data.permanent_delete');
+}
+
 export function canDeleteProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return canUnlockProcurementOrder(user);
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function canDeleteHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return canUnlockProcurementOrder(user);
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function canCreateHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
@@ -487,7 +497,7 @@ export function canDeactivateHqWarehouse(user: Pick<AuthUser, 'role' | 'roles' |
 }
 
 export function canDeleteHqGoodsReceiving(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
-  return canUnlockProcurementOrder(user);
+  return canPermanentDeleteBusinessData(user);
 }
 
 export function canEditWarehouseInfo(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {

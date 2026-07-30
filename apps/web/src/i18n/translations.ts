@@ -27,6 +27,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'common.confirm': 'Ырастоо',
     'common.deleteConfirmTitle': 'Өчүрүү',
     'common.deleteConfirmMessage': 'Өчүрүүгө ишенесизби?',
+    'common.permanentDeleteConfirmMessage':
+      'Бул аракет кайтарылгыс.\n\nДаналарды өчүргүңүз келет?',
     'common.deleteReason': 'Себеп',
     'common.deleteReasonPlaceholder': 'Себепти көрсөтүңүз',
     'common.delete': 'Өчүрүү',
@@ -3103,6 +3105,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'common.select': 'Выбрать',
     'common.deleteConfirmTitle': 'Удаление',
     'common.deleteConfirmMessage': 'Вы уверены, что хотите удалить?',
+    'common.permanentDeleteConfirmMessage':
+      'Это действие необратимо.\n\nВы действительно хотите удалить данные?',
     'common.deleteReason': 'Причина',
     'common.deleteReasonPlaceholder': 'Укажите причину',
     'common.delete': 'Удалить',
@@ -6340,6 +6344,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'common.confirm': 'Confirm',
     'common.deleteConfirmTitle': 'Delete',
     'common.deleteConfirmMessage': 'Are you sure you want to delete?',
+    'common.permanentDeleteConfirmMessage':
+      'This action cannot be undone.\n\nDo you really want to delete this data?',
     'common.deleteReason': 'Reason',
     'common.deleteReasonPlaceholder': 'Enter reason',
     'common.delete': 'Delete',

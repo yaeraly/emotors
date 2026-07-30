@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { API_URL, clearToken, getToken, apiFetch } from '@/lib/api';
 import { formatProductUnit } from '@/lib/product-unit';
-import { canArchiveProduct } from '@/lib/rbac';
+import { canDeleteProduct } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -62,7 +62,7 @@ export function ProductsListContent() {
   }, [query]);
 
   async function deleteProduct(product: Product) {
-    if (!window.confirm(t('inventory.confirmDeleteProduct'))) return;
+    if (!window.confirm(t('common.permanentDeleteConfirmMessage'))) return;
 
     const token = getToken();
     if (!token) {
@@ -215,7 +215,7 @@ export function ProductsListContent() {
                       >
                         {t('common.open')}
                       </Link>
-                      {canArchiveProduct(currentUser) ? (
+                      {canDeleteProduct(currentUser) ? (
                         <button
                           onClick={() => void deleteProduct(product)}
                           disabled={deletingProductId === product.id}

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canCreateProcurementOrder, canDeleteProcurementOrder, canManageProcurement, canManageTransportCompany, canViewTransportCompany } from '@/lib/rbac';
+import { canCreateProcurementOrder, canDeleteProcurementOrder, canDeleteSupplier, canManageProcurement, canManageTransportCompany, canViewTransportCompany } from '@/lib/rbac';
 import type { User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -66,7 +66,7 @@ export function SuppliersListPanel() {
     }
   }
 
-  const canDeleteSupplier = Boolean(currentUser && roleCodes(currentUser).includes('CEO'));
+  const canRemoveSupplier = canDeleteSupplier(currentUser);
 
   return (
     <>
@@ -99,7 +99,7 @@ export function SuppliersListPanel() {
                     <Link href={`/procurement/suppliers/${supplier.id}`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold">
                       {t('common.open')}
                     </Link>
-                    {canDeleteSupplier ? (
+                    {canRemoveSupplier ? (
                       <button onClick={() => setDeleteTarget(supplier)} className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600" type="button">
                         {t('common.delete')}
                       </button>
@@ -396,7 +396,7 @@ export function ProcurementOrdersListPanel() {
           </tbody>
         </table>
       </div>
-      <DeleteConfirmModal open={!!deleteTarget} title={t('common.deleteConfirmTitle')} message={t('common.deleteConfirmMessage')} requireReason={deleteRequireReason} loading={deleting} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} />
+      <DeleteConfirmModal open={!!deleteTarget} title={t('common.deleteConfirmTitle')} message={t('common.permanentDeleteConfirmMessage')} requireReason={deleteRequireReason} loading={deleting} onClose={() => setDeleteTarget(null)} onConfirm={confirmDelete} />
     </>
   );
 }

@@ -328,7 +328,7 @@ export class HqWarehouseService {
         id,
         hasHistory ? 'ARCHIVE' : 'DELETE',
       );
-      throw new ForbiddenException('Only CEO can delete HQ warehouses');
+      throw new ForbiddenException('Only HQ Admin can delete HQ warehouses');
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -485,7 +485,7 @@ export class HqWarehouseService {
 
   async deleteReceiving(user: AuthUser, warehouseId: string, receivingId: string, reason?: string) {
     if (!canDeleteHqGoodsReceiving(user)) {
-      throw new ForbiddenException('Only CEO can delete HQ goods receiving records');
+      throw new ForbiddenException('Only HQ Admin can delete HQ goods receiving records');
     }
     const trimmedReason = reason?.trim();
     if (!trimmedReason) {

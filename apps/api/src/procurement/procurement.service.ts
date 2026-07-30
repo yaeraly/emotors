@@ -40,6 +40,7 @@ import {
   isFullAccessRole,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { ConfirmSupplierPaymentDto } from './dto/confirm-supplier-payment.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
@@ -202,9 +203,7 @@ export class ProcurementService {
   }
 
   async deleteSupplier(user: AuthUser, id: string, reason?: string) {
-    if (!this.hasRole(user, Role.CEO)) {
-      throw new ForbiddenException('Only CEO can delete suppliers');
-    }
+    assertCanPermanentDeleteBusinessData(user);
 
     return this.prisma.$transaction(async (tx) => {
       const supplier = await tx.supplier.findFirst({ where: { id, deletedAt: null } });
@@ -333,8 +332,24 @@ export class ProcurementService {
     return this.prisma.factory.update({ where: { id }, data: dto, include: { supplier: true } });
   }
 
-  deleteFactory(id: string) {
-    return this.prisma.factory.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } });
+  deleteFactory(user: AuthUser, id: string) {
+    assertCanPermanentDeleteBusinessData(user);
+    return this.prisma.$transaction(async (tx) => {
+      const factory = await tx.factory.findFirst({ where: { id, deletedAt: null } });
+      if (!factory) throw new NotFoundException('Factory not found');
+      const procurementItems = await tx.procurementOrderItem.count({ where: { factoryId: id } });
+      if (procurementItems > 0) {
+        const archived = await tx.factory.update({
+          where: { id },
+          data: { isActive: false, deletedAt: new Date() },
+        });
+        await auditPermanentDelete(tx, user, 'Factory', id, { archived: true });
+        return archived;
+      }
+      await tx.factory.delete({ where: { id } });
+      await auditPermanentDelete(tx, user, 'Factory', id, { permanent: true });
+      return { success: true, id };
+    });
   }
 
   createTransportCompany(user: AuthUser, dto: any) {
@@ -2039,7 +2054,7 @@ export class ProcurementService {
 
   deleteProcurementOrder(user: AuthUser, id: string, reason?: string) {
     if (!canDeleteProcurementOrder(user)) {
-      throw new ForbiddenException('Only CEO can delete procurement orders');
+      throw new ForbiddenException('Only HQ Admin can delete procurement orders');
     }
 
     return this.prisma.$transaction(async (tx) => {

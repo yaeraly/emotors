@@ -2,7 +2,7 @@ import {
   CLEANED_TABLES,
   DELETE_STEPS,
   PRESERVED_TABLES,
-} from '../../prisma/scripts/dev-database-cleanup.util';
+} from '../dev-admin/operational-cleanup.util';
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(message);

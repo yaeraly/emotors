@@ -104,7 +104,9 @@ export class ProcurementController {
 
   @Delete('factories/:id')
   @RequirePermissions('procurement.manage')
-  deleteFactory(@Param('id') id: string) { return this.service.deleteFactory(id); }
+  deleteFactory(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.deleteFactory(user, id);
+  }
 
   @Post('transport-companies')
   @RequirePermissions('procurement.manage')
