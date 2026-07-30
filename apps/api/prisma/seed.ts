@@ -7,6 +7,8 @@ const prisma = new PrismaClient();
 function parsePermissionCode(code: string): { module: string; action: string } {
   const overrides: Record<string, { module: string; action: string }> = {
     cashier: { module: 'finance', action: 'cashier' },
+    'data.permanent_delete': { module: 'data', action: 'permanent_delete' },
+    'businessDate.update.hqAdmin': { module: 'businessDate', action: 'update.hqAdmin' },
   };
   if (overrides[code]) return overrides[code];
   const [module, action] = code.split('.');
@@ -166,13 +168,16 @@ const permissionCodes = [
   'analytics.view',
 ];
 
+const sysAdminPermissionCodes = [
+  'data.permanent_delete',
+  'businessDate.update.hqAdmin',
+];
+
+const allPermissionCodes = [...permissionCodes, ...sysAdminPermissionCodes];
+
 const rolePermissions: Record<string, string[]> = {
   CEO: permissionCodes,
-  SYSTEM_ADMINISTRATOR: [
-    ...ALL_PERMISSION_CODES,
-    'data.permanent_delete',
-    'businessDate.update.hqAdmin',
-  ],
+  SYSTEM_ADMINISTRATOR: [...allPermissionCodes],
   OWNER: permissionCodes,
   FRANCHISE_OWNER: ['users.manage', 'crm.manage', 'sales.manage', 'inventory.manage', 'inventory.view', 'products.view', 'service.manage', 'finance.view', 'payments.manage', 'kpi.view', 'reports.view'],
   MANAGER: ['crm.manage', 'sales.manage', 'inventory.view', 'products.view'],
@@ -305,7 +310,7 @@ async function main() {
     resetPassword: true,
   });
 
-  for (const code of permissionCodes) {
+  for (const code of allPermissionCodes) {
     const { module, action } = parsePermissionCode(code);
     await prisma.permission.upsert({
       where: { code },
