@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { BranchType, MaximumMarkupOverrideReasonCode, MaximumPricePolicy, MaximumPricePolicySource, PricingAppliedRuleType, PricingEnginePriceType, PricingPolicyVersionStatus, ProductPricingMode, Prisma, WarehouseType } from '@prisma/client';
+import { BranchType, MaximumMarkupOverrideReasonCode, MaximumPricePolicy, MaximumPricePolicySource, PricingAppliedRuleType, PricingEnginePriceType, PricingPolicyVersionStatus, ProductPricingMode, Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
@@ -58,6 +58,7 @@ import {
   type RetailMarkupInput,
   type WholesaleMarkupInput,
 } from './product-markup-resolution.util';
+import { buildFranchiseSalesCatalogRow } from './pricing-franchise-sales-catalog.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -452,121 +453,45 @@ export class PricingCatalogService {
 
     return Promise.all(
       products.map(async (product) => {
-        const resolution = await this.branchPriceResolver.resolveBranchPrice(product.id, {
-          branchId: displayBranch?.id,
-        });
-        const storedMarkupPercent = Number(product.hqBranchWholesaleMarkupPercent);
-        const storedBranchPriceKgs = Number(product.hqBranchWholesalePriceKgs);
-        const engineMarkupPercent = Number(resolution?.baseFranchiseMarkupPercent ?? 0);
+        const fifoCost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
+        const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
 
-        let costAvailable = Boolean(resolution?.costAvailable && resolution.costPrice > 0);
-        let costPriceKgs = costAvailable ? resolution!.costPrice : null;
-        if (!costAvailable) {
-          const fifoCost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
-          if (fifoCost.available && fifoCost.costPriceKgs > 0) {
-            costAvailable = true;
-            costPriceKgs = fifoCost.costPriceKgs;
+        let engine: Awaited<ReturnType<PricingEngineService['resolvePrice']>> | null = null;
+        if (displayBranch && costAvailable) {
+          try {
+            engine = await this.pricingEngine.resolvePrice({
+              productId: product.id,
+              branchId: displayBranch.id,
+              priceType: PricingEnginePriceType.BRANCH_PURCHASE,
+            });
+          } catch {
+            engine = null;
           }
         }
 
-        const baseFranchiseMarkupPercent =
-          storedMarkupPercent > 0
-            ? storedMarkupPercent
-            : engineMarkupPercent > 0
-              ? engineMarkupPercent
-              : storedMarkupPercent;
-        const hqMarkupPercent = baseFranchiseMarkupPercent;
-
-        let finalBranchPriceKgs =
-          resolution?.priceConfigured && resolution.finalBranchPrice > 0
-            ? resolution.finalBranchPrice
-            : null;
-        if (!finalBranchPriceKgs && storedBranchPriceKgs > 0) {
-          finalBranchPriceKgs = storedBranchPriceKgs;
-        }
-        if (!finalBranchPriceKgs && costPriceKgs && baseFranchiseMarkupPercent > 0) {
-          finalBranchPriceKgs = applyHqBranchWholesaleMarkup(
-            costPriceKgs,
-            baseFranchiseMarkupPercent,
-          );
-        }
-
-        const branchPriceKgs = finalBranchPriceKgs;
-        const baseFranchisePriceKgs =
-          resolution?.priceConfigured && resolution.baseFranchisePrice > 0
-            ? resolution.baseFranchisePrice
-            : storedBranchPriceKgs > 0
-              ? storedBranchPriceKgs
-              : branchPriceKgs;
-        const priceConfigured = Boolean(
-          branchPriceKgs != null && branchPriceKgs > 0 && (baseFranchiseMarkupPercent > 0 || storedBranchPriceKgs > 0),
+        return buildFranchiseSalesCatalogRow(
+          product,
+          {
+            available: fifoCost.available,
+            costPriceKgs: fifoCost.costPriceKgs,
+            source: fifoCost.source,
+            batchId: fifoCost.batchId,
+          },
+          engine
+            ? {
+                baseFranchiseMarkupPercent: engine.baseFranchiseMarkupPercent,
+                baseBranchPriceKgs: engine.baseBranchPriceKgs,
+                resolvedPriceKgs: engine.resolvedPriceKgs,
+                pricingPolicyVersionId: engine.pricingPolicyVersionId,
+                pricingProfileId: engine.pricingProfileId,
+                appliedRuleType: engine.appliedRuleType,
+                costSource: engine.costSource,
+              }
+            : null,
+          displayBranch ? { id: displayBranch.id, name: displayBranch.name } : null,
         );
-
-        const hqAvailableQuantity = await this.resolveHqAvailableQuantity(product.id);
-
-        return {
-          id: product.id,
-          name: product.name,
-          sku: product.sku,
-          categoryId: product.categoryId,
-          categoryName:
-            product.productCategory?.nameRu ??
-            product.productCategory?.nameEn ??
-            product.category ??
-            '-',
-          isActive: product.isActive,
-          hqAvailableQuantity,
-          costPriceKgs,
-          costAvailable,
-          costSource: resolution?.costSource ?? 'NO_FIFO_LAYER',
-          costBatchId: resolution?.fifoBatchId ?? null,
-          markupConfigured: baseFranchiseMarkupPercent > 0,
-          hqMarkupPercent,
-          baseFranchiseMarkupPercent,
-          recommendedMarkupPercent: baseFranchiseMarkupPercent > 0 ? hqMarkupPercent : null,
-          branchPriceKgs,
-          finalBranchPriceKgs,
-          baseFranchisePriceKgs,
-          masterBranchPriceKgs: branchPriceKgs,
-          effectiveBranchPriceKgs: branchPriceKgs,
-          recommendedBranchPriceKgs: branchPriceKgs,
-          priceConfigured,
-          pricingSource: resolution?.pricingSource ?? null,
-          branchPriceProfileId: resolution?.branchPriceProfileId ?? null,
-          pricingPolicyVersionId: resolution?.pricingPolicyVersionId ?? null,
-          pricingPolicyVersionNumber: resolution?.pricingPolicyVersionNumber ?? null,
-          displayBranchId: displayBranch?.id ?? null,
-          displayBranchName: displayBranch?.name ?? null,
-          lastUpdated: product.updatedAt,
-        };
       }),
     );
-  }
-
-  /** HQ on-hand quantity across same-SKU catalog/inventory product rows (never filters the catalog). */
-  private async resolveHqAvailableQuantity(productId: string) {
-    const product = await this.prisma.product.findFirst({
-      where: { id: productId, deletedAt: null },
-      select: { id: true, sku: true },
-    });
-    if (!product) return 0;
-    const sku = product.sku?.trim();
-    const ids = new Set<string>([product.id]);
-    if (sku) {
-      const siblings = await this.prisma.product.findMany({
-        where: { sku, deletedAt: null },
-        select: { id: true },
-      });
-      for (const row of siblings) ids.add(row.id);
-    }
-    const balance = await this.prisma.inventoryBalance.aggregate({
-      where: {
-        productId: { in: [...ids] },
-        warehouse: { warehouseType: WarehouseType.HQ, deletedAt: null, isActive: true },
-      },
-      _sum: { quantity: true },
-    });
-    return Math.max(0, Number(balance._sum.quantity ?? 0));
   }
 
   async updateFranchiseSalesProduct(

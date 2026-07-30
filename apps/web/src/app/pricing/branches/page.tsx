@@ -137,6 +137,10 @@ export default function PricingBranchesPage() {
         }),
       );
       setPage(1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+      setRows([]);
+      setCategories([]);
     } finally {
       setLoading(false);
     }
