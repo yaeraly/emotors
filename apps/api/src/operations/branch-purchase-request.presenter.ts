@@ -1,6 +1,8 @@
 import { BranchPurchaseRequestStatus } from '@prisma/client';
 import { canManageOwnBranchProductRequest } from '../rbac/rbac';
 import type { AuthUser } from '../auth/auth.types';
+import { toApiMoneyKgs, sumApiMoneyKgs } from '../common/authoritative-money.util';
+import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 
 export function canSeeHqStockInBranchRequests(user: AuthUser, canViewAll: boolean) {
@@ -24,7 +26,109 @@ const REVIEWED_REQUEST_STATUSES = new Set<BranchPurchaseRequestStatus>([
   BranchPurchaseRequestStatus.RECEIVED,
   BranchPurchaseRequestStatus.RECEIVED_WITH_DIFFERENCE,
   BranchPurchaseRequestStatus.COMPLETED,
+  BranchPurchaseRequestStatus.PAYMENT_CONFIRMED,
+  BranchPurchaseRequestStatus.PAYMENT_SUBMITTED,
+  BranchPurchaseRequestStatus.PENDING_PAYMENT,
+  BranchPurchaseRequestStatus.PENDING_INSTALLMENT_APPROVAL,
 ]);
+
+export function shouldUseStoredBranchPurchaseCosts(request: {
+  status: BranchPurchaseRequestStatus;
+  reviewedAt?: Date | string | null;
+}) {
+  return Boolean(request.reviewedAt) || REVIEWED_REQUEST_STATUSES.has(request.status);
+}
+
+export function toBranchPurchaseRequestItemResponse(item: {
+  quantity: number;
+  approvedQuantity?: number | null;
+  estimatedLineProductCostKgs?: unknown;
+  estimatedUnitCost?: unknown;
+  wholesalePriceKgs?: unknown;
+  transportExpenseAllocation?: unknown;
+  totalAmount?: unknown;
+  approvedLineTotalKgs?: unknown;
+  resolvedBranchPriceKgs?: unknown;
+  weightKg?: unknown;
+  [key: string]: unknown;
+}) {
+  const lineQuantity =
+    item.approvedQuantity != null && Number(item.approvedQuantity) > 0
+      ? Number(item.approvedQuantity)
+      : Number(item.quantity ?? 0);
+  const estimatedLineProductCostKgs = toApiMoneyKgs(item.estimatedLineProductCostKgs);
+  const estimatedUnitCost =
+    estimatedLineProductCostKgs > 0 && lineQuantity > 0
+      ? deriveDisplayUnitCost(estimatedLineProductCostKgs, lineQuantity)
+      : toApiMoneyKgs(item.estimatedUnitCost);
+
+  return {
+    ...item,
+    wholesalePriceKgs: toApiMoneyKgs(item.wholesalePriceKgs),
+    transportExpenseAllocation: toApiMoneyKgs(item.transportExpenseAllocation),
+    estimatedUnitCost,
+    estimatedLineProductCostKgs,
+    totalAmount: toApiMoneyKgs(item.totalAmount),
+    approvedLineTotalKgs:
+      item.approvedLineTotalKgs != null ? toApiMoneyKgs(item.approvedLineTotalKgs) : null,
+    resolvedBranchPriceKgs:
+      item.resolvedBranchPriceKgs != null ? toApiMoneyKgs(item.resolvedBranchPriceKgs) : null,
+    weightKg: item.weightKg != null ? Number(item.weightKg) : 0,
+  };
+}
+
+export function sumStoredBranchPurchaseProductCostKgs(
+  items: Array<{
+    quantity: number;
+    approvedQuantity?: number | null;
+    estimatedLineProductCostKgs?: unknown;
+  }>,
+) {
+  return sumApiMoneyKgs(
+    items.map((item) => {
+      const lineQuantity =
+        item.approvedQuantity != null && Number(item.approvedQuantity) > 0
+          ? Number(item.approvedQuantity)
+          : Number(item.quantity ?? 0);
+      return lineQuantity > 0 ? item.estimatedLineProductCostKgs : 0;
+    }),
+  );
+}
+
+export function toBranchPurchaseRequestResponse<T extends {
+  status: BranchPurchaseRequestStatus;
+  reviewedAt?: Date | string | null;
+  totalEstimatedAmount?: unknown;
+  transportCostKgs?: unknown;
+  convertedOrderId?: string | null;
+  items: Array<Record<string, unknown>>;
+  totalProductCostKgs?: number;
+  authoritativeTransferCostKgs?: number;
+}>(request: T) {
+  const items = request.items.map((item) =>
+    toBranchPurchaseRequestItemResponse(item as Parameters<typeof toBranchPurchaseRequestItemResponse>[0]),
+  );
+  const storedProductCostKgs = sumStoredBranchPurchaseProductCostKgs(items);
+  const authoritativeTransferCostKgs =
+    request.authoritativeTransferCostKgs != null
+      ? toApiMoneyKgs(request.authoritativeTransferCostKgs)
+      : undefined;
+  const totalProductCostKgs =
+    authoritativeTransferCostKgs != null && authoritativeTransferCostKgs > 0
+      ? authoritativeTransferCostKgs
+      : request.totalProductCostKgs != null && Number(request.totalProductCostKgs) > 0
+        ? roundDisplayMoney(Number(request.totalProductCostKgs))
+        : storedProductCostKgs;
+
+  return {
+    ...request,
+    totalEstimatedAmount: toApiMoneyKgs(request.totalEstimatedAmount),
+    transportCostKgs: toApiMoneyKgs(request.transportCostKgs),
+    totalProductCostKgs,
+    authoritativeTransferCostKgs,
+    items,
+  };
+}
 
 export function resolveBranchDisplayStatus(
   status: BranchPurchaseRequestStatus,
@@ -106,11 +210,11 @@ export function sanitizeBranchPurchaseRequest<T extends {
   }>;
 }>(request: T, hideSensitive: boolean) {
   if (!hideSensitive) {
-    return {
+    return toBranchPurchaseRequestResponse({
       ...request,
       branchDisplayStatus: resolveBranchDisplayStatus(request.status, request.items),
       partialFulfillmentMessage: null,
-    };
+    });
   }
 
   const branchDisplayStatus = resolveBranchDisplayStatus(request.status, request.items);
@@ -120,7 +224,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
       : null;
   const reviewed = Boolean(request.reviewedAt) || REVIEWED_REQUEST_STATUSES.has(request.status);
 
-  return {
+  return toBranchPurchaseRequestResponse({
     ...request,
     branchDisplayStatus,
     partialFulfillmentMessage,
@@ -171,5 +275,5 @@ export function sanitizeBranchPurchaseRequest<T extends {
         resolvedBranchPriceKgs: undefined,
       };
     }),
-  };
+  });
 }

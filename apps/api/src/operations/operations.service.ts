@@ -123,6 +123,8 @@ import {
   canSeeHqStockInBranchRequests,
   isBranchOnlyRequestUser,
   sanitizeBranchPurchaseRequest,
+  shouldUseStoredBranchPurchaseCosts,
+  toBranchPurchaseRequestResponse,
 } from './branch-purchase-request.presenter';
 import {
   deriveRequestStatusFromLines,
@@ -192,7 +194,9 @@ export class OperationsService {
       orderBy: { createdAt: 'desc' },
     });
     const hideSensitive = isBranchOnlyRequestUser(user, this.canViewAllBranchPurchaseRequests(user));
-    return rows.map((row) => sanitizeBranchPurchaseRequest(row, hideSensitive));
+    return rows.map((row) =>
+      sanitizeBranchPurchaseRequest(toBranchPurchaseRequestResponse(row), hideSensitive),
+    );
   }
 
   async branchPurchaseRequestById(user: AuthUser, id: string) {
@@ -235,10 +239,31 @@ export class OperationsService {
     }
     const canViewAll = this.canViewAllBranchPurchaseRequests(user);
     const hideSensitive = isBranchOnlyRequestUser(user, canViewAll);
-    const enriched = hideSensitive
+    let enriched: typeof request & {
+      authoritativeTransferCostKgs?: number;
+      convertedOrderNumber?: string;
+      totalProductCostKgs?: number;
+      hqStockStatus?: 'loaded' | 'unavailable';
+    } = hideSensitive
       ? request
       : await this.enrichBranchPurchaseRequestWithHqStock(user, request);
-    return sanitizeBranchPurchaseRequest(enriched, hideSensitive);
+    if (request.convertedOrderId) {
+      const linkedOrder = await this.prisma.branchDistributionOrder.findFirst({
+        where: { id: request.convertedOrderId, deletedAt: null },
+        select: { totalCost: true, orderNumber: true },
+      });
+      if (linkedOrder) {
+        enriched = {
+          ...enriched,
+          authoritativeTransferCostKgs: roundDisplayMoney(Number(linkedOrder.totalCost ?? 0)),
+          convertedOrderNumber: linkedOrder.orderNumber,
+        };
+      }
+    }
+    return sanitizeBranchPurchaseRequest(
+      toBranchPurchaseRequestResponse(enriched),
+      hideSensitive,
+    );
   }
 
   async branchProductOptions(
@@ -5063,32 +5088,23 @@ export class OperationsService {
         let estimatedUnitCost = costPriceSnapshot;
         if (assignedHqWarehouseId && quantity > 0) {
           await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
-          const fifoPreview = await this.pricingFifoService.previewFifoAllocation(this.prisma, {
+          const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
             productId: product.id,
             warehouseId: assignedHqWarehouseId,
             quantity,
-            isHqOwnedBranch: branch
-              ? this.pricingFifoService.isHqBranchType(branch.branchType)
-              : false,
-            branchPricing: branch
-              ? {
-                  branchType: branch.branchType,
-                  hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent ?? 0),
-                }
-              : undefined,
-            preferPerLayerMarkup: true,
-            subtractReserved: true,
+            branchType: branch?.branchType,
+            hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
             fallbackUnitCost: costPriceSnapshot,
             fallbackUnitPrice: branchPurchasePriceKgs,
           });
-          if (fifoPreview.allocatedQty > 0) {
-            estimatedLineProductCostKgs = fifoPreview.totalCostKgs;
-            estimatedUnitCost = deriveDisplayUnitCost(fifoPreview.totalCostKgs, quantity);
+          if (fifoCost.allocatedQty > 0) {
+            estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
+            estimatedUnitCost = fifoCost.estimatedUnitCost;
           }
         }
         const totalAmount =
           pricing.hasPricingPolicy && pricing.branchPurchasePriceKgs != null
-            ? Math.round((pricing.branchPurchasePriceKgs * quantity + Number.EPSILON) * 100) / 100
+            ? roundDisplayMoney(pricing.branchPurchasePriceKgs * quantity)
             : 0;
         const stockMetrics = hqStockMetrics.get(product.id);
 
@@ -5288,6 +5304,8 @@ export class OperationsService {
     T extends {
       id: string;
       branchId: string;
+      status: BranchPurchaseRequestStatus;
+      reviewedAt?: Date | string | null;
       assignedHqWarehouseId?: string | null;
       branch?: { assignedHqWarehouseId?: string | null } | null;
       items: Array<{
@@ -5297,6 +5315,8 @@ export class OperationsService {
         quantity: number;
         approvedQuantity?: number | null;
         hqAvailableStock?: number | null;
+        estimatedLineProductCostKgs?: unknown;
+        estimatedUnitCost?: unknown;
       }>;
     },
   >(user: AuthUser, request: T) {
@@ -5331,6 +5351,8 @@ export class OperationsService {
       });
       await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
 
+      const useStoredCosts = shouldUseStoredBranchPurchaseCosts(request);
+
       const enrichedItems = await Promise.all(
         request.items.map(async (item) => {
           const metrics = stockMetrics.get(item.productId);
@@ -5347,29 +5369,32 @@ export class OperationsService {
               ? Math.max(item.quantity - approved, 0)
               : Math.max(item.quantity - availableForThisRequest, 0);
           const lineQuantity = approved ?? item.quantity;
-          let estimatedLineProductCostKgs = 0;
+          const storedLineCost = roundDisplayMoney(
+            Number((item as { estimatedLineProductCostKgs?: unknown }).estimatedLineProductCostKgs ?? 0),
+          );
+          let estimatedLineProductCostKgs = storedLineCost;
           let estimatedUnitCost = Number((item as { estimatedUnitCost?: unknown }).estimatedUnitCost ?? 0);
+
           if (lineQuantity > 0) {
-            const fifoPreview = await this.pricingFifoService.previewFifoAllocation(this.prisma, {
-              productId: item.productId,
-              warehouseId: assignedHqWarehouseId,
-              quantity: lineQuantity,
-              isHqOwnedBranch: branch
-                ? this.pricingFifoService.isHqBranchType(branch.branchType)
-                : false,
-              branchPricing: branch
-                ? {
-                    branchType: branch.branchType,
-                    hqToBranchMarkupPercent: Number(branch.hqToBranchMarkupPercent ?? 0),
-                  }
-                : undefined,
-              preferPerLayerMarkup: true,
-              subtractReserved: true,
-              fallbackUnitCost: estimatedUnitCost,
-            });
-            if (fifoPreview.allocatedQty > 0) {
-              estimatedLineProductCostKgs = fifoPreview.totalCostKgs;
-              estimatedUnitCost = deriveDisplayUnitCost(fifoPreview.totalCostKgs, lineQuantity);
+            if (useStoredCosts && storedLineCost > 0) {
+              estimatedLineProductCostKgs = storedLineCost;
+              estimatedUnitCost = deriveDisplayUnitCost(storedLineCost, lineQuantity);
+            } else {
+              const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
+                productId: item.productId,
+                warehouseId: assignedHqWarehouseId,
+                quantity: lineQuantity,
+                branchType: branch?.branchType,
+                hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
+                fallbackUnitCost: estimatedUnitCost,
+                fallbackUnitPrice: Number(
+                  (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ?? 0,
+                ),
+              });
+              if (fifoCost.allocatedQty > 0) {
+                estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
+                estimatedUnitCost = fifoCost.estimatedUnitCost;
+              }
             }
           }
 

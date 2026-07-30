@@ -17,6 +17,7 @@ import {
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
+import { formatKgs, roundMoney } from '@/lib/money';
 
 type LineReviewAction = 'APPROVE' | 'PARTIAL' | 'REJECT' | 'REMOVE';
 
@@ -48,6 +49,7 @@ type RequestItem = {
   estimatedUnitCost?: number;
   estimatedLineProductCostKgs?: number;
   totalAmount?: number;
+  approvedLineTotalKgs?: number | null;
   weightKg: number;
   note?: string | null;
 };
@@ -153,19 +155,25 @@ function formatFrozenBranchPrice(item: RequestItem, t: (key: string) => string) 
   }
   const price = getFrozenBranchPrice(item);
   if (price == null) return t('branchProductRequest.pricingPending');
-  return price.toFixed(2);
+  return formatKgs(price);
 }
 
 function requestLineTotal(item: RequestItem) {
+  if (item.totalAmount != null && Number(item.totalAmount) > 0) {
+    return roundMoney(Number(item.totalAmount));
+  }
   const price = getFrozenBranchPrice(item);
   if (price == null) return 0;
-  return Math.round((price * item.quantity + Number.EPSILON) * 100) / 100;
+  return roundMoney(price * item.quantity);
 }
 
 function approvedLineTotal(item: RequestItem, approvedQuantity: number) {
+  if (item.approvedLineTotalKgs != null && Number(item.approvedLineTotalKgs) > 0) {
+    return roundMoney(Number(item.approvedLineTotalKgs));
+  }
   const price = getFrozenBranchPrice(item);
   if (price == null) return 0;
-  return Math.round((price * approvedQuantity + Number.EPSILON) * 100) / 100;
+  return roundMoney(price * approvedQuantity);
 }
 
 function translateRejectionReason(t: (key: string) => string, code?: string | null) {
@@ -595,19 +603,19 @@ export default function BranchPurchaseRequestDetailPage() {
             <div>
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalProductCost')}</p>
               <p className="mt-1 font-semibold text-slate-900">
-                {Number(request.totalProductCostKgs ?? 0).toFixed(2)} KGS
+                {formatKgs(request.totalProductCostKgs)} KGS
               </p>
             </div>
           ) : null}
           {!branchOnlyView ? (
             <div>
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.estimatedAmount')}</p>
-              <p className="mt-1 font-semibold text-slate-900">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)} KGS</p>
+              <p className="mt-1 font-semibold text-slate-900">{formatKgs(request.totalEstimatedAmount)} KGS</p>
             </div>
           ) : (
             <div>
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalAmount')}</p>
-              <p className="mt-1 font-semibold text-slate-900">{Number(request.totalEstimatedAmount ?? 0).toFixed(2)} KGS</p>
+              <p className="mt-1 font-semibold text-slate-900">{formatKgs(request.totalEstimatedAmount)} KGS</p>
             </div>
           )}
           {request.note ? (
@@ -645,7 +653,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     <td className="hidden px-3 py-2 text-slate-600 sm:table-cell">{item.sku}</td>
                     <td className="px-3 py-2">{item.quantity}</td>
                     <td className="px-3 py-2">{formatFrozenBranchPrice(item, t)}</td>
-                    <td className="px-3 py-2">{Number(item.totalAmount ?? requestLineTotal(item)).toFixed(2)}</td>
+                    <td className="px-3 py-2">{formatKgs(item.totalAmount ?? requestLineTotal(item))}</td>
                     <td className="px-3 py-2">
                       {translateStatus(t, item.lineStatus ?? request.status, 'branchRequestLine')}
                     </td>
@@ -730,7 +738,7 @@ export default function BranchPurchaseRequestDetailPage() {
                     </td>
                     <td className="px-2 py-1.5 text-center">{item.unit}</td>
                     <td className="hidden px-2 py-1.5 text-center tabular-nums md:table-cell">{item.currentBranchStock ?? '-'}</td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{requestLineTotal(item).toFixed(2)}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">{formatKgs(requestLineTotal(item))}</td>
                     {canActOnRequest && reviewable ? (
                       <td className="sticky right-0 bg-white px-2 py-1.5" onClick={(event) => event.stopPropagation()}>
                         <div className="flex min-w-[7.5rem] flex-col gap-1">
@@ -969,26 +977,26 @@ export default function BranchPurchaseRequestDetailPage() {
                     {!branchOnlyView && reviewable ? (
                       <>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatFrozenBranchPrice(item, t)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{requestLineTotal(item).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(requestLineTotal(item))}</td>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right font-semibold tabular-nums text-slate-900')}>
-                          {approvedLineTotal(item, approvedValue).toFixed(2)}
+                          {formatKgs(approvedLineTotal(item, approvedValue))}
                         </td>
                       </>
                     ) : null}
                     {!branchOnlyView && !reviewable ? (
                       <>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.wholesalePriceKgs ?? 0).toFixed(2)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.transportExpenseAllocation ?? 0).toFixed(2)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.estimatedUnitCost ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.wholesalePriceKgs)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.transportExpenseAllocation)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.estimatedUnitCost)}</td>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>
-                          {Number(item.estimatedLineProductCostKgs ?? 0).toFixed(2)}
+                          {formatKgs(item.estimatedLineProductCostKgs)}
                         </td>
                       </>
                     ) : null}
                     {branchOnlyView && !reviewed ? (
                       <>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.branchPurchasePriceKgs ?? 0).toFixed(2)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{Number(item.totalAmount ?? 0).toFixed(2)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.branchPurchasePriceKgs)}</td>
+                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.totalAmount)}</td>
                       </>
                     ) : null}
                   </tr>

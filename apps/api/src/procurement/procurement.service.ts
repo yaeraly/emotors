@@ -22,6 +22,7 @@ import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { toApiMoneyKgs } from '../common/authoritative-money.util';
 import {
   canAllowSupplierOverpayment,
   canCreateProcurementOrder,
@@ -1194,11 +1195,13 @@ export class ProcurementService {
   }
 
   procurementOrders() {
-    return this.prisma.procurementOrder.findMany({
-      where: { deletedAt: null },
-      include: this.procurementOrderInclude(),
-      orderBy: { createdAt: 'desc' },
-    });
+    return this.prisma.procurementOrder
+      .findMany({
+        where: { deletedAt: null },
+        include: this.procurementOrderInclude(),
+        orderBy: { createdAt: 'desc' },
+      })
+      .then((orders) => Promise.all(orders.map((order) => this.toProcurementOrderResponse(order))));
   }
 
   procurementOrder(id: string) {
@@ -3773,6 +3776,7 @@ export class ProcurementService {
 
     return {
       ...order,
+      totalCostKgs: toApiMoneyKgs(order.totalCostKgs),
       totalYuan: Number(order.totalYuan),
       totalPaidYuan: Number(order.totalPaidYuan ?? 0),
       totalPaidKgs: Number(order.totalPaidKgs ?? 0),
