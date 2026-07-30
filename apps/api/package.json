@@ -24,6 +24,7 @@
     "test:receiving": "node --import tsx --test src/distribution/branch-receiving.integration.test.ts",
     "audit:hq-fifo": "tsx scripts/audit-hq-fifo-inventory.ts",
     "repair:hq-fifo-from-receipts": "tsx scripts/repair-hq-fifo-from-receipts.ts",
+    "repair:hq-inventory-valuation": "tsx scripts/repair-hq-inventory-valuation.ts",
     "verify:product-catalog-costs": "tsx scripts/verify-product-catalog-cost-table.ts",
     "repair:product-catalog-reference-costs": "tsx scripts/repair-product-catalog-reference-costs.ts",
     "typecheck": "tsc --noEmit -p tsconfig.build.json"

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { HqWarehouseAssignmentStatus, Prisma, ProcurementOrderStatus, Role, StockMovementStatus, StockMovementType, WarehouseType } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { sumWarehouseFifoRemainingValueKgs } from '../inventory/inventory-authoritative-value.util';
 import { InventoryService } from '../inventory/inventory.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
@@ -55,10 +56,20 @@ export class HqWarehouseService {
       });
       const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
       const totalReserved = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
-      const totalStockValueKgs = balances.reduce(
-        (sum, item) => sum + Number(item.totalValueKgs),
-        0,
-      );
+      let totalStockValueKgs = 0;
+      const hqWarehouses = await tx.warehouse.findMany({
+        where: warehouseWhere,
+        select: { id: true },
+      });
+      for (const wh of hqWarehouses) {
+        totalStockValueKgs += await sumWarehouseFifoRemainingValueKgs(tx, wh.id);
+      }
+      if (totalStockValueKgs <= 0) {
+        totalStockValueKgs = balances.reduce(
+          (sum, item) => (item.quantity > 0 ? sum + Number(item.totalValueKgs) : sum),
+          0,
+        );
+      }
       const productIds = new Set(balances.filter((b) => b.quantity > 0).map((b) => b.productId));
 
       const stats = {
@@ -153,7 +164,13 @@ export class HqWarehouseService {
 
     const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
     const reservedQuantity = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
-    const totalStockValueKgs = balances.reduce((sum, item) => sum + Number(item.totalValueKgs), 0);
+    const fifoInventoryValueKgs = await sumWarehouseFifoRemainingValueKgs(tx, warehouse.id);
+    const balanceValueOnHand = balances.reduce(
+      (sum, item) => (item.quantity > 0 ? sum + Number(item.totalValueKgs) : sum),
+      0,
+    );
+    const totalStockValueKgs =
+      fifoInventoryValueKgs > 0 ? fifoInventoryValueKgs : balanceValueOnHand;
     const availableStockValueKgs = balances.reduce((sum, item) => {
       const available = Math.max(item.quantity - item.reservedQuantity, 0);
       return sum + available * Number(item.landedCostKgs || item.averageCostKgs);

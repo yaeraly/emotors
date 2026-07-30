@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { StockMovementType } from '@prisma/client';
-import { recomputeInventoryBalanceValuation } from './inventory-balance-valuation.util';
+import { recomputeInventoryBalanceValuation, clampValuationForZeroQuantity } from './inventory-balance-valuation.util';
 
 describe('recomputeInventoryBalanceValuation', () => {
   it('sums authoritative IN movement line totals without unit×qty drift', () => {
@@ -44,5 +44,36 @@ describe('recomputeInventoryBalanceValuation', () => {
     ]);
     assert.equal(valuation.totalValueKgs, 700);
     assert.equal(valuation.averageCostKgs, 100);
+  });
+
+  it('zero-quantity adjustment with value only does not persist ghost value after clamp', () => {
+    const valuation = recomputeInventoryBalanceValuation([
+      {
+        id: 'in-1',
+        type: StockMovementType.IN,
+        quantity: 10,
+        unitCostKgs: 100,
+        totalCostKgs: 1000,
+        createdAt: new Date(2026, 0, 1),
+      },
+      {
+        id: 'out-1',
+        type: StockMovementType.OUT,
+        quantity: -10,
+        unitCostKgs: 100,
+        totalCostKgs: 1000,
+        createdAt: new Date(2026, 0, 2),
+      },
+      {
+        id: 'adj-1',
+        type: StockMovementType.INVENTORY_ADJUSTMENT_OUT,
+        quantity: 0,
+        unitCostKgs: 0,
+        totalCostKgs: 90743.06,
+        createdAt: new Date(2026, 0, 3),
+      },
+    ]);
+    const clamped = clampValuationForZeroQuantity(0, valuation);
+    assert.equal(clamped.totalValueKgs, 0);
   });
 });

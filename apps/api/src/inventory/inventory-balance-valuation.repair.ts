@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { recomputeInventoryBalanceValuation } from './inventory-balance-valuation.util';
+import { recomputeInventoryBalanceValuation, clampValuationForZeroQuantity } from './inventory-balance-valuation.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -37,7 +37,14 @@ export async function recomputeInventoryBalanceValuationInTx(
     },
   });
 
-  const valuation = recomputeInventoryBalanceValuation(movements);
+  const balanceRow = await tx.inventoryBalance.findUnique({
+    where: { id: balance.id },
+    select: { quantity: true },
+  });
+  const valuation = clampValuationForZeroQuantity(
+    balanceRow?.quantity ?? 0,
+    recomputeInventoryBalanceValuation(movements),
+  );
   await tx.inventoryBalance.update({
     where: { id: balance.id },
     data: {

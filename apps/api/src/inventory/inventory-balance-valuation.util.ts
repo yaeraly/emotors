@@ -96,3 +96,16 @@ export function recomputeInventoryBalanceValuation(movements: InventoryBalanceMo
 
   return { totalValueKgs, averageCostKgs, landedCostKgs };
 }
+
+/** When on-hand quantity is zero, inventory value must be zero (no ghost valuation). */
+export function clampValuationForZeroQuantity(
+  quantity: number,
+  valuation: { totalValueKgs: number; averageCostKgs: number; landedCostKgs: number },
+) {
+  if (quantity > 0) return valuation;
+  return {
+    totalValueKgs: 0,
+    averageCostKgs: 0,
+    landedCostKgs: valuation.landedCostKgs,
+  };
+}

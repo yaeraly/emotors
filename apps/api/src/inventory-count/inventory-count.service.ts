@@ -12,6 +12,7 @@ import {
   Prisma,
   Role,
   StockMovementType,
+  WarehouseType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
@@ -35,6 +36,18 @@ import {
 import { InventoryCountQueryDto } from './dto/inventory-count-query.dto';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import {
+  compareWarehouseInventoryValuation,
+  INVENTORY_VALUATION_MISMATCH_MESSAGE,
+  resolveAuthoritativeSystemUnitCostKgs,
+  resolveInventoryCountDifferenceValueKgs,
+} from '../inventory/inventory-authoritative-value.util';
+import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
+import { PricingFifoService } from '../pricing/pricing-fifo.service';
+import {
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+} from '../pricing/product-cost-precision.util';
+import {
   sanitizeInventoryCountSearchResultForUser,
   sanitizeInventoryCountSessionForUser,
 } from './inventory-count.presenter';
@@ -56,6 +69,7 @@ export class InventoryCountService {
     private readonly inventoryService: InventoryService,
     private readonly notificationsService: NotificationsService,
     private readonly assignmentService: HqWarehouseAssignmentService,
+    private readonly pricingFifoService: PricingFifoService,
   ) {}
 
   list(user: AuthUser, query: InventoryCountQueryDto) {
@@ -100,7 +114,7 @@ export class InventoryCountService {
     const term = q.trim();
     if (!term) return [];
 
-    return this.prisma.inventoryBalance.findMany({
+    const rows = await this.prisma.inventoryBalance.findMany({
       where: {
         warehouseId,
         OR: [
@@ -114,9 +128,23 @@ export class InventoryCountService {
         warehouse: true,
       },
       take: 20,
-    }).then((rows) =>
-      rows.map((row) =>
-        sanitizeInventoryCountSearchResultForUser(user, {
+    });
+
+    const results = await Promise.all(
+      rows.map(async (row) => {
+        const { unitCostKgs } = await resolveAuthoritativeSystemUnitCostKgs(
+          this.prisma,
+          warehouseId,
+          row.productId,
+          row.quantity,
+          {
+            totalValueKgs: row.totalValueKgs,
+            landedCostKgs: row.landedCostKgs,
+            averageCostKgs: row.averageCostKgs,
+            finalCostKgs: row.product.finalCostKgs,
+          },
+        );
+        return sanitizeInventoryCountSearchResultForUser(user, {
           productId: row.productId,
           sku: row.product.sku,
           barcode: row.product.barcode,
@@ -125,10 +153,11 @@ export class InventoryCountService {
           shelf: row.shelf,
           zone: row.zone,
           systemQuantity: row.quantity,
-          unitCostKgs: Number(row.landedCostKgs || row.averageCostKgs || row.product.finalCostKgs),
-        }),
-      ),
+          unitCostKgs,
+        });
+      }),
     );
+    return results;
   }
 
   create(user: AuthUser, dto: CreateInventoryCountDto) {
@@ -188,10 +217,12 @@ export class InventoryCountService {
         },
       });
 
-      const items = await this.buildSessionItems(tx, session, dto);
-      if (items.length === 0) {
+      const rawItems = await this.buildSessionItems(tx, session, dto);
+      if (rawItems.length === 0) {
         throw new BadRequestException('No products match the selected inventory filters');
       }
+
+      const items = await this.finalizeSessionItemCosts(tx, warehouse, rawItems);
 
       await tx.inventoryCountItem.createMany({ data: items });
 
@@ -254,8 +285,12 @@ export class InventoryCountService {
 
     const actualQuantity = Math.max(0, Math.floor(dto.actualQuantity));
     const differenceQuantity = actualQuantity - item.systemQuantity;
-    const unitCost = Number(item.unitCostKgs);
-    const differenceValueKgs = this.roundMoney(differenceQuantity * unitCost);
+    const differenceValueKgs = await this.resolveItemDifferenceValue(
+      this.prisma,
+      session.warehouse,
+      item,
+      actualQuantity,
+    );
 
     const updated = await this.prisma.inventoryCountItem.update({
       where: { id: itemId },
@@ -296,12 +331,18 @@ export class InventoryCountService {
       if (!item) throw new NotFoundException(`Inventory count item not found: ${entry.itemId}`);
       const actualQuantity = Math.max(0, Math.floor(entry.actualQuantity));
       const differenceQuantity = actualQuantity - item.systemQuantity;
+      const differenceValueKgs = await this.resolveItemDifferenceValue(
+        this.prisma,
+        session.warehouse,
+        item,
+        actualQuantity,
+      );
       await this.prisma.inventoryCountItem.update({
         where: { id: entry.itemId },
         data: {
           actualQuantity,
           differenceQuantity,
-          differenceValueKgs: this.roundMoney(differenceQuantity * Number(item.unitCostKgs)),
+          differenceValueKgs,
           remark: entry.remark,
           countedAt: new Date(),
         },
@@ -356,6 +397,19 @@ export class InventoryCountService {
         throw new NotFoundException('Referenced product was not found for this branch warehouse');
       }
 
+      const { unitCostKgs } = await resolveAuthoritativeSystemUnitCostKgs(
+        tx,
+        session.warehouseId,
+        product.id,
+        balance?.quantity ?? 0,
+        {
+          totalValueKgs: balance?.totalValueKgs,
+          landedCostKgs: balance?.landedCostKgs,
+          averageCostKgs: balance?.averageCostKgs,
+          finalCostKgs: product.finalCostKgs,
+        },
+      );
+
       const created = await tx.inventoryCountItem.create({
         data: {
           sessionId: session.id,
@@ -368,9 +422,7 @@ export class InventoryCountService {
           systemQuantity: balance?.quantity ?? 0,
           actualQuantity: null,
           differenceQuantity: 0,
-          unitCostKgs: Number(
-            balance?.landedCostKgs || balance?.averageCostKgs || product.finalCostKgs,
-          ),
+          unitCostKgs,
           differenceValueKgs: 0,
           remark: dto.remark,
         },
@@ -464,6 +516,30 @@ export class InventoryCountService {
         throw new BadRequestException('Only submitted inventory can be approved');
       }
 
+      if (isHqWarehouse(session.warehouse)) {
+        const valuationCheck = await compareWarehouseInventoryValuation(tx, session.warehouseId);
+        if (!valuationCheck.ok) {
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              role: user.role,
+              action: 'INVENTORY_VALUATION_RECONCILIATION_FAILED',
+              entity: 'InventoryCountSession',
+              entityId: session.id,
+              metadata: {
+                warehouseId: session.warehouseId,
+                inventoryCountId: session.id,
+                expectedValueKgs: valuationCheck.fifoTotalKgs,
+                actualValueKgs: valuationCheck.balanceTotalKgs,
+                differenceKgs: valuationCheck.differenceKgs,
+                timestamp: new Date().toISOString(),
+              },
+            },
+          });
+          throw new BadRequestException(INVENTORY_VALUATION_MISMATCH_MESSAGE);
+        }
+      }
+
       for (const item of session.items) {
         if (item.actualQuantity === null) continue;
 
@@ -490,15 +566,29 @@ export class InventoryCountService {
             ? StockMovementType.INVENTORY_ADJUSTMENT_IN
             : StockMovementType.INVENTORY_ADJUSTMENT_OUT;
 
+        const movementQuantity = Math.abs(delta);
+        const authoritativeLineTotal = roundDisplayMoney(Math.abs(Number(item.differenceValueKgs)));
+        const movementUnitCost =
+          movementQuantity > 0
+            ? deriveDisplayUnitCost(authoritativeLineTotal, movementQuantity)
+            : Number(item.unitCostKgs);
+
         await this.inventoryService.createStockMovementInTx(tx, user, {
           productId: item.productId,
           warehouseId: session.warehouseId,
           type: movementType,
-          quantity: Math.abs(delta),
-          unitCostKgs: Number(item.unitCostKgs),
+          quantity: movementQuantity,
+          unitCostKgs: movementUnitCost,
+          totalCostKgs: authoritativeLineTotal,
           referenceType: 'INVENTORY_COUNT',
           referenceId: session.id,
           note: `Inventory count ${session.sessionNumber} adjustment for SKU ${item.sku}`,
+        });
+
+        await recomputeInventoryBalanceValuationInTx(tx, {
+          branchId: balanceBranchId,
+          warehouseId: session.warehouseId,
+          productId: item.productId,
         });
 
         if (isBranchWarehouse(session.warehouse)) {
@@ -653,20 +743,68 @@ export class InventoryCountService {
       orderBy: { product: { sku: 'asc' } },
     });
 
-    return balances.map((balance) => ({
-      sessionId: session.id,
-      productId: balance.productId,
-      sku: balance.product.sku,
-      productName: balance.product.name,
-      categoryName: balance.product.productCategory?.nameRu ?? balance.product.category,
-      shelf: balance.shelf,
-      zone: balance.zone,
-      systemQuantity: balance.quantity,
-      actualQuantity: null,
-      differenceQuantity: 0,
-      unitCostKgs: Number(balance.landedCostKgs || balance.averageCostKgs || balance.product.finalCostKgs),
-      differenceValueKgs: 0,
-    }));
+    return balances.map((balance) => {
+      const systemQuantity = balance.quantity;
+      return {
+        sessionId: session.id,
+        productId: balance.productId,
+        sku: balance.product.sku,
+        productName: balance.product.name,
+        categoryName: balance.product.productCategory?.nameRu ?? balance.product.category,
+        shelf: balance.shelf,
+        zone: balance.zone,
+        systemQuantity,
+        actualQuantity: null,
+        differenceQuantity: 0,
+        unitCostKgs: 0,
+        differenceValueKgs: 0,
+        _balanceForCost: balance,
+      };
+    });
+  }
+
+  private async finalizeSessionItemCosts(
+    tx: PrismaTx,
+    warehouse: { id: string; warehouseType: WarehouseType; branchId: string | null },
+    items: Array<{
+      sessionId: string;
+      productId: string;
+      sku: string;
+      productName: string;
+      categoryName: string;
+      shelf: string | null;
+      zone: string | null;
+      systemQuantity: number;
+      actualQuantity: null;
+      differenceQuantity: number;
+      unitCostKgs: number;
+      differenceValueKgs: number;
+      _balanceForCost: {
+        totalValueKgs: unknown;
+        landedCostKgs: unknown;
+        averageCostKgs: unknown;
+        product: { finalCostKgs: unknown };
+      };
+    }>,
+  ) {
+    return Promise.all(
+      items.map(async (item) => {
+        const { unitCostKgs } = await resolveAuthoritativeSystemUnitCostKgs(
+          tx,
+          warehouse.id,
+          item.productId,
+          item.systemQuantity,
+          {
+            totalValueKgs: item._balanceForCost.totalValueKgs,
+            landedCostKgs: item._balanceForCost.landedCostKgs,
+            averageCostKgs: item._balanceForCost.averageCostKgs,
+            finalCostKgs: item._balanceForCost.product.finalCostKgs,
+          },
+        );
+        const { _balanceForCost, ...rest } = item;
+        return { ...rest, unitCostKgs };
+      }),
+    );
   }
 
   private validateTypeFilters(dto: CreateInventoryCountDto) {
@@ -773,8 +911,28 @@ export class InventoryCountService {
       shortages,
       overages,
       matched: session.items.filter((item) => item.differenceQuantity === 0 && item.actualQuantity !== null).length,
-      totalDifferenceValueKgs: this.roundMoney(totalDifferenceValue),
+      totalDifferenceValueKgs: roundDisplayMoney(totalDifferenceValue),
     };
+  }
+
+  private async resolveItemDifferenceValue(
+    tx: PrismaTx,
+    warehouse: { id: string; warehouseType: WarehouseType; branchId: string | null },
+    item: {
+      productId: string;
+      systemQuantity: number;
+      unitCostKgs: unknown;
+    },
+    actualQuantity: number,
+  ) {
+    return resolveInventoryCountDifferenceValueKgs(tx, this.pricingFifoService, {
+      warehouseId: warehouse.id,
+      productId: item.productId,
+      systemQuantity: item.systemQuantity,
+      actualQuantity,
+      unitCostKgs: Number(item.unitCostKgs ?? 0),
+      isHqWarehouse: isHqWarehouse(warehouse),
+    });
   }
 
   private sessionInclude() {
@@ -1244,6 +1402,6 @@ export class InventoryCountService {
   }
 
   private roundMoney(value: number) {
-    return Math.round((value + Number.EPSILON) * 100) / 100;
+    return roundDisplayMoney(value);
   }
 }
