@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
-import { allocateProportionalCost, deriveDisplayUnitCost } from './product-cost-precision.util';
+import { allocateProportionalCost, deriveDisplayUnitCost, roundDisplayMoney, sumDisplayMoneyTotals } from './product-cost-precision.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
   isSeedStockMovementReference,
@@ -67,7 +67,7 @@ type FifoPreviewLine = {
 };
 
 function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  return roundDisplayMoney(value);
 }
 
 @Injectable()
@@ -464,8 +464,8 @@ export class PricingFifoService {
     if (!preferPerLayerMarkup && input.overrideUnitPriceKgs != null && input.overrideUnitPriceKgs >= 0) {
       const layerByBatchId = new Map(allocationLayers.map((layer) => [layer.batchId, layer]));
       let remainingToAllocate = input.quantity;
-      let totalCost = 0;
-      let totalPrice = 0;
+      const lineCosts: number[] = [];
+      const linePrices: number[] = [];
       const lines: FifoPreviewLine[] = [];
       for (const batch of businessBatches) {
         if (remainingToAllocate <= 0) break;
@@ -483,12 +483,11 @@ export class PricingFifoService {
           (batch.initialQuantity > 0 ? batch.initialQuantity : take);
         const layerTotalCostKgs =
           mappedLayer?.layerTotalCostKgs ?? Number(batch.unitCostKgs) * layerBaseQty;
-        const lineCost = roundMoney(
-          allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take),
-        );
+        const rawLineCost = allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take);
+        const lineCost = roundMoney(rawLineCost);
         const linePrice = roundMoney(unitPriceKgs * take);
-        totalCost = roundMoney(totalCost + lineCost);
-        totalPrice = roundMoney(totalPrice + linePrice);
+        lineCosts.push(lineCost);
+        linePrices.push(linePrice);
         remainingToAllocate -= take;
         lines.push({
           batchId: batch.id,
@@ -517,9 +516,11 @@ export class PricingFifoService {
           allocatedQty: 0,
         };
       }
+      const totalCost = sumDisplayMoneyTotals(lineCosts);
+      const totalPrice = sumDisplayMoneyTotals(linePrices);
       return {
-        unitCost: roundMoney(totalCost / allocatedQty),
-        unitPrice: roundMoney(totalPrice / allocatedQty),
+        unitCost: deriveDisplayUnitCost(totalCost, allocatedQty),
+        unitPrice: deriveDisplayUnitCost(totalPrice, allocatedQty),
         activeUnitCost: lines[0]?.unitCostKgs ?? 0,
         activeUnitPrice: lines[0]?.unitPriceKgs ?? 0,
         totalCostKgs: totalCost,
@@ -601,6 +602,9 @@ export class PricingFifoService {
       },
     });
     if (existing.length) {
+      const totalCostKgs = sumDisplayMoneyTotals(existing.map((row) => Number(row.totalCostKgs)));
+      const totalPriceKgs = sumDisplayMoneyTotals(existing.map((row) => Number(row.totalPriceKgs)));
+      const allocatedQty = existing.reduce((sum, row) => sum + row.quantity, 0);
       return {
         lines: existing.map((row) => ({
           batchId: row.fifoBatchId,
@@ -612,6 +616,14 @@ export class PricingFifoService {
           profitKgs: Number(row.profitKgs),
         })),
         alreadyReserved: true,
+        totalCostKgs,
+        totalPriceKgs,
+        profitKgs: roundMoney(totalPriceKgs - totalCostKgs),
+        allocatedQty,
+        unitCost: deriveDisplayUnitCost(totalCostKgs, allocatedQty),
+        unitPrice: deriveDisplayUnitCost(totalPriceKgs, allocatedQty),
+        activeUnitCost: Number(existing[0]?.unitCostKgs ?? 0),
+        activeUnitPrice: Number(existing[0]?.unitPriceKgs ?? 0),
       };
     }
 
@@ -771,8 +783,8 @@ export class PricingFifoService {
     });
 
     if (reserved.length) {
-      let totalCostKgs = 0;
-      let totalPriceKgs = 0;
+      const lineCosts: number[] = [];
+      const linePrices: number[] = [];
       const lines: FifoPreviewLine[] = [];
 
       for (const row of reserved) {
@@ -790,8 +802,8 @@ export class PricingFifoService {
           data: { status: 'CONSUMED', profitKgs },
         });
 
-        totalCostKgs = roundMoney(totalCostKgs + Number(row.totalCostKgs));
-        totalPriceKgs = roundMoney(totalPriceKgs + Number(row.totalPriceKgs));
+        lineCosts.push(Number(row.totalCostKgs));
+        linePrices.push(Number(row.totalPriceKgs));
         lines.push({
           batchId: row.fifoBatchId,
           quantity: row.quantity,
@@ -830,9 +842,11 @@ export class PricingFifoService {
       }
 
       const allocatedQty = lines.reduce((sum, line) => sum + line.quantity, 0);
+      const totalCostKgs = sumDisplayMoneyTotals(lineCosts);
+      const totalPriceKgs = sumDisplayMoneyTotals(linePrices);
       return {
-        unitCost: allocatedQty > 0 ? roundMoney(totalCostKgs / allocatedQty) : 0,
-        unitPrice: allocatedQty > 0 ? roundMoney(totalPriceKgs / allocatedQty) : 0,
+        unitCost: deriveDisplayUnitCost(totalCostKgs, allocatedQty),
+        unitPrice: deriveDisplayUnitCost(totalPriceKgs, allocatedQty),
         activeUnitCost: lines[0]?.unitCostKgs ?? 0,
         activeUnitPrice: lines[0]?.unitPriceKgs ?? 0,
         totalCostKgs,

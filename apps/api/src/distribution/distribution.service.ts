@@ -61,6 +61,11 @@ import {
 } from '../warehouse/warehouse.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
+import {
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+  sumDisplayMoneyTotals,
+} from '../pricing/product-cost-precision.util';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
 import { RejectBranchInstallmentDto, RequestBranchInstallmentDto } from './dto/request-branch-installment.dto';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
@@ -313,17 +318,17 @@ export class DistributionService {
             userId: user.id,
             userRole: user.role,
           });
-          if (!reserved.alreadyReserved && 'totalCostKgs' in reserved) {
-            const totalCost = this.roundMoney(Number(reserved.totalCostKgs ?? 0));
-            const totalPrice = this.roundMoney(Number(reserved.totalPriceKgs ?? 0));
+          if ('totalCostKgs' in reserved) {
+            const totalCost = roundDisplayMoney(Number(reserved.totalCostKgs ?? 0));
+            const totalPrice = roundDisplayMoney(Number(reserved.totalPriceKgs ?? 0));
             await tx.branchDistributionOrderItem.update({
               where: { id: item.id },
               data: {
-                unitCost: item.quantity > 0 ? this.roundMoney(totalCost / item.quantity) : 0,
-                unitPrice: item.quantity > 0 ? this.roundMoney(totalPrice / item.quantity) : 0,
+                unitCost: item.quantity > 0 ? deriveDisplayUnitCost(totalCost, item.quantity) : 0,
+                unitPrice: item.quantity > 0 ? deriveDisplayUnitCost(totalPrice, item.quantity) : 0,
                 totalCost,
                 totalPrice,
-                profit: this.roundMoney(totalPrice - totalCost),
+                profit: roundDisplayMoney(totalPrice - totalCost),
               },
             });
           }
@@ -337,18 +342,14 @@ export class DistributionService {
       const refreshedItems = await tx.branchDistributionOrderItem.findMany({
         where: { orderId: order.id },
       });
-      const totalAmount = this.roundMoney(
-        refreshedItems.reduce((sum, row) => sum + Number(row.totalPrice), 0),
-      );
-      const totalCostSum = this.roundMoney(
-        refreshedItems.reduce((sum, row) => sum + Number(row.totalCost), 0),
-      );
+      const totalAmount = sumDisplayMoneyTotals(refreshedItems.map((row) => Number(row.totalPrice)));
+      const totalCostSum = sumDisplayMoneyTotals(refreshedItems.map((row) => Number(row.totalCost)));
       await tx.branchDistributionOrder.update({
         where: { id: order.id },
         data: {
           totalAmount,
           totalCost: totalCostSum,
-          totalProfit: this.roundMoney(totalAmount - totalCostSum),
+          totalProfit: roundDisplayMoney(totalAmount - totalCostSum),
         },
       });
 
@@ -3195,13 +3196,13 @@ export class DistributionService {
       }
       const quantity = Number(item.quantity);
       // Multi-layer totals: sum of per-layer cost/price (never average-then-multiply).
-      const totalCost = this.roundMoney(fifoPreview.totalCostKgs);
+      const totalCost = roundDisplayMoney(fifoPreview.totalCostKgs);
       const totalPrice =
         isHqOwnedBranch || !hasAnyFullAccessRole(userRoles)
-          ? this.roundMoney(fifoPreview.totalPriceKgs)
-          : this.roundMoney(requestedPrice * quantity);
-      const unitCost = this.roundMoney(totalCost / quantity);
-      const unitPrice = this.roundMoney(totalPrice / quantity);
+          ? roundDisplayMoney(fifoPreview.totalPriceKgs)
+          : roundDisplayMoney(requestedPrice * quantity);
+      const unitCost = deriveDisplayUnitCost(totalCost, quantity);
+      const unitPrice = deriveDisplayUnitCost(totalPrice, quantity);
       items.push({
         productId: product.id,
         sku: product.sku,
@@ -3211,7 +3212,7 @@ export class DistributionService {
         unitPrice,
         totalCost,
         totalPrice,
-        profit: this.roundMoney(totalPrice - totalCost),
+        profit: roundDisplayMoney(totalPrice - totalCost),
         pricingPolicyVersionId: priceFreeze.pricingPolicyVersionId,
         pricingProfileId: priceFreeze.pricingProfileId,
         resolvedPriceKgs: priceFreeze.resolvedPriceKgs,
@@ -3224,9 +3225,9 @@ export class DistributionService {
         priceResolvedAt: priceFreeze.priceResolvedAt,
       });
     }
-    const totalAmount = this.roundMoney(items.reduce((sum, item) => sum + item.totalPrice, 0));
-    const totalCost = this.roundMoney(items.reduce((sum, item) => sum + item.totalCost, 0));
-    return { items, totalAmount, totalCost, totalProfit: this.roundMoney(totalAmount - totalCost) };
+    const totalAmount = sumDisplayMoneyTotals(items.map((item) => item.totalPrice));
+    const totalCost = sumDisplayMoneyTotals(items.map((item) => item.totalCost));
+    return { items, totalAmount, totalCost, totalProfit: roundDisplayMoney(totalAmount - totalCost) };
   }
 
   private async generateOrderNumber(tx: PrismaTx) {
@@ -3891,6 +3892,6 @@ export class DistributionService {
   }
 
   private roundMoney(value: number) {
-    return Math.round((value + Number.EPSILON) * 100) / 100;
+    return roundDisplayMoney(value);
   }
 }

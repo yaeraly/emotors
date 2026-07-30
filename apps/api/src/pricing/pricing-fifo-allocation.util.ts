@@ -79,9 +79,13 @@ export function buildFifoAllocationLines(
         ? Number(layer.layerBaseQuantity)
         : Math.max(layer.remainingQuantity, take);
     const layerTotalCostKgs =
-      Number(layer.layerTotalCostKgs ?? 0) > 0
+      layer.layerTotalCostKgs != null && Number(layer.layerTotalCostKgs) > 0
         ? Number(layer.layerTotalCostKgs)
-        : Number(layer.unitCostKgs) * layerBaseQty;
+        : allocateProportionalCost(
+            Number(layer.unitCostKgs) * layerBaseQty,
+            layerBaseQty,
+            layerBaseQty,
+          );
 
     const rawLineCost = allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take);
     rawLineCosts.push(rawLineCost);
