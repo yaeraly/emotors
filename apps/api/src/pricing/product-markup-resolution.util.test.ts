@@ -75,19 +75,42 @@ describe('product-markup-resolution.util', () => {
     expect(row.validationErrors).toContain(MARKUP_VALIDATION_MESSAGES.INHERITED_MAX_MISMATCH);
   });
 
-  it('allows CEO override to fix inherited mismatch', () => {
+  it('keeps recommended and maximum retail prices separate after CEO max override', () => {
     const row = buildRetailMarkupRow(
       {
         ...baseRetailProduct,
-        recommendedRetailMarkupPercent: 35,
+        recommendedRetailMarkupPercent: 20,
         maximumRetailMarkupOverridePercent: 40,
       },
       category,
       1000,
     );
-    expect(row.maximumRetailMarkupSource).toBe(MaximumMarkupSource.CEO_PRODUCT_OVERRIDE);
-    expect(row.validationStatus).toBe('OK');
+    expect(row.recommendedRetailMarkupPercent).toBe(20);
+    expect(row.effectiveMaximumRetailMarkupPercent).toBe(40);
+    expect(row.recommendedRetailPriceKgs).toBe(1200);
     expect(row.maximumRetailPriceKgs).toBe(1400);
+    expect(row.recommendedRetailPriceKgs).not.toBe(row.maximumRetailPriceKgs);
+  });
+
+  it('saving only maximum markup does not change recommended markup or price', () => {
+    const before = buildRetailMarkupRow(
+      { ...baseRetailProduct, recommendedRetailMarkupPercent: 25 },
+      category,
+      800,
+    );
+    const after = buildRetailMarkupRow(
+      {
+        ...baseRetailProduct,
+        recommendedRetailMarkupPercent: 25,
+        maximumRetailMarkupOverridePercent: 50,
+      },
+      category,
+      800,
+    );
+    expect(after.recommendedRetailMarkupPercent).toBe(before.recommendedRetailMarkupPercent);
+    expect(after.recommendedRetailPriceKgs).toBe(before.recommendedRetailPriceKgs);
+    expect(after.maximumRetailPriceKgs).toBe(1200);
+    expect(after.maximumRetailPriceKgs).not.toBe(after.recommendedRetailPriceKgs);
   });
 
   it('validates wholesale markups independently', () => {

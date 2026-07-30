@@ -2291,7 +2291,7 @@ export class PricingCatalogService {
       categoryId: product.categoryId,
       categoryName: category.nameRu ?? category.nameEn ?? '-',
       isActive: product.isActive,
-      maximumRetailMarkupPercent: markupRow.maximumRetailMarkupOverridePercent,
+      maximumRetailMarkupPercent: markupRow.effectiveMaximumRetailMarkupPercent,
       lastUpdated: product.updatedAt,
       updatedAt: product.updatedAt,
     };
@@ -2339,7 +2339,7 @@ export class PricingCatalogService {
       categoryId: product.categoryId,
       categoryName: category.nameRu ?? category.nameEn ?? '-',
       isActive: product.isActive,
-      maximumWholesaleMarkupPercent: markupRow.maximumWholesaleMarkupOverridePercent,
+      maximumWholesaleMarkupPercent: markupRow.effectiveMaximumWholesaleMarkupPercent,
       lastUpdated: product.updatedAt,
       updatedAt: product.updatedAt,
     };
@@ -2491,42 +2491,47 @@ export class PricingCatalogService {
       };
     }
 
-    const [branchPurchase, retailMin, retailRec, retailMax] = await Promise.all([
+    const [branchPurchase] = await Promise.all([
       this.pricingEngine.resolvePrice({
         productId: product.id,
         branchId: displayBranch.id,
         priceType: PricingEnginePriceType.BRANCH_PURCHASE,
       }),
-      this.pricingEngine.resolvePrice({
-        productId: product.id,
-        branchId: displayBranch.id,
-        priceType: PricingEnginePriceType.RETAIL_MINIMUM,
-      }),
-      this.pricingEngine.resolvePrice({
-        productId: product.id,
-        branchId: displayBranch.id,
-        priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
-      }),
-      this.pricingEngine.resolvePrice({
-        productId: product.id,
-        branchId: displayBranch.id,
-        priceType: PricingEnginePriceType.RETAIL_MAXIMUM,
-      }),
     ]);
 
     const masterBranchPriceKgs = branchPurchase.baseBranchPriceKgs;
     const effectiveBranchPriceKgs = branchPurchase.resolvedPriceKgs;
+    const category = this.defaultCategoryMaximumFields(product.productCategory);
+    const markupRow = buildRetailMarkupRow(
+      product as unknown as RetailMarkupInput & { id: string },
+      category,
+      effectiveBranchPriceKgs,
+    );
+    const masterMarkupRow = buildRetailMarkupRow(
+      product as unknown as RetailMarkupInput & { id: string },
+      category,
+      masterBranchPriceKgs,
+    );
 
     return {
       ...baseRow,
       effectiveBranchPriceKgs,
-      minimumRetailPriceKgs: retailMin.resolvedPriceKgs,
-      recommendedRetailPriceKgs: retailRec.resolvedPriceKgs,
-      maximumRetailPriceKgs: retailMax.resolvedPriceKgs,
+      minimumRetailMarkupPercent: markupRow.minimumRetailMarkupPercent,
+      minimumRetailPriceKgs: markupRow.minimumRetailPriceKgs,
+      recommendedRetailMarkupPercent: markupRow.recommendedRetailMarkupPercent,
+      recommendedRetailPriceKgs: markupRow.recommendedRetailPriceKgs,
+      inheritedMaximumRetailMarkupPercent: markupRow.inheritedMaximumRetailMarkupPercent,
+      maximumRetailMarkupOverridePercent: markupRow.maximumRetailMarkupOverridePercent,
+      effectiveMaximumRetailMarkupPercent: markupRow.effectiveMaximumRetailMarkupPercent,
+      maximumRetailMarkupPercent: markupRow.effectiveMaximumRetailMarkupPercent,
+      maximumRetailPriceKgs: markupRow.maximumRetailPriceKgs,
+      maximumRetailMarkupSource: markupRow.maximumRetailMarkupSource,
+      validationStatus: markupRow.validationStatus,
+      validationErrors: markupRow.validationErrors,
       masterBranchPriceKgs,
-      masterMinimumRetailPriceKgs: baseRow.minimumRetailPriceKgs,
-      masterRecommendedRetailPriceKgs: baseRow.recommendedRetailPriceKgs,
-      masterMaximumRetailPriceKgs: baseRow.maximumRetailPriceKgs,
+      masterMinimumRetailPriceKgs: masterMarkupRow.minimumRetailPriceKgs,
+      masterRecommendedRetailPriceKgs: masterMarkupRow.recommendedRetailPriceKgs,
+      masterMaximumRetailPriceKgs: masterMarkupRow.maximumRetailPriceKgs,
       ruleApplied: this.isRuleApplied(
         branchPurchase.appliedRuleType,
         masterBranchPriceKgs,
@@ -2573,42 +2578,47 @@ export class PricingCatalogService {
       };
     }
 
-    const [branchPurchase, wholesaleMin, wholesaleRec, wholesaleMax] = await Promise.all([
+    const [branchPurchase] = await Promise.all([
       this.pricingEngine.resolvePrice({
         productId: product.id,
         branchId: displayBranch.id,
         priceType: PricingEnginePriceType.BRANCH_PURCHASE,
       }),
-      this.pricingEngine.resolvePrice({
-        productId: product.id,
-        branchId: displayBranch.id,
-        priceType: PricingEnginePriceType.WHOLESALE_MINIMUM,
-      }),
-      this.pricingEngine.resolvePrice({
-        productId: product.id,
-        branchId: displayBranch.id,
-        priceType: PricingEnginePriceType.WHOLESALE_RECOMMENDED,
-      }),
-      this.pricingEngine.resolvePrice({
-        productId: product.id,
-        branchId: displayBranch.id,
-        priceType: PricingEnginePriceType.WHOLESALE_MAXIMUM,
-      }),
     ]);
 
     const masterBranchPriceKgs = branchPurchase.baseBranchPriceKgs;
     const effectiveBranchPriceKgs = branchPurchase.resolvedPriceKgs;
+    const category = this.defaultCategoryMaximumFields(product.productCategory);
+    const markupRow = buildWholesaleMarkupRow(
+      product as unknown as WholesaleMarkupInput & { id: string },
+      category,
+      effectiveBranchPriceKgs,
+    );
+    const masterMarkupRow = buildWholesaleMarkupRow(
+      product as unknown as WholesaleMarkupInput & { id: string },
+      category,
+      masterBranchPriceKgs,
+    );
 
     return {
       ...baseRow,
       effectiveBranchPriceKgs,
-      minimumWholesalePriceKgs: wholesaleMin.resolvedPriceKgs,
-      recommendedWholesalePriceKgs: wholesaleRec.resolvedPriceKgs,
-      maximumWholesalePriceKgs: wholesaleMax.resolvedPriceKgs,
+      minimumWholesaleMarkupPercent: markupRow.minimumWholesaleMarkupPercent,
+      minimumWholesalePriceKgs: markupRow.minimumWholesalePriceKgs,
+      recommendedWholesaleMarkupPercent: markupRow.recommendedWholesaleMarkupPercent,
+      recommendedWholesalePriceKgs: markupRow.recommendedWholesalePriceKgs,
+      inheritedMaximumWholesaleMarkupPercent: markupRow.inheritedMaximumWholesaleMarkupPercent,
+      maximumWholesaleMarkupOverridePercent: markupRow.maximumWholesaleMarkupOverridePercent,
+      effectiveMaximumWholesaleMarkupPercent: markupRow.effectiveMaximumWholesaleMarkupPercent,
+      maximumWholesaleMarkupPercent: markupRow.effectiveMaximumWholesaleMarkupPercent,
+      maximumWholesalePriceKgs: markupRow.maximumWholesalePriceKgs,
+      maximumWholesaleMarkupSource: markupRow.maximumWholesaleMarkupSource,
+      validationStatus: markupRow.validationStatus,
+      validationErrors: markupRow.validationErrors,
       masterBranchPriceKgs,
-      masterMinimumWholesalePriceKgs: baseRow.minimumWholesalePriceKgs,
-      masterRecommendedWholesalePriceKgs: baseRow.recommendedWholesalePriceKgs,
-      masterMaximumWholesalePriceKgs: baseRow.maximumWholesalePriceKgs,
+      masterMinimumWholesalePriceKgs: masterMarkupRow.minimumWholesalePriceKgs,
+      masterRecommendedWholesalePriceKgs: masterMarkupRow.recommendedWholesalePriceKgs,
+      masterMaximumWholesalePriceKgs: masterMarkupRow.maximumWholesalePriceKgs,
       ruleApplied: this.isRuleApplied(
         branchPurchase.appliedRuleType,
         masterBranchPriceKgs,
