@@ -4,8 +4,9 @@ import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import { useSearchParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
+import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/components/HqPaymentPermanentDeleteModal';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
-import { canConfirmSupplierPayment } from '@/lib/rbac';
+import { canConfirmSupplierPayment, canPermanentDeleteBusinessData } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -172,8 +173,10 @@ function CashierBillsPageContent() {
     images: Array<{ src: string; alt?: string; label?: string }>;
     initialIndex: number;
   } | null>(null);
+  const [paymentDeleteTarget, setPaymentDeleteTarget] = useState<BillRow | null>(null);
 
   const canAccess = canConfirmSupplierPayment(user);
+  const canPermanentDelete = canPermanentDeleteBusinessData(user);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -296,6 +299,45 @@ function CashierBillsPageContent() {
       setConfirmError('');
       setPinNotice('');
       await refreshAfterAction(row);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function buildPaymentDeleteSummary(row: BillRow, detail?: BillDetail | null): HqPaymentDeleteSummary {
+    const d = detail && String(detail.id) === row.id ? detail : null;
+    return {
+      paymentNumber: row.paymentNumber,
+      amount: formatMoney(Number(d?.amount ?? row.amount)),
+      currency: row.currency,
+      paymentDate:
+        (d?.paidAt as string | undefined) ||
+        (d?.sentToCashierAt as string | undefined) ||
+        row.sentToCashierAt ||
+        null,
+      accountOrCashbox:
+        (d?.debitAccount as { name?: string } | undefined)?.name || row.debitAccountName || null,
+      payer: (d?.sender as { fullName?: string } | undefined)?.fullName || row.sender?.fullName || null,
+      recipient:
+        (d?.recipient as { name?: string } | undefined)?.name || row.recipientName || null,
+    };
+  }
+
+  async function confirmPermanentDeletePayment() {
+    const row = paymentDeleteTarget;
+    if (!row) return;
+    setSaving(true);
+    setActionError('');
+    try {
+      await apiFetch(`/procurement/cashier-bills/${row.source}/${row.id}/permanent-delete`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setPaymentDeleteTarget(null);
+      setSelected(null);
+      await load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -855,6 +897,19 @@ function CashierBillsPageContent() {
                         {t('finance.cashierBills.fail')}
                       </button>
                     ) : null}
+                    {canPermanentDelete ? (
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => {
+                          const billRow = selectedAsRow();
+                          if (billRow) setPaymentDeleteTarget(billRow);
+                        }}
+                        className="rounded border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 disabled:opacity-50"
+                      >
+                        {t('finance.paymentPermanentDelete.action')}
+                      </button>
+                    ) : null}
                   </div>
                 );
               })()}
@@ -1002,6 +1057,16 @@ function CashierBillsPageContent() {
             onClose={() => setQrPreview(null)}
           />
         ) : null}
+
+        <HqPaymentPermanentDeleteModal
+          open={!!paymentDeleteTarget}
+          payment={
+            paymentDeleteTarget ? buildPaymentDeleteSummary(paymentDeleteTarget, selected) : null
+          }
+          loading={saving}
+          onClose={() => setPaymentDeleteTarget(null)}
+          onConfirm={() => void confirmPermanentDeletePayment()}
+        />
       </div>
     </ProtectedShell>
   );

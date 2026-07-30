@@ -8,6 +8,8 @@ import { AlertType, FinanceExpenseStatus, FinanceLedgerEntryType } from '@prisma
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { canPermanentDeleteBusinessData } from '../rbac/rbac';
+import { auditPaymentPermanentlyDeleted } from '../rbac/payment-permanent-delete.audit';
 import {
   assertCanAccessAccountScope,
   canManageFinanceAccounts,
@@ -108,6 +110,58 @@ export class FinanceExpensesService {
       }
 
       return expense;
+    });
+  }
+
+  async permanentlyDelete(user: AuthUser, id: string, dto: { reason?: string }) {
+    if (!canPermanentDeleteBusinessData(user)) {
+      throw new ForbiddenException('Only HQ SysAdmin can permanently delete payments');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.financeExpense.findUnique({
+        where: { id },
+        include: { account: true },
+      });
+      if (!expense) throw new NotFoundException('Finance expense not found');
+
+      const oldStatus = expense.status;
+      const amount = roundMoney(Number(expense.amount));
+
+      if (expense.status === FinanceExpenseStatus.PAID && amount > 0) {
+        await this.ledgerService.postLedgerEntry(tx, user, {
+          accountId: expense.accountId,
+          branchId: expense.branchId,
+          entryType: FinanceLedgerEntryType.ADJUSTMENT,
+          amount,
+          currency: expense.currency,
+          referenceType: 'FinanceExpensePermanentDeleteReversal',
+          referenceId: expense.id,
+          notes: `Permanent delete reversal expense ${expense.expenseNumber}`,
+        });
+      }
+
+      await tx.financeExpense.delete({ where: { id } });
+
+      await auditPaymentPermanentlyDeleted(tx, user, {
+        paymentId: expense.id,
+        paymentType: 'FinanceExpense',
+        paymentNumber: expense.expenseNumber,
+        amount,
+        currency: expense.currency,
+        paymentDate: expense.expenseDate.toISOString(),
+        accountId: expense.accountId,
+        cashboxId: expense.accountId,
+        invoiceId: null,
+        oldInvoiceStatus: oldStatus,
+        newInvoiceStatus: 'DELETED',
+        reason: dto.reason,
+      });
+
+      return {
+        success: true,
+        deletedPaymentId: expense.id,
+        paymentNumber: expense.expenseNumber,
+      };
     });
   }
 }

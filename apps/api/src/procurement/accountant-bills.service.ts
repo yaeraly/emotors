@@ -14,9 +14,10 @@ import {
   TransportExpenseType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { FinanceExpensesService } from '../finance/finance-expenses.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { canCreateSupplierPayment, hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
+import { canCreateSupplierPayment, canPermanentDeleteBusinessData, hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import {
   AccountantBillListItem,
   AccountantBillRequestType,
@@ -34,6 +35,7 @@ import {
 } from './accountant-bills.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
+import type { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
 
 export type AccountantBillsQuery = {
   requestType?: string;
@@ -56,6 +58,7 @@ export class AccountantBillsService {
     private readonly notifications: NotificationsService,
     private readonly supplierPayments: SupplierPaymentWorkflowService,
     private readonly transportExpenses: TransportExpenseService,
+    private readonly financeExpenses: FinanceExpensesService,
   ) {}
 
   async list(user: AuthUser, query: AccountantBillsQuery = {}) {
@@ -338,6 +341,31 @@ export class AccountantBillsService {
     }
 
     throw new BadRequestException('Approve is not supported for this request type');
+  }
+
+  async permanentlyDelete(
+    user: AuthUser,
+    source: AccountantBillSource,
+    id: string,
+    dto: PermanentDeleteHqPaymentDto,
+  ) {
+    if (!canPermanentDeleteBusinessData(user)) {
+      throw new ForbiddenException('Only HQ SysAdmin can permanently delete payments');
+    }
+    if (source === 'SUPPLIER_INVOICE') {
+      const paymentId = String(dto.paymentId || '').trim();
+      if (!paymentId) {
+        throw new BadRequestException('paymentId is required to delete a supplier payment');
+      }
+      return this.supplierPayments.permanentlyDeletePayment(user, id, paymentId, dto);
+    }
+    if (source === 'TRANSPORT_EXPENSE') {
+      return this.transportExpenses.permanentlyDelete(user, id, dto);
+    }
+    if (source === 'FINANCE_EXPENSE') {
+      return this.financeExpenses.permanentlyDelete(user, id, dto);
+    }
+    throw new BadRequestException('Permanent delete is not supported for this request type');
   }
 
   private assertAccountant(user: AuthUser) {

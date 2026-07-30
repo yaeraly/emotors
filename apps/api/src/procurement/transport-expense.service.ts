@@ -30,9 +30,11 @@ import {
   canConfirmSupplierPayment,
   canCreateSupplierPayment,
   canCreateProcurementOrder,
+  canPermanentDeleteBusinessData,
   hasAnyFullAccessRole,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { auditPaymentPermanentlyDeleted } from '../rbac/payment-permanent-delete.audit';
 import {
   ApproveTransportExpenseDto,
   ConfirmTransportExpenseDto,
@@ -40,6 +42,7 @@ import {
   ReturnTransportExpenseDto,
   UpdateTransportExpenseDto,
 } from './dto/transport-expense.dto';
+import type { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
 import {
   assertCargoTotalsMatchServer,
   calculateCargoPaymentAmounts,
@@ -1406,6 +1409,102 @@ export class TransportExpenseService {
       );
     } catch {
       // Weight/finalized gates may block recalculation; section totals above remain updated.
+    }
+  }
+
+  permanentlyDelete(user: AuthUser, id: string, dto: PermanentDeleteHqPaymentDto) {
+    if (!canPermanentDeleteBusinessData(user)) {
+      throw new ForbiddenException('Only HQ SysAdmin can permanently delete payments');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundException('Transport expense not found');
+
+      const oldInvoiceStatus = expense.status;
+      const paidKgs = roundMoney(Number(expense.paidAmountKgs || 0));
+
+      if (paidKgs > 0) {
+        await this.assertNoIrreversibleWarehouseOps(tx, expense.procurementOrderId);
+        const accountId = expense.financeAccountId;
+        if (!accountId) {
+          throw new BadRequestException('Paid transport expense is missing finance account linkage');
+        }
+        const account = await this.assertHqAccount(tx, accountId);
+        const reason = dto.reason?.trim() || 'Permanent delete by HQ SysAdmin';
+        await this.ledgerService.postLedgerEntry(tx, user, {
+          accountId: account.id,
+          branchId: null,
+          entryType: FinanceLedgerEntryType.ADJUSTMENT,
+          amount: paidKgs,
+          currency: 'KGS',
+          referenceType: 'ProcurementTransportExpensePermanentDeleteReversal',
+          referenceId: expense.id,
+          notes: `Permanent delete reversal transport expense ${expense.expenseNumber}: ${reason}`,
+        });
+      }
+
+      await tx.fileAttachment.updateMany({
+        where: {
+          entityId: expense.id,
+          deletedAt: null,
+          entityType: {
+            in: [
+              FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE,
+              FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT,
+            ],
+          },
+        },
+        data: { deletedAt: new Date() },
+      });
+
+      const orderId = expense.procurementOrderId;
+      const expenseType = expense.expenseType;
+      await tx.procurementTransportExpense.delete({ where: { id } });
+
+      if (orderId) {
+        const anchor = await tx.procurementTransportExpense.findFirst({
+          where: { procurementOrderId: orderId, expenseType },
+        });
+        if (anchor) {
+          await this.syncOrderSectionCostFromPaidExpenses(tx, user, anchor);
+        }
+      }
+
+      await auditPaymentPermanentlyDeleted(tx, user, {
+        paymentId: expense.id,
+        paymentType: 'ProcurementTransportExpense',
+        paymentNumber: expense.expenseNumber,
+        amount: Number(expense.amount),
+        currency: expense.currency,
+        paymentDate: expense.paidAt?.toISOString() ?? expense.submittedAt?.toISOString() ?? null,
+        accountId: expense.financeAccountId,
+        cashboxId: expense.financeAccountId,
+        invoiceId: orderId ?? null,
+        oldInvoiceStatus,
+        newInvoiceStatus: 'DELETED',
+        reason: dto.reason,
+      });
+
+      return {
+        success: true,
+        deletedPaymentId: expense.id,
+        paymentNumber: expense.expenseNumber,
+      };
+    });
+  }
+
+  private async assertNoIrreversibleWarehouseOps(
+    tx: Tx,
+    procurementOrderId: string | null | undefined,
+  ) {
+    if (!procurementOrderId) return;
+    const receivingCount = await tx.procurementGoodsReceiving.count({
+      where: { procurementOrderId, deletedAt: null },
+    });
+    if (receivingCount > 0) {
+      throw new BadRequestException(
+        'Невозможно удалить платеж: на основании этого платежа уже выполнена необратимая складская операция.',
+      );
     }
   }
 

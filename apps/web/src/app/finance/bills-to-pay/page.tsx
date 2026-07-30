@@ -9,9 +9,10 @@ import {
   FinanceLoadingState,
 } from '@/components/finance/FinanceLayout';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
+import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/components/HqPaymentPermanentDeleteModal';
 import { API_URL, apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
-import { canCreateSupplierPayment } from '@/lib/rbac';
+import { canCreateSupplierPayment, canPermanentDeleteBusinessData } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 
 type BillSource = 'SUPPLIER_INVOICE' | 'TRANSPORT_EXPENSE' | 'FINANCE_EXPENSE';
@@ -136,8 +137,13 @@ function BillsToPayPageContent() {
     images: Array<{ src: string; alt?: string; label?: string }>;
     initialIndex: number;
   } | null>(null);
+  const [paymentDeleteContext, setPaymentDeleteContext] = useState<{
+    bill: BillDetail;
+    payment?: Record<string, unknown>;
+  } | null>(null);
 
   const canAccess = canCreateSupplierPayment(user);
+  const canPermanentDelete = canPermanentDeleteBusinessData(user);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -218,6 +224,73 @@ function BillsToPayPageContent() {
         const detail = await apiFetch<BillDetail>(`/procurement/bills-to-pay/${bill.source}/${bill.id}`);
         setSelected(detail);
       }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function buildPaymentDeleteSummary(
+    bill: BillDetail,
+    payment?: Record<string, unknown>,
+  ): HqPaymentDeleteSummary {
+    const paymentNumber = payment
+      ? `PAY-${payment.sequenceNumber ?? payment.id}`
+      : bill.requestNumber;
+    const amountValue = payment
+      ? payment.amountYuan != null
+        ? Number(payment.amountYuan).toFixed(2)
+        : Number(payment.amountKgs ?? payment.amount ?? 0).toFixed(2)
+      : Number(bill.amount).toFixed(2);
+    const currency = payment
+      ? payment.amountYuan != null
+        ? 'CNY'
+        : 'KGS'
+      : bill.currency;
+    return {
+      paymentNumber: String(paymentNumber),
+      amount: amountValue,
+      currency,
+      paymentDate:
+        (payment?.paidAt as string | undefined) ||
+        (payment?.sentToCashierAt as string | undefined) ||
+        (payment?.paymentDate as string | undefined) ||
+        bill.submittedAt ||
+        null,
+      accountOrCashbox:
+        (payment?.actualFinanceAccount as { name?: string } | undefined)?.name ||
+        (payment?.intendedFinanceAccount as { name?: string } | undefined)?.name ||
+        bill.detail?.financeAccount?.name ||
+        null,
+      payer: bill.sender?.fullName || null,
+      recipient:
+        (payment?.recipientName as string | undefined) ||
+        bill.recipientName ||
+        null,
+    };
+  }
+
+  async function confirmPermanentDeletePayment() {
+    const ctx = paymentDeleteContext;
+    if (!ctx) return;
+    setSaving(true);
+    setActionError('');
+    try {
+      const body: Record<string, unknown> = {};
+      if (ctx.payment?.id) {
+        body.paymentId = ctx.payment.id;
+      }
+      await apiFetch(
+        `/procurement/bills-to-pay/${ctx.bill.source}/${ctx.bill.id}/permanent-delete`,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        },
+      );
+      setPaymentDeleteContext(null);
+      setSelected(null);
+      await load();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -655,6 +728,7 @@ function BillsToPayPageContent() {
           t={t}
           bill={selected}
           saving={saving}
+          canPermanentDelete={canPermanentDelete}
           onClose={() => setSelected(null)}
           onTakeReview={() => void runAction('take-review')}
           onApprove={() => {
@@ -669,6 +743,10 @@ function BillsToPayPageContent() {
           onCreatePayment={() => void openPaymentModal(selected)}
           onEditPayment={(payment) => void openEditPayment(payment)}
           onPayPayment={(payment) => void payDraftPayment(payment)}
+          onPermanentDeletePayment={(payment) =>
+            setPaymentDeleteContext({ bill: selected, payment })
+          }
+          onPermanentDeleteBill={() => setPaymentDeleteContext({ bill: selected })}
           onShowQr={(images, initialIndex) => setQrPreview({ images, initialIndex })}
         />
       ) : null}
@@ -937,6 +1015,21 @@ function BillsToPayPageContent() {
           onClose={() => setQrPreview(null)}
         />
       ) : null}
+
+      <HqPaymentPermanentDeleteModal
+        open={!!paymentDeleteContext}
+        payment={
+          paymentDeleteContext
+            ? buildPaymentDeleteSummary(
+                paymentDeleteContext.bill,
+                paymentDeleteContext.payment,
+              )
+            : null
+        }
+        loading={saving}
+        onClose={() => setPaymentDeleteContext(null)}
+        onConfirm={() => void confirmPermanentDeletePayment()}
+      />
     </FinanceLayout>
   );
 }
@@ -954,6 +1047,7 @@ function DetailDrawer({
   t,
   bill,
   saving,
+  canPermanentDelete,
   onClose,
   onTakeReview,
   onApprove,
@@ -962,11 +1056,14 @@ function DetailDrawer({
   onCreatePayment,
   onEditPayment,
   onPayPayment,
+  onPermanentDeletePayment,
+  onPermanentDeleteBill,
   onShowQr,
 }: {
   t: (key: string) => string;
   bill: BillDetail;
   saving: boolean;
+  canPermanentDelete: boolean;
   onClose: () => void;
   onTakeReview: () => void;
   onApprove: () => void;
@@ -975,6 +1072,8 @@ function DetailDrawer({
   onCreatePayment: () => void;
   onEditPayment: (payment: any) => void;
   onPayPayment: (payment: any) => void;
+  onPermanentDeletePayment: (payment: Record<string, unknown>) => void;
+  onPermanentDeleteBill: () => void;
   onShowQr: (
     images: Array<{ src: string; alt?: string; label?: string }>,
     initialIndex: number,
@@ -1253,6 +1352,15 @@ function DetailDrawer({
                                   {t('finance.billsToPay.pay')}
                                 </button>
                               </div>
+                            ) : canPermanentDelete ? (
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => onPermanentDeletePayment(payment)}
+                                className="rounded border border-red-300 px-1.5 py-0.5 font-semibold text-red-700 disabled:opacity-40"
+                              >
+                                {t('finance.paymentPermanentDelete.action')}
+                              </button>
                             ) : (
                               <span className="text-slate-400">—</span>
                             )}
@@ -1318,6 +1426,16 @@ function DetailDrawer({
               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
             >
               {t('finance.billsToPay.createPartialPayment')}
+            </button>
+          ) : null}
+          {canPermanentDelete && bill.source !== 'SUPPLIER_INVOICE' ? (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onPermanentDeleteBill}
+              className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-semibold text-red-700 disabled:opacity-40"
+            >
+              {t('finance.paymentPermanentDelete.action')}
             </button>
           ) : null}
         </div>

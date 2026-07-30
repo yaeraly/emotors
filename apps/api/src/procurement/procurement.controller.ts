@@ -27,6 +27,7 @@ import { UpdateImportCostsDto } from './dto/update-import-costs.dto';
 import { UpdateLocalTransportDto } from './dto/update-local-transport.dto';
 import { UpdateSvhToHqTransportDto } from './dto/update-svh-to-hq-transport.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
+import { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
 import { UnlockProcurementOrderDto } from './dto/unlock-procurement-order.dto';
 import { DeleteArchiveDto } from '../common/dto/delete-archive.dto';
 import { AccountantBillsService, type AccountantBillsQuery } from './accountant-bills.service';
@@ -303,6 +304,16 @@ export class ProcurementController {
     return this.accountantBillsService.approve(user, source, id, dto);
   }
 
+  @Post('bills-to-pay/:source/:id/permanent-delete')
+  permanentDeleteBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: AccountantBillSource,
+    @Param('id') id: string,
+    @Body() dto: PermanentDeleteHqPaymentDto,
+  ) {
+    return this.accountantBillsService.permanentlyDelete(user, source, id, dto);
+  }
+
   @Get('cashier-bills')
   @RequirePermissions('payments.manage', 'finance.view')
   listCashierBills(@CurrentUser() user: AuthUser, @Query() query: CashierBillsQuery) {
@@ -371,6 +382,16 @@ export class ProcurementController {
     @Body() dto: { reason?: string },
   ) {
     return this.cashierBillsService.reportFailure(user, source, id, { reason: dto?.reason || '' });
+  }
+
+  @Post('cashier-bills/:source/:id/permanent-delete')
+  permanentDeleteCashierBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: CashierBillSource,
+    @Param('id') id: string,
+    @Body() dto: PermanentDeleteHqPaymentDto,
+  ) {
+    return this.cashierBillsService.permanentlyDelete(user, source, id, dto);
   }
 
   @Get('cashier-payment-queue')

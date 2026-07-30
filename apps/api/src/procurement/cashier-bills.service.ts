@@ -18,7 +18,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { canConfirmSupplierPayment } from '../rbac/rbac';
+import { canConfirmSupplierPayment, canPermanentDeleteBusinessData } from '../rbac/rbac';
 import { assertHqCashierAssignedAccount } from '../finance/finance-assignment.util';
 import {
   assertCashierCannotMutateApprovedAmount,
@@ -36,6 +36,7 @@ import {
 } from './cashier-bills.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
+import type { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
 
 export type CashierBillsQuery = {
   requestType?: string;
@@ -174,6 +175,34 @@ export class CashierBillsService {
       return this.failSupplierPayment(user, id, reason);
     }
     return this.failTransportExpense(user, id, reason);
+  }
+
+  async permanentlyDelete(
+    user: AuthUser,
+    source: CashierBillSource,
+    id: string,
+    dto: PermanentDeleteHqPaymentDto,
+  ) {
+    if (!canPermanentDeleteBusinessData(user)) {
+      throw new ForbiddenException('Only HQ SysAdmin can permanently delete payments');
+    }
+    if (source === 'SUPPLIER_PAYMENT') {
+      const payment = await this.prisma.procurementSupplierPayment.findUnique({
+        where: { id },
+        select: { procurementOrderId: true },
+      });
+      if (!payment) throw new NotFoundException('Payment task not found');
+      return this.supplierPayments.permanentlyDeletePayment(
+        user,
+        payment.procurementOrderId,
+        id,
+        dto,
+      );
+    }
+    if (source === 'TRANSPORT_EXPENSE') {
+      return this.transportExpenses.permanentlyDelete(user, id, dto);
+    }
+    throw new BadRequestException('Unknown cashier bill source');
   }
 
   private assertCashier(user: AuthUser) {

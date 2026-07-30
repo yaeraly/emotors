@@ -29,6 +29,6 @@ import { FinanceTransfersService } from './finance-transfers.service';
     FinanceExpensesService,
     FinanceReconciliationService,
   ],
-  exports: [FinanceLedgerService, FinanceAccountsService],
+  exports: [FinanceLedgerService, FinanceAccountsService, FinanceExpensesService],
 })
 export class FinanceModule {}

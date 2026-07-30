@@ -33,6 +33,7 @@ import {
   canConfirmSupplierPayment,
   canCreateSupplierPayment,
   canEditSupplierPayment,
+  canPermanentDeleteBusinessData,
   canReturnSupplierPaymentToAccountant,
   canReverseSupplierPayment,
   canSendProcurementInvoiceToAccountant,
@@ -42,6 +43,7 @@ import {
   hasAnyFullAccessRole,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { auditPaymentPermanentlyDeleted } from '../rbac/payment-permanent-delete.audit';
 import { ConfirmSupplierPaymentDto } from './dto/confirm-supplier-payment.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { ReturnSupplierPaymentDto } from './dto/return-supplier-payment.dto';
@@ -49,6 +51,7 @@ import { ReverseSupplierPaymentDto } from './dto/reverse-supplier-payment.dto';
 import { SendInvoiceToAccountantDto } from './dto/send-invoice-to-accountant.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
+import type { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
 import { LandedCostService } from './landed-cost.service';
 import {
   calculateAmountKgs,
@@ -1264,6 +1267,104 @@ export class SupplierPaymentWorkflowService {
     });
   }
 
+  permanentlyDeletePayment(
+    user: AuthUser,
+    orderId: string,
+    paymentId: string,
+    dto: PermanentDeleteHqPaymentDto,
+  ) {
+    if (!canPermanentDeleteBusinessData(user)) {
+      throw new ForbiddenException('Only HQ SysAdmin can permanently delete payments');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOrder(tx, orderId);
+      const payment = await this.lockPayment(tx, order.id, paymentId);
+      const oldInvoiceStatus = order.supplierPaymentStatus ?? null;
+      const paymentNumber = `PAY-${payment.sequenceNumber}`;
+      const paymentDate =
+        payment.paidAt?.toISOString() ??
+        payment.paymentDate?.toISOString() ??
+        payment.sentToCashierAt?.toISOString() ??
+        null;
+      const accountId = payment.actualFinanceAccountId ?? payment.intendedFinanceAccountId ?? null;
+
+      if (payment.status === ProcurementSupplierPaymentStatus.ACTIVE) {
+        await this.assertNoIrreversibleWarehouseOps(tx, order.id);
+        if (!payment.ledgerEntryId || !payment.actualFinanceAccountId) {
+          throw new BadRequestException('Completed payment is missing ledger linkage; cannot delete safely');
+        }
+        const reason = dto.reason?.trim() || 'Permanent delete by HQ SysAdmin';
+        const restoreAmount = resolveSupplierPaymentKgs({
+          amountKgs: Number(payment.amountKgs),
+          actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+          approvedAmountKgs: Number(payment.approvedAmountKgs),
+          amountYuan: Number(payment.amountYuan),
+          exchangeRate: Number(payment.exchangeRate),
+        });
+        const account = await this.assertHqFinanceAccount(tx, payment.actualFinanceAccountId, true);
+        await this.financeLedgerService.postLedgerEntry(tx, user, {
+          accountId: account.id,
+          branchId: null,
+          entryType: FinanceLedgerEntryType.ADJUSTMENT,
+          amount: restoreAmount,
+          currency: account.currency,
+          referenceType: 'ProcurementSupplierPaymentPermanentDeleteReversal',
+          referenceId: payment.id,
+          notes: `Permanent delete reversal China purchase ${order.orderNumber} payment #${payment.sequenceNumber}: ${reason}`,
+        });
+      } else if (payment.status === ProcurementSupplierPaymentStatus.REVERSED) {
+        // Ledger already reversed — do not post a second adjustment.
+      } else if (
+        payment.status === ProcurementSupplierPaymentStatus.VOID ||
+        payment.status === ProcurementSupplierPaymentStatus.CANCELLED
+      ) {
+        // No ledger impact.
+      } else {
+        // DRAFT, PENDING_CASHIER, RETURNED — no ledger entries yet.
+      }
+
+      await tx.fileAttachment.updateMany({
+        where: {
+          entityId: payment.id,
+          deletedAt: null,
+          entityType: FileAttachmentEntityType.SUPPLIER_PAYMENT,
+        },
+        data: { deletedAt: new Date() },
+      });
+
+      await tx.procurementSupplierPayment.delete({ where: { id: payment.id } });
+
+      const synced = await this.syncOrderPaymentState(
+        tx,
+        user,
+        order.id,
+        dto.reason?.trim() || 'Supplier payment permanently deleted',
+      );
+
+      await auditPaymentPermanentlyDeleted(tx, user, {
+        paymentId: payment.id,
+        paymentType: 'ProcurementSupplierPayment',
+        paymentNumber,
+        amount: Number(payment.amountYuan),
+        currency: 'CNY',
+        paymentDate,
+        accountId,
+        cashboxId: accountId,
+        invoiceId: order.id,
+        oldInvoiceStatus,
+        newInvoiceStatus: synced.supplierPaymentStatus ?? null,
+        reason: dto.reason,
+      });
+
+      return {
+        success: true,
+        deletedPaymentId: payment.id,
+        paymentNumber,
+        order: synced,
+      };
+    });
+  }
+
   toPaymentResponse(payment: any) {
     return {
       ...payment,
@@ -1449,6 +1550,17 @@ export class SupplierPaymentWorkflowService {
     const order = await tx.procurementOrder.findFirst({ where: { id: orderId, deletedAt: null } });
     if (!order) throw new NotFoundException('Procurement order not found');
     return order;
+  }
+
+  private async assertNoIrreversibleWarehouseOps(tx: Tx, orderId: string) {
+    const receivingCount = await tx.procurementGoodsReceiving.count({
+      where: { procurementOrderId: orderId, deletedAt: null },
+    });
+    if (receivingCount > 0) {
+      throw new BadRequestException(
+        'Невозможно удалить платеж: на основании этого платежа уже выполнена необратимая складская операция.',
+      );
+    }
   }
 
   private async lockPayment(tx: Tx, orderId: string, paymentId: string) {
