@@ -28,6 +28,7 @@ import {
   USER_DELETE_ACTIVE_OPERATIONS_MESSAGE,
   USER_DELETE_LAST_CEO_MESSAGE,
   USER_DELETE_SELF_MESSAGE,
+  USER_PERMANENT_DELETE_HISTORY_MESSAGE,
 } from '../lifecycle/hq-ceo-lifecycle.constants';
 import { assertCanPermanentDeleteBusinessData } from '../rbac/permanent-delete.util';
 import { EMPLOYEE_ID_GENERATION_FAILED, generateBranchEmployeeId } from './employee-id.util';
@@ -349,11 +350,16 @@ export class UsersService {
           reason: trimmedReason,
         });
       });
-      return { success: true, archived: false, deactivated: false, message: 'Пользователь удалён' };
+      return {
+        success: true,
+        permanentlyDeleted: true,
+        deactivated: false,
+        message: 'Пользователь удалён',
+      };
     }
 
     if (!trimmedReason) {
-      throw new BadRequestException('Укажите причину деактивации пользователя с историей операций');
+      throw new BadRequestException('Укажите причину удаления пользователя с историей операций');
     }
 
     const archived = await this.prisma.$transaction(async (tx) => {
@@ -398,9 +404,9 @@ export class UsersService {
 
     return {
       success: true,
-      archived: true,
+      permanentlyDeleted: false,
       deactivated: true,
-      message: 'Пользователь деактивирован',
+      message: USER_PERMANENT_DELETE_HISTORY_MESSAGE,
       user: this.safeUser(archived),
     };
   }

@@ -84,3 +84,15 @@ export const USER_DELETE_LAST_CEO_MESSAGE =
 
 export const USER_DELETE_ACTIVE_OPERATIONS_MESSAGE =
   'Колдонуучуда активдүү операциялар бар. Адегенде аларды башка кызматкерге өткөрүңүз.';
+
+export const BRANCH_PERMANENT_DELETE_HISTORY_MESSAGE =
+  'Постоянное удаление филиала невозможно: есть связанные бизнес-данные. Сначала завершите или перенесите операции.';
+
+export const WAREHOUSE_PERMANENT_DELETE_HISTORY_MESSAGE =
+  'Постоянное удаление склада невозможно: есть история складских операций.';
+
+export const BRANCH_PERMANENT_DELETE_USERS_MESSAGE =
+  'Постоянное удаление филиала невозможно: в филиале есть пользователи. Сначала удалите или перенесите их.';
+
+export const USER_PERMANENT_DELETE_HISTORY_MESSAGE =
+  'Постоянное удаление пользователя невозможно: есть история операций. Пользователь будет деактивирован.';

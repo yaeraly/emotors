@@ -105,13 +105,13 @@ export default function BranchesPage() {
     setDeleteLoading(true);
     setError('');
     try {
-      const result = await apiFetch<{ success: boolean; archived?: boolean }>(
+      const result = await apiFetch<{ success: boolean; permanentlyDeleted?: boolean; message?: string }>(
         `/branches/${deleteTarget.id}`,
         { method: 'DELETE', body: JSON.stringify({ reason }) },
       );
       if (!result.success) throw new Error(t('branches.deleteFailed'));
       setDeleteTarget(null);
-      setSuccess(result.archived ? t('lifecycle.branchArchivedSuccess') : t('branches.deletedSuccess'));
+      setSuccess(t('branches.deletedSuccess'));
       await loadBranches();
     } catch (err) {
       setError(err instanceof Error ? err.message : t('branches.deleteFailed'));
@@ -264,7 +264,7 @@ export default function BranchesPage() {
         entityType="branch"
         entityName={deleteTarget?.name ?? ''}
         entityCode={deleteTarget?.code}
-        requireReason
+        requireReason={false}
         loading={deleteLoading}
         onClose={() => setDeleteTarget(null)}
         onConfirm={(reason) => void confirmDeleteBranch(reason)}

@@ -163,7 +163,7 @@ export default function UserDetailPage() {
     setError('');
     setDeleteLoading(true);
     try {
-      const result = await apiFetch<{ success: boolean; archived?: boolean; message?: string }>(
+      const result = await apiFetch<{ success: boolean; permanentlyDeleted?: boolean; deactivated?: boolean; message?: string }>(
         `/users/${id}`,
         {
           method: 'DELETE',
@@ -171,15 +171,11 @@ export default function UserDetailPage() {
         },
       );
       setShowDeleteModal(false);
-      if (result.archived) {
-        setDeleteSuccess(t('lifecycle.userDeactivatedSuccess'));
-        await load();
-        window.setTimeout(() => {
-          window.location.href = '/users';
-        }, 1200);
-      } else {
+      if (result.permanentlyDeleted) {
         window.location.href = '/users';
+        return;
       }
+      setDeleteSuccess(result.message ?? t('lifecycle.userDeactivatedSuccess'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {

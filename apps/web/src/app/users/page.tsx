@@ -139,13 +139,23 @@ export default function UsersPage() {
     setDeleteLoading(true);
     setError('');
     try {
-      await apiFetch(`/users/${deleteTarget.id}`, {
+      const result = await apiFetch<{
+        success: boolean;
+        permanentlyDeleted?: boolean;
+        deactivated?: boolean;
+        message?: string;
+      }>(`/users/${deleteTarget.id}`, {
         method: 'DELETE',
         body: JSON.stringify({ reason }),
       });
+      const targetId = deleteTarget.id;
       setDeleteTarget(null);
-      setSuccessMessage(t('lifecycle.userDeactivatedSuccess'));
-      setUsers((current) => current.filter((row) => row.id !== deleteTarget.id));
+      setUsers((current) => current.filter((row) => row.id !== targetId));
+      setSuccessMessage(
+        result.permanentlyDeleted
+          ? t('lifecycle.userDeletedSuccess')
+          : (result.message ?? t('lifecycle.userDeactivatedSuccess')),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {

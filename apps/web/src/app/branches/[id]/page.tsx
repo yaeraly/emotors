@@ -327,7 +327,7 @@ export default function BranchDetailPage() {
     setSuccess('');
 
     try {
-      const result = await apiFetch<{ success?: boolean; archived?: boolean; message?: string }>(
+      const result = await apiFetch<{ success?: boolean; permanentlyDeleted?: boolean; message?: string }>(
         `/branches/${branch.id}`,
         {
           method: 'DELETE',
@@ -339,10 +339,7 @@ export default function BranchDetailPage() {
         throw new Error(t('branches.deleteFailed'));
       }
 
-      const successMessage = result.archived
-        ? t('lifecycle.branchArchivedSuccess')
-        : t('branches.deletedSuccess');
-      window.localStorage.setItem('emotors-branch-deleted', successMessage);
+      window.localStorage.setItem('emotors-branch-deleted', t('branches.deletedSuccess'));
       setDeleteModalOpen(false);
       router.replace('/branches');
     } catch (err) {
@@ -357,7 +354,7 @@ export default function BranchDetailPage() {
     setWarehouseDeleting(true);
     setError('');
     try {
-      const result = await apiFetch<{ success: boolean; archived?: boolean; message?: string }>(
+      const result = await apiFetch<{ success: boolean; permanentlyDeleted?: boolean; message?: string }>(
         `/branch-warehouses/${branchWarehouseId}`,
         {
           method: 'DELETE',
@@ -365,11 +362,7 @@ export default function BranchDetailPage() {
         },
       );
       setWarehouseDeleteModalOpen(false);
-      setSuccess(
-        result.archived
-          ? t('lifecycle.warehouseArchivedSuccess')
-          : t('lifecycle.warehouseDeletedSuccess'),
-      );
+      setSuccess(t('lifecycle.warehouseDeletedSuccess'));
       setBranchWarehouseId(null);
       setBranchWarehouseCode(null);
       setBranchWarehouseMissing(true);
@@ -643,7 +636,7 @@ export default function BranchDetailPage() {
         entityType="branch"
         entityName={branch?.name ?? ''}
         entityCode={branch?.code}
-        requireReason
+        requireReason={false}
         loading={deleting}
         onClose={() => setDeleteModalOpen(false)}
         onConfirm={(reason) => void confirmDeleteBranch(reason)}
@@ -653,7 +646,7 @@ export default function BranchDetailPage() {
         entityType="warehouse"
         entityName={branch?.name ? `${branch.name} — склад` : t('branchWarehouse.warehouseLabel')}
         entityCode={branchWarehouseCode ?? undefined}
-        requireReason
+        requireReason={false}
         loading={warehouseDeleting}
         onClose={() => setWarehouseDeleteModalOpen(false)}
         onConfirm={(reason) => void confirmDeleteWarehouse(reason)}

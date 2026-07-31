@@ -3,6 +3,7 @@ import { Role } from '@prisma/client';
 import {
   canHqCeoManageLifecycle,
   assertCanHqCeoManageLifecycle,
+  assessBranchDeleteBlocking,
   assessBranchWarehouseDeleteBlocking,
 } from './hq-ceo-lifecycle.util';
 import { BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE } from './hq-ceo-lifecycle.constants';
@@ -110,6 +111,39 @@ async function run() {
     'wh-6',
   );
   assert(countWarehouse.blocked === true, '10. Warehouse with open inventory count is blocked');
+
+  const usersOnBranch = await assessBranchDeleteBlocking(
+    {
+      warehouse: {
+        findMany: async () => [{ id: 'wh-branch' }],
+        count: async () => 1,
+      },
+      inventoryBalance: {
+        findMany: async () => [],
+      },
+      fifoInventoryBatch: {
+        aggregate: async () => ({ _sum: { remainingQuantity: 0 } }),
+      },
+      user: {
+        count: async () => 2,
+      },
+      branchDistributionOrder: {
+        findMany: async () => [],
+      },
+      sale: {
+        findMany: async () => [],
+      },
+      inventoryCountSession: {
+        findMany: async () => [],
+      },
+      hqStockBooking: {
+        findMany: async () => [],
+      },
+    } as unknown as import('@prisma/client').Prisma.TransactionClient,
+    'branch-1',
+  );
+  assert(usersOnBranch.blocked === true, '12. Branch with users is blocked from permanent delete');
+  assert(usersOnBranch.reasons.userCount === 2, '12b. User count in blocking reasons');
 
   assert(
     BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE.includes('Складды'),

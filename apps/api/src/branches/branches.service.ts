@@ -17,10 +17,10 @@ import {
   hasAnyHqRole,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { BRANCH_PERMANENT_DELETE_HISTORY_MESSAGE } from '../lifecycle/hq-ceo-lifecycle.constants';
 import {
   assessBranchDeleteBlocking,
   assertCanHqCeoManageLifecycle,
-  archiveBranch,
   branchHasBusinessHistory,
   assessBranchWarehouseDeleteBlocking,
   hardDeleteBranchWarehouse,
@@ -533,64 +533,48 @@ export class BranchesService {
 
       const hasHistory = await branchHasBusinessHistory(tx, id);
 
-      if (!hasHistory) {
-        const warehouses = await tx.warehouse.findMany({
-          where: { branchId: id, deletedAt: null },
-          select: { id: true },
-        });
-        for (const warehouse of warehouses) {
-          const warehouseBlocking = await assessBranchWarehouseDeleteBlocking(tx, warehouse.id);
-          if (warehouseBlocking.blocked) {
-            throw new BadRequestException({
-              message: 'Филиал не может быть удалён: склад филиала не пуст.',
-              blockingRecords: warehouseBlocking.reasons,
-            });
-          }
-          await hardDeleteBranchWarehouse(tx, warehouse.id);
-        }
-
-        await tx.branch.delete({ where: { id } });
-
+      if (hasHistory) {
         await tx.auditLog.create({
           data: {
             userId: user.id,
             role: user.role,
-            action: 'BRANCH_DELETED',
+            action: 'BRANCH_DELETE_BLOCKED',
             entity: 'Branch',
             entityId: id,
             metadata: {
               actorUserId: user.id,
               branchId: id,
-              branchName: branch.name,
-              branchCode: branch.code,
               oldStatus: previousStatus,
-              newStatus: null,
-              deletionType: 'hard_delete',
-              reason: trimmedReason,
+              reason: 'BUSINESS_HISTORY',
               timestamp: new Date().toISOString(),
             },
           },
         });
-
-        return {
-          success: true,
-          deletedBranchId: id,
-          archived: false,
-          message: 'Филиал успешно удалён',
-        };
+        throw new BadRequestException(BRANCH_PERMANENT_DELETE_HISTORY_MESSAGE);
       }
 
-      if (!trimmedReason) {
-        throw new BadRequestException('Укажите причину архивации филиала с историей операций');
+      const warehouses = await tx.warehouse.findMany({
+        where: { branchId: id, deletedAt: null },
+        select: { id: true },
+      });
+      for (const warehouse of warehouses) {
+        const warehouseBlocking = await assessBranchWarehouseDeleteBlocking(tx, warehouse.id);
+        if (warehouseBlocking.blocked) {
+          throw new BadRequestException({
+            message: 'Филиал не может быть удалён: склад филиала не пуст.',
+            blockingRecords: warehouseBlocking.reasons,
+          });
+        }
+        await hardDeleteBranchWarehouse(tx, warehouse.id);
       }
 
-      await archiveBranch(tx, id);
+      await tx.branch.delete({ where: { id } });
 
       await tx.auditLog.create({
         data: {
           userId: user.id,
           role: user.role,
-          action: 'BRANCH_ARCHIVED',
+          action: 'BRANCH_DELETED',
           entity: 'Branch',
           entityId: id,
           metadata: {
@@ -599,7 +583,8 @@ export class BranchesService {
             branchName: branch.name,
             branchCode: branch.code,
             oldStatus: previousStatus,
-            newStatus: BranchStatus.INACTIVE,
+            newStatus: null,
+            deletionType: 'permanent_delete',
             reason: trimmedReason,
             timestamp: new Date().toISOString(),
           },
@@ -609,8 +594,8 @@ export class BranchesService {
       return {
         success: true,
         deletedBranchId: id,
-        archived: true,
-        message: 'Филиал архивирован',
+        permanentlyDeleted: true,
+        message: 'Филиал успешно удалён',
       };
     });
 

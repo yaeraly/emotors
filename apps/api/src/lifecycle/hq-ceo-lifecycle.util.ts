@@ -261,6 +261,7 @@ export async function assessBranchDeleteBlocking(tx: Tx, branchId: string) {
   };
 
   const blocked =
+    userCount > 0 ||
     availableQuantity > 0 ||
     reservedQuantity > 0 ||
     fifoQuantity > 0 ||

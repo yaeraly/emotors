@@ -5,11 +5,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   assessBranchWarehouseDeleteBlocking,
   assertCanHqCeoManageLifecycle,
-  archiveBranchWarehouse,
   branchWarehouseHasDeleteHistory,
   hardDeleteBranchWarehouse,
 } from '../lifecycle/hq-ceo-lifecycle.util';
-import { BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE } from '../lifecycle/hq-ceo-lifecycle.constants';
+import {
+  BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE,
+  WAREHOUSE_PERMANENT_DELETE_HISTORY_MESSAGE,
+} from '../lifecycle/hq-ceo-lifecycle.constants';
 import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { activeBranchWarehouseWhere, branchWarehouseWhere, isBranchWarehouse } from '../warehouse/warehouse.util';
 import { UpdateBranchWarehouseDto } from './dto/update-branch-warehouse.dto';
@@ -184,32 +186,25 @@ export class BranchWarehouseService {
 
       const hasHistory = await branchWarehouseHasDeleteHistory(tx, id);
 
-      if (!hasHistory) {
-        await hardDeleteBranchWarehouse(tx, id);
-        await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETED', id, {
+      if (hasHistory) {
+        await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETE_BLOCKED', id, {
           branchId: existing.branchId,
           warehouseCode: existing.code,
-          oldStatus: previousStatus,
-          newStatus: null,
-          deletionType: 'hard_delete',
-          reason: trimmedReason,
+          reason: 'BUSINESS_HISTORY',
         });
-        return { success: true, archived: false, message: 'Склад филиала удалён' };
+        throw new BadRequestException(WAREHOUSE_PERMANENT_DELETE_HISTORY_MESSAGE);
       }
 
-      if (!trimmedReason) {
-        throw new BadRequestException('Укажите причину архивации склада с историей операций');
-      }
-
-      const archived = await archiveBranchWarehouse(tx, id);
-      await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_ARCHIVED', id, {
+      await hardDeleteBranchWarehouse(tx, id);
+      await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETED', id, {
         branchId: existing.branchId,
         warehouseCode: existing.code,
         oldStatus: previousStatus,
-        newStatus: archived.isActive,
+        newStatus: null,
+        deletionType: 'permanent_delete',
         reason: trimmedReason,
       });
-      return { success: true, archived: true, message: 'Склад филиала архивирован' };
+      return { success: true, permanentlyDeleted: true, message: 'Склад филиала удалён' };
     });
   }
 
