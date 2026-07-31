@@ -3,6 +3,11 @@ import { canManageOwnBranchProductRequest } from '../rbac/rbac';
 import type { AuthUser } from '../auth/auth.types';
 import { toApiMoneyKgs, sumApiMoneyKgs } from '../common/authoritative-money.util';
 import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
+import {
+  resolveBranchPurchaseEstimatedAmountKgs,
+  resolveBranchPurchaseLinePayableAmount,
+  shouldTransferBranchPurchaseAtCost,
+} from './branch-purchase-estimated-amount.util';
 import { resolveBranchPurchaseWorkflowLabel } from './branch-purchase-workflow.util';
 
 export function canSeeHqStockInBranchRequests(user: AuthUser, canViewAll: boolean) {
@@ -104,10 +109,35 @@ export function toBranchPurchaseRequestResponse<T extends {
   items: Array<Record<string, unknown>>;
   totalProductCostKgs?: number;
   authoritativeTransferCostKgs?: number;
+  branch?: { branchType?: string | null } | null;
+  branchType?: string | null;
 }>(request: T) {
-  const items = request.items.map((item) =>
-    toBranchPurchaseRequestItemResponse(item as Parameters<typeof toBranchPurchaseRequestItemResponse>[0]),
-  );
+  const branchType = request.branch?.branchType ?? request.branchType ?? null;
+  const transferAtCost = shouldTransferBranchPurchaseAtCost(branchType);
+  const items = request.items.map((rawItem) => {
+    const item = toBranchPurchaseRequestItemResponse(
+      rawItem as Parameters<typeof toBranchPurchaseRequestItemResponse>[0],
+    );
+    if (!transferAtCost) return item;
+    const lineQuantity =
+      item.approvedQuantity != null && Number(item.approvedQuantity) > 0
+        ? Number(item.approvedQuantity)
+        : Number(item.quantity ?? 0);
+    const payable = resolveBranchPurchaseLinePayableAmount({
+      branchType,
+      quantity: lineQuantity,
+      estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+      unitPriceKgs: item.resolvedBranchPriceKgs ?? item.wholesalePriceKgs,
+      hasPricingPolicy: true,
+    });
+    if (payable <= 0) return item;
+    return {
+      ...item,
+      totalAmount: payable,
+      approvedLineTotalKgs:
+        item.approvedQuantity != null && Number(item.approvedQuantity) > 0 ? payable : item.approvedLineTotalKgs,
+    };
+  });
   const storedProductCostKgs = sumStoredBranchPurchaseProductCostKgs(items);
   const linkedTransferCostKgs =
     request.authoritativeTransferCostKgs != null
@@ -123,10 +153,16 @@ export function toBranchPurchaseRequestResponse<T extends {
           : 0;
   const authoritativeTransferCostKgs =
     storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
+  const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
+    branchType,
+    totalProductCostKgs,
+    lineProductCosts: items.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+    storedEstimatedAmountKgs: toApiMoneyKgs(request.totalEstimatedAmount),
+  });
 
   return {
     ...request,
-    totalEstimatedAmount: toApiMoneyKgs(request.totalEstimatedAmount),
+    totalEstimatedAmount,
     transportCostKgs: toApiMoneyKgs(request.transportCostKgs),
     totalProductCostKgs,
     authoritativeTransferCostKgs,

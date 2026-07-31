@@ -97,6 +97,13 @@ import {
   sumBranchPurchaseLineProductCosts,
 } from './branch-purchase-fifo-cost.util';
 import {
+  BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE,
+  compareEstimatedAmountToProductCost,
+  resolveBranchPurchaseEstimatedAmountKgs,
+  resolveBranchPurchaseLinePayableAmount,
+  shouldTransferBranchPurchaseAtCost,
+} from './branch-purchase-estimated-amount.util';
+import {
   assertBranchPurchaseBranchContext,
   assertBranchPurchaseRequestItems,
 } from './branch-purchase-request.validation';
@@ -186,6 +193,7 @@ export class OperationsService {
           select: {
             id: true,
             name: true,
+            branchType: true,
             assignedHqWarehouseId: true,
             assignedHqWarehouse: { select: { id: true, name: true, code: true, city: true, isActive: true } },
           },
@@ -214,6 +222,7 @@ export class OperationsService {
           select: {
             id: true,
             name: true,
+            branchType: true,
             assignedHqWarehouseId: true,
             assignedHqWarehouse: { select: { id: true, name: true, code: true, city: true, isActive: true } },
           },
@@ -936,6 +945,17 @@ export class OperationsService {
           estimatedUnitCost = fifoCost.estimatedUnitCost;
         }
 
+        const payableLineAmount =
+          resolved.approvedQuantity > 0
+            ? resolveBranchPurchaseLinePayableAmount({
+                branchType: reviewBranch?.branchType,
+                quantity: resolved.approvedQuantity,
+                estimatedLineProductCostKgs,
+                unitPriceKgs: Number(item.resolvedBranchPriceKgs ?? 0),
+                hasPricingPolicy,
+              })
+            : 0;
+
         await tx.branchPurchaseRequestItem.update({
           where: { id: item.id },
           data: {
@@ -947,10 +967,8 @@ export class OperationsService {
             rejectionReasonCode: resolved.rejectionReasonCode,
             publicComment: resolved.publicComment,
             hasPricingPolicyAtReview: hasPricingPolicy,
-            approvedLineTotalKgs:
-              resolved.approvedQuantity > 0 && item.resolvedBranchPriceKgs != null
-                ? roundDisplayMoney(Number(item.resolvedBranchPriceKgs) * resolved.approvedQuantity)
-                : null,
+            approvedLineTotalKgs: payableLineAmount > 0 ? payableLineAmount : null,
+            totalAmount: payableLineAmount,
             bookingExpiresAt:
               resolved.approvedQuantity > 0 ? branchConfirmationExpiresAt : null,
             bookedQuantity:
@@ -1033,6 +1051,29 @@ export class OperationsService {
             ? BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION
             : BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION;
 
+      const refreshedItems = await tx.branchPurchaseRequestItem.findMany({
+        where: { requestId: id },
+        select: {
+          approvedQuantity: true,
+          quantity: true,
+          estimatedLineProductCostKgs: true,
+          totalAmount: true,
+        },
+      });
+      const reviewedProductCostKgs = sumDisplayMoneyTotals(
+        refreshedItems.map((item) => {
+          const qty = item.approvedQuantity ?? item.quantity;
+          return qty > 0 ? Number(item.estimatedLineProductCostKgs ?? 0) : 0;
+        }),
+      );
+      const reviewedEstimatedAmountKgs = resolveBranchPurchaseEstimatedAmountKgs({
+        branchType: reviewBranch?.branchType,
+        totalProductCostKgs: reviewedProductCostKgs,
+        storedEstimatedAmountKgs: sumDisplayMoneyTotals(
+          refreshedItems.map((item) => Number(item.totalAmount ?? 0)),
+        ),
+      });
+
       const request = await tx.branchPurchaseRequest.update({
         where: { id },
         data: {
@@ -1040,6 +1081,7 @@ export class OperationsService {
           reviewedById: user.id,
           reviewedAt: new Date(),
           assignedHqWarehouseId,
+          totalEstimatedAmount: reviewedEstimatedAmountKgs,
           bookingExpiresAt:
             requestStatus === BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION
               ? branchConfirmationExpiresAt
@@ -1234,18 +1276,74 @@ export class OperationsService {
         }
 
         fifoLineCosts.push(fifoCost.estimatedLineProductCostKgs);
+        const payableLineAmount = resolveBranchPurchaseLinePayableAmount({
+          branchType: branch?.branchType,
+          quantity: approvedQuantity,
+          estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
+          unitPriceKgs: Number(item.resolvedBranchPriceKgs ?? 0),
+          hasPricingPolicy: true,
+        });
         await tx.branchPurchaseRequestItem.update({
           where: { id: item.id },
           data: {
             estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
             estimatedUnitCost: fifoCost.estimatedUnitCost,
+            totalAmount: payableLineAmount,
+            approvedLineTotalKgs: payableLineAmount,
           },
         });
         itemsWithFifoCosts.push({
           ...item,
           estimatedLineProductCostKgs: fifoCost.estimatedLineProductCostKgs,
           estimatedUnitCost: fifoCost.estimatedUnitCost,
+          totalAmount: payableLineAmount,
+          approvedLineTotalKgs: payableLineAmount,
         });
+      }
+
+      const fifoOrderTotal = sumBranchPurchaseLineProductCosts(fifoLineCosts);
+      if (shouldTransferBranchPurchaseAtCost(branch?.branchType)) {
+        const storedEstimated = roundDisplayMoney(Number(existing.totalEstimatedAmount ?? 0));
+        const estimatedParity = compareEstimatedAmountToProductCost(storedEstimated, fifoOrderTotal);
+        if (!estimatedParity.ok) {
+          await tx.branchPurchaseRequest.update({
+            where: { id: existing.id },
+            data: { totalEstimatedAmount: fifoOrderTotal },
+          });
+          await this.auditInTx(
+            tx,
+            user,
+            existing.branchId,
+            'COST_RECONCILIATION_REPAIRED',
+            'BranchPurchaseRequest',
+            existing.id,
+            {
+              requestNumber: existing.requestNumber,
+              oldAmount: storedEstimated,
+              correctedAmount: fifoOrderTotal,
+              difference: estimatedParity.differenceKgs,
+              reason: 'estimated_amount_aligned_to_fifo_product_cost',
+              affectedItemIds: existing.items.map((item) => item.id),
+            },
+          );
+        }
+        const refreshedEstimated = resolveBranchPurchaseEstimatedAmountKgs({
+          branchType: branch?.branchType,
+          totalProductCostKgs: fifoOrderTotal,
+          storedEstimatedAmountKgs: fifoOrderTotal,
+        });
+        const afterRepair = compareEstimatedAmountToProductCost(refreshedEstimated, fifoOrderTotal);
+        if (!afterRepair.ok) {
+          throw new BadRequestException({
+            message: BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE,
+            branchPurchaseRequestId: existing.id,
+            requestNumber: existing.requestNumber,
+            expectedAmount: afterRepair.expectedKgs,
+            actualAmount: afterRepair.actualKgs,
+            difference: afterRepair.differenceKgs,
+            affectedItemIds: existing.items.map((item) => item.id),
+          });
+        }
       }
 
       let builtLines;
@@ -1264,7 +1362,6 @@ export class OperationsService {
         throw new BadRequestException('Order has no approved items');
       }
 
-      const fifoOrderTotal = sumBranchPurchaseLineProductCosts(fifoLineCosts);
       const orderTransferTotal = sumDisplayMoneyTotals(builtLines.map((line) => line.totalCost));
       const reconciliation = compareAuthoritativeCostTotals(
         fifoOrderTotal,
@@ -5101,10 +5198,13 @@ export class OperationsService {
             estimatedUnitCost = fifoCost.estimatedUnitCost;
           }
         }
-        const totalAmount =
-          pricing.hasPricingPolicy && pricing.branchPurchasePriceKgs != null
-            ? roundDisplayMoney(pricing.branchPurchasePriceKgs * quantity)
-            : 0;
+        const totalAmount = resolveBranchPurchaseLinePayableAmount({
+          branchType: branch?.branchType,
+          quantity,
+          estimatedLineProductCostKgs,
+          unitPriceKgs: branchPurchasePriceKgs,
+          hasPricingPolicy: pricing.hasPricingPolicy,
+        });
         const stockMetrics = hqStockMetrics.get(product.id);
 
         return {
@@ -5353,10 +5453,13 @@ export class OperationsService {
       const transferCostLocked = Boolean(
         (request as { convertedOrderId?: string | null }).convertedOrderId,
       );
+      const transferAtCost = shouldTransferBranchPurchaseAtCost(branch?.branchType);
       const staleCostRepairs: Array<{
         itemId: string;
         estimatedLineProductCostKgs: number;
         estimatedUnitCost: number;
+        totalAmount: number;
+        approvedLineTotalKgs: number | null;
       }> = [];
 
       const enrichedItems = await Promise.all(
@@ -5381,6 +5484,14 @@ export class OperationsService {
           let estimatedLineProductCostKgs = storedLineCost;
           const storedUnitCost = Number((item as { estimatedUnitCost?: unknown }).estimatedUnitCost ?? 0);
           let estimatedUnitCost = storedUnitCost;
+          const storedTotalAmount = roundDisplayMoney(
+            Number((item as { totalAmount?: unknown }).totalAmount ?? 0),
+          );
+          let totalAmount = storedTotalAmount;
+          let approvedLineTotalKgs =
+            (item as { approvedLineTotalKgs?: unknown }).approvedLineTotalKgs != null
+              ? roundDisplayMoney(Number((item as { approvedLineTotalKgs?: unknown }).approvedLineTotalKgs))
+              : null;
 
           if (lineQuantity > 0) {
             const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
@@ -5404,17 +5515,38 @@ export class OperationsService {
             estimatedLineProductCostKgs = resolvedLineCost.estimatedLineProductCostKgs;
             estimatedUnitCost = resolvedLineCost.estimatedUnitCost;
 
+            const payableAmount = resolveBranchPurchaseLinePayableAmount({
+              branchType: branch?.branchType,
+              quantity: lineQuantity,
+              estimatedLineProductCostKgs,
+              unitPriceKgs: Number(
+                (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ??
+                  (item as { wholesalePriceKgs?: unknown }).wholesalePriceKgs ??
+                  0,
+              ),
+              hasPricingPolicy: pricingAvailability.get(item.id) ?? true,
+            });
+            if (payableAmount > 0) {
+              totalAmount = payableAmount;
+              if (approved != null && approved > 0) {
+                approvedLineTotalKgs = payableAmount;
+              }
+            }
+
             if (
               !transferCostLocked &&
               fifoCost.allocatedQty >= lineQuantity &&
               resolvedLineCost.estimatedLineProductCostKgs > 0 &&
               (Math.abs(resolvedLineCost.estimatedLineProductCostKgs - storedLineCost) > 0.009 ||
-                Math.abs(resolvedLineCost.estimatedUnitCost - storedUnitCost) > 0.009)
+                Math.abs(resolvedLineCost.estimatedUnitCost - storedUnitCost) > 0.009 ||
+                Math.abs(totalAmount - storedTotalAmount) > 0.009)
             ) {
               staleCostRepairs.push({
                 itemId: item.id,
                 estimatedLineProductCostKgs: resolvedLineCost.estimatedLineProductCostKgs,
                 estimatedUnitCost: resolvedLineCost.estimatedUnitCost,
+                totalAmount,
+                approvedLineTotalKgs,
               });
             }
           }
@@ -5443,70 +5575,86 @@ export class OperationsService {
             pricingPolicyAvailable: pricingAvailability.get(item.id) ?? false,
             estimatedLineProductCostKgs,
             estimatedUnitCost,
+            totalAmount,
+            approvedLineTotalKgs,
           };
         }),
       );
 
-      if (staleCostRepairs.length > 0) {
-        await Promise.all(
-          staleCostRepairs.map((repair) =>
-            this.prisma.branchPurchaseRequestItem.update({
-              where: { id: repair.itemId },
-              data: {
-                estimatedLineProductCostKgs: repair.estimatedLineProductCostKgs,
-                estimatedUnitCost: repair.estimatedUnitCost,
-              },
-            }),
-          ),
-        );
-        const oldTotal = sumDisplayMoneyTotals(
-          request.items.map((item) => {
-            const stored = roundDisplayMoney(
-              Number((item as { estimatedLineProductCostKgs?: unknown }).estimatedLineProductCostKgs ?? 0),
-            );
-            const qty = item.approvedQuantity ?? item.quantity;
-            return qty > 0 ? stored : 0;
-          }),
-        );
-        const newTotal = sumDisplayMoneyTotals(
-          enrichedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
-        );
-        await this.prisma.auditLog.create({
-          data: {
-            userId: user.id,
-            role: user.role,
-            action: 'COST_RECONCILIATION_REPAIRED',
-            entity: 'BranchPurchaseRequest',
-            entityId: request.id,
-            metadata: {
-              requestId: request.id,
-              branchOrderId: request.id,
-              oldAmount: oldTotal,
-              correctedAmount: newTotal,
-              difference: roundDisplayMoney(newTotal - oldTotal),
-              reason: 'fifo_layer_line_total_not_unit_times_qty',
-              repairedLineCount: staleCostRepairs.length,
-              itemIds: staleCostRepairs.map((row) => row.itemId),
-              timestamp: new Date().toISOString(),
-            } as Prisma.InputJsonValue,
-          },
-        });
-        this.logger.log({
-          message: 'COST_RECONCILIATION_REPAIRED',
-          requestId: request.id,
-          repairedLineCount: staleCostRepairs.length,
-        });
-      }
-
       const totalProductCostKgs = sumDisplayMoneyTotals(
         enrichedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
       );
+      const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
+        branchType: branch?.branchType,
+        totalProductCostKgs,
+        storedEstimatedAmountKgs: sumDisplayMoneyTotals(
+          enrichedItems.map((item) => Number(item.totalAmount ?? 0)),
+        ),
+      });
+
+      if (staleCostRepairs.length > 0 || transferAtCost) {
+        const storedEstimated = roundDisplayMoney(
+          Number((request as { totalEstimatedAmount?: unknown }).totalEstimatedAmount ?? 0),
+        );
+        const needsHeaderRepair =
+          transferAtCost && Math.abs(storedEstimated - totalEstimatedAmount) > 0.009;
+
+        if (staleCostRepairs.length > 0 || needsHeaderRepair) {
+          await Promise.all(
+            staleCostRepairs.map((repair) =>
+              this.prisma.branchPurchaseRequestItem.update({
+                where: { id: repair.itemId },
+                data: {
+                  estimatedLineProductCostKgs: repair.estimatedLineProductCostKgs,
+                  estimatedUnitCost: repair.estimatedUnitCost,
+                  totalAmount: repair.totalAmount,
+                  approvedLineTotalKgs: repair.approvedLineTotalKgs,
+                },
+              }),
+            ),
+          );
+          if (needsHeaderRepair || staleCostRepairs.length > 0) {
+            await this.prisma.branchPurchaseRequest.update({
+              where: { id: request.id },
+              data: { totalEstimatedAmount },
+            });
+          }
+          await this.prisma.auditLog.create({
+            data: {
+              userId: user.id,
+              role: user.role,
+              action: 'COST_RECONCILIATION_REPAIRED',
+              entity: 'BranchPurchaseRequest',
+              entityId: request.id,
+              metadata: {
+                requestId: request.id,
+                branchOrderId: request.id,
+                oldAmount: storedEstimated,
+                correctedAmount: totalEstimatedAmount,
+                difference: roundDisplayMoney(totalEstimatedAmount - storedEstimated),
+                reason: 'estimated_amount_aligned_to_fifo_product_cost',
+                repairedLineCount: staleCostRepairs.length,
+                itemIds: staleCostRepairs.map((row) => row.itemId),
+                timestamp: new Date().toISOString(),
+              } as Prisma.InputJsonValue,
+            },
+          });
+          this.logger.log({
+            message: 'COST_RECONCILIATION_REPAIRED',
+            requestId: request.id,
+            repairedLineCount: staleCostRepairs.length,
+            totalEstimatedAmount,
+            totalProductCostKgs,
+          });
+        }
+      }
 
       return {
         ...request,
         hqStockStatus: 'loaded' as const,
         bookingExpiresAt: (request as { bookingExpiresAt?: Date | null }).bookingExpiresAt ?? null,
         totalProductCostKgs,
+        totalEstimatedAmount,
         items: enrichedItems,
       };
     } catch (error) {

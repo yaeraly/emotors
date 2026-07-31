@@ -12,6 +12,11 @@ import {
   sumDisplayMoneyTotals,
 } from '../src/pricing/product-cost-precision.util';
 import { resolveBranchPurchaseFifoLineCost } from '../src/operations/branch-purchase-fifo-cost.util';
+import {
+  resolveBranchPurchaseEstimatedAmountKgs,
+  resolveBranchPurchaseLinePayableAmount,
+  shouldTransferBranchPurchaseAtCost,
+} from '../src/operations/branch-purchase-estimated-amount.util';
 import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 
@@ -63,6 +68,8 @@ async function main() {
       correctUnitCost: number;
       oldTotal: number;
       correctTotal: number;
+      oldPayable: number;
+      correctPayable: number;
       difference: number;
       reason: string;
     }> = [];
@@ -83,17 +90,30 @@ async function main() {
 
       const oldTotal = roundDisplayMoney(n(item.estimatedLineProductCostKgs));
       const newTotal = fifoCost.estimatedLineProductCostKgs;
-      if (Math.abs(newTotal - oldTotal) > 0.001) {
+      const payable = resolveBranchPurchaseLinePayableAmount({
+        branchType: request.branch?.branchType,
+        quantity,
+        estimatedLineProductCostKgs: newTotal > 0 ? newTotal : oldTotal,
+        unitPriceKgs: n(item.resolvedBranchPriceKgs),
+        hasPricingPolicy: true,
+      });
+      const oldPayable = roundDisplayMoney(n(item.totalAmount));
+      if (Math.abs(newTotal - oldTotal) > 0.001 || Math.abs(payable - oldPayable) > 0.001) {
         itemUpdates.push({
           itemId: item.id,
           productId: item.productId,
           sku: item.sku,
           oldUnitCost: roundDisplayMoney(n(item.estimatedUnitCost)),
-          correctUnitCost: quantity > 0 ? deriveDisplayUnitCost(newTotal, quantity) : 0,
+          correctUnitCost: quantity > 0 ? deriveDisplayUnitCost(newTotal > 0 ? newTotal : payable, quantity) : 0,
           oldTotal,
-          correctTotal: newTotal,
-          difference: roundDisplayMoney(newTotal - oldTotal),
-          reason: 'fifo_layer_line_total_not_unit_times_qty',
+          correctTotal: newTotal > 0 ? newTotal : oldTotal,
+          oldPayable,
+          correctPayable: payable,
+          difference: roundDisplayMoney((newTotal > 0 ? newTotal : oldTotal) - oldTotal),
+          reason:
+            Math.abs(payable - oldPayable) > 0.001
+              ? 'estimated_amount_aligned_to_fifo_product_cost'
+              : 'fifo_layer_line_total_not_unit_times_qty',
         });
       }
     }
@@ -155,10 +175,21 @@ async function main() {
       }
     }
 
+    const correctEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
+      branchType: request.branch?.branchType,
+      totalProductCostKgs: newOrderTotal,
+      storedEstimatedAmountKgs: n(request.totalEstimatedAmount),
+    });
+    const oldEstimatedAmount = roundDisplayMoney(n(request.totalEstimatedAmount));
+    const estimatedNeedsRepair =
+      shouldTransferBranchPurchaseAtCost(request.branch?.branchType) &&
+      Math.abs(correctEstimatedAmount - oldEstimatedAmount) > 0.001;
+
     if (
       itemUpdates.length === 0 &&
       Math.abs(newOrderTotal - oldOrderTotal) <= 0.001 &&
-      !distributionRepair
+      !distributionRepair &&
+      !estimatedNeedsRepair
     ) {
       continue;
     }
@@ -170,6 +201,9 @@ async function main() {
       oldOrderTotal,
       newOrderTotal,
       difference: roundDisplayMoney(newOrderTotal - oldOrderTotal),
+      oldEstimatedAmount,
+      correctEstimatedAmount,
+      estimatedDifference: roundDisplayMoney(correctEstimatedAmount - oldEstimatedAmount),
       itemUpdates,
       distributionRepair,
     });
@@ -186,7 +220,16 @@ async function main() {
           data: {
             estimatedLineProductCostKgs: update.correctTotal,
             estimatedUnitCost: update.correctUnitCost,
+            totalAmount: update.correctPayable ?? update.correctTotal,
+            approvedLineTotalKgs:
+              quantity > 0 ? (update.correctPayable ?? update.correctTotal) : item.approvedLineTotalKgs,
           },
+        });
+      }
+      if (estimatedNeedsRepair || itemUpdates.length > 0) {
+        await tx.branchPurchaseRequest.update({
+          where: { id: request.id },
+          data: { totalEstimatedAmount: correctEstimatedAmount },
         });
       }
 
