@@ -109,16 +109,20 @@ export function toBranchPurchaseRequestResponse<T extends {
     toBranchPurchaseRequestItemResponse(item as Parameters<typeof toBranchPurchaseRequestItemResponse>[0]),
   );
   const storedProductCostKgs = sumStoredBranchPurchaseProductCostKgs(items);
-  const authoritativeTransferCostKgs =
+  const linkedTransferCostKgs =
     request.authoritativeTransferCostKgs != null
       ? toApiMoneyKgs(request.authoritativeTransferCostKgs)
       : undefined;
   const totalProductCostKgs =
-    authoritativeTransferCostKgs != null && authoritativeTransferCostKgs > 0
-      ? authoritativeTransferCostKgs
-      : request.totalProductCostKgs != null && Number(request.totalProductCostKgs) > 0
-        ? roundDisplayMoney(Number(request.totalProductCostKgs))
-        : storedProductCostKgs;
+    storedProductCostKgs > 0
+      ? storedProductCostKgs
+      : linkedTransferCostKgs != null && linkedTransferCostKgs > 0
+        ? linkedTransferCostKgs
+        : request.totalProductCostKgs != null && Number(request.totalProductCostKgs) > 0
+          ? roundDisplayMoney(Number(request.totalProductCostKgs))
+          : 0;
+  const authoritativeTransferCostKgs =
+    storedProductCostKgs > 0 ? storedProductCostKgs : linkedTransferCostKgs;
 
   return {
     ...request,

@@ -5,7 +5,7 @@ export const LANDED_COST_PARITY_TOLERANCE_KGS = 0;
 
 /** Shown when branch-order transfer cost does not match reserved/consumed FIFO layers. */
 export const BRANCH_ORDER_COST_MISMATCH_MESSAGE =
-  'Себестоимость заказа не совпадает с себестоимостью складских партий. Пересчитайте себестоимость перед подтверждением.';
+  'Товардын себестоимосту FIFO партиялары менен дал келбейт. Заказды аяктоодон мурун себестоимостьту текшериңиз.';
 
 export type CostReconciliationResult = {
   ok: boolean;

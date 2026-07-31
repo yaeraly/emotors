@@ -250,12 +250,11 @@ export class OperationsService {
     if (request.convertedOrderId) {
       const linkedOrder = await this.prisma.branchDistributionOrder.findFirst({
         where: { id: request.convertedOrderId, deletedAt: null },
-        select: { totalCost: true, orderNumber: true },
+        select: { orderNumber: true },
       });
       if (linkedOrder) {
         enriched = {
           ...enriched,
-          authoritativeTransferCostKgs: roundDisplayMoney(Number(linkedOrder.totalCost ?? 0)),
           convertedOrderNumber: linkedOrder.orderNumber,
         };
       }
@@ -5377,8 +5376,27 @@ export class OperationsService {
 
           if (lineQuantity > 0) {
             if (useStoredCosts && storedLineCost > 0) {
-              estimatedLineProductCostKgs = storedLineCost;
-              estimatedUnitCost = deriveDisplayUnitCost(storedLineCost, lineQuantity);
+              const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
+                productId: item.productId,
+                warehouseId: assignedHqWarehouseId,
+                quantity: lineQuantity,
+                branchType: branch?.branchType,
+                hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
+                fallbackUnitCost: estimatedUnitCost,
+                fallbackUnitPrice: Number(
+                  (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ?? 0,
+                ),
+              });
+              if (
+                fifoCost.allocatedQty > 0 &&
+                Math.abs(fifoCost.estimatedLineProductCostKgs - storedLineCost) > 0.001
+              ) {
+                estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
+                estimatedUnitCost = fifoCost.estimatedUnitCost;
+              } else {
+                estimatedLineProductCostKgs = storedLineCost;
+                estimatedUnitCost = deriveDisplayUnitCost(storedLineCost, lineQuantity);
+              }
             } else {
               const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
                 productId: item.productId,

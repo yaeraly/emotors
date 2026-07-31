@@ -42,7 +42,27 @@ describe('branch-purchase-request.presenter', () => {
     assert.equal(item.estimatedLineProductCostKgs, 914369.8);
   });
 
-  it('prefers linked distribution order transfer cost for header total', () => {
+  it('prefers authoritative item line totals over stale linked distribution total', () => {
+    const response = toBranchPurchaseRequestResponse({
+      status: BranchPurchaseRequestStatus.BRANCH_CONFIRMED,
+      reviewedAt: new Date(),
+      totalEstimatedAmount: 1000,
+      transportCostKgs: 0,
+      convertedOrderId: 'order-1',
+      authoritativeTransferCostKgs: 914368.98,
+      items: [
+        {
+          quantity: 11,
+          approvedQuantity: 11,
+          estimatedLineProductCostKgs: 914369.8,
+        },
+      ],
+    });
+    assert.equal(response.totalProductCostKgs, 914369.8);
+    assert.equal(response.authoritativeTransferCostKgs, 914369.8);
+  });
+
+  it('uses linked transfer cost only when item line costs are absent', () => {
     const response = toBranchPurchaseRequestResponse({
       status: BranchPurchaseRequestStatus.BRANCH_CONFIRMED,
       reviewedAt: new Date(),
@@ -54,11 +74,10 @@ describe('branch-purchase-request.presenter', () => {
         {
           quantity: 11,
           approvedQuantity: 11,
-          estimatedLineProductCostKgs: 914368.98,
+          estimatedLineProductCostKgs: 0,
         },
       ],
     });
     assert.equal(response.totalProductCostKgs, 914369.8);
-    assert.equal(response.authoritativeTransferCostKgs, 914369.8);
   });
 });

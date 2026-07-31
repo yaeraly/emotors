@@ -57,9 +57,14 @@ async function main() {
 
     const itemUpdates: Array<{
       itemId: string;
+      productId: string;
       sku: string;
+      oldUnitCost: number;
+      correctUnitCost: number;
       oldTotal: number;
-      newTotal: number;
+      correctTotal: number;
+      difference: number;
+      reason: string;
     }> = [];
 
     for (const item of request.items) {
@@ -81,9 +86,14 @@ async function main() {
       if (Math.abs(newTotal - oldTotal) > 0.001) {
         itemUpdates.push({
           itemId: item.id,
+          productId: item.productId,
           sku: item.sku,
+          oldUnitCost: roundDisplayMoney(n(item.estimatedUnitCost)),
+          correctUnitCost: quantity > 0 ? deriveDisplayUnitCost(newTotal, quantity) : 0,
           oldTotal,
-          newTotal,
+          correctTotal: newTotal,
+          difference: roundDisplayMoney(newTotal - oldTotal),
+          reason: 'fifo_layer_line_total_not_unit_times_qty',
         });
       }
     }
@@ -95,17 +105,12 @@ async function main() {
       }),
     );
     const newOrderTotal = sumDisplayMoneyTotals(
-      itemUpdates.length
-        ? request.items.map((item) => {
-            const update = itemUpdates.find((row) => row.itemId === item.id);
-            if (update) return update.newTotal;
-            const quantity = item.approvedQuantity ?? item.quantity;
-            return quantity > 0 ? n(item.estimatedLineProductCostKgs) : 0;
-          })
-        : request.items.map((item) => {
-            const quantity = item.approvedQuantity ?? item.quantity;
-            return quantity > 0 ? n(item.estimatedLineProductCostKgs) : 0;
-          }),
+      request.items.map((item) => {
+        const update = itemUpdates.find((row) => row.itemId === item.id);
+        if (update) return Number(update.correctTotal);
+        const quantity = item.approvedQuantity ?? item.quantity;
+        return quantity > 0 ? n(item.estimatedLineProductCostKgs) : 0;
+      }),
     );
 
     let distributionRepair: Record<string, unknown> | null = null;
@@ -134,7 +139,7 @@ async function main() {
             : sumDisplayMoneyTotals(
                 order.items.map((row) => {
                   const lineUpdate = itemUpdates.find((update) => update.sku === row.sku);
-                  return lineUpdate ? lineUpdate.newTotal : n(row.totalCost);
+                  return lineUpdate ? lineUpdate.correctTotal : n(row.totalCost);
                 }),
               );
         const oldDistributionTotal = roundDisplayMoney(n(order.totalCost));
@@ -179,8 +184,8 @@ async function main() {
         await tx.branchPurchaseRequestItem.update({
           where: { id: update.itemId },
           data: {
-            estimatedLineProductCostKgs: update.newTotal,
-            estimatedUnitCost: quantity > 0 ? deriveDisplayUnitCost(update.newTotal, quantity) : 0,
+            estimatedLineProductCostKgs: update.correctTotal,
+            estimatedUnitCost: update.correctUnitCost,
           },
         });
       }
@@ -207,7 +212,7 @@ async function main() {
           const lineTotal =
             allocationTotal > 0
               ? allocationTotal
-              : itemUpdates.find((row) => row.itemId === bprItem?.id)?.newTotal ??
+              : itemUpdates.find((row) => row.itemId === bprItem?.id)?.correctTotal ??
                 n(bprItem?.estimatedLineProductCostKgs ?? orderItem.totalCost);
           const quantity = n(orderItem.quantity);
           await tx.branchDistributionOrderItem.update({

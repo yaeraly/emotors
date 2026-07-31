@@ -44,8 +44,8 @@ describe('cost-reconciliation.util', () => {
     assert.equal(result.differenceKgs, -0.82);
   });
 
-  it('exports Russian reconciliation message', () => {
-    assert.match(BRANCH_ORDER_COST_MISMATCH_MESSAGE, /Себестоимость заказа/);
+  it('exports Kyrgyz reconciliation message', () => {
+    assert.match(BRANCH_ORDER_COST_MISMATCH_MESSAGE, /FIFO партиялары менен дал келбейт/);
   });
 });
 

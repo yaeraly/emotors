@@ -158,4 +158,20 @@ describe('BPR China batch transfer parity', () => {
     );
     assert.notEqual(distributionTotal, unitTimesQtyTotal);
   });
+
+  it('documents 0.82 KGS drift when lines use rounded unit×qty instead of authoritative totals', () => {
+    const procurementLines = buildChinaBatchLines();
+    const authoritative = sumDisplayMoneyTotals(procurementLines.map((line) => line.totalCostKgs));
+    const roundedUnitLineSum = roundDisplayMoney(
+      procurementLines.reduce((sum, line) => {
+        const unit = deriveDisplayUnitCost(line.totalCostKgs, line.quantity);
+        return sum + roundDisplayMoney(unit * line.quantity);
+      }, 0),
+    );
+    const drift = roundDisplayMoney(authoritative - roundedUnitLineSum);
+    assert.equal(authoritative, CHINA_BATCH_TOTAL);
+    assert.ok(Math.abs(drift) > 0);
+    // Production BPR-1785478341861 observed total 914368.98 vs shipment 914369.80 (−0.82 KGS).
+    assert.equal(roundDisplayMoney(CHINA_BATCH_TOTAL - 914368.98), 0.82);
+  });
 });
