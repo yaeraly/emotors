@@ -7,11 +7,12 @@ import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import { allocateProportionalCost, deriveDisplayUnitCost, roundDisplayMoney, sumDisplayMoneyTotals } from './product-cost-precision.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
+  isBusinessProcurementReceiptReference,
   isSeedStockMovementReference,
   SEED_FIFO_REFERENCE_TYPE,
 } from './pricing-fifo-business-layer.util';
 import { resolveFifoLayerCatalogUnitCost } from '../inventory/product-catalog-current-cost.util';
-import { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
+import { resolveAuthoritativeFifoLayerUnitCost, resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 
 export { resolveUnitCostFromInventoryLayer } from './pricing-fifo-unit-cost.util';
 export { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
@@ -114,24 +115,31 @@ export class PricingFifoService {
         continue;
       }
 
-      const unitCostKgs = await resolveFifoLayerCatalogUnitCost(
-        client,
-        {
-          referenceType: movement.referenceType,
-          referenceId: movement.referenceId,
-          productId: movement.productId,
-          unitCostKgs: Number(movement.unitCostKgs),
-        },
-        {
-          id: movement.id,
-          quantity: movement.quantity,
-          unitCostKgs: movement.unitCostKgs,
-          totalCostKgs: movement.totalCostKgs,
-          referenceType: movement.referenceType,
-          referenceId: movement.referenceId,
-          note: movement.note,
-        },
-      );
+      const unitCostKgs =
+        Number(movement.totalCostKgs) > 0
+          ? resolveUnitCostFromInventoryLayer({
+              quantity: movement.quantity,
+              unitCostKgs: Number(movement.unitCostKgs),
+              totalCostKgs: Number(movement.totalCostKgs),
+            })
+          : await resolveFifoLayerCatalogUnitCost(
+              client,
+              {
+                referenceType: movement.referenceType,
+                referenceId: movement.referenceId,
+                productId: movement.productId,
+                unitCostKgs: Number(movement.unitCostKgs),
+              },
+              {
+                id: movement.id,
+                quantity: movement.quantity,
+                unitCostKgs: movement.unitCostKgs,
+                totalCostKgs: movement.totalCostKgs,
+                referenceType: movement.referenceType,
+                referenceId: movement.referenceId,
+                note: movement.note,
+              },
+            );
 
       const existing = await client.fifoInventoryBatch.findFirst({
         where: { stockMovementId: movement.id },
@@ -1016,6 +1024,9 @@ export class PricingFifoService {
       initialQuantity: number;
       unitCostKgs: unknown;
       stockMovementId?: string | null;
+      productId?: string;
+      referenceType?: string | null;
+      referenceId?: string | null;
       wholesalePriceKgs: unknown;
       hqBranchWholesalePriceKgs: unknown;
       reservedQuantity?: number;
@@ -1027,10 +1038,46 @@ export class PricingFifoService {
     const movements = movementIds.length
       ? await tx.stockMovement.findMany({
           where: { id: { in: movementIds } },
-          select: { id: true, quantity: true, totalCostKgs: true },
+          select: { id: true, quantity: true, totalCostKgs: true, unitCostKgs: true },
         })
       : [];
     const movementById = new Map(movements.map((movement) => [movement.id, movement]));
+
+    const receiptIds = batches
+      .filter(
+        (batch) =>
+          isBusinessProcurementReceiptReference(batch.referenceType) && Boolean(batch.referenceId),
+      )
+      .map((batch) => batch.referenceId as string);
+    const receivingItems = receiptIds.length
+      ? await tx.procurementGoodsReceivingItem.findMany({
+          where: { receivingId: { in: receiptIds } },
+          select: { receivingId: true, productId: true, procurementItemId: true },
+        })
+      : [];
+    const procurementItemIds = receivingItems
+      .map((row) => row.procurementItemId)
+      .filter((id): id is string => Boolean(id));
+    const orderItems = procurementItemIds.length
+      ? await tx.procurementOrderItem.findMany({
+          where: { id: { in: procurementItemIds } },
+          select: { id: true, totalCostKgs: true, quantity: true },
+        })
+      : [];
+    const orderItemById = new Map(orderItems.map((row) => [row.id, row]));
+    const procurementLineByReceiptProduct = new Map<string, { totalCostKgs: number; quantity: number }>();
+    for (const receivingItem of receivingItems) {
+      if (!receivingItem.procurementItemId) continue;
+      const orderLine = orderItemById.get(receivingItem.procurementItemId);
+      if (!orderLine || Number(orderLine.totalCostKgs) <= 0) continue;
+      procurementLineByReceiptProduct.set(
+        `${receivingItem.receivingId}:${receivingItem.productId}`,
+        {
+          totalCostKgs: Number(orderLine.totalCostKgs),
+          quantity: Number(orderLine.quantity),
+        },
+      );
+    }
 
     return batches.map((batch) => {
       const movement = batch.stockMovementId ? movementById.get(batch.stockMovementId) : null;
@@ -1040,10 +1087,31 @@ export class PricingFifoService {
           : movement
             ? Math.abs(Number(movement.quantity))
             : batch.remainingQuantity;
-      const layerTotalCostKgs =
-        movement && Number(movement.totalCostKgs) > 0
-          ? Number(movement.totalCostKgs)
-          : Number(batch.unitCostKgs) * layerBaseQuantity;
+
+      let layerTotalCostKgs = 0;
+      if (movement && Number(movement.totalCostKgs) > 0) {
+        layerTotalCostKgs = Number(movement.totalCostKgs);
+      } else if (
+        batch.referenceId &&
+        batch.productId &&
+        isBusinessProcurementReceiptReference(batch.referenceType)
+      ) {
+        const orderLine = procurementLineByReceiptProduct.get(`${batch.referenceId}:${batch.productId}`);
+        if (orderLine) {
+          layerTotalCostKgs = roundDisplayMoney(orderLine.totalCostKgs);
+        }
+      }
+
+      if (layerTotalCostKgs <= 0) {
+        const unitCostKgs = resolveAuthoritativeFifoLayerUnitCost({
+          initialQuantity: batch.initialQuantity,
+          batchUnitCostKgs: Number(batch.unitCostKgs),
+          movementQuantity: movement?.quantity,
+          movementUnitCostKgs: movement ? Number(movement.unitCostKgs) : null,
+          movementTotalCostKgs: movement?.totalCostKgs != null ? Number(movement.totalCostKgs) : null,
+        });
+        layerTotalCostKgs = roundDisplayMoney(unitCostKgs * layerBaseQuantity);
+      }
 
       return {
         batchId: batch.id,

@@ -5,6 +5,7 @@ import {
   isSeedStockMovementReference,
   SEED_FIFO_REFERENCE_TYPE,
 } from '../pricing/pricing-fifo-business-layer.util';
+import { resolveAuthoritativeFifoLayerUnitCost } from '../pricing/pricing-fifo-unit-cost.util';
 import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 
 type DbClient = PrismaService | Prisma.TransactionClient;
@@ -97,9 +98,20 @@ export async function resolveProcurementReceiptLayerUnitCost(
     }),
     client.procurementOrderItem.findUnique({
       where: { id: receivingItem.procurementItemId },
-      select: { finalCostKgs: true },
+      select: { finalCostKgs: true, totalCostKgs: true, quantity: true },
     }),
   ]);
+
+  const fromLineTotal = resolveAuthoritativeFifoLayerUnitCost({
+    initialQuantity: Number(orderItem?.quantity ?? 0),
+    batchUnitCostKgs: input.batchUnitCostKgs,
+    movementUnitCostKgs: input.movementUnitCostKgs,
+    movementTotalCostKgs: orderItem?.totalCostKgs != null ? Number(orderItem.totalCostKgs) : null,
+    movementQuantity: orderItem?.quantity != null ? Number(orderItem.quantity) : null,
+  });
+  if (fromLineTotal > 0) {
+    return fromLineTotal;
+  }
 
   return resolveStoredFifoCatalogUnitCostFromSources({
     batchUnitCostKgs: input.batchUnitCostKgs,
@@ -114,6 +126,19 @@ export async function resolveFifoLayerCatalogUnitCost(
   batch: Pick<FifoBatchRow, 'referenceType' | 'referenceId' | 'productId' | 'unitCostKgs'>,
   movement: MovementRow | null,
 ) {
+  if (movement) {
+    const fromMovement = resolveAuthoritativeFifoLayerUnitCost({
+      initialQuantity: Math.abs(Number(movement.quantity)),
+      batchUnitCostKgs: n(batch.unitCostKgs),
+      movementQuantity: movement.quantity,
+      movementUnitCostKgs: n(movement.unitCostKgs),
+      movementTotalCostKgs: n(movement.totalCostKgs),
+    });
+    if (fromMovement > 0) {
+      return fromMovement;
+    }
+  }
+
   if (isBusinessProcurementReceiptReference(batch.referenceType) && batch.referenceId) {
     return resolveProcurementReceiptLayerUnitCost(client, {
       receivingId: batch.referenceId,

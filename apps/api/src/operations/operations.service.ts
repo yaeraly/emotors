@@ -5353,6 +5353,11 @@ export class OperationsService {
       const transferCostLocked = Boolean(
         (request as { convertedOrderId?: string | null }).convertedOrderId,
       );
+      const staleCostRepairs: Array<{
+        itemId: string;
+        estimatedLineProductCostKgs: number;
+        estimatedUnitCost: number;
+      }> = [];
 
       const enrichedItems = await Promise.all(
         request.items.map(async (item) => {
@@ -5374,7 +5379,8 @@ export class OperationsService {
             Number((item as { estimatedLineProductCostKgs?: unknown }).estimatedLineProductCostKgs ?? 0),
           );
           let estimatedLineProductCostKgs = storedLineCost;
-          let estimatedUnitCost = Number((item as { estimatedUnitCost?: unknown }).estimatedUnitCost ?? 0);
+          const storedUnitCost = Number((item as { estimatedUnitCost?: unknown }).estimatedUnitCost ?? 0);
+          let estimatedUnitCost = storedUnitCost;
 
           if (lineQuantity > 0) {
             const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
@@ -5397,6 +5403,20 @@ export class OperationsService {
             });
             estimatedLineProductCostKgs = resolvedLineCost.estimatedLineProductCostKgs;
             estimatedUnitCost = resolvedLineCost.estimatedUnitCost;
+
+            if (
+              !transferCostLocked &&
+              fifoCost.allocatedQty >= lineQuantity &&
+              resolvedLineCost.estimatedLineProductCostKgs > 0 &&
+              (Math.abs(resolvedLineCost.estimatedLineProductCostKgs - storedLineCost) > 0.009 ||
+                Math.abs(resolvedLineCost.estimatedUnitCost - storedUnitCost) > 0.009)
+            ) {
+              staleCostRepairs.push({
+                itemId: item.id,
+                estimatedLineProductCostKgs: resolvedLineCost.estimatedLineProductCostKgs,
+                estimatedUnitCost: resolvedLineCost.estimatedUnitCost,
+              });
+            }
           }
 
           this.logger.log({
@@ -5426,6 +5446,25 @@ export class OperationsService {
           };
         }),
       );
+
+      if (staleCostRepairs.length > 0) {
+        await Promise.all(
+          staleCostRepairs.map((repair) =>
+            this.prisma.branchPurchaseRequestItem.update({
+              where: { id: repair.itemId },
+              data: {
+                estimatedLineProductCostKgs: repair.estimatedLineProductCostKgs,
+                estimatedUnitCost: repair.estimatedUnitCost,
+              },
+            }),
+          ),
+        );
+        this.logger.log({
+          message: 'BRANCH_PURCHASE_COST_REALIGNED_TO_FIFO',
+          requestId: request.id,
+          repairedLineCount: staleCostRepairs.length,
+        });
+      }
 
       const totalProductCostKgs = sumDisplayMoneyTotals(
         enrichedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
