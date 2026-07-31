@@ -1,6 +1,7 @@
 import type { Prisma, WarehouseType } from '@prisma/client';
 import {
   allocateProportionalCost,
+  computeLayerRemainingCostKgs,
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
@@ -79,13 +80,13 @@ export async function sumProductFifoRemainingValueKgs(
 
   const layers = await mapFifoLayerTotals(tx, batches);
   const lineValues = layers.map((layer) =>
-    allocateProportionalCost(
+    computeLayerRemainingCostKgs(
       layer.layerTotalCostKgs,
       layer.layerBaseQuantity,
       layer.remainingQuantity,
     ),
   );
-  return sumDisplayMoneyTotals(lineValues.map((value) => roundDisplayMoney(value)));
+  return sumDisplayMoneyTotals(lineValues);
 }
 
 /** Sum remaining FIFO layer values for an entire warehouse (only layers with qty > 0). */
@@ -107,13 +108,13 @@ export async function sumWarehouseFifoRemainingValueKgs(tx: PrismaTx, warehouseI
 
   const layers = await mapFifoLayerTotals(tx, batches);
   const lineValues = layers.map((layer) =>
-    allocateProportionalCost(
+    computeLayerRemainingCostKgs(
       layer.layerTotalCostKgs,
       layer.layerBaseQuantity,
       layer.remainingQuantity,
     ),
   );
-  return sumDisplayMoneyTotals(lineValues.map((value) => roundDisplayMoney(value)));
+  return sumDisplayMoneyTotals(lineValues);
 }
 
 /** Sum balance totalValueKgs for rows with positive quantity only (excludes ghost zero-qty value). */

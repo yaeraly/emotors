@@ -1,5 +1,6 @@
 import { applyHqBranchWholesaleMarkup, resolveHqToBranchPrice } from './pricing-calculator.util';
 import {
+  allocateLayerConsumptionCost,
   allocateProportionalCost,
   deriveDisplayUnitCost,
   reconcileAuthoritativeLineCosts,
@@ -87,9 +88,13 @@ export function buildFifoAllocationLines(
             layerBaseQty,
           );
 
-    const rawLineCost = allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take);
-    rawLineCosts.push(rawLineCost);
-    const lineCost = roundDisplayMoney(rawLineCost);
+    const lineCost = allocateLayerConsumptionCost({
+      layerTotalCostKgs,
+      layerBaseQuantity: layerBaseQty,
+      remainingQuantity: layer.remainingQuantity,
+      takeQuantity: take,
+    });
+    rawLineCosts.push(allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take));
     const unitCostKgs = deriveDisplayUnitCost(lineCost, take);
     const unitPriceKgs =
       options.branchType === 'HQ_BRANCH'
@@ -120,11 +125,11 @@ export function buildFifoAllocationLines(
     remainingToAllocate -= take;
   }
 
-  if (lines.length > 0) {
+  if (lines.length > 1) {
     const reconciledCosts = reconcileAuthoritativeLineCosts(rawLineCosts);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]!;
-      const lineCost = reconciledCosts[index] ?? 0;
+      const lineCost = reconciledCosts[index] ?? line.totalCostKgs;
       const unitCostKgs = deriveDisplayUnitCost(lineCost, line.quantity);
       const unitPriceKgs =
         options.branchType === 'HQ_BRANCH'

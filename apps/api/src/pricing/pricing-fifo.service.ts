@@ -4,7 +4,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups } from './pricing-calculator.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
-import { allocateProportionalCost, deriveDisplayUnitCost, roundDisplayMoney, sumDisplayMoneyTotals } from './product-cost-precision.util';
+import {
+  allocateLayerConsumptionCost,
+  allocateProportionalCost,
+  deriveDisplayUnitCost,
+  roundDisplayMoney,
+  sumDisplayMoneyTotals,
+} from './product-cost-precision.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
   isBusinessProcurementReceiptReference,
@@ -491,8 +497,12 @@ export class PricingFifoService {
           (batch.initialQuantity > 0 ? batch.initialQuantity : take);
         const layerTotalCostKgs =
           mappedLayer?.layerTotalCostKgs ?? Number(batch.unitCostKgs) * layerBaseQty;
-        const rawLineCost = allocateProportionalCost(layerTotalCostKgs, layerBaseQty, take);
-        const lineCost = roundMoney(rawLineCost);
+        const lineCost = allocateLayerConsumptionCost({
+          layerTotalCostKgs,
+          layerBaseQuantity: layerBaseQty,
+          remainingQuantity: batch.remainingQuantity,
+          takeQuantity: take,
+        });
         const linePrice = roundMoney(unitPriceKgs * take);
         lineCosts.push(lineCost);
         linePrices.push(linePrice);

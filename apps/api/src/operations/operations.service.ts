@@ -5459,8 +5459,40 @@ export class OperationsService {
             }),
           ),
         );
+        const oldTotal = sumDisplayMoneyTotals(
+          request.items.map((item) => {
+            const stored = roundDisplayMoney(
+              Number((item as { estimatedLineProductCostKgs?: unknown }).estimatedLineProductCostKgs ?? 0),
+            );
+            const qty = item.approvedQuantity ?? item.quantity;
+            return qty > 0 ? stored : 0;
+          }),
+        );
+        const newTotal = sumDisplayMoneyTotals(
+          enrichedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+        );
+        await this.prisma.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'COST_RECONCILIATION_REPAIRED',
+            entity: 'BranchPurchaseRequest',
+            entityId: request.id,
+            metadata: {
+              requestId: request.id,
+              branchOrderId: request.id,
+              oldAmount: oldTotal,
+              correctedAmount: newTotal,
+              difference: roundDisplayMoney(newTotal - oldTotal),
+              reason: 'fifo_layer_line_total_not_unit_times_qty',
+              repairedLineCount: staleCostRepairs.length,
+              itemIds: staleCostRepairs.map((row) => row.itemId),
+              timestamp: new Date().toISOString(),
+            } as Prisma.InputJsonValue,
+          },
+        });
         this.logger.log({
-          message: 'BRANCH_PURCHASE_COST_REALIGNED_TO_FIFO',
+          message: 'COST_RECONCILIATION_REPAIRED',
           requestId: request.id,
           repairedLineCount: staleCostRepairs.length,
         });

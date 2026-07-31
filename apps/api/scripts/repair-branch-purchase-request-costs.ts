@@ -244,7 +244,7 @@ async function main() {
         data: {
           userId: 'system',
           role: 'SYSTEM_ADMINISTRATOR',
-          action: 'COST_RECONCILIATION_CORRECTED',
+          action: 'COST_RECONCILIATION_REPAIRED',
           entity: 'BranchPurchaseRequest',
           entityId: request.id,
           metadata: {

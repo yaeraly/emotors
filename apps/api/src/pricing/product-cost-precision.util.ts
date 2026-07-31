@@ -18,6 +18,50 @@ export function deriveDisplayUnitCost(totalCostKgs: number, quantity: number): n
 }
 
 /**
+ * Exact monetary value still on a FIFO layer (proportional from authoritative layer total).
+ */
+export function computeLayerRemainingCostKgs(
+  layerTotalCostKgs: number,
+  layerBaseQuantity: number,
+  remainingQuantity: number,
+): number {
+  const baseQty = Math.abs(Number(layerBaseQuantity));
+  const remaining = Math.max(0, Math.floor(Number(remainingQuantity)));
+  if (layerTotalCostKgs <= 0 || baseQty <= 0 || remaining <= 0) return 0;
+  return roundDisplayMoney(allocateProportionalCost(layerTotalCostKgs, baseQty, remaining));
+}
+
+/**
+ * Authoritative cost for consuming `takeQuantity` from a FIFO layer.
+ * When the full remaining layer is consumed, uses the exact remaining layer total
+ * (never rounded display unit × quantity).
+ */
+export function allocateLayerConsumptionCost(input: {
+  layerTotalCostKgs: number;
+  layerBaseQuantity: number;
+  remainingQuantity: number;
+  takeQuantity: number;
+}): number {
+  const take = Math.abs(Number(input.takeQuantity));
+  const remaining = Math.max(0, Math.floor(Number(input.remainingQuantity)));
+  const baseQty = Math.abs(Number(input.layerBaseQuantity));
+  const layerTotal = Number(input.layerTotalCostKgs);
+  if (take <= 0 || layerTotal <= 0 || baseQty <= 0) return 0;
+
+  if (remaining <= 0) {
+    return roundDisplayMoney(allocateProportionalCost(layerTotal, baseQty, take));
+  }
+
+  const remainingLayerCost = allocateProportionalCost(layerTotal, baseQty, remaining);
+
+  if (take >= remaining) {
+    return roundDisplayMoney(remainingLayerCost);
+  }
+
+  return roundDisplayMoney(allocateProportionalCost(remainingLayerCost, remaining, take));
+}
+
+/**
  * Allocate a share of an authoritative layer/batch total cost without rounding per unit first.
  * Uses full Decimal precision; caller rounds only when storing/displaying.
  */

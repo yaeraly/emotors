@@ -5,7 +5,10 @@ export const LANDED_COST_PARITY_TOLERANCE_KGS = 0;
 
 /** Shown when branch-order transfer cost does not match reserved/consumed FIFO layers. */
 export const BRANCH_ORDER_COST_MISMATCH_MESSAGE =
-  'Товардын себестоимосту FIFO партиялары менен дал келбейт. Заказды аяктоодон мурун себестоимостьту текшериңиз.';
+  'Себестоимость FIFO партиялары менен дал келбейт. Операцияны аяктоодон мурун эсептөөнү текшериңиз.';
+
+/** Shown when FIFO transfer valuation fails parity checks (HQ → branch). */
+export const FIFO_TRANSFER_COST_MISMATCH_MESSAGE = BRANCH_ORDER_COST_MISMATCH_MESSAGE;
 
 export type CostReconciliationResult = {
   ok: boolean;
