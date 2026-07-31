@@ -38,7 +38,7 @@ import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assig
 import {
   compareWarehouseInventoryValuation,
   INVENTORY_VALUATION_MISMATCH_MESSAGE,
-  resolveAuthoritativeSystemUnitCostKgs,
+  resolveInventoryCountUnitCostKgs,
   resolveInventoryCountDifferenceValueKgs,
 } from '../inventory/inventory-authoritative-value.util';
 import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
@@ -132,17 +132,19 @@ export class InventoryCountService {
 
     const results = await Promise.all(
       rows.map(async (row) => {
-        const { unitCostKgs } = await resolveAuthoritativeSystemUnitCostKgs(
+        const { unitCostKgs } = await resolveInventoryCountUnitCostKgs(
           this.prisma,
+          this.pricingFifoService,
           warehouseId,
           row.productId,
-          row.quantity,
+          isHqWarehouse(warehouse),
           {
             totalValueKgs: row.totalValueKgs,
             landedCostKgs: row.landedCostKgs,
             averageCostKgs: row.averageCostKgs,
             finalCostKgs: row.product.finalCostKgs,
           },
+          row.quantity,
         );
         return sanitizeInventoryCountSearchResultForUser(user, {
           productId: row.productId,
@@ -397,17 +399,19 @@ export class InventoryCountService {
         throw new NotFoundException('Referenced product was not found for this branch warehouse');
       }
 
-      const { unitCostKgs } = await resolveAuthoritativeSystemUnitCostKgs(
+      const { unitCostKgs } = await resolveInventoryCountUnitCostKgs(
         tx,
+        this.pricingFifoService,
         session.warehouseId,
         product.id,
-        balance?.quantity ?? 0,
+        isHqWarehouse(session.warehouse),
         {
           totalValueKgs: balance?.totalValueKgs,
           landedCostKgs: balance?.landedCostKgs,
           averageCostKgs: balance?.averageCostKgs,
           finalCostKgs: product.finalCostKgs,
         },
+        balance?.quantity ?? 0,
       );
 
       const created = await tx.inventoryCountItem.create({
@@ -789,17 +793,19 @@ export class InventoryCountService {
   ) {
     return Promise.all(
       items.map(async (item) => {
-        const { unitCostKgs } = await resolveAuthoritativeSystemUnitCostKgs(
+        const { unitCostKgs } = await resolveInventoryCountUnitCostKgs(
           tx,
+          this.pricingFifoService,
           warehouse.id,
           item.productId,
-          item.systemQuantity,
+          isHqWarehouse(warehouse),
           {
             totalValueKgs: item._balanceForCost.totalValueKgs,
             landedCostKgs: item._balanceForCost.landedCostKgs,
             averageCostKgs: item._balanceForCost.averageCostKgs,
             finalCostKgs: item._balanceForCost.product.finalCostKgs,
           },
+          item.systemQuantity,
         );
         const { _balanceForCost, ...rest } = item;
         return { ...rest, unitCostKgs };
@@ -1101,11 +1107,12 @@ export class InventoryCountService {
         return locked ?? session;
       }
 
-      const items = await this.buildSessionItems(tx, locked, this.sessionFiltersToDto(locked));
-      if (items.length === 0) {
+      const rawItems = await this.buildSessionItems(tx, locked, this.sessionFiltersToDto(locked));
+      if (rawItems.length === 0) {
         return locked;
       }
 
+      const items = await this.finalizeSessionItemCosts(tx, locked.warehouse, rawItems);
       await tx.inventoryCountItem.createMany({ data: items });
       await this.audit(tx, user, 'INVENTORY_ITEMS_RESTORED', locked.id, {
         warehouseId: locked.warehouseId,

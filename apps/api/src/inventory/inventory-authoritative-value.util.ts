@@ -135,8 +135,81 @@ export type InventoryCountDifferenceInput = {
 };
 
 /**
- * Shortage/surplus value for inventory count using authoritative FIFO layer costs.
- * Shortage: sum exact FIFO costs for missing quantity (never rounded unit × qty).
+ * Authoritative FIFO unit cost for inventory-count display and fallback allocation.
+ * HQ: oldest active FIFO layer unit landed cost (never average/markup/catalog price).
+ */
+export async function resolveInventoryCountUnitCostKgs(
+  tx: PrismaTx,
+  pricingFifoService: PricingFifoService,
+  warehouseId: string,
+  productId: string,
+  isHqWarehouse: boolean,
+  balanceFallback: {
+    totalValueKgs?: unknown;
+    landedCostKgs?: unknown;
+    averageCostKgs?: unknown;
+    finalCostKgs?: unknown;
+  },
+  systemQuantity: number,
+): Promise<{ unitCostKgs: number; authoritativeSystemValueKgs: number }> {
+  const qty = Math.max(0, Math.floor(systemQuantity));
+  const fifoValue = await sumProductFifoRemainingValueKgs(tx, warehouseId, productId);
+  const authoritativeSystemValueKgs =
+    fifoValue > 0 ? fifoValue : roundDisplayMoney(Number(balanceFallback.totalValueKgs ?? 0));
+
+  if (isHqWarehouse) {
+    const oldest = await pricingFifoService.getOldestActiveHqFifoCost(
+      { productId, warehouseId },
+      tx,
+    );
+    if (oldest.costPriceKgs > 0) {
+      return {
+        unitCostKgs: roundDisplayMoney(oldest.costPriceKgs),
+        authoritativeSystemValueKgs,
+      };
+    }
+  } else if (qty > 0 && authoritativeSystemValueKgs > 0) {
+    const preview = await pricingFifoService.previewFifoAllocation(tx, {
+      productId,
+      warehouseId,
+      quantity: 1,
+      isHqOwnedBranch: false,
+      subtractReserved: false,
+      preferPerLayerMarkup: false,
+      fallbackUnitCost: Number(
+        balanceFallback.landedCostKgs ?? balanceFallback.averageCostKgs ?? 0,
+      ),
+    });
+    if (preview.unitCost > 0) {
+      return {
+        unitCostKgs: roundDisplayMoney(preview.unitCost),
+        authoritativeSystemValueKgs,
+      };
+    }
+  }
+
+  if (qty <= 0) {
+    return { unitCostKgs: 0, authoritativeSystemValueKgs };
+  }
+
+  const unitCostKgs =
+    authoritativeSystemValueKgs > 0
+      ? deriveDisplayUnitCost(authoritativeSystemValueKgs, qty)
+      : roundDisplayMoney(
+          Number(
+            balanceFallback.landedCostKgs ??
+              balanceFallback.averageCostKgs ??
+              balanceFallback.finalCostKgs ??
+              0,
+          ),
+        );
+
+  return { unitCostKgs, authoritativeSystemValueKgs };
+}
+
+/**
+ * Surplus/shortage value for inventory count using authoritative FIFO layer costs
+ * for the difference quantity only (never physical qty, system qty, or warehouse total).
  */
 export async function resolveInventoryCountDifferenceValueKgs(
   tx: PrismaTx,
@@ -148,22 +221,18 @@ export async function resolveInventoryCountDifferenceValueKgs(
   const diffQty = actualQty - systemQty;
   if (diffQty === 0) return 0;
 
-  if (diffQty > 0) {
-    return roundDisplayMoney(diffQty * input.unitCostKgs);
-  }
-
-  const shortageQty = -diffQty;
+  const allocationQty = Math.abs(diffQty);
   const fifoPreview = await pricingFifoService.previewFifoAllocation(tx, {
     productId: input.productId,
     warehouseId: input.warehouseId,
-    quantity: shortageQty,
+    quantity: allocationQty,
     isHqOwnedBranch: input.isHqWarehouse,
     subtractReserved: false,
-    preferPerLayerMarkup: true,
+    preferPerLayerMarkup: false,
     fallbackUnitCost: input.unitCostKgs,
   });
-  const shortageValue = roundDisplayMoney(fifoPreview.totalCostKgs);
-  return roundDisplayMoney(-shortageValue);
+  const differenceValue = roundDisplayMoney(fifoPreview.totalCostKgs);
+  return diffQty > 0 ? differenceValue : roundDisplayMoney(-differenceValue);
 }
 
 export async function resolveAuthoritativeSystemUnitCostKgs(
