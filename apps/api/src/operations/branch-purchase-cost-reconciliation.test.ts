@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
-import { sumBranchPurchaseLineProductCosts } from './branch-purchase-fifo-cost.util';
+import {
+  resolveEnrichedBranchPurchaseLineCost,
+  sumBranchPurchaseLineProductCosts,
+} from './branch-purchase-fifo-cost.util';
 import { buildFifoAllocationLines } from '../pricing/pricing-fifo-allocation.util';
 import {
   deriveDisplayUnitCost,
@@ -173,5 +176,50 @@ describe('BPR China batch transfer parity', () => {
     assert.ok(Math.abs(drift) > 0);
     // Production BPR-1785478341861 observed total 914368.98 vs shipment 914369.80 (−0.82 KGS).
     assert.equal(roundDisplayMoney(CHINA_BATCH_TOTAL - 914368.98), 0.82);
+  });
+});
+
+describe('resolveEnrichedBranchPurchaseLineCost — prefer live FIFO over stale stored', () => {
+  it('uses FIFO when transfer is not locked even if stored differs slightly', () => {
+    const fifoTotal = 162317.33;
+    const storedRoundedUnitQty = roundDisplayMoney(14756.12 * 11);
+    const resolved = resolveEnrichedBranchPurchaseLineCost({
+      storedLineCostKgs: storedRoundedUnitQty,
+      fifoLineCostKgs: fifoTotal,
+      fifoAllocatedQty: 11,
+      lineQuantity: 11,
+      transferCostLocked: false,
+    });
+    assert.equal(resolved.estimatedLineProductCostKgs, fifoTotal);
+    assert.notEqual(resolved.estimatedLineProductCostKgs, storedRoundedUnitQty);
+  });
+
+  it('full China batch enrich sum matches 914369.80 when FIFO is authoritative', () => {
+    const procurementLines = buildChinaBatchLines();
+    const enrichedCosts = procurementLines.map((line) => {
+      const storedDrift = roundDisplayMoney(
+        deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity,
+      );
+      return resolveEnrichedBranchPurchaseLineCost({
+        storedLineCostKgs: storedDrift,
+        fifoLineCostKgs: line.totalCostKgs,
+        fifoAllocatedQty: line.quantity,
+        lineQuantity: line.quantity,
+        transferCostLocked: false,
+      }).estimatedLineProductCostKgs;
+    });
+    assert.equal(sumBranchPurchaseLineProductCosts(enrichedCosts), CHINA_BATCH_TOTAL);
+  });
+
+  it('keeps stored costs when transfer is locked', () => {
+    const stored = 914368.98;
+    const resolved = resolveEnrichedBranchPurchaseLineCost({
+      storedLineCostKgs: stored,
+      fifoLineCostKgs: CHINA_BATCH_TOTAL,
+      fifoAllocatedQty: 682,
+      lineQuantity: 682,
+      transferCostLocked: true,
+    });
+    assert.equal(resolved.estimatedLineProductCostKgs, stored);
   });
 });

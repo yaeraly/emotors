@@ -57,3 +57,47 @@ export async function resolveBranchPurchaseFifoLineCost(
 export function sumBranchPurchaseLineProductCosts(costs: number[]) {
   return sumDisplayMoneyTotals(costs);
 }
+
+/**
+ * Authoritative line cost for BPR enrichment: live FIFO when available, stored only when
+ * transfer is locked or FIFO cannot allocate (never unit×qty recompute).
+ */
+export function resolveEnrichedBranchPurchaseLineCost(input: {
+  storedLineCostKgs: number;
+  fifoLineCostKgs: number;
+  fifoAllocatedQty: number;
+  lineQuantity: number;
+  transferCostLocked: boolean;
+}): BranchPurchaseFifoLineCost {
+  const lineQuantity = Math.max(0, input.lineQuantity);
+  if (lineQuantity <= 0) {
+    return { estimatedLineProductCostKgs: 0, estimatedUnitCost: 0 };
+  }
+
+  const storedLineCost = roundDisplayMoney(input.storedLineCostKgs);
+  const fifoLineCost = roundDisplayMoney(input.fifoLineCostKgs);
+  const fifoAllocatedQty = Math.max(0, input.fifoAllocatedQty);
+
+  if (input.transferCostLocked && storedLineCost > 0) {
+    return {
+      estimatedLineProductCostKgs: storedLineCost,
+      estimatedUnitCost: deriveDisplayUnitCost(storedLineCost, lineQuantity),
+    };
+  }
+
+  if (fifoAllocatedQty > 0 && fifoLineCost > 0) {
+    return {
+      estimatedLineProductCostKgs: fifoLineCost,
+      estimatedUnitCost: deriveDisplayUnitCost(fifoLineCost, lineQuantity),
+    };
+  }
+
+  if (storedLineCost > 0) {
+    return {
+      estimatedLineProductCostKgs: storedLineCost,
+      estimatedUnitCost: deriveDisplayUnitCost(storedLineCost, lineQuantity),
+    };
+  }
+
+  return { estimatedLineProductCostKgs: 0, estimatedUnitCost: 0 };
+}

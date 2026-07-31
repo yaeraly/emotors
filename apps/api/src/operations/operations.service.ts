@@ -93,6 +93,7 @@ import { toBranchPurchaseRequestItemCreate } from './branch-purchase-request-ite
 import { buildDistributionLinesFromConfirmedRequestItems } from './branch-purchase-confirm.util';
 import {
   resolveBranchPurchaseFifoLineCost,
+  resolveEnrichedBranchPurchaseLineCost,
   sumBranchPurchaseLineProductCosts,
 } from './branch-purchase-fifo-cost.util';
 import {
@@ -123,7 +124,6 @@ import {
   canSeeHqStockInBranchRequests,
   isBranchOnlyRequestUser,
   sanitizeBranchPurchaseRequest,
-  shouldUseStoredBranchPurchaseCosts,
   toBranchPurchaseRequestResponse,
 } from './branch-purchase-request.presenter';
 import {
@@ -5350,7 +5350,9 @@ export class OperationsService {
       });
       await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
 
-      const useStoredCosts = shouldUseStoredBranchPurchaseCosts(request);
+      const transferCostLocked = Boolean(
+        (request as { convertedOrderId?: string | null }).convertedOrderId,
+      );
 
       const enrichedItems = await Promise.all(
         request.items.map(async (item) => {
@@ -5375,45 +5377,26 @@ export class OperationsService {
           let estimatedUnitCost = Number((item as { estimatedUnitCost?: unknown }).estimatedUnitCost ?? 0);
 
           if (lineQuantity > 0) {
-            if (useStoredCosts && storedLineCost > 0) {
-              const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
-                productId: item.productId,
-                warehouseId: assignedHqWarehouseId,
-                quantity: lineQuantity,
-                branchType: branch?.branchType,
-                hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
-                fallbackUnitCost: estimatedUnitCost,
-                fallbackUnitPrice: Number(
-                  (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ?? 0,
-                ),
-              });
-              if (
-                fifoCost.allocatedQty > 0 &&
-                Math.abs(fifoCost.estimatedLineProductCostKgs - storedLineCost) > 0.001
-              ) {
-                estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
-                estimatedUnitCost = fifoCost.estimatedUnitCost;
-              } else {
-                estimatedLineProductCostKgs = storedLineCost;
-                estimatedUnitCost = deriveDisplayUnitCost(storedLineCost, lineQuantity);
-              }
-            } else {
-              const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
-                productId: item.productId,
-                warehouseId: assignedHqWarehouseId,
-                quantity: lineQuantity,
-                branchType: branch?.branchType,
-                hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
-                fallbackUnitCost: estimatedUnitCost,
-                fallbackUnitPrice: Number(
-                  (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ?? 0,
-                ),
-              });
-              if (fifoCost.allocatedQty > 0) {
-                estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
-                estimatedUnitCost = fifoCost.estimatedUnitCost;
-              }
-            }
+            const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
+              productId: item.productId,
+              warehouseId: assignedHqWarehouseId,
+              quantity: lineQuantity,
+              branchType: branch?.branchType,
+              hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
+              fallbackUnitCost: estimatedUnitCost,
+              fallbackUnitPrice: Number(
+                (item as { resolvedBranchPriceKgs?: unknown }).resolvedBranchPriceKgs ?? 0,
+              ),
+            });
+            const resolvedLineCost = resolveEnrichedBranchPurchaseLineCost({
+              storedLineCostKgs: storedLineCost,
+              fifoLineCostKgs: fifoCost.estimatedLineProductCostKgs,
+              fifoAllocatedQty: fifoCost.allocatedQty,
+              lineQuantity,
+              transferCostLocked,
+            });
+            estimatedLineProductCostKgs = resolvedLineCost.estimatedLineProductCostKgs;
+            estimatedUnitCost = resolvedLineCost.estimatedUnitCost;
           }
 
           this.logger.log({
