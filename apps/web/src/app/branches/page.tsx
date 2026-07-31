@@ -4,11 +4,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { LifecycleDeleteConfirmModal } from '@/components/LifecycleDeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
+import { canDeleteBranch, hasFullAccess } from '@/lib/rbac';
 import type { Branch, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
-import { hasFullAccess } from '@/lib/rbac';
 
 export default function BranchesPage() {
   const router = useRouter();
@@ -25,6 +26,8 @@ export default function BranchesPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [user, setUser] = useState<User | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Branch | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (filters.search.trim()) params.set('search', filters.search.trim());
@@ -95,6 +98,27 @@ export default function BranchesPage() {
   }
 
   const ceoView = hasFullAccess(user);
+  const canDelete = canDeleteBranch(user);
+
+  async function confirmDeleteBranch(reason?: string) {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    setError('');
+    try {
+      const result = await apiFetch<{ success: boolean; archived?: boolean }>(
+        `/branches/${deleteTarget.id}`,
+        { method: 'DELETE', body: JSON.stringify({ reason }) },
+      );
+      if (!result.success) throw new Error(t('branches.deleteFailed'));
+      setDeleteTarget(null);
+      setSuccess(result.archived ? t('lifecycle.branchArchivedSuccess') : t('branches.deletedSuccess'));
+      await loadBranches();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('branches.deleteFailed'));
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
 
   return (
     <ProtectedShell>
@@ -213,9 +237,20 @@ export default function BranchesPage() {
                     {ceoView ? <td className="hidden px-3 py-2 md:table-cell">{branch.city ?? '—'}</td> : null}
                     <td className="px-3 py-2">{translateStatus(t, branch.status ?? 'ACTIVE', 'branch')}</td>
                     <td className="px-3 py-2 text-right">
-                      <Link href={`/branches/${branch.id}`} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
+                      <div className="flex justify-end gap-2">
+                        <Link href={`/branches/${branch.id}`} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold">
+                          {t('common.open')}
+                        </Link>
+                        {canDelete ? (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(branch)}
+                            className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700"
+                          >
+                            {t('common.delete')}
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -224,6 +259,16 @@ export default function BranchesPage() {
           </div>
         </div>
       </section>
+      <LifecycleDeleteConfirmModal
+        open={Boolean(deleteTarget)}
+        entityType="branch"
+        entityName={deleteTarget?.name ?? ''}
+        entityCode={deleteTarget?.code}
+        requireReason
+        loading={deleteLoading}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={(reason) => void confirmDeleteBranch(reason)}
+      />
     </ProtectedShell>
   );
 }

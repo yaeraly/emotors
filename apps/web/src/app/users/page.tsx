@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { LifecycleDeleteConfirmModal } from '@/components/LifecycleDeleteConfirmModal';
 import { RoleBadges } from '@/components/RoleSelector';
 import { apiFetch } from '@/lib/api';
-import { canCreateBranchOwner, canResetUserPassword, isBranchPanelUser } from '@/lib/rbac';
+import { canCreateBranchOwner, canDeleteEmployee, canResetUserPassword, isBranchPanelUser } from '@/lib/rbac';
 import type { Branch, Role, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -51,6 +52,8 @@ export default function UsersPage() {
   const [pageSize, setPageSize] = useState(25);
   const [successMessage, setSuccessMessage] = useState('');
   const [openMenuUserId, setOpenMenuUserId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const isBranchOwnerPanel = isBranchPanelUser(currentUser);
 
@@ -129,6 +132,25 @@ export default function UsersPage() {
     setUserTypeFilter('');
     setStatusFilter('');
     setPage(1);
+  }
+
+  async function confirmDeleteUser(reason?: string) {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    setError('');
+    try {
+      await apiFetch(`/users/${deleteTarget.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ reason }),
+      });
+      setDeleteTarget(null);
+      setSuccessMessage(t('lifecycle.userDeactivatedSuccess'));
+      setUsers((current) => current.filter((row) => row.id !== deleteTarget.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setDeleteLoading(false);
+    }
   }
 
   if (isBranchOwnerPanel) {
@@ -356,9 +378,20 @@ export default function UsersPage() {
                     <td className="hidden px-3 py-2 text-slate-600 md:table-cell">{user.phone || '—'}</td>
                     <td className="px-3 py-2">{translateStatus(t, user.status)}</td>
                     <td className="px-3 py-2 text-right">
-                      <Link href={`/users/${user.id}`} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold">
-                        {t('common.open')}
-                      </Link>
+                      <div className="flex justify-end gap-2">
+                        <Link href={`/users/${user.id}`} className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-semibold">
+                          {t('common.open')}
+                        </Link>
+                        {canDeleteEmployee(currentUser) && currentUser?.id !== user.id ? (
+                          <button
+                            type="button"
+                            onClick={() => setDeleteTarget(user)}
+                            className="rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-700"
+                          >
+                            {t('common.delete')}
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -375,6 +408,17 @@ export default function UsersPage() {
           </div>
         </div>
       </section>
+      <LifecycleDeleteConfirmModal
+        open={Boolean(deleteTarget)}
+        entityType="user"
+        entityName={deleteTarget?.fullName ?? ''}
+        userFullName={deleteTarget?.fullName}
+        employeeId={deleteTarget?.employeeId ?? undefined}
+        requireReason
+        loading={deleteLoading}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={(reason) => void confirmDeleteUser(reason)}
+      />
     </ProtectedShell>
   );
 }

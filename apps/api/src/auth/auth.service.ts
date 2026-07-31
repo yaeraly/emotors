@@ -45,7 +45,7 @@ export class AuthService {
 
     if (user.status !== 'ACTIVE') {
       await this.recordLogin(user.id, false, meta);
-      throw new UnauthorizedException('User is not active');
+      throw new UnauthorizedException('Аккаунт деактивирован. Вход недоступен.');
     }
 
     if (!user.hasLogin) {

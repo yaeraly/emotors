@@ -2,6 +2,14 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { Prisma, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  assessBranchWarehouseDeleteBlocking,
+  assertCanHqCeoManageLifecycle,
+  archiveBranchWarehouse,
+  branchWarehouseHasDeleteHistory,
+  hardDeleteBranchWarehouse,
+} from '../lifecycle/hq-ceo-lifecycle.util';
+import { BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE } from '../lifecycle/hq-ceo-lifecycle.constants';
 import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
 import { activeBranchWarehouseWhere, branchWarehouseWhere, isBranchWarehouse } from '../warehouse/warehouse.util';
 import { UpdateBranchWarehouseDto } from './dto/update-branch-warehouse.dto';
@@ -137,6 +145,72 @@ export class BranchWarehouseService {
     });
     const metrics = await this.buildMetrics(warehouse, user);
     return { ...warehouse, ...metrics };
+  }
+
+  async remove(user: AuthUser, id: string, reason?: string) {
+    assertCanHqCeoManageLifecycle(user);
+
+    const existing = await this.prisma.warehouse.findFirst({
+      where: { id, ...branchWarehouseWhere },
+      include: { branch: { select: { id: true, name: true, code: true } } },
+    });
+    if (!existing || !isBranchWarehouse(existing)) {
+      throw new NotFoundException('Склад филиала не найден');
+    }
+
+    const trimmedReason = reason?.trim() || null;
+    const previousStatus = existing.isActive;
+
+    await this.audit(user, 'BRANCH_WAREHOUSE_DELETE_REQUESTED', id, {
+      branchId: existing.branchId,
+      warehouseCode: existing.code,
+      oldStatus: previousStatus,
+      reason: trimmedReason,
+    });
+
+    return this.prisma.$transaction(async (tx) => {
+      const { blocked, reasons } = await assessBranchWarehouseDeleteBlocking(tx, id);
+      if (blocked) {
+        await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETE_BLOCKED', id, {
+          branchId: existing.branchId,
+          warehouseCode: existing.code,
+          blockingRecords: reasons,
+        });
+        throw new BadRequestException({
+          message: BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE,
+          blockingRecords: reasons,
+        });
+      }
+
+      const hasHistory = await branchWarehouseHasDeleteHistory(tx, id);
+
+      if (!hasHistory) {
+        await hardDeleteBranchWarehouse(tx, id);
+        await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETED', id, {
+          branchId: existing.branchId,
+          warehouseCode: existing.code,
+          oldStatus: previousStatus,
+          newStatus: null,
+          deletionType: 'hard_delete',
+          reason: trimmedReason,
+        });
+        return { success: true, archived: false, message: 'Склад филиала удалён' };
+      }
+
+      if (!trimmedReason) {
+        throw new BadRequestException('Укажите причину архивации склада с историей операций');
+      }
+
+      const archived = await archiveBranchWarehouse(tx, id);
+      await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_ARCHIVED', id, {
+        branchId: existing.branchId,
+        warehouseCode: existing.code,
+        oldStatus: previousStatus,
+        newStatus: archived.isActive,
+        reason: trimmedReason,
+      });
+      return { success: true, archived: true, message: 'Склад филиала архивирован' };
+    });
   }
 
   async updateBranchCeoProfile(
@@ -662,6 +736,33 @@ export class BranchWarehouseService {
     if (!this.canViewAll(user)) {
       throw new ForbiddenException('Only HQ users can view all branch warehouses');
     }
+  }
+
+  private auditInTx(
+    tx: Prisma.TransactionClient,
+    user: AuthUser,
+    action: string,
+    warehouseId: string,
+    metadata?: Record<string, unknown>,
+  ) {
+    return tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'Warehouse',
+        entityId: warehouseId,
+        metadata: {
+          actorUserId: user.id,
+          userId: user.id,
+          role: user.role,
+          warehouseId,
+          roles: user.roles ?? [user.role],
+          timestamp: new Date().toISOString(),
+          ...metadata,
+        } as Prisma.InputJsonValue,
+      },
+    });
   }
 
   private audit(user: AuthUser, action: string, warehouseId: string, metadata?: Record<string, unknown>) {

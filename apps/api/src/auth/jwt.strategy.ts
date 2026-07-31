@@ -42,7 +42,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
 
     if (!user || user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('User no longer exists');
+      throw new UnauthorizedException('Аккаунт деактивирован. Вход недоступен.');
     }
 
     const userRoles = await this.prisma.userRole.findMany({

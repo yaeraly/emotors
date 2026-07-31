@@ -80,7 +80,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Roles(Role.OWNER, Role.CEO)
+  @Roles(Role.CEO)
   removeEmployee(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

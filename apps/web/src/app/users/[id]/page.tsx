@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { hqAssignableRoles, RoleBadges, RoleSelector } from '@/components/RoleSelector';
 import { HqWarehouseMultiSelect } from '@/components/users/HqWarehouseMultiSelect';
+import { LifecycleDeleteConfirmModal } from '@/components/LifecycleDeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { canAssignHqWarehouseManager, canDeleteEmployee, canResetUserPassword } from '@/lib/rbac';
 import { canGrantCashierCapability } from '@/lib/cashier-capability';
@@ -24,7 +25,8 @@ export default function UserDetailPage() {
   const [temporaryPassword, setTemporaryPassword] = useState('');
   const [showCreateLogin, setShowCreateLogin] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteSuccess, setDeleteSuccess] = useState('');
   const [loginForm, setLoginForm] = useState({ username: '', email: '', password: '' });
   const [cashierEnabled, setCashierEnabled] = useState(false);
   const [cashierSaving, setCashierSaving] = useState(false);
@@ -157,16 +159,31 @@ export default function UserDetailPage() {
     }
   }
 
-  async function deleteEmployee() {
+  async function deleteEmployee(reason?: string) {
     setError('');
+    setDeleteLoading(true);
     try {
-      await apiFetch(`/users/${id}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ reason: deleteReason }),
-      });
-      window.location.href = '/users';
+      const result = await apiFetch<{ success: boolean; archived?: boolean; message?: string }>(
+        `/users/${id}`,
+        {
+          method: 'DELETE',
+          body: JSON.stringify({ reason }),
+        },
+      );
+      setShowDeleteModal(false);
+      if (result.archived) {
+        setDeleteSuccess(t('lifecycle.userDeactivatedSuccess'));
+        await load();
+        window.setTimeout(() => {
+          window.location.href = '/users';
+        }, 1200);
+      } else {
+        window.location.href = '/users';
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -212,6 +229,7 @@ export default function UserDetailPage() {
           ) : null}
         </div>
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+        {deleteSuccess ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{deleteSuccess}</p> : null}
         {temporaryPassword ? <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{t('users.temporaryPassword')}: {temporaryPassword}</p> : null}
         <form onSubmit={save} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
           <Input label={t('crm.fullName')} value={form.fullName} onChange={(value) => setField('fullName', value)} />
@@ -306,18 +324,17 @@ export default function UserDetailPage() {
           </form>
         ) : null}
         {showDeleteModal ? (
-          <div className="rounded-3xl border border-red-200 bg-red-50/40 p-6">
-            <h3 className="text-lg font-bold text-slate-900">{t('users.deleteEmployee')}</h3>
-            <p className="mt-2 text-sm text-slate-600">{t('users.deleteEmployeeHint')}</p>
-            <label className="mt-4 block">
-              <span className="text-sm font-semibold text-slate-700">{t('users.deleteReason')}</span>
-              <textarea value={deleteReason} onChange={(event) => setDeleteReason(event.target.value)} className="mt-2 min-h-24 w-full rounded-xl border border-slate-300 px-3 py-2" />
-            </label>
-            <div className="mt-4 flex gap-2">
-              <button onClick={() => void deleteEmployee()} className="rounded-xl bg-red-600 px-4 py-3 font-semibold text-white" type="button">{t('users.confirmDelete')}</button>
-              <button onClick={() => setShowDeleteModal(false)} className="rounded-xl border border-slate-300 px-4 py-3 font-semibold" type="button">{t('common.cancel')}</button>
-            </div>
-          </div>
+          <LifecycleDeleteConfirmModal
+            open={showDeleteModal}
+            entityType="user"
+            entityName={user?.fullName ?? ''}
+            userFullName={user?.fullName}
+            employeeId={user?.employeeId ?? undefined}
+            requireReason
+            loading={deleteLoading}
+            onClose={() => setShowDeleteModal(false)}
+            onConfirm={(reason) => void deleteEmployee(reason)}
+          />
         ) : null}
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-bold">{t('users.loginHistory')}</h3>

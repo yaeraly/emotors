@@ -17,7 +17,14 @@ import {
   hasAnyHqRole,
   resolveUserRoles,
 } from '../rbac/rbac';
-import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
+import {
+  assessBranchDeleteBlocking,
+  assertCanHqCeoManageLifecycle,
+  archiveBranch,
+  branchHasBusinessHistory,
+  assessBranchWarehouseDeleteBlocking,
+  hardDeleteBranchWarehouse,
+} from '../lifecycle/hq-ceo-lifecycle.util';
 import { activeHqWarehouseWhere, isHqWarehouse } from '../warehouse/warehouse.util';
 import { BranchQueryDto } from './dto/branch-query.dto';
 import { CreateBranchDto } from './dto/create-branch.dto';
@@ -469,72 +476,145 @@ export class BranchesService {
     }
   }
 
-  async delete(user: AuthUser, id: string) {
-    assertCanPermanentDeleteBusinessData(user);
+  async delete(user: AuthUser, id: string, reason?: string) {
+    assertCanHqCeoManageLifecycle(user);
+
     const branch = await this.prisma.branch.findFirst({
       where: { id, deletedAt: null },
     });
     if (!branch) throw new NotFoundException('Branch not found');
 
-    const [
-      users,
-      customers,
-      sales,
-      products,
-      stockMovements,
-      warehouses,
-    ] = await Promise.all([
-      this.prisma.user.count({ where: { branchId: id } }),
-      this.prisma.customer.count({ where: { branchId: id } }),
-      this.prisma.sale.count({ where: { branchId: id } }),
-      this.prisma.product.count({ where: { branchId: id } }),
-      this.prisma.stockMovement.count({ where: { branchId: id } }),
-      this.prisma.warehouse.count({ where: { branchId: id } }),
-    ]);
-    const hasRelatedData =
-      users + customers + sales + products + stockMovements + warehouses > 0;
     const previousStatus = branch.status;
-
-    await this.prisma.branch.update({
-      where: { id },
-      data: {
-        status: BranchStatus.INACTIVE,
-        deletedAt: new Date(),
-      },
-    });
+    const trimmedReason = reason?.trim() || null;
 
     await this.prisma.auditLog.create({
       data: {
         userId: user.id,
         role: user.role,
-        action: 'BRANCH_DELETED',
+        action: 'BRANCH_DELETE_REQUESTED',
         entity: 'Branch',
         entityId: id,
         metadata: {
-          userId: user.id,
-          role: user.role,
+          actorUserId: user.id,
           branchId: id,
           branchName: branch.name,
-          deletionType: 'soft_delete',
-          previousStatus,
-          newStatus: BranchStatus.INACTIVE,
-          hasRelatedData,
+          branchCode: branch.code,
+          oldStatus: previousStatus,
+          reason: trimmedReason,
           timestamp: new Date().toISOString(),
         },
       },
     });
-    await auditPermanentDelete(this.prisma, user, 'Branch', id, {
-      deletionType: 'soft_delete',
-      hasRelatedData,
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const { blocked, reasons } = await assessBranchDeleteBlocking(tx, id);
+      if (blocked) {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'BRANCH_DELETE_BLOCKED',
+            entity: 'Branch',
+            entityId: id,
+            metadata: {
+              actorUserId: user.id,
+              branchId: id,
+              oldStatus: previousStatus,
+              blockingRecords: reasons,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+        throw new BadRequestException({
+          message: 'Филиал не может быть удалён: есть активные операции или остатки.',
+          blockingRecords: reasons,
+        });
+      }
+
+      const hasHistory = await branchHasBusinessHistory(tx, id);
+
+      if (!hasHistory) {
+        const warehouses = await tx.warehouse.findMany({
+          where: { branchId: id, deletedAt: null },
+          select: { id: true },
+        });
+        for (const warehouse of warehouses) {
+          const warehouseBlocking = await assessBranchWarehouseDeleteBlocking(tx, warehouse.id);
+          if (warehouseBlocking.blocked) {
+            throw new BadRequestException({
+              message: 'Филиал не может быть удалён: склад филиала не пуст.',
+              blockingRecords: warehouseBlocking.reasons,
+            });
+          }
+          await hardDeleteBranchWarehouse(tx, warehouse.id);
+        }
+
+        await tx.branch.delete({ where: { id } });
+
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'BRANCH_DELETED',
+            entity: 'Branch',
+            entityId: id,
+            metadata: {
+              actorUserId: user.id,
+              branchId: id,
+              branchName: branch.name,
+              branchCode: branch.code,
+              oldStatus: previousStatus,
+              newStatus: null,
+              deletionType: 'hard_delete',
+              reason: trimmedReason,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+
+        return {
+          success: true,
+          deletedBranchId: id,
+          archived: false,
+          message: 'Филиал успешно удалён',
+        };
+      }
+
+      if (!trimmedReason) {
+        throw new BadRequestException('Укажите причину архивации филиала с историей операций');
+      }
+
+      await archiveBranch(tx, id);
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_ARCHIVED',
+          entity: 'Branch',
+          entityId: id,
+          metadata: {
+            actorUserId: user.id,
+            branchId: id,
+            branchName: branch.name,
+            branchCode: branch.code,
+            oldStatus: previousStatus,
+            newStatus: BranchStatus.INACTIVE,
+            reason: trimmedReason,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      return {
+        success: true,
+        deletedBranchId: id,
+        archived: true,
+        message: 'Филиал архивирован',
+      };
     });
 
-    return {
-      success: true,
-      deletedBranchId: id,
-      message: 'Филиал успешно удалён',
-      deactivated: true,
-      hasRelatedData,
-    };
+    return result;
   }
 
   async assignHqWarehouse(user: AuthUser, id: string, dto: AssignBranchHqWarehouseDto) {

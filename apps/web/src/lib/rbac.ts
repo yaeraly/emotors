@@ -179,7 +179,13 @@ export function canUpdateBusinessDate(
 }
 
 export function canDeleteEmployee(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return canPermanentDeleteBusinessData(user);
+  return canHqCeoManageLifecycle(user);
+}
+
+/** HQ CEO — safe delete/archive of branches, branch warehouses, and users. */
+export function canHqCeoManageLifecycle(user: Pick<User, 'role' | 'roles'> | null | undefined) {
+  if (!user) return false;
+  return hasRole(user, 'CEO');
 }
 
 export function isSupplyChainManagerUser(user: Pick<User, 'role' | 'roles'> | null | undefined) {
@@ -1419,7 +1425,11 @@ export function canDeleteSupplier(user: Pick<User, 'role' | 'roles' | 'permissio
 }
 
 export function canDeleteBranch(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
-  return canPermanentDeleteBusinessData(user);
+  return canHqCeoManageLifecycle(user);
+}
+
+export function canDeleteBranchWarehouse(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
+  return canHqCeoManageLifecycle(user);
 }
 
 export function canPermanentDeleteCustomer(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {

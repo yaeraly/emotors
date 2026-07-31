@@ -18,7 +18,18 @@ import {
   uniqueRoles,
   userHasPermission,
 } from '../rbac/rbac';
-import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
+import {
+  assessUserDeleteProtection,
+  assertCanHqCeoManageLifecycle,
+  revokeUserSessions,
+  userHasBusinessHistory,
+} from '../lifecycle/hq-ceo-lifecycle.util';
+import {
+  USER_DELETE_ACTIVE_OPERATIONS_MESSAGE,
+  USER_DELETE_LAST_CEO_MESSAGE,
+  USER_DELETE_SELF_MESSAGE,
+} from '../lifecycle/hq-ceo-lifecycle.constants';
+import { assertCanPermanentDeleteBusinessData } from '../rbac/permanent-delete.util';
 import { EMPLOYEE_ID_GENERATION_FAILED, generateBranchEmployeeId } from './employee-id.util';
 import { BRANCH_CODE_GENERATION_FAILED, generateBranchCode } from '../branches/branch-code.util';
 
@@ -280,82 +291,118 @@ export class UsersService {
   }
 
   async removeEmployee(user: AuthUser, id: string, reason?: string) {
-    assertCanPermanentDeleteBusinessData(user);
-    if (user.id === id) {
-      throw new BadRequestException('You cannot delete your own account');
+    assertCanHqCeoManageLifecycle(user);
+
+    const trimmedReason = reason?.trim() || null;
+
+    await this.audit(user, 'USER_DELETE_REQUESTED', 'User', id, {
+      actorUserId: user.id,
+      targetUserId: id,
+      reason: trimmedReason,
+    });
+
+    const protection = await this.prisma.$transaction(async (tx) => {
+      return assessUserDeleteProtection(tx, user.id, id);
+    });
+
+    if (protection.blocked) {
+      await this.audit(user, 'USER_DELETE_BLOCKED', 'User', id, {
+        actorUserId: user.id,
+        targetUserId: id,
+        reason: protection.reason,
+        blockingRecords: 'details' in protection ? protection.details : undefined,
+      });
+
+      if (protection.reason === 'SELF') {
+        throw new BadRequestException(USER_DELETE_SELF_MESSAGE);
+      }
+      if (protection.reason === 'LAST_CEO') {
+        throw new BadRequestException(USER_DELETE_LAST_CEO_MESSAGE);
+      }
+      if (protection.reason === 'OPEN_CASH_SHIFT' || protection.reason === 'ACTIVE_OPERATIONS') {
+        throw new BadRequestException(USER_DELETE_ACTIVE_OPERATIONS_MESSAGE);
+      }
+      if (protection.reason === 'NOT_FOUND') {
+        throw new NotFoundException('User not found');
+      }
+      throw new BadRequestException(USER_DELETE_ACTIVE_OPERATIONS_MESSAGE);
     }
 
-    const existing = await this.prisma.user.findFirst({
-      where: { id, deletedAt: null },
-      include: { userRoles: { include: { role: true } } },
-    });
-    if (!existing) throw new NotFoundException('User not found');
-
-    const [
-      sales,
-      payments,
-      stockMovements,
-      auditLogs,
-      assignments,
-      procurementOrders,
-      distributionOrders,
-    ] = await Promise.all([
-      this.prisma.sale.count({ where: { sellerId: id } }),
-      this.prisma.payment.count({ where: { createdById: id } }),
-      this.prisma.stockMovement.count({ where: { createdById: id } }),
-      this.prisma.auditLog.count({ where: { userId: id } }),
-      this.prisma.hqWarehouseManagerAssignment.count({ where: { userId: id } }),
-      this.prisma.procurementOrder.count({ where: { createdById: id } }),
-      this.prisma.branchDistributionOrder.count({ where: { createdById: id } }),
-    ]);
-
-    const hasHistory =
-      sales > 0 ||
-      payments > 0 ||
-      stockMovements > 0 ||
-      auditLogs > 0 ||
-      assignments > 0 ||
-      procurementOrders > 0 ||
-      distributionOrders > 0;
-
+    const existing = protection.target!;
     const oldValue = this.safeUser(existing);
+
+    const hasHistory = await this.prisma.$transaction((tx) => userHasBusinessHistory(tx, id));
 
     if (!hasHistory) {
       await this.prisma.$transaction(async (tx) => {
-        await tx.userRole.deleteMany({ where: { userId: id } });
         await tx.hqWarehouseManagerAssignment.deleteMany({ where: { userId: id } });
+        await tx.hqSalesManagerWarehouseAssignment.deleteMany({ where: { userId: id } });
+        await tx.userRole.deleteMany({ where: { userId: id } });
+        await tx.userPermission.deleteMany({ where: { userId: id } });
+        await revokeUserSessions(tx, id, user.id, user.role);
         await tx.user.delete({ where: { id } });
-        await auditPermanentDelete(tx, user, 'User', id, {
+        await this.auditInTx(tx, user, 'USER_DELETED', 'User', id, {
+          actorUserId: user.id,
+          targetUserId: id,
           entityType: 'User',
           oldValue,
-          reason: reason?.trim() || null,
-        });
-        await this.auditInTx(tx, user, 'EMPLOYEE_DELETED', 'User', id, {
-          entityType: 'User',
-          oldValue,
-          reason: reason?.trim() || null,
+          reason: trimmedReason,
         });
       });
-      return { success: true, archived: false };
+      return { success: true, archived: false, deactivated: false, message: 'Пользователь удалён' };
     }
 
-    const trimmedReason = reason?.trim();
     if (!trimmedReason) {
-      throw new BadRequestException('Reason is required when archiving an employee with history');
+      throw new BadRequestException('Укажите причину деактивации пользователя с историей операций');
     }
 
-    const archived = await this.prisma.user.update({
-      where: { id },
-      data: { status: UserStatus.INACTIVE, deletedAt: new Date() },
-      include: { branch: true, userRoles: { include: { role: true } } },
+    const archived = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id },
+        data: { status: UserStatus.INACTIVE, deletedAt: new Date() },
+        include: { branch: true, userRoles: { include: { role: true } } },
+      });
+
+      await tx.hqWarehouseManagerAssignment.updateMany({
+        where: { userId: id, status: 'ACTIVE' },
+        data: { status: 'INACTIVE' },
+      });
+      await tx.hqSalesManagerWarehouseAssignment.updateMany({
+        where: { userId: id, status: 'ACTIVE' },
+        data: { status: 'INACTIVE' },
+      });
+
+      await revokeUserSessions(tx, id, user.id, user.role);
+
+      await this.auditInTx(tx, user, 'USER_DEACTIVATED', 'User', id, {
+        actorUserId: user.id,
+        targetUserId: id,
+        entityType: 'User',
+        oldValue,
+        newValue: this.safeUser(updated),
+        oldStatus: existing.status,
+        newStatus: UserStatus.INACTIVE,
+        reason: trimmedReason,
+      });
+
+      await this.auditInTx(tx, user, 'USER_ARCHIVED', 'User', id, {
+        actorUserId: user.id,
+        targetUserId: id,
+        oldStatus: existing.status,
+        newStatus: UserStatus.INACTIVE,
+        reason: trimmedReason,
+      });
+
+      return updated;
     });
-    await this.audit(user, 'EMPLOYEE_ARCHIVED', 'User', id, {
-      entityType: 'User',
-      oldValue,
-      newValue: this.safeUser(archived),
-      reason: trimmedReason,
-    });
-    return { success: true, archived: true };
+
+    return {
+      success: true,
+      archived: true,
+      deactivated: true,
+      message: 'Пользователь деактивирован',
+      user: this.safeUser(archived),
+    };
   }
 
   async createBranchOwner(user: AuthUser, dto: import('./dto/create-branch-owner.dto').CreateBranchOwnerDto) {
@@ -725,9 +772,10 @@ export class UsersService {
   }
 
   private userScope(user: AuthUser) {
-    if (this.hasFullAccess(user)) return {};
-    if (this.isHqUserManager(user)) return { branchId: null };
-    if (this.hasRole(user, Role.FRANCHISE_OWNER)) return { branchId: user.branchId };
+    const base = { deletedAt: null };
+    if (this.hasFullAccess(user)) return base;
+    if (this.isHqUserManager(user)) return { ...base, branchId: null };
+    if (this.hasRole(user, Role.FRANCHISE_OWNER)) return { ...base, branchId: user.branchId };
     throw new ForbiddenException('No user management access');
   }
 

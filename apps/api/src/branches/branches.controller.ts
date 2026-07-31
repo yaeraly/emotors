@@ -52,9 +52,13 @@ export class BranchesController {
   }
 
   @Delete(':id')
-  @Roles(Role.SYSTEM_ADMINISTRATOR)
-  delete(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.branchesService.delete(user, id);
+  @Roles(Role.CEO)
+  delete(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto?: { reason?: string },
+  ) {
+    return this.branchesService.delete(user, id, dto?.reason);
   }
 
   @Put(':id/assigned-hq-warehouse')

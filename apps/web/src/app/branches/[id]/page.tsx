@@ -4,12 +4,13 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
-import { API_URL, apiFetch, clearToken, getToken } from '@/lib/api';
+import { LifecycleDeleteConfirmModal } from '@/components/LifecycleDeleteConfirmModal';
+import { API_URL, apiFetch } from '@/lib/api';
 import {
   canAssignBranchHqWarehouse,
   canChangeBranchType,
   canDeleteBranch,
+  canDeleteBranchWarehouse,
   canManageBranches,
   canInspectAnyBranchWarehouse,
 } from '@/lib/rbac';
@@ -105,6 +106,9 @@ export default function BranchDetailPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [warehouseDeleteModalOpen, setWarehouseDeleteModalOpen] = useState(false);
+  const [warehouseDeleting, setWarehouseDeleting] = useState(false);
+  const [branchWarehouseCode, setBranchWarehouseCode] = useState<string | null>(null);
   const [branchWarehouseId, setBranchWarehouseId] = useState<string | null>(null);
   const [branchWarehouseMissing, setBranchWarehouseMissing] = useState(false);
   const [branchWarehouseLoading, setBranchWarehouseLoading] = useState(false);
@@ -150,9 +154,10 @@ export default function BranchDetailPage() {
       return;
     }
     setBranchWarehouseLoading(true);
-    apiFetch<{ id: string }>(`/branches/${id}/warehouse`)
+    apiFetch<{ id: string; code?: string }>(`/branches/${id}/warehouse`)
       .then((warehouse) => {
         setBranchWarehouseId(warehouse.id);
+        setBranchWarehouseCode(warehouse.code ?? null);
         setBranchWarehouseMissing(false);
       })
       .catch((err) => {
@@ -170,6 +175,7 @@ export default function BranchDetailPage() {
 
   const canManage = canManageBranches(user);
   const canDelete = canDeleteBranch(user);
+  const canDeleteWarehouse = canDeleteBranchWarehouse(user);
   const canAssign = canAssignBranchHqWarehouse(user);
   const canEditBranchType = canChangeBranchType(user);
   const canInspectWarehouse = canInspectAnyBranchWarehouse(user);
@@ -313,54 +319,64 @@ export default function BranchDetailPage() {
     }
   }
 
-  async function confirmDeleteBranch() {
+  async function confirmDeleteBranch(reason?: string) {
     if (!branch) return;
-
-    const token = getToken();
-    if (!token) {
-      router.replace('/login');
-      return;
-    }
 
     setDeleting(true);
     setError('');
     setSuccess('');
 
     try {
-      const response = await fetch(`${API_URL}/branches/${branch.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.status === 401) {
-        clearToken();
-        router.replace('/login');
-        return;
-      }
-
-      if (!response.ok) {
-        if (response.status === 403) throw new Error(t('branches.noPermission'));
-        if (response.status === 404) throw new Error(t('branches.notFound'));
-        throw new Error(t('branches.deleteFailed'));
-      }
-
-      const result = (await response.json()) as {
-        success?: boolean;
-        deletedBranchId?: string;
-        message?: string;
-      };
+      const result = await apiFetch<{ success?: boolean; archived?: boolean; message?: string }>(
+        `/branches/${branch.id}`,
+        {
+          method: 'DELETE',
+          body: JSON.stringify({ reason }),
+        },
+      );
 
       if (!result.success) {
         throw new Error(t('branches.deleteFailed'));
       }
 
-      window.localStorage.setItem('emotors-branch-deleted', t('branches.deletedSuccess'));
+      const successMessage = result.archived
+        ? t('lifecycle.branchArchivedSuccess')
+        : t('branches.deletedSuccess');
+      window.localStorage.setItem('emotors-branch-deleted', successMessage);
       setDeleteModalOpen(false);
       router.replace('/branches');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('branches.deleteFailed'));
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function confirmDeleteWarehouse(reason?: string) {
+    if (!branchWarehouseId) return;
+    setWarehouseDeleting(true);
+    setError('');
+    try {
+      const result = await apiFetch<{ success: boolean; archived?: boolean; message?: string }>(
+        `/branch-warehouses/${branchWarehouseId}`,
+        {
+          method: 'DELETE',
+          body: JSON.stringify({ reason }),
+        },
+      );
+      setWarehouseDeleteModalOpen(false);
+      setSuccess(
+        result.archived
+          ? t('lifecycle.warehouseArchivedSuccess')
+          : t('lifecycle.warehouseDeletedSuccess'),
+      );
+      setBranchWarehouseId(null);
+      setBranchWarehouseCode(null);
+      setBranchWarehouseMissing(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setWarehouseDeleting(false);
     }
   }
 
@@ -573,12 +589,23 @@ export default function BranchDetailPage() {
                 ) : null}
               </div>
               {branchWarehouseId ? (
-                <Link
-                  href={`/branch-warehouses/${branchWarehouseId}?fromBranch=${id}`}
-                  className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
-                >
-                  {t('branchWarehouse.openWarehouse')}
-                </Link>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href={`/branch-warehouses/${branchWarehouseId}?fromBranch=${id}`}
+                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    {t('branchWarehouse.openWarehouse')}
+                  </Link>
+                  {canDeleteWarehouse ? (
+                    <button
+                      type="button"
+                      onClick={() => setWarehouseDeleteModalOpen(true)}
+                      className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700"
+                    >
+                      {t('common.delete')}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </div>
@@ -611,11 +638,25 @@ export default function BranchDetailPage() {
           </div>
         ) : null}
       </section>
-      <PermanentDeleteConfirmModal
+      <LifecycleDeleteConfirmModal
         open={deleteModalOpen}
+        entityType="branch"
+        entityName={branch?.name ?? ''}
+        entityCode={branch?.code}
+        requireReason
         loading={deleting}
         onClose={() => setDeleteModalOpen(false)}
-        onConfirm={() => void confirmDeleteBranch()}
+        onConfirm={(reason) => void confirmDeleteBranch(reason)}
+      />
+      <LifecycleDeleteConfirmModal
+        open={warehouseDeleteModalOpen}
+        entityType="warehouse"
+        entityName={branch?.name ? `${branch.name} — склад` : t('branchWarehouse.warehouseLabel')}
+        entityCode={branchWarehouseCode ?? undefined}
+        requireReason
+        loading={warehouseDeleting}
+        onClose={() => setWarehouseDeleteModalOpen(false)}
+        onConfirm={(reason) => void confirmDeleteWarehouse(reason)}
       />
     </ProtectedShell>
   );
