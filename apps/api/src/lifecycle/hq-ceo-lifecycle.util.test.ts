@@ -17,6 +17,7 @@ function createWarehouseBlockingMock(overrides: {
   fifoRemaining?: number;
   outgoing?: string[];
   incoming?: string[];
+  activeOrders?: string[];
   openCounts?: string[];
   bookings?: string[];
   fifoReservations?: string[];
@@ -25,17 +26,24 @@ function createWarehouseBlockingMock(overrides: {
   return {
     inventoryBalance: {
       findMany: async () => balances,
-      aggregate: async () => ({ _sum: { remainingQuantity: overrides.fifoRemaining ?? 0 } }),
     },
     fifoInventoryBatch: {
       aggregate: async () => ({ _sum: { remainingQuantity: overrides.fifoRemaining ?? 0 } }),
     },
     branchDistributionOrder: {
-      findMany: async (args: { where: { sourceWarehouseId?: string; destinationWarehouseId?: string } }) => {
+      findMany: async (args: {
+        where: { sourceWarehouseId?: string; destinationWarehouseId?: string; status?: unknown };
+      }) => {
         if (args.where.sourceWarehouseId) {
           return (overrides.outgoing ?? []).map((id) => ({ id }));
         }
-        return (overrides.incoming ?? []).map((id) => ({ id }));
+        if (args.where.destinationWarehouseId) {
+          return (overrides.incoming ?? []).map((id) => ({ id }));
+        }
+        if (args.where.status) {
+          return (overrides.activeOrders ?? []).map((id) => ({ id }));
+        }
+        return [];
       },
     },
     inventoryCountSession: {
@@ -111,6 +119,12 @@ async function run() {
     'wh-6',
   );
   assert(countWarehouse.blocked === true, '10. Warehouse with open inventory count is blocked');
+
+  const activeOrderWarehouse = await assessBranchWarehouseDeleteBlocking(
+    createWarehouseBlockingMock({ activeOrders: ['order-pending-1'] }),
+    'wh-7',
+  );
+  assert(activeOrderWarehouse.blocked === true, '10b. Warehouse with active branch orders is blocked');
 
   const usersOnBranch = await assessBranchDeleteBlocking(
     {

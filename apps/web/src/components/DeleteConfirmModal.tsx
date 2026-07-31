@@ -15,6 +15,8 @@ type Props = {
   confirmPhrase?: string;
   /** Label shown above the confirmation phrase input. */
   confirmPhraseLabel?: string;
+  /** Override confirm button label (e.g. «Удалить склад»). */
+  confirmButtonLabel?: string;
   loading?: boolean;
   onClose: () => void;
   onConfirm: (reason?: string) => void | Promise<void>;
@@ -29,6 +31,7 @@ export function DeleteConfirmModal({
   reasonPlaceholder,
   confirmPhrase,
   confirmPhraseLabel,
+  confirmButtonLabel,
   loading = false,
   onClose,
   onConfirm,
@@ -88,7 +91,7 @@ export function DeleteConfirmModal({
             disabled={loading || (requireReason && reason.trim().length < minLength) || !phraseOk}
             className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:bg-red-300"
           >
-            {loading ? t('common.loading') : t('common.delete')}
+            {loading ? t('common.loading') : confirmButtonLabel ?? t('common.delete')}
           </button>
         </div>
       </form>

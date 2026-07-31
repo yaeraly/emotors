@@ -5525,6 +5525,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'branchWarehouse.editWarehouse': 'Редактировать склад',
     'branchWarehouse.updatedSuccess': 'Склад филиала успешно обновлен.',
     'branchWarehouse.openWarehouse': 'Открыть склад',
+    'branchWarehouse.deleteWarehouse': 'Удалить склад',
+    'branchWarehouse.deleteIrreversibleWarning':
+      'Внимание: это действие необратимо. Склад будет удалён из системы, если нет остатков и активных операций.',
+    'branchWarehouse.deletedSuccess': 'Филиалдын склады ийгиликтүү өчүрүлдү.',
     'branchWarehouse.noWarehouseAssigned': 'Для этого филиала склад ещё не назначен',
     'branchWarehouse.noProducts': 'На складе филиала пока нет товаров',
     'branchWarehouse.noInventoryCounts': 'Инвентаризации ещё не проводились',

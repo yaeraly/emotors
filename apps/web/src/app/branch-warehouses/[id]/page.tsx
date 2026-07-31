@@ -3,9 +3,10 @@
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { BranchWarehouseDeleteConfirmModal } from '@/components/BranchWarehouseDeleteConfirmModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { canEditWarehouseInfo, canInspectAnyBranchWarehouse } from '@/lib/rbac';
+import { canDeleteBranchWarehouse, canEditWarehouseInfo, canInspectAnyBranchWarehouse } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -143,6 +144,8 @@ export default function BranchWarehouseDetailPage() {
   const [receivings, setReceivings] = useState<ReceivingRow[]>([]);
   const [distribution, setDistribution] = useState<DistributionRow[]>([]);
   const [error, setError] = useState('');
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const inspectionView = canInspectAnyBranchWarehouse(user);
   const tabs: Array<{ id: Tab; label: string }> = [
@@ -227,7 +230,33 @@ export default function BranchWarehouseDetailPage() {
   }
 
   const canEdit = canEditWarehouseInfo(user) && warehouse?.permissions?.canEdit !== false;
+  const canDelete = canDeleteBranchWarehouse(user);
   const branchContextId = fromBranchId ?? warehouse?.branchId ?? null;
+
+  async function confirmDeleteWarehouse() {
+    setDeleting(true);
+    setError('');
+    try {
+      const result = await apiFetch<{ success: boolean; message?: string }>(
+        `/branch-warehouses/${params.id}`,
+        { method: 'DELETE', body: JSON.stringify({}) },
+      );
+      if (!result.success) {
+        throw new Error(t('common.error'));
+      }
+      window.localStorage.setItem(
+        'emotors_warehouse_success',
+        result.message ?? t('branchWarehouse.deletedSuccess'),
+      );
+      setDeleteModalOpen(false);
+      router.push('/branch-warehouses');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('common.error');
+      setError(message.includes('Internal Server Error') ? t('common.error') : message);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   if (!warehouse && !error) {
     return (
@@ -319,6 +348,15 @@ export default function BranchWarehouseDetailPage() {
                 className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
               >
                 {t('branchWarehouse.editWarehouse')}
+              </button>
+            ) : null}
+            {canDelete && !editing ? (
+              <button
+                type="button"
+                onClick={() => setDeleteModalOpen(true)}
+                className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-700"
+              >
+                {t('branchWarehouse.deleteWarehouse')}
               </button>
             ) : null}
           </div>
@@ -579,6 +617,14 @@ export default function BranchWarehouseDetailPage() {
           />
         ) : null}
       </section>
+      <BranchWarehouseDeleteConfirmModal
+        open={deleteModalOpen}
+        warehouseName={warehouse.name}
+        branchName={warehouse.branchName ?? '—'}
+        loading={deleting}
+        onClose={() => setDeleteModalOpen(false)}
+        onConfirm={() => void confirmDeleteWarehouse()}
+      />
     </ProtectedShell>
   );
 }

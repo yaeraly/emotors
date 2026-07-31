@@ -10,6 +10,7 @@ import {
 } from '../lifecycle/hq-ceo-lifecycle.util';
 import {
   BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE,
+  BRANCH_WAREHOUSE_DELETE_SUCCESS_MESSAGE,
   WAREHOUSE_PERMANENT_DELETE_HISTORY_MESSAGE,
 } from '../lifecycle/hq-ceo-lifecycle.constants';
 import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
@@ -165,7 +166,11 @@ export class BranchWarehouseService {
 
     await this.audit(user, 'BRANCH_WAREHOUSE_DELETE_REQUESTED', id, {
       branchId: existing.branchId,
+      branchName: existing.branch?.name ?? null,
+      warehouseId: id,
+      warehouseName: existing.name,
       warehouseCode: existing.code,
+      deletedByUserId: user.id,
       oldStatus: previousStatus,
       reason: trimmedReason,
     });
@@ -175,7 +180,14 @@ export class BranchWarehouseService {
       if (blocked) {
         await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETE_BLOCKED', id, {
           branchId: existing.branchId,
+          branchName: existing.branch?.name ?? null,
+          warehouseId: id,
+          warehouseName: existing.name,
           warehouseCode: existing.code,
+          deletedByUserId: user.id,
+          deletedAt: new Date().toISOString(),
+          deletionType: 'permanent_delete',
+          validationResult: { blocked: true, reasons },
           blockingRecords: reasons,
         });
         throw new BadRequestException({
@@ -189,22 +201,40 @@ export class BranchWarehouseService {
       if (hasHistory) {
         await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETE_BLOCKED', id, {
           branchId: existing.branchId,
+          branchName: existing.branch?.name ?? null,
+          warehouseId: id,
+          warehouseName: existing.name,
           warehouseCode: existing.code,
+          deletedByUserId: user.id,
+          deletedAt: new Date().toISOString(),
+          deletionType: 'permanent_delete',
+          validationResult: { blocked: true, reason: 'BUSINESS_HISTORY' },
           reason: 'BUSINESS_HISTORY',
         });
         throw new BadRequestException(WAREHOUSE_PERMANENT_DELETE_HISTORY_MESSAGE);
       }
 
       await hardDeleteBranchWarehouse(tx, id);
+      const deletedAt = new Date().toISOString();
       await this.auditInTx(tx, user, 'BRANCH_WAREHOUSE_DELETED', id, {
         branchId: existing.branchId,
+        branchName: existing.branch?.name ?? null,
+        warehouseId: id,
+        warehouseName: existing.name,
         warehouseCode: existing.code,
+        deletedByUserId: user.id,
+        deletedAt,
         oldStatus: previousStatus,
         newStatus: null,
         deletionType: 'permanent_delete',
+        validationResult: { blocked: false, reasons },
         reason: trimmedReason,
       });
-      return { success: true, permanentlyDeleted: true, message: 'Склад филиала удалён' };
+      return {
+        success: true,
+        permanentlyDeleted: true,
+        message: BRANCH_WAREHOUSE_DELETE_SUCCESS_MESSAGE,
+      };
     });
   }
 

@@ -75,7 +75,9 @@ export const PENDING_INSTALLMENT_APPROVAL_STATUSES: SaleInstallmentApprovalStatu
 export const USER_INACTIVE_LOGIN_MESSAGE = 'Аккаунт деактивирован. Вход недоступен.';
 
 export const BRANCH_WAREHOUSE_DELETE_BLOCKED_MESSAGE =
-  'Складды өчүрүүгө болбойт. Складда товар же активдүү операциялар бар.';
+  'Складды өчүрүүгө болбойт. Складда товар калдыгы же бүтө элек операциялар бар.';
+
+export const BRANCH_WAREHOUSE_DELETE_SUCCESS_MESSAGE = 'Филиалдын склады ийгиликтүү өчүрүлдү.';
 
 export const USER_DELETE_SELF_MESSAGE = 'Өзүңүздүн активдүү аккаунтуңузду өчүрүүгө болбойт.';
 

@@ -54,6 +54,7 @@ export type WarehouseDeleteBlockingReasons = {
   reservedQuantity: number;
   fifoQuantity: number;
   activeShipmentIds: string[];
+  activeOrderIds: string[];
   openInventoryCountIds: string[];
   reservationIds: string[];
 };
@@ -123,8 +124,25 @@ export async function assessBranchWarehouseDeleteBlocking(tx: Tx, warehouseId: s
     take: 50,
   });
 
+  const activeBranchOrders = await tx.branchDistributionOrder.findMany({
+    where: {
+      deletedAt: null,
+      OR: [{ sourceWarehouseId: warehouseId }, { destinationWarehouseId: warehouseId }],
+      status: { in: BRANCH_ACTIVE_DISTRIBUTION_STATUSES },
+    },
+    select: { id: true },
+    take: 50,
+  });
+
   const activeShipmentIds = [
     ...new Set([...outgoingShipments, ...incomingShipments].map((row) => row.id)),
+  ];
+
+  const activeOrderIds = [
+    ...new Set([
+      ...activeBranchOrders.map((row) => row.id),
+      ...activeShipmentIds,
+    ]),
   ];
 
   const reservationIds = [...new Set([...stockBookings, ...fifoReservations].map((row) => row.id))];
@@ -135,6 +153,7 @@ export async function assessBranchWarehouseDeleteBlocking(tx: Tx, warehouseId: s
     reservedQuantity,
     fifoQuantity,
     activeShipmentIds,
+    activeOrderIds,
     openInventoryCountIds: openInventoryCounts.map((row) => row.id),
     reservationIds,
   };
@@ -144,7 +163,7 @@ export async function assessBranchWarehouseDeleteBlocking(tx: Tx, warehouseId: s
     availableQuantity > 0 ||
     reservedQuantity > 0 ||
     fifoQuantity > 0 ||
-    activeShipmentIds.length > 0 ||
+    activeOrderIds.length > 0 ||
     openInventoryCounts.length > 0 ||
     reservationIds.length > 0;
 

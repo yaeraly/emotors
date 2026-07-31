@@ -295,7 +295,7 @@ export default function BranchWarehousesPage() {
                   href={`/branch-warehouses/${row.id}${row.branchId ? `?fromBranch=${row.branchId}` : ''}`}
                   className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
                 >
-                  {t('common.open')}
+                  {t('branchWarehouse.openWarehouse')}
                 </Link>
               ),
             },
