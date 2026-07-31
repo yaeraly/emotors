@@ -222,6 +222,12 @@ export function sanitizeBranchPurchaseRequest<T extends {
   status: BranchPurchaseRequestStatus;
   reviewedAt?: Date | string | null;
   items: Array<{
+    id?: string;
+    productId?: string;
+    sku?: string;
+    productName?: string;
+    unit?: string;
+    note?: string | null;
     quantity: number;
     approvedQuantity?: number | null;
     unavailableQuantity?: number | null;
@@ -230,7 +236,9 @@ export function sanitizeBranchPurchaseRequest<T extends {
     missingQty?: number | null;
     transportExpenseAllocation?: unknown;
     estimatedUnitCost?: unknown;
+    estimatedLineProductCostKgs?: unknown;
     totalAmount?: unknown;
+    approvedLineTotalKgs?: unknown;
     wholesalePriceKgs?: unknown;
     branchPurchasePriceKgs?: unknown;
     resolvedBranchPriceKgs?: unknown;
@@ -248,37 +256,54 @@ export function sanitizeBranchPurchaseRequest<T extends {
     baseBranchPriceKgs?: unknown;
     priceResolvedAt?: unknown;
   }>;
+  branch?: { branchType?: string | null } | null;
+  branchType?: string | null;
+  totalEstimatedAmount?: unknown;
+  totalProductCostKgs?: number;
 }>(request: T, hideSensitive: boolean) {
+  // Authoritative totals must be computed from full FIFO line data before stripping.
+  const full = toBranchPurchaseRequestResponse({
+    ...request,
+    branchDisplayStatus: resolveBranchDisplayStatus(request.status, request.items),
+    partialFulfillmentMessage: null,
+  });
+
   if (!hideSensitive) {
-    return toBranchPurchaseRequestResponse({
-      ...request,
-      branchDisplayStatus: resolveBranchDisplayStatus(request.status, request.items),
-      partialFulfillmentMessage: null,
-    });
+    return full;
   }
 
   const branchDisplayStatus = resolveBranchDisplayStatus(request.status, request.items);
   const partialFulfillmentMessage =
-    branchDisplayStatus === 'HQ_APPROVED' && status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED
+    branchDisplayStatus === 'HQ_APPROVED' && request.status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED
       ? 'PARTIAL_FULFILLMENT_LATER'
       : null;
   const reviewed = Boolean(request.reviewedAt) || REVIEWED_REQUEST_STATUSES.has(request.status);
+  const fullItemsById = new Map(
+    full.items
+      .filter((item) => (item as { id?: string }).id)
+      .map((item) => [(item as { id: string }).id, item]),
+  );
 
-  return toBranchPurchaseRequestResponse({
-    ...request,
+  return {
+    ...full,
     branchDisplayStatus,
     partialFulfillmentMessage,
+    // Keep authoritative header totals for Branch Sales "Сумма".
+    totalEstimatedAmount: full.totalEstimatedAmount,
+    totalProductCostKgs: undefined,
+    authoritativeTransferCostKgs: undefined,
     items: request.items.map((item) => {
+      const fullItem = item.id ? fullItemsById.get(item.id) : undefined;
       const branchPrice =
         item.branchPurchasePriceKgs ??
         item.resolvedBranchPriceKgs ??
         item.wholesalePriceKgs ??
         null;
       return {
-        id: (item as { id?: string }).id,
-        productId: (item as { productId?: string }).productId,
-        sku: (item as { sku?: string }).sku,
-        productName: (item as { productName?: string }).productName,
+        id: item.id,
+        productId: item.productId,
+        sku: item.sku,
+        productName: item.productName,
         quantity: item.quantity,
         approvedQuantity: reviewed ? (item.approvedQuantity ?? 0) : undefined,
         unavailableQuantity: reviewed
@@ -287,11 +312,17 @@ export function sanitizeBranchPurchaseRequest<T extends {
         lineStatus: reviewed ? item.lineStatus : undefined,
         rejectionReasonCode: reviewed ? item.rejectionReasonCode : undefined,
         publicComment: reviewed ? item.publicComment : undefined,
-        unit: (item as { unit?: string }).unit,
-        note: (item as { note?: string | null }).note,
+        unit: item.unit,
+        note: item.note,
         branchPurchasePriceKgs: branchPrice,
-        totalAmount: item.totalAmount,
-        // Explicitly omit internal pricing layers for branch users
+        // Prefer authoritative payable total from full FIFO-based response.
+        totalAmount: fullItem?.totalAmount ?? item.totalAmount,
+        approvedLineTotalKgs: reviewed
+          ? (fullItem?.approvedLineTotalKgs ??
+            (item.approvedQuantity != null && Number(item.approvedQuantity) > 0
+              ? fullItem?.totalAmount
+              : undefined))
+          : undefined,
         weightKg: undefined,
         hqAvailableStock: undefined,
         missingQty: reviewed
@@ -300,6 +331,7 @@ export function sanitizeBranchPurchaseRequest<T extends {
         currentBranchStock: undefined,
         transportExpenseAllocation: undefined,
         estimatedUnitCost: undefined,
+        estimatedLineProductCostKgs: undefined,
         wholesalePriceKgs: undefined,
         hasPricingPolicyAtReview: undefined,
         hasPricingPolicyAtSubmit: undefined,
@@ -315,5 +347,5 @@ export function sanitizeBranchPurchaseRequest<T extends {
         resolvedBranchPriceKgs: undefined,
       };
     }),
-  });
+  };
 }

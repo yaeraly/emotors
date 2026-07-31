@@ -365,7 +365,12 @@ export class OperationsService {
     return enriched.map((product) => ({ ...product, pricingRevision }));
   }
 
-  async branchProductPrices(user: AuthUser, branchId: string, productIds: string[]) {
+  async branchProductPrices(
+    user: AuthUser,
+    branchId: string,
+    productIds: string[],
+    quantities?: number[],
+  ) {
     if (!canManageOwnBranchProductRequest(user) && !this.canViewAllBranchPurchaseRequests(user)) {
       throw new ForbiddenException('Forbidden resource');
     }
@@ -382,6 +387,15 @@ export class OperationsService {
       return {};
     }
 
+    const quantityByProductId = new Map<string, number>();
+    productIds.forEach((productId, index) => {
+      if (!productId) return;
+      const qty = quantities?.[index];
+      if (qty != null && qty > 0) {
+        quantityByProductId.set(productId, qty);
+      }
+    });
+
     const hqBranch = await ensureHqCatalogBranch(this.prisma);
     const catalogProducts = await this.prisma.product.findMany({
       where: {
@@ -397,6 +411,12 @@ export class OperationsService {
     });
 
     await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+    const branch = await this.prisma.branch.findFirst({
+      where: { id: resolvedBranchId, deletedAt: null },
+      select: { branchType: true, hqToBranchMarkupPercent: true, assignedHqWarehouseId: true },
+    });
+    const assignedHqWarehouseId =
+      branch?.assignedHqWarehouseId ?? (await this.getBranchAssignedHqWarehouseId(resolvedBranchId));
 
     const entries = await Promise.all(
       catalogProducts.map(async (product) => {
@@ -404,6 +424,30 @@ export class OperationsService {
           resolvedBranchId,
           product.id,
         );
+        const quantity = quantityByProductId.get(product.id) ?? 0;
+        let lineTotalKgs: number | null = null;
+        let estimatedLineProductCostKgs = 0;
+        if (assignedHqWarehouseId && quantity > 0) {
+          const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, this.prisma, {
+            productId: product.id,
+            warehouseId: assignedHqWarehouseId,
+            quantity,
+            branchType: branch?.branchType,
+            hqToBranchMarkupPercent: Number(branch?.hqToBranchMarkupPercent ?? 0),
+            fallbackUnitCost: pricing.costPriceSnapshot ?? 0,
+            fallbackUnitPrice: pricing.branchPurchasePriceKgs ?? 0,
+          });
+          if (fifoCost.allocatedQty > 0) {
+            estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
+          }
+          lineTotalKgs = resolveBranchPurchaseLinePayableAmount({
+            branchType: branch?.branchType,
+            quantity,
+            estimatedLineProductCostKgs,
+            unitPriceKgs: pricing.branchPurchasePriceKgs,
+            hasPricingPolicy: pricing.hasPricingPolicy,
+          });
+        }
         return [
           product.id,
           {
@@ -420,6 +464,8 @@ export class OperationsService {
             priceConfigured: pricing.priceConfigured,
             priceMissingReason: pricing.priceMissingReason,
             pricingRevision: this.branchOrderPricingRevision.current(),
+            quantity: quantity > 0 ? quantity : undefined,
+            lineTotalKgs,
           },
         ] as const;
       }),
@@ -450,7 +496,20 @@ export class OperationsService {
         ? (await this.getBranchAssignedHqWarehouseId(branchId))
         : await this.requireBranchAssignedHqWarehouse(user, branchId);
     const totalQuantity = resolvedItems.reduce((sum, item) => sum + item.quantity, 0);
-    const totalEstimatedAmount = resolvedItems.reduce((sum, item) => sum + Number(item.totalAmount), 0);
+    const createBranch = await this.prisma.branch.findFirst({
+      where: { id: branchId, deletedAt: null },
+      select: { branchType: true },
+    });
+    const totalProductCostOnCreate = sumDisplayMoneyTotals(
+      resolvedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+    );
+    const totalEstimatedAmount = resolveBranchPurchaseEstimatedAmountKgs({
+      branchType: createBranch?.branchType,
+      totalProductCostKgs: totalProductCostOnCreate,
+      storedEstimatedAmountKgs: sumDisplayMoneyTotals(
+        resolvedItems.map((item) => Number(item.totalAmount ?? 0)),
+      ),
+    });
 
     const request = await this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
@@ -594,7 +653,21 @@ export class OperationsService {
       : undefined;
     const itemCreates = resolvedItems?.map((item) => toBranchPurchaseRequestItemCreate(item));
     const totalQuantity = resolvedItems?.reduce((sum, item) => sum + item.quantity, 0);
-    const totalEstimatedAmount = resolvedItems?.reduce((sum, item) => sum + Number(item.totalAmount), 0);
+    const updateBranch = await this.prisma.branch.findFirst({
+      where: { id: existing.branchId, deletedAt: null },
+      select: { branchType: true },
+    });
+    const totalEstimatedAmount = resolvedItems
+      ? resolveBranchPurchaseEstimatedAmountKgs({
+          branchType: updateBranch?.branchType,
+          totalProductCostKgs: sumDisplayMoneyTotals(
+            resolvedItems.map((item) => Number(item.estimatedLineProductCostKgs ?? 0)),
+          ),
+          storedEstimatedAmountKgs: sumDisplayMoneyTotals(
+            resolvedItems.map((item) => Number(item.totalAmount ?? 0)),
+          ),
+        })
+      : undefined;
 
     const updated = await this.prisma.branchPurchaseRequest.update({
       where: { id },

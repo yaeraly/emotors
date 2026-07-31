@@ -42,9 +42,14 @@ export class OperationsController {
     @CurrentUser() user: AuthUser,
     @Query('branchId') branchId: string,
     @Query('productIds') productIds?: string,
+    @Query('quantities') quantities?: string,
   ) {
     const ids = productIds?.split(',').map((id) => id.trim()).filter(Boolean) ?? [];
-    return this.service.branchProductPrices(user, branchId, ids);
+    const qtyList = quantities
+      ?.split(',')
+      .map((value) => Number(value.trim()))
+      .map((value) => (Number.isFinite(value) && value > 0 ? Math.floor(value) : 0));
+    return this.service.branchProductPrices(user, branchId, ids, qtyList);
   }
 
   @Get('branch-purchase-requests/diagnostics/duplicate-products')

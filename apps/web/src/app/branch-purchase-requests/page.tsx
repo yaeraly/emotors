@@ -84,6 +84,8 @@ type DraftLine = {
   weightKg: number;
   branchPurchasePriceKgs: number | null;
   wholesalePriceKgs: number | null;
+  /** Authoritative backend line total (FIFO / payable). Never recompute from unit×qty. */
+  authoritativeLineTotalKgs: number | null;
   pricingPending: boolean;
   priceResolving: boolean;
   branchStock: number | null;
@@ -93,10 +95,10 @@ type DraftLine = {
 };
 
 function lineTotal(line: DraftLine) {
-  const quantity = Number(line.quantity) || 0;
-  const branchPrice = parseBranchMoney(line.branchPurchasePriceKgs);
-  if (line.pricingPending || branchPrice == null) return 0;
-  return Math.round((branchPrice * quantity + Number.EPSILON) * 100) / 100;
+  if (line.authoritativeLineTotalKgs != null && Number(line.authoritativeLineTotalKgs) > 0) {
+    return Number(line.authoritativeLineTotalKgs);
+  }
+  return 0;
 }
 
 function formatBranchPrice(line: DraftLine, t: (key: string) => string) {
@@ -129,6 +131,7 @@ function emptyLine(): DraftLine {
     weightKg: 0,
     branchPurchasePriceKgs: null,
     wholesalePriceKgs: null,
+    authoritativeLineTotalKgs: null,
     pricingPending: false,
     priceResolving: false,
     branchStock: 0,
@@ -156,6 +159,8 @@ function linesFromRequest(request: BranchPurchaseRequest): DraftLine[] {
       weightKg: item.weightKg ?? 0,
       branchPurchasePriceKgs: branchPrice,
       wholesalePriceKgs: branchPrice,
+      authoritativeLineTotalKgs:
+        item.totalAmount != null && Number(item.totalAmount) > 0 ? Number(item.totalAmount) : null,
       pricingPending: branchPrice == null,
       priceResolving: false,
       branchStock: item.currentBranchStock ?? 0,
@@ -299,8 +304,9 @@ export default function BranchPurchaseRequestsPage() {
                 quantity: String(Number(line.quantity) + 1),
                 branchPurchasePriceKgs: branchPrice ?? line.branchPurchasePriceKgs,
                 wholesalePriceKgs: branchPrice ?? line.wholesalePriceKgs,
+                authoritativeLineTotalKgs: null,
                 pricingPending: false,
-                priceResolving: false,
+                priceResolving: true,
               }
             : line,
         );
@@ -315,8 +321,9 @@ export default function BranchPurchaseRequestsPage() {
         weightKg: 0,
         branchPurchasePriceKgs: branchPrice,
         wholesalePriceKgs: branchPrice,
+        authoritativeLineTotalKgs: null,
         pricingPending: false,
-        priceResolving: false,
+        priceResolving: true,
         branchStock: 0,
         hqStock: null,
         quantity: '1',
@@ -576,16 +583,19 @@ export default function BranchPurchaseRequestsPage() {
     .map((line) => line.productId)
     .filter(Boolean)
     .join(',');
+  const draftQuantities = lines
+    .filter((line) => line.productId)
+    .map((line) => String(Number(line.quantity) || 0))
+    .join(',');
 
   useEffect(() => {
     if (!showForm || !branchOnlyView || !form.branchId || !draftProductIds) return;
 
+    const quantityList = draftQuantities.split(',').map((value) => Number(value) || 0);
+
     setLines((current) =>
       current.map((line) => {
         if (!line.productId) return line;
-        if (line.branchPurchasePriceKgs != null && Number(line.branchPurchasePriceKgs) > 0) {
-          return line;
-        }
         return { ...line, priceResolving: true, pricingPending: false };
       }),
     );
@@ -594,9 +604,14 @@ export default function BranchPurchaseRequestsPage() {
       branchPriceKgs: number | string | null;
       hasPricingPolicy?: boolean;
       priceConfigured?: boolean;
+      lineTotalKgs?: number | string | null;
     };
 
-    const params = new URLSearchParams({ branchId: form.branchId, productIds: draftProductIds });
+    const params = new URLSearchParams({
+      branchId: form.branchId,
+      productIds: draftProductIds,
+      quantities: quantityList.join(','),
+    });
     void apiFetch<Record<string, BranchProductPricingSnapshot | number | null>>(
       `/branch-purchase-requests/product-prices?${params.toString()}`,
     )
@@ -616,10 +631,18 @@ export default function BranchPurchaseRequestsPage() {
                   : typeof entry === 'object' && entry != null && 'hasPricingPolicy' in entry
                     ? Boolean(entry.hasPricingPolicy)
                     : branchPrice != null;
+            const lineTotalFromApi =
+              typeof entry === 'object' && entry != null && entry.lineTotalKgs != null
+                ? Number(entry.lineTotalKgs)
+                : null;
             return {
               ...line,
               branchPurchasePriceKgs: branchPrice,
               wholesalePriceKgs: branchPrice,
+              authoritativeLineTotalKgs:
+                lineTotalFromApi != null && Number.isFinite(lineTotalFromApi) && lineTotalFromApi > 0
+                  ? lineTotalFromApi
+                  : null,
               pricingPending: !hasPricing,
               priceResolving: false,
             };
@@ -629,13 +652,13 @@ export default function BranchPurchaseRequestsPage() {
       .catch(() => {
         setLines((current) =>
           current.map((line) =>
-            line.productId && (line.branchPurchasePriceKgs == null || Number(line.branchPurchasePriceKgs) <= 0)
-              ? { ...line, priceResolving: false, pricingPending: true }
+            line.productId
+              ? { ...line, priceResolving: false, pricingPending: line.branchPurchasePriceKgs == null }
               : line,
           ),
         );
       });
-  }, [branchOnlyView, draftProductIds, form.branchId, showForm]);
+  }, [branchOnlyView, draftProductIds, draftQuantities, form.branchId, showForm]);
 
   const draftTotalAmount = lines.reduce((sum, line) => sum + lineTotal(line), 0);
 
@@ -820,7 +843,16 @@ export default function BranchPurchaseRequestsPage() {
                           disabled={!line.productId}
                           onChange={(e) =>
                             setLines((current) =>
-                              current.map((row) => (row.key === line.key ? { ...row, quantity: e.target.value } : row)),
+                              current.map((row) =>
+                                row.key === line.key
+                                  ? {
+                                      ...row,
+                                      quantity: e.target.value,
+                                      authoritativeLineTotalKgs: null,
+                                      priceResolving: Boolean(row.productId),
+                                    }
+                                  : row,
+                              ),
                             )
                           }
                           className="w-24 rounded-lg border border-slate-300 px-2 py-1"

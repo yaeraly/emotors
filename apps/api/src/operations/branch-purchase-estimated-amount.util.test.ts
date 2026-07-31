@@ -14,7 +14,10 @@ import {
   resolveBranchPurchaseLinePayableAmount,
   shouldTransferBranchPurchaseAtCost,
 } from './branch-purchase-estimated-amount.util';
-import { toBranchPurchaseRequestResponse } from './branch-purchase-request.presenter';
+import {
+  sanitizeBranchPurchaseRequest,
+  toBranchPurchaseRequestResponse,
+} from './branch-purchase-request.presenter';
 import { BranchPurchaseRequestStatus } from '@prisma/client';
 
 const CHINA_BATCH_TOTAL = 914369.8;
@@ -121,6 +124,45 @@ describe('branch-purchase-estimated-amount — HQ at-cost parity', () => {
     assert.equal(result.ok, false);
     assert.notEqual(result.differenceKgs, 0);
     assert.match(BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE, /Ориентировочная сумма/);
+  });
+
+  it('Branch Sales sanitize keeps Сумма equal to FIFO product cost', () => {
+    const lines = buildChinaBatchLines();
+    const staleEstimated = sumDisplayMoneyTotals(
+      lines.map((line) =>
+        roundDisplayMoney(deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity),
+      ),
+    );
+    const sanitized = sanitizeBranchPurchaseRequest(
+      {
+        status: BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION,
+        reviewedAt: new Date(),
+        totalEstimatedAmount: staleEstimated,
+        transportCostKgs: 0,
+        branch: { branchType: BranchType.HQ_BRANCH },
+        items: lines.map((line, index) => ({
+          id: `item-${index}`,
+          productId: `prod-${index}`,
+          sku: line.sku,
+          productName: line.sku,
+          quantity: line.quantity,
+          approvedQuantity: line.quantity,
+          estimatedLineProductCostKgs: line.totalCostKgs,
+          totalAmount: roundDisplayMoney(
+            deriveDisplayUnitCost(line.totalCostKgs, line.quantity) * line.quantity,
+          ),
+          resolvedBranchPriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+          wholesalePriceKgs: deriveDisplayUnitCost(line.totalCostKgs, line.quantity),
+        })),
+      },
+      true,
+    );
+    assert.equal(sanitized.totalEstimatedAmount, CHINA_BATCH_TOTAL);
+    assert.equal(sanitized.totalProductCostKgs, undefined);
+    const lineSum = sumDisplayMoneyTotals(
+      sanitized.items.map((item) => Number((item as { totalAmount?: number }).totalAmount ?? 0)),
+    );
+    assert.equal(lineSum, CHINA_BATCH_TOTAL);
   });
 
   it('repair of estimated amount is idempotent for already-aligned totals', () => {
