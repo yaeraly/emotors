@@ -38,8 +38,9 @@ import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assig
 import {
   compareWarehouseInventoryValuation,
   INVENTORY_VALUATION_MISMATCH_MESSAGE,
+  assertInventoryCountLinesMatchAuthoritativeValuation,
+  recomputeInventoryCountLineValuation,
   resolveInventoryCountUnitCostKgs,
-  resolveInventoryCountDifferenceValueKgs,
 } from '../inventory/inventory-authoritative-value.util';
 import { recomputeInventoryBalanceValuationInTx } from '../inventory/inventory-balance-valuation.repair';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
@@ -286,20 +287,25 @@ export class InventoryCountService {
     if (!item) throw new NotFoundException('Inventory count item not found');
 
     const actualQuantity = Math.max(0, Math.floor(dto.actualQuantity));
-    const differenceQuantity = actualQuantity - item.systemQuantity;
-    const differenceValueKgs = await this.resolveItemDifferenceValue(
+    const valuation = await recomputeInventoryCountLineValuation(
       this.prisma,
+      this.pricingFifoService,
       session.warehouse,
-      item,
-      actualQuantity,
+      {
+        productId: item.productId,
+        systemQuantity: item.systemQuantity,
+        actualQuantity,
+      },
+      isHqWarehouse(session.warehouse),
     );
 
     const updated = await this.prisma.inventoryCountItem.update({
       where: { id: itemId },
       data: {
         actualQuantity,
-        differenceQuantity,
-        differenceValueKgs,
+        differenceQuantity: valuation.differenceQuantity,
+        unitCostKgs: valuation.unitCostKgs,
+        differenceValueKgs: valuation.differenceValueKgs,
         remark: dto.remark,
         countedAt: new Date(),
       },
@@ -314,7 +320,7 @@ export class InventoryCountService {
       extra: {
         sku: item.sku,
         systemQuantity: item.systemQuantity,
-        differenceQuantity,
+        differenceQuantity: valuation.differenceQuantity,
       },
     });
 
@@ -332,19 +338,24 @@ export class InventoryCountService {
       const item = session.items.find((row) => row.id === entry.itemId);
       if (!item) throw new NotFoundException(`Inventory count item not found: ${entry.itemId}`);
       const actualQuantity = Math.max(0, Math.floor(entry.actualQuantity));
-      const differenceQuantity = actualQuantity - item.systemQuantity;
-      const differenceValueKgs = await this.resolveItemDifferenceValue(
+      const valuation = await recomputeInventoryCountLineValuation(
         this.prisma,
+        this.pricingFifoService,
         session.warehouse,
-        item,
-        actualQuantity,
+        {
+          productId: item.productId,
+          systemQuantity: item.systemQuantity,
+          actualQuantity,
+        },
+        isHqWarehouse(session.warehouse),
       );
       await this.prisma.inventoryCountItem.update({
         where: { id: entry.itemId },
         data: {
           actualQuantity,
-          differenceQuantity,
-          differenceValueKgs,
+          differenceQuantity: valuation.differenceQuantity,
+          unitCostKgs: valuation.unitCostKgs,
+          differenceValueKgs: valuation.differenceValueKgs,
           remark: entry.remark,
           countedAt: new Date(),
         },
@@ -461,6 +472,29 @@ export class InventoryCountService {
         );
       }
 
+      await this.recomputeAndPersistSessionValuations(tx, session);
+
+      const refreshed = await tx.inventoryCountSession.findUniqueOrThrow({
+        where: { id },
+        include: this.sessionInclude(),
+      });
+
+      if (isHqWarehouse(session.warehouse)) {
+        await this.assertHqWarehouseValuationReconciled(tx, user, session);
+        const lineCheck = await assertInventoryCountLinesMatchAuthoritativeValuation(
+          tx,
+          this.pricingFifoService,
+          session.warehouse,
+          refreshed.items,
+          true,
+        );
+        if (!lineCheck.ok) {
+          throw new BadRequestException(
+            'Инвентаризациянын айырма суммасы FIFO партиялары менен дал келбейт. Саны кайра текшериңиз.',
+          );
+        }
+      }
+
       const updated = await tx.inventoryCountSession.update({
         where: { id },
         data: {
@@ -521,27 +555,7 @@ export class InventoryCountService {
       }
 
       if (isHqWarehouse(session.warehouse)) {
-        const valuationCheck = await compareWarehouseInventoryValuation(tx, session.warehouseId);
-        if (!valuationCheck.ok) {
-          await tx.auditLog.create({
-            data: {
-              userId: user.id,
-              role: user.role,
-              action: 'INVENTORY_VALUATION_RECONCILIATION_FAILED',
-              entity: 'InventoryCountSession',
-              entityId: session.id,
-              metadata: {
-                warehouseId: session.warehouseId,
-                inventoryCountId: session.id,
-                expectedValueKgs: valuationCheck.fifoTotalKgs,
-                actualValueKgs: valuationCheck.balanceTotalKgs,
-                differenceKgs: valuationCheck.differenceKgs,
-                timestamp: new Date().toISOString(),
-              },
-            },
-          });
-          throw new BadRequestException(INVENTORY_VALUATION_MISMATCH_MESSAGE);
-        }
+        await this.assertHqWarehouseValuationReconciled(tx, user, session);
       }
 
       for (const item of session.items) {
@@ -905,6 +919,16 @@ export class InventoryCountService {
     const countedProducts = session.items.filter((item) => item.actualQuantity !== null).length;
     const shortages = session.items.filter((item) => item.differenceQuantity < 0).length;
     const overages = session.items.filter((item) => item.differenceQuantity > 0).length;
+    const surplusValueKgs = roundDisplayMoney(
+      session.items
+        .filter((item) => item.differenceQuantity > 0)
+        .reduce((sum, item) => sum + Number(item.differenceValueKgs), 0),
+    );
+    const shortageValueKgs = roundDisplayMoney(
+      session.items
+        .filter((item) => item.differenceQuantity < 0)
+        .reduce((sum, item) => sum + Number(item.differenceValueKgs), 0),
+    );
     const totalDifferenceValue = session.items.reduce(
       (sum, item) => sum + Number(item.differenceValueKgs),
       0,
@@ -917,28 +941,77 @@ export class InventoryCountService {
       shortages,
       overages,
       matched: session.items.filter((item) => item.differenceQuantity === 0 && item.actualQuantity !== null).length,
+      surplusValueKgs,
+      shortageValueKgs,
       totalDifferenceValueKgs: roundDisplayMoney(totalDifferenceValue),
     };
   }
 
-  private async resolveItemDifferenceValue(
+  private async recomputeAndPersistSessionValuations(
     tx: PrismaTx,
-    warehouse: { id: string; warehouseType: WarehouseType; branchId: string | null },
-    item: {
-      productId: string;
-      systemQuantity: number;
-      unitCostKgs: unknown;
+    session: {
+      id: string;
+      warehouseId: string;
+      warehouse: { id: string; warehouseType: WarehouseType; branchId: string | null };
+      items: Array<{
+        id: string;
+        productId: string;
+        systemQuantity: number;
+        actualQuantity: number | null;
+      }>;
     },
-    actualQuantity: number,
   ) {
-    return resolveInventoryCountDifferenceValueKgs(tx, this.pricingFifoService, {
-      warehouseId: warehouse.id,
-      productId: item.productId,
-      systemQuantity: item.systemQuantity,
-      actualQuantity,
-      unitCostKgs: Number(item.unitCostKgs ?? 0),
-      isHqWarehouse: isHqWarehouse(warehouse),
-    });
+    const hq = isHqWarehouse(session.warehouse);
+    for (const item of session.items) {
+      if (item.actualQuantity === null) continue;
+      const valuation = await recomputeInventoryCountLineValuation(
+        tx,
+        this.pricingFifoService,
+        session.warehouse,
+        {
+          productId: item.productId,
+          systemQuantity: item.systemQuantity,
+          actualQuantity: item.actualQuantity,
+        },
+        hq,
+      );
+      await tx.inventoryCountItem.update({
+        where: { id: item.id },
+        data: {
+          differenceQuantity: valuation.differenceQuantity,
+          unitCostKgs: valuation.unitCostKgs,
+          differenceValueKgs: valuation.differenceValueKgs,
+        },
+      });
+    }
+  }
+
+  private async assertHqWarehouseValuationReconciled(
+    tx: PrismaTx,
+    user: AuthUser,
+    session: { id: string; warehouseId: string },
+  ) {
+    const valuationCheck = await compareWarehouseInventoryValuation(tx, session.warehouseId);
+    if (!valuationCheck.ok) {
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'INVENTORY_VALUATION_RECONCILIATION_FAILED',
+          entity: 'InventoryCountSession',
+          entityId: session.id,
+          metadata: {
+            warehouseId: session.warehouseId,
+            inventoryCountId: session.id,
+            expectedValueKgs: valuationCheck.fifoTotalKgs,
+            actualValueKgs: valuationCheck.balanceTotalKgs,
+            differenceKgs: valuationCheck.differenceKgs,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      throw new BadRequestException(INVENTORY_VALUATION_MISMATCH_MESSAGE);
+    }
   }
 
   private sessionInclude() {

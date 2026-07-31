@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma, WarehouseType } from '@prisma/client';
 import {
   allocateProportionalCost,
   deriveDisplayUnitCost,
@@ -162,12 +162,10 @@ export async function resolveInventoryCountUnitCostKgs(
       { productId, warehouseId },
       tx,
     );
-    if (oldest.costPriceKgs > 0) {
-      return {
-        unitCostKgs: roundDisplayMoney(oldest.costPriceKgs),
-        authoritativeSystemValueKgs,
-      };
-    }
+    return {
+      unitCostKgs: oldest.costPriceKgs > 0 ? roundDisplayMoney(oldest.costPriceKgs) : 0,
+      authoritativeSystemValueKgs,
+    };
   } else if (qty > 0 && authoritativeSystemValueKgs > 0) {
     const preview = await pricingFifoService.previewFifoAllocation(tx, {
       productId,
@@ -231,8 +229,114 @@ export async function resolveInventoryCountDifferenceValueKgs(
     preferPerLayerMarkup: false,
     fallbackUnitCost: input.unitCostKgs,
   });
-  const differenceValue = roundDisplayMoney(fifoPreview.totalCostKgs);
+
+  let differenceValue = roundDisplayMoney(fifoPreview.totalCostKgs);
+  const allocatedQty = Number(fifoPreview.allocatedQty ?? 0);
+  if (allocatedQty < allocationQty && input.unitCostKgs > 0) {
+    const remainderQty = allocationQty - allocatedQty;
+    differenceValue = roundDisplayMoney(differenceValue + remainderQty * input.unitCostKgs);
+  }
+
   return diffQty > 0 ? differenceValue : roundDisplayMoney(-differenceValue);
+}
+
+export type InventoryCountLineInput = {
+  productId: string;
+  systemQuantity: number;
+  actualQuantity: number;
+  balanceFallback?: {
+    totalValueKgs?: unknown;
+    landedCostKgs?: unknown;
+    averageCostKgs?: unknown;
+    finalCostKgs?: unknown;
+  };
+};
+
+/** Recompute one inventory-count line from authoritative FIFO (preview = final). */
+export async function recomputeInventoryCountLineValuation(
+  tx: PrismaTx,
+  pricingFifoService: PricingFifoService,
+  warehouse: { id: string; warehouseType: WarehouseType; branchId: string | null },
+  item: InventoryCountLineInput,
+  isHqWarehouse: boolean,
+): Promise<{
+  unitCostKgs: number;
+  differenceQuantity: number;
+  differenceValueKgs: number;
+}> {
+  const systemQty = Math.max(0, Math.floor(item.systemQuantity));
+  const actualQty = Math.max(0, Math.floor(item.actualQuantity));
+  const differenceQuantity = actualQty - systemQty;
+  const fallback = item.balanceFallback ?? {};
+  const { unitCostKgs } = await resolveInventoryCountUnitCostKgs(
+    tx,
+    pricingFifoService,
+    warehouse.id,
+    item.productId,
+    isHqWarehouse,
+    fallback,
+    systemQty,
+  );
+  const differenceValueKgs = await resolveInventoryCountDifferenceValueKgs(
+    tx,
+    pricingFifoService,
+    {
+      warehouseId: warehouse.id,
+      productId: item.productId,
+      systemQuantity: systemQty,
+      actualQuantity: actualQty,
+      unitCostKgs,
+      isHqWarehouse,
+    },
+  );
+  return { unitCostKgs, differenceQuantity, differenceValueKgs };
+}
+
+/** Ensure stored line values match authoritative FIFO recomputation. */
+export async function assertInventoryCountLinesMatchAuthoritativeValuation(
+  tx: PrismaTx,
+  pricingFifoService: PricingFifoService,
+  warehouse: { id: string; warehouseType: WarehouseType; branchId: string | null },
+  items: Array<{
+    id: string;
+    productId: string;
+    systemQuantity: number;
+    actualQuantity: number | null;
+    differenceQuantity: number;
+    differenceValueKgs: unknown;
+    unitCostKgs: unknown;
+  }>,
+  isHqWarehouse: boolean,
+  toleranceKgs = 0.01,
+): Promise<{ ok: boolean; mismatches: Array<{ itemId: string; productId: string; expected: number; actual: number }> }> {
+  const mismatches: Array<{ itemId: string; productId: string; expected: number; actual: number }> = [];
+
+  for (const item of items) {
+    if (item.actualQuantity === null) continue;
+    const recomputed = await recomputeInventoryCountLineValuation(
+      tx,
+      pricingFifoService,
+      warehouse,
+      {
+        productId: item.productId,
+        systemQuantity: item.systemQuantity,
+        actualQuantity: item.actualQuantity,
+      },
+      isHqWarehouse,
+    );
+    const stored = roundDisplayMoney(Number(item.differenceValueKgs));
+    const expected = recomputed.differenceValueKgs;
+    if (Math.abs(stored - expected) > toleranceKgs) {
+      mismatches.push({
+        itemId: item.id,
+        productId: item.productId,
+        expected,
+        actual: stored,
+      });
+    }
+  }
+
+  return { ok: mismatches.length === 0, mismatches };
 }
 
 export async function resolveAuthoritativeSystemUnitCostKgs(
