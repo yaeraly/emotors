@@ -50,16 +50,7 @@ export function resolveLineReview(
 
   if (!context.hasPricingPolicy) {
     if (input.action === 'APPROVE' || input.action === 'PARTIAL') {
-      return {
-        lineStatus: BranchPurchaseRequestLineStatus.REJECTED,
-        approvedQuantity: 0,
-        unavailableQuantity: requested,
-        rejectionReasonCode: BranchRequestLineRejectionReason.NO_PRICING_POLICY,
-        publicComment: comment || DEFAULT_NO_PRICING_COMMENT,
-        hasPricingPolicy: false,
-        notifyCeoNoPricingPolicy: true,
-        notifyCeoOutOfStock: false,
-      };
+      throw new Error('NO_PRICING_POLICY');
     }
   }
 
@@ -110,12 +101,24 @@ export function resolveLineReview(
     };
   }
 
-  const requestedApproved =
+  const rawApproved =
     input.action === 'PARTIAL'
       ? Number(input.approvedQuantity ?? 0)
       : input.action === 'APPROVE'
         ? requested
         : 0;
+
+  if (!Number.isFinite(rawApproved)) {
+    throw new Error('INVALID_APPROVED_QUANTITY');
+  }
+
+  const requestedApproved = Math.max(0, Math.floor(rawApproved));
+
+  if (requestedApproved > requested) {
+    throw new Error('APPROVED_QUANTITY_EXCEEDS_REQUESTED');
+  }
+
+  const hasStockShortage = requested > available;
 
   if (requestedApproved <= 0) {
     return {
@@ -147,7 +150,7 @@ export function resolveLineReview(
       publicComment: `На складе HQ доступно только ${requestedApproved} шт.`,
       hasPricingPolicy: context.hasPricingPolicy,
       notifyCeoNoPricingPolicy: false,
-      notifyCeoOutOfStock: false,
+      notifyCeoOutOfStock: hasStockShortage,
     };
   }
 
@@ -172,7 +175,7 @@ export function resolveLineReview(
     publicComment: comment,
     hasPricingPolicy: context.hasPricingPolicy,
     notifyCeoNoPricingPolicy: false,
-    notifyCeoOutOfStock: false,
+    notifyCeoOutOfStock: hasStockShortage,
   };
 }
 

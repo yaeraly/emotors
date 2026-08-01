@@ -228,6 +228,7 @@ export default function BranchPurchaseRequestDetailPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [submittingLineId, setSubmittingLineId] = useState<string | null>(null);
   const [lineDecisions, setLineDecisions] = useState<Record<string, LineDecision>>({});
 
   function localizeBranchRequestError(message: string) {
@@ -235,6 +236,8 @@ export default function BranchPurchaseRequestDetailPage() {
     if (message.includes('INACTIVE_HQ_WAREHOUSE')) return t('branchHqRouting.inactiveWarehouse');
     if (message.includes('NO_HQ_WAREHOUSE_MANAGER_ASSIGNED')) return t('branchHqRouting.noWarehouseManager');
     if (message.includes('public comment is required')) return t('branchProductRequest.commentRequired');
+    if (message.includes('не настроена цена для филиала')) return message;
+    if (message.includes('Данные заказа изменились')) return message;
     return message;
   }
 
@@ -306,22 +309,139 @@ export default function BranchPurchaseRequestDetailPage() {
   }, [params.id, t]);
 
   function updateLineDecision(itemId: string, patch: Partial<LineDecision>) {
-    setLineDecisions((current) => ({
-      ...current,
-      [itemId]: { ...current[itemId], ...patch },
-    }));
+    setLineDecisions((current) => {
+      const previous = current[itemId];
+      const next = { ...previous, ...patch };
+      if (patch.approvedQuantity !== undefined && request) {
+        const item = request.items.find((row) => row.id === itemId);
+        if (item) {
+          const qty = Number(patch.approvedQuantity);
+          if (Number.isFinite(qty) && qty > 0 && qty < item.quantity) {
+            next.action = 'PARTIAL';
+          } else if (Number.isFinite(qty) && qty >= item.quantity) {
+            next.action = 'APPROVE';
+          }
+        }
+      }
+      return { ...current, [itemId]: next };
+    });
+  }
+
+  function buildLineReviewPayload(item: RequestItem, decision: LineDecision, stockLoaded = true) {
+    const available = availableForLine(item, stockLoaded);
+    const approvedQuantity =
+      decision.action === 'APPROVE'
+        ? Math.min(item.quantity, available)
+        : decision.action === 'PARTIAL'
+          ? decision.approvedQuantity
+          : 0;
+    return {
+      action: decision.action,
+      approvedQuantity,
+      publicComment: decision.publicComment.trim() || undefined,
+    };
+  }
+
+  async function submitLineReview(
+    item: RequestItem,
+    action?: LineReviewAction,
+    overrideApprovedQuantity?: number,
+    overridePublicComment?: string,
+  ) {
+    if (!request || submitting || submittingLineId) return;
+    const stockLoaded = request.hqStockStatus !== 'unavailable';
+    const decision = lineDecisions[item.id] ?? defaultLineDecision(item, stockLoaded);
+    const finalAction = action ?? decision.action;
+    const available = availableForLine(item, stockLoaded);
+    const resolvedDecision: LineDecision =
+      finalAction === 'APPROVE'
+        ? { action: 'APPROVE', approvedQuantity: Math.min(item.quantity, available), publicComment: '' }
+        : finalAction === 'PARTIAL'
+          ? {
+              action: 'PARTIAL',
+              approvedQuantity: overrideApprovedQuantity ?? decision.approvedQuantity,
+              publicComment: overridePublicComment ?? decision.publicComment,
+            }
+          : {
+              action: finalAction,
+              approvedQuantity: 0,
+              publicComment: overridePublicComment ?? decision.publicComment,
+            };
+
+    if (
+      (resolvedDecision.action === 'REJECT' || resolvedDecision.action === 'REMOVE') &&
+      !resolvedDecision.publicComment.trim()
+    ) {
+      setError(t('branchProductRequest.commentRequired'));
+      return;
+    }
+
+    setError('');
+    setSuccess('');
+    setSubmittingLineId(item.id);
+    try {
+      const detail = await apiFetch<RequestDetail>(
+        `/branch-purchase-requests/${request.id}/items/${item.id}/review`,
+        {
+          method: 'POST',
+          body: JSON.stringify(buildLineReviewPayload(item, resolvedDecision)),
+        },
+      );
+      setRequest(detail);
+      setLineDecisions(
+        Object.fromEntries(
+          detail.items.map((row) => [
+            row.id,
+            row.lineStatus === 'PENDING_REVIEW'
+              ? defaultLineDecision(row, detail.hqStockStatus !== 'unavailable')
+              : {
+                  action:
+                    row.lineStatus === 'APPROVED'
+                      ? 'APPROVE'
+                      : row.lineStatus === 'PARTIALLY_APPROVED'
+                        ? 'PARTIAL'
+                        : row.lineStatus === 'REMOVED_BY_HQ_SALES'
+                          ? 'REMOVE'
+                          : 'REJECT',
+                  approvedQuantity: row.approvedQuantity ?? 0,
+                  publicComment: row.publicComment ?? '',
+                },
+          ]),
+        ),
+      );
+      setSuccess(t('branchProductRequest.lineReviewSaved'));
+    } catch (err) {
+      setError(localizeBranchRequestError(err instanceof Error ? err.message : t('common.error')));
+    } finally {
+      setSubmittingLineId(null);
+    }
   }
 
   function setLineAction(item: RequestItem, action: LineReviewAction) {
-    const hqStockLoaded = request?.hqStockStatus !== 'unavailable';
-    const available = availableForLine(item, hqStockLoaded);
+    const stockLoaded = request?.hqStockStatus !== 'unavailable';
+    const available = availableForLine(item, stockLoaded);
     if (action === 'APPROVE') {
       updateLineDecision(item.id, { action, approvedQuantity: Math.min(item.quantity, available), publicComment: '' });
-    } else if (action === 'PARTIAL') {
-      updateLineDecision(item.id, { action, approvedQuantity: Math.min(available, item.quantity - 1) || available, publicComment: '' });
-    } else {
-      updateLineDecision(item.id, { action, approvedQuantity: 0, publicComment: lineDecisions[item.id]?.publicComment ?? '' });
+      void submitLineReview(item, action);
+      return;
     }
+    if (action === 'PARTIAL') {
+      const current = lineDecisions[item.id]?.approvedQuantity;
+      const partialQty =
+        current != null && current > 0 && current < item.quantity
+          ? current
+          : Math.min(available, item.quantity - 1) || available;
+      updateLineDecision(item.id, {
+        action,
+        approvedQuantity: partialQty,
+        publicComment: lineDecisions[item.id]?.publicComment ?? '',
+      });
+      void submitLineReview(item, action, partialQty);
+      return;
+    }
+    const comment = lineDecisions[item.id]?.publicComment ?? '';
+    updateLineDecision(item.id, { action, approvedQuantity: 0, publicComment: comment });
+    void submitLineReview(item, action, undefined, comment);
   }
 
   async function confirmBranchOrder() {
@@ -358,6 +478,19 @@ export default function BranchPurchaseRequestDetailPage() {
 
   async function submitReview() {
     if (!request || submitting) return;
+
+    const pendingItems = request.items.filter((item) => item.lineStatus === 'PENDING_REVIEW');
+    if (pendingItems.length > 0) {
+      setError(t('branchProductRequest.allLinesMustBeReviewed'));
+      return;
+    }
+
+    const hasApproved = request.items.some((item) => (item.approvedQuantity ?? 0) > 0);
+    if (!hasApproved) {
+      setError(t('branchProductRequest.noApprovedItems'));
+      return;
+    }
+
     setError('');
     setSuccess('');
     setSubmitting(true);
@@ -367,9 +500,7 @@ export default function BranchPurchaseRequestDetailPage() {
           const decision = lineDecisions[item.id] ?? defaultLineDecision(item, hqStockLoaded);
           return {
             id: item.id,
-            action: decision.action,
-            approvedQuantity: decision.approvedQuantity,
-            publicComment: decision.publicComment.trim() || undefined,
+            ...buildLineReviewPayload(item, decision, hqStockLoaded),
           };
         }),
       };
@@ -752,7 +883,7 @@ export default function BranchPurchaseRequestDetailPage() {
                           <div className="flex flex-wrap gap-0.5">
                             <button
                               type="button"
-                              disabled={!canApproveFull}
+                              disabled={!canApproveFull || submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'APPROVE')}
                               className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'APPROVE' ? 'bg-green-600 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
@@ -760,7 +891,7 @@ export default function BranchPurchaseRequestDetailPage() {
                             </button>
                             <button
                               type="button"
-                              disabled={!canPartial}
+                              disabled={!canPartial || submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'PARTIAL')}
                               className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'PARTIAL' ? 'bg-amber-500 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
@@ -768,6 +899,7 @@ export default function BranchPurchaseRequestDetailPage() {
                             </button>
                             <button
                               type="button"
+                              disabled={submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'REJECT')}
                               className={`rounded px-1 py-0.5 text-[10px] font-semibold ${decision.action === 'REJECT' ? 'bg-red-600 text-white' : 'border border-slate-300'}`}
                             >
@@ -944,7 +1076,7 @@ export default function BranchPurchaseRequestDetailPage() {
                           <div className="flex flex-wrap gap-0.5">
                             <button
                               type="button"
-                              disabled={!canApproveFull}
+                              disabled={!canApproveFull || submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'APPROVE')}
                               className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'APPROVE' ? 'bg-green-600 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
@@ -952,7 +1084,7 @@ export default function BranchPurchaseRequestDetailPage() {
                             </button>
                             <button
                               type="button"
-                              disabled={!canPartial}
+                              disabled={!canPartial || submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'PARTIAL')}
                               className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'PARTIAL' ? 'bg-amber-500 text-white' : 'border border-slate-300'} disabled:opacity-40`}
                             >
@@ -960,6 +1092,7 @@ export default function BranchPurchaseRequestDetailPage() {
                             </button>
                             <button
                               type="button"
+                              disabled={submittingLineId === item.id || submitting}
                               onClick={() => setLineAction(item, 'REJECT')}
                               className={`rounded font-semibold ${hqCompactTable ? 'px-1 py-0.5 text-[10px]' : 'rounded-lg px-2 py-1 text-xs'} ${decision.action === 'REJECT' ? 'bg-red-600 text-white' : 'border border-slate-300'}`}
                             >

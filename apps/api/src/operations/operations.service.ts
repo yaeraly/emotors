@@ -8,6 +8,7 @@ import {
   BranchRequestIssueType,
   BranchRequestLineRejectionReason,
   BranchRequestShortageStatus,
+  BranchType,
   HqStockBookingReleaseReason,
   HqWarrantyDecision,
   PricingAppliedRuleType,
@@ -133,8 +134,14 @@ import {
   presentBranchPurchaseRequestForUser,
 } from './branch-purchase-request.presenter';
 import {
+  applyBranchPurchaseLineReviewInTx,
+  completeBranchPurchaseRequestReviewInTx,
+  mapBranchPurchaseLineReviewAuditAction,
+  type AppliedBranchPurchaseLineReview,
+  type BranchPurchaseLineReviewContext,
+} from './branch-purchase-line-review.apply';
+import {
   deriveRequestStatusFromLines,
-  resolveLineReview,
   type LineReviewAction,
   type LineReviewInput,
 } from './branch-request-review.util';
@@ -960,25 +967,31 @@ export class OperationsService {
       throw new BadRequestException('Every request line must have a review decision');
     }
 
+    const lineReviewDeps = {
+      hqStockBookingService: this.hqStockBookingService,
+      pricingFifoService: this.pricingFifoService,
+      auditInTx: this.auditInTx.bind(this),
+    };
+    const lineReviewContext: BranchPurchaseLineReviewContext = {
+      requestId: existing.id,
+      branchId: existing.branchId,
+      assignedHqWarehouseId,
+      stockMap,
+      bookedMap,
+      physicalStockMap,
+      bookingIdByLine,
+      pricingAvailability,
+      branchConfirmationExpiresAt,
+    };
+
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
-      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
+      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements(tx);
       const reviewBranch = await tx.branch.findFirst({
         where: { id: existing.branchId, deletedAt: null },
         select: { branchType: true, hqToBranchMarkupPercent: true },
       });
-      const resolvedLines: Array<{
-        itemId: string;
-        lineStatus: BranchPurchaseRequestLineStatus;
-        approvedQuantity: number;
-        unavailableQuantity: number;
-        rejectionReasonCode: BranchRequestLineRejectionReason | null;
-        publicComment: string | null;
-        notifyCeoNoPricingPolicy: boolean;
-        notifyCeoOutOfStock: boolean;
-        generalAvailable: number;
-        bookedQuantity: number;
-      }> = [];
+      const resolvedLines: AppliedBranchPurchaseLineReview[] = [];
 
       for (const item of existing.items) {
         const input = reviewInputs.find((row) => row.id === item.id);
@@ -986,261 +999,33 @@ export class OperationsService {
           throw new BadRequestException(`Missing review decision for line ${item.sku}`);
         }
 
-        const generalAvailable = stockMap.get(item.productId) ?? 0;
-        const bookedQuantity = bookedMap.get(item.id) ?? item.bookedQuantity ?? 0;
-        const hasPricingPolicy = pricingAvailability.get(item.id) ?? false;
-
-        let resolved;
-        try {
-          resolved = resolveLineReview(input, {
-            requestedQuantity: item.quantity,
-            availableQuantity: generalAvailable,
-            bookedQuantity,
-            hasPricingPolicy,
-          });
-        } catch (error) {
-          if (error instanceof Error && error.message === 'APPROVED_QUANTITY_EXCEEDS_AVAILABLE') {
-            throw new BadRequestException(
-              `На складе HQ недостаточно товара для утверждения указанного количества (${item.sku})`,
-            );
-          }
-          throw error;
-        }
-
-        if (
-          (resolved.lineStatus === BranchPurchaseRequestLineStatus.REJECTED ||
-            resolved.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES) &&
-          !resolved.publicComment?.trim()
-        ) {
-          throw new BadRequestException(`A public comment is required for line ${item.sku}`);
-        }
-
-        let estimatedLineProductCostKgs = 0;
-        let estimatedUnitCost = 0;
-        if (resolved.approvedQuantity > 0) {
-          const fifoCost = await resolveBranchPurchaseFifoLineCost(this.pricingFifoService, tx, {
-            productId: item.productId,
-            warehouseId: assignedHqWarehouseId,
-            quantity: resolved.approvedQuantity,
-            branchType: reviewBranch?.branchType,
-            hqToBranchMarkupPercent: Number(reviewBranch?.hqToBranchMarkupPercent ?? 0),
-            fallbackUnitCost: Number(item.estimatedUnitCost ?? 0),
-            fallbackUnitPrice: Number(item.resolvedBranchPriceKgs ?? 0),
-          });
-          estimatedLineProductCostKgs = fifoCost.estimatedLineProductCostKgs;
-          estimatedUnitCost = fifoCost.estimatedUnitCost;
-        }
-
-        const payableLineAmount =
-          resolved.approvedQuantity > 0
-            ? resolveBranchPurchaseLinePayableAmount({
-                branchType: reviewBranch?.branchType,
-                quantity: resolved.approvedQuantity,
-                estimatedLineProductCostKgs,
-                unitPriceKgs: Number(item.resolvedBranchPriceKgs ?? 0),
-                hasPricingPolicy,
-              })
-            : 0;
-
-        await tx.branchPurchaseRequestItem.update({
-          where: { id: item.id },
-          data: {
-            approvedQuantity: resolved.approvedQuantity,
-            unavailableQuantity: resolved.unavailableQuantity,
-            hqAvailableStock: this.hqStockBookingService.availableForRequestLine(generalAvailable, bookedQuantity),
-            hqPhysicalStock: physicalStockMap.get(item.productId) ?? item.hqPhysicalStock ?? 0,
-            lineStatus: resolved.lineStatus,
-            rejectionReasonCode: resolved.rejectionReasonCode,
-            publicComment: resolved.publicComment,
-            hasPricingPolicyAtReview: hasPricingPolicy,
-            approvedLineTotalKgs: payableLineAmount > 0 ? payableLineAmount : null,
-            totalAmount: payableLineAmount,
-            bookingExpiresAt:
-              resolved.approvedQuantity > 0 ? branchConfirmationExpiresAt : null,
-            bookedQuantity:
-              resolved.approvedQuantity > 0 ? resolved.approvedQuantity : 0,
-            estimatedLineProductCostKgs,
-            estimatedUnitCost,
-          },
-        });
-
-        const bookingId = bookingIdByLine.get(item.id);
-        if (bookingId) {
-          if (resolved.approvedQuantity > 0) {
-            await this.hqStockBookingService.confirmBookingInTx(
-              tx,
-              user,
-              bookingId,
-              resolved.approvedQuantity,
-              branchConfirmationExpiresAt,
-            );
-            await this.auditInTx(tx, user, existing.branchId, 'HQ_STOCK_BOOKING_CONFIRMED', 'HqStockBooking', bookingId, {
-              requestId: existing.id,
-              requestLineId: item.id,
-              approvedQuantity: resolved.approvedQuantity,
-            });
-          } else {
-            const releaseReason =
-              resolved.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES
-                ? HqStockBookingReleaseReason.HQ_SALES_REMOVED
-                : HqStockBookingReleaseReason.HQ_SALES_REJECTED;
-            await this.hqStockBookingService.releaseBookingInTx(tx, user, bookingId, releaseReason);
-            await this.auditInTx(tx, user, existing.branchId, 'HQ_STOCK_BOOKING_RELEASED', 'HqStockBooking', bookingId, {
-              requestId: existing.id,
-              requestLineId: item.id,
-              reason: releaseReason,
-            });
-          }
-        }
-
-        if (resolved.unavailableQuantity > 0 || resolved.approvedQuantity < item.quantity) {
-          const missingQty = Math.max(item.quantity - resolved.approvedQuantity, 0);
-          await tx.branchRequestShortage.create({
-            data: {
-              branchRequestId: existing.id,
-              branchRequestItemId: item.id,
-              branchId: existing.branchId,
-              productId: item.productId,
-              requestedQty: item.quantity,
-              availableQty: generalAvailable + bookedQuantity,
-              approvedQty: resolved.approvedQuantity,
-              missingQty,
-              assignedHqWarehouseId,
-              status:
-                resolved.approvedQuantity === 0
-                  ? BranchRequestShortageStatus.OPEN
-                  : BranchRequestShortageStatus.PARTIALLY_FULFILLED,
-            },
-          });
-        }
-
-        resolvedLines.push({
-          itemId: item.id,
-          ...resolved,
-          generalAvailable,
-          bookedQuantity,
-        });
+        const line = await this.applyBranchPurchaseLineReviewWithIssues(
+          tx,
+          user,
+          existing,
+          item,
+          input,
+          lineReviewContext,
+          reviewBranch,
+          lineReviewDeps,
+        );
+        resolvedLines.push(line);
       }
 
-      const derivedStatus = deriveRequestStatusFromLines(
-        resolvedLines.map((line) => ({
-          lineStatus: line.lineStatus,
-          approvedQuantity: line.approvedQuantity,
-          unavailableQuantity: line.unavailableQuantity,
-        })),
+      const { request } = await completeBranchPurchaseRequestReviewInTx(
+        tx,
+        user,
+        id,
+        existing.branchId,
+        assignedHqWarehouseId,
+        resolvedLines,
+        this.auditInTx.bind(this),
       );
-
-      const requestStatus =
-        derivedStatus === 'REJECTED'
-          ? BranchPurchaseRequestStatus.REJECTED
-          : derivedStatus === 'PARTIALLY_APPROVED'
-            ? BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION
-            : BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION;
-
-      const refreshedItems = await tx.branchPurchaseRequestItem.findMany({
-        where: { requestId: id },
-        select: {
-          approvedQuantity: true,
-          quantity: true,
-          estimatedLineProductCostKgs: true,
-          totalAmount: true,
-        },
-      });
-      const reviewedProductCostKgs = sumDisplayMoneyTotals(
-        refreshedItems.map((item) => {
-          const qty = item.approvedQuantity ?? item.quantity;
-          return qty > 0 ? Number(item.estimatedLineProductCostKgs ?? 0) : 0;
-        }),
-      );
-      const reviewedEstimatedAmountKgs = resolveBranchPurchaseEstimatedAmountKgs({
-        branchType: reviewBranch?.branchType,
-        totalProductCostKgs: reviewedProductCostKgs,
-        storedEstimatedAmountKgs: sumDisplayMoneyTotals(
-          refreshedItems.map((item) => Number(item.totalAmount ?? 0)),
-        ),
-      });
-
-      const request = await tx.branchPurchaseRequest.update({
-        where: { id },
-        data: {
-          status: requestStatus,
-          reviewedById: user.id,
-          reviewedAt: new Date(),
-          assignedHqWarehouseId,
-          totalEstimatedAmount: reviewedEstimatedAmountKgs,
-          bookingExpiresAt:
-            requestStatus === BranchPurchaseRequestStatus.PENDING_BRANCH_CONFIRMATION
-              ? branchConfirmationExpiresAt
-              : null,
-        },
-        include: {
-          items: true,
-          createdBy: { select: { id: true, fullName: true, role: true } },
-          branch: { select: { id: true, name: true } },
-          assignedHqWarehouse: { select: { id: true, name: true } },
-        },
-      });
 
       for (const line of resolvedLines) {
         const item = existing.items.find((row) => row.id === line.itemId);
         if (!item) continue;
-
-        if (line.notifyCeoNoPricingPolicy) {
-          const branchName = request.branch?.name ?? 'филиал';
-          await this.upsertBranchRequestIssueInTx(tx, user, {
-            issueType: BranchRequestIssueType.NO_PRICING_POLICY,
-            request,
-            item,
-            availableQuantity: line.generalAvailable + line.bookedQuantity,
-            unavailableQuantity: line.unavailableQuantity,
-            publicComment: line.publicComment,
-            hqWarehouseId: assignedHqWarehouseId,
-            alertType: AlertType.BRANCH_REQUEST_NO_PRICING_POLICY,
-            alertTitle: 'Требуется ценовая политика',
-            alertMessage: `Филиал '${branchName}' заказал товар, для которого отсутствует ценовая политика.`,
-          });
-        }
-
-        if (line.notifyCeoOutOfStock) {
-          const branchName = request.branch?.name ?? 'филиал';
-          await this.upsertBranchRequestIssueInTx(tx, user, {
-            issueType: BranchRequestIssueType.OUT_OF_STOCK,
-            request,
-            item,
-            availableQuantity: line.generalAvailable + line.bookedQuantity,
-            unavailableQuantity: line.unavailableQuantity || item.quantity,
-            publicComment: line.publicComment,
-            hqWarehouseId: assignedHqWarehouseId,
-            alertType: AlertType.BRANCH_REQUEST_OUT_OF_STOCK,
-            alertTitle: 'Товара недостаточно на складе HQ',
-            alertMessage: `Филиал '${branchName}' заказал товар, но на складе HQ недостаточно остатков.`,
-          });
-        }
-
-        const auditAction =
-          line.lineStatus === BranchPurchaseRequestLineStatus.APPROVED
-            ? 'HQ_SALES_LINE_APPROVED'
-            : line.lineStatus === BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED
-              ? 'HQ_SALES_LINE_PARTIALLY_APPROVED'
-              : line.lineStatus === BranchPurchaseRequestLineStatus.REMOVED_BY_HQ_SALES
-                ? 'BRANCH_REQUEST_LINE_REMOVED'
-                : 'HQ_SALES_LINE_REJECTED';
-
-        await this.auditInTx(tx, user, existing.branchId, auditAction, 'BranchPurchaseRequestItem', item.id, {
-          requestId: existing.id,
-          requestLineId: item.id,
-          branchId: existing.branchId,
-          productId: item.productId,
-          requestedQuantity: item.quantity,
-          bookedQuantity: line.bookedQuantity,
-          availableQuantity: line.generalAvailable + line.bookedQuantity,
-          approvedQuantity: line.approvedQuantity,
-          unavailableQuantity: line.unavailableQuantity,
-          reasonCode: line.rejectionReasonCode,
-          publicComment: line.publicComment,
-          createdById: user.id,
-          timestamp: new Date().toISOString(),
-        });
+        await this.recordBranchPurchaseLineReviewAudits(tx, user, existing, item, line, assignedHqWarehouseId);
       }
 
       await this.auditInTx(tx, user, existing.branchId, 'BRANCH_REQUEST_REVIEW_SUBMITTED', 'BranchPurchaseRequest', id, {
@@ -1265,6 +1050,320 @@ export class OperationsService {
     await this.notifyBranchSalesReviewOutcome(user, updated);
 
     return this.presentBranchPurchaseRequestResponse(user, updated);
+  }
+
+  async reviewBranchPurchaseRequestItem(
+    user: AuthUser,
+    requestId: string,
+    itemId: string,
+    dto: {
+      action?: LineReviewAction;
+      approvedQuantity?: number;
+      publicComment?: string;
+    },
+  ) {
+    if (!canManageBranchPurchaseRequests(user)) throw new ForbiddenException('Forbidden resource');
+
+    const existing = await this.prisma.branchPurchaseRequest.findFirst({
+      where: { id: requestId, deletedAt: null },
+      include: {
+        items: true,
+        branch: { select: { id: true, name: true, assignedHqWarehouseId: true } },
+        createdBy: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+    if (!existing) throw new NotFoundException('Branch purchase request not found');
+    await this.assertBranchPurchaseRequestAccess(user, existing);
+    if (!isSubmittedBranchPurchaseStatus(existing.status)) {
+      throw new ConflictException('Only submitted requests can be reviewed');
+    }
+
+    const item = existing.items.find((row) => row.id === itemId);
+    if (!item) throw new NotFoundException('Branch purchase request line not found');
+
+    const input: LineReviewInput = {
+      id: item.id,
+      action: (String(dto?.action ?? 'APPROVE').toUpperCase() as LineReviewAction) || 'APPROVE',
+      approvedQuantity: dto?.approvedQuantity !== undefined ? Number(dto.approvedQuantity) : undefined,
+      publicComment: typeof dto?.publicComment === 'string' ? dto.publicComment : undefined,
+    };
+
+    if (input.approvedQuantity !== undefined && !Number.isFinite(input.approvedQuantity)) {
+      throw new BadRequestException('Утверждённое количество должно быть числом');
+    }
+
+    const assignedHqWarehouseId =
+      existing.assignedHqWarehouseId ?? (await this.getBranchAssignedHqWarehouseId(existing.branchId));
+    if (!assignedHqWarehouseId) {
+      throw new BadRequestException(NO_HQ_WAREHOUSE_ASSIGNED_TO_BRANCH);
+    }
+
+    const stockMap = await this.inventoryService.getAvailableQuantityMap(
+      user,
+      assignedHqWarehouseId,
+      [{ productId: item.productId, sku: item.sku }],
+      { branchId: existing.branchId },
+    );
+    const bookedMap = await this.hqStockBookingService.getActiveBookedQuantityByLine(existing.id);
+    const physicalStockMap = await this.getHqPhysicalStockMap(
+      assignedHqWarehouseId,
+      [{ productId: item.productId, sku: item.sku }],
+    );
+    const activeBookings = await this.prisma.hqStockBooking.findMany({
+      where: {
+        requestId: existing.id,
+        status: { in: ['ACTIVE', 'CONFIRMED'] },
+      },
+      select: { id: true, requestLineId: true },
+    });
+    const bookingIdByLine = new Map(activeBookings.map((row) => [row.requestLineId, row.id]));
+    const branchConfirmationExpiresAt = addBookingHours(new Date(), BRANCH_CONFIRMATION_BOOKING_HOURS);
+    const pricingAvailability = await this.resolveBranchRequestPricingAvailability(
+      existing.branchId,
+      [
+        {
+          id: item.id,
+          productId: item.productId,
+          sku: item.sku,
+          resolvedBranchPriceKgs: item.resolvedBranchPriceKgs,
+          hasPricingPolicyAtSubmit: item.hasPricingPolicyAtSubmit,
+        },
+      ],
+    );
+
+    const lineReviewDeps = {
+      hqStockBookingService: this.hqStockBookingService,
+      pricingFifoService: this.pricingFifoService,
+      auditInTx: this.auditInTx.bind(this),
+    };
+    const lineReviewContext: BranchPurchaseLineReviewContext = {
+      requestId: existing.id,
+      branchId: existing.branchId,
+      assignedHqWarehouseId,
+      stockMap,
+      bookedMap,
+      physicalStockMap,
+      bookingIdByLine,
+      pricingAvailability,
+      branchConfirmationExpiresAt,
+    };
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.hqStockBookingService.expireOverdueBookingsInTx(tx, user);
+      await this.pricingFifoService.syncFifoBatchesFromHqStockMovements(tx);
+      const reviewBranch = await tx.branch.findFirst({
+        where: { id: existing.branchId, deletedAt: null },
+        select: { branchType: true, hqToBranchMarkupPercent: true },
+      });
+
+      const line = await this.applyBranchPurchaseLineReviewWithIssues(
+        tx,
+        user,
+        existing,
+        item,
+        input,
+        lineReviewContext,
+        reviewBranch,
+        lineReviewDeps,
+      );
+
+      await this.recordBranchPurchaseLineReviewAudits(tx, user, existing, item, line, assignedHqWarehouseId);
+
+      return tx.branchPurchaseRequest.findFirstOrThrow({
+        where: { id: requestId },
+        include: {
+          items: true,
+          createdBy: { select: { id: true, fullName: true, role: true } },
+          branch: { select: { id: true, name: true } },
+          assignedHqWarehouse: { select: { id: true, name: true } },
+        },
+      });
+    });
+
+    return this.presentBranchPurchaseRequestResponse(user, updated);
+  }
+
+  private async applyBranchPurchaseLineReviewWithIssues(
+    tx: PrismaTx,
+    user: AuthUser,
+    existing: {
+      id: string;
+      requestNumber: string;
+      branchId: string;
+      createdAt: Date;
+      branch?: { name?: string | null } | null;
+      assignedHqWarehouse?: { name?: string | null } | null;
+    },
+    item: {
+      id: string;
+      productId: string;
+      sku: string;
+      productName: string;
+      quantity: number;
+      bookedQuantity: number | null;
+      hqPhysicalStock: number | null;
+      estimatedUnitCost: Prisma.Decimal | number | null;
+      resolvedBranchPriceKgs: Prisma.Decimal | number | null;
+    },
+    input: LineReviewInput,
+    context: BranchPurchaseLineReviewContext,
+    reviewBranch: { branchType: BranchType | null; hqToBranchMarkupPercent: Prisma.Decimal | number | null } | null,
+    deps: {
+      hqStockBookingService: HqStockBookingService;
+      pricingFifoService: PricingFifoService;
+      auditInTx: typeof OperationsService.prototype.auditInTx;
+    },
+  ): Promise<AppliedBranchPurchaseLineReview> {
+    const hasPricingPolicy = context.pricingAvailability.get(item.id) ?? false;
+    if (!hasPricingPolicy && (input.action === 'APPROVE' || input.action === 'PARTIAL')) {
+      const branchName = existing.branch?.name ?? 'филиал';
+      await this.upsertBranchRequestIssueInTx(tx, user, {
+        issueType: BranchRequestIssueType.NO_PRICING_POLICY,
+        request: existing,
+        item,
+        availableQuantity:
+          (context.stockMap.get(item.productId) ?? 0) +
+          (context.bookedMap.get(item.id) ?? item.bookedQuantity ?? 0),
+        unavailableQuantity: item.quantity,
+        publicComment: 'Для товара не настроена цена для филиала.',
+        hqWarehouseId: context.assignedHqWarehouseId,
+        alertType: AlertType.BRANCH_REQUEST_NO_PRICING_POLICY,
+        alertTitle: 'Требуется ценовая политика',
+        alertMessage: `Филиал '${branchName}' заказал товар, для которого отсутствует ценовая политика.`,
+      });
+      await this.auditInTx(tx, user, existing.branchId, 'BRANCH_ORDER_PRICING_MISSING', 'BranchPurchaseRequestItem', item.id, {
+        requestId: existing.id,
+        productId: item.productId,
+        requestedQuantity: item.quantity,
+      });
+      throw new BadRequestException('Для товара не настроена цена для филиала.');
+    }
+
+    try {
+      return await applyBranchPurchaseLineReviewInTx(tx, user, deps, item, input, context, reviewBranch);
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message.startsWith('APPROVED_QUANTITY_EXCEEDS_AVAILABLE:')) {
+          throw new BadRequestException(
+            `На складе HQ недостаточно товара для утверждения указанного количества (${item.sku})`,
+          );
+        }
+        if (error.message.startsWith('PUBLIC_COMMENT_REQUIRED:')) {
+          throw new BadRequestException(`A public comment is required for line ${item.sku}`);
+        }
+        if (error.message === 'APPROVED_QUANTITY_EXCEEDS_REQUESTED') {
+          throw new BadRequestException(
+            `Утверждённое количество не может превышать запрошенное (${item.sku})`,
+          );
+        }
+        if (error.message === 'INVALID_APPROVED_QUANTITY') {
+          throw new BadRequestException('Утверждённое количество должно быть числом');
+        }
+      }
+      if (error instanceof BadRequestException) {
+        const message = error.message ?? '';
+        if (
+          message.includes('изменилось') ||
+          message.includes('истекла') ||
+          message.includes('недостаточно товара')
+        ) {
+          throw new ConflictException('Данные заказа изменились. Обновите страницу и повторите проверку.');
+        }
+        throw error;
+      }
+      throw error;
+    }
+  }
+
+  private async recordBranchPurchaseLineReviewAudits(
+    tx: PrismaTx,
+    user: AuthUser,
+    existing: { id: string; branchId: string },
+    item: { id: string; productId: string; quantity: number; productName: string; sku: string },
+    line: AppliedBranchPurchaseLineReview,
+    assignedHqWarehouseId: string,
+  ) {
+    const request = await tx.branchPurchaseRequest.findFirst({
+      where: { id: existing.id },
+      include: { branch: { select: { name: true } } },
+    });
+
+    if (line.notifyCeoNoPricingPolicy) {
+      const branchName = request?.branch?.name ?? 'филиал';
+      await this.upsertBranchRequestIssueInTx(tx, user, {
+        issueType: BranchRequestIssueType.NO_PRICING_POLICY,
+        request: {
+          id: existing.id,
+          requestNumber: request?.requestNumber ?? existing.id,
+          branchId: existing.branchId,
+          createdAt: request?.createdAt ?? new Date(),
+          branch: request?.branch,
+        },
+        item,
+        availableQuantity: line.generalAvailable + line.bookedQuantity,
+        unavailableQuantity: line.unavailableQuantity,
+        publicComment: line.publicComment,
+        hqWarehouseId: assignedHqWarehouseId,
+        alertType: AlertType.BRANCH_REQUEST_NO_PRICING_POLICY,
+        alertTitle: 'Требуется ценовая политика',
+        alertMessage: `Филиал '${branchName}' заказал товар, для которого отсутствует ценовая политика.`,
+      });
+      await this.auditInTx(tx, user, existing.branchId, 'BRANCH_ORDER_PRICING_MISSING', 'BranchPurchaseRequestItem', item.id, {
+        requestId: existing.id,
+        productId: item.productId,
+        requestedQuantity: item.quantity,
+      });
+    }
+
+    if (line.notifyCeoOutOfStock) {
+      const branchName = request?.branch?.name ?? 'филиал';
+      await this.upsertBranchRequestIssueInTx(tx, user, {
+        issueType: BranchRequestIssueType.OUT_OF_STOCK,
+        request: {
+          id: existing.id,
+          requestNumber: request?.requestNumber ?? existing.id,
+          branchId: existing.branchId,
+          createdAt: request?.createdAt ?? new Date(),
+          branch: request?.branch,
+        },
+        item,
+        availableQuantity: line.generalAvailable + line.bookedQuantity,
+        unavailableQuantity: line.unavailableQuantity || item.quantity,
+        publicComment: line.publicComment,
+        hqWarehouseId: assignedHqWarehouseId,
+        alertType: AlertType.BRANCH_REQUEST_OUT_OF_STOCK,
+        alertTitle: 'Товара недостаточно на складе HQ',
+        alertMessage: `Филиал '${branchName}' заказал товар, но на складе HQ недостаточно остатков.`,
+      });
+    }
+
+    if (line.unavailableQuantity > 0 && line.approvedQuantity > 0) {
+      await this.auditInTx(tx, user, existing.branchId, 'BRANCH_ORDER_STOCK_SHORTAGE_DETECTED', 'BranchPurchaseRequestItem', item.id, {
+        requestId: existing.id,
+        productId: item.productId,
+        requestedQuantity: item.quantity,
+        availableQuantity: line.generalAvailable + line.bookedQuantity,
+        approvedQuantity: line.approvedQuantity,
+        shortageQuantity: line.unavailableQuantity,
+      });
+    }
+
+    const auditAction = mapBranchPurchaseLineReviewAuditAction(line.lineStatus);
+    await this.auditInTx(tx, user, existing.branchId, auditAction, 'BranchPurchaseRequestItem', item.id, {
+      requestId: existing.id,
+      requestLineId: item.id,
+      branchId: existing.branchId,
+      productId: item.productId,
+      requestedQuantity: item.quantity,
+      bookedQuantity: line.bookedQuantity,
+      availableQuantity: line.generalAvailable + line.bookedQuantity,
+      approvedQuantity: line.approvedQuantity,
+      unavailableQuantity: line.unavailableQuantity,
+      reasonCode: line.rejectionReasonCode,
+      publicComment: line.publicComment,
+      createdById: user.id,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   async confirmBranchPurchaseRequest(user: AuthUser, id: string) {
@@ -6203,12 +6302,21 @@ export class OperationsService {
       requestNumber: string;
       branchId: string;
       status: BranchPurchaseRequestStatus;
+      items?: Array<{ lineStatus?: BranchPurchaseRequestLineStatus | null; unavailableQuantity?: number | null }>;
     },
   ) {
     let type: AlertType;
     if (request.status === BranchPurchaseRequestStatus.REJECTED) {
       type = AlertType.BRANCH_ORDER_REJECTED;
-    } else if (request.status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED) {
+    } else if (
+      request.status === BranchPurchaseRequestStatus.PARTIALLY_APPROVED ||
+      (request.items?.some(
+        (item) =>
+          item.lineStatus === BranchPurchaseRequestLineStatus.PARTIALLY_APPROVED ||
+          (item.unavailableQuantity ?? 0) > 0,
+      ) ??
+        false)
+    ) {
       type = AlertType.BRANCH_ORDER_PARTIALLY_APPROVED;
     } else {
       type = AlertType.BRANCH_ORDER_APPROVED;

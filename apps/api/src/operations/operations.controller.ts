@@ -122,6 +122,17 @@ export class OperationsController {
     return this.service.submitBranchPurchaseRequestReview(user, id, dto);
   }
 
+  @Post('branch-purchase-requests/:id/items/:itemId/review')
+  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.HQ_SALES_MANAGER)
+  reviewBranchPurchaseRequestItem(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @Body() dto: any,
+  ) {
+    return this.service.reviewBranchPurchaseRequestItem(user, id, itemId, dto);
+  }
+
   @Post('branch-purchase-requests/:id/confirm')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.MANAGER)
   confirmBranchPurchaseRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
