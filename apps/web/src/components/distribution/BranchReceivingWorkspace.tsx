@@ -8,6 +8,10 @@ import {
   type BranchReceivingLineItem,
   type BranchReceivingProgress,
 } from '@/lib/branch-receiving-draft';
+import {
+  buildBranchReceivingTransportPayload,
+  type BranchReceivingTransportFormState,
+} from '@/lib/branch-receiving-ui';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { GoodsReceiving, ShortageReport } from '@/lib/types';
 
@@ -39,8 +43,7 @@ export function BranchReceivingWorkspace({
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
-  const [transportForm, setTransportForm] = useState({
-    transportCompany: '',
+  const [transportForm, setTransportForm] = useState<BranchReceivingTransportFormState>({
     driverName: '',
     vehicleNumber: '',
     transportCostKgs: '0',
@@ -102,13 +105,7 @@ export function BranchReceivingWorkspace({
     if (!Number.isFinite(transportCostKgs) || transportCostKgs < 0) {
       throw new Error(t('distribution.deliveryCost'));
     }
-    return {
-      transportCompany: transportForm.transportCompany.trim() || undefined,
-      driverName: transportForm.driverName.trim() || undefined,
-      vehicleNumber: transportForm.vehicleNumber.trim() || undefined,
-      transportNotes: transportForm.transportNotes.trim() || undefined,
-      transportCostKgs,
-    };
+    return buildBranchReceivingTransportPayload(transportForm);
   }
 
   async function loadTransportPreview() {
@@ -223,10 +220,8 @@ export function BranchReceivingWorkspace({
               <th className="px-2 py-2">{t('distribution.sentQuantity')}</th>
               <th className="px-2 py-2">{t('distribution.acceptedQuantity')}</th>
               <th className="px-2 py-2">{t('distribution.damagedQuantity')}</th>
-              <th className="px-2 py-2">{t('distribution.missingQuantity')}</th>
               <th className="px-2 py-2">{t('distribution.difference')}</th>
               <th className="px-2 py-2">{t('crm.notes')}</th>
-              <th className="px-2 py-2">{t('distribution.status')}</th>
               {canEdit ? <th className="w-24 px-2 py-2">{t('chinaReceiving.col.actionsShort')}</th> : null}
             </tr>
           </thead>
@@ -235,7 +230,6 @@ export function BranchReceivingWorkspace({
               const row = rows[item.id];
               const accepted = Number(row?.acceptedQuantity ?? item.expectedQuantity);
               const damaged = Number(row?.damagedQuantity ?? 0);
-              const missing = Number(row?.missingQuantity ?? 0);
               const diff = accepted - item.expectedQuantity;
               const rowStatus = row?.rowStatus ?? 'IN_PROGRESS';
               const bg = row ? rowBackgroundClass(rowStatus, row.saveState, row.isDirty) : '';
@@ -277,19 +271,6 @@ export function BranchReceivingWorkspace({
                       <span className="block text-center">{damaged}</span>
                     )}
                   </td>
-                  <td className="px-2 py-2">
-                    {canEdit && !isLocked ? (
-                      <input
-                        type="number"
-                        min={0}
-                        value={row?.missingQuantity ?? ''}
-                        onChange={(e) => updateRow(item.id, 'missingQuantity', e.target.value)}
-                        className="w-full rounded border border-slate-300 px-1.5 py-1 text-center"
-                      />
-                    ) : (
-                      <span className="block text-center">{missing}</span>
-                    )}
-                  </td>
                   <td className="px-2 py-2 text-center font-semibold">{diff}</td>
                   <td className="px-2 py-2">
                     {canEdit && !isLocked ? (
@@ -302,9 +283,6 @@ export function BranchReceivingWorkspace({
                     ) : (
                       <span className="block truncate">{row?.note || '-'}</span>
                     )}
-                  </td>
-                  <td className="px-2 py-2 text-center text-[11px] font-semibold">
-                    {isLocked ? t('chinaReceiving.saveState.saved') : t('chinaReceiving.saveState.unsaved')}
                   </td>
                   {canEdit ? (
                     <td className="px-2 py-2">
@@ -335,14 +313,6 @@ export function BranchReceivingWorkspace({
             <h4 className="text-base font-bold text-slate-950">{t('branchWarehouseOperator.transportExpenses')}</h4>
             <p className="mt-1 text-sm text-slate-600">{t('distribution.transportCostZeroAllowed')}</p>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <label className="block">
-                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
-                <input
-                  value={transportForm.transportCompany}
-                  onChange={(e) => setTransportForm((c) => ({ ...c, transportCompany: e.target.value }))}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                />
-              </label>
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
                 <input

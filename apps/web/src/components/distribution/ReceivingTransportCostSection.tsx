@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import type { BranchDistributionOrder } from '@/lib/types';
+import { buildBranchReceivingTransportPayload } from '@/lib/branch-receiving-ui';
 import { useTranslation } from '@/i18n/useTranslation';
 
 function formatKgs(value: number | string | null | undefined) {
@@ -41,7 +42,6 @@ export function ReceivingTransportCostSection({
 }) {
   const { t } = useTranslation();
   const [transportForm, setTransportForm] = useState({
-    transportCompany: '',
     driverName: '',
     vehicleNumber: '',
     transportCostKgs: '',
@@ -68,10 +68,12 @@ export function ReceivingTransportCostSection({
 
   const payload = useMemo(
     () => ({
-      transportCompany: transportForm.transportCompany.trim() || undefined,
-      driverName: transportForm.driverName.trim() || undefined,
-      vehicleNumber: transportForm.vehicleNumber.trim() || undefined,
-      transportCostKgs: Number(transportForm.transportCostKgs || 0),
+      ...buildBranchReceivingTransportPayload({
+        driverName: transportForm.driverName,
+        vehicleNumber: transportForm.vehicleNumber,
+        transportCostKgs: transportForm.transportCostKgs,
+        transportNotes: transportForm.comment,
+      }),
       deliveryDate: transportForm.deliveryDate || undefined,
       comment: transportForm.comment.trim() || undefined,
     }),
@@ -131,14 +133,6 @@ export function ReceivingTransportCostSection({
           <h3 className="text-lg font-bold">{t('branchWarehouseOperator.transportExpenses')}</h3>
           <p className="text-sm text-slate-600">{t('distribution.transportCostZeroAllowed')}</p>
           <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
-            <label className="block">
-              <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
-              <input
-                value={transportForm.transportCompany}
-                onChange={(event) => setTransportForm((current) => ({ ...current, transportCompany: event.target.value }))}
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-              />
-            </label>
             <label className="block">
               <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
               <input
@@ -248,11 +242,6 @@ export function ReceivingTransportCostSection({
             />
             <Info label={t('distribution.deliveryCostAllocated')} value={formatKgs(order.deliveryCostSummary.deliveryCostTotal)} />
           </div>
-          {order.transportCompany ? (
-            <p className="mt-3 text-sm text-slate-600">
-              {t('branchProductRequest.transportCompany')}: {order.transportCompany}
-            </p>
-          ) : null}
           {order.driverName ? (
             <p className="text-sm text-slate-600">
               {t('branchProductRequest.driverName')}: {order.driverName}

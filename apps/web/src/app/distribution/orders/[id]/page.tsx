@@ -21,6 +21,7 @@ import { ReceivingTransportCostSection } from '@/components/distribution/Receivi
 import { BranchReceivingWorkspace } from '@/components/distribution/BranchReceivingWorkspace';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
+import { shouldShowReceivingBranchField } from '@/lib/branch-receiving-ui';
 import { buildHqDispatchSendPayload, shouldShowHqDispatchTransportFields } from '@/lib/hq-dispatch-form';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -128,7 +129,9 @@ export default function DistributionOrderDetailPage() {
         <>
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="grid gap-4 md:grid-cols-4">
-                <Info label={t('distribution.branch')} value={order.branch?.name ?? ''} />
+                {shouldShowReceivingBranchField(operatorView) ? (
+                  <Info label={t('distribution.branch')} value={order.branch?.name ?? ''} />
+                ) : null}
                 <Info label={t('distribution.sourceWarehouse')} value={order.sourceWarehouse?.name ?? ''} />
                 <Info label={t('distribution.destinationWarehouse')} value={order.destinationWarehouse?.name ?? ''} />
                 <Info label={t('distribution.status')} value={translateStatus(t, order.status, 'distribution')} />

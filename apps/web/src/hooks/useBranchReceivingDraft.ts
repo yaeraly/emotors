@@ -10,6 +10,7 @@ import {
   type BranchReceivingLineItem,
   type BranchReceivingProgress,
 } from '@/lib/branch-receiving-draft';
+import { deriveMissingQuantity } from '@/lib/branch-receiving-ui';
 
 type SaveRowPayload = {
   acceptedQuantity: number;
@@ -199,6 +200,11 @@ export function useBranchReceivingDraft({
         const next = { ...prev, [field]: value, isDirty: true, saveState: 'unsaved' as const };
         const accepted = Number(field === 'acceptedQuantity' ? value : next.acceptedQuantity) || 0;
         const damaged = Number(field === 'damagedQuantity' ? value : next.damagedQuantity) || 0;
+        if (field === 'acceptedQuantity' || field === 'damagedQuantity') {
+          next.missingQuantity = String(
+            deriveMissingQuantity(item.expectedQuantity, accepted, damaged),
+          );
+        }
         next.rowStatus = resolveRowStatus(accepted, item.expectedQuantity, damaged, false);
         return { ...current, [itemId]: next };
       });
