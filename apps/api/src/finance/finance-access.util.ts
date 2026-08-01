@@ -9,6 +9,10 @@ import {
   userHasPermission,
 } from '../rbac/rbac';
 import { hasCashierCapability } from '../rbac/cashier-capability.util';
+import {
+  canBrowseAllFinanceAccounts,
+  canManageOwnBranchAccounts,
+} from './finance-account-ownership.util';
 
 export type FinanceAccountAccess = {
   id: string;
@@ -29,7 +33,12 @@ export function canManageFinanceAccounts(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
 ) {
   if (isHqFinanceUser(user) && !user.branchId) return true;
-  return isBranchAccountantUser(user) || userHasPermission(user, 'finance.manage');
+  // Branch CEO and Branch Accountant may manage accounts of their own branch only.
+  return (
+    canManageOwnBranchAccounts(user) ||
+    isBranchAccountantUser(user) ||
+    userHasPermission(user, 'finance.manage')
+  );
 }
 
 export function canManageHqFinanceAccounts(
@@ -69,7 +78,10 @@ export function canApproveFinanceAccountLifecycle(
 export function canManageBranchFinanceAccounts(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
 ) {
-  return !!user.branchId && (isBranchAccountantUser(user) || userHasPermission(user, 'finance.manage'));
+  return (
+    canManageOwnBranchAccounts(user) ||
+    (!!user.branchId && userHasPermission(user, 'finance.manage'))
+  );
 }
 
 export function canViewFinanceReports(
@@ -178,7 +190,17 @@ export function assertCanAccessAccountScope(
   assignedAccountIds: Set<string> = new Set(),
 ) {
   const roles = resolveUserRoles(user);
-  if (hasAnyFullAccessRole(roles) || isHqFinanceUser(user)) {
+
+  // HQ CEO / Owner / Finance Manager may browse all owners (HQ + every Branch).
+  if (canBrowseAllFinanceAccounts(user)) {
+    return;
+  }
+
+  // HQ Accountant may access only HQ-owned accounts (never Branch accounts).
+  if (roles.includes(Role.HQ_ACCOUNTANT) && !user.branchId) {
+    if (account.scope !== FinanceAccountScope.HQ || account.branchId != null) {
+      throw new ForbiddenException('HQ accountants can only access HQ accounts');
+    }
     return;
   }
 
@@ -225,18 +247,24 @@ export function resolveFinanceScopeFilter(
   requestedBranchId?: string,
 ): { scope?: FinanceAccountScope; branchId?: string | null } {
   const roles = resolveUserRoles(user);
-  if (hasAnyFullAccessRole(roles) || isHqFinanceUser(user)) {
+
+  // HQ CEO / Owner / Finance Manager: all accounts, optional Branch drill-down.
+  if (canBrowseAllFinanceAccounts(user)) {
     if (requestedBranchId) {
       return { scope: FinanceAccountScope.BRANCH, branchId: requestedBranchId };
     }
-    if (!user.branchId) {
-      return {};
-    }
+    return {};
+  }
+
+  // HQ Accountant: strictly HQ-owned accounts.
+  if (roles.includes(Role.HQ_ACCOUNTANT) && !user.branchId) {
+    return { scope: FinanceAccountScope.HQ, branchId: null };
   }
 
   if (!user.branchId) {
     return { scope: FinanceAccountScope.HQ, branchId: null };
   }
 
+  // Branch users (CEO, Accountant, Cashier): only their Branch accounts.
   return { scope: FinanceAccountScope.BRANCH, branchId: user.branchId };
 }

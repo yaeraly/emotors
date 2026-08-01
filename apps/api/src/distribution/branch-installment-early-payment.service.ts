@@ -10,8 +10,6 @@ import {
   BranchInstallmentEarlyPaymentType,
   BranchInvoiceStatus,
   BranchOrderInstallmentStatus,
-  FinanceAccountScope,
-  FinanceAccountStatus,
   Prisma,
   Role,
 } from '@prisma/client';
@@ -31,6 +29,7 @@ import {
   resolveEarlyPaymentApprovedAmount,
   validateEarlyPaymentAmount,
 } from './branch-installment-early-payment.util';
+import { assertAccountUsableByOwner } from '../finance/finance-account-ownership.util';
 import { buildBranchOrderInstallmentSchedule } from './branch-order-installment.util';
 import { CreateInstallmentEarlyPaymentDto } from './dto/create-installment-early-payment.dto';
 import { RejectInstallmentEarlyPaymentDto } from './dto/reject-installment-early-payment.dto';
@@ -183,14 +182,15 @@ export class BranchInstallmentEarlyPaymentService {
           where: {
             id: financeAccountId,
             deletedAt: null,
-            status: FinanceAccountStatus.ACTIVE,
-            scope: FinanceAccountScope.BRANCH,
-            branchId: invoice.branchId,
           },
         });
         if (!account) {
           throw new BadRequestException('Счёт филиала не найден');
         }
+        assertAccountUsableByOwner(user, account, {
+          expectedBranchId: invoice.branchId,
+          requireActive: true,
+        });
       }
 
       const request = await tx.branchInstallmentEarlyPaymentRequest.create({

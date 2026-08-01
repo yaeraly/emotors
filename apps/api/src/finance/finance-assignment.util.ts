@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { FinanceAccountScope, Role } from '@prisma/client';
+import { FinanceAccountStatus, Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -17,6 +17,7 @@ import {
   resolveUserRoles,
 } from '../rbac/rbac';
 import { canManageFinanceAccounts } from './finance-access.util';
+import { assertAccountUsableByOwner } from './finance-account-ownership.util';
 
 export async function getActiveAssignmentAccountIds(prisma: PrismaService, userId: string) {
   const now = new Date();
@@ -79,20 +80,40 @@ export async function assertCashierPaymentAllowed(
     if (!assignment) {
       throw new BadRequestException('You are not assigned to the selected account');
     }
-    if (assignment.account.scope === FinanceAccountScope.HQ) {
-      throw new ForbiddenException('Branch cashiers cannot use HQ accounts');
-    }
+    assertAccountUsableByOwner(user, {
+      id: assignment.account.id,
+      scope: assignment.account.scope,
+      branchId: assignment.account.branchId,
+      status: assignment.account.status as FinanceAccountStatus,
+      deletedAt: null,
+    }, { expectedBranchId: options.branchId ?? user.branchId });
     if (options.operation) {
       assertAssignmentOperationAllowed(assignment.allowedOperations, options.operation);
     }
     return assignment;
   }
 
-  const eligible = activeAssignments.find((assignment) =>
-    assignment.allowedOperations.includes(
-      options.operation ?? CASHIER_ASSIGNMENT_OPERATIONS.RECEIVE_PAYMENTS,
-    ),
-  );
+  const eligible = activeAssignments.find((assignment) => {
+    if (
+      !assignment.allowedOperations.includes(
+        options.operation ?? CASHIER_ASSIGNMENT_OPERATIONS.RECEIVE_PAYMENTS,
+      )
+    ) {
+      return false;
+    }
+    try {
+      assertAccountUsableByOwner(user, {
+        id: assignment.account.id,
+        scope: assignment.account.scope,
+        branchId: assignment.account.branchId,
+        status: assignment.account.status as FinanceAccountStatus,
+        deletedAt: null,
+      }, { expectedBranchId: options.branchId ?? user.branchId });
+      return true;
+    } catch {
+      return false;
+    }
+  });
   if (!eligible) {
     throw new BadRequestException('No assigned account allows this payment operation');
   }

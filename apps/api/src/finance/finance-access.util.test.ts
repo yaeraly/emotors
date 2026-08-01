@@ -107,6 +107,26 @@ assertEqual(
   'branch-2',
   'hq can drill into branch',
 );
+assertEqual(
+  resolveFinanceScopeFilter(hqAccountant).scope,
+  'HQ',
+  'HQ accountant lists only HQ accounts',
+);
+assertEqual(
+  resolveFinanceScopeFilter(hqAccountant).branchId,
+  null,
+  'HQ accountant branchId is null',
+);
+assertEqual(
+  canManageBranchFinanceAccounts(branchCeo),
+  true,
+  'Branch CEO can manage own branch accounts',
+);
+assertEqual(
+  canManageFinanceAccounts(branchCeo),
+  true,
+  'Branch CEO can create/edit branch accounts',
+);
 
 assertEqual(canPrepareFinanceTransfer(hqAccountant), true, 'HQ Accountant prepares transfers');
 assertEqual(canPrepareFinanceTransfer(hqCashier), false, 'HQ Cashier cannot prepare transfers');

@@ -39,6 +39,14 @@ export class CreateFinanceAccountDto {
 
   @IsOptional()
   @IsString()
+  iban?: string;
+
+  @IsOptional()
+  @IsString()
+  responsibleEmployeeId?: string;
+
+  @IsOptional()
+  @IsString()
   qrProvider?: string;
 
   @IsOptional()
@@ -66,6 +74,14 @@ export class UpdateFinanceAccountDto {
   @IsOptional()
   @IsString()
   bankAccountNo?: string;
+
+  @IsOptional()
+  @IsString()
+  iban?: string;
+
+  @IsOptional()
+  @IsString()
+  responsibleEmployeeId?: string;
 
   @IsOptional()
   @IsString()

@@ -28,6 +28,11 @@ import {
   canManageHqFinanceAccounts,
   resolveFinanceScopeFilter,
 } from './finance-access.util';
+import {
+  ACCOUNT_OWNERSHIP_AUDIT,
+  assertFinanceAccountOwnershipInvariant,
+  resolveFinanceAccountOwner,
+} from './finance-account-ownership.util';
 import { getActiveAssignmentAccountIds, listCashierEligibleEmployees } from './finance-assignment.util';
 import { FinanceLedgerService } from './finance-ledger.service';
 import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
@@ -125,7 +130,13 @@ export class FinanceAccountsService {
   private async writeAccountAudit(
     user: AuthUser,
     action: string,
-    account: { id: string; branchId: string | null; accountNumber: string; currentBalance?: unknown },
+    account: {
+      id: string;
+      branchId: string | null;
+      accountNumber: string;
+      currentBalance?: unknown;
+      scope?: FinanceAccountScope;
+    },
     metadata: Record<string, unknown>,
   ) {
     await this.prisma.auditLog.create({
@@ -137,11 +148,14 @@ export class FinanceAccountsService {
         entityId: account.id,
         metadata: {
           accountId: account.id,
+          ownerType: account.scope ?? null,
           branchId: account.branchId,
+          userId: user.id,
           employeeId: user.id,
           role: user.role,
           amount: Number(account.currentBalance ?? 0),
           transactionNumber: account.accountNumber,
+          timestamp: new Date().toISOString(),
           ...metadata,
         },
       },
@@ -342,19 +356,37 @@ export class FinanceAccountsService {
       throw new BadRequestException('Unknown account type');
     }
 
-    const scope = dto.scope ?? (user.branchId ? FinanceAccountScope.BRANCH : FinanceAccountScope.HQ);
-    const branchId = scope === FinanceAccountScope.BRANCH ? (dto.branchId ?? user.branchId) : null;
+    const { scope, branchId } = resolveFinanceAccountOwner({
+      scope: dto.scope,
+      branchId: dto.branchId,
+      userBranchId: user.branchId,
+    });
 
     if (scope === FinanceAccountScope.HQ && !canManageHqFinanceAccounts(user)) {
       throw new ForbiddenException('Only HQ finance can create HQ accounts');
     }
     if (scope === FinanceAccountScope.BRANCH) {
-      if (!branchId) throw new BadRequestException('Branch is required');
       if (!canManageBranchFinanceAccounts(user) && !canManageHqFinanceAccounts(user)) {
         throw new ForbiddenException('Forbidden');
       }
       if (user.branchId && user.branchId !== branchId) {
         throw new ForbiddenException('Branch isolation violation');
+      }
+    }
+
+    if (dto.responsibleEmployeeId) {
+      const responsible = await this.prisma.user.findFirst({
+        where: { id: dto.responsibleEmployeeId, deletedAt: null },
+        select: { id: true, branchId: true },
+      });
+      if (!responsible) {
+        throw new BadRequestException('Responsible employee not found');
+      }
+      if (scope === FinanceAccountScope.BRANCH && responsible.branchId !== branchId) {
+        throw new BadRequestException('Responsible employee must belong to the account branch');
+      }
+      if (scope === FinanceAccountScope.HQ && responsible.branchId != null) {
+        throw new BadRequestException('HQ account responsible employee must be an HQ employee');
       }
     }
 
@@ -374,6 +406,8 @@ export class FinanceAccountsService {
               : FinanceAccountStatus.ACTIVE,
           bankName: dto.bankName,
           bankAccountNo: dto.bankAccountNo,
+          iban: dto.iban,
+          responsibleEmployeeId: dto.responsibleEmployeeId,
           qrProvider: dto.qrProvider,
           qrMerchantId: dto.qrMerchantId,
           posTerminalId: dto.posTerminalId,
@@ -384,6 +418,8 @@ export class FinanceAccountsService {
         include: this.accountInclude(),
       });
 
+      assertFinanceAccountOwnershipInvariant(account);
+
       await tx.auditLog.create({
         data: {
           userId: user.id,
@@ -393,7 +429,10 @@ export class FinanceAccountsService {
           entityId: account.id,
           metadata: {
             accountId: account.id,
+            ownerType: account.scope,
             branchId,
+            userId: user.id,
+            ownershipAction: ACCOUNT_OWNERSHIP_AUDIT.CREATED,
             employeeId: user.id,
             role: user.role,
             operation: 'CREATE_ACCOUNT',
@@ -401,6 +440,7 @@ export class FinanceAccountsService {
             transactionNumber: account.accountNumber,
             previousValue: null,
             newValue: { status: account.status, name: account.name, scope: account.scope },
+            timestamp: new Date().toISOString(),
           },
         },
       });
@@ -415,8 +455,19 @@ export class FinanceAccountsService {
     });
     if (!existing) throw new NotFoundException('Account not found');
     if (!canManageFinanceAccounts(user)) throw new ForbiddenException('Forbidden');
+    assertFinanceAccountOwnershipInvariant(existing);
     if (user.branchId && existing.branchId && user.branchId !== existing.branchId) {
       throw new ForbiddenException('Branch isolation violation');
+    }
+    if (existing.scope === FinanceAccountScope.HQ && !canManageHqFinanceAccounts(user) && !canApproveFinanceAccountLifecycle(user)) {
+      throw new ForbiddenException('Only HQ finance can edit HQ accounts');
+    }
+    if (
+      existing.scope === FinanceAccountScope.BRANCH &&
+      !canManageBranchFinanceAccounts(user) &&
+      !canManageHqFinanceAccounts(user)
+    ) {
+      throw new ForbiddenException('Forbidden');
     }
     if (
       existing.status === FinanceAccountStatus.ARCHIVED ||
@@ -425,10 +476,32 @@ export class FinanceAccountsService {
       throw new BadRequestException('Archived or archive-requested accounts cannot be edited');
     }
 
+    // Ownership is immutable after creation — never allow scope/branchId changes here.
+    if (dto.responsibleEmployeeId) {
+      const responsible = await this.prisma.user.findFirst({
+        where: { id: dto.responsibleEmployeeId, deletedAt: null },
+        select: { id: true, branchId: true },
+      });
+      if (!responsible) {
+        throw new BadRequestException('Responsible employee not found');
+      }
+      if (
+        existing.scope === FinanceAccountScope.BRANCH &&
+        responsible.branchId !== existing.branchId
+      ) {
+        throw new BadRequestException('Responsible employee must belong to the account branch');
+      }
+      if (existing.scope === FinanceAccountScope.HQ && responsible.branchId != null) {
+        throw new BadRequestException('HQ account responsible employee must be an HQ employee');
+      }
+    }
+
     const previousValue = {
       name: existing.name,
       bankName: existing.bankName,
       bankAccountNo: existing.bankAccountNo,
+      iban: existing.iban,
+      responsibleEmployeeId: existing.responsibleEmployeeId,
       qrProvider: existing.qrProvider,
       qrMerchantId: existing.qrMerchantId,
       posTerminalId: existing.posTerminalId,
@@ -441,6 +514,8 @@ export class FinanceAccountsService {
         name: dto.name?.trim(),
         bankName: dto.bankName,
         bankAccountNo: dto.bankAccountNo,
+        iban: dto.iban,
+        responsibleEmployeeId: dto.responsibleEmployeeId,
         qrProvider: dto.qrProvider,
         qrMerchantId: dto.qrMerchantId,
         posTerminalId: dto.posTerminalId,
@@ -450,13 +525,18 @@ export class FinanceAccountsService {
       include: this.accountInclude(),
     });
 
+    assertFinanceAccountOwnershipInvariant(account);
+
     await this.writeAccountAudit(user, 'finance.account.edit', account, {
       operation: 'EDIT_ACCOUNT',
+      ownershipAction: ACCOUNT_OWNERSHIP_AUDIT.UPDATED,
       previousValue,
       newValue: {
         name: account.name,
         bankName: account.bankName,
         bankAccountNo: account.bankAccountNo,
+        iban: account.iban,
+        responsibleEmployeeId: account.responsibleEmployeeId,
         qrProvider: account.qrProvider,
         qrMerchantId: account.qrMerchantId,
         posTerminalId: account.posTerminalId,
@@ -550,6 +630,7 @@ export class FinanceAccountsService {
       });
       await this.writeAccountAudit(user, 'finance.account.delete', deleted, {
         operation: 'SOFT_DELETE_UNUSED',
+        ownershipAction: ACCOUNT_OWNERSHIP_AUDIT.DELETED,
         previousValue: { status: existing.status, deletedAt: null },
         newValue: { status: deleted.status, deletedAt: deleted.deletedAt },
       });
