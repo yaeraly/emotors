@@ -12,6 +12,10 @@ import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/type
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
+import {
+  shouldShowInventoryCountDiscrepancyTotal,
+  shouldShowInventoryCountItemCostColumns,
+} from '@/lib/inventory-count-discrepancy';
 import { BRANCH_CEO_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-ceo-warehouse';
 import { BRANCH_WAREHOUSE_INVENTORY_BASE } from '@/lib/branch-warehouse-inventory';
 import { BranchWarehouseSection } from '@/components/branch-warehouse/BranchWarehouseSection';
@@ -55,7 +59,9 @@ export default function InventoryCountDetailPage() {
   const branchScopedView =
     currentUser &&
     (isBranchWarehouseOperator(currentUser) || isBranchOwnerUser(currentUser));
-  const hideFinancials = Boolean(currentUser && isBranchWarehouseOperator(currentUser));
+  const hideItemFinancials = Boolean(currentUser && isBranchWarehouseOperator(currentUser));
+  const showDiscrepancyTotal = shouldShowInventoryCountDiscrepancyTotal({ hideItemFinancials });
+  const showItemCostColumns = shouldShowInventoryCountItemCostColumns({ hideItemFinancials });
   const inventoryListHref = isBranchWarehouseOperator(currentUser)
     ? BRANCH_WAREHOUSE_INVENTORY_BASE
     : isBranchOwnerUser(currentUser)
@@ -172,11 +178,22 @@ export default function InventoryCountDetailPage() {
 
     setError('');
     try {
-      await apiFetch(`/inventory-count/sessions/${id}/items/${item.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ actualQuantity }),
-      });
-      await load();
+      const updated = await apiFetch<InventoryCountSession>(
+        `/inventory-count/sessions/${id}/items/${item.id}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ actualQuantity }),
+        },
+      );
+      setSession(updated);
+      setPendingQty(
+        Object.fromEntries(
+          (updated.items ?? []).map((row) => [
+            row.id,
+            row.actualQuantity !== null ? String(row.actualQuantity) : '',
+          ]),
+        ),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -389,7 +406,7 @@ export default function InventoryCountDetailPage() {
             <SummaryCard label={t('inventoryCount.remainingProducts')} value={String(summary.remainingProducts)} />
             <SummaryCard label={t('inventoryCount.shortages')} value={String(summary.shortages)} tone="red" />
             <SummaryCard label={t('inventoryCount.overages')} value={String(summary.overages)} tone="amber" />
-            {!hideFinancials ? (
+            {showDiscrepancyTotal ? (
               <SummaryCard
                 label={t('inventoryCount.totalDifferenceValue')}
                 value={formatKgs(summary.totalDifferenceValueKgs)}
@@ -469,7 +486,7 @@ export default function InventoryCountDetailPage() {
                 <th className="px-4 py-3">{t('inventoryCount.systemQuantity')}</th>
                 <th className="px-4 py-3">{t('inventoryCount.actualQuantity')}</th>
                 <th className="px-4 py-3">{t('inventoryCount.difference')}</th>
-                {!hideFinancials ? (
+                {showItemCostColumns ? (
                   <th className="px-4 py-3">{t('inventoryCount.differenceValue')}</th>
                 ) : null}
                 {isCounting && canManage ? <th className="px-4 py-3">{t('common.actions')}</th> : null}
@@ -506,7 +523,7 @@ export default function InventoryCountDetailPage() {
                   <td className="px-4 py-3">
                     <DifferenceBadge item={item} t={t} />
                   </td>
-                  {!hideFinancials ? (
+                  {showItemCostColumns ? (
                     <td className="px-4 py-3">{formatKgs(item.differenceValueKgs)}</td>
                   ) : null}
                   {isCounting && canManage ? (

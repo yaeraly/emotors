@@ -18,13 +18,24 @@ export function sanitizeInventoryCountSummaryForUser(
     overages: number;
     matched: number;
     totalDifferenceValueKgs?: number;
+    surplusValueKgs?: number;
+    shortageValueKgs?: number;
   },
 ) {
   if (!shouldStripBranchWarehouseInventoryFinancials(user)) {
     return summary;
   }
-  const { totalDifferenceValueKgs: _totalDifferenceValueKgs, ...rest } = summary;
-  return rest;
+  // Branch Warehouse may see the aggregate discrepancy total only.
+  // Do not expose surplus/shortage monetary breakdowns or any item-level cost fields.
+  const {
+    surplusValueKgs: _surplusValueKgs,
+    shortageValueKgs: _shortageValueKgs,
+    ...safeSummary
+  } = summary;
+  return {
+    ...safeSummary,
+    totalDifferenceValueKgs: Number(summary.totalDifferenceValueKgs ?? 0),
+  };
 }
 
 export function sanitizeInventoryCountItemForUser(user: AuthUser, item: any) {

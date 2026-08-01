@@ -48,6 +48,7 @@ import {
   deriveDisplayUnitCost,
   roundDisplayMoney,
 } from '../pricing/product-cost-precision.util';
+import { buildInventoryCountDiscrepancySummary } from './inventory-count-summary.util';
 import {
   sanitizeInventoryCountSearchResultForUser,
   sanitizeInventoryCountSessionForUser,
@@ -324,7 +325,13 @@ export class InventoryCountService {
       },
     });
 
-    return updated;
+    // Return the refreshed session so Branch/HQ share the same authoritative summary total
+    // after each saved quantity change (no separate discrepancy formula).
+    const refreshed = await this.prisma.inventoryCountSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      include: this.sessionInclude(),
+    });
+    return this.toSessionResponse(user, refreshed);
   }
 
   async bulkUpdateItems(user: AuthUser, sessionId: string, dto: BulkUpdateInventoryCountItemsDto) {
@@ -912,39 +919,16 @@ export class InventoryCountService {
       systemQuantity: number;
       actualQuantity: number | null;
       differenceQuantity: number;
-      differenceValueKgs: Prisma.Decimal;
+      differenceValueKgs: Prisma.Decimal | number;
     }>;
   }) {
-    const totalProducts = session.items.length;
-    const countedProducts = session.items.filter((item) => item.actualQuantity !== null).length;
-    const shortages = session.items.filter((item) => item.differenceQuantity < 0).length;
-    const overages = session.items.filter((item) => item.differenceQuantity > 0).length;
-    const surplusValueKgs = roundDisplayMoney(
-      session.items
-        .filter((item) => item.differenceQuantity > 0)
-        .reduce((sum, item) => sum + Number(item.differenceValueKgs), 0),
+    return buildInventoryCountDiscrepancySummary(
+      session.items.map((item) => ({
+        actualQuantity: item.actualQuantity,
+        differenceQuantity: item.differenceQuantity,
+        differenceValueKgs: Number(item.differenceValueKgs),
+      })),
     );
-    const shortageValueKgs = roundDisplayMoney(
-      session.items
-        .filter((item) => item.differenceQuantity < 0)
-        .reduce((sum, item) => sum + Number(item.differenceValueKgs), 0),
-    );
-    const totalDifferenceValue = session.items.reduce(
-      (sum, item) => sum + Number(item.differenceValueKgs),
-      0,
-    );
-
-    return {
-      totalProducts,
-      countedProducts,
-      remainingProducts: totalProducts - countedProducts,
-      shortages,
-      overages,
-      matched: session.items.filter((item) => item.differenceQuantity === 0 && item.actualQuantity !== null).length,
-      surplusValueKgs,
-      shortageValueKgs,
-      totalDifferenceValueKgs: roundDisplayMoney(totalDifferenceValue),
-    };
   }
 
   private async recomputeAndPersistSessionValuations(

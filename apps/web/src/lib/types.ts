@@ -120,8 +120,10 @@ export type InventoryCountItem = {
   systemQuantity: number;
   actualQuantity: number | null;
   differenceQuantity: number;
-  unitCostKgs: number;
-  differenceValueKgs: number;
+  /** Hidden for Branch Warehouse Manager (confidential). */
+  unitCostKgs?: number;
+  /** Hidden for Branch Warehouse Manager (confidential). */
+  differenceValueKgs?: number;
   differenceType?: 'SHORTAGE' | 'OVERAGE' | 'MATCHED' | null;
   remark?: string | null;
   countedAt?: string | null;

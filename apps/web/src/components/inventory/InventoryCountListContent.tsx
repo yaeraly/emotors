@@ -212,12 +212,10 @@ function ActiveInventoryCard({
         <Metric label={t('inventoryCount.remainingProducts')} value={String(summary?.remainingProducts ?? 0)} />
         <Metric label={t('inventoryCount.differencePositions')} value={String(differencePositions)} />
         <Metric label={t('inventoryCount.completionPercentage')} value={`${progress}%`} />
-        {branchOwnerView ? (
-          <Metric
-            label={t('inventoryCount.totalDifferenceValue')}
-            value={Number(summary?.totalDifferenceValueKgs ?? 0).toFixed(2)}
-          />
-        ) : null}
+        <Metric
+          label={t('inventoryCount.totalDifferenceValue')}
+          value={Number(summary?.totalDifferenceValueKgs ?? 0).toFixed(2)}
+        />
       </div>
 
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
