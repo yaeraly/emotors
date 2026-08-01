@@ -15,7 +15,12 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveUserRoles, isBranchOwnerUser } from '../rbac/rbac';
+import { resolveUserRoles, isBranchAccountantUser, isBranchOwnerUser } from '../rbac/rbac';
+import {
+  assertValidFinanceAccountName,
+  BANK_ACCOUNT_NAME_UPDATED,
+  branchAccountantAttemptedNonNameEdit,
+} from './finance-account-name.util';
 import {
   DEFAULT_CASHIER_ASSIGNMENT_OPERATIONS,
   hasCashierCapability,
@@ -390,11 +395,13 @@ export class FinanceAccountsService {
       }
     }
 
+    const accountName = assertValidFinanceAccountName(dto.name);
+
     return this.prisma.$transaction(async (tx) => {
       const account = await tx.financeAccount.create({
         data: {
           accountNumber: buildFinanceDocumentNumber('FAC'),
-          name: dto.name.trim(),
+          name: accountName,
           scope,
           branchId,
           typeCode: dto.typeCode,
@@ -476,6 +483,70 @@ export class FinanceAccountsService {
       throw new BadRequestException('Archived or archive-requested accounts cannot be edited');
     }
 
+    // Branch Accountant may change only the display name of their own Branch account.
+    if (isBranchAccountantUser(user)) {
+      if (existing.scope !== FinanceAccountScope.BRANCH || existing.branchId !== user.branchId) {
+        throw new ForbiddenException('Branch accountants can only rename accounts of their own branch');
+      }
+      if (branchAccountantAttemptedNonNameEdit(dto)) {
+        throw new BadRequestException('Branch accountants can only change the account name');
+      }
+      if (dto.name === undefined) {
+        throw new BadRequestException('Account name is required');
+      }
+
+      const newName = assertValidFinanceAccountName(dto.name);
+      const oldName = existing.name;
+      if (newName === oldName) {
+        return this.toAccountResponse(existing);
+      }
+
+      const beforeBalance = {
+        openingBalance: existing.openingBalance,
+        currentBalance: existing.currentBalance,
+        availableBalance: existing.availableBalance,
+        pendingBalance: existing.pendingBalance,
+      };
+
+      const account = await this.prisma.financeAccount.update({
+        where: { id },
+        data: {
+          name: newName,
+          updatedById: user.id,
+        },
+        include: this.accountInclude(),
+      });
+
+      assertFinanceAccountOwnershipInvariant(account);
+
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: BANK_ACCOUNT_NAME_UPDATED,
+          entity: 'FinanceAccount',
+          entityId: account.id,
+          metadata: {
+            accountId: account.id,
+            oldName,
+            newName,
+            branchId: account.branchId,
+            updatedBy: user.id,
+            updatedAt: new Date().toISOString(),
+            ownerType: account.scope,
+            balanceUnchanged: {
+              openingBalance: Number(beforeBalance.openingBalance),
+              currentBalance: Number(beforeBalance.currentBalance),
+              availableBalance: Number(beforeBalance.availableBalance),
+              pendingBalance: Number(beforeBalance.pendingBalance),
+            },
+          },
+        },
+      });
+
+      return this.toAccountResponse(account);
+    }
+
     // Ownership is immutable after creation — never allow scope/branchId changes here.
     if (dto.responsibleEmployeeId) {
       const responsible = await this.prisma.user.findFirst({
@@ -508,10 +579,13 @@ export class FinanceAccountsService {
       notes: existing.notes,
     };
 
+    const nextName =
+      dto.name !== undefined ? assertValidFinanceAccountName(dto.name) : existing.name;
+
     const account = await this.prisma.financeAccount.update({
       where: { id },
       data: {
-        name: dto.name?.trim(),
+        name: nextName,
         bankName: dto.bankName,
         bankAccountNo: dto.bankAccountNo,
         iban: dto.iban,
@@ -526,6 +600,27 @@ export class FinanceAccountsService {
     });
 
     assertFinanceAccountOwnershipInvariant(account);
+
+    if (account.name !== existing.name) {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: BANK_ACCOUNT_NAME_UPDATED,
+          entity: 'FinanceAccount',
+          entityId: account.id,
+          metadata: {
+            accountId: account.id,
+            oldName: existing.name,
+            newName: account.name,
+            branchId: account.branchId,
+            updatedBy: user.id,
+            updatedAt: new Date().toISOString(),
+            ownerType: account.scope,
+          },
+        },
+      });
+    }
 
     await this.writeAccountAudit(user, 'finance.account.edit', account, {
       operation: 'EDIT_ACCOUNT',
@@ -611,6 +706,9 @@ export class FinanceAccountsService {
     });
     if (!existing) throw new NotFoundException('Account not found');
     if (!canManageFinanceAccounts(user)) throw new ForbiddenException('Forbidden');
+    if (isBranchAccountantUser(user)) {
+      throw new ForbiddenException('Branch accountants cannot delete bank accounts');
+    }
     if (user.branchId && existing.branchId && user.branchId !== existing.branchId) {
       throw new ForbiddenException('Branch isolation violation');
     }

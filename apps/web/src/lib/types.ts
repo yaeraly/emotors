@@ -1320,6 +1320,7 @@ export type FinanceAccount = {
   pendingBalance: number;
   bankName?: string | null;
   bankAccountNo?: string | null;
+  iban?: string | null;
   qrProvider?: string | null;
   qrMerchantId?: string | null;
   posTerminalId?: string | null;

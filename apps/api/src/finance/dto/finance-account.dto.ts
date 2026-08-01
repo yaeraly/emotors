@@ -7,11 +7,14 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
 } from 'class-validator';
+import { FINANCE_ACCOUNT_NAME_MAX_LENGTH } from '../finance-account-name.util';
 
 export class CreateFinanceAccountDto {
   @IsString()
+  @MaxLength(FINANCE_ACCOUNT_NAME_MAX_LENGTH)
   name!: string;
 
   @IsString()
@@ -65,6 +68,7 @@ export class CreateFinanceAccountDto {
 export class UpdateFinanceAccountDto {
   @IsOptional()
   @IsString()
+  @MaxLength(FINANCE_ACCOUNT_NAME_MAX_LENGTH)
   name?: string;
 
   @IsOptional()

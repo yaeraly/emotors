@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AccountAssignmentsPanel } from '@/components/finance/AccountAssignmentsPanel';
 import {
@@ -18,6 +18,7 @@ import {
   canApproveFinanceAccountLifecycle,
   canManageFinanceAccounts,
 } from '@/lib/finance-rbac';
+import { isBranchAccountantUser } from '@/lib/rbac';
 import type { FinanceAccount, FinanceLedgerEntry, User } from '@/lib/types';
 
 export default function FinanceAccountDetailsPage() {
@@ -30,6 +31,9 @@ export default function FinanceAccountDetailsPage() {
   const [actionError, setActionError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [nameSuccess, setNameSuccess] = useState('');
 
   const reload = () => {
     setLoading(true);
@@ -40,6 +44,7 @@ export default function FinanceAccountDetailsPage() {
       .then(([row, currentUser]) => {
         setAccount(row);
         setUser(currentUser);
+        setNameDraft(row.name);
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
       .finally(() => setLoading(false));
@@ -51,7 +56,41 @@ export default function FinanceAccountDetailsPage() {
 
   const canManage = Boolean(user && canManageFinanceAccounts(user));
   const canApproveLifecycle = Boolean(user && canApproveFinanceAccountLifecycle(user));
+  const isBranchAccountant = Boolean(user && isBranchAccountantUser(user));
+  const canRenameAccount =
+    Boolean(user && canManageFinanceAccounts(user)) &&
+    Boolean(account) &&
+    account?.status !== 'ARCHIVED' &&
+    account?.status !== 'ARCHIVE_REQUESTED' &&
+    (!isBranchAccountant || (account?.scope === 'BRANCH' && account?.branchId === user?.branchId));
   const status = account?.status;
+
+  async function saveAccountName(event: FormEvent) {
+    event.preventDefault();
+    if (!account || busy) return;
+    const nextName = nameDraft.trim();
+    if (!nextName) {
+      setActionError(t('finance.accountNameRequired'));
+      return;
+    }
+    setBusy(true);
+    setActionError('');
+    setNameSuccess('');
+    try {
+      const updated = await apiFetch<FinanceAccount>(`/finance/accounts/${account.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: nextName }),
+      });
+      setAccount((prev) => (prev ? { ...prev, ...updated } : updated));
+      setNameDraft(updated.name);
+      setEditingName(false);
+      setNameSuccess(t('finance.accountNameUpdated'));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function runAction(path: string, method: 'PATCH' | 'POST' | 'DELETE', successRedirect?: boolean) {
     if (busy) return;
@@ -97,10 +136,13 @@ export default function FinanceAccountDetailsPage() {
             <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('distribution.status')}</p><p className="mt-2"><FinanceStatusBadge status={account.status} /></p></div>
           </div>
 
-          {(canManage || canApproveLifecycle) ? (
+          {(canManage || canApproveLifecycle || canRenameAccount) ? (
             <div className="flex flex-wrap gap-2 rounded-3xl border border-slate-200 bg-white p-4">
               {actionError ? <div className="w-full"><FinanceErrorState message={actionError} /></div> : null}
-              {canManage && (status === 'DRAFT' || status === 'BLOCKED' || status === 'INACTIVE') ? (
+              {nameSuccess ? (
+                <p className="w-full rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{nameSuccess}</p>
+              ) : null}
+              {canManage && !isBranchAccountant && (status === 'DRAFT' || status === 'BLOCKED' || status === 'INACTIVE') ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -110,7 +152,7 @@ export default function FinanceAccountDetailsPage() {
                   {t('finance.activateAccount')}
                 </button>
               ) : null}
-              {canManage && status === 'ACTIVE' ? (
+              {canManage && !isBranchAccountant && status === 'ACTIVE' ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -120,7 +162,7 @@ export default function FinanceAccountDetailsPage() {
                   {t('finance.blockAccount')}
                 </button>
               ) : null}
-              {canManage && status !== 'ARCHIVED' && status !== 'ARCHIVE_REQUESTED' ? (
+              {canManage && !isBranchAccountant && status !== 'ARCHIVED' && status !== 'ARCHIVE_REQUESTED' ? (
                 <button
                   type="button"
                   disabled={busy}
@@ -160,10 +202,68 @@ export default function FinanceAccountDetailsPage() {
 
           <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <dl className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <dt className="text-sm text-slate-500">{t('finance.accountName')}</dt>
+                <dd className="mt-1">
+                  {canRenameAccount && editingName ? (
+                    <form onSubmit={saveAccountName} className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <input
+                        required
+                        maxLength={120}
+                        value={nameDraft}
+                        onChange={(event) => setNameDraft(event.target.value)}
+                        className="w-full rounded-xl border border-slate-300 px-4 py-2 font-semibold outline-none ring-blue-500 focus:ring-2"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="submit"
+                          disabled={busy}
+                          className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        >
+                          {t('common.save')}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setEditingName(false);
+                            setNameDraft(account.name);
+                            setActionError('');
+                          }}
+                          className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+                        >
+                          {t('common.cancel')}
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <span className="font-semibold">{account.name}</span>
+                      {canRenameAccount ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingName(true);
+                            setNameDraft(account.name);
+                            setNameSuccess('');
+                            setActionError('');
+                          }}
+                          className="rounded-xl border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700"
+                        >
+                          {t('common.edit')}
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </dd>
+              </div>
               <div><dt className="text-sm text-slate-500">{t('finance.accountType')}</dt><dd className="font-semibold">{account.typeDefinition?.name ?? account.typeCode}</dd></div>
               <div><dt className="text-sm text-slate-500">{t('finance.currency')}</dt><dd className="font-semibold">{account.currency}</dd></div>
               <div><dt className="text-sm text-slate-500">{t('finance.accountNumber')}</dt><dd className="font-semibold">{account.accountNumber}</dd></div>
+              {account.iban ? <div><dt className="text-sm text-slate-500">{t('finance.iban')}</dt><dd className="font-semibold">{account.iban}</dd></div> : null}
               {account.bankName ? <div><dt className="text-sm text-slate-500">{t('finance.bankName')}</dt><dd className="font-semibold">{account.bankName}</dd></div> : null}
+              <div><dt className="text-sm text-slate-500">{t('finance.scope')}</dt><dd className="font-semibold">{account.scope}</dd></div>
+              <div><dt className="text-sm text-slate-500">{t('finance.openingBalance')}</dt><dd className="font-semibold"><FinanceMoney amount={Number(account.openingBalance)} currency={account.currency} /></dd></div>
             </dl>
           </div>
 
