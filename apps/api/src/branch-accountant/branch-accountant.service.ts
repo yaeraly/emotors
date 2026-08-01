@@ -15,6 +15,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { BranchInstallmentEarlyPaymentService } from '../distribution/branch-installment-early-payment.service';
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
+import { isBranchCashierInvoiceVisible } from '../distribution/branch-cashier-invoice-visibility.util';
 import { DistributionService } from '../distribution/distribution.service';
 import { CreateInstallmentEarlyPaymentDto } from '../distribution/dto/create-installment-early-payment.dto';
 import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
@@ -79,6 +80,14 @@ export class BranchAccountantService {
       installmentEarlyPaymentRequests: {
         orderBy: { requestedAt: 'desc' as const },
         take: 5,
+        include: {
+          financeAccount: {
+            select: { id: true, name: true, accountNumber: true, availableBalance: true, currentBalance: true },
+          },
+          requestedBy: { select: { id: true, fullName: true } },
+          branchCeoApprovedBy: { select: { id: true, fullName: true } },
+          sentToCashierBy: { select: { id: true, fullName: true } },
+        },
       },
     };
   }
@@ -405,7 +414,9 @@ export class BranchAccountantService {
       orderBy: { sentToCashierAt: 'desc' },
     });
     const enriched = await Promise.all(invoices.map((invoice) => this.attachLinkedRequest(invoice)));
-    return enriched.map((invoice) => sanitizeBranchCashierInvoice(invoice));
+    return enriched
+      .filter((invoice) => isBranchCashierInvoiceVisible(invoice))
+      .map((invoice) => sanitizeBranchCashierInvoice(invoice));
   }
 
   async getCashierInvoice(user: AuthUser, id: string) {
@@ -416,24 +427,10 @@ export class BranchAccountantService {
         deletedAt: null,
         branchId: user.branchId!,
         sentToCashierAt: { not: null },
-        NOT: {
-          installmentEarlyPaymentRequests: {
-            some: { status: BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO },
-          },
-        },
       },
       include: this.invoiceInclude(),
     });
-    if (!invoice) throw new NotFoundException('Счёт не найден');
-    const visibleEarly = invoice.installmentEarlyPaymentRequests?.find(
-      (row) =>
-        CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES.includes(row.status) && row.sentToCashierAt != null,
-    );
-    if (
-      invoice.paymentType === BranchInvoicePaymentType.INSTALLMENT &&
-      invoice.branchOrderInstallment?.firstPaymentConfirmed &&
-      !visibleEarly
-    ) {
+    if (!invoice || !isBranchCashierInvoiceVisible(invoice)) {
       throw new NotFoundException('Счёт не найден');
     }
     const enriched = await this.attachLinkedRequest(invoice);

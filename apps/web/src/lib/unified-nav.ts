@@ -94,11 +94,12 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     id: 'sales',
     labelKey: 'nav.sales',
     defaultHref: '/sales',
-    pathPrefixes: ['/sales', '/installments', '/reservations', '/returns'],
+    pathPrefixes: ['/sales', '/installments', '/reservations', '/returns', '/branch-ceo/early-payment-requests'],
     sidebarVisible: salesVisible,
     pages: [
       { href: '/sales', labelKey: 'nav.sales', isVisible: salesVisible },
       { href: '/sales/installment-requests', labelKey: 'nav.installmentRequests', isVisible: isBranchOwnerUser },
+      { href: '/branch-ceo/early-payment-requests', labelKey: 'nav.earlyPaymentRequests', isVisible: isBranchOwnerUser },
       { href: '/installments', labelKey: 'nav.activeInstallments', isVisible: isBranchOwnerUser },
       { href: '/installments/closed', labelKey: 'nav.closedInstallments', isVisible: isBranchOwnerUser },
       { href: '/installments', labelKey: 'nav.installments', isVisible: (user) => salesVisible(user) && !isBranchOwnerUser(user) },

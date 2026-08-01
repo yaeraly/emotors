@@ -115,23 +115,49 @@ export function sanitizeAccountantInvoice(invoice: any) {
             : remainingAmount
           : remainingAmount;
 
-  const earlyPaymentRequests = (invoice.installmentEarlyPaymentRequests ?? []).map((row: any) => ({
-    id: row.id,
-    paymentType: row.paymentType,
-    status: row.status,
-    requestedAmount: Number(row.requestedAmount),
-    approvedAmount: row.approvedAmount != null ? Number(row.approvedAmount) : null,
-    requestComment: row.requestComment,
-    rejectionComment: row.rejectionComment,
-    requestedAt: row.requestedAt,
-    branchCeoApprovedAt: row.branchCeoApprovedAt,
-    sentToCashierAt: row.sentToCashierAt,
-    canSendToCashier: row.status === BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO,
-    sentToCashier:
-      row.status === BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER ||
-      row.status === BranchInstallmentEarlyPaymentStatus.PAYMENT_SUBMITTED ||
-      row.status === BranchInstallmentEarlyPaymentStatus.PAYMENT_CONFIRMED,
-  }));
+  const earlyPaymentRequests = (invoice.installmentEarlyPaymentRequests ?? []).map((row: any) => {
+    const approvedAmount = row.approvedAmount != null ? Number(row.approvedAmount) : null;
+    const requestedAmount = Number(row.requestedAmount);
+    const paymentAmount = approvedAmount ?? requestedAmount;
+    return {
+      id: row.id,
+      installmentId: row.installmentId ?? invoice.branchOrderInstallment?.id ?? null,
+      paymentType: row.paymentType,
+      status: row.status,
+      requestedAmount,
+      approvedAmount,
+      remainingDebtAtRequest:
+        row.remainingDebtAtRequest != null ? Number(row.remainingDebtAtRequest) : remainingAmount,
+      expectedRemainingDebtAfterPayment: Math.max(remainingAmount - paymentAmount, 0),
+      financeAccount: row.financeAccount
+        ? {
+            id: row.financeAccount.id,
+            name: row.financeAccount.name,
+            accountNumber: row.financeAccount.accountNumber,
+            availableBalance: Number(row.financeAccount.availableBalance ?? 0),
+          }
+        : null,
+      requestComment: row.requestComment,
+      rejectionComment: row.rejectionComment,
+      requestedAt: row.requestedAt,
+      requestedBy: row.requestedBy ?? null,
+      branchCeoApprovedBy: row.branchCeoApprovedBy ?? null,
+      branchCeoApprovedAt: row.branchCeoApprovedAt,
+      sentToCashierBy: row.sentToCashierBy ?? null,
+      sentToCashierAt: row.sentToCashierAt,
+      canSendToCashier: row.status === BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO,
+      sentToCashier:
+        row.status === BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER ||
+        row.status === BranchInstallmentEarlyPaymentStatus.PAYMENT_SUBMITTED ||
+        row.status === BranchInstallmentEarlyPaymentStatus.PAYMENT_CONFIRMED,
+    };
+  });
+
+  const cashierVisibleEarlyPayment =
+    earlyPaymentRequests.find(
+      (row: { sentToCashier?: boolean; sentToCashierAt?: Date | string | null }) =>
+        Boolean(row.sentToCashier && row.sentToCashierAt),
+    ) ?? null;
 
   return {
     id: invoice.id,
@@ -168,6 +194,7 @@ export function sanitizeAccountantInvoice(invoice: any) {
     })),
     branchOrderInstallment: installment,
     installmentEarlyPaymentRequests: earlyPaymentRequests,
+    activeEarlyPaymentRequest: cashierVisibleEarlyPayment,
     payments: (invoice.payments ?? []).map((payment: any) => ({
       id: payment.id,
       amount: Number(payment.amount),
