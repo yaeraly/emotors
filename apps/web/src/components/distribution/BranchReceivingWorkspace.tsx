@@ -10,6 +10,8 @@ import {
 } from '@/lib/branch-receiving-draft';
 import {
   buildBranchReceivingTransportPayload,
+  BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS,
+  BRANCH_RECEIVING_QUANTITY_HEADER_KEYS,
   type BranchReceivingTransportFormState,
 } from '@/lib/branch-receiving-ui';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -212,17 +214,27 @@ export function BranchReceivingWorkspace({
       </div>
 
       <div className="overflow-x-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
+        <table className="w-full min-w-[44rem] table-auto divide-y divide-slate-200 text-xs">
+          <colgroup>
+            <col className="w-[4.5rem]" />
+            <col />
+            <col className="w-[4.5rem]" />
+            <col className="w-[4.5rem]" />
+            <col className="w-[4.5rem]" />
+            <col className="w-[3.5rem]" />
+            <col className="w-[7rem]" />
+            {canEdit ? <col className="w-[4.5rem]" /> : null}
+          </colgroup>
           <thead className="bg-slate-50 text-left font-bold text-slate-500">
             <tr>
               <th className="px-2 py-2">SKU</th>
-              <th className="px-2 py-2">{t('sales.product')}</th>
-              <th className="px-2 py-2">{t('distribution.sentQuantity')}</th>
-              <th className="px-2 py-2">{t('distribution.acceptedQuantity')}</th>
-              <th className="px-2 py-2">{t('distribution.damagedQuantity')}</th>
-              <th className="px-2 py-2">{t('distribution.difference')}</th>
+              <th className="min-w-[10rem] px-2 py-2">{t('sales.product')}</th>
+              <th className="px-2 py-2 text-center">{t(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.sentQuantity)}</th>
+              <th className="px-2 py-2 text-center">{t(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.acceptedQuantity)}</th>
+              <th className="px-2 py-2 text-center">{t('distribution.damagedQuantity')}</th>
+              <th className="px-2 py-2 text-center">{t('distribution.difference')}</th>
               <th className="px-2 py-2">{t('crm.notes')}</th>
-              {canEdit ? <th className="w-24 px-2 py-2">{t('chinaReceiving.col.actionsShort')}</th> : null}
+              {canEdit ? <th className="px-2 py-2 text-center">{t('chinaReceiving.col.actionsShort')}</th> : null}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -237,42 +249,40 @@ export function BranchReceivingWorkspace({
 
               return (
                 <tr key={item.id} className={bg}>
-                  <td className="px-2 py-2">{item.sku}</td>
-                  <td className="px-2 py-2">
-                    <p className="truncate font-medium text-slate-900" title={item.productName}>
-                      {item.productName}
-                    </p>
+                  <td className="px-2 py-2 align-top whitespace-nowrap">{item.sku}</td>
+                  <td className="min-w-[10rem] px-2 py-2 align-top">
+                    <p className={BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS}>{item.productName}</p>
                     <p className="text-[10px] text-slate-500">{item.unit}</p>
                   </td>
-                  <td className="px-2 py-2 text-center">{item.expectedQuantity}</td>
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 text-center align-top">{item.expectedQuantity}</td>
+                  <td className="px-2 py-2 align-top">
                     {canEdit && !isLocked ? (
                       <input
                         type="number"
                         min={0}
                         value={row?.acceptedQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'acceptedQuantity', e.target.value)}
-                        className="w-full rounded border border-slate-300 px-1.5 py-1 text-center"
+                        className="w-full min-w-[3rem] rounded border border-slate-300 px-1.5 py-1 text-center"
                       />
                     ) : (
                       <span className="block text-center">{accepted}</span>
                     )}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 align-top">
                     {canEdit && !isLocked ? (
                       <input
                         type="number"
                         min={0}
                         value={row?.damagedQuantity ?? ''}
                         onChange={(e) => updateRow(item.id, 'damagedQuantity', e.target.value)}
-                        className="w-full rounded border border-slate-300 px-1.5 py-1 text-center"
+                        className="w-full min-w-[3rem] rounded border border-slate-300 px-1.5 py-1 text-center"
                       />
                     ) : (
                       <span className="block text-center">{damaged}</span>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-center font-semibold">{diff}</td>
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 text-center align-top font-semibold">{diff}</td>
+                  <td className="px-2 py-2 align-top">
                     {canEdit && !isLocked ? (
                       <input
                         value={row?.note ?? ''}
@@ -285,7 +295,7 @@ export function BranchReceivingWorkspace({
                     )}
                   </td>
                   {canEdit ? (
-                    <td className="px-2 py-2">
+                    <td className="px-2 py-2 text-center align-top">
                       {!isLocked ? (
                         <button
                           type="button"

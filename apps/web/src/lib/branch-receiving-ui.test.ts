@@ -2,10 +2,15 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   BRANCH_RECEIVING_TABLE_COLUMNS,
+  BRANCH_RECEIVING_LEGACY_QUANTITY_HEADER_KEYS,
+  BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS,
+  BRANCH_RECEIVING_QUANTITY_HEADER_KEYS,
   REMOVED_BRANCH_RECEIVING_TABLE_COLUMNS,
+  allowsProductNameWrapping,
   buildBranchReceivingTransportPayload,
   computeDifference,
   deriveMissingQuantity,
+  productNameDisplayUsesTruncation,
   shouldShowReceivingBranchField,
   shouldShowTransportCompanyField,
 } from './branch-receiving-ui';
@@ -34,6 +39,22 @@ describe('branch-receiving-ui', () => {
       'notes',
       'actions',
     ]);
+  });
+
+  it('uses compact quantity column header keys instead of legacy long labels', () => {
+    assert.equal(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.sentQuantity, 'distribution.sentQuantityShort');
+    assert.equal(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.acceptedQuantity, 'distribution.acceptedQuantityShort');
+    for (const legacy of BRANCH_RECEIVING_LEGACY_QUANTITY_HEADER_KEYS) {
+      assert.notEqual(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.sentQuantity, legacy);
+      assert.notEqual(BRANCH_RECEIVING_QUANTITY_HEADER_KEYS.acceptedQuantity, legacy);
+    }
+  });
+
+  it('renders full product names without truncation and allows wrapping', () => {
+    assert.equal(productNameDisplayUsesTruncation(BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS), false);
+    assert.equal(allowsProductNameWrapping(BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS), true);
+    const longName = 'Амортизатор 43×72 (Ø1,5 см)';
+    assert.equal(longName.includes('...'), false);
   });
 
   it('keeps difference calculation unchanged', () => {

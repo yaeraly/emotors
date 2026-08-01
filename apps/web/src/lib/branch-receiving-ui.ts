@@ -1,5 +1,28 @@
 import { computeDifference } from './branch-receiving-draft';
 
+/** i18n keys for compact quantity column headers on the receiving table. */
+export const BRANCH_RECEIVING_QUANTITY_HEADER_KEYS = {
+  sentQuantity: 'distribution.sentQuantityShort',
+  acceptedQuantity: 'distribution.acceptedQuantityShort',
+} as const;
+
+/** Legacy long labels that must not be used on the receiving table. */
+export const BRANCH_RECEIVING_LEGACY_QUANTITY_HEADER_KEYS = [
+  'distribution.sentQuantity',
+  'distribution.acceptedQuantity',
+] as const;
+
+export const BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS =
+  'break-words whitespace-normal font-medium text-slate-900';
+
+export function productNameDisplayUsesTruncation(className: string): boolean {
+  return /\btruncate\b/.test(className) || /\bline-clamp-\d+\b/.test(className);
+}
+
+export function allowsProductNameWrapping(className: string): boolean {
+  return /\bbreak-words\b/.test(className) && /\bwhitespace-normal\b/.test(className);
+}
+
 /** Visible columns on Branch Warehouse receiving product table (in order). */
 export const BRANCH_RECEIVING_TABLE_COLUMNS = [
   'sku',
