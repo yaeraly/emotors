@@ -9,6 +9,7 @@ import {
 import {
   AlertType,
   BranchDistributionOrderStatus,
+  BranchInstallmentEarlyPaymentStatus,
   BranchInvoiceStatus,
   BranchInvoicePaymentType,
   BranchInvoiceCategory,
@@ -79,6 +80,7 @@ import {
   isZeroInitialPayment,
   validateBranchOrderInstallmentAmounts,
 } from './branch-order-installment.util';
+import { BranchInstallmentEarlyPaymentService } from './branch-installment-early-payment.service';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
@@ -123,6 +125,7 @@ export class DistributionService {
     private readonly notificationsService: NotificationsService,
     private readonly pricingFifoService: PricingFifoService,
     private readonly pricingResolutionService: PricingResolutionService,
+    private readonly earlyPaymentService: BranchInstallmentEarlyPaymentService,
   ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
@@ -496,6 +499,40 @@ export class DistributionService {
       const installment = invoice.branchOrderInstallment;
       if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
         throw new BadRequestException('Рассрочка ожидает утверждения CEO');
+      }
+      if (
+        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+        !installment.firstPaymentRequired
+      ) {
+        throw new BadRequestException(
+          'Для рассрочки без первоначального взноса используйте запрос досрочного погашения',
+        );
+      }
+      if (
+        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+        installment.firstPaymentRequired &&
+        installment.firstPaymentConfirmed
+      ) {
+        throw new BadRequestException(
+          'Для дополнительных платежей создайте запрос досрочного погашения',
+        );
+      }
+      const approvedEarlyPayment = await tx.branchInstallmentEarlyPaymentRequest.findFirst({
+        where: {
+          invoiceId: invoice.id,
+          status: {
+            in: [
+              BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO,
+              BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER,
+              BranchInstallmentEarlyPaymentStatus.PAYMENT_SUBMITTED,
+            ],
+          },
+        },
+      });
+      if (approvedEarlyPayment) {
+        throw new BadRequestException(
+          'Используйте отправку в кассу для утверждённого досрочного погашения',
+        );
       }
 
       const updated = await tx.branchInvoice.update({
@@ -2316,7 +2353,44 @@ export class DistributionService {
         throw new BadRequestException('Рассрочка ожидает утверждения CEO');
       }
 
-      const autoValidate = this.shouldAutoValidatePayment(invoice, amount, installment);
+      const earlyPaymentRequest = await this.earlyPaymentService.findCashierVisibleRequest(tx, invoice.id);
+      if (
+        !earlyPaymentRequest &&
+        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+        !installment.firstPaymentRequired
+      ) {
+        throw new BadRequestException('Оплата доступна только через досрочное погашение');
+      }
+      if (
+        !earlyPaymentRequest &&
+        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+        installment.firstPaymentRequired &&
+        installment.firstPaymentConfirmed
+      ) {
+        throw new BadRequestException('Создайте и отправьте запрос досрочного погашения');
+      }
+
+      if (earlyPaymentRequest) {
+        const approvedAmount = this.roundMoney(
+          Number(earlyPaymentRequest.approvedAmount ?? earlyPaymentRequest.requestedAmount),
+        );
+        if (Math.abs(amount - approvedAmount) > 0.009) {
+          throw new BadRequestException('Сумма должна совпадать с утверждённой суммой досрочного погашения');
+        }
+        if (earlyPaymentRequest.status !== BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER) {
+          throw new BadRequestException('Запрос досрочного погашения не отправлен в кассу');
+        }
+        if (earlyPaymentRequest.financeAccountId) {
+          const account = await tx.financeAccount.findFirst({
+            where: { id: earlyPaymentRequest.financeAccountId, deletedAt: null },
+          });
+          if (!account || Number(account.availableBalance) < amount) {
+            throw new BadRequestException('Недостаточно средств на счёте филиала');
+          }
+        }
+      }
+
+      const autoValidate = this.shouldAutoValidatePayment(invoice, amount, installment, earlyPaymentRequest);
       const confirmationStatus = autoValidate
         ? BranchPaymentConfirmationStatus.CONFIRMED
         : BranchPaymentConfirmationStatus.PENDING_CONFIRMATION;
@@ -2331,12 +2405,40 @@ export class DistributionService {
           receiptReference: dto.receiptReference,
           confirmationStatus,
           submittedAt: new Date(),
+          earlyPaymentRequestId: earlyPaymentRequest?.id ?? null,
           ...(autoValidate
             ? { confirmedAt: new Date(), confirmedById: user.id, paidAt: new Date() }
             : {}),
           createdById: user.id,
         },
       });
+
+      if (earlyPaymentRequest) {
+        await this.earlyPaymentService.markPaymentSubmitted(tx, earlyPaymentRequest.id);
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'EARLY_PAYMENT_PROCESSED',
+            entity: 'BranchInstallmentEarlyPaymentRequest',
+            entityId: earlyPaymentRequest.id,
+            metadata: {
+              invoiceId: invoice.id,
+              amount,
+              roles: user.roles ?? [user.role],
+            },
+          },
+        });
+        if (earlyPaymentRequest.financeAccountId) {
+          await tx.financeAccount.update({
+            where: { id: earlyPaymentRequest.financeAccountId },
+            data: {
+              currentBalance: { decrement: amount },
+              availableBalance: { decrement: amount },
+            },
+          });
+        }
+      }
 
       await tx.auditLog.create({
         data: {
@@ -2381,8 +2483,18 @@ export class DistributionService {
       firstPaymentConfirmed: boolean;
       firstPaymentAmount: Prisma.Decimal;
     } | null,
+    earlyPaymentRequest?: {
+      approvedAmount: Prisma.Decimal | null;
+      requestedAmount: Prisma.Decimal;
+    } | null,
   ) {
     if (installment?.status === BranchOrderInstallmentStatus.PENDING) return false;
+    if (earlyPaymentRequest) {
+      const expected = this.roundMoney(
+        Number(earlyPaymentRequest.approvedAmount ?? earlyPaymentRequest.requestedAmount),
+      );
+      return Math.abs(amount - expected) < 0.01;
+    }
     if (installment?.status === BranchOrderInstallmentStatus.APPROVED && installment.firstPaymentRequired) {
       const expected = installment.firstPaymentConfirmed
         ? Number(invoice.debtAmount)
@@ -2636,6 +2748,34 @@ export class DistributionService {
         entityId: invoice.id,
         recipientRoles: [Role.HQ_SALES_MANAGER],
       });
+    }
+
+    const submittedEarlyPayment = await tx.branchInstallmentEarlyPaymentRequest.findFirst({
+      where: {
+        invoiceId: invoice.id,
+        status: BranchInstallmentEarlyPaymentStatus.PAYMENT_SUBMITTED,
+      },
+    });
+    if (submittedEarlyPayment && installment) {
+      const confirmedPayment = await tx.branchPayment.findFirst({
+        where: {
+          earlyPaymentRequestId: submittedEarlyPayment.id,
+          deletedAt: null,
+          confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
+        },
+        orderBy: { confirmedAt: 'desc' },
+      });
+      if (confirmedPayment) {
+        const refreshedInvoice = await tx.branchInvoice.findUniqueOrThrow({ where: { id: invoice.id } });
+        await this.earlyPaymentService.completeEarlyPayment(
+          tx,
+          user,
+          submittedEarlyPayment.id,
+          Number(confirmedPayment.amount),
+          refreshedInvoice,
+          installment,
+        );
+      }
     }
 
     const updated = await tx.branchInvoice.findUniqueOrThrow({

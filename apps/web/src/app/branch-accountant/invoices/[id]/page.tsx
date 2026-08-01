@@ -23,6 +23,9 @@ export default function BranchAccountantInvoiceDetailPage() {
   const [installmentTermMonths, setInstallmentTermMonths] = useState('3');
   const [installmentDueDate, setInstallmentDueDate] = useState('');
   const [installmentComment, setInstallmentComment] = useState('');
+  const [earlyPaymentType, setEarlyPaymentType] = useState<'PARTIAL' | 'FULL'>('PARTIAL');
+  const [earlyPaymentAmount, setEarlyPaymentAmount] = useState('');
+  const [earlyPaymentComment, setEarlyPaymentComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   async function load() {
@@ -54,6 +57,14 @@ export default function BranchAccountantInvoiceDetailPage() {
       schedule: buildBranchOrderInstallmentSchedulePreview(remainingDebt, termMonths),
     };
   }, [invoice, installmentFirstPayment, installmentTermMonths]);
+
+  const activeEarlyPayment = invoice?.installmentEarlyPaymentRequests?.find(
+    (row) =>
+      row.status === 'PENDING_BRANCH_CEO_APPROVAL' ||
+      row.status === 'APPROVED_BY_BRANCH_CEO' ||
+      row.status === 'SENT_TO_CASHIER' ||
+      row.status === 'PAYMENT_SUBMITTED',
+  );
 
   async function selectFullPayment() {
     setError('');
@@ -97,6 +108,34 @@ export default function BranchAccountantInvoiceDetailPage() {
     }
   }
 
+  async function requestEarlyPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!invoice) return;
+    setError('');
+    setSuccess('');
+    setSubmitting(true);
+    const remaining = Number(invoice.remainingAmount);
+    const amount =
+      earlyPaymentType === 'FULL' ? remaining : Number(earlyPaymentAmount);
+    try {
+      setInvoice(
+        await apiFetch<BranchAccountantInvoice>(`/branch-accountant/invoices/${id}/early-payment-request`, {
+          method: 'POST',
+          body: JSON.stringify({
+            paymentType: earlyPaymentType,
+            requestedAmount: amount,
+            comment: earlyPaymentComment || undefined,
+          }),
+        }),
+      );
+      setSuccess(t('branchAccountant.earlyPaymentRequested'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function sendToCashier() {
     setError('');
     setSuccess('');
@@ -108,9 +147,36 @@ export default function BranchAccountantInvoiceDetailPage() {
     }
   }
 
+  async function sendEarlyPaymentToCashier(requestId: string) {
+    setError('');
+    setSuccess('');
+    try {
+      setInvoice(
+        await apiFetch<BranchAccountantInvoice>(
+          `/branch-accountant/invoices/${id}/early-payment-requests/${requestId}/send-to-cashier`,
+          { method: 'POST' },
+        ),
+      );
+      setSuccess(t('branchAccountant.sentToCashierDone'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
   const canReview = invoice?.workflowStatus === 'PENDING_ACCOUNTANT_REVIEW';
   const installmentPending = invoice?.branchOrderInstallment?.status === 'PENDING';
   const installmentApproved = invoice?.branchOrderInstallment?.status === 'APPROVED';
+  const zeroInitial =
+    invoice?.branchOrderInstallment?.zeroInitialPayment ||
+    !invoice?.branchOrderInstallment?.firstPaymentRequired;
+  const firstPaymentDone = invoice?.branchOrderInstallment?.firstPaymentConfirmed;
+  const canLegacySendToCashier =
+    invoice?.paymentType === 'FULL_PAYMENT' ||
+    (installmentApproved && !zeroInitial && !firstPaymentDone);
+  const showLegacySend =
+    canLegacySendToCashier && !invoice?.sentToCashierAt && !installmentPending && !activeEarlyPayment;
+  const canRequestEarlyPayment =
+    installmentApproved && invoice?.status !== 'PAID' && !activeEarlyPayment && (zeroInitial || firstPaymentDone);
 
   return (
     <ProtectedShell>
@@ -216,14 +282,6 @@ export default function BranchAccountantInvoiceDetailPage() {
                       <p>{t('sales.installmentFinancedAmount')}: {formatKgs(installmentPreview.remainingDebt)}</p>
                       <p>{t('finance.cashierBills.remainingDebt')}: {formatKgs(installmentPreview.remainingDebt)}</p>
                       <p>{t('distribution.installmentMonths')}: {installmentPreview.termMonths}</p>
-                      <div className="mt-2">
-                        <p className="font-semibold">{t('branchAccountant.paymentSchedule')}</p>
-                        {installmentPreview.schedule.map((row) => (
-                          <p key={row.installmentNumber}>
-                            #{row.installmentNumber}: {formatKgs(row.amount)}
-                          </p>
-                        ))}
-                      </div>
                     </div>
                   ) : null}
                   <button type="submit" disabled={submitting} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
@@ -258,13 +316,86 @@ export default function BranchAccountantInvoiceDetailPage() {
               </section>
             ) : null}
 
+            {activeEarlyPayment ? (
+              <section className="rounded-3xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm space-y-3">
+                <h3 className="font-bold">{t('branchAccountant.requestEarlyPayment')}</h3>
+                <p className="text-sm">
+                  {t('branchAccountant.earlyPaymentType')}: {t(`branchAccountant.earlyPaymentType.${activeEarlyPayment.paymentType}`)} ·{' '}
+                  {formatKgs(activeEarlyPayment.approvedAmount ?? activeEarlyPayment.requestedAmount)} · {activeEarlyPayment.status}
+                </p>
+                {activeEarlyPayment.status === 'PENDING_BRANCH_CEO_APPROVAL' ? (
+                  <p className="text-sm text-amber-800">{t('branchAccountant.earlyPaymentPendingCeo')}</p>
+                ) : null}
+                {activeEarlyPayment.status === 'APPROVED_BY_BRANCH_CEO' && activeEarlyPayment.canSendToCashier ? (
+                  <button
+                    type="button"
+                    onClick={() => void sendEarlyPaymentToCashier(activeEarlyPayment.id)}
+                    className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white"
+                  >
+                    {t('distribution.sendToCashier')}
+                  </button>
+                ) : null}
+                {activeEarlyPayment.sentToCashier ? (
+                  <p className="text-sm font-semibold text-green-800">{t('branchAccountant.sentToCashierDone')}</p>
+                ) : null}
+                {activeEarlyPayment.status === 'REJECTED_BY_BRANCH_CEO' ? (
+                  <p className="text-sm text-red-700">
+                    {t('branchAccountant.earlyPaymentRejected')}: {activeEarlyPayment.rejectionComment ?? '—'}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+
+            {canRequestEarlyPayment ? (
+              <form onSubmit={requestEarlyPayment} className="space-y-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="font-bold">{t('branchAccountant.requestEarlyPayment')}</h3>
+                <label className="block text-sm">
+                  <span className="font-semibold">{t('branchAccountant.earlyPaymentType')}</span>
+                  <select
+                    value={earlyPaymentType}
+                    onChange={(e) => setEarlyPaymentType(e.target.value as 'PARTIAL' | 'FULL')}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  >
+                    <option value="PARTIAL">{t('branchAccountant.earlyPaymentType.PARTIAL')}</option>
+                    <option value="FULL">{t('branchAccountant.earlyPaymentType.FULL')}</option>
+                  </select>
+                </label>
+                {earlyPaymentType === 'PARTIAL' ? (
+                  <label className="block text-sm">
+                    <span className="font-semibold">{t('branchAccountant.earlyPaymentAmount')}</span>
+                    <input
+                      value={earlyPaymentAmount}
+                      onChange={(e) => setEarlyPaymentAmount(e.target.value)}
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      max={invoice.remainingAmount}
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                      required
+                    />
+                  </label>
+                ) : (
+                  <p className="text-sm text-slate-600">
+                    {t('finance.cashierBills.remainingDebt')}: {formatKgs(invoice.remainingAmount)}
+                  </p>
+                )}
+                <label className="block text-sm">
+                  <span className="font-semibold">{t('crm.notes')}</span>
+                  <input value={earlyPaymentComment} onChange={(e) => setEarlyPaymentComment(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" />
+                </label>
+                <button type="submit" disabled={submitting} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
+                  {t('branchAccountant.requestEarlyPayment')}
+                </button>
+              </form>
+            ) : null}
+
             {invoice.branchOrderInstallment?.status === 'REJECTED' ? (
               <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
                 {t('sales.installmentRejectionReason')}: {invoice.branchOrderInstallment.rejectionComment ?? '—'}
               </p>
             ) : null}
 
-            {(invoice?.paymentType && !invoice.sentToCashierAt && invoice.branchOrderInstallment?.status !== 'PENDING') ? (
+            {showLegacySend ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <button type="button" onClick={() => void sendToCashier()} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white">
                   {t('distribution.sendToCashier')}

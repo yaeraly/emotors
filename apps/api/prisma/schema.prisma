@@ -652,6 +652,12 @@ enum AlertType {
   BRANCH_INSTALLMENT_REQUESTED
   BRANCH_INSTALLMENT_APPROVED
   BRANCH_INSTALLMENT_REJECTED
+  BRANCH_EARLY_PAYMENT_REQUESTED
+  BRANCH_EARLY_PAYMENT_APPROVED
+  BRANCH_EARLY_PAYMENT_REJECTED
+  BRANCH_EARLY_PAYMENT_SENT_TO_CASHIER
+  BRANCH_EARLY_PAYMENT_CONFIRMED
+  INSTALLMENT_FULLY_PAID
   BRANCH_ORDER_READY_FOR_WAREHOUSE
   BRANCH_RECEIVE_DISCREPANCY
   ORDER_SENT_TO_WAREHOUSE
@@ -925,6 +931,21 @@ enum BranchOrderInstallmentStatus {
   CANCELLED
 }
 
+enum BranchInstallmentEarlyPaymentType {
+  PARTIAL
+  FULL
+}
+
+enum BranchInstallmentEarlyPaymentStatus {
+  PENDING_BRANCH_CEO_APPROVAL
+  APPROVED_BY_BRANCH_CEO
+  REJECTED_BY_BRANCH_CEO
+  SENT_TO_CASHIER
+  PAYMENT_SUBMITTED
+  PAYMENT_CONFIRMED
+  CANCELLED
+}
+
 enum BranchInvoiceStatus {
   DRAFT
   ISSUED
@@ -1066,6 +1087,7 @@ model Branch {
   branchInvoices            BranchInvoice[]
   branchPayments            BranchPayment[]
   branchOrderInstallments   BranchOrderInstallment[]
+  installmentEarlyPayments  BranchInstallmentEarlyPaymentRequest[]
   branchAccountBalance      BranchAccountBalance?
   serviceOrders             ServiceOrder[]
   serviceOrderPayments      ServiceOrderPayment[]
@@ -1417,6 +1439,10 @@ model User {
   requestedBranchInstallments                     BranchOrderInstallment[]            @relation("BranchInstallmentRequester")
   approvedBranchInstallments                      BranchOrderInstallment[]            @relation("BranchInstallmentApprover")
   rejectedBranchInstallments                      BranchOrderInstallment[]            @relation("BranchInstallmentRejecter")
+  requestedInstallmentEarlyPayments               BranchInstallmentEarlyPaymentRequest[] @relation("InstallmentEarlyPaymentRequester")
+  approvedInstallmentEarlyPayments                  BranchInstallmentEarlyPaymentRequest[] @relation("InstallmentEarlyPaymentBranchCeoApprover")
+  rejectedInstallmentEarlyPayments                  BranchInstallmentEarlyPaymentRequest[] @relation("InstallmentEarlyPaymentBranchCeoRejecter")
+  sentInstallmentEarlyPaymentsToCashier             BranchInstallmentEarlyPaymentRequest[] @relation("InstallmentEarlyPaymentCashierSender")
   createdProcurementOrders                        ProcurementOrder[]                  @relation("ProcurementOrderCreator")
   approvedProcurementOrders                       ProcurementOrder[]                  @relation("ProcurementOrderApprover")
   assignedServiceOrders                           ServiceOrder[]                      @relation("ServiceOrderMaster")
@@ -3910,6 +3936,7 @@ model BranchInvoice {
   createdBy              User                      @relation("BranchInvoiceCreator", fields: [createdById], references: [id])
   payments               BranchPayment[]
   branchOrderInstallment BranchOrderInstallment?
+  installmentEarlyPaymentRequests BranchInstallmentEarlyPaymentRequest[]
   createdAt              DateTime                  @default(now())
   updatedAt              DateTime                  @updatedAt
   deletedAt              DateTime?
@@ -3944,12 +3971,15 @@ model BranchPayment {
   confirmedBy        User?                           @relation("BranchPaymentConfirmer", fields: [confirmedById], references: [id])
   rejectedById       String?
   rejectedBy         User?                           @relation("BranchPaymentRejecter", fields: [rejectedById], references: [id])
+  earlyPaymentRequestId String?                     @unique
+  earlyPaymentRequest   BranchInstallmentEarlyPaymentRequest? @relation(fields: [earlyPaymentRequestId], references: [id])
   createdAt          DateTime                        @default(now())
   updatedAt          DateTime                        @updatedAt
   deletedAt          DateTime?
 
   @@index([branchId])
   @@index([invoiceId])
+  @@index([earlyPaymentRequestId])
   @@index([method])
   @@index([paidAt])
   @@index([createdById])
@@ -3982,6 +4012,7 @@ model BranchOrderInstallment {
   installmentDueDate      DateTime?
   requestedAt             DateTime                     @default(now())
   decidedAt               DateTime?
+  earlyPaymentRequests    BranchInstallmentEarlyPaymentRequest[]
   createdAt               DateTime                     @default(now())
   updatedAt               DateTime                     @updatedAt
 
@@ -3989,6 +4020,47 @@ model BranchOrderInstallment {
   @@index([branchPurchaseRequestId])
   @@index([status])
   @@index([requestedById])
+}
+
+model BranchInstallmentEarlyPaymentRequest {
+  id                    String                              @id @default(cuid())
+  branchId              String
+  branch                Branch                              @relation(fields: [branchId], references: [id])
+  invoiceId             String
+  invoice               BranchInvoice                       @relation(fields: [invoiceId], references: [id])
+  installmentId         String
+  installment           BranchOrderInstallment              @relation(fields: [installmentId], references: [id])
+  paymentType           BranchInstallmentEarlyPaymentType
+  status                BranchInstallmentEarlyPaymentStatus @default(PENDING_BRANCH_CEO_APPROVAL)
+  requestedAmount       Decimal                             @db.Decimal(14, 2)
+  approvedAmount        Decimal?                            @db.Decimal(14, 2)
+  remainingDebtAtRequest Decimal                            @db.Decimal(14, 2)
+  financeAccountId      String?
+  financeAccount        FinanceAccount?                     @relation(fields: [financeAccountId], references: [id])
+  requestComment        String?
+  rejectionComment      String?
+  requestedById           String
+  requestedBy             User                                @relation("InstallmentEarlyPaymentRequester", fields: [requestedById], references: [id])
+  branchCeoApprovedById String?
+  branchCeoApprovedBy     User?                               @relation("InstallmentEarlyPaymentBranchCeoApprover", fields: [branchCeoApprovedById], references: [id])
+  branchCeoApprovedAt     DateTime?
+  branchCeoRejectedById   String?
+  branchCeoRejectedBy     User?                               @relation("InstallmentEarlyPaymentBranchCeoRejecter", fields: [branchCeoRejectedById], references: [id])
+  branchCeoRejectedAt     DateTime?
+  sentToCashierById       String?
+  sentToCashierBy         User?                               @relation("InstallmentEarlyPaymentCashierSender", fields: [sentToCashierById], references: [id])
+  sentToCashierAt         DateTime?
+  branchPayment           BranchPayment?
+  requestedAt             DateTime                            @default(now())
+  createdAt               DateTime                            @default(now())
+  updatedAt               DateTime                            @updatedAt
+
+  @@index([branchId])
+  @@index([invoiceId])
+  @@index([installmentId])
+  @@index([status])
+  @@index([requestedById])
+  @@index([financeAccountId])
 }
 
 model BranchAccountBalance {
@@ -5456,6 +5528,7 @@ model FinanceAccount {
   intendedProcurementPayments ProcurementSupplierPayment[]  @relation("ProcurementPaymentIntendedAccount")
   actualProcurementPayments   ProcurementSupplierPayment[]  @relation("ProcurementPaymentActualAccount")
   transportExpenses           ProcurementTransportExpense[] @relation("TransportExpenseFinanceAccount")
+  installmentEarlyPayments    BranchInstallmentEarlyPaymentRequest[]
   createdAt                   DateTime                      @default(now())
   updatedAt                   DateTime                      @updatedAt
   deletedAt                   DateTime?

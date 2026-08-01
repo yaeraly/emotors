@@ -940,6 +940,20 @@ export type BranchAccountantInvoice = {
     unit?: string | null;
   }>;
   branchOrderInstallment?: BranchOrderInstallment | null;
+  installmentEarlyPaymentRequests?: Array<{
+    id: string;
+    paymentType: 'PARTIAL' | 'FULL';
+    status: string;
+    requestedAmount: number;
+    approvedAmount: number | null;
+    requestComment?: string | null;
+    rejectionComment?: string | null;
+    requestedAt: string;
+    branchCeoApprovedAt?: string | null;
+    sentToCashierAt?: string | null;
+    canSendToCashier?: boolean;
+    sentToCashier?: boolean;
+  }>;
   payments?: BranchPayment[];
   createdAt: string;
   updatedAt: string;

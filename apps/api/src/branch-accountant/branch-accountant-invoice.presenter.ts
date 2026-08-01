@@ -1,6 +1,7 @@
 import {
   BranchInvoicePaymentType,
   BranchInvoiceStatus,
+  BranchInstallmentEarlyPaymentStatus,
   BranchOrderInstallmentStatus,
   BranchPaymentConfirmationStatus,
 } from '@prisma/client';
@@ -8,6 +9,7 @@ import {
   buildBranchOrderInstallmentSchedule,
   computeBranchOrderRemainingDebt,
 } from '../distribution/branch-order-installment.util';
+import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
 
 export type AccountantInvoiceWorkflowStatus =
   | 'PENDING_ACCOUNTANT_REVIEW'
@@ -94,8 +96,14 @@ export function sanitizeAccountantInvoice(invoice: any) {
     : null;
 
   const remainingAmount = Number(invoice.debtAmount ?? 0);
-  const requiredPaymentAmount =
-    installment?.status === BranchOrderInstallmentStatus.APPROVED
+  const activeEarlyPayment = (invoice.installmentEarlyPaymentRequests ?? []).find(
+    (row: { status: BranchInstallmentEarlyPaymentStatus; sentToCashierAt?: Date | string | null }) =>
+      row.status === BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO ||
+      CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES.includes(row.status),
+  );
+  const requiredPaymentAmount = activeEarlyPayment
+    ? Number(activeEarlyPayment.approvedAmount ?? activeEarlyPayment.requestedAmount ?? 0)
+    : installment?.status === BranchOrderInstallmentStatus.APPROVED
       ? installment.firstPaymentRequired && !installment.firstPaymentConfirmed
         ? Number(installment.firstPaymentAmount)
         : remainingAmount
@@ -106,6 +114,24 @@ export function sanitizeAccountantInvoice(invoice: any) {
             ? Number(installment.firstPaymentAmount)
             : remainingAmount
           : remainingAmount;
+
+  const earlyPaymentRequests = (invoice.installmentEarlyPaymentRequests ?? []).map((row: any) => ({
+    id: row.id,
+    paymentType: row.paymentType,
+    status: row.status,
+    requestedAmount: Number(row.requestedAmount),
+    approvedAmount: row.approvedAmount != null ? Number(row.approvedAmount) : null,
+    requestComment: row.requestComment,
+    rejectionComment: row.rejectionComment,
+    requestedAt: row.requestedAt,
+    branchCeoApprovedAt: row.branchCeoApprovedAt,
+    sentToCashierAt: row.sentToCashierAt,
+    canSendToCashier: row.status === BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO,
+    sentToCashier:
+      row.status === BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER ||
+      row.status === BranchInstallmentEarlyPaymentStatus.PAYMENT_SUBMITTED ||
+      row.status === BranchInstallmentEarlyPaymentStatus.PAYMENT_CONFIRMED,
+  }));
 
   return {
     id: invoice.id,
@@ -141,6 +167,7 @@ export function sanitizeAccountantInvoice(invoice: any) {
       unit: item.product?.unit ?? null,
     })),
     branchOrderInstallment: installment,
+    installmentEarlyPaymentRequests: earlyPaymentRequests,
     payments: (invoice.payments ?? []).map((payment: any) => ({
       id: payment.id,
       amount: Number(payment.amount),

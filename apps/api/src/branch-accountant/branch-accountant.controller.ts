@@ -3,9 +3,10 @@ import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
+import { CreateInstallmentEarlyPaymentDto } from '../distribution/dto/create-installment-early-payment.dto';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
-import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
 import { BranchAccountantService } from './branch-accountant.service';
 import { BranchAccountantInvoiceQueryDto } from './dto/branch-accountant-invoice-query.dto';
 import { BranchAccountantInstallmentRequestDto } from './dto/installment-request.dto';
@@ -64,6 +65,32 @@ export class BranchAccountantController {
   @Roles(Role.ACCOUNTANT)
   sendToCashier(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.sendToCashier(user, id);
+  }
+
+  @Get('invoices/:id/early-payment-requests')
+  @Roles(Role.ACCOUNTANT)
+  listEarlyPaymentRequests(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.listEarlyPaymentRequests(user, id);
+  }
+
+  @Post('invoices/:id/early-payment-request')
+  @Roles(Role.ACCOUNTANT)
+  createEarlyPaymentRequest(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CreateInstallmentEarlyPaymentDto,
+  ) {
+    return this.service.createEarlyPaymentRequest(user, id, dto);
+  }
+
+  @Post('invoices/:id/early-payment-requests/:requestId/send-to-cashier')
+  @Roles(Role.ACCOUNTANT)
+  sendEarlyPaymentToCashier(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('requestId') requestId: string,
+  ) {
+    return this.service.sendEarlyPaymentToCashier(user, id, requestId);
   }
 }
 

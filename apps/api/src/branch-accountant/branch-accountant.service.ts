@@ -7,12 +7,16 @@ import {
 import {
   BranchInvoicePaymentType,
   BranchInvoiceStatus,
+  BranchInstallmentEarlyPaymentStatus,
   BranchOrderInstallmentStatus,
   Prisma,
   Role,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { BranchInstallmentEarlyPaymentService } from '../distribution/branch-installment-early-payment.service';
+import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
 import { DistributionService } from '../distribution/distribution.service';
+import { CreateInstallmentEarlyPaymentDto } from '../distribution/dto/create-installment-early-payment.dto';
 import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -34,6 +38,7 @@ export class BranchAccountantService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly distributionService: DistributionService,
+    private readonly earlyPaymentService: BranchInstallmentEarlyPaymentService,
   ) {}
 
   private assertBranchAccountant(user: AuthUser) {
@@ -71,6 +76,10 @@ export class BranchAccountantService {
         orderBy: { paidAt: 'desc' as const },
       },
       branchOrderInstallment: true,
+      installmentEarlyPaymentRequests: {
+        orderBy: { requestedAt: 'desc' as const },
+        take: 5,
+      },
     };
   }
 
@@ -351,6 +360,35 @@ export class BranchAccountantService {
       branchId: user.branchId!,
       sentToCashierAt: { not: null },
       status: { in: [BranchInvoiceStatus.ISSUED, BranchInvoiceStatus.PARTIALLY_PAID, BranchInvoiceStatus.OVERDUE] },
+      NOT: {
+        installmentEarlyPaymentRequests: {
+          some: { status: BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO },
+        },
+      },
+      OR: [
+        { paymentType: BranchInvoicePaymentType.FULL_PAYMENT },
+        {
+          branchOrderInstallment: {
+            status: BranchOrderInstallmentStatus.APPROVED,
+            firstPaymentRequired: true,
+            firstPaymentConfirmed: false,
+          },
+          installmentEarlyPaymentRequests: {
+            none: {
+              status: { in: CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES },
+              sentToCashierAt: { not: null },
+            },
+          },
+        },
+        {
+          installmentEarlyPaymentRequests: {
+            some: {
+              status: { in: CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES },
+              sentToCashierAt: { not: null },
+            },
+          },
+        },
+      ],
     };
     if (query.search?.trim()) {
       where.invoiceNumber = { contains: query.search.trim(), mode: 'insensitive' };
@@ -378,10 +416,26 @@ export class BranchAccountantService {
         deletedAt: null,
         branchId: user.branchId!,
         sentToCashierAt: { not: null },
+        NOT: {
+          installmentEarlyPaymentRequests: {
+            some: { status: BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO },
+          },
+        },
       },
       include: this.invoiceInclude(),
     });
     if (!invoice) throw new NotFoundException('Счёт не найден');
+    const visibleEarly = invoice.installmentEarlyPaymentRequests?.find(
+      (row) =>
+        CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES.includes(row.status) && row.sentToCashierAt != null,
+    );
+    if (
+      invoice.paymentType === BranchInvoicePaymentType.INSTALLMENT &&
+      invoice.branchOrderInstallment?.firstPaymentConfirmed &&
+      !visibleEarly
+    ) {
+      throw new NotFoundException('Счёт не найден');
+    }
     const enriched = await this.attachLinkedRequest(invoice);
     return sanitizeBranchCashierInvoice(enriched);
   }
@@ -390,5 +444,19 @@ export class BranchAccountantService {
     this.assertBranchCashier(user);
     await this.distributionService.submitInvoicePayment(user, id, dto);
     return this.getCashierInvoice(user, id);
+  }
+
+  async listEarlyPaymentRequests(user: AuthUser, invoiceId: string) {
+    return this.earlyPaymentService.listForInvoice(user, invoiceId);
+  }
+
+  async createEarlyPaymentRequest(user: AuthUser, invoiceId: string, dto: CreateInstallmentEarlyPaymentDto) {
+    await this.earlyPaymentService.createRequest(user, invoiceId, dto);
+    return this.getInvoice(user, invoiceId);
+  }
+
+  async sendEarlyPaymentToCashier(user: AuthUser, invoiceId: string, requestId: string) {
+    await this.earlyPaymentService.sendToCashier(user, invoiceId, requestId);
+    return this.getInvoice(user, invoiceId);
   }
 }
