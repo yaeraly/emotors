@@ -118,6 +118,7 @@ export default function BranchWarehouseDetailPage() {
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
   const fromBranchId = searchParams.get('fromBranch');
+  const listReturn = searchParams.get('listReturn');
   const router = useRouter();
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
@@ -232,6 +233,8 @@ export default function BranchWarehouseDetailPage() {
   const canEdit = canEditWarehouseInfo(user) && warehouse?.permissions?.canEdit !== false;
   const canDelete = canDeleteBranchWarehouse(user);
   const branchContextId = fromBranchId ?? warehouse?.branchId ?? null;
+  const listBackHref =
+    listReturn && listReturn.startsWith('/branch-warehouses') ? listReturn : '/branch-warehouses';
 
   async function confirmDeleteWarehouse() {
     setDeleting(true);
@@ -319,7 +322,7 @@ export default function BranchWarehouseDetailPage() {
                 {t('branchWarehouse.backToBranch')}
               </Link>
             ) : (
-              <Link href="/branch-warehouses" className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
+              <Link href={listBackHref} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold">
                 {t('common.back')}
               </Link>
             )}

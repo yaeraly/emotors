@@ -3,6 +3,11 @@
 import type { StatusFilter } from '@/lib/warehouse-list-utils';
 import { useTranslation } from '@/i18n/useTranslation';
 
+export type WarehouseBranchFilterOption = {
+  id: string;
+  name: string;
+};
+
 type Props = {
   search: string;
   region: string;
@@ -15,6 +20,10 @@ type Props = {
   onCityChange: (value: string) => void;
   onStatusChange: (value: StatusFilter) => void;
   searchPlaceholder: string;
+  branchId?: string;
+  branchOptions?: WarehouseBranchFilterOption[];
+  onBranchChange?: (value: string) => void;
+  onClear?: () => void;
 };
 
 export function WarehouseListToolbar({
@@ -29,8 +38,13 @@ export function WarehouseListToolbar({
   onCityChange,
   onStatusChange,
   searchPlaceholder,
+  branchId = '',
+  branchOptions,
+  onBranchChange,
+  onClear,
 }: Props) {
   const { t } = useTranslation();
+  const showBranchFilter = Boolean(branchOptions && onBranchChange);
 
   return (
     <div className="flex min-w-0 flex-wrap items-end gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:gap-3 sm:p-4 lg:flex-nowrap">
@@ -43,6 +57,25 @@ export function WarehouseListToolbar({
           className="mt-1.5 w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 text-sm"
         />
       </label>
+      {showBranchFilter ? (
+        <label className="block min-w-0 w-[calc(50%-0.25rem)] flex-1 sm:w-auto sm:min-w-[6.5rem]">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {t('branchWarehouse.filterBranch')}
+          </span>
+          <select
+            value={branchId}
+            onChange={(event) => onBranchChange?.(event.target.value)}
+            className="mt-1.5 w-full min-w-0 rounded-xl border border-slate-300 px-2 py-2 text-sm"
+          >
+            <option value="">{t('branchWarehouse.allBranches')}</option>
+            {branchOptions?.map((branch) => (
+              <option key={branch.id} value={branch.id}>
+                {branch.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label className="block min-w-0 w-[calc(50%-0.25rem)] flex-1 sm:w-auto sm:min-w-[6.5rem]">
         <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t('warehouse.region')}</span>
         <select
@@ -85,6 +118,15 @@ export function WarehouseListToolbar({
           <option value="inactive">{t('warehouse.inactive')}</option>
         </select>
       </label>
+      {onClear ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="mt-1.5 rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          {t('branches.clearFilters')}
+        </button>
+      ) : null}
     </div>
   );
 }

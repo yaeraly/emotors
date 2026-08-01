@@ -1,16 +1,22 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseDataTable } from '@/components/warehouse/WarehouseDataTable';
 import { WarehouseListToolbar } from '@/components/warehouse/WarehouseListToolbar';
 import { WarehousePagination } from '@/components/warehouse/WarehousePagination';
 import { WarehouseSummaryCard } from '@/components/warehouse/WarehouseSummaryCard';
 import { apiFetch } from '@/lib/api';
+import {
+  buildBranchWarehousesListQuery,
+  branchWarehousesListHref,
+  EMPTY_BRANCH_WAREHOUSES_LIST_FILTERS,
+  parseBranchWarehousesListFilters,
+} from '@/lib/branch-warehouses-list';
 import { canInspectAnyBranchWarehouse, isBranchOwnerUser } from '@/lib/rbac';
-import type { User } from '@/lib/types';
+import type { Branch, User } from '@/lib/types';
 import {
   filterWarehouseRows,
   paginateRows,
@@ -42,20 +48,37 @@ type BranchWarehouseMetrics = {
 };
 
 export default function BranchWarehousesPage() {
+  return (
+    <Suspense
+      fallback={
+        <ProtectedShell>
+          <p className="p-6 text-slate-500">...</p>
+        </ProtectedShell>
+      }
+    >
+      <BranchWarehousesPageContent />
+    </Suspense>
+  );
+}
+
+function BranchWarehousesPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [warehouses, setWarehouses] = useState<BranchWarehouseMetrics[]>([]);
-  const [branchFilter, setBranchFilter] = useState('');
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [search, setSearch] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
   const [region, setRegion] = useState('');
   const [city, setCity] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [sortKey, setSortKey] = useState('branchName');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const [page, setPage] = useState(1);
+  const [filtersReady, setFiltersReady] = useState(false);
 
   useEffect(() => {
     const successMessage = window.localStorage.getItem('emotors_warehouse_success');
@@ -79,12 +102,34 @@ export default function BranchWarehousesPage() {
             country: warehouse.country ?? 'Kyrgyzstan',
           })),
         );
+        if (canInspectAnyBranchWarehouse(me)) {
+          void apiFetch<Branch[]>('/branches')
+            .then(setBranches)
+            .catch(() => setBranches([]));
+        }
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
-  }, [t]);
+  }, [router, t]);
+
+  useEffect(() => {
+    const parsed = parseBranchWarehousesListFilters(searchParams);
+    setSearch(parsed.search);
+    setBranchFilter(parsed.branchId);
+    setRegion(parsed.region);
+    setCity(parsed.city);
+    setStatus(parsed.status);
+    setPage(parsed.page);
+    setFiltersReady(true);
+  }, [searchParams]);
 
   const canFilterByBranch = canInspectAnyBranchWarehouse(user);
+
   const branchOptions = useMemo(() => {
+    if (branches.length > 0) {
+      return branches
+        .map((branch) => ({ id: branch.id, name: branch.name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
     const unique = new Map<string, string>();
     for (const warehouse of warehouses) {
       if (warehouse.branchId && warehouse.branchName) {
@@ -94,7 +139,7 @@ export default function BranchWarehousesPage() {
     return Array.from(unique.entries())
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [warehouses]);
+  }, [branches, warehouses]);
 
   const scopedWarehouses = useMemo(() => {
     if (!branchFilter) return warehouses;
@@ -109,6 +154,21 @@ export default function BranchWarehousesPage() {
     () => uniqueSortedValues(scopedWarehouses.map((warehouse) => warehouse.city)),
     [scopedWarehouses],
   );
+
+  const listFilters = useMemo(
+    () => ({ search, branchId: branchFilter, region, city, status, page }),
+    [search, branchFilter, region, city, status, page],
+  );
+
+  useEffect(() => {
+    if (!filtersReady) return;
+    const nextQuery = buildBranchWarehousesListQuery(listFilters);
+    const currentQuery = searchParams.toString();
+    const normalizedCurrent = currentQuery ? `?${currentQuery}` : '';
+    if (nextQuery !== normalizedCurrent) {
+      router.replace(branchWarehousesListHref(listFilters), { scroll: false });
+    }
+  }, [filtersReady, listFilters, router, searchParams]);
 
   const filteredWarehouses = useMemo(
     () =>
@@ -159,6 +219,37 @@ export default function BranchWarehousesPage() {
     setSortDirection('asc');
   }
 
+  function handleBranchChange(value: string) {
+    setBranchFilter(value);
+    setPage(1);
+    const nextScoped = value
+      ? warehouses.filter((warehouse) => warehouse.branchId === value)
+      : warehouses;
+    const nextRegions = uniqueSortedValues(
+      nextScoped.map((warehouse) => warehouse.country ?? 'Kyrgyzstan'),
+    );
+    const nextCities = uniqueSortedValues(nextScoped.map((warehouse) => warehouse.city));
+    if (region && !nextRegions.includes(region)) setRegion('');
+    if (city && !nextCities.includes(city)) setCity('');
+  }
+
+  function clearFilters() {
+    setSearch(EMPTY_BRANCH_WAREHOUSES_LIST_FILTERS.search);
+    setBranchFilter(EMPTY_BRANCH_WAREHOUSES_LIST_FILTERS.branchId);
+    setRegion(EMPTY_BRANCH_WAREHOUSES_LIST_FILTERS.region);
+    setCity(EMPTY_BRANCH_WAREHOUSES_LIST_FILTERS.city);
+    setStatus(EMPTY_BRANCH_WAREHOUSES_LIST_FILTERS.status);
+    setPage(EMPTY_BRANCH_WAREHOUSES_LIST_FILTERS.page);
+  }
+
+  function warehouseOpenHref(row: BranchWarehouseMetrics) {
+    const listReturn = encodeURIComponent(branchWarehousesListHref(listFilters));
+    const fromBranch = row.branchId ? `fromBranch=${row.branchId}` : '';
+    const params = [`listReturn=${listReturn}`];
+    if (fromBranch) params.unshift(fromBranch);
+    return `/branch-warehouses/${row.id}?${params.join('&')}`;
+  }
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -189,10 +280,13 @@ export default function BranchWarehousesPage() {
           regionOptions={regionOptions}
           cityOptions={cityOptions}
           searchPlaceholder={t('warehouse.searchBranchPlaceholder')}
+          branchId={branchFilter}
+          branchOptions={canFilterByBranch ? branchOptions : undefined}
           onSearchChange={(value) => {
             setSearch(value);
             setPage(1);
           }}
+          onBranchChange={canFilterByBranch ? handleBranchChange : undefined}
           onRegionChange={(value) => {
             setRegion(value);
             setPage(1);
@@ -205,30 +299,8 @@ export default function BranchWarehousesPage() {
             setStatus(value);
             setPage(1);
           }}
+          onClear={clearFilters}
         />
-
-        {canFilterByBranch ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-            <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <span>{t('branchWarehouse.filterBranch')}</span>
-              <select
-                value={branchFilter}
-                onChange={(event) => {
-                  setBranchFilter(event.target.value);
-                  setPage(1);
-                }}
-                className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              >
-                <option value="">{t('branchWarehouse.allBranches')}</option>
-                {branchOptions.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        ) : null}
 
         <WarehouseDataTable
           columns={[
@@ -292,7 +364,7 @@ export default function BranchWarehousesPage() {
               label: t('common.actions'),
               render: (row) => (
                 <Link
-                  href={`/branch-warehouses/${row.id}${row.branchId ? `?fromBranch=${row.branchId}` : ''}`}
+                  href={warehouseOpenHref(row)}
                   className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
                 >
                   {t('common.open')}
