@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { BranchesModule } from './branches/branches.module';
 import { BranchCeoModule } from './branch-ceo/branch-ceo.module';
 import { CommissionsModule } from './commissions/commissions.module';
+import { CustomerPriceListModule } from './customers/customer-price-list.module';
 import { CustomersModule } from './customers/customers.module';
 import { DistributionModule } from './distribution/distribution.module';
 import { ExpansionModule } from './expansion/expansion.module';
@@ -47,6 +48,7 @@ import { BusinessDateModule } from './business-date/business-date.module';
     BranchesModule,
     CommissionsModule,
     CustomersModule,
+    CustomerPriceListModule,
     DistributionModule,
     InventoryModule,
     InventoryCountModule,

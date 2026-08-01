@@ -16,6 +16,7 @@ import {
   loyaltyCategoryLabelKey,
 } from '@/lib/sale-customer-pricing';
 import type { Branch, Customer, CustomerStatus, CustomerType, User } from '@/lib/types';
+import { SendPriceListModal } from '@/components/customers/SendPriceListModal';
 import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -123,6 +124,8 @@ function CustomersPageContent() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<Customer | null>(null);
+  const [priceListModalOpen, setPriceListModalOpen] = useState(false);
+  const [priceListCustomerId, setPriceListCustomerId] = useState<string | null>(null);
 
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
@@ -491,16 +494,30 @@ function CustomersPageContent() {
             </p>
           </div>
 
-          {canCreate ? (
-            <button
-              onClick={openCreateCustomer}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
-              type="button"
-            >
-              <PlusIcon />
-              {t('crm.createClientButton')}
-            </button>
-          ) : null}
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            {branchSalesManagerView && !archiveView ? (
+              <button
+                onClick={() => {
+                  setPriceListCustomerId(null);
+                  setPriceListModalOpen(true);
+                }}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 sm:w-auto"
+                type="button"
+              >
+                {t('crm.sendPriceList')}
+              </button>
+            ) : null}
+            {canCreate ? (
+              <button
+                onClick={openCreateCustomer}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
+                type="button"
+              >
+                <PlusIcon />
+                {t('crm.createClientButton')}
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -772,13 +789,25 @@ function CustomersPageContent() {
                           ) : null}
                           {columnVisible('actions') ? (
                             <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <Link
                                   href={`/customers/${customer.id}`}
                                   className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                                 >
                                   {t('common.open')}
                                 </Link>
+                                {branchSalesManagerView && !archiveView ? (
+                                  <button
+                                    onClick={() => {
+                                      setPriceListCustomerId(customer.id);
+                                      setPriceListModalOpen(true);
+                                    }}
+                                    className="rounded-lg border border-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50"
+                                    type="button"
+                                  >
+                                    {t('crm.sendPriceList')}
+                                  </button>
+                                ) : null}
                                 {showListEditButton ? (
                                   <button
                                     onClick={() => openEditCustomer(customer)}
@@ -1025,6 +1054,14 @@ function CustomersPageContent() {
         loading={permanentDeleteTarget !== null && deletingCustomerId === permanentDeleteTarget.id}
         onClose={() => setPermanentDeleteTarget(null)}
         onConfirm={() => void confirmPermanentDeleteCustomer()}
+      />
+      <SendPriceListModal
+        open={priceListModalOpen}
+        initialCustomerId={priceListCustomerId}
+        onClose={() => {
+          setPriceListModalOpen(false);
+          setPriceListCustomerId(null);
+        }}
       />
     </ProtectedShell>
   );

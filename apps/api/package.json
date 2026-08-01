@@ -47,6 +47,7 @@
     "class-validator": "latest",
     "passport": "latest",
     "passport-jwt": "latest",
+    "pdfkit": "^0.19.1",
     "reflect-metadata": "latest",
     "rxjs": "latest"
   },
@@ -54,6 +55,7 @@
     "@nestjs/cli": "latest",
     "@types/node": "latest",
     "@types/passport-jwt": "latest",
+    "@types/pdfkit": "^0.17.6",
     "prisma": "^6.19.3",
     "ts-node": "latest",
     "tsx": "latest",

@@ -224,6 +224,19 @@ enum CustomerEventType {
   FOLLOW_UP
 }
 
+enum CustomerPriceListShareChannel {
+  DOWNLOAD
+  WHATSAPP
+}
+
+enum CustomerPriceListShareStatus {
+  GENERATED
+  DOWNLOADED
+  WHATSAPP_OPENED
+  SENT
+  SEND_FAILED
+}
+
 enum FollowUpStatus {
   OPEN
   DONE
@@ -1148,6 +1161,7 @@ model Branch {
   franchiseSupportTasks     FranchiseSupportTask[]
   convertedFromCustomers    Customer[]                    @relation("CustomerFranchiseConversion")
   hqB2bSales                HqB2bSale[]
+  customerPriceLists        CustomerPriceList[]
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
   deletedAt                 DateTime?
@@ -1224,6 +1238,7 @@ model PricingPolicyVersion {
   sales                     Sale[]
   hqB2bSales                HqB2bSale[]
   distributionOrders        BranchDistributionOrder[]
+  customerPriceLists        CustomerPriceList[]
   createdAt                 DateTime                               @default(now())
   updatedAt                 DateTime                               @updatedAt
 
@@ -1447,6 +1462,7 @@ model User {
   pricingSimulationsCreated                       PricingSimulation[]                 @relation("PricingSimulationCreator")
   pricingMasterSettingsUpdated                    PricingMasterSettings[]             @relation("PricingMasterSettingsUpdater")
   loyaltyProgramSettingsUpdated                   LoyaltyProgramSettings[]            @relation("LoyaltyProgramSettingsUpdater")
+  customerPriceListsGenerated                     CustomerPriceList[]                 @relation("CustomerPriceListGenerator")
   kpiTargets                                      BranchKpiTarget[]                   @relation("KpiTargetCreator")
   npsSurveys                                      NpsSurvey[]                         @relation("NpsSurveyCreator")
   courses                                         Course[]                            @relation("CourseCreator")
@@ -1726,6 +1742,7 @@ model Customer {
   serviceOrderPayments ServiceOrderPayment[]
   warranties           Warranty[]
   hqB2bSales           HqB2bSale[]
+  priceLists           CustomerPriceList[]
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   deletedAt            DateTime?
@@ -1738,6 +1755,42 @@ model Customer {
   @@index([fullName])
   @@index([phone])
   @@index([whatsappPhone])
+}
+
+/// Historical snapshot of a customer-facing price list generated for WhatsApp/PDF sharing.
+model CustomerPriceList {
+  id                     String                         @id @default(cuid())
+  customerId             String
+  customer               Customer                       @relation(fields: [customerId], references: [id])
+  branchId               String
+  branch                 Branch                         @relation(fields: [branchId], references: [id])
+  customerType           CustomerType
+  loyaltyCategory        CustomerLoyaltyCategory        @default(STANDARD)
+  loyaltyDiscountPercent Decimal                        @default(0) @db.Decimal(8, 2)
+  pricingPolicyVersionId String?
+  pricingPolicyVersion   PricingPolicyVersion?          @relation(fields: [pricingPolicyVersionId], references: [id])
+  title                  String
+  productCount           Int                            @default(0)
+  currency               String                         @default("KGS")
+  fileName               String?
+  filePath               String?
+  fileUrl                String?
+  shareChannel           CustomerPriceListShareChannel?
+  shareStatus            CustomerPriceListShareStatus   @default(GENERATED)
+  sharedAt               DateTime?
+  snapshotJson           Json
+  generatedById          String
+  generatedBy            User                           @relation("CustomerPriceListGenerator", fields: [generatedById], references: [id])
+  generatedAt            DateTime                       @default(now())
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
+
+  @@index([customerId])
+  @@index([branchId])
+  @@index([generatedById])
+  @@index([generatedAt])
+  @@index([pricingPolicyVersionId])
+  @@index([shareStatus])
 }
 
 model CustomerEvent {
