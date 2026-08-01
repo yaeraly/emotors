@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
-import { HqSalesBranchOrdersNav } from '@/components/HqSalesBranchOrdersNav';
+import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { apiFetch } from '@/lib/api';
 import {
   canManageBranchPurchaseRequests,
@@ -512,7 +512,6 @@ export default function BranchPurchaseRequestDetailPage() {
 
   const detailBody = (
     <>
-        {hqSalesView ? <HqSalesBranchOrdersNav /> : null}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             {!branchSalesManagerView ? (
@@ -1021,6 +1020,8 @@ export default function BranchPurchaseRequestDetailPage() {
         <BranchProductOrdersSection user={user} title={request.requestNumber}>
           {detailBody}
         </BranchProductOrdersSection>
+      ) : hqSalesView ? (
+        <HqSalesBranchOrdersSection>{detailBody}</HqSalesBranchOrdersSection>
       ) : (
         <section className="space-y-6">{detailBody}</section>
       )}

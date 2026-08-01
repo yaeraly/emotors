@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import {
+  HqSalesBranchOrdersTabContent,
   HqSalesListFilterGrid,
   HqSalesListTableCard,
   hqSalesListFilterControlClass,
@@ -103,39 +104,40 @@ export default function DistributionOrdersPage() {
           {newOrderAction}
         </div>
       ) : null}
-      {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      <HqSalesListFilterGrid columns={operatorView ? 2 : 3}>
-        <input
-          value={filters.search}
-          onChange={(event) => setFilters({ ...filters, search: event.target.value })}
-          placeholder={t('distribution.orderNumber')}
-          className={hqSalesListFilterControlClass}
-        />
-        {!operatorView ? (
+      <HqSalesBranchOrdersTabContent error={error} filters={
+        <HqSalesListFilterGrid columns={operatorView ? 2 : 3}>
+          <input
+            value={filters.search}
+            onChange={(event) => setFilters({ ...filters, search: event.target.value })}
+            placeholder={t('distribution.orderNumber')}
+            className={hqSalesListFilterControlClass}
+          />
+          {!operatorView ? (
+            <select
+              value={filters.branchId}
+              onChange={(event) => setFilters({ ...filters, branchId: event.target.value })}
+              className={hqSalesListFilterControlClass}
+            >
+              <option value="">{t('common.all')} {t('distribution.branch')}</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>{branch.name}</option>
+              ))}
+            </select>
+          ) : null}
           <select
-            value={filters.branchId}
-            onChange={(event) => setFilters({ ...filters, branchId: event.target.value })}
+            value={filters.status}
+            onChange={(event) => setFilters({ ...filters, status: event.target.value })}
             className={hqSalesListFilterControlClass}
           >
-            <option value="">{t('common.all')} {t('distribution.branch')}</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>{branch.name}</option>
+            <option value="">{t('common.all')} {t('distribution.status')}</option>
+            {(operatorView
+              ? (['SHIPPED', 'SENT', 'RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE'] as BranchDistributionOrderStatus[])
+              : statuses).map((status) => (
+              <option key={status} value={status}>{translateStatus(t, status, 'distribution')}</option>
             ))}
           </select>
-        ) : null}
-        <select
-          value={filters.status}
-          onChange={(event) => setFilters({ ...filters, status: event.target.value })}
-          className={hqSalesListFilterControlClass}
-        >
-          <option value="">{t('common.all')} {t('distribution.status')}</option>
-          {(operatorView
-            ? (['SHIPPED', 'SENT', 'RECEIVED_BY_BRANCH', 'RECEIVED_WITH_DIFFERENCE'] as BranchDistributionOrderStatus[])
-            : statuses).map((status) => (
-            <option key={status} value={status}>{translateStatus(t, status, 'distribution')}</option>
-          ))}
-        </select>
-      </HqSalesListFilterGrid>
+        </HqSalesListFilterGrid>
+      }>
       <HqSalesListTableCard>
         <table className={hqSalesListTableClass}>
           <thead className={hqSalesListTableHeadClass}>
@@ -175,6 +177,7 @@ export default function DistributionOrdersPage() {
           </tbody>
         </table>
       </HqSalesListTableCard>
+      </HqSalesBranchOrdersTabContent>
     </>
   );
 

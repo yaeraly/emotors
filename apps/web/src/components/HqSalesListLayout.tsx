@@ -38,3 +38,21 @@ export const hqSalesListTableHeadClass =
 export const hqSalesListTableThClass = 'px-4 py-3';
 
 export const hqSalesListTableTdClass = 'px-4 py-3';
+
+type TabContentProps = {
+  error?: string;
+  filters?: ReactNode;
+  children: ReactNode;
+};
+
+/** Standard HQ Sales tab body: alerts → filters → table/list content. */
+export function HqSalesBranchOrdersTabContent({ error, filters, children }: TabContentProps) {
+  return (
+    <>
+      {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {filters}
+      {children}
+    </>
+  );
+}
+
