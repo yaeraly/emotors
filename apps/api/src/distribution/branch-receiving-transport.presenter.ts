@@ -54,9 +54,12 @@ export type TransportAllocationPreview = {
 
 export type BranchWarehouseTransportAllocationResult = {
   status: 'ALLOCATED';
+  allocationCompleted: true;
+  shipmentId: string;
   transportCostKgs: number;
   totalShipmentWeightKg: number;
   allocatedAt: string;
+  allocationVersion: string;
   message: string;
 };
 
@@ -78,7 +81,9 @@ export function parseReceivingTransportCostInput(
 
 export function toBranchWarehouseTransportAllocationResult(
   preview: Pick<TransportAllocationPreview, 'transportCostKgs' | 'totalShipmentWeightKg'> & {
+    shipmentId: string;
     allocatedAt?: string | Date | null;
+    allocationVersion: string;
   },
 ): BranchWarehouseTransportAllocationResult {
   const allocatedAt =
@@ -87,9 +92,12 @@ export function toBranchWarehouseTransportAllocationResult(
       : preview.allocatedAt ?? new Date().toISOString();
   return {
     status: 'ALLOCATED',
+    allocationCompleted: true,
+    shipmentId: preview.shipmentId,
     transportCostKgs: preview.transportCostKgs,
     totalShipmentWeightKg: preview.totalShipmentWeightKg,
     allocatedAt,
+    allocationVersion: preview.allocationVersion,
     message: TRANSPORT_ALLOCATION_SUCCESS_MESSAGE,
   };
 }

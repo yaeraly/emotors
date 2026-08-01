@@ -309,15 +309,26 @@ export default function DistributionOrderDetailPage() {
                 destinationWarehouseId={order.destinationWarehouseId}
                 lineItems={order.receivingLineItems!}
                 initialProgress={order.receivingProgress}
-                canCompleteReceiving={order.canCompleteReceiving}
                 initialTransportAllocationReady={order.transportAllocationReady}
+                onAllocationSuccess={(result) => {
+                  setOrder((current) =>
+                    current
+                      ? {
+                          ...current,
+                          transportAllocationReady: true,
+                          deliveryCostEnteredAt: result.allocatedAt,
+                          transportCostKgs: result.transportCostKgs,
+                        }
+                      : current,
+                  );
+                }}
                 onCompleted={(result) => {
                   setReceiving(result.receiving);
                   setShortageReport(result.shortageReport);
                   setSuccess(
                     result.shortageReport
                       ? t('distribution.hasDifferences')
-                      : t('distribution.goodsReceivingCreated'),
+                      : t('distribution.branchReceivingCompletedSuccess'),
                   );
                   void load();
                 }}

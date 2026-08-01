@@ -29,14 +29,19 @@ describe('branch-receiving-transport.presenter', () => {
 
   it('returns branch-safe allocation result without confidential fields', () => {
     const safe = toBranchWarehouseTransportAllocationResult({
+      shipmentId: 'order-123',
       transportCostKgs: 1000,
       totalShipmentWeightKg: 250,
       allocatedAt: '2026-08-01T00:00:00.000Z',
+      allocationVersion: '{"transportCostKgs":1000}',
     });
     assert.equal(safe.status, 'ALLOCATED');
+    assert.equal(safe.allocationCompleted, true);
+    assert.equal(safe.shipmentId, 'order-123');
     assert.equal(responseContainsConfidentialTransportFields(safe), false);
     assert.equal(safe.transportCostKgs, 1000);
     assert.equal(safe.totalShipmentWeightKg, 250);
+    assert.equal(safe.allocationVersion, '{"transportCostKgs":1000}');
   });
 
   it('detects confidential transport allocation fields in payloads', () => {

@@ -70,13 +70,19 @@ export const TRANSPORT_ALLOCATION_SUCCESS_MESSAGE =
   'Транспортные расходы успешно распределены.\nМожно завершить приемку товара.';
 
 export const COMPLETE_RECEIVING_REQUIRES_ALLOCATION =
-  'Сначала распределите транспортные расходы.';
+  'Сначала сохраните товары и распределите транспортные расходы.';
+
+export const BRANCH_RECEIVING_COMPLETED_MESSAGE =
+  'Товар успешно принят на склад филиала.';
 
 export type BranchWarehouseTransportAllocationResult = {
   status: 'ALLOCATED';
+  allocationCompleted: true;
+  shipmentId: string;
   transportCostKgs: number;
   totalShipmentWeightKg: number;
   allocatedAt: string;
+  allocationVersion: string;
   message: string;
 };
 
@@ -96,17 +102,25 @@ export function validateTransportCostInput(
   return { ok: true, transportCostKgs: numeric };
 }
 
+export function quantitiesReadyForBranchReceiving(input: {
+  allSaved: boolean;
+  products: number;
+  checked: number;
+}) {
+  return input.allSaved && input.products > 0 && input.checked === input.products;
+}
+
 export function canCompleteBranchReceiving(input: {
   allSaved: boolean;
-  canCompleteReceiving: boolean;
-  transportAllocationReady: boolean;
   products: number;
+  checked: number;
+  transportAllocationReady: boolean;
+  receiptCompleted?: boolean;
 }) {
+  if (input.receiptCompleted) return false;
   return (
-    input.allSaved &&
-    input.canCompleteReceiving &&
-    input.transportAllocationReady &&
-    input.products > 0
+    quantitiesReadyForBranchReceiving(input) &&
+    input.transportAllocationReady
   );
 }
 

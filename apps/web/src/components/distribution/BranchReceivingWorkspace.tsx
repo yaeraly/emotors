@@ -29,9 +29,9 @@ type BranchReceivingWorkspaceProps = {
   destinationWarehouseId: string;
   lineItems: BranchReceivingLineItem[];
   initialProgress?: BranchReceivingProgress;
-  canCompleteReceiving?: boolean;
   initialTransportAllocationReady?: boolean;
   readOnly?: boolean;
+  onAllocationSuccess?: (result: BranchWarehouseTransportAllocationResult) => void;
   onCompleted?: (result: {
     receiving: GoodsReceiving;
     shortageReport: ShortageReport | null;
@@ -43,9 +43,9 @@ export function BranchReceivingWorkspace({
   destinationWarehouseId,
   lineItems,
   initialProgress,
-  canCompleteReceiving = false,
   initialTransportAllocationReady = false,
   readOnly = false,
+  onAllocationSuccess,
   onCompleted,
 }: BranchReceivingWorkspaceProps) {
   const { t } = useTranslation();
@@ -54,6 +54,7 @@ export function BranchReceivingWorkspace({
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [completed, setCompleted] = useState(false);
   const [transportAllocationReady, setTransportAllocationReady] = useState(
     initialTransportAllocationReady,
   );
@@ -67,7 +68,7 @@ export function BranchReceivingWorkspace({
     transportNotes: '',
   });
 
-  const canEdit = !readOnly;
+  const canEdit = !readOnly && !completed;
 
   const {
     rows,
@@ -88,10 +89,13 @@ export function BranchReceivingWorkspace({
 
   const showComplete = canCompleteBranchReceiving({
     allSaved,
-    canCompleteReceiving,
-    transportAllocationReady,
     products: displayProgress.products,
+    checked: displayProgress.checked,
+    transportAllocationReady,
+    receiptCompleted: completed,
   });
+
+  const quantitiesReady = allSaved && displayProgress.products > 0 && displayProgress.checked === displayProgress.products;
 
   function invalidateTransportAllocation() {
     setTransportAllocationReady(false);
@@ -159,6 +163,9 @@ export function BranchReceivingWorkspace({
       }
       setAllocationResult(result);
       setTransportAllocationReady(true);
+      setSaveToast(TRANSPORT_ALLOCATION_SUCCESS_MESSAGE);
+      setTimeout(() => setSaveToast(''), 4000);
+      onAllocationSuccess?.(result);
     } catch (err) {
       setAllocationResult(null);
       setTransportAllocationReady(false);
@@ -173,7 +180,6 @@ export function BranchReceivingWorkspace({
     setError('');
     setSubmitting(true);
     try {
-      const transport = transportPayload();
       const result = await apiFetch<{
         receiving: GoodsReceiving;
         shortageReport: ShortageReport | null;
@@ -182,11 +188,12 @@ export function BranchReceivingWorkspace({
         body: JSON.stringify({
           warehouseId: destinationWarehouseId,
           note: '',
-          driverName: transport.driverName,
-          vehicleNumber: transport.vehicleNumber,
-          transportNotes: transport.comment,
+          driverName: transportForm.driverName.trim() || undefined,
+          vehicleNumber: transportForm.vehicleNumber.trim() || undefined,
+          transportNotes: transportForm.transportNotes.trim() || undefined,
         }),
       });
+      setCompleted(true);
       onCompleted?.(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
@@ -410,23 +417,27 @@ export function BranchReceivingWorkspace({
                 {t('chinaReceiving.unsavedBlock').replace('{count}', String(unsavedCount))}
               </p>
             ) : null}
-            <button
-              type="button"
-              disabled={previewing || !allSaved}
-              onClick={() => void allocateTransportCost()}
-              className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 disabled:opacity-50"
-            >
-              {previewing ? t('common.loading') : t('distribution.transportAllocationPreview')}
-            </button>
-            <button
-              type="button"
-              disabled={submitting || !showComplete}
-              onClick={() => void completeReceiving()}
-              className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              {submitting ? t('common.loading') : t('distribution.completeReceiving')}
-            </button>
-            {!transportAllocationReady && allSaved && canCompleteReceiving ? (
+            {!completed ? (
+              <>
+                <button
+                  type="button"
+                  disabled={previewing || !allSaved}
+                  onClick={() => void allocateTransportCost()}
+                  className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 disabled:opacity-50"
+                >
+                  {previewing ? t('common.loading') : t('distribution.transportAllocationPreview')}
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting || !showComplete}
+                  onClick={() => void completeReceiving()}
+                  className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {submitting ? t('common.loading') : t('distribution.completeReceiving')}
+                </button>
+              </>
+            ) : null}
+            {!showComplete && quantitiesReady && !completed ? (
               <p className="w-full text-sm text-slate-600">{COMPLETE_RECEIVING_REQUIRES_ALLOCATION}</p>
             ) : null}
           </div>

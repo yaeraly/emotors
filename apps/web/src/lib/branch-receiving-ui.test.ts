@@ -92,17 +92,29 @@ describe('branch-receiving-ui', () => {
     assert.equal(validateTransportCostInput('0').ok, true);
     assert.equal(canCompleteBranchReceiving({
       allSaved: true,
-      canCompleteReceiving: true,
-      transportAllocationReady: false,
       products: 1,
+      checked: 1,
+      transportAllocationReady: false,
     }), false);
     assert.equal(canCompleteBranchReceiving({
       allSaved: true,
-      canCompleteReceiving: true,
-      transportAllocationReady: true,
       products: 1,
+      checked: 1,
+      transportAllocationReady: true,
     }), true);
-    assert.equal(allocationResponseIsBranchSafe({ status: 'ALLOCATED', transportCostKgs: 0 }), true);
+    assert.equal(canCompleteBranchReceiving({
+      allSaved: true,
+      products: 2,
+      checked: 1,
+      transportAllocationReady: true,
+    }), false);
+    assert.equal(allocationResponseIsBranchSafe({
+      status: 'ALLOCATED',
+      allocationCompleted: true,
+      shipmentId: 'order-1',
+      transportCostKgs: 0,
+      allocationVersion: 'v1',
+    }), true);
     assert.equal(allocationResponseIsBranchSafe({ allocations: [] }), false);
   });
 

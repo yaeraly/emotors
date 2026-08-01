@@ -70,6 +70,61 @@ async function saveDraftViaApi(
   return { status: response.status, body };
 }
 
+async function receiveWithoutAllocate(
+  token: string,
+  orderId: string,
+  warehouseId: string,
+  items: Array<{
+    shipmentItemId: string;
+    acceptedQuantity: number;
+    damagedQuantity?: number;
+    missingQuantity?: number;
+    note?: string;
+  }>,
+) {
+  for (const item of items) {
+    const draftResult = await saveDraftViaApi(token, orderId, item.shipmentItemId, {
+      acceptedQuantity: item.acceptedQuantity,
+      damagedQuantity: item.damagedQuantity ?? 0,
+      missingQuantity: item.missingQuantity,
+      note: item.note,
+    });
+    assert.ok([200, 201].includes(draftResult.status), JSON.stringify(draftResult.body));
+  }
+
+  const response = await fetch(`${API}/distribution/orders/${orderId}/receive`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      warehouseId,
+    }),
+  });
+  const body = await response.json();
+  return { status: response.status, body };
+}
+
+async function allocateTransportViaApi(
+  token: string,
+  orderId: string,
+  transportCostKgs = 0,
+) {
+  const response = await fetch(`${API}/distribution/orders/${orderId}/transport-cost/allocate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      transportCostKgs,
+    }),
+  });
+  const body = await response.json();
+  return { status: response.status, body };
+}
+
 async function receiveViaApi(
   token: string,
   orderId: string,
@@ -565,5 +620,48 @@ describe('Branch receiving integration', () => {
       where: { referenceType: 'GOODS_RECEIVING_ITEM', referenceId: goodItem.id },
     });
     assert.equal(goodMovement, null);
+  });
+
+  it('H — receive without transport allocation is rejected', async () => {
+    const sku = `INT-H-${Date.now()}`;
+    const order = await createShippedOrder(sku);
+    const item = order.items[0]!;
+    const token = await login(ctx.operatorEmail, ctx.operatorPassword);
+
+    const result = await receiveWithoutAllocate(token, order.id, ctx.branchWarehouseId, [
+      { shipmentItemId: item.id, acceptedQuantity: item.quantity },
+    ]);
+    assert.equal(result.status, 400);
+    assert.match(String(result.body?.message ?? ''), /распределите актуальные транспортные расходы/i);
+
+    const balance = await prisma.inventoryBalance.findFirst({
+      where: {
+        branchId: ctx.branchId,
+        warehouseId: ctx.branchWarehouseId,
+        product: { sku },
+      },
+    });
+    assert.equal(balance, null);
+  });
+
+  it('I — allocation returns operational completion fields for branch UI', async () => {
+    const sku = `INT-I-${Date.now()}`;
+    const order = await createShippedOrder(sku);
+    const item = order.items[0]!;
+    const token = await login(ctx.operatorEmail, ctx.operatorPassword);
+
+    const draftResult = await saveDraftViaApi(token, order.id, item.id, {
+      acceptedQuantity: item.quantity,
+    });
+    assert.ok([200, 201].includes(draftResult.status), JSON.stringify(draftResult.body));
+
+    const allocation = await allocateTransportViaApi(token, order.id, 0);
+    assert.ok([200, 201].includes(allocation.status), JSON.stringify(allocation.body));
+    assert.equal(allocation.body.allocationCompleted, true);
+    assert.equal(allocation.body.shipmentId, order.id);
+    assert.ok(typeof allocation.body.allocationVersion === 'string');
+    assert.equal(allocation.body.transportCostKgs, 0);
+    assert.equal(allocation.body.hqTransferUnitCost, undefined);
+    assert.equal(allocation.body.allocations, undefined);
   });
 });

@@ -2203,9 +2203,11 @@ export class DistributionService {
         storedTransportAllocationsMatchComputed(preview.allocations, order.items)
       ) {
         return toBranchWarehouseTransportAllocationResult({
+          shipmentId: order.id,
           transportCostKgs,
           totalShipmentWeightKg: preview.totalShipmentWeightKg,
           allocatedAt: order.deliveryCostEnteredAt,
+          allocationVersion: fingerprint,
         });
       }
 
@@ -2261,9 +2263,11 @@ export class DistributionService {
       });
 
       return toBranchWarehouseTransportAllocationResult({
+        shipmentId: order.id,
         transportCostKgs,
         totalShipmentWeightKg: preview.totalShipmentWeightKg,
         allocatedAt,
+        allocationVersion: fingerprint,
       });
     });
   }
@@ -4567,8 +4571,7 @@ export class DistributionService {
     );
     const canCompleteReceiving =
       receivingProgress.products > 0 &&
-      receivingProgress.checked === receivingProgress.products &&
-      Boolean(order.deliveryCostEnteredAt);
+      receivingProgress.checked === receivingProgress.products;
 
     return {
       receivingLineItems,
