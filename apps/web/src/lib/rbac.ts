@@ -1261,6 +1261,34 @@ export function canSubmitSaleInstallmentRequest(
   return isBranchSalesManagerUser(user) && hasPermission(user, 'sales.manage');
 }
 
+/** Only cashier-capable branch roles may record sale payments (not Branch Sales Manager). */
+export function canAcceptSalePayment(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  if (isBranchOwnerUser(user)) return true;
+  return isBranchCashierUser(user) || hasPermission(user, 'cashier');
+}
+
+export function shouldSyncSalePaymentsOnDraftSave(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+  paymentType: 'FULL_PAYMENT' | 'INSTALLMENT',
+) {
+  if (paymentType === 'INSTALLMENT') {
+    return false;
+  }
+  return canAcceptSalePayment(user);
+}
+
+export function canCancelBranchSale(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+) {
+  if (!user) return false;
+  if (hasFullAccess(user) || isBranchOwnerUser(user)) return true;
+  return isBranchSalesManagerUser(user) && hasPermission(user, 'sales.manage');
+}
+
 export function canApproveSaleInstallmentRequest(
   user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
 ) {

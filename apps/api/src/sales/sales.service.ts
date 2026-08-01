@@ -52,6 +52,7 @@ import {
   resolvePricingChannelFromCustomerType,
   type SalePricingChannel,
 } from './sale-customer-pricing.util';
+import { assertBranchSalesManagerCanCancelSale } from './branch-sales-workflow.util';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -160,6 +161,10 @@ export class SalesService {
       if (sale.installments?.length) {
         await this.audit(user, sale.branchId, 'INSTALLMENT_CREATED', 'Sale', sale.id);
       }
+      await this.audit(user, sale.branchId, 'BRANCH_SALE_DRAFT_SAVED', 'Sale', sale.id, {
+        paymentType: dto.paymentType ?? 'FULL_PAYMENT',
+        status: sale.status,
+      });
       return sale;
     });
   }
@@ -640,6 +645,12 @@ export class SalesService {
         include: this.saleInclude(),
       });
       return this.toSaleResponse(refreshed);
+    }).then(async (sale) => {
+      await this.audit(user, sale.branchId, 'BRANCH_SALE_DRAFT_SAVED', 'Sale', sale.id, {
+        paymentType: dto.paymentType ?? 'FULL_PAYMENT',
+        status: sale.status,
+      });
+      return sale;
     });
   }
 
@@ -1096,14 +1107,21 @@ export class SalesService {
     await this.prisma.$transaction(async (tx) => {
       const sale = await this.getAccessibleSaleInTx(tx, user, id);
 
-      if (sale.status === SaleStatus.FINALIZED && !this.hasFullAccess(user)) {
-        throw new ForbiddenException('Only HQ can cancel finalized sale');
-      }
-
       if (sale.status === SaleStatus.CANCELLED) {
         throw new BadRequestException('Sale is already cancelled');
       }
 
+      assertBranchSalesManagerCanCancelSale(user, {
+        status: sale.status,
+        paidAmount: Number(sale.paidAmount),
+        paymentStatus: sale.paymentStatus,
+      });
+
+      if (sale.status === SaleStatus.FINALIZED && !this.hasFullAccess(user)) {
+        throw new ForbiddenException('Only HQ can cancel finalized sale');
+      }
+
+      const previousStatus = sale.status;
       await tx.sale.update({
         where: { id: sale.id },
         data: {
@@ -1119,7 +1137,11 @@ export class SalesService {
           branchId: sale.branchId,
         });
       }
-      await this.auditInTx(tx, user, sale.branchId, 'SALE_CANCELLATION', 'Sale', sale.id);
+      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_SALE_CANCELLED', 'Sale', sale.id, {
+        previousStatus,
+        newStatus: SaleStatus.CANCELLED,
+        paymentStatus: sale.paymentStatus,
+      });
     });
 
     return this.findOne(user, id);

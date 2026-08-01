@@ -7,7 +7,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { SaleCustomerSearch, type SaleCustomerOption } from '@/components/SaleCustomerSearch';
 import { SaleProductSearch, type SaleProductOption } from '@/components/SaleProductSearch';
 import { apiFetch } from '@/lib/api';
-import { canApproveSale, canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canApproveSale, canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser, shouldSyncSalePaymentsOnDraftSave } from '@/lib/rbac';
 import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
   appliedPriceLabelKey,
@@ -467,6 +467,11 @@ export default function NewSalePage() {
       }
     }
 
+    if (paymentType === 'FULL_PAYMENT' && !paymentRows[0]?.method) {
+      setError(t('sales.paymentMethodRequired'));
+      return null;
+    }
+
     if (hasBlockingPriceError) {
       setError(t('sales.priceOutOfRangeBlocked'));
       return null;
@@ -474,11 +479,6 @@ export default function NewSalePage() {
 
     if (hasMissingPricing) {
       setError(t('sales.noPricingPolicy'));
-      return null;
-    }
-
-    if (!paymentRows[0]?.method) {
-      setError(t('sales.paymentMethodRequired'));
       return null;
     }
 
@@ -512,7 +512,7 @@ export default function NewSalePage() {
         },
       );
 
-      if (!paymentsSynced) {
+      if (!paymentsSynced && shouldSyncSalePaymentsOnDraftSave(user, paymentType)) {
         const activePayments = (sale.payments ?? []).filter(
           (payment) => payment.status !== 'VOID',
         );

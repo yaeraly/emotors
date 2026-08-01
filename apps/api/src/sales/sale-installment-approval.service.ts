@@ -310,9 +310,12 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'SALE_INSTALLMENT_SUBMITTED', 'SaleInstallmentApproval', updatedApproval.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_SUBMITTED_FOR_APPROVAL', 'SaleInstallmentApproval', updatedApproval.id, {
         saleId: sale.id,
         requestVersion: updatedApproval.requestVersion,
+        previousStatus: approval.status,
+        newStatus: updatedApproval.status,
+        paymentType: 'INSTALLMENT',
       });
 
       await this.notificationsService.notifyInTx(tx, user, {

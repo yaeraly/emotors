@@ -169,7 +169,6 @@ export class SalesController {
     Role.SYSTEM_ADMINISTRATOR,
     Role.FRANCHISE_OWNER,
     Role.CASHIER,
-    Role.MANAGER,
     Role.MASTER,
     Role.SALESPERSON,
   )
