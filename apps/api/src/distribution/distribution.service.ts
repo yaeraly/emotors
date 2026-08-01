@@ -1125,6 +1125,9 @@ export class DistributionService {
         },
         include: this.include(),
       });
+      await this.auditTransfer(tx, user, 'DISTRIBUTION_ORDER_CANCELLED', updated, {
+        previousStatus: order.status,
+      });
       return this.toResponse(updated);
     });
   }
