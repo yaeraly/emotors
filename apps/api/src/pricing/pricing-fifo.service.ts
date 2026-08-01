@@ -609,7 +609,7 @@ export class PricingFifoService {
       branchPricing?: BranchPricingConfig;
       distributionOrderId: string;
       distributionOrderItemId: string;
-      userId: string;
+      userId: string | null;
       userRole: string;
     },
   ) {
