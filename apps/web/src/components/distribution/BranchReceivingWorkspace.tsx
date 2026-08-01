@@ -38,6 +38,30 @@ export function BranchReceivingWorkspace({
   const [saveToast, setSaveToast] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [transportForm, setTransportForm] = useState({
+    transportCompany: '',
+    driverName: '',
+    vehicleNumber: '',
+    transportCostKgs: '0',
+    transportNotes: '',
+  });
+  const [preview, setPreview] = useState<{
+    totalShipmentWeightKg: number;
+    transportCostKgs: number;
+    allocatedTotal: number;
+    allocations: Array<{
+      productId: string;
+      sku?: string;
+      productName?: string;
+      receivedQuantity: number;
+      itemTotalWeightKg: number;
+      hqTransferUnitCost: number;
+      transportExpenseAllocation: number;
+      transportCostPerUnit: number;
+      finalUnitCostKgs: number;
+    }>;
+  } | null>(null);
 
   const canEdit = !readOnly;
 
@@ -73,10 +97,48 @@ export function BranchReceivingWorkspace({
     [saveRow, t],
   );
 
+  function transportPayload() {
+    const transportCostKgs = Number(transportForm.transportCostKgs);
+    if (!Number.isFinite(transportCostKgs) || transportCostKgs < 0) {
+      throw new Error(t('distribution.deliveryCost'));
+    }
+    return {
+      transportCompany: transportForm.transportCompany.trim() || undefined,
+      driverName: transportForm.driverName.trim() || undefined,
+      vehicleNumber: transportForm.vehicleNumber.trim() || undefined,
+      transportNotes: transportForm.transportNotes.trim() || undefined,
+      transportCostKgs,
+    };
+  }
+
+  async function loadTransportPreview() {
+    setError('');
+    setPreviewing(true);
+    try {
+      const payload = transportPayload();
+      const result = await apiFetch<{
+        totalShipmentWeightKg: number;
+        transportCostKgs: number;
+        allocatedTotal: number;
+        allocations: NonNullable<typeof preview>['allocations'];
+      }>(`/distribution/orders/${orderId}/transport-cost/preview`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      setPreview(result);
+    } catch (err) {
+      setPreview(null);
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
   async function completeReceiving() {
     setError('');
     setSubmitting(true);
     try {
+      const transport = transportPayload();
       const result = await apiFetch<{
         receiving: GoodsReceiving;
         shortageReport: ShortageReport | null;
@@ -85,6 +147,7 @@ export function BranchReceivingWorkspace({
         body: JSON.stringify({
           warehouseId: destinationWarehouseId,
           note: '',
+          ...transport,
         }),
       });
       onCompleted?.(result);
@@ -93,6 +156,10 @@ export function BranchReceivingWorkspace({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function formatKgs(value: number) {
+    return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} сом`;
   }
 
   return (
@@ -263,20 +330,118 @@ export function BranchReceivingWorkspace({
       </div>
 
       {canEdit ? (
-        <div className="flex flex-wrap gap-3">
-          {!allSaved ? (
-            <p className="w-full rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              {t('chinaReceiving.unsavedBlock').replace('{count}', String(unsavedCount))}
-            </p>
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <h4 className="text-base font-bold text-slate-950">{t('branchWarehouseOperator.transportExpenses')}</h4>
+            <p className="mt-1 text-sm text-slate-600">{t('distribution.transportCostZeroAllowed')}</p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
+                <input
+                  value={transportForm.transportCompany}
+                  onChange={(e) => setTransportForm((c) => ({ ...c, transportCompany: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
+                <input
+                  value={transportForm.driverName}
+                  onChange={(e) => setTransportForm((c) => ({ ...c, driverName: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.vehicleNumber')}</span>
+                <input
+                  value={transportForm.vehicleNumber}
+                  onChange={(e) => setTransportForm((c) => ({ ...c, vehicleNumber: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block">
+                <span className="text-sm font-semibold text-slate-700">{t('distribution.deliveryCost')}</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  required
+                  value={transportForm.transportCostKgs}
+                  onChange={(e) => setTransportForm((c) => ({ ...c, transportCostKgs: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                />
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
+                <textarea
+                  value={transportForm.transportNotes}
+                  onChange={(e) => setTransportForm((c) => ({ ...c, transportNotes: e.target.value }))}
+                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  rows={2}
+                />
+              </label>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {!allSaved ? (
+              <p className="w-full rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                {t('chinaReceiving.unsavedBlock').replace('{count}', String(unsavedCount))}
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={previewing || !allSaved}
+              onClick={() => void loadTransportPreview()}
+              className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 disabled:opacity-50"
+            >
+              {previewing ? t('common.loading') : t('distribution.transportAllocationPreview')}
+            </button>
+            <button
+              type="button"
+              disabled={submitting || !showComplete}
+              onClick={() => void completeReceiving()}
+              className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {submitting ? t('common.loading') : t('distribution.completeReceiving')}
+            </button>
+          </div>
+          {preview ? (
+            <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <SummaryCard
+                  label={t('distribution.shipmentTotalWeight')}
+                  value={`${preview.totalShipmentWeightKg} ${t('distribution.weightUnitKg')}`}
+                />
+                <SummaryCard label={t('distribution.deliveryCost')} value={formatKgs(preview.transportCostKgs)} />
+                <SummaryCard
+                  label={t('distribution.deliveryCostAllocated')}
+                  value={formatKgs(preview.allocatedTotal)}
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2">SKU</th>
+                      <th className="px-3 py-2">{t('distribution.hqTransferCost')}</th>
+                      <th className="px-3 py-2">{t('distribution.allocatedTransportCost')}</th>
+                      <th className="px-3 py-2">{t('distribution.finalBranchInventoryCost')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {preview.allocations.map((row) => (
+                      <tr key={row.productId}>
+                        <td className="px-3 py-2">{row.sku || row.productName || row.productId}</td>
+                        <td className="px-3 py-2">{formatKgs(row.hqTransferUnitCost)}</td>
+                        <td className="px-3 py-2">{formatKgs(row.transportExpenseAllocation)}</td>
+                        <td className="px-3 py-2 font-semibold">{formatKgs(row.finalUnitCostKgs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           ) : null}
-          <button
-            type="button"
-            disabled={submitting || !showComplete}
-            onClick={() => void completeReceiving()}
-            className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
-          >
-            {submitting ? t('common.loading') : t('distribution.completeReceiving')}
-          </button>
         </div>
       ) : null}
     </section>

@@ -98,7 +98,11 @@ async function receiveViaApi(
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ warehouseId }),
+    body: JSON.stringify({
+      warehouseId,
+      // Branch Warehouse enters delivery cost on receipt (0 = free / paid elsewhere).
+      transportCostKgs: 0,
+    }),
   });
   const body = await response.json();
   return { status: response.status, body };

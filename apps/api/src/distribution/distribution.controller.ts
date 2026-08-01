@@ -299,6 +299,16 @@ export class DistributionController {
     return this.distributionService.sendInvoiceToCashier(user, id);
   }
 
+  @Post('orders/:id/transport-cost/preview')
+  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_OPERATOR)
+  previewReceivingTransportCost(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: EnterReceivingTransportDto,
+  ) {
+    return this.distributionService.previewReceivingTransportCost(user, id, dto);
+  }
+
   @Post('orders/:id/transport-cost')
   @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_OPERATOR)
   enterReceivingTransportCost(

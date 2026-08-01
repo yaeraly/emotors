@@ -21,6 +21,7 @@ import { ReceivingTransportCostSection } from '@/components/distribution/Receivi
 import { BranchReceivingWorkspace } from '@/components/distribution/BranchReceivingWorkspace';
 import type { BranchDistributionOrder, GoodsReceiving, ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
+import { buildHqDispatchSendPayload, shouldShowHqDispatchTransportFields } from '@/lib/hq-dispatch-form';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
@@ -29,12 +30,6 @@ export default function DistributionOrderDetailPage() {
   const { t } = useTranslation();
   const [order, setOrder] = useState<BranchDistributionOrder | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [dispatchForm, setDispatchForm] = useState({
-    transportCompany: '',
-    driverName: '',
-    vehicleNumber: '',
-    transportNotes: '',
-  });
   const [receiving, setReceiving] = useState<GoodsReceiving | null>(null);
   const [shortageReport, setShortageReport] = useState<ShortageReport | null>(null);
   const [error, setError] = useState('');
@@ -91,12 +86,7 @@ export default function DistributionOrderDetailPage() {
   }
 
   async function dispatchShipment() {
-    await action('send', t('distribution.orderSent'), {
-      transportCompany: dispatchForm.transportCompany || undefined,
-      driverName: dispatchForm.driverName || undefined,
-      vehicleNumber: dispatchForm.vehicleNumber || undefined,
-      transportNotes: dispatchForm.transportNotes || undefined,
-    });
+    await action('send', t('distribution.orderSent'), buildHqDispatchSendPayload());
   }
 
   const canApprove = canManageDistributionOrders(currentUser);
@@ -222,24 +212,9 @@ export default function DistributionOrderDetailPage() {
                     value={`${Number(weightSummary?.totalWeightKg ?? order.totalShipmentWeightKg ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 3 })} ${t('distribution.weightUnitKg')}`}
                   />
                 </div>
-                <div className="grid gap-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 md:grid-cols-2">
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.transportCompany')}</span>
-                    <input value={dispatchForm.transportCompany} onChange={(event) => setDispatchForm((current) => ({ ...current, transportCompany: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                  </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
-                    <input value={dispatchForm.driverName} onChange={(event) => setDispatchForm((current) => ({ ...current, driverName: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                  </label>
-                  <label className="block">
-                    <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.vehicleNumber')}</span>
-                    <input value={dispatchForm.vehicleNumber} onChange={(event) => setDispatchForm((current) => ({ ...current, vehicleNumber: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                  </label>
-                  <label className="block md:col-span-2">
-                    <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
-                    <textarea value={dispatchForm.transportNotes} onChange={(event) => setDispatchForm((current) => ({ ...current, transportNotes: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" rows={2} />
-                  </label>
-                </div>
+                {shouldShowHqDispatchTransportFields() ? null : (
+                  <p className="text-sm text-slate-600">{t('distribution.hqDispatchNoTransportHint')}</p>
+                )}
               </section>
             ) : null}
             {(weightSummary || Number(order.totalShipmentWeightKg ?? 0) > 0) && !showFinancials && !(order.status === 'PACKED' && canDispatch) ? (

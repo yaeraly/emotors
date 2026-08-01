@@ -1,89 +1,172 @@
+import { Prisma } from '@prisma/client';
+import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
+
+export const BRANCH_TRANSPORT_MISSING_WEIGHT_MESSAGE =
+  'Невозможно распределить транспортные расходы. Для некоторых товаров не указан вес одной единицы.';
+
 export type BranchReceivingTransportLineInput = {
   productId: string;
+  sku?: string;
+  productName?: string;
   receivedQuantity: number;
-  weightKg: number;
-  unitCostKgs: number;
+  weightKg: number | Prisma.Decimal | string;
+  unitCostKgs: number | Prisma.Decimal | string;
 };
 
 export type BranchReceivingTransportLineCost = {
   productId: string;
+  itemTotalWeightKg: number;
   transportExpenseAllocation: number;
   transportCostPerUnit: number;
   finalUnitCostKgs: number;
 };
 
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+export type MissingWeightProduct = {
+  productId: string;
+  sku: string | null;
+  productName: string | null;
+  weightKg: number;
+};
+
+function toDecimal(value: number | Prisma.Decimal | string): Prisma.Decimal {
+  return value instanceof Prisma.Decimal ? value : new Prisma.Decimal(value);
 }
 
+function roundWeight(value: Prisma.Decimal): number {
+  return value.toDecimalPlaces(3, Prisma.Decimal.ROUND_HALF_UP).toNumber();
+}
+
+export function collectMissingWeightProducts(
+  items: BranchReceivingTransportLineInput[],
+): MissingWeightProduct[] {
+  const missing: MissingWeightProduct[] = [];
+  for (const item of items) {
+    if (item.receivedQuantity <= 0) continue;
+    const weight = toDecimal(item.weightKg ?? 0);
+    if (weight.lte(0)) {
+      missing.push({
+        productId: item.productId,
+        sku: item.sku ?? null,
+        productName: item.productName ?? null,
+        weightKg: weight.toNumber(),
+      });
+    }
+  }
+  return missing;
+}
+
+export function assertPositiveUnitWeights(items: BranchReceivingTransportLineInput[]) {
+  const missing = collectMissingWeightProducts(items);
+  if (missing.length) {
+    const error = new Error(BRANCH_TRANSPORT_MISSING_WEIGHT_MESSAGE) as Error & {
+      missingWeightProducts: MissingWeightProduct[];
+    };
+    error.missingWeightProducts = missing;
+    throw error;
+  }
+}
+
+/**
+ * Allocate branch transport cost by received quantity × unit weight.
+ * Authoritative money math uses Prisma Decimal; remainder is assigned to the
+ * heaviest line (then stable productId) so totals equal the entered cost exactly.
+ */
 export function allocateBranchReceivingTransportCost(
   items: BranchReceivingTransportLineInput[],
-  transportCostKgs: number,
+  transportCostKgs: number | Prisma.Decimal | string,
 ): BranchReceivingTransportLineCost[] {
   const receivedLines = items.filter((item) => item.receivedQuantity > 0);
   if (!receivedLines.length) return [];
 
-  const safeTransport = Math.max(Number(transportCostKgs) || 0, 0);
-  const lineWeights = receivedLines.map((item) => {
-    const unitWeight = Number(item.weightKg) > 0 ? Number(item.weightKg) : 0;
-    const lineWeight = unitWeight > 0 ? unitWeight * item.receivedQuantity : 0;
-    return { productId: item.productId, lineWeight, receivedQuantity: item.receivedQuantity };
-  });
-  const totalWeight = lineWeights.reduce((sum, row) => sum + row.lineWeight, 0);
-  const totalQuantity = receivedLines.reduce((sum, item) => sum + item.receivedQuantity, 0);
+  assertPositiveUnitWeights(receivedLines);
 
-  const rawAllocations = receivedLines.map((item) => {
-    const weightRow = lineWeights.find((row) => row.productId === item.productId);
-    const lineWeight = weightRow?.lineWeight ?? 0;
-    let share = 0;
-    if (safeTransport > 0) {
-      if (totalWeight > 0 && lineWeight > 0) {
-        share = lineWeight / totalWeight;
-      } else if (totalQuantity > 0) {
-        share = item.receivedQuantity / totalQuantity;
-      }
-    }
+  const targetTransport = toDecimal(transportCostKgs ?? 0);
+  if (targetTransport.lt(0)) {
+    throw new Error('Transport cost cannot be negative');
+  }
+  const safeTransport = targetTransport.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 
-    const transportExpenseAllocation = roundMoney(safeTransport * share);
-    const transportCostPerUnit =
-      item.receivedQuantity > 0 ? transportExpenseAllocation / item.receivedQuantity : 0;
-    const finalUnitCostKgs = roundMoney(Number(item.unitCostKgs) + transportCostPerUnit);
-
+  const prepared = receivedLines.map((item) => {
+    const unitWeight = toDecimal(item.weightKg);
+    const qty = new Prisma.Decimal(item.receivedQuantity);
+    const itemTotalWeight = unitWeight.mul(qty);
     return {
       productId: item.productId,
-      transportExpenseAllocation,
-      transportCostPerUnit: roundMoney(transportCostPerUnit),
-      finalUnitCostKgs,
-      lineWeight,
+      receivedQuantity: item.receivedQuantity,
+      unitCostKgs: toDecimal(item.unitCostKgs),
+      itemTotalWeight,
     };
   });
 
-  if (safeTransport <= 0) {
-    return rawAllocations.map(({ lineWeight: _lineWeight, ...row }) => row);
+  const shipmentTotalWeight = prepared.reduce(
+    (sum, row) => sum.plus(row.itemTotalWeight),
+    new Prisma.Decimal(0),
+  );
+  if (shipmentTotalWeight.lte(0)) {
+    throw new Error(BRANCH_TRANSPORT_MISSING_WEIGHT_MESSAGE);
   }
 
-  const allocatedTotal = rawAllocations.reduce((sum, row) => sum + row.transportExpenseAllocation, 0);
-  const remainder = roundMoney(safeTransport - allocatedTotal);
-  if (remainder !== 0) {
-    const largestLine = [...rawAllocations].sort((a, b) => {
-      if (b.lineWeight !== a.lineWeight) return b.lineWeight - a.lineWeight;
+  if (safeTransport.lte(0)) {
+    return prepared.map((row) => ({
+      productId: row.productId,
+      itemTotalWeightKg: roundWeight(row.itemTotalWeight),
+      transportExpenseAllocation: 0,
+      transportCostPerUnit: 0,
+      finalUnitCostKgs: roundDisplayMoney(row.unitCostKgs),
+    }));
+  }
+
+  const rawAllocations = prepared.map((row) => {
+    const rawShare = safeTransport.mul(row.itemTotalWeight.div(shipmentTotalWeight));
+    return {
+      ...row,
+      rawAllocation: rawShare,
+      transportExpenseAllocation: roundDisplayMoney(rawShare),
+    };
+  });
+
+  const allocatedTotal = rawAllocations.reduce(
+    (sum, row) => sum.plus(toDecimal(row.transportExpenseAllocation)),
+    new Prisma.Decimal(0),
+  );
+  const remainder = safeTransport
+    .minus(allocatedTotal)
+    .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+
+  if (!remainder.isZero()) {
+    const target = [...rawAllocations].sort((a, b) => {
+      const weightCmp = b.itemTotalWeight.comparedTo(a.itemTotalWeight);
+      if (weightCmp !== 0) return weightCmp;
       return a.productId.localeCompare(b.productId);
     })[0];
-    if (largestLine) {
-      const sourceLine = receivedLines.find((line) => line.productId === largestLine.productId);
-      largestLine.transportExpenseAllocation = roundMoney(
-        largestLine.transportExpenseAllocation + remainder,
-      );
-      largestLine.transportCostPerUnit = roundMoney(
-        sourceLine && sourceLine.receivedQuantity > 0
-          ? largestLine.transportExpenseAllocation / sourceLine.receivedQuantity
-          : 0,
-      );
-      largestLine.finalUnitCostKgs = roundMoney(
-        Number(sourceLine?.unitCostKgs ?? 0) + largestLine.transportCostPerUnit,
+    if (target) {
+      target.transportExpenseAllocation = roundDisplayMoney(
+        toDecimal(target.transportExpenseAllocation).plus(remainder),
       );
     }
   }
 
-  return rawAllocations.map(({ lineWeight: _lineWeight, ...row }) => row);
+  return rawAllocations.map((row) => {
+    const allocation = toDecimal(row.transportExpenseAllocation);
+    const perUnit =
+      row.receivedQuantity > 0
+        ? allocation.div(row.receivedQuantity)
+        : new Prisma.Decimal(0);
+    return {
+      productId: row.productId,
+      itemTotalWeightKg: roundWeight(row.itemTotalWeight),
+      transportExpenseAllocation: roundDisplayMoney(allocation),
+      transportCostPerUnit: roundDisplayMoney(perUnit),
+      finalUnitCostKgs: roundDisplayMoney(row.unitCostKgs.plus(perUnit)),
+    };
+  });
+}
+
+export function sumAllocatedTransportCost(rows: BranchReceivingTransportLineCost[]): number {
+  return roundDisplayMoney(
+    rows.reduce(
+      (sum, row) => sum.plus(toDecimal(row.transportExpenseAllocation)),
+      new Prisma.Decimal(0),
+    ),
+  );
 }
