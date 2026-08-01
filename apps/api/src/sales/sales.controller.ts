@@ -15,7 +15,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../roles/roles.decorator';
 import { RolesGuard } from '../roles/roles.guard';
 import { AddPaymentDto } from './dto/add-payment.dto';
+import { ApproveSaleInstallmentDto } from './dto/approve-sale-installment.dto';
+import { CancelSaleInstallmentDto } from './dto/cancel-sale-installment.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import { SaleInstallmentRequestQueryDto } from './dto/sale-installment-request-query.dto';
 import { SaleQueryDto } from './dto/sale-query.dto';
 import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
 import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
@@ -86,8 +89,17 @@ export class SalesController {
 
   @Get('installment-requests')
   @Roles(Role.FRANCHISE_OWNER)
-  listInstallmentRequests(@CurrentUser() user: AuthUser) {
-    return this.saleInstallmentApprovalService.listInstallmentRequests(user);
+  listInstallmentRequests(
+    @CurrentUser() user: AuthUser,
+    @Query() query: SaleInstallmentRequestQueryDto,
+  ) {
+    return this.saleInstallmentApprovalService.listInstallmentRequests(user, query);
+  }
+
+  @Get('installment-requests/:saleId')
+  @Roles(Role.FRANCHISE_OWNER, Role.MANAGER)
+  findInstallmentRequest(@CurrentUser() user: AuthUser, @Param('saleId') saleId: string) {
+    return this.saleInstallmentApprovalService.findInstallmentRequest(user, saleId);
   }
 
   @Post(':id/installment-request/submit')
@@ -98,8 +110,12 @@ export class SalesController {
 
   @Post(':id/installment-request/approve')
   @Roles(Role.FRANCHISE_OWNER)
-  approveInstallmentRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.saleInstallmentApprovalService.approveInstallmentRequest(user, id);
+  approveInstallmentRequest(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ApproveSaleInstallmentDto,
+  ) {
+    return this.saleInstallmentApprovalService.approveInstallmentRequest(user, id, dto);
   }
 
   @Post(':id/installment-request/reject')
@@ -110,6 +126,16 @@ export class SalesController {
     @Body() dto: RejectSaleInstallmentDto,
   ) {
     return this.saleInstallmentApprovalService.rejectInstallmentRequest(user, id, dto);
+  }
+
+  @Post(':id/installment-request/cancel')
+  @Roles(Role.FRANCHISE_OWNER)
+  cancelInstallmentRequest(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: CancelSaleInstallmentDto,
+  ) {
+    return this.saleInstallmentApprovalService.cancelInstallmentRequest(user, id, dto);
   }
 
   @Get('customer-options')

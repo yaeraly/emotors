@@ -205,7 +205,6 @@ export default function NewSalePage() {
   const installmentApproval = draftSale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
   const installmentPending =
-    installmentApproval?.status === 'PENDING_APPROVAL' ||
     installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
   const installmentApproved = installmentApproval?.status === 'APPROVED';
   const installmentRejected = installmentApproval?.status === 'REJECTED';

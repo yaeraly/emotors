@@ -9,6 +9,7 @@ import {
   AlertType,
   PaymentMethod,
   PaymentRecordStatus,
+  PaymentStatus,
   Prisma,
   Role,
   SaleInstallmentApprovalStatus,
@@ -24,7 +25,19 @@ import {
 } from '../rbac/rbac';
 import { ReceiveInstallmentPaymentDto } from './dto/receive-installment-payment.dto';
 import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
+import { ApproveSaleInstallmentDto } from './dto/approve-sale-installment.dto';
+import { CancelSaleInstallmentDto } from './dto/cancel-sale-installment.dto';
+import { SaleInstallmentRequestQueryDto } from './dto/sale-installment-request-query.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
+import {
+  assertBranchCeoCanApproveInstallment,
+  assertBranchCeoCanCancelInstallment,
+  assertBranchCeoCanRejectInstallment,
+  BRANCH_CEO_PENDING_STATUSES,
+  INSTALLMENT_DECISION_CONFLICT_MESSAGE,
+  resolveStatusAfterBranchCeoApproval,
+  validateInstallmentTerms,
+} from './sale-installment-workflow.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -34,13 +47,14 @@ type SaleWithApprovalContext = {
   customerId: string;
   receiptNumber: string;
   status: SaleStatus;
+  paymentStatus: PaymentStatus;
   totalAmount: Prisma.Decimal;
   paidAmount: Prisma.Decimal;
   debtAmount: Prisma.Decimal;
   notes: string | null;
   sellerId: string;
   seller: { fullName: string };
-  customer: { fullName: string };
+  customer: { fullName: string; customerType?: string };
   items: Array<{
     productId: string | null;
     quantity: number;
@@ -63,8 +77,8 @@ type SaleWithApprovalContext = {
 };
 
 const PENDING_STATUSES: SaleInstallmentApprovalStatus[] = [
+  ...BRANCH_CEO_PENDING_STATUSES,
   SaleInstallmentApprovalStatus.PENDING_APPROVAL,
-  SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL,
 ];
 
 @Injectable()
@@ -201,7 +215,8 @@ export class SaleInstallmentApprovalService {
         data: {
           ...data,
           status:
-            existing.status === SaleInstallmentApprovalStatus.REJECTED
+            existing.status === SaleInstallmentApprovalStatus.REJECTED ||
+            existing.status === SaleInstallmentApprovalStatus.CANCELLED
               ? SaleInstallmentApprovalStatus.DRAFT
               : existing.status,
         },
@@ -221,26 +236,53 @@ export class SaleInstallmentApprovalService {
     });
   }
 
-  async listInstallmentRequests(user: AuthUser) {
+  async listInstallmentRequests(user: AuthUser, query: SaleInstallmentRequestQueryDto = {}) {
     if (!isBranchOwnerUser(user)) {
       throw new ForbiddenException('Недостаточно прав для просмотра заявок на рассрочку');
     }
+
+    const submittedAt: Prisma.DateTimeFilter = {};
+    if (query.from) {
+      submittedAt.gte = new Date(query.from);
+    }
+    if (query.to) {
+      const end = new Date(query.to);
+      end.setHours(23, 59, 59, 999);
+      submittedAt.lte = end;
+    }
+
+    const search = query.search?.trim();
     const rows = await this.prisma.saleInstallmentApproval.findMany({
       where: {
         branchId: user.branchId!,
-        status: {
-          in: [
-            ...PENDING_STATUSES,
-            SaleInstallmentApprovalStatus.APPROVED,
-            SaleInstallmentApprovalStatus.REJECTED,
-          ],
-        },
+        ...(query.status
+          ? { status: query.status }
+          : {
+              status: {
+                not: SaleInstallmentApprovalStatus.DRAFT,
+              },
+            }),
+        ...(Object.keys(submittedAt).length ? { submittedAt } : {}),
+        ...(search
+          ? {
+              OR: [
+                { requestNumber: { contains: search, mode: 'insensitive' } },
+                { sale: { receiptNumber: { contains: search, mode: 'insensitive' } } },
+                { sale: { customer: { fullName: { contains: search, mode: 'insensitive' } } } },
+                { sale: { customer: { phone: { contains: search, mode: 'insensitive' } } } },
+              ],
+            }
+          : {}),
       },
       include: {
         sale: {
           include: {
-            customer: { select: { id: true, fullName: true, phone: true } },
+            customer: {
+              select: { id: true, fullName: true, phone: true, customerType: true },
+            },
             seller: { select: { id: true, fullName: true } },
+            branch: { select: { id: true, name: true, code: true } },
+            installments: { orderBy: { dueDate: 'asc' } },
           },
         },
         submittedBy: { select: { id: true, fullName: true, role: true } },
@@ -256,8 +298,64 @@ export class SaleInstallmentApprovalService {
         totalAmount: Number(row.sale.totalAmount),
         paidAmount: Number(row.sale.paidAmount),
         debtAmount: Number(row.sale.debtAmount),
+        installments: row.sale.installments.map((installment) => ({
+          ...installment,
+          amount: Number(installment.amount),
+          paidAmount: Number(installment.paidAmount),
+        })),
       },
     }));
+  }
+
+  async findInstallmentRequest(user: AuthUser, saleId: string) {
+    if (!isBranchOwnerUser(user) && !isBranchSalesManagerUser(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра заявки на рассрочку');
+    }
+
+    const row = await this.prisma.saleInstallmentApproval.findFirst({
+      where: {
+        saleId,
+        ...(user.branchId ? { branchId: user.branchId } : {}),
+      },
+      include: {
+        sale: {
+          include: {
+            customer: true,
+            seller: { select: { id: true, fullName: true, role: true } },
+            branch: { select: { id: true, name: true, code: true } },
+            items: true,
+            installments: { orderBy: { dueDate: 'asc' } },
+          },
+        },
+        submittedBy: { select: { id: true, fullName: true, role: true } },
+        approvedBy: { select: { id: true, fullName: true, role: true } },
+        rejectedBy: { select: { id: true, fullName: true, role: true } },
+      },
+    });
+
+    if (!row) {
+      throw new NotFoundException('Заявка на рассрочку не найдена');
+    }
+
+    return {
+      ...this.serializeApproval(row),
+      sale: {
+        ...row.sale,
+        totalAmount: Number(row.sale.totalAmount),
+        paidAmount: Number(row.sale.paidAmount),
+        debtAmount: Number(row.sale.debtAmount),
+        items: row.sale.items.map((item) => ({
+          ...item,
+          unitPrice: Number(item.unitPrice),
+          totalPrice: Number(item.totalPrice),
+        })),
+        installments: row.sale.installments.map((installment) => ({
+          ...installment,
+          amount: Number(installment.amount),
+          paidAmount: Number(installment.paidAmount),
+        })),
+      },
+    };
   }
 
   async submitInstallmentRequest(user: AuthUser, saleId: string) {
@@ -287,9 +385,10 @@ export class SaleInstallmentApprovalService {
       const updatedApproval = await tx.saleInstallmentApproval.update({
         where: { id: existing.id },
         data: {
-          status: SaleInstallmentApprovalStatus.PENDING_APPROVAL,
+          status: SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL,
           requestVersion:
-            existing.status === SaleInstallmentApprovalStatus.REJECTED
+            existing.status === SaleInstallmentApprovalStatus.REJECTED ||
+            existing.status === SaleInstallmentApprovalStatus.CANCELLED
               ? existing.requestVersion + 1
               : existing.requestVersion,
           termsSnapshot: terms.snapshot,
@@ -310,19 +409,23 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_SUBMITTED_FOR_APPROVAL', 'SaleInstallmentApproval', updatedApproval.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_SUBMITTED', 'SaleInstallmentApproval', updatedApproval.id, {
         saleId: sale.id,
+        orderId: sale.id,
         requestVersion: updatedApproval.requestVersion,
         previousStatus: approval.status,
         newStatus: updatedApproval.status,
-        paymentType: 'INSTALLMENT',
+        saleTotal: Number(sale.totalAmount),
+        initialPayment: downPayment,
+        remainingDebt,
+        term: approval.dueDate?.toISOString() ?? null,
       });
 
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.SALE_INSTALLMENT_REQUESTED,
         branchId: sale.branchId,
         title: 'Новая заявка на рассрочку',
-        message: `Новая заявка на рассрочку №${updatedApproval.requestNumber} от менеджера ${user.fullName}. Клиент: ${sale.customer.fullName}. Сумма: ${Number(sale.totalAmount).toFixed(2)}.`,
+        message: `Новая заявка на рассрочку №${updatedApproval.requestNumber} от менеджера ${user.fullName}. Клиент: ${sale.customer.fullName}. Сумма: ${Number(sale.totalAmount).toFixed(2)}. Первоначальный взнос: ${downPayment.toFixed(2)}. Остаток: ${remainingDebt.toFixed(2)}.`,
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updatedApproval.requestNumber,
@@ -333,7 +436,7 @@ export class SaleInstallmentApprovalService {
     });
   }
 
-  async approveInstallmentRequest(user: AuthUser, saleId: string) {
+  async approveInstallmentRequest(user: AuthUser, saleId: string, dto: ApproveSaleInstallmentDto = {}) {
     if (!isBranchOwnerUser(user)) {
       throw new ForbiddenException('Недостаточно прав одобрять рассрочку');
     }
@@ -344,30 +447,44 @@ export class SaleInstallmentApprovalService {
       if (!approval) {
         throw new NotFoundException('Заявка на рассрочку не найдена');
       }
-      if (!PENDING_STATUSES.includes(approval.status)) {
-        throw new ConflictException('Заявка уже рассмотрена');
-      }
+      assertBranchCeoCanApproveInstallment(approval.status);
       this.assertTermsMatch(sale, approval);
+      validateInstallmentTerms({
+        totalAmount: Number(sale.totalAmount),
+        initialPayment: Number(approval.initialPayment),
+        financedAmount: Number(approval.financedAmount),
+        dueDate: approval.dueDate ?? null,
+      });
 
+      const previousStatus = approval.status;
+      const nextStatus = resolveStatusAfterBranchCeoApproval();
       const updated = await tx.saleInstallmentApproval.update({
         where: { id: approval.id },
         data: {
-          status: SaleInstallmentApprovalStatus.APPROVED,
+          status: nextStatus,
           approvedById: user.id,
           approvedAt: new Date(),
         },
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'SALE_INSTALLMENT_APPROVED', 'SaleInstallmentApproval', updated.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_APPROVED', 'SaleInstallmentApproval', updated.id, {
         saleId: sale.id,
+        orderId: sale.id,
+        previousStatus,
+        newStatus: updated.status,
+        saleTotal: Number(sale.totalAmount),
+        initialPayment: Number(approval.initialPayment),
+        remainingDebt: Number(approval.financedAmount),
+        term: approval.dueDate?.toISOString() ?? null,
+        reason: dto.approvalComment?.trim() || null,
       });
 
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.SALE_INSTALLMENT_APPROVED,
         branchId: sale.branchId,
         title: 'Рассрочка одобрена',
-        message: `Заявка на рассрочку №${updated.requestNumber} одобрена.`,
+        message: `Заявка на рассрочку №${updated.requestNumber} одобрена руководителем филиала.${dto.approvalComment?.trim() ? ` Комментарий: ${dto.approvalComment.trim()}.` : ''}`,
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updated.requestNumber,
@@ -389,31 +506,95 @@ export class SaleInstallmentApprovalService {
       if (!approval) {
         throw new NotFoundException('Заявка на рассрочку не найдена');
       }
-      if (!PENDING_STATUSES.includes(approval.status)) {
-        throw new ConflictException('Заявка уже рассмотрена');
-      }
+      assertBranchCeoCanRejectInstallment(approval.status);
 
+      const previousStatus = approval.status;
+      const rejectionReason = dto.rejectionReason.trim();
       const updated = await tx.saleInstallmentApproval.update({
         where: { id: approval.id },
         data: {
           status: SaleInstallmentApprovalStatus.REJECTED,
           rejectedById: user.id,
           rejectedAt: new Date(),
-          rejectionReason: dto.rejectionReason.trim(),
+          rejectionReason,
         },
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'SALE_INSTALLMENT_REJECTED', 'SaleInstallmentApproval', updated.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_REJECTED', 'SaleInstallmentApproval', updated.id, {
         saleId: sale.id,
-        rejectionReason: dto.rejectionReason.trim(),
+        orderId: sale.id,
+        previousStatus,
+        newStatus: updated.status,
+        saleTotal: Number(sale.totalAmount),
+        initialPayment: Number(approval.initialPayment),
+        remainingDebt: Number(approval.financedAmount),
+        term: approval.dueDate?.toISOString() ?? null,
+        reason: rejectionReason,
       });
 
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.SALE_INSTALLMENT_REJECTED,
         branchId: sale.branchId,
         title: 'Рассрочка отклонена',
-        message: `Заявка на рассрочку №${updated.requestNumber} отклонена. Причина: ${dto.rejectionReason.trim()}.`,
+        message: `Заявка на рассрочку №${updated.requestNumber} отклонена. Причина: ${rejectionReason}.`,
+        entityType: 'Sale',
+        entityId: sale.id,
+        referenceNumber: updated.requestNumber,
+        recipientRoles: [Role.MANAGER],
+      });
+
+      return this.serializeApproval(updated);
+    });
+  }
+
+  async cancelInstallmentRequest(user: AuthUser, saleId: string, dto: CancelSaleInstallmentDto) {
+    if (!isBranchOwnerUser(user)) {
+      throw new ForbiddenException('Недостаточно прав отменять рассрочку');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await this.getSaleForApproval(tx, user, saleId);
+      const approval = sale.installmentApproval;
+      if (!approval) {
+        throw new NotFoundException('Заявка на рассрочку не найдена');
+      }
+
+      assertBranchCeoCanCancelInstallment({
+        approvalStatus: approval.status,
+        saleStatus: sale.status,
+        salePaidAmount: Number(sale.paidAmount),
+        salePaymentStatus: sale.paymentStatus,
+      });
+
+      const previousStatus = approval.status;
+      const cancellationReason = dto.cancellationReason.trim();
+      const updated = await tx.saleInstallmentApproval.update({
+        where: { id: approval.id },
+        data: {
+          status: SaleInstallmentApprovalStatus.CANCELLED,
+          rejectionReason: cancellationReason,
+        },
+        include: this.installmentApprovalInclude(),
+      });
+
+      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_CANCELLED', 'SaleInstallmentApproval', updated.id, {
+        saleId: sale.id,
+        orderId: sale.id,
+        previousStatus,
+        newStatus: updated.status,
+        saleTotal: Number(sale.totalAmount),
+        initialPayment: Number(approval.initialPayment),
+        remainingDebt: Number(approval.financedAmount),
+        term: approval.dueDate?.toISOString() ?? null,
+        reason: cancellationReason,
+      });
+
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.SALE_INSTALLMENT_REJECTED,
+        branchId: sale.branchId,
+        title: 'Рассрочка отменена',
+        message: `Заявка на рассрочку №${updated.requestNumber} отменена. Причина: ${cancellationReason}.`,
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updated.requestNumber,

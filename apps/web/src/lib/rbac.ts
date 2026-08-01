@@ -1295,6 +1295,12 @@ export function canApproveSaleInstallmentRequest(
   return isBranchOwnerUser(user);
 }
 
+export function canCancelSaleInstallmentRequest(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+) {
+  return isBranchOwnerUser(user);
+}
+
 export function isBranchCashierForbiddenPath(pathname: string) {
   return BRANCH_CASHIER_FORBIDDEN_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

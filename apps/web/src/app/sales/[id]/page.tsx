@@ -9,6 +9,7 @@ import {
   canApproveSale,
   canApproveSaleInstallmentRequest,
   canCancelSale,
+  canCancelSaleInstallmentRequest,
   canManageSaleWorkflow,
   canSubmitSaleInstallmentRequest,
   canUpdateBusinessDate,
@@ -16,8 +17,10 @@ import {
   shouldHideSaleProfitColumn,
 } from '@/lib/rbac';
 import {
+  canBranchCeoCancelInstallmentRequest,
   installmentBlocksCompletion,
   installmentStatusLabelKey,
+  isPendingBranchCeoInstallmentDecision,
   saleIsInstallment,
 } from '@/lib/sale-installment';
 import { SaleReceipt } from '@/components/sales/SaleReceipt';
@@ -43,7 +46,10 @@ export default function SaleDetailPage() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [submittingInstallment, setSubmittingInstallment] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [approvalComment, setApprovalComment] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
+  const [showCancelForm, setShowCancelForm] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -158,9 +164,39 @@ export default function SaleDetailPage() {
     setError('');
     setSuccess('');
     try {
-      await apiFetch(`/sales/${saleId}/installment-request/approve`, { method: 'POST' });
+      await apiFetch(`/sales/${saleId}/installment-request/approve`, {
+        method: 'POST',
+        body: JSON.stringify({
+          approvalComment: approvalComment.trim() || undefined,
+        }),
+      });
       await loadSale();
+      setApprovalComment('');
       setSuccess(t('sales.installmentRequestApproved'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmittingInstallment(false);
+    }
+  }
+
+  async function cancelInstallmentRequest() {
+    if (!cancellationReason.trim()) {
+      setError(t('sales.installmentCancellationReasonRequired'));
+      return;
+    }
+    setSubmittingInstallment(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/sales/${saleId}/installment-request/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ cancellationReason: cancellationReason.trim() }),
+      });
+      setShowCancelForm(false);
+      setCancellationReason('');
+      await loadSale();
+      setSuccess(t('sales.installmentRequestCancelled'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -196,11 +232,13 @@ export default function SaleDetailPage() {
   const isInstallment = saleIsInstallment(sale);
   const installmentApproval = sale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
-  const installmentPending =
-    installmentApproval?.status === 'PENDING_APPROVAL' ||
-    installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
+  const installmentPending = isPendingBranchCeoInstallmentDecision(installmentApproval?.status);
   const installmentApproved = installmentApproval?.status === 'APPROVED';
   const installmentRejected = installmentApproval?.status === 'REJECTED';
+  const installmentCancelled = installmentApproval?.status === 'CANCELLED';
+  const canCancelInstallment =
+    canCancelSaleInstallmentRequest(currentUser) &&
+    canBranchCeoCancelInstallmentRequest(installmentApproval, sale);
   const canFinalize =
     Boolean(sale) &&
     sale?.status !== 'FINALIZED' &&
@@ -325,6 +363,12 @@ export default function SaleDetailPage() {
                   isInstallment &&
                   installmentPending ? (
                     <>
+                      <input
+                        value={approvalComment}
+                        onChange={(event) => setApprovalComment(event.target.value)}
+                        placeholder={t('sales.installmentApprovalComment')}
+                        className="min-w-[220px] rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                      />
                       <button
                         onClick={() => void approveInstallmentRequest()}
                         disabled={submittingInstallment}
@@ -342,6 +386,16 @@ export default function SaleDetailPage() {
                         {t('sales.rejectInstallment')}
                       </button>
                     </>
+                  ) : null}
+                  {canCancelInstallment ? (
+                    <button
+                      onClick={() => setShowCancelForm((value) => !value)}
+                      disabled={submittingInstallment}
+                      type="button"
+                      className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                    >
+                      {t('sales.cancelInstallment')}
+                    </button>
                   ) : null}
                   <button
                     onClick={() => void runSaleAction('finalize')}
@@ -534,7 +588,7 @@ export default function SaleDetailPage() {
                     className={`mb-4 rounded-xl px-4 py-3 text-sm font-semibold ${
                       installmentApproved
                         ? 'bg-green-50 text-green-800'
-                        : installmentRejected
+                        : installmentRejected || installmentCancelled
                           ? 'bg-red-50 text-red-700'
                           : 'bg-amber-50 text-amber-800'
                     }`}
@@ -543,7 +597,30 @@ export default function SaleDetailPage() {
                     {installmentRejected && installmentApproval?.rejectionReason
                       ? `: ${installmentApproval.rejectionReason}`
                       : ''}
+                    {installmentCancelled && installmentApproval?.rejectionReason
+                      ? `: ${installmentApproval.rejectionReason}`
+                      : ''}
                   </p>
+                ) : null}
+                {showCancelForm ? (
+                  <div className="mb-4 space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <label className="block text-sm font-semibold text-amber-900">
+                      {t('sales.installmentCancellationReason')}
+                      <textarea
+                        value={cancellationReason}
+                        onChange={(event) => setCancellationReason(event.target.value)}
+                        className="mt-2 w-full rounded-xl border border-amber-200 px-3 py-2 text-sm text-slate-900"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={submittingInstallment}
+                      onClick={() => void cancelInstallmentRequest()}
+                      className="rounded-xl bg-amber-700 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-50"
+                    >
+                      {t('sales.confirmCancelInstallment')}
+                    </button>
+                  </div>
                 ) : null}
                 {showRejectForm ? (
                   <div className="mb-4 space-y-2 rounded-xl border border-red-200 bg-red-50 p-4">
