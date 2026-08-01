@@ -1306,9 +1306,25 @@ export class PricingFifoService {
           warehouseId: input.branchWarehouseId,
           type: StockMovementType.IN,
         },
-        select: { id: true },
+        select: { id: true, totalCostKgs: true, unitCostKgs: true },
       });
       if (existingMovement) {
+        // Idempotent cost repair: never leave unit×qty drift on an existing Branch receipt line.
+        const existingTotal = roundDisplayMoney(existingMovement.totalCostKgs ?? 0);
+        const correctTotal = roundDisplayMoney(line.lineTotalCostKgs);
+        if (existingTotal !== correctTotal) {
+          await tx.stockMovement.update({
+            where: { id: existingMovement.id },
+            data: {
+              unitCostKgs: line.finalBranchUnitCostKgs,
+              totalCostKgs: correctTotal,
+            },
+          });
+          await tx.fifoInventoryBatch.updateMany({
+            where: { stockMovementId: existingMovement.id },
+            data: { unitCostKgs: line.finalBranchUnitCostKgs },
+          });
+        }
         const existingBatch = await tx.fifoInventoryBatch.findFirst({
           where: { stockMovementId: existingMovement.id },
           select: { id: true },

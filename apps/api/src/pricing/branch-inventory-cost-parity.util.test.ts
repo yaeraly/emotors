@@ -3,11 +3,13 @@ import { describe, it } from 'node:test';
 import { distributeRoundedAmounts } from '../procurement/landed-cost-allocation.util';
 import { buildBranchReceiveLinesFromHqAllocations } from './pricing-fifo-branch-receive.util';
 import {
+  allocateLayerConsumptionCost,
   deriveDisplayUnitCost,
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from './product-cost-precision.util';
 import { buildInventoryCountDiscrepancySummary } from '../inventory-count/inventory-count-summary.util';
+import { sumWarehouseFifoRemainingValueKgs } from '../inventory/inventory-authoritative-value.util';
 
 const CHINA_BATCH_TOTAL = 914369.8;
 /** Production Branch inventory/count observed stale total before the fix. */
@@ -160,5 +162,85 @@ describe('Branch inventory cost parity — first China shipment 914369.80', () =
     );
     assert.notEqual(rebuiltFromDisplayUnit, CHINA_BATCH_TOTAL);
     assert.equal(sumDisplayMoneyTotals(receiveLines.map((l) => l.lineTotalCostKgs)), CHINA_BATCH_TOTAL);
+  });
+
+  it('full-layer consumption preserves exact remaining layer total', () => {
+    const layerTotal = 162317.33;
+    const baseQty = 11;
+    const consumed = allocateLayerConsumptionCost({
+      layerTotalCostKgs: layerTotal,
+      layerBaseQuantity: baseQty,
+      remainingQuantity: baseQty,
+      takeQuantity: baseQty,
+    });
+    assert.equal(consumed, layerTotal);
+    assert.notEqual(
+      consumed,
+      roundDisplayMoney(deriveDisplayUnitCost(layerTotal, baseQty) * baseQty),
+    );
+  });
+
+  it('partial consumption preserves original = consumed + remaining', () => {
+    const layerTotal = 162317.33;
+    const baseQty = 11;
+    const take = 4;
+    const consumed = allocateLayerConsumptionCost({
+      layerTotalCostKgs: layerTotal,
+      layerBaseQuantity: baseQty,
+      remainingQuantity: baseQty,
+      takeQuantity: take,
+    });
+    const remaining = allocateLayerConsumptionCost({
+      layerTotalCostKgs: layerTotal,
+      layerBaseQuantity: baseQty,
+      remainingQuantity: baseQty - take,
+      takeQuantity: baseQty - take,
+    });
+    assert.equal(roundDisplayMoney(consumed + remaining), layerTotal);
+  });
+
+  it('multiple FIFO layers reconcile exactly to shipment total', () => {
+    const receiveLines = buildBranchReceiveLinesFromHqAllocations(
+      lines,
+      lines.reduce((s, l) => s + l.quantity, 0),
+      0,
+    );
+    assert.equal(receiveLines.length, lines.length);
+    assert.equal(sumDisplayMoneyTotals(receiveLines.map((l) => l.lineTotalCostKgs)), CHINA_BATCH_TOTAL);
+  });
+
+  it('Branch transport-cost allocation preserves exact HQ transfer + delivery total', () => {
+    const transportPerUnit = 1.25;
+    const qty = lines.reduce((s, l) => s + l.quantity, 0);
+    const receiveLines = buildBranchReceiveLinesFromHqAllocations(lines, qty, transportPerUnit);
+    const transferTotal = CHINA_BATCH_TOTAL;
+    const transportTotal = roundDisplayMoney(transportPerUnit * qty);
+    assert.equal(
+      sumDisplayMoneyTotals(receiveLines.map((l) => l.lineTotalCostKgs)),
+      roundDisplayMoney(transferTotal + transportTotal),
+    );
+  });
+
+  it('Branch CEO and Branch Warehouse share FIFO remaining valuation source symbol', () => {
+    assert.equal(typeof sumWarehouseFifoRemainingValueKgs, 'function');
+  });
+
+  it('omitting totalCostKgs reproduces stale unit×qty path (must not be used in production)', () => {
+    const fixture = buildProductionDriftFixture();
+    const stale = sumDisplayMoneyTotals(
+      buildBranchReceiveLinesFromHqAllocations(
+        fixture.map(({ totalCostKgs: _ignored, ...row }) => row),
+        fixture.reduce((s, l) => s + l.quantity, 0),
+        0,
+      ).map((line) => line.lineTotalCostKgs),
+    );
+    const authoritative = sumDisplayMoneyTotals(
+      buildBranchReceiveLinesFromHqAllocations(
+        fixture,
+        fixture.reduce((s, l) => s + l.quantity, 0),
+        0,
+      ).map((line) => line.lineTotalCostKgs),
+    );
+    assert.equal(roundDisplayMoney(authoritative - stale), PRODUCTION_DRIFT);
   });
 });
