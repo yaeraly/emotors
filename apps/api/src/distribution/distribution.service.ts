@@ -71,6 +71,7 @@ import {
   logBranchTransferReconciliationFailure,
   reconcileBranchTransferCost,
 } from '../pricing/cost-reconciliation.util';
+import { buildBranchReceiveLinesFromHqAllocations } from '../pricing/pricing-fifo-branch-receive.util';
 import {
   deriveDisplayUnitCost,
   roundDisplayMoney,
@@ -1525,6 +1526,13 @@ export class DistributionService {
               }
 
               const unitCostWithTransport = transportCost?.finalUnitCostKgs ?? Number(orderItem.unitCost);
+              // Prefer authoritative transfer line total (HQ FIFO consumed), never unit×qty alone.
+              const authoritativeLineTotal = Number(orderItem.totalCost);
+              const transportAllocation = Number(transportCost?.transportExpenseAllocation ?? 0);
+              const fallbackLineTotal =
+                authoritativeLineTotal > 0
+                  ? this.roundMoney(authoritativeLineTotal + transportAllocation)
+                  : this.roundMoney(unitCostWithTransport * acceptedQuantity);
               const movement = await this.inventoryService.createStockMovementInTx(
                 tx,
                 user,
@@ -1534,6 +1542,7 @@ export class DistributionService {
                   type: StockMovementType.IN,
                   quantity: acceptedQuantity,
                   unitCostKgs: unitCostWithTransport,
+                  totalCostKgs: fallbackLineTotal,
                   referenceType: 'GOODS_RECEIVING_ITEM',
                   referenceId: orderItem.id,
                   note: receivingNote,
@@ -1618,6 +1627,84 @@ export class DistributionService {
         }
 
       await tx.goodsReceivingItem.createMany({ data: receivingItems });
+
+      // Guard: Branch receipt movement totals must equal authoritative HQ FIFO consumed totals
+      // (+ exact allocated branch transport). Never allow unit×qty drift to persist.
+      const hqConsumedAllocations = await tx.distributionFifoAllocation.findMany({
+        where: { distributionOrderId: order.id, status: 'CONSUMED' },
+        select: {
+          id: true,
+          productId: true,
+          totalCostKgs: true,
+          quantity: true,
+          distributionOrderItemId: true,
+          unitCostKgs: true,
+          fifoBatchId: true,
+        },
+      });
+      if (hqConsumedAllocations.length > 0) {
+        const expectedLineTotals: number[] = [];
+        for (const orderItem of order.items) {
+          const itemAllocations = hqConsumedAllocations.filter(
+            (row) => row.distributionOrderItemId === orderItem.id,
+          );
+          if (!itemAllocations.length) continue;
+          const accepted = receivedMap.get(orderItem.id)?.acceptedQuantity ?? 0;
+          if (accepted <= 0) continue;
+          const receiveLines = buildBranchReceiveLinesFromHqAllocations(
+            itemAllocations.map((row) => ({
+              id: row.id,
+              fifoBatchId: row.fifoBatchId,
+              quantity: row.quantity,
+              unitCostKgs: Number(row.unitCostKgs),
+              totalCostKgs: Number(row.totalCostKgs),
+            })),
+            accepted,
+            Number(orderItem.transportCostPerUnit ?? 0),
+          );
+          for (const line of receiveLines) {
+            expectedLineTotals.push(line.lineTotalCostKgs);
+          }
+        }
+        const expectedBranchTotal = sumDisplayMoneyTotals(expectedLineTotals);
+        const branchMovements = await tx.stockMovement.findMany({
+          where: {
+            warehouseId: warehouse.id,
+            status: StockMovementStatus.ACTIVE,
+            type: StockMovementType.IN,
+            referenceType: 'DISTRIBUTION_FIFO_ALLOCATION',
+            referenceId: { in: hqConsumedAllocations.map((row) => row.id) },
+          },
+          select: { id: true, productId: true, totalCostKgs: true },
+        });
+        const actualBranchTotal = sumDisplayMoneyTotals(
+          branchMovements.map((row) => Number(row.totalCostKgs ?? 0)),
+        );
+        const parityDifference = this.roundMoney(actualBranchTotal - expectedBranchTotal);
+        if (Math.abs(parityDifference) > 0) {
+          throw new BadRequestException(
+            `Branch receipt cost does not match HQ FIFO consumed cost. orderId=${order.id} warehouseId=${warehouse.id} productIds=${[
+              ...new Set(branchMovements.map((row) => row.productId)),
+            ].join(',')} expected=${expectedBranchTotal} actual=${actualBranchTotal} difference=${parityDifference}`,
+          );
+        }
+
+        const affectedProductIds = [
+          ...new Set(branchMovements.map((row) => row.productId).filter(Boolean)),
+        ];
+        for (const productId of affectedProductIds) {
+          const balance = await tx.inventoryBalance.findFirst({
+            where: { warehouseId: warehouse.id, productId },
+            select: { branchId: true },
+          });
+          if (!balance) continue;
+          await syncInventoryBalanceValuationFromFifoRemainingInTx(tx, {
+            warehouseId: warehouse.id,
+            productId,
+            branchId: balance.branchId,
+          });
+        }
+      }
 
       let shortageReport = null;
       if (shortageItems.length > 0) {

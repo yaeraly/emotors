@@ -1279,6 +1279,8 @@ export class PricingFifoService {
         fifoBatchId: row.fifoBatchId,
         quantity: row.quantity,
         unitCostKgs: Number(row.unitCostKgs),
+        // Authoritative HQ FIFO consumed line total — never rebuild from rounded unit×qty.
+        totalCostKgs: Number(row.totalCostKgs),
       })),
       input.acceptedQuantity,
       Number(input.transportCostPerUnit ?? 0),

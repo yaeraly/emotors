@@ -26,6 +26,7 @@
     "repair:hq-fifo-from-receipts": "tsx scripts/repair-hq-fifo-from-receipts.ts",
     "repair:hq-inventory-valuation": "tsx scripts/repair-hq-inventory-valuation.ts",
     "repair:hq-inventory-fifo-parity": "tsx scripts/repair-hq-inventory-fifo-parity.ts",
+    "repair:branch-inventory-cost-parity": "tsx scripts/repair-branch-inventory-cost-parity.ts",
     "verify:product-catalog-costs": "tsx scripts/verify-product-catalog-cost-table.ts",
     "repair:product-catalog-reference-costs": "tsx scripts/repair-product-catalog-reference-costs.ts",
     "typecheck": "tsc --noEmit -p tsconfig.build.json"

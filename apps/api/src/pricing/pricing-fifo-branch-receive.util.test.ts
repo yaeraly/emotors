@@ -52,4 +52,27 @@ describe('buildBranchReceiveLinesFromHqAllocations', () => {
     assert.equal(lines[0].lineTotalCostKgs, 914369.8);
     assert.notEqual(lines[0].lineTotalCostKgs, lines[0].finalBranchUnitCostKgs * lines[0].quantity);
   });
+
+  it('omitting totalCostKgs falls back to unit×qty (production must pass totalCostKgs)', () => {
+    const lines = buildBranchReceiveLinesFromHqAllocations(
+      [{ id: 'a1', fifoBatchId: 'hq-L1', quantity: 11, unitCostKgs: 14756.12 }],
+      11,
+      0,
+    );
+    assert.equal(lines[0].lineTotalCostKgs, 162317.32);
+    assert.notEqual(lines[0].lineTotalCostKgs, 162317.33);
+  });
+
+  it('full-layer transfer with totalCostKgs preserves exact HQ consumed value', () => {
+    const lines = buildBranchReceiveLinesFromHqAllocations(
+      [
+        { id: 'a1', fifoBatchId: 'hq-L1', quantity: 11, unitCostKgs: 14756.12, totalCostKgs: 162317.33 },
+        { id: 'a2', fifoBatchId: 'hq-L2', quantity: 11, unitCostKgs: 14756.13, totalCostKgs: 162317.41 },
+      ],
+      22,
+      0,
+    );
+    assert.equal(lines[0].lineTotalCostKgs, 162317.33);
+    assert.equal(lines[1].lineTotalCostKgs, 162317.41);
+  });
 });

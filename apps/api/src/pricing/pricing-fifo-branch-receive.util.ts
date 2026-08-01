@@ -43,9 +43,16 @@ export function buildBranchReceiveLinesFromHqAllocations(
 
     const transferUnitCostKgs = roundDisplayMoney(Number(row.unitCostKgs));
     const transport = roundDisplayMoney(Number(transportCostPerUnit));
+    const authoritativeAllocationTotal = Number(row.totalCostKgs ?? 0);
+    // Full remaining allocation: keep exact HQ consumed total (preserves layer remainders).
+    // Partial take: proportional Decimal share of that authoritative total.
     const allocationLineTotal =
-      Number(row.totalCostKgs ?? 0) > 0
-        ? roundDisplayMoney(allocateProportionalCost(Number(row.totalCostKgs), row.quantity, take))
+      authoritativeAllocationTotal > 0
+        ? take >= row.quantity
+          ? roundDisplayMoney(authoritativeAllocationTotal)
+          : roundDisplayMoney(
+              allocateProportionalCost(authoritativeAllocationTotal, row.quantity, take),
+            )
         : roundDisplayMoney(transferUnitCostKgs * take);
     const transportLineTotal = roundDisplayMoney(transport * take);
     const lineTotalCostKgs = roundDisplayMoney(allocationLineTotal + transportLineTotal);

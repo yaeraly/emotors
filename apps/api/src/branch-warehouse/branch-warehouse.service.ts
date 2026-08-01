@@ -14,6 +14,8 @@ import {
   WAREHOUSE_PERMANENT_DELETE_HISTORY_MESSAGE,
 } from '../lifecycle/hq-ceo-lifecycle.constants';
 import { canEditWarehouseInfo, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, isBranchWarehouseOperator, resolveUserRoles } from '../rbac/rbac';
+import { sumWarehouseFifoRemainingValueKgs } from '../inventory/inventory-authoritative-value.util';
+import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { activeBranchWarehouseWhere, branchWarehouseWhere, isBranchWarehouse } from '../warehouse/warehouse.util';
 import { UpdateBranchWarehouseDto } from './dto/update-branch-warehouse.dto';
 import {
@@ -589,7 +591,19 @@ export class BranchWarehouseService {
 
     const totalQuantity = balances.reduce((sum, item) => sum + item.quantity, 0);
     const reservedQuantity = balances.reduce((sum, item) => sum + item.reservedQuantity, 0);
-    const totalStockValueKgs = balances.reduce((sum, item) => sum + Number(item.totalValueKgs), 0);
+    // Authoritative Branch warehouse value = remaining active Branch FIFO layers
+    // (same source used by inventory-count discrepancy), not stale balance averages.
+    const fifoRemainingValueKgs = await sumWarehouseFifoRemainingValueKgs(
+      this.prisma,
+      warehouse.id,
+    );
+    const balanceFallbackValueKgs = roundDisplayMoney(
+      balances
+        .filter((item) => item.quantity > 0)
+        .reduce((sum, item) => sum + Number(item.totalValueKgs), 0),
+    );
+    const totalStockValueKgs =
+      fifoRemainingValueKgs > 0 ? fifoRemainingValueKgs : balanceFallbackValueKgs;
     const productIds = new Set(balances.filter((b) => b.quantity > 0).map((b) => b.productId));
     const lowStockSkuCount = balances.filter(
       (balance) => balance.quantity <= (balance.product?.minStockLevel ?? 0),
@@ -616,7 +630,7 @@ export class BranchWarehouseService {
       lowStockSkuCount,
       ...(user && this.shouldHideLineItemCosts(user)
         ? {}
-        : { totalStockValueKgs: Math.round(totalStockValueKgs * 100) / 100 }),
+        : { totalStockValueKgs: roundDisplayMoney(totalStockValueKgs) }),
       reservedQuantity,
       availableQuantity: Math.max(totalQuantity - reservedQuantity, 0),
       lastInventoryDate:
