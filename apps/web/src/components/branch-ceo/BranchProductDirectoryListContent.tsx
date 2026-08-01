@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { API_URL } from '@/lib/api';
 import { apiFetch } from '@/lib/api';
+import { formatBranchCatalogInventoryCost } from '@/lib/branch-product-directory-cost';
 import { formatProductUnit } from '@/lib/product-unit';
 import type { ProductCategory } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -12,7 +13,6 @@ type BranchProductRow = {
   id: string;
   sku: string;
   name: string;
-  barcode?: string | null;
   unit: string;
   weightKg?: number | null;
   photoUrl?: string | null;
@@ -22,6 +22,8 @@ type BranchProductRow = {
   isActive: boolean;
   quantity: number;
   lowStock: boolean;
+  currentBranchInventoryCost?: number | null;
+  branchInventoryCostAvailable?: boolean;
 };
 
 type ProductDirectoryResponse = {
@@ -109,7 +111,7 @@ export function BranchProductDirectoryListContent() {
                 <th className="px-3 py-2">{t('inventory.name')}</th>
                 <th className="px-3 py-2">{t('inventory.category')}</th>
                 <th className="px-3 py-2">{t('inventory.unit')}</th>
-                <th className="px-3 py-2">{t('inventory.barcode')}</th>
+                <th className="px-3 py-2">{t('inventory.finalCost')}</th>
                 <th className="px-3 py-2">{t('inventory.weight')}</th>
                 <th className="px-3 py-2">{t('inventory.status')}</th>
                 <th className="px-3 py-2 text-right">{t('common.actions')}</th>
@@ -133,7 +135,7 @@ export function BranchProductDirectoryListContent() {
                   <td className="px-3 py-2">{product.name}</td>
                   <td className="px-3 py-2">{product.category ?? '—'}</td>
                   <td className="px-3 py-2">{formatProductUnit(product.unit, language, t)}</td>
-                  <td className="px-3 py-2">{product.barcode ?? '—'}</td>
+                  <td className="px-3 py-2">{formatBranchCatalogInventoryCost(product)}</td>
                   <td className="px-3 py-2">{product.weightKg ?? '—'}</td>
                   <td className="px-3 py-2">
                     {product.isActive ? t('inventory.active') : t('inventory.inactive')}

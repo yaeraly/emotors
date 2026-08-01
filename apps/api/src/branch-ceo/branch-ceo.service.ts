@@ -6,8 +6,13 @@ import {
 } from '@nestjs/common';
 import { AuthUser } from '../auth/auth.types';
 import { BranchWarehouseService } from '../branch-warehouse/branch-warehouse.service';
+import {
+  resolveBranchProductCatalogCostsForProducts,
+  resolveBranchWarehouseIdForCatalog,
+} from '../inventory/branch-product-catalog-cost.util';
 import { InventoryService } from '../inventory/inventory.service';
 import { ProductQueryDto } from '../inventory/dto/product-query.dto';
+import { PrismaService } from '../prisma/prisma.service';
 import { isBranchOwnerUser } from '../rbac/rbac';
 import {
   sanitizeBranchCeoProductDetail,
@@ -21,6 +26,7 @@ export class BranchCeoService {
   constructor(
     private readonly inventoryService: InventoryService,
     private readonly branchWarehouseService: BranchWarehouseService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private assertBranchCeo(user: AuthUser) {
@@ -34,17 +40,48 @@ export class BranchCeoService {
 
   async productDirectory(user: AuthUser, query: ProductQueryDto) {
     this.assertBranchCeo(user);
+    const branchId = user.branchId!;
+    const warehouseId = await resolveBranchWarehouseIdForCatalog(this.prisma, branchId);
     const result = await this.inventoryService.products(user, query);
+    const costByProductId = warehouseId
+      ? await resolveBranchProductCatalogCostsForProducts(this.prisma, {
+          productIds: result.items.map((product) => product.id),
+          warehouseId,
+        })
+      : new Map<string, never>();
+
     return {
       ...result,
-      items: result.items.map((product) => sanitizeBranchCeoProductRow(product)),
+      items: result.items.map((product) => {
+        const branchCost = costByProductId.get(product.id);
+        return sanitizeBranchCeoProductRow({
+          ...product,
+          currentBranchInventoryCost: branchCost?.currentBranchInventoryCost ?? null,
+          branchInventoryCostAvailable: branchCost?.branchInventoryCostAvailable ?? false,
+        });
+      }),
     };
   }
 
   async productDetail(user: AuthUser, id: string) {
     this.assertBranchCeo(user);
+    const branchId = user.branchId!;
+    const warehouseId = await resolveBranchWarehouseIdForCatalog(this.prisma, branchId);
     const product = await this.inventoryService.product(user, id);
-    return sanitizeBranchCeoProductDetail(product);
+    const branchCost = warehouseId
+      ? (
+          await resolveBranchProductCatalogCostsForProducts(this.prisma, {
+            productIds: [product.id],
+            warehouseId,
+          })
+        ).get(product.id)
+      : undefined;
+
+    return sanitizeBranchCeoProductDetail({
+      ...product,
+      currentBranchInventoryCost: branchCost?.currentBranchInventoryCost ?? null,
+      branchInventoryCostAvailable: branchCost?.branchInventoryCostAvailable ?? false,
+    });
   }
 
   async warehouseOverview(user: AuthUser) {

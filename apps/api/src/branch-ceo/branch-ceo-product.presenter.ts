@@ -23,9 +23,17 @@ type ProductLike = {
   } | null;
   quantity?: number;
   lowStock?: boolean;
+  currentBranchInventoryCost?: number | null;
+  branchInventoryCostAvailable?: boolean;
 };
 
 export function sanitizeBranchCeoProductRow(product: ProductLike) {
+  const branchInventoryCostAvailable = product.branchInventoryCostAvailable === true;
+  const currentBranchInventoryCost =
+    branchInventoryCostAvailable && product.currentBranchInventoryCost != null
+      ? Number(product.currentBranchInventoryCost)
+      : null;
+
   return {
     id: product.id,
     sku: product.sku,
@@ -41,6 +49,8 @@ export function sanitizeBranchCeoProductRow(product: ProductLike) {
     categoryId: product.productCategory?.id ?? null,
     quantity: product.quantity ?? 0,
     lowStock: product.lowStock ?? false,
+    currentBranchInventoryCost,
+    branchInventoryCostAvailable,
   };
 }
 
