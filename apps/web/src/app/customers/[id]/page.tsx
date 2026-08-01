@@ -8,7 +8,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { CenteredDialog } from '@/components/CenteredDialog';
 import { apiFetch } from '@/lib/api';
 import { shouldHideCustomerProfit, canEditCustomerType } from '@/lib/rbac';
-import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
+import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 import type {
@@ -339,6 +339,17 @@ export default function CustomerDetailPage() {
                               <input
                                 type="radio"
                                 required
+                                checked={editForm.customerType === 'MASTER'}
+                                onChange={() =>
+                                  setEditForm({ ...editForm, customerType: 'MASTER' })
+                                }
+                              />
+                              {t('customers.customerTypeMaster')}
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                required
                                 checked={editForm.customerType === 'WHOLESALE'}
                                 onChange={() =>
                                   setEditForm({ ...editForm, customerType: 'WHOLESALE' })
@@ -388,6 +399,28 @@ export default function CustomerDetailPage() {
                     value={t(customerTypeLabelKey(customer.customerType))}
                   />
                   <Info
+                    label={t('customers.loyaltyCategory')}
+                    value={t(
+                      loyaltyCategoryLabelKey(
+                        (customer as { loyaltyCategory?: string; customerCategory?: string })
+                          .loyaltyCategory ??
+                          (customer as { customerCategory?: string }).customerCategory,
+                      ),
+                    )}
+                  />
+                  <Info
+                    label={t('customers.currentDiscount')}
+                    value={`${Number((customer as { currentDiscountPercent?: number; currentDiscount?: number }).currentDiscountPercent ?? (customer as { currentDiscount?: number }).currentDiscount ?? 0)}%`}
+                  />
+                  <Info
+                    label={t('customers.lastPurchaseDate')}
+                    value={
+                      customer.lastPurchaseDate
+                        ? new Date(customer.lastPurchaseDate).toLocaleDateString()
+                        : '-'
+                    }
+                  />
+                  <Info
                     label={t('common.createdDate')}
                     value={new Date(customer.createdAt).toLocaleDateString()}
                   />
@@ -400,6 +433,14 @@ export default function CustomerDetailPage() {
                   <Amount
                     label={t('crm.totalPurchaseAmount')}
                     value={customer.totalPurchases}
+                  />
+                  <Amount
+                    label={t('customers.purchaseVolume')}
+                    value={Number(
+                      (customer as { purchaseVolume?: number }).purchaseVolume ??
+                        customer.totalPurchases ??
+                        0,
+                    )}
                   />
                   {!hideCustomerProfit ? (
                     <Amount label={t('crm.totalProfitAmount')} value={customer.totalProfit} />

@@ -7,6 +7,7 @@ import {
   applyPricingAdjustmentRaw,
   calculateBaseBranchPriceKgs,
   calculateBaseBranchPriceKgsRaw,
+  calculateMasterPriceKgs,
   calculateRetailPriceKgs,
   calculateWholesalePriceKgs,
   applyPricingRounding,
@@ -330,6 +331,32 @@ export class PricingEngineService {
               );
         break;
       }
+      case PricingEnginePriceType.MASTER_MINIMUM:
+        // Master floor uses the HQ minimum allowed selling price.
+        resolvedPriceKgs = calculateRetailPriceKgs(
+          effectiveBranchPriceKgs,
+          Number(pricingProduct.minimumSellingMarkupPercent ?? 0),
+          rounding,
+        );
+        break;
+      case PricingEnginePriceType.MASTER_RECOMMENDED:
+      case PricingEnginePriceType.MASTER_MAXIMUM: {
+        const configuredMasterMarkup = Number(pricingProduct.masterMarkupPercent ?? 0);
+        const retailMarkup = Number(pricingProduct.recommendedRetailMarkupPercent ?? 0);
+        const wholesaleMarkup = Number(pricingProduct.wholesaleMarkupPercent ?? 0);
+        const masterMarkup =
+          configuredMasterMarkup > 0
+            ? configuredMasterMarkup
+            : retailMarkup > wholesaleMarkup
+              ? (retailMarkup + wholesaleMarkup) / 2
+              : wholesaleMarkup;
+        resolvedPriceKgs = calculateMasterPriceKgs(
+          effectiveBranchPriceKgs,
+          masterMarkup,
+          rounding,
+        );
+        break;
+      }
       case PricingEnginePriceType.WHOLESALE_MINIMUM:
         resolvedPriceKgs = calculateWholesalePriceKgs(
           effectiveBranchPriceKgs,
@@ -426,6 +453,7 @@ export class PricingEngineService {
     recommendedRetailMarkupPercent: { toString(): string } | number;
     minimumWholesaleMarkupPercent: { toString(): string } | number;
     wholesaleMarkupPercent: { toString(): string } | number;
+    masterMarkupPercent?: { toString(): string } | number;
     retailMaximumPolicySource: import('@prisma/client').MaximumPricePolicySource;
     wholesaleMaximumPolicySource: import('@prisma/client').MaximumPricePolicySource;
     retailMaximumPolicy: import('@prisma/client').MaximumPricePolicy;

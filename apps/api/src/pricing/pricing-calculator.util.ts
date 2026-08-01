@@ -218,6 +218,14 @@ export function calculateWholesalePriceKgs(
   return applyMarkupRoundUp(effectiveBranchPriceKgs, wholesaleMarkupPercent, config);
 }
 
+export function calculateMasterPriceKgs(
+  effectiveBranchPriceKgs: number,
+  masterMarkupPercent: number,
+  config: PricingRoundingConfig = DEFAULT_PRICING_ROUNDING,
+) {
+  return applyMarkupRoundUp(effectiveBranchPriceKgs, masterMarkupPercent, config);
+}
+
 export type BranchProductPriceSource =
   | 'OVERRIDE'
   | 'PRODUCT_RULE'
@@ -440,6 +448,7 @@ export function pricesFromMarkups(
     wholesaleMarkupPercent: number;
     minimumWholesaleMarkupPercent?: number;
     hqBranchWholesaleMarkupPercent: number;
+    masterMarkupPercent?: number;
     recommendedRetailMarkupPercent: number;
     minimumSellingMarkupPercent: number;
     maximumRetailMarkupPercent?: number;
@@ -453,6 +462,15 @@ export function pricesFromMarkups(
     markups.hqBranchWholesaleMarkupPercent,
   );
   const minimumWholesaleMarkupPercent = markups.minimumWholesaleMarkupPercent ?? markups.wholesaleMarkupPercent;
+  const retailMarkup = markups.recommendedRetailMarkupPercent;
+  const wholesaleMarkup = markups.wholesaleMarkupPercent;
+  const configuredMasterMarkup = markups.masterMarkupPercent;
+  const masterMarkupPercent =
+    configuredMasterMarkup != null && Number(configuredMasterMarkup) > 0
+      ? Number(configuredMasterMarkup)
+      : retailMarkup > wholesaleMarkup
+        ? (retailMarkup + wholesaleMarkup) / 2
+        : wholesaleMarkup;
   const maximumRetailPriceKgs =
     markups.enableMaximumRetailPrice && (markups.maximumRetailMarkupPercent ?? 0) > 0
       ? applyMarkupRoundUp(branchPurchasePriceKgs, markups.maximumRetailMarkupPercent ?? 0)
@@ -465,6 +483,8 @@ export function pricesFromMarkups(
     hqBranchWholesalePriceKgs: branchPurchasePriceKgs,
     minimumWholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, minimumWholesaleMarkupPercent),
     wholesalePriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.wholesaleMarkupPercent),
+    masterPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, masterMarkupPercent),
+    masterMarkupPercent,
     recommendedRetailPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.recommendedRetailMarkupPercent),
     minimumSellingPriceKgs: applyMarkupRoundUp(branchPurchasePriceKgs, markups.minimumSellingMarkupPercent),
     maximumRetailPriceKgs,

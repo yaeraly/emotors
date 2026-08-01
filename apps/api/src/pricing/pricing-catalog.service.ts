@@ -885,13 +885,27 @@ export class PricingCatalogService {
     }
 
     const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const masterMarkupPercent =
+      dto.masterMarkupPercent ?? Number((product as { masterMarkupPercent?: Prisma.Decimal }).masterMarkupPercent ?? 0);
     const basePrices = pricesFromMarkups(cost.costPriceKgs, {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
       minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      masterMarkupPercent,
       recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
       minimumSellingMarkupPercent: dto.minimumSellingMarkupPercent,
     });
+    if (
+      basePrices.recommendedRetailPriceKgs > 0 &&
+      basePrices.masterPriceKgs > 0 &&
+      basePrices.wholesalePriceKgs > 0 &&
+      !(
+        basePrices.recommendedRetailPriceKgs > basePrices.masterPriceKgs &&
+        basePrices.masterPriceKgs > basePrices.wholesalePriceKgs
+      )
+    ) {
+      throw new BadRequestException('Price order must be Retail > Master > Wholesale');
+    }
     const retailPrices = calculateRetailPricesFromBranchPrice(basePrices.hqBranchWholesalePriceKgs, {
       minimumRetailMarkupPercent: dto.minimumSellingMarkupPercent,
       recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
@@ -911,6 +925,7 @@ export class PricingCatalogService {
         costPriceKgs: cost.costPriceKgs,
         wholesalePriceKgs: basePrices.wholesalePriceKgs,
         hqBranchWholesalePriceKgs: basePrices.hqBranchWholesalePriceKgs,
+        masterPriceKgs: basePrices.masterPriceKgs,
         recommendedRetailPriceKgs: retailPrices.recommendedRetailPriceKgs,
         minimumSellingPriceKgs: retailPrices.minimumRetailPriceKgs,
         maximumRetailPriceKgs: retailPrices.maximumRetailPriceKgs,
@@ -919,6 +934,7 @@ export class PricingCatalogService {
         wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
         minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
         hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+        masterMarkupPercent: basePrices.masterMarkupPercent,
         recommendedRetailMarkupPercent: dto.recommendedRetailMarkupPercent,
         minimumSellingMarkupPercent: dto.minimumSellingMarkupPercent,
         reason: dto.reason,
@@ -1714,11 +1730,13 @@ export class PricingCatalogService {
       sku: string;
       wholesalePriceKgs: Prisma.Decimal;
       hqBranchWholesalePriceKgs: Prisma.Decimal;
+      masterPriceKgs?: Prisma.Decimal;
       recommendedRetailPriceKgs: Prisma.Decimal;
       minimumSellingPriceKgs: Prisma.Decimal;
       wholesaleMarkupPercent: Prisma.Decimal;
       minimumWholesaleMarkupPercent: Prisma.Decimal;
       hqBranchWholesaleMarkupPercent: Prisma.Decimal;
+      masterMarkupPercent?: Prisma.Decimal;
       recommendedRetailMarkupPercent: Prisma.Decimal;
       minimumSellingMarkupPercent: Prisma.Decimal;
     },
@@ -1726,6 +1744,7 @@ export class PricingCatalogService {
       costPriceKgs: number;
       wholesalePriceKgs: number;
       hqBranchWholesalePriceKgs: number;
+      masterPriceKgs?: number;
       recommendedRetailPriceKgs: number;
       minimumSellingPriceKgs: number;
       maximumRetailPriceKgs?: number;
@@ -1737,6 +1756,7 @@ export class PricingCatalogService {
       wholesaleMarkupPercent: number;
       minimumWholesaleMarkupPercent?: number;
       hqBranchWholesaleMarkupPercent: number;
+      masterMarkupPercent?: number;
       recommendedRetailMarkupPercent: number;
       minimumSellingMarkupPercent: number;
       reason?: string;
@@ -1750,26 +1770,45 @@ export class PricingCatalogService {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
       minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
       hqBranchWholesaleMarkupPercent: Number(product.hqBranchWholesaleMarkupPercent),
+      masterMarkupPercent: Number(product.masterMarkupPercent ?? 0),
       recommendedRetailMarkupPercent: Number(product.recommendedRetailMarkupPercent),
       minimumSellingMarkupPercent: Number(product.minimumSellingMarkupPercent),
     };
     const oldPrices = {
       wholesalePriceKgs: Number(product.wholesalePriceKgs),
       hqBranchWholesalePriceKgs: Number(product.hqBranchWholesalePriceKgs),
+      masterPriceKgs: Number(product.masterPriceKgs ?? 0),
       recommendedRetailPriceKgs: Number(product.recommendedRetailPriceKgs),
       minimumSellingPriceKgs: Number(product.minimumSellingPriceKgs),
     };
+    const resolvedMasterMarkup =
+      input.masterMarkupPercent ??
+      Number(product.masterMarkupPercent ?? 0) ??
+      0;
+    const pricesWithMaster = pricesFromMarkups(input.costPriceKgs, {
+      wholesaleMarkupPercent: input.wholesaleMarkupPercent,
+      minimumWholesaleMarkupPercent:
+        input.minimumWholesaleMarkupPercent ?? Number(product.minimumWholesaleMarkupPercent),
+      hqBranchWholesaleMarkupPercent: input.hqBranchWholesaleMarkupPercent,
+      masterMarkupPercent: resolvedMasterMarkup,
+      recommendedRetailMarkupPercent: input.recommendedRetailMarkupPercent,
+      minimumSellingMarkupPercent: input.minimumSellingMarkupPercent,
+    });
+    const masterMarkupPercent = pricesWithMaster.masterMarkupPercent;
+    const masterPriceKgs = input.masterPriceKgs ?? pricesWithMaster.masterPriceKgs;
     const newMarkups = {
       wholesaleMarkupPercent: input.wholesaleMarkupPercent,
       minimumWholesaleMarkupPercent:
         input.minimumWholesaleMarkupPercent ?? Number(product.minimumWholesaleMarkupPercent),
       hqBranchWholesaleMarkupPercent: input.hqBranchWholesaleMarkupPercent,
+      masterMarkupPercent,
       recommendedRetailMarkupPercent: input.recommendedRetailMarkupPercent,
       minimumSellingMarkupPercent: input.minimumSellingMarkupPercent,
     };
     const newPrices = {
       wholesalePriceKgs: input.wholesalePriceKgs,
       hqBranchWholesalePriceKgs: input.hqBranchWholesalePriceKgs,
+      masterPriceKgs,
       recommendedRetailPriceKgs: input.recommendedRetailPriceKgs,
       minimumSellingPriceKgs: input.minimumSellingPriceKgs,
     };
@@ -1782,6 +1821,7 @@ export class PricingCatalogService {
         finalCostKgs: input.costPriceKgs,
         wholesalePriceKgs: input.wholesalePriceKgs,
         hqBranchWholesalePriceKgs: input.hqBranchWholesalePriceKgs,
+        masterPriceKgs,
         recommendedRetailPriceKgs: input.recommendedRetailPriceKgs,
         minimumSellingPriceKgs: input.minimumSellingPriceKgs,
         maximumRetailPriceKgs: input.maximumRetailPriceKgs ?? 0,
@@ -1794,6 +1834,7 @@ export class PricingCatalogService {
         minimumWholesaleMarkupPercent:
           input.minimumWholesaleMarkupPercent ?? Number(product.minimumWholesaleMarkupPercent),
         hqBranchWholesaleMarkupPercent: input.hqBranchWholesaleMarkupPercent,
+        masterMarkupPercent,
         recommendedRetailMarkupPercent: input.recommendedRetailMarkupPercent,
         minimumSellingMarkupPercent: input.minimumSellingMarkupPercent,
         sellingPriceKgs: input.wholesalePriceKgs,

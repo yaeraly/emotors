@@ -1,21 +1,39 @@
-export type SalePricingChannel = 'RETAIL' | 'WHOLESALE';
+export type SalePricingChannel = 'RETAIL' | 'MASTER' | 'WHOLESALE';
 
-export type BranchSaleCustomerType = 'RETAIL' | 'WHOLESALE';
+export type BranchSaleCustomerType = 'RETAIL' | 'MASTER' | 'WHOLESALE';
 
 export function resolvePricingChannelFromCustomerType(
   customerType?: BranchSaleCustomerType | string | null,
 ): SalePricingChannel {
-  return customerType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL';
+  if (customerType === 'WHOLESALE') return 'WHOLESALE';
+  if (customerType === 'MASTER') return 'MASTER';
+  return 'RETAIL';
 }
 
 export function customerTypeLabelKey(customerType?: BranchSaleCustomerType | string | null) {
-  return customerType === 'WHOLESALE'
-    ? 'customers.customerTypeWholesale'
-    : 'customers.customerTypeRetail';
+  if (customerType === 'WHOLESALE') return 'customers.customerTypeWholesale';
+  if (customerType === 'MASTER') return 'customers.customerTypeMaster';
+  return 'customers.customerTypeRetail';
+}
+
+export function loyaltyCategoryLabelKey(category?: string | null) {
+  switch (category) {
+    case 'SILVER':
+      return 'customers.loyaltyCategorySilver';
+    case 'GOLD':
+      return 'customers.loyaltyCategoryGold';
+    case 'VIP':
+      return 'customers.loyaltyCategoryVip';
+    case 'STANDARD':
+    default:
+      return 'customers.loyaltyCategoryStandard';
+  }
 }
 
 export function appliedPriceLabelKey(channel: SalePricingChannel) {
-  return channel === 'WHOLESALE' ? 'sales.appliedPriceWholesale' : 'sales.appliedPriceRetail';
+  if (channel === 'WHOLESALE') return 'sales.appliedPriceWholesale';
+  if (channel === 'MASTER') return 'sales.appliedPriceMaster';
+  return 'sales.appliedPriceRetail';
 }
 
 /** Preserve draft line quantity when refreshing prices for a new customer type. */

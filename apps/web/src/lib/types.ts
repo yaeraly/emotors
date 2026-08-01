@@ -33,7 +33,9 @@ export type CustomerStatus =
   | 'INACTIVE'
   | 'ARCHIVED';
 
-export type CustomerType = 'RETAIL' | 'WHOLESALE' | 'DEALER' | 'DISTRIBUTOR' | 'FRANCHISE';
+export type CustomerType = 'RETAIL' | 'MASTER' | 'WHOLESALE' | 'DEALER' | 'DISTRIBUTOR' | 'FRANCHISE';
+
+export type CustomerLoyaltyCategory = 'STANDARD' | 'SILVER' | 'GOLD' | 'VIP';
 
 export type CustomerEventType =
   | 'NOTE'
@@ -280,6 +282,11 @@ export type Customer = {
   branch?: Branch;
   status: CustomerStatus;
   customerType?: CustomerType;
+  loyaltyCategory?: CustomerLoyaltyCategory;
+  customerCategory?: CustomerLoyaltyCategory;
+  purchaseVolume?: number;
+  currentDiscountPercent?: number;
+  currentDiscount?: number;
   notes?: string | null;
   totalPurchases: number;
   totalProfit: number;

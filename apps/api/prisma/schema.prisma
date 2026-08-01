@@ -132,6 +132,9 @@ enum PricingEnginePriceType {
   RETAIL_MINIMUM
   RETAIL_RECOMMENDED
   RETAIL_MAXIMUM
+  MASTER_MINIMUM
+  MASTER_RECOMMENDED
+  MASTER_MAXIMUM
   WHOLESALE_MINIMUM
   WHOLESALE_RECOMMENDED
   WHOLESALE_MAXIMUM
@@ -191,10 +194,24 @@ enum CustomerStatus {
 
 enum CustomerType {
   RETAIL
+  MASTER
   WHOLESALE
   DEALER
   DISTRIBUTOR
   FRANCHISE
+}
+
+enum CustomerLoyaltyCategory {
+  STANDARD
+  SILVER
+  GOLD
+  VIP
+}
+
+enum LoyaltyPurchaseWindow {
+  TOTAL
+  ROLLING_90_DAYS
+  ROLLING_180_DAYS
 }
 
 enum CustomerEventType {
@@ -1300,6 +1317,28 @@ model PricingMasterSettings {
   @@index([updatedById])
 }
 
+/// HQ CEO-configured customer loyalty thresholds and discount percents.
+model LoyaltyProgramSettings {
+  id                        String                @id @default(cuid())
+  singletonKey              String                @unique @default("DEFAULT")
+  purchaseWindow            LoyaltyPurchaseWindow @default(TOTAL)
+  standardThresholdKgs      Decimal               @default(0) @db.Decimal(14, 2)
+  silverThresholdKgs        Decimal               @default(0) @db.Decimal(14, 2)
+  goldThresholdKgs          Decimal               @default(0) @db.Decimal(14, 2)
+  vipThresholdKgs           Decimal               @default(0) @db.Decimal(14, 2)
+  standardDiscountPercent   Decimal               @default(0) @db.Decimal(8, 2)
+  silverDiscountPercent     Decimal               @default(0) @db.Decimal(8, 2)
+  goldDiscountPercent       Decimal               @default(0) @db.Decimal(8, 2)
+  vipDiscountPercent        Decimal               @default(0) @db.Decimal(8, 2)
+  allowDowngrade            Boolean               @default(false)
+  updatedById               String?
+  updatedBy                 User?                 @relation("LoyaltyProgramSettingsUpdater", fields: [updatedById], references: [id])
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+
+  @@index([updatedById])
+}
+
 model PricingPolicyVersionCategoryDiscount {
   id              String                 @id @default(cuid())
   versionId       String
@@ -1323,11 +1362,13 @@ model PricingPolicyVersionProductSnapshot {
   hqBranchWholesaleMarkupPercent Decimal              @db.Decimal(8, 2)
   wholesaleMarkupPercent         Decimal              @db.Decimal(8, 2)
   minimumWholesaleMarkupPercent  Decimal              @db.Decimal(8, 2)
+  masterMarkupPercent            Decimal              @default(0) @db.Decimal(8, 2)
   recommendedRetailMarkupPercent Decimal              @db.Decimal(8, 2)
   minimumSellingMarkupPercent    Decimal              @db.Decimal(8, 2)
   hqBranchWholesalePriceKgs      Decimal              @db.Decimal(14, 2)
   wholesalePriceKgs              Decimal              @db.Decimal(14, 2)
   minimumWholesalePriceKgs       Decimal              @db.Decimal(14, 2)
+  masterPriceKgs                 Decimal              @default(0) @db.Decimal(14, 2)
   recommendedRetailPriceKgs      Decimal              @db.Decimal(14, 2)
   minimumSellingPriceKgs         Decimal              @db.Decimal(14, 2)
 
@@ -1405,6 +1446,7 @@ model User {
   pricingProductRulesCreated                      PricingProductRule[]                @relation("PricingProductRuleCreator")
   pricingSimulationsCreated                       PricingSimulation[]                 @relation("PricingSimulationCreator")
   pricingMasterSettingsUpdated                    PricingMasterSettings[]             @relation("PricingMasterSettingsUpdater")
+  loyaltyProgramSettingsUpdated                   LoyaltyProgramSettings[]            @relation("LoyaltyProgramSettingsUpdater")
   kpiTargets                                      BranchKpiTarget[]                   @relation("KpiTargetCreator")
   npsSurveys                                      NpsSurvey[]                         @relation("NpsSurveyCreator")
   courses                                         Course[]                            @relation("CourseCreator")
@@ -1659,6 +1701,7 @@ model Customer {
   branchId             String
   branch               Branch                @relation(fields: [branchId], references: [id])
   customerType         CustomerType            @default(RETAIL)
+  loyaltyCategory      CustomerLoyaltyCategory @default(STANDARD)
   companyName          String?
   taxId                String?
   region               String?
@@ -1670,8 +1713,10 @@ model Customer {
   status               CustomerStatus          @default(NEW)
   notes                String?
   totalPurchaseAmount  Decimal               @default(0) @db.Decimal(14, 2)
+  purchaseVolume       Decimal               @default(0) @db.Decimal(14, 2)
   totalProfitAmount    Decimal               @default(0) @db.Decimal(14, 2)
   totalDebtAmount      Decimal               @default(0) @db.Decimal(14, 2)
+  lastPurchaseAt       DateTime?
   events               CustomerEvent[]
   followUps            FollowUp[]
   sales                Sale[]
@@ -1689,6 +1734,7 @@ model Customer {
   @@index([branchId, status])
   @@index([branchId, customerType])
   @@index([customerType])
+  @@index([loyaltyCategory])
   @@index([fullName])
   @@index([phone])
   @@index([whatsappPhone])
@@ -2219,6 +2265,7 @@ model Product {
   sellingPriceKgs                       Decimal                          @default(0) @db.Decimal(14, 2)
   wholesalePriceKgs                     Decimal                          @default(0) @db.Decimal(14, 2)
   hqBranchWholesalePriceKgs             Decimal                          @default(0) @db.Decimal(14, 2)
+  masterPriceKgs                        Decimal                          @default(0) @db.Decimal(14, 2)
   recommendedRetailPriceKgs             Decimal                          @default(0) @db.Decimal(14, 2)
   minimumSellingPriceKgs                Decimal                          @default(0) @db.Decimal(14, 2)
   maximumDiscountPercent                Decimal                          @default(0) @db.Decimal(8, 2)
@@ -2226,6 +2273,7 @@ model Product {
   wholesaleMarkupPercent                Decimal                          @default(0) @db.Decimal(8, 2)
   minimumWholesaleMarkupPercent         Decimal                          @default(0) @db.Decimal(8, 2)
   hqBranchWholesaleMarkupPercent        Decimal                          @default(0) @db.Decimal(8, 2)
+  masterMarkupPercent                   Decimal                          @default(0) @db.Decimal(8, 2)
   recommendedRetailMarkupPercent        Decimal                          @default(0) @db.Decimal(8, 2)
   minimumSellingMarkupPercent           Decimal                          @default(0) @db.Decimal(8, 2)
   retailMaximumPolicySource             MaximumPricePolicySource         @default(CATEGORY)

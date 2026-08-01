@@ -25,7 +25,7 @@ export type SaleProductOption = {
 
 type Props = {
   disabled?: boolean;
-  pricingChannel?: 'RETAIL' | 'WHOLESALE';
+  pricingChannel?: 'RETAIL' | 'MASTER' | 'WHOLESALE';
   onSelect: (product: SaleProductOption) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
   showRecommendedPriceLabel?: boolean;

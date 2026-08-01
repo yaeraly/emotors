@@ -23,6 +23,6 @@ export class SaleProductSearchQueryDto {
   search?: string;
 
   @IsOptional()
-  @IsIn(['RETAIL', 'WHOLESALE'])
-  pricingChannel?: 'RETAIL' | 'WHOLESALE';
+  @IsIn(['RETAIL', 'MASTER', 'WHOLESALE'])
+  pricingChannel?: 'RETAIL' | 'MASTER' | 'WHOLESALE';
 }

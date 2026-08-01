@@ -38,7 +38,7 @@ type SaleItemInput = {
   productId?: string;
   productSku?: string;
   unitPrice: number;
-  pricingChannel?: 'RETAIL' | 'WHOLESALE';
+  pricingChannel?: 'RETAIL' | 'MASTER' | 'WHOLESALE';
   priceAboveRecommendedReasonCode?: PriceAboveRecommendedReasonCode;
   priceAboveRecommendedComment?: string;
 };
@@ -266,7 +266,12 @@ export class PricingService {
     });
   }
 
-  async validateSaleItems(user: AuthUser, branchId: string, items: SaleItemInput[]) {
+  async validateSaleItems(
+    user: AuthUser,
+    branchId: string,
+    items: SaleItemInput[],
+    options?: { automaticCustomerPricing?: boolean },
+  ) {
     if (hasAnyFullAccessRole(resolveUserRoles(user))) return;
 
     for (const item of items) {
@@ -295,16 +300,21 @@ export class PricingService {
 
       const channel = item.pricingChannel ?? 'RETAIL';
       const isWholesale = channel === 'WHOLESALE';
+      const isMaster = channel === 'MASTER';
       const maximumPolicy = isWholesale
         ? resolveWholesaleMaximumPolicy(product, category)
         : resolveRetailMaximumPolicy(product, category);
 
       const minPriceType = isWholesale
         ? PricingEnginePriceType.WHOLESALE_MINIMUM
-        : PricingEnginePriceType.RETAIL_MINIMUM;
+        : isMaster
+          ? PricingEnginePriceType.MASTER_MINIMUM
+          : PricingEnginePriceType.RETAIL_MINIMUM;
       const recommendedPriceType = isWholesale
         ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
-        : PricingEnginePriceType.RETAIL_RECOMMENDED;
+        : isMaster
+          ? PricingEnginePriceType.MASTER_RECOMMENDED
+          : PricingEnginePriceType.RETAIL_RECOMMENDED;
       const pricingBranchId = await this.pricingResolution.resolvePricingBranchId(
         branchId,
         recommendedPriceType,
@@ -322,7 +332,7 @@ export class PricingService {
       const recommendedResult = { resolvedPriceKgs: recommendedFreeze.resolvedPriceKgs };
 
       let maximumPriceKgs: number | null = null;
-      if (isMaximumPolicyActive(maximumPolicy)) {
+      if (!isMaster && isMaximumPolicyActive(maximumPolicy)) {
         const maxFreeze = await this.pricingResolution.resolveWithFreeze(
           pricingBranchId,
           item.productId,
@@ -339,8 +349,8 @@ export class PricingService {
         unitPrice: item.unitPrice,
         minimumPriceKgs: minResult.resolvedPriceKgs,
         recommendedPriceKgs: recommendedResult.resolvedPriceKgs,
-        maximumPriceKgs,
-        maximumPolicy,
+        maximumPriceKgs: options?.automaticCustomerPricing ? null : maximumPriceKgs,
+        maximumPolicy: options?.automaticCustomerPricing ? 'DISABLED' : maximumPolicy,
       });
 
       if (!validation.ok) {
@@ -357,6 +367,11 @@ export class PricingService {
           newValue: { unitPrice: item.unitPrice },
         });
         throw new BadRequestException(reason);
+      }
+
+      if (options?.automaticCustomerPricing) {
+        // Loyalty/auto customer pricing is authoritative; skip manual discount limits.
+        continue;
       }
 
       const recommendedPriceKgs = recommendedResult.resolvedPriceKgs;

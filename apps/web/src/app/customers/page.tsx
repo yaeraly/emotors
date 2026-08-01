@@ -10,7 +10,7 @@ import {
   shouldShowCustomerListEditButton,
   type CustomerListColumnKey,
 } from '@/lib/customer-table-config';
-import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
+import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
 import type { Branch, Customer, CustomerStatus, CustomerType, User } from '@/lib/types';
 import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
@@ -1069,12 +1069,44 @@ function CustomerProfileDrawer({
             label={t('customers.customerType')}
             value={t(customerTypeLabelKey(customer.customerType))}
           />
+          <Info
+            label={t('customers.loyaltyCategory')}
+            value={t(
+              loyaltyCategoryLabelKey(
+                (customer as { loyaltyCategory?: string; customerCategory?: string })
+                  .loyaltyCategory ??
+                  (customer as { customerCategory?: string }).customerCategory,
+              ),
+            )}
+          />
+          <Info
+            label={t('customers.currentDiscount')}
+            value={`${Number((customer as { currentDiscountPercent?: number; currentDiscount?: number }).currentDiscountPercent ?? (customer as { currentDiscount?: number }).currentDiscount ?? 0)}%`}
+          />
+          <Info
+            label={t('customers.lastPurchaseDate')}
+            value={
+              customer.lastPurchaseDate
+                ? formatDate(customer.lastPurchaseDate)
+                : '-'
+            }
+          />
           <Info label={t('common.createdDate')} value={formatDate(customer.createdAt)} />
         </div>
 
         <Panel title={t('crm.financialSummary')}>
           <div className="grid gap-3 md:grid-cols-2">
             <Metric label={t('crm.totalPurchaseAmount')} value={formatKgs(customer.totalPurchases)} />
+            <Metric
+              label={t('customers.purchaseVolume')}
+              value={formatKgs(
+                Number(
+                  (customer as { purchaseVolume?: number }).purchaseVolume ??
+                    customer.totalPurchases ??
+                    0,
+                ),
+              )}
+            />
             {!hideProfit ? (
               <Metric label={t('crm.totalProfitAmount')} value={formatKgs(customer.totalProfit)} />
             ) : null}
@@ -1157,6 +1189,16 @@ function CustomerForm({
                 onChange={() => onChange({ customerType: 'RETAIL' })}
               />
               {t('customers.customerTypeRetail')}
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                required
+                disabled={!customerTypeEditable}
+                checked={form.customerType === 'MASTER'}
+                onChange={() => onChange({ customerType: 'MASTER' })}
+              />
+              {t('customers.customerTypeMaster')}
             </label>
             <label className="flex items-center gap-2">
               <input

@@ -19,25 +19,45 @@ type Settings = {
   defaultActivationTimezone: string;
 };
 
+type LoyaltySettings = {
+  id: string;
+  purchaseWindow: 'TOTAL' | 'ROLLING_90_DAYS' | 'ROLLING_180_DAYS';
+  standardThresholdKgs: number;
+  silverThresholdKgs: number;
+  goldThresholdKgs: number;
+  vipThresholdKgs: number;
+  standardDiscountPercent: number;
+  silverDiscountPercent: number;
+  goldDiscountPercent: number;
+  vipDiscountPercent: number;
+  allowDowngrade: boolean;
+};
+
 export default function PricingSettingsPage() {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Partial<Settings>>({});
+  const [loyalty, setLoyalty] = useState<LoyaltySettings | null>(null);
+  const [loyaltyDraft, setLoyaltyDraft] = useState<Partial<LoyaltySettings>>({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
+  const [savingLoyalty, setSavingLoyalty] = useState(false);
 
   const canManage = canManagePricingPolicy(user);
 
   async function load() {
-    const [me, data] = await Promise.all([
+    const [me, data, loyaltyData] = await Promise.all([
       apiFetch<User>('/auth/me'),
       apiFetch<Settings>('/pricing/settings'),
+      apiFetch<LoyaltySettings>('/pricing/loyalty-settings'),
     ]);
     setUser(me);
     setSettings(data);
     setDraft(data);
+    setLoyalty(loyaltyData);
+    setLoyaltyDraft(loyaltyData);
   }
 
   useEffect(() => {
@@ -70,6 +90,37 @@ export default function PricingSettingsPage() {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveLoyalty() {
+    if (!canManage) return;
+    setSavingLoyalty(true);
+    setError('');
+    setSuccess('');
+    try {
+      const updated = await apiFetch<LoyaltySettings>('/pricing/loyalty-settings', {
+        method: 'PUT',
+        body: JSON.stringify({
+          purchaseWindow: loyaltyDraft.purchaseWindow,
+          standardThresholdKgs: Number(loyaltyDraft.standardThresholdKgs ?? 0),
+          silverThresholdKgs: Number(loyaltyDraft.silverThresholdKgs ?? 0),
+          goldThresholdKgs: Number(loyaltyDraft.goldThresholdKgs ?? 0),
+          vipThresholdKgs: Number(loyaltyDraft.vipThresholdKgs ?? 0),
+          standardDiscountPercent: Number(loyaltyDraft.standardDiscountPercent ?? 0),
+          silverDiscountPercent: Number(loyaltyDraft.silverDiscountPercent ?? 0),
+          goldDiscountPercent: Number(loyaltyDraft.goldDiscountPercent ?? 0),
+          vipDiscountPercent: Number(loyaltyDraft.vipDiscountPercent ?? 0),
+          allowDowngrade: Boolean(loyaltyDraft.allowDowngrade),
+        }),
+      });
+      setLoyalty(updated);
+      setLoyaltyDraft(updated);
+      setSuccess(t('pricing.loyaltySaved'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSavingLoyalty(false);
     }
   }
 
@@ -189,6 +240,107 @@ export default function PricingSettingsPage() {
           ) : (
             <p className="text-sm text-slate-500">{t('pricing.readOnly')}</p>
           )}
+        </div>
+      ) : null}
+
+      {loyalty ? (
+        <div className="mt-6 max-w-2xl space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">{t('pricing.loyaltySettings')}</h2>
+
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-500">{t('pricing.loyaltyPurchaseWindow')}</span>
+            <select
+              disabled={!canManage}
+              value={loyaltyDraft.purchaseWindow ?? 'TOTAL'}
+              onChange={(e) =>
+                setLoyaltyDraft((d) => ({
+                  ...d,
+                  purchaseWindow: e.target.value as LoyaltySettings['purchaseWindow'],
+                }))
+              }
+              className="w-full rounded-lg border border-slate-300 px-3 py-2"
+            >
+              <option value="TOTAL">{t('pricing.loyaltyWindowTotal')}</option>
+              <option value="ROLLING_90_DAYS">{t('pricing.loyaltyWindow90')}</option>
+              <option value="ROLLING_180_DAYS">{t('pricing.loyaltyWindow180')}</option>
+            </select>
+          </label>
+
+          <p className="text-sm font-semibold text-slate-700">{t('pricing.loyaltyThresholds')}</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            {(
+              [
+                ['standardThresholdKgs', 'Standard'],
+                ['silverThresholdKgs', 'Silver'],
+                ['goldThresholdKgs', 'Gold'],
+                ['vipThresholdKgs', 'VIP'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="block text-sm">
+                <span className="mb-1 block text-slate-500">{label}</span>
+                <input
+                  type="number"
+                  disabled={!canManage}
+                  min={0}
+                  value={loyaltyDraft[key] ?? 0}
+                  onChange={(e) =>
+                    setLoyaltyDraft((d) => ({ ...d, [key]: Number(e.target.value) }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+            ))}
+          </div>
+
+          <p className="text-sm font-semibold text-slate-700">{t('pricing.loyaltyDiscounts')}</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            {(
+              [
+                ['standardDiscountPercent', 'Standard'],
+                ['silverDiscountPercent', 'Silver'],
+                ['goldDiscountPercent', 'Gold'],
+                ['vipDiscountPercent', 'VIP'],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="block text-sm">
+                <span className="mb-1 block text-slate-500">{label}</span>
+                <input
+                  type="number"
+                  disabled={!canManage}
+                  min={0}
+                  max={100}
+                  value={loyaltyDraft[key] ?? 0}
+                  onChange={(e) =>
+                    setLoyaltyDraft((d) => ({ ...d, [key]: Number(e.target.value) }))
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                />
+              </label>
+            ))}
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              disabled={!canManage}
+              checked={Boolean(loyaltyDraft.allowDowngrade)}
+              onChange={(e) =>
+                setLoyaltyDraft((d) => ({ ...d, allowDowngrade: e.target.checked }))
+              }
+            />
+            {t('pricing.loyaltyAllowDowngrade')}
+          </label>
+
+          {canManage ? (
+            <button
+              type="button"
+              disabled={savingLoyalty}
+              onClick={() => void saveLoyalty()}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {t('common.save')}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </>

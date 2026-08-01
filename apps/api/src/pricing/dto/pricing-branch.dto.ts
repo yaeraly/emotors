@@ -35,6 +35,12 @@ export class UpdateRetailPricingDto {
   recommendedRetailMarkupPercent!: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  masterMarkupPercent?: number;
+
+  @IsOptional()
   @ValidateIf((dto: UpdateRetailPricingDto) => dto.maximumRetailMarkupOverridePercent != null)
   @Type(() => Number)
   @IsNumber()
@@ -43,6 +49,16 @@ export class UpdateRetailPricingDto {
 
   @IsOptional()
   restoreMaximumRetailInheritance?: boolean;
+
+  @IsOptional()
+  reason?: string;
+}
+
+export class UpdateMasterPricingDto {
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  masterMarkupPercent!: number;
 
   @IsOptional()
   reason?: string;

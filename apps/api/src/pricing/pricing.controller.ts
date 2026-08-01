@@ -52,6 +52,8 @@ import { PricingSimulationService } from './pricing-simulation.service';
 import { PricingEngineService } from './pricing-engine.service';
 import { PricingSettingsService } from './pricing-settings.service';
 import { UpdatePricingMasterSettingsDto } from './dto/pricing-master-settings.dto';
+import { LoyaltyProgramSettingsService } from '../customers/loyalty-program-settings.service';
+import { UpdateLoyaltyProgramSettingsDto } from '../customers/dto/update-loyalty-program-settings.dto';
 
 const PRICING_VIEW_ROLES = [
   Role.OWNER,
@@ -85,6 +87,7 @@ export class PricingController {
     private readonly pricingVersionService: PricingVersionService,
     private readonly pricingEngineService: PricingEngineService,
     private readonly pricingSettingsService: PricingSettingsService,
+    private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
   ) {}
 
   @Get('settings')
@@ -97,6 +100,21 @@ export class PricingController {
   @Roles(Role.CEO)
   updateSettings(@CurrentUser() user: AuthUser, @Body() dto: UpdatePricingMasterSettingsDto) {
     return this.pricingSettingsService.update(user, dto);
+  }
+
+  @Get('loyalty-settings')
+  @Roles(...PRICING_VIEW_ROLES)
+  getLoyaltySettings(@CurrentUser() user: AuthUser) {
+    return this.loyaltyProgramSettingsService.get(user);
+  }
+
+  @Put('loyalty-settings')
+  @Roles(Role.CEO)
+  updateLoyaltySettings(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateLoyaltyProgramSettingsDto,
+  ) {
+    return this.loyaltyProgramSettingsService.update(user, dto);
   }
 
   @Get('explain')

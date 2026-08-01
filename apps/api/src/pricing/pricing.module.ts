@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CustomersModule } from '../customers/customers.module';
 import { BranchOrderPricingRevisionService } from './branch-order-pricing-revision.service';
 import { BranchPriceResolverService } from './branch-price-resolver.service';
 import { PricingCatalogService } from './pricing-catalog.service';
@@ -19,6 +20,7 @@ import { PricingValidationService } from './pricing-validation.service';
 import { PricingVersionService } from './pricing-version.service';
 
 @Module({
+  imports: [CustomersModule],
   controllers: [PricingController],
   providers: [
     BranchOrderPricingRevisionService,

@@ -11,7 +11,7 @@ export type SaleCustomerOption = {
   phone: string;
   whatsappPhone?: string | null;
   status: CustomerStatus;
-  customerType?: 'RETAIL' | 'WHOLESALE';
+  customerType?: 'RETAIL' | 'MASTER' | 'WHOLESALE';
   lastPurchaseDate?: string | null;
   totalDebtAmount: number;
   hasOverdueInstallment: boolean;

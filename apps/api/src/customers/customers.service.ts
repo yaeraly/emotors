@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  CustomerLoyaltyCategory,
   CustomerStatus,
   CustomerEvent,
   CustomerEventType,
@@ -26,6 +27,8 @@ import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../r
 import { isBranchRetailWholesaleCustomerType } from '../sales/sale-customer-pricing.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { toRoleAwareCustomerListItem } from './customer-list.presenter';
+import { getLoyaltyDiscountPercent } from './customer-loyalty.util';
+import { LoyaltyProgramSettingsService } from './loyalty-program-settings.service';
 
 type CustomerSaleHistory = {
   id: string;
@@ -55,7 +58,10 @@ type CustomerSaleHistory = {
 
 @Injectable()
 export class CustomersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
+  ) {}
 
   async findAll(user: AuthUser, query: CustomerQueryDto) {
     const where: Prisma.CustomerWhereInput = {
@@ -80,44 +86,50 @@ export class CustomersService {
       ];
     }
 
-    const customers = await this.prisma.customer.findMany({
-      where,
-      select: {
-        id: true,
-        fullName: true,
-        phone: true,
-        whatsappPhone: true,
-        status: true,
-        customerType: true,
-        branchId: true,
-        branch: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
+    const [customers, loyaltyConfig] = await Promise.all([
+      this.prisma.customer.findMany({
+        where,
+        select: {
+          id: true,
+          fullName: true,
+          phone: true,
+          whatsappPhone: true,
+          status: true,
+          customerType: true,
+          loyaltyCategory: true,
+          purchaseVolume: true,
+          lastPurchaseAt: true,
+          branchId: true,
+          branch: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
+          totalPurchaseAmount: true,
+          totalProfitAmount: true,
+          totalDebtAmount: true,
+          createdAt: true,
+          updatedAt: true,
+          sales: {
+            where: { deletedAt: null, status: SaleStatus.FINALIZED },
+            select: {
+              id: true,
+              saleDate: true,
+            },
+            orderBy: { saleDate: 'desc' },
           },
         },
-        totalPurchaseAmount: true,
-        totalProfitAmount: true,
-        totalDebtAmount: true,
-        createdAt: true,
-        updatedAt: true,
-        sales: {
-          where: { deletedAt: null, status: SaleStatus.FINALIZED },
-          select: {
-            id: true,
-            saleDate: true,
-          },
-          orderBy: { saleDate: 'desc' },
-        },
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
+        orderBy: { updatedAt: 'desc' },
+      }),
+      this.loyaltyProgramSettingsService.getConfig(),
+    ]);
 
     return customers.map((customer) =>
       toRoleAwareCustomerListItem(
         user,
-        this.toCustomerListItem(customer, customer.sales),
+        this.toCustomerListItem(customer, customer.sales, loyaltyConfig),
       ),
     );
   }
@@ -141,12 +153,8 @@ export class CustomersService {
     }
     const isHqBranch =
       branch?.branchType === 'HQ_BRANCH' || branch?.code === HQ_CATALOG_BRANCH_CODE;
-    if (
-      isHqBranch &&
-      customerType !== CustomerType.RETAIL &&
-      customerType !== CustomerType.WHOLESALE
-    ) {
-      throw new BadRequestException('HQ Branch customers must be Retail or Wholesale');
+    if (isHqBranch && !isBranchRetailWholesaleCustomerType(customerType)) {
+      throw new BadRequestException('HQ Branch customers must be Retail, Master, or Wholesale');
     }
 
     const customer = await this.prisma.customer.create({
@@ -156,6 +164,7 @@ export class CustomersService {
         whatsappPhone: dto.whatsappPhone,
         branchId,
         customerType,
+        loyaltyCategory: CustomerLoyaltyCategory.STANDARD,
         status: dto.status,
         notes: dto.notes,
         totalPurchaseAmount: dto.totalPurchaseAmount,
@@ -166,12 +175,14 @@ export class CustomersService {
     });
 
     await this.audit(user, branchId, 'CUSTOMER_CREATED', 'Customer', customer.id);
-    return this.toCustomerProfile(customer, customer.events, customer.sales);
+    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
+    return this.toCustomerProfile(customer, customer.events, customer.sales, loyaltyConfig);
   }
 
   async findOne(user: AuthUser, id: string) {
     const customer = await this.getAccessibleCustomer(user, id);
-    return this.toCustomerProfile(customer, customer.events, customer.sales);
+    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
+    return this.toCustomerProfile(customer, customer.events, customer.sales, loyaltyConfig);
   }
 
   async update(user: AuthUser, id: string, dto: UpdateCustomerDto) {
@@ -193,7 +204,7 @@ export class CustomersService {
       const isHqBranch =
         branch?.branchType === 'HQ_BRANCH' || branch?.code === HQ_CATALOG_BRANCH_CODE;
       if (isHqBranch && !isBranchRetailWholesaleCustomerType(dto.customerType)) {
-        throw new BadRequestException('HQ Branch customers must be Retail or Wholesale');
+        throw new BadRequestException('HQ Branch customers must be Retail, Master, or Wholesale');
       }
     }
 
@@ -225,15 +236,21 @@ export class CustomersService {
           customerId: id,
           previousCustomerType: existing.customerType,
           newCustomerType: dto.customerType,
+          oldValue: existing.customerType,
+          newValue: dto.customerType,
           from: existing.customerType,
           to: dto.customerType,
+          userId: user.id,
+          branchId: customer.branchId,
           changedBy: user.id,
           changedByName: user.fullName,
+          timestamp: new Date().toISOString(),
           changedAt: new Date().toISOString(),
         },
       );
     }
-    return this.toCustomerProfile(customer, customer.events, customer.sales);
+    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
+    return this.toCustomerProfile(customer, customer.events, customer.sales, loyaltyConfig);
   }
 
   async permanentDelete(user: AuthUser, id: string) {
@@ -441,8 +458,9 @@ export class CustomersService {
       })),
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
+    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
     return {
-      customer: this.toCustomerProfile(customer, events, customer.sales),
+      customer: this.toCustomerProfile(customer, events, customer.sales, loyaltyConfig),
       events,
       whatsappEvents: events.filter(
         (event) => event.type === CustomerEventType.WHATSAPP,
@@ -590,6 +608,9 @@ export class CustomersService {
       whatsappPhone: string | null;
       status: string;
       customerType?: CustomerType;
+      loyaltyCategory?: CustomerLoyaltyCategory;
+      purchaseVolume?: Prisma.Decimal | number;
+      lastPurchaseAt?: Date | null;
       branchId: string;
       branch: { id: string; name: string; code: string };
       totalPurchaseAmount: Prisma.Decimal;
@@ -598,12 +619,19 @@ export class CustomersService {
       createdAt: Date;
       updatedAt: Date;
     },
-  >(customer: T, sales: { id: string; saleDate: Date }[]) {
+  >(
+    customer: T,
+    sales: { id: string; saleDate: Date }[],
+    loyaltyConfig: Awaited<ReturnType<LoyaltyProgramSettingsService['getConfig']>>,
+  ) {
     const purchaseCount = sales.length;
-    const lastPurchaseDate = sales[0]?.saleDate ?? null;
+    const lastPurchaseDate = customer.lastPurchaseAt ?? sales[0]?.saleDate ?? null;
     const totalPurchases = Number(customer.totalPurchaseAmount);
     const totalProfit = Number(customer.totalProfitAmount);
     const totalDebt = Number(customer.totalDebtAmount);
+    const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
+    const purchaseVolume = Number(customer.purchaseVolume ?? totalPurchases);
+    const currentDiscountPercent = getLoyaltyDiscountPercent(loyaltyCategory, loyaltyConfig);
 
     return {
       id: customer.id,
@@ -612,6 +640,11 @@ export class CustomersService {
       whatsappPhone: customer.whatsappPhone,
       status: customer.status,
       customerType: customer.customerType ?? CustomerType.RETAIL,
+      loyaltyCategory,
+      customerCategory: loyaltyCategory,
+      purchaseVolume,
+      currentDiscountPercent,
+      currentDiscount: currentDiscountPercent,
       branchId: customer.branchId,
       branch: customer.branch,
       totalPurchases,
@@ -637,6 +670,9 @@ export class CustomersService {
       branch: { id: string; name: string; code: string };
       status: string;
       customerType?: CustomerType;
+      loyaltyCategory?: CustomerLoyaltyCategory;
+      purchaseVolume?: Prisma.Decimal | number;
+      lastPurchaseAt?: Date | null;
       notes: string | null;
       totalPurchaseAmount: Prisma.Decimal;
       totalProfitAmount: Prisma.Decimal;
@@ -645,7 +681,12 @@ export class CustomersService {
       updatedAt: Date;
       deletedAt: Date | null;
     },
-  >(customer: T, _events: CustomerEvent[], sales: CustomerSaleHistory[]) {
+  >(
+    customer: T,
+    _events: CustomerEvent[],
+    sales: CustomerSaleHistory[],
+    loyaltyConfig: Awaited<ReturnType<LoyaltyProgramSettingsService['getConfig']>>,
+  ) {
     const totalPurchases = Number(customer.totalPurchaseAmount);
     const totalProfit = Number(customer.totalProfitAmount);
     const totalDebt = Number(customer.totalDebtAmount);
@@ -653,6 +694,9 @@ export class CustomersService {
     const totalPayments = Math.max(totalPurchases - totalDebt, 0);
     const averageOrderValue =
       purchaseCount > 0 ? totalPurchases / purchaseCount : 0;
+    const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
+    const purchaseVolume = Number(customer.purchaseVolume ?? totalPurchases);
+    const currentDiscountPercent = getLoyaltyDiscountPercent(loyaltyCategory, loyaltyConfig);
 
     return {
       id: customer.id,
@@ -663,6 +707,11 @@ export class CustomersService {
       branch: customer.branch,
       status: customer.status,
       customerType: customer.customerType ?? CustomerType.RETAIL,
+      loyaltyCategory,
+      customerCategory: loyaltyCategory,
+      purchaseVolume,
+      currentDiscountPercent,
+      currentDiscount: currentDiscountPercent,
       notes: customer.notes,
       totalPurchases,
       totalProfit,
@@ -670,7 +719,7 @@ export class CustomersService {
       totalPayments,
       averageOrderValue,
       purchaseCount,
-      lastPurchaseDate: sales[0]?.saleDate ?? null,
+      lastPurchaseDate: customer.lastPurchaseAt ?? sales[0]?.saleDate ?? null,
       createdAt: customer.createdAt,
       updatedAt: customer.updatedAt,
       deletedAt: customer.deletedAt,

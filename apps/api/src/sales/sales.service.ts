@@ -7,6 +7,7 @@ import {
 import {
   AlertType,
   CustomerEventType,
+  CustomerLoyaltyCategory,
   CustomerStatus,
   CustomerType,
   InstallmentStatus,
@@ -21,11 +22,17 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
+import {
+  calculateFinalSaleUnitPrice,
+  getLoyaltyDiscountPercent,
+} from '../customers/customer-loyalty.util';
+import { LoyaltyProgramSettingsService } from '../customers/loyalty-program-settings.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PricingCatalogService } from '../pricing/pricing-catalog.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PricingService } from '../pricing/pricing.service';
+import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertBranchCashierCannotManageSales, assertBranchSalesManagerCannotApproveSale, hasAnyFullAccessRole, hasAnyHqRole, isBranchSalesManagerUser, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
 import { CASHIER_ASSIGNMENT_OPERATIONS } from '../rbac/cashier-capability.util';
@@ -39,7 +46,9 @@ import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sal
 import {
   assertBranchSaleCustomerTypeAllowed,
   assertSalePricingChannelMatchesCustomer,
+  minimumPriceTypeForChannel,
   missingSalePricingPolicyMessage,
+  recommendedPriceTypeForChannel,
   resolvePricingChannelFromCustomerType,
   type SalePricingChannel,
 } from './sale-customer-pricing.util';
@@ -58,6 +67,7 @@ export class SalesService {
     private readonly pricingResolution: PricingResolutionService,
     private readonly saleInstallmentApprovalService: SaleInstallmentApprovalService,
     private readonly notificationsService: NotificationsService,
+    private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -71,9 +81,12 @@ export class SalesService {
       this.applyCustomerPricingChannels(customer, dto);
       this.assertCustomerAllowedForBranchSale(customer, dto.items);
       await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
+      await this.applyAutomaticSalePricing(user, customer, dto);
       await this.validateSaleStock(user, customer.branchId, dto.items);
       await this.assertSaleItemsResolvablePricing(user, customer.branchId, dto.items);
-      await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
+      await this.pricingService.validateSaleItems(user, customer.branchId, dto.items, {
+        automaticCustomerPricing: true,
+      });
       const saleDate = dto.saleDate ?? new Date();
       const receiptNumber = await this.generateReceiptNumber(tx, saleDate);
       const totals = await this.calculateSaleWithFreeze(user, customer.branchId, dto);
@@ -355,17 +368,23 @@ export class SalesService {
     const productOptions = await Promise.all(
       balances.map(async (balance) => {
         const availableQty = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
-        const pricingChannel = query.pricingChannel ?? 'RETAIL';
-        const isWholesale = pricingChannel === 'WHOLESALE';
-        const recommendedPriceKgs = isWholesale
-          ? await this.resolveRecommendedWholesalePrice(branchId, balance.product.id)
-          : await this.resolveRecommendedRetailPrice(branchId, balance.product.id);
-        const minimumPriceKgs = isWholesale
-          ? await this.resolveWholesaleMinimumPrice(branchId, balance.product.id)
-          : await this.resolveRetailMinimumPrice(branchId, balance.product.id);
-        const maximumPriceKgs = isWholesale
-          ? await this.resolveWholesaleMaximumPrice(branchId, balance.product.id)
-          : await this.resolveRetailMaximumPrice(branchId, balance.product.id);
+        const pricingChannel = (query.pricingChannel ?? 'RETAIL') as SalePricingChannel;
+        const recommendedPriceKgs = await this.resolveRecommendedChannelPrice(
+          branchId,
+          balance.product.id,
+          pricingChannel,
+        );
+        const minimumPriceKgs = await this.resolveChannelMinimumPrice(
+          branchId,
+          balance.product.id,
+          pricingChannel,
+        );
+        const maximumPriceKgs =
+          pricingChannel === 'WHOLESALE'
+            ? await this.resolveWholesaleMaximumPrice(branchId, balance.product.id)
+            : pricingChannel === 'MASTER'
+              ? null
+              : await this.resolveRetailMaximumPrice(branchId, balance.product.id);
         const sellingPriceKgs = recommendedPriceKgs ?? 0;
 
         return {
@@ -398,11 +417,35 @@ export class SalesService {
   }
 
   private async resolveRecommendedRetailPrice(branchId: string, productId: string) {
+    return this.resolveRecommendedChannelPrice(branchId, productId, 'RETAIL');
+  }
+
+  private async resolveRecommendedChannelPrice(
+    branchId: string,
+    productId: string,
+    channel: SalePricingChannel,
+  ) {
     try {
       const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
-        priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+        priceType: recommendedPriceTypeForChannel(channel),
       });
-      const price = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      const price = roundDisplayMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveChannelMinimumPrice(
+    branchId: string,
+    productId: string,
+    channel: SalePricingChannel,
+  ) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: minimumPriceTypeForChannel(channel),
+      });
+      const price = roundDisplayMoney(Number(freeze.resolvedPriceKgs ?? 0));
       return price > 0 ? price : null;
     } catch {
       return null;
@@ -485,9 +528,12 @@ export class SalesService {
       this.applyCustomerPricingChannels(customer, dto);
       this.assertCustomerAllowedForBranchSale(customer, dto.items);
       await this.enrichSaleItemsFromProducts(user, customer.branchId, dto);
+      await this.applyAutomaticSalePricing(user, customer, dto);
       await this.validateSaleStock(user, customer.branchId, dto.items);
       await this.assertSaleItemsResolvablePricing(user, customer.branchId, dto.items);
-      await this.pricingService.validateSaleItems(user, customer.branchId, dto.items);
+      await this.pricingService.validateSaleItems(user, customer.branchId, dto.items, {
+        automaticCustomerPricing: true,
+      });
       const saleDate = dto.saleDate ?? sale.saleDate;
       const totals = await this.calculateSaleWithFreeze(user, customer.branchId, dto);
       const paymentAggregate = await tx.payment.aggregate({
@@ -835,7 +881,11 @@ export class SalesService {
       await this.refreshSalePaymentState(tx, sale.id);
 
       if (sale.status === SaleStatus.FINALIZED) {
-        await this.refreshCustomerFinancials(tx, sale.customerId);
+        await this.refreshCustomerFinancials(tx, sale.customerId, {
+          userId: user.id,
+          role: user.role,
+          branchId: sale.branchId,
+        });
       }
     });
 
@@ -943,7 +993,9 @@ export class SalesService {
 
         await this.validateSaleStock(user, refreshedSale.branchId, finalizeItems);
         await this.assertSaleItemsResolvablePricing(user, refreshedSale.branchId, finalizeItems);
-        await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems);
+        await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems, {
+          automaticCustomerPricing: true,
+        });
       }
 
       const refreshed = await tx.sale.findUniqueOrThrow({
@@ -1016,7 +1068,11 @@ export class SalesService {
         });
       }
 
-      await this.refreshCustomerFinancials(tx, sale.customerId);
+      await this.refreshCustomerFinancials(tx, sale.customerId, {
+        userId: user.id,
+        role: user.role,
+        branchId: sale.branchId,
+      });
       await this.commissionsService.createSalesCommission(tx, sale.id);
 
       if (requiresInstallmentApproval) {
@@ -1057,7 +1113,11 @@ export class SalesService {
       });
 
       if (sale.status === SaleStatus.FINALIZED) {
-        await this.refreshCustomerFinancials(tx, sale.customerId);
+        await this.refreshCustomerFinancials(tx, sale.customerId, {
+          userId: user.id,
+          role: user.role,
+          branchId: sale.branchId,
+        });
       }
       await this.auditInTx(tx, user, sale.branchId, 'SALE_CANCELLATION', 'Sale', sale.id);
     });
@@ -1154,12 +1214,9 @@ export class SalesService {
       let freezeFields: Record<string, unknown> = {};
       if (item.productId) {
         try {
-          const channel = item.pricingChannel ?? 'RETAIL';
+          const channel = (item.pricingChannel ?? 'RETAIL') as SalePricingChannel;
           const freeze = await this.pricingResolution.resolveWithFreeze(branchId, item.productId, {
-            priceType:
-              channel === 'WHOLESALE'
-                ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
-                : PricingEnginePriceType.RETAIL_RECOMMENDED,
+            priceType: recommendedPriceTypeForChannel(channel),
             auditUser: user,
             auditEntity: 'SaleItem',
           });
@@ -1347,6 +1404,123 @@ export class SalesService {
     }
   }
 
+  /**
+   * Backend is the single source of truth for Branch Sale unit prices:
+   * Customer Type price → loyalty discount → minimum price floor.
+   * Branch users cannot override the calculated selling price.
+   */
+  private async applyAutomaticSalePricing(
+    user: AuthUser,
+    customer: {
+      id: string;
+      branchId: string;
+      customerType: CustomerType;
+      loyaltyCategory?: CustomerLoyaltyCategory | null;
+    },
+    dto: CreateSaleDto,
+  ) {
+    const channel = this.resolvePricingChannelFromCustomer(customer.customerType);
+    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
+    const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
+    const loyaltyDiscountPercent = getLoyaltyDiscountPercent(loyaltyCategory, loyaltyConfig);
+    const allowManualOverride = hasAnyFullAccessRole(resolveUserRoles(user));
+
+    for (const item of dto.items) {
+      if (!item.productId) continue;
+      item.pricingChannel = channel;
+
+      const basePrice = await this.resolveRecommendedChannelPrice(
+        customer.branchId,
+        item.productId,
+        channel,
+      );
+      if (basePrice == null || basePrice <= 0) {
+        continue;
+      }
+
+      const minimumPrice =
+        (await this.resolveChannelMinimumPrice(customer.branchId, item.productId, channel)) ?? 0;
+
+      const priced = calculateFinalSaleUnitPrice({
+        basePriceKgs: basePrice,
+        loyaltyDiscountPercent,
+        minimumPriceKgs: minimumPrice,
+      });
+
+      const clientPrice = roundDisplayMoney(Number(item.unitPrice || 0));
+      if (!allowManualOverride && Math.abs(clientPrice - priced.finalPriceKgs) > 0.01) {
+        // Overwrite client-supplied price; Branch Sales cannot override calculated price.
+        await this.prisma.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'PRICE_OVERRIDE_REJECTED',
+            entity: 'Customer',
+            entityId: customer.id,
+            metadata: {
+              customerId: customer.id,
+              productId: item.productId,
+              oldValue: clientPrice,
+              newValue: priced.finalPriceKgs,
+              userId: user.id,
+              branchId: customer.branchId,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+      }
+
+      item.unitPrice = priced.finalPriceKgs;
+
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'AUTO_PRICE_SELECTED',
+          entity: 'Customer',
+          entityId: customer.id,
+          metadata: {
+            customerId: customer.id,
+            productId: item.productId,
+            customerType: customer.customerType,
+            pricingChannel: channel,
+            oldValue: clientPrice,
+            newValue: priced.finalPriceKgs,
+            basePriceKgs: priced.basePriceKgs,
+            userId: user.id,
+            branchId: customer.branchId,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      if (priced.discountPercent > 0) {
+        await this.prisma.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'LOYALTY_DISCOUNT_APPLIED',
+            entity: 'Customer',
+            entityId: customer.id,
+            metadata: {
+              customerId: customer.id,
+              productId: item.productId,
+              loyaltyCategory,
+              oldValue: priced.basePriceKgs,
+              newValue: priced.finalPriceKgs,
+              discountPercent: priced.discountPercent,
+              discountAmountKgs: priced.discountAmountKgs,
+              minimumPriceApplied: priced.minimumPriceApplied,
+              userId: user.id,
+              branchId: customer.branchId,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+      }
+    }
+  }
+
   private assertCustomerAllowedForBranchSale(
     customer: {
       customerType: CustomerType;
@@ -1371,7 +1545,7 @@ export class SalesService {
   private async assertSaleItemsResolvablePricing(
     user: AuthUser,
     branchId: string,
-    items: Array<{ productId?: string; pricingChannel?: 'RETAIL' | 'WHOLESALE' }>,
+    items: Array<{ productId?: string; pricingChannel?: SalePricingChannel }>,
   ) {
     if (hasAnyFullAccessRole(resolveUserRoles(user))) {
       return;
@@ -1379,21 +1553,12 @@ export class SalesService {
 
     for (const item of items) {
       if (!item.productId) continue;
-      const channel = item.pricingChannel ?? 'RETAIL';
-      const isWholesale = channel === 'WHOLESALE';
-      const priceType = isWholesale
-        ? PricingEnginePriceType.WHOLESALE_RECOMMENDED
-        : PricingEnginePriceType.RETAIL_RECOMMENDED;
-
-      let resolvedPrice: number | null = null;
-      try {
-        const freeze = await this.pricingResolution.resolveWithFreeze(branchId, item.productId, {
-          priceType,
-        });
-        resolvedPrice = this.roundMoney(Number(freeze.resolvedPriceKgs ?? 0));
-      } catch {
-        resolvedPrice = null;
-      }
+      const channel = (item.pricingChannel ?? 'RETAIL') as SalePricingChannel;
+      const resolvedPrice = await this.resolveRecommendedChannelPrice(
+        branchId,
+        item.productId,
+        channel,
+      );
 
       if (!resolvedPrice || resolvedPrice <= 0) {
         await this.notifyMissingSalePricingPolicy(user, branchId, item.productId, channel);
@@ -1406,13 +1571,14 @@ export class SalesService {
     user: AuthUser,
     branchId: string,
     productId: string,
-    channel: 'RETAIL' | 'WHOLESALE',
+    channel: SalePricingChannel,
   ) {
     const product = await this.prisma.product.findFirst({
       where: { id: productId, deletedAt: null },
       select: { sku: true, name: true },
     });
-    const label = channel === 'WHOLESALE' ? 'оптовая' : 'розничная';
+    const label =
+      channel === 'WHOLESALE' ? 'оптовая' : channel === 'MASTER' ? 'Master' : 'розничная';
     await this.notificationsService.notify(user, {
       type: AlertType.BRANCH_REQUEST_NO_PRICING_POLICY,
       branchId,
@@ -1621,7 +1787,11 @@ export class SalesService {
     }
   }
 
-  private async refreshCustomerFinancials(tx: PrismaTx, customerId: string) {
+  private async refreshCustomerFinancials(
+    tx: PrismaTx,
+    customerId: string,
+    options?: { userId?: string; role?: string; branchId?: string },
+  ) {
     const sales = await tx.sale.findMany({
       where: {
         customerId,
@@ -1632,7 +1802,10 @@ export class SalesService {
         totalAmount: true,
         profitAmount: true,
         debtAmount: true,
+        saleDate: true,
+        branchId: true,
       },
+      orderBy: { saleDate: 'desc' },
     });
 
     await tx.customer.update({
@@ -1645,8 +1818,25 @@ export class SalesService {
           sales.map((sale) => sale.profitAmount),
         ),
         totalDebtAmount: this.sumDecimals(sales.map((sale) => sale.debtAmount)),
+        lastPurchaseAt: sales[0]?.saleDate ?? null,
       },
     });
+
+    if (options?.userId && options.role && options.branchId) {
+      await this.loyaltyProgramSettingsService.refreshCustomerLoyalty(tx, {
+        customerId,
+        branchId: options.branchId,
+        userId: options.userId,
+        role: options.role,
+      });
+    } else if (sales[0]) {
+      await this.loyaltyProgramSettingsService.refreshCustomerLoyalty(tx, {
+        customerId,
+        branchId: sales[0].branchId,
+        userId: 'system',
+        role: 'SYSTEM',
+      });
+    }
   }
 
   private buildReceiptText(input: {

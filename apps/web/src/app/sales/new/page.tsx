@@ -89,7 +89,7 @@ export default function NewSalePage() {
     fullName: '',
     phone: '',
     whatsappPhone: '',
-    customerType: 'RETAIL' as 'RETAIL' | 'WHOLESALE',
+    customerType: 'RETAIL' as 'RETAIL' | 'MASTER' | 'WHOLESALE',
   });
   const [creatingCustomer, setCreatingCustomer] = useState(false);
   const [draftSale, setDraftSale] = useState<Sale | null>(null);
@@ -631,7 +631,11 @@ export default function NewSalePage() {
         whatsappPhone: customer.whatsappPhone,
         status: customer.status,
         customerType:
-          customer.customerType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
+          customer.customerType === 'WHOLESALE'
+            ? 'WHOLESALE'
+            : customer.customerType === 'MASTER'
+              ? 'MASTER'
+              : 'RETAIL',
         totalDebtAmount: Number(customer.totalDebtAmount ?? 0),
         hasOverdueInstallment: false,
       });
@@ -711,7 +715,11 @@ export default function NewSalePage() {
           whatsappPhone: refreshedCustomer.whatsappPhone,
           status: refreshedCustomer.status,
           customerType:
-            refreshedCustomer.customerType === 'WHOLESALE' ? 'WHOLESALE' : 'RETAIL',
+            refreshedCustomer.customerType === 'WHOLESALE'
+              ? 'WHOLESALE'
+              : refreshedCustomer.customerType === 'MASTER'
+                ? 'MASTER'
+                : 'RETAIL',
           totalDebtAmount: Number(refreshedCustomer.totalDebtAmount ?? 0),
           hasOverdueInstallment: selectedCustomer.hasOverdueInstallment,
         };
@@ -894,6 +902,17 @@ export default function NewSalePage() {
                     <input
                       type="radio"
                       required
+                      checked={createCustomerForm.customerType === 'MASTER'}
+                      onChange={() =>
+                        setCreateCustomerForm((current) => ({ ...current, customerType: 'MASTER' }))
+                      }
+                    />
+                    {t('customers.customerTypeMaster')}
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      required
                       checked={createCustomerForm.customerType === 'WHOLESALE'}
                       onChange={() =>
                         setCreateCustomerForm((current) => ({ ...current, customerType: 'WHOLESALE' }))
@@ -981,10 +1000,11 @@ export default function NewSalePage() {
                         label={t('sales.sellingPrice')}
                         type="number"
                         value={item.unitPrice}
-                        onChange={(value) => updateItem(index, { unitPrice: value })}
+                        onChange={() => undefined}
                         required
                         step="1"
                         min={0}
+                        readOnly
                         labelAccessory={
                           <SaleLinePricingTooltip
                             minimumPrice={item.minimumPrice}
@@ -1002,6 +1022,7 @@ export default function NewSalePage() {
                               : undefined
                         }
                       />
+                      <p className="mt-1 text-xs text-slate-500">{t('sales.autoPriceLocked')}</p>
                       {item.hasPricingPolicy && priceState?.level === 'warning' ? (
                         <p className="mt-1 text-xs font-semibold text-amber-700">
                           {priceWarningMessage(priceState)}
