@@ -4,7 +4,7 @@ import { IsDateString, IsInt, IsNumber, IsOptional, IsString, Min, MinLength } f
 export class BranchAccountantInstallmentRequestDto {
   @Type(() => Number)
   @IsNumber()
-  @Min(0.01)
+  @Min(0)
   firstPaymentAmount!: number;
 
   @IsOptional()

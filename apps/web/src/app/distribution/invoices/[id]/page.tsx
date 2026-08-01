@@ -29,6 +29,7 @@ export default function BranchInvoiceDetailPage() {
   const [rejectComment, setRejectComment] = useState('');
   const [installmentFirstPayment, setInstallmentFirstPayment] = useState('');
   const [installmentMonths, setInstallmentMonths] = useState('3');
+  const [installmentRejectComment, setInstallmentRejectComment] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -141,6 +142,27 @@ export default function BranchInvoiceDetailPage() {
     try {
       setInvoice(await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/installment/approve`, { method: 'POST' }));
       setSuccess(t('distribution.installmentApproved'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
+  }
+
+  async function rejectInstallment() {
+    if (!installmentRejectComment.trim()) {
+      setError(t('sales.installmentRejectionReasonRequired'));
+      return;
+    }
+    setError('');
+    setSuccess('');
+    try {
+      setInvoice(
+        await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/installment/reject`, {
+          method: 'POST',
+          body: JSON.stringify({ comment: installmentRejectComment.trim() }),
+        }),
+      );
+      setInstallmentRejectComment('');
+      setSuccess(t('sales.installmentRequestRejected'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -271,14 +293,52 @@ export default function BranchInvoiceDetailPage() {
             ) : null}
 
             {canApproveInstallment && invoice.branchOrderInstallment?.status === 'PENDING' ? (
-              <section className="rounded-3xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
+              <section className="rounded-3xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm space-y-4">
                 <h3 className="text-lg font-bold">{t('distribution.installmentApproval')}</h3>
-                <p className="mt-2 text-sm">
-                  {formatKgs(invoice.branchOrderInstallment.firstPaymentAmount)} / {invoice.branchOrderInstallment.termMonths} {t('distribution.months')}
-                </p>
-                <button className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white" type="button" onClick={() => void approveInstallment()}>
-                  {t('distribution.approveInstallment')}
-                </button>
+                <div className="grid gap-3 text-sm md:grid-cols-2">
+                  <p>{t('distribution.branch')}: {invoice.branch?.name ?? '—'}</p>
+                  <p>{t('distribution.totalAmount')}: {formatKgs(invoice.branchOrderInstallment.totalAmount)}</p>
+                  <p>{t('distribution.firstPaymentAmount')}: {formatKgs(invoice.branchOrderInstallment.firstPaymentAmount)}</p>
+                  <p>{t('distribution.installmentInitialPercent')}: {invoice.branchOrderInstallment.initialPaymentPercent ?? 0}%</p>
+                  <p>{t('distribution.installmentRemainingDebt')}: {formatKgs(invoice.branchOrderInstallment.remainingDebt ?? invoice.debtAmount)}</p>
+                  <p>{t('distribution.installmentMonths')}: {invoice.branchOrderInstallment.termMonths}</p>
+                </div>
+                {invoice.branchOrderInstallment.zeroInitialPayment ? (
+                  <p className="rounded-xl bg-amber-100 px-4 py-3 text-sm font-semibold text-amber-900">
+                    {t('distribution.zeroInitialPaymentWarning')}
+                  </p>
+                ) : null}
+                {invoice.branchOrderInstallment.requestComment ? (
+                  <p className="text-sm text-slate-700">
+                    {t('sales.installmentComment')}: {invoice.branchOrderInstallment.requestComment}
+                  </p>
+                ) : null}
+                {invoice.branchOrderInstallment.paymentSchedule?.length ? (
+                  <div className="rounded-xl bg-white p-4 text-sm">
+                    <p className="font-semibold">{t('branchAccountant.paymentSchedule')}</p>
+                    {invoice.branchOrderInstallment.paymentSchedule.map((row) => (
+                      <p key={row.installmentNumber}>
+                        #{row.installmentNumber}: {formatKgs(row.amount)} · {new Date(row.dueDate).toLocaleDateString()}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap gap-3">
+                  <button className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white" type="button" onClick={() => void approveInstallment()}>
+                    {t('distribution.approveInstallment')}
+                  </button>
+                  <label className="flex min-w-[16rem] flex-col gap-2">
+                    <span className="text-sm font-semibold text-slate-700">{t('sales.installmentRejectionReason')}</span>
+                    <input
+                      value={installmentRejectComment}
+                      onChange={(event) => setInstallmentRejectComment(event.target.value)}
+                      className="rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <button className="rounded-xl bg-red-600 px-4 py-2 font-semibold text-white" type="button" onClick={() => void rejectInstallment()}>
+                    {t('distribution.rejectInstallment')}
+                  </button>
+                </div>
               </section>
             ) : null}
 

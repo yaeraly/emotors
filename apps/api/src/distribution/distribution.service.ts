@@ -73,6 +73,12 @@ import {
 } from '../pricing/product-cost-precision.util';
 import { AddBranchPaymentDto } from './dto/add-branch-payment.dto';
 import { RejectBranchInstallmentDto, RequestBranchInstallmentDto } from './dto/request-branch-installment.dto';
+import {
+  buildBranchOrderInstallmentSchedule,
+  computeBranchOrderRemainingDebt,
+  isZeroInitialPayment,
+  validateBranchOrderInstallmentAmounts,
+} from './branch-order-installment.util';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
@@ -2803,6 +2809,30 @@ export class DistributionService {
         throw new BadRequestException('Рассрочка по этому счёту уже запрошена');
       }
 
+      const totalAmount = this.roundMoney(Number(invoice.totalAmount));
+      const firstPaymentAmount = this.roundMoney(Number(dto.firstPaymentAmount));
+      const validationError = validateBranchOrderInstallmentAmounts(totalAmount, firstPaymentAmount);
+      if (validationError === 'ORDER_TOTAL_REQUIRED') {
+        throw new BadRequestException('Сумма заказа должна быть больше нуля');
+      }
+      if (validationError === 'INVALID_INITIAL_PAYMENT') {
+        throw new BadRequestException('Первоначальный взнос должен быть числом');
+      }
+      if (validationError === 'NEGATIVE_INITIAL_PAYMENT') {
+        throw new BadRequestException('Первоначальный взнос не может быть отрицательным');
+      }
+      if (validationError === 'INITIAL_PAYMENT_EXCEEDS_TOTAL') {
+        throw new BadRequestException('Первоначальный взнос не может превышать сумму заказа');
+      }
+
+      const remainingDebt = computeBranchOrderRemainingDebt(totalAmount, firstPaymentAmount);
+      const firstPaymentRequired = dto.firstPaymentRequired ?? !isZeroInitialPayment(firstPaymentAmount);
+      const paymentSchedule = buildBranchOrderInstallmentSchedule(
+        remainingDebt,
+        dto.termMonths,
+        dto.dueDate ? new Date(dto.dueDate) : null,
+      );
+
       const linkedRequest = await tx.branchPurchaseRequest.findFirst({
         where: { convertedOrderId: invoice.distributionOrderId, deletedAt: null },
       });
@@ -2813,9 +2843,9 @@ export class DistributionService {
           invoiceId: invoice.id,
           branchPurchaseRequestId: linkedRequest?.id,
           totalAmount: invoice.totalAmount,
-          firstPaymentAmount: dto.firstPaymentAmount,
+          firstPaymentAmount,
           termMonths: dto.termMonths,
-          firstPaymentRequired: dto.firstPaymentRequired ?? true,
+          firstPaymentRequired,
           requestedById: user.id,
           requestComment: dto.comment?.trim() || null,
           installmentDueDate: dto.dueDate ? new Date(dto.dueDate) : null,
@@ -2843,13 +2873,23 @@ export class DistributionService {
         data: {
           userId: user.id,
           role: user.role,
-          action: 'INSTALLMENT_REQUESTED',
+          action: isZeroInitialPayment(firstPaymentAmount)
+            ? 'ZERO_INITIAL_PAYMENT_INSTALLMENT_REQUESTED'
+            : 'INSTALLMENT_REQUESTED',
           entity: 'BranchOrderInstallment',
           entityId: installment.id,
           metadata: {
             invoiceId,
-            firstPaymentAmount: dto.firstPaymentAmount,
-            termMonths: dto.termMonths,
+            branchId: invoice.branchId,
+            orderId: invoice.distributionOrderId,
+            orderNumber: invoice.invoiceNumber,
+            orderTotal: totalAmount,
+            initialPayment: firstPaymentAmount,
+            remainingDebt,
+            installmentTerm: dto.termMonths,
+            paymentSchedule,
+            requestedById: user.id,
+            requestedAt: new Date().toISOString(),
             roles: user.roles ?? [user.role],
           },
         },
@@ -2858,8 +2898,12 @@ export class DistributionService {
       await this.createWorkflowAlert(tx, user, {
         branchId: invoice.branchId,
         type: AlertType.BRANCH_INSTALLMENT_REQUESTED,
-        title: 'Запрос рассрочки по заказу филиала',
-        message: `Филиал запросил рассрочку по счёту ${invoice.invoiceNumber}`,
+        title: isZeroInitialPayment(firstPaymentAmount)
+          ? 'Запрос рассрочки без первоначального взноса'
+          : 'Запрос рассрочки по заказу филиала',
+        message: isZeroInitialPayment(firstPaymentAmount)
+          ? `Филиал запросил рассрочку без первоначального взноса по счёту ${invoice.invoiceNumber}. Сумма заказа: ${totalAmount.toFixed(2)} KGS.`
+          : `Филиал запросил рассрочку по счёту ${invoice.invoiceNumber}`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
         recipientRoles: [Role.CEO, Role.OWNER, Role.FINANCE_MANAGER],
@@ -2889,8 +2933,18 @@ export class DistributionService {
         throw new BadRequestException('Рассрочка уже рассмотрена');
       }
 
+      const installment = invoice.branchOrderInstallment;
+      const totalAmount = this.roundMoney(Number(installment.totalAmount));
+      const firstPaymentAmount = this.roundMoney(Number(installment.firstPaymentAmount));
+      const remainingDebt = computeBranchOrderRemainingDebt(totalAmount, firstPaymentAmount);
+      const paymentSchedule = buildBranchOrderInstallmentSchedule(
+        remainingDebt,
+        installment.termMonths,
+        installment.installmentDueDate,
+      );
+
       await tx.branchOrderInstallment.update({
-        where: { id: invoice.branchOrderInstallment.id },
+        where: { id: installment.id },
         data: {
           status: BranchOrderInstallmentStatus.APPROVED,
           approvedById: user.id,
@@ -2909,10 +2963,37 @@ export class DistributionService {
         data: {
           userId: user.id,
           role: user.role,
-          action: 'BRANCH_INSTALLMENT_APPROVED',
+          action: 'INSTALLMENT_APPROVED',
           entity: 'BranchOrderInstallment',
-          entityId: invoice.branchOrderInstallment.id,
-          metadata: { invoiceId, roles: user.roles ?? [user.role] },
+          entityId: installment.id,
+          metadata: {
+            invoiceId,
+            branchId: invoice.branchId,
+            orderTotal: totalAmount,
+            initialPayment: firstPaymentAmount,
+            remainingDebt,
+            installmentTerm: installment.termMonths,
+            paymentSchedule,
+            approvedById: user.id,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'INSTALLMENT_SCHEDULE_CREATED',
+          entity: 'BranchOrderInstallment',
+          entityId: installment.id,
+          metadata: {
+            invoiceId,
+            remainingDebt,
+            installmentTerm: installment.termMonths,
+            paymentSchedule,
+            roles: user.roles ?? [user.role],
+          },
         },
       });
 
@@ -2985,7 +3066,7 @@ export class DistributionService {
         data: {
           userId: user.id,
           role: user.role,
-          action: 'BRANCH_INSTALLMENT_REJECTED',
+          action: 'INSTALLMENT_REJECTED',
           entity: 'BranchOrderInstallment',
           entityId: invoice.branchOrderInstallment.id,
           metadata: { invoiceId, comment: dto.comment.trim(), roles: user.roles ?? [user.role] },
@@ -3899,11 +3980,7 @@ export class DistributionService {
         amount: Number(payment.amount),
       })),
       branchOrderInstallment: invoice.branchOrderInstallment
-        ? {
-            ...invoice.branchOrderInstallment,
-            totalAmount: Number(invoice.branchOrderInstallment.totalAmount),
-            firstPaymentAmount: Number(invoice.branchOrderInstallment.firstPaymentAmount),
-          }
+        ? this.serializeBranchOrderInstallment(invoice.branchOrderInstallment)
         : null,
     };
   }
@@ -3913,6 +3990,44 @@ export class DistributionService {
       ...balance,
       totalDebt: Number(balance.totalDebt),
       totalPaid: Number(balance.totalPaid),
+    };
+  }
+
+  private serializeBranchOrderInstallment(installment: {
+    id: string;
+    status: BranchOrderInstallmentStatus;
+    totalAmount: Prisma.Decimal | number;
+    firstPaymentAmount: Prisma.Decimal | number;
+    termMonths: number;
+    firstPaymentRequired: boolean;
+    firstPaymentConfirmed: boolean;
+    requestComment?: string | null;
+    installmentDueDate?: Date | string | null;
+    requestedAt?: Date | string;
+    decidedAt?: Date | string | null;
+    rejectionComment?: string | null;
+    [key: string]: unknown;
+  }) {
+    const totalAmount = Number(installment.totalAmount);
+    const firstPaymentAmount = Number(installment.firstPaymentAmount);
+    const remainingDebt = computeBranchOrderRemainingDebt(totalAmount, firstPaymentAmount);
+    const paymentSchedule = buildBranchOrderInstallmentSchedule(
+      remainingDebt,
+      installment.termMonths,
+      installment.installmentDueDate ? new Date(installment.installmentDueDate) : null,
+    );
+    const initialPaymentPercent =
+      totalAmount > 0 ? this.roundMoney((firstPaymentAmount / totalAmount) * 100) : 0;
+
+    return {
+      ...installment,
+      totalAmount,
+      firstPaymentAmount,
+      remainingDebt,
+      financedAmount: remainingDebt,
+      initialPaymentPercent,
+      paymentSchedule,
+      zeroInitialPayment: isZeroInitialPayment(firstPaymentAmount),
     };
   }
 

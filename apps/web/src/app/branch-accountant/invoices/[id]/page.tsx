@@ -1,11 +1,15 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
+import {
+  buildBranchOrderInstallmentSchedulePreview,
+  computeBranchOrderRemainingDebt,
+} from '@/lib/branch-order-installment';
 import { translateStatus } from '@/lib/translate-status';
 import type { BranchAccountantInvoice } from '@/lib/types';
 
@@ -15,9 +19,11 @@ export default function BranchAccountantInvoiceDetailPage() {
   const [invoice, setInvoice] = useState<BranchAccountantInvoice | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [installmentFirstPayment, setInstallmentFirstPayment] = useState('');
+  const [installmentFirstPayment, setInstallmentFirstPayment] = useState('0');
+  const [installmentTermMonths, setInstallmentTermMonths] = useState('3');
   const [installmentDueDate, setInstallmentDueDate] = useState('');
   const [installmentComment, setInstallmentComment] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   async function load() {
     try {
@@ -31,6 +37,23 @@ export default function BranchAccountantInvoiceDetailPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const installmentPreview = useMemo(() => {
+    if (!invoice) return null;
+    const totalAmount = Number(invoice.totalAmount);
+    const firstPaymentRaw = installmentFirstPayment.trim();
+    const firstPaymentAmount = firstPaymentRaw === '' ? 0 : Number(firstPaymentRaw);
+    if (!Number.isFinite(firstPaymentAmount) || firstPaymentAmount < 0) return null;
+    const remainingDebt = computeBranchOrderRemainingDebt(totalAmount, firstPaymentAmount);
+    const termMonths = Math.max(1, Number(installmentTermMonths) || 1);
+    return {
+      totalAmount,
+      firstPaymentAmount,
+      remainingDebt,
+      termMonths,
+      schedule: buildBranchOrderInstallmentSchedulePreview(remainingDebt, termMonths),
+    };
+  }, [invoice, installmentFirstPayment, installmentTermMonths]);
 
   async function selectFullPayment() {
     setError('');
@@ -50,15 +73,17 @@ export default function BranchAccountantInvoiceDetailPage() {
 
   async function requestInstallment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!installmentPreview) return;
     setError('');
     setSuccess('');
+    setSubmitting(true);
     try {
       setInvoice(
         await apiFetch<BranchAccountantInvoice>(`/branch-accountant/invoices/${id}/installment-request`, {
           method: 'POST',
           body: JSON.stringify({
-            firstPaymentAmount: Number(installmentFirstPayment),
-            termMonths: 3,
+            firstPaymentAmount: installmentPreview.firstPaymentAmount,
+            termMonths: installmentPreview.termMonths,
             dueDate: installmentDueDate || undefined,
             comment: installmentComment || undefined,
           }),
@@ -67,6 +92,8 @@ export default function BranchAccountantInvoiceDetailPage() {
       setSuccess(t('branchAccountant.installmentRequested'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -153,7 +180,26 @@ export default function BranchAccountantInvoiceDetailPage() {
                   <h4 className="font-bold">{t('branchAccountant.installmentPayment')}</h4>
                   <label className="block text-sm">
                     <span className="font-semibold">{t('distribution.firstPaymentAmount')}</span>
-                    <input value={installmentFirstPayment} onChange={(e) => setInstallmentFirstPayment(e.target.value)} type="number" min="0.01" step="0.01" className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" required />
+                    <input
+                      value={installmentFirstPayment}
+                      onChange={(e) => setInstallmentFirstPayment(e.target.value)}
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                      required
+                    />
+                  </label>
+                  <label className="block text-sm">
+                    <span className="font-semibold">{t('distribution.installmentMonths')}</span>
+                    <input
+                      value={installmentTermMonths}
+                      onChange={(e) => setInstallmentTermMonths(e.target.value)}
+                      type="number"
+                      min="1"
+                      className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                      required
+                    />
                   </label>
                   <label className="block text-sm">
                     <span className="font-semibold">{t('distribution.dueDate')}</span>
@@ -163,7 +209,24 @@ export default function BranchAccountantInvoiceDetailPage() {
                     <span className="font-semibold">{t('crm.notes')}</span>
                     <input value={installmentComment} onChange={(e) => setInstallmentComment(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2" />
                   </label>
-                  <button type="submit" className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white">
+                  {installmentPreview ? (
+                    <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+                      <p>{t('distribution.totalAmount')}: {formatKgs(installmentPreview.totalAmount)}</p>
+                      <p>{t('distribution.firstPaymentAmount')}: {formatKgs(installmentPreview.firstPaymentAmount)}</p>
+                      <p>{t('sales.installmentFinancedAmount')}: {formatKgs(installmentPreview.remainingDebt)}</p>
+                      <p>{t('finance.cashierBills.remainingDebt')}: {formatKgs(installmentPreview.remainingDebt)}</p>
+                      <p>{t('distribution.installmentMonths')}: {installmentPreview.termMonths}</p>
+                      <div className="mt-2">
+                        <p className="font-semibold">{t('branchAccountant.paymentSchedule')}</p>
+                        {installmentPreview.schedule.map((row) => (
+                          <p key={row.installmentNumber}>
+                            #{row.installmentNumber}: {formatKgs(row.amount)}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  <button type="submit" disabled={submitting} className="rounded-xl bg-indigo-600 px-4 py-2 font-semibold text-white disabled:opacity-60">
                     {t('distribution.requestInstallment')}
                   </button>
                 </form>
@@ -175,12 +238,30 @@ export default function BranchAccountantInvoiceDetailPage() {
             ) : null}
 
             {installmentApproved && invoice.branchOrderInstallment ? (
-              <section className="rounded-3xl border border-green-200 bg-green-50 p-6 shadow-sm">
+              <section className="rounded-3xl border border-green-200 bg-green-50 p-6 shadow-sm space-y-2">
                 <h3 className="font-bold">{t('branchAccountant.installmentApproved')}</h3>
-                <p className="mt-2 text-sm">
-                  {formatKgs(invoice.branchOrderInstallment.firstPaymentAmount)} / {invoice.branchOrderInstallment.termMonths} {t('distribution.months')}
+                <p className="text-sm">
+                  {t('distribution.firstPaymentAmount')}: {formatKgs(invoice.branchOrderInstallment.firstPaymentAmount)} ·{' '}
+                  {t('finance.cashierBills.remainingDebt')}: {formatKgs(invoice.branchOrderInstallment.remainingDebt ?? invoice.remainingAmount)} ·{' '}
+                  {invoice.branchOrderInstallment.termMonths} {t('distribution.months')}
                 </p>
+                {invoice.branchOrderInstallment.paymentSchedule?.length ? (
+                  <div className="text-sm">
+                    <p className="font-semibold">{t('branchAccountant.paymentSchedule')}</p>
+                    {invoice.branchOrderInstallment.paymentSchedule.map((row) => (
+                      <p key={row.installmentNumber}>
+                        #{row.installmentNumber}: {formatKgs(row.amount)} · {new Date(row.dueDate).toLocaleDateString()}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
               </section>
+            ) : null}
+
+            {invoice.branchOrderInstallment?.status === 'REJECTED' ? (
+              <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                {t('sales.installmentRejectionReason')}: {invoice.branchOrderInstallment.rejectionComment ?? '—'}
+              </p>
             ) : null}
 
             {(invoice?.paymentType && !invoice.sentToCashierAt && invoice.branchOrderInstallment?.status !== 'PENDING') ? (

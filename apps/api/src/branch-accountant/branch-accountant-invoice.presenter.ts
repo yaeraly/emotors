@@ -4,6 +4,10 @@ import {
   BranchOrderInstallmentStatus,
   BranchPaymentConfirmationStatus,
 } from '@prisma/client';
+import {
+  buildBranchOrderInstallmentSchedule,
+  computeBranchOrderRemainingDebt,
+} from '../distribution/branch-order-installment.util';
 
 export type AccountantInvoiceWorkflowStatus =
   | 'PENDING_ACCOUNTANT_REVIEW'
@@ -58,32 +62,49 @@ export function sanitizeAccountantInvoice(invoice: any) {
   const order = invoice.distributionOrder;
   const linkedRequest = order?.branchPurchaseRequest ?? null;
   const installment = invoice.branchOrderInstallment
-    ? {
-        id: invoice.branchOrderInstallment.id,
-        status: invoice.branchOrderInstallment.status,
-        totalAmount: Number(invoice.branchOrderInstallment.totalAmount),
-        firstPaymentAmount: Number(invoice.branchOrderInstallment.firstPaymentAmount),
-        termMonths: invoice.branchOrderInstallment.termMonths,
-        firstPaymentRequired: invoice.branchOrderInstallment.firstPaymentRequired,
-        firstPaymentConfirmed: invoice.branchOrderInstallment.firstPaymentConfirmed,
-        requestComment: invoice.branchOrderInstallment.requestComment,
-        installmentDueDate: invoice.branchOrderInstallment.installmentDueDate,
-        requestedAt: invoice.branchOrderInstallment.requestedAt,
-        decidedAt: invoice.branchOrderInstallment.decidedAt,
-        rejectionComment: invoice.branchOrderInstallment.rejectionComment,
-      }
+    ? (() => {
+        const totalAmount = Number(invoice.branchOrderInstallment.totalAmount);
+        const firstPaymentAmount = Number(invoice.branchOrderInstallment.firstPaymentAmount);
+        const remainingDebt = computeBranchOrderRemainingDebt(totalAmount, firstPaymentAmount);
+        return {
+          id: invoice.branchOrderInstallment.id,
+          status: invoice.branchOrderInstallment.status,
+          totalAmount,
+          firstPaymentAmount,
+          remainingDebt,
+          financedAmount: remainingDebt,
+          termMonths: invoice.branchOrderInstallment.termMonths,
+          firstPaymentRequired: invoice.branchOrderInstallment.firstPaymentRequired,
+          firstPaymentConfirmed: invoice.branchOrderInstallment.firstPaymentConfirmed,
+          requestComment: invoice.branchOrderInstallment.requestComment,
+          installmentDueDate: invoice.branchOrderInstallment.installmentDueDate,
+          requestedAt: invoice.branchOrderInstallment.requestedAt,
+          decidedAt: invoice.branchOrderInstallment.decidedAt,
+          rejectionComment: invoice.branchOrderInstallment.rejectionComment,
+          initialPaymentPercent:
+            totalAmount > 0 ? Math.round((firstPaymentAmount / totalAmount) * 10000) / 100 : 0,
+          zeroInitialPayment: firstPaymentAmount <= 0,
+          paymentSchedule: buildBranchOrderInstallmentSchedule(
+            remainingDebt,
+            invoice.branchOrderInstallment.termMonths,
+            invoice.branchOrderInstallment.installmentDueDate,
+          ),
+        };
+      })()
     : null;
 
   const remainingAmount = Number(invoice.debtAmount ?? 0);
   const requiredPaymentAmount =
-    installment?.status === BranchOrderInstallmentStatus.APPROVED && installment.firstPaymentRequired
-      ? installment.firstPaymentConfirmed
-        ? remainingAmount
-        : Number(installment.firstPaymentAmount)
+    installment?.status === BranchOrderInstallmentStatus.APPROVED
+      ? installment.firstPaymentRequired && !installment.firstPaymentConfirmed
+        ? Number(installment.firstPaymentAmount)
+        : remainingAmount
       : invoice.paymentType === BranchInvoicePaymentType.FULL_PAYMENT
         ? remainingAmount
         : installment
-          ? Number(installment.firstPaymentAmount)
+          ? installment.firstPaymentRequired
+            ? Number(installment.firstPaymentAmount)
+            : remainingAmount
           : remainingAmount;
 
   return {

@@ -879,9 +879,19 @@ export type BranchOrderInstallment = {
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
   totalAmount: number;
   firstPaymentAmount: number;
+  remainingDebt?: number;
+  financedAmount?: number;
   termMonths: number;
   firstPaymentRequired: boolean;
   firstPaymentConfirmed: boolean;
+  requestComment?: string | null;
+  installmentDueDate?: string | null;
+  requestedAt?: string;
+  decidedAt?: string | null;
+  rejectionComment?: string | null;
+  initialPaymentPercent?: number;
+  zeroInitialPayment?: boolean;
+  paymentSchedule?: Array<{ installmentNumber: number; dueDate: string; amount: number }>;
 };
 
 export type BranchInvoicePaymentType = 'FULL_PAYMENT' | 'INSTALLMENT';

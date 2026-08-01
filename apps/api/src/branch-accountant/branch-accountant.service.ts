@@ -311,10 +311,11 @@ export class BranchAccountantService {
   }
 
   async requestInstallment(user: AuthUser, id: string, dto: BranchAccountantInstallmentRequestDto) {
+    const firstPaymentAmount = Number(dto.firstPaymentAmount);
     await this.distributionService.requestInvoiceInstallment(user, id, {
-      firstPaymentAmount: dto.firstPaymentAmount,
+      firstPaymentAmount,
       termMonths: dto.termMonths ?? 3,
-      firstPaymentRequired: true,
+      firstPaymentRequired: firstPaymentAmount > 0.009,
       dueDate: dto.dueDate,
       comment: dto.comment,
     });
