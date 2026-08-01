@@ -6,6 +6,7 @@ import {
   BRANCH_TRANSPORT_MISSING_WEIGHT_MESSAGE,
   collectMissingWeightProducts,
   sumAllocatedTransportCost,
+  storedTransportAllocationsMatchComputed,
 } from './branch-receiving-transport.util';
 
 describe('allocateBranchReceivingTransportCost', () => {
@@ -109,14 +110,21 @@ describe('allocateBranchReceivingTransportCost', () => {
     assert.equal(rows[0]?.finalUnitCostKgs, 90);
   });
 
-  it('preview and final allocation use the same pure allocator (exact match)', () => {
-    const lines = [
-      { productId: 'p1', receivedQuantity: 7, weightKg: 3, unitCostKgs: 120, sku: 'P1' },
-      { productId: 'p2', receivedQuantity: 2, weightKg: 11, unitCostKgs: 90, sku: 'P2' },
-    ];
-    const preview = allocateBranchReceivingTransportCost(lines, 1234.56);
-    const final = allocateBranchReceivingTransportCost(lines, 1234.56);
-    assert.deepEqual(preview, final);
-    assert.equal(sumAllocatedTransportCost(final), 1234.56);
+  it('stored allocations match computed values', () => {
+    const computed = allocateBranchReceivingTransportCost(
+      [{ productId: 'a', receivedQuantity: 2, weightKg: 1, unitCostKgs: 100 }],
+      50,
+    );
+    assert.equal(
+      storedTransportAllocationsMatchComputed(computed, [
+        {
+          productId: 'a',
+          transportExpenseAllocation: 50,
+          transportCostPerUnit: 25,
+          landedUnitCostKgs: 125,
+        },
+      ]),
+      true,
+    );
   });
 });

@@ -170,3 +170,56 @@ export function sumAllocatedTransportCost(rows: BranchReceivingTransportLineCost
     ),
   );
 }
+
+export type PreReceiveTransportAllocationFingerprintInput = {
+  transportCostKgs: number;
+  driverName?: string | null;
+  vehicleNumber?: string | null;
+  transportNotes?: string | null;
+  lines: Array<{
+    itemId: string;
+    acceptedQuantity: number;
+    damagedQuantity: number;
+  }>;
+};
+
+export function buildPreReceiveTransportAllocationFingerprint(
+  input: PreReceiveTransportAllocationFingerprintInput,
+): string {
+  const lines = [...input.lines].sort((a, b) => a.itemId.localeCompare(b.itemId));
+  return JSON.stringify({
+    transportCostKgs: roundDisplayMoney(input.transportCostKgs),
+    driverName: input.driverName?.trim() ?? '',
+    vehicleNumber: input.vehicleNumber?.trim() ?? '',
+    transportNotes: input.transportNotes?.trim() ?? '',
+    lines,
+  });
+}
+
+export function storedTransportAllocationsMatchComputed(
+  computed: BranchReceivingTransportLineCost[],
+  stored: Array<{
+    productId: string;
+    transportExpenseAllocation: number | Prisma.Decimal | string | null;
+    transportCostPerUnit: number | Prisma.Decimal | string | null;
+    landedUnitCostKgs: number | Prisma.Decimal | string | null;
+  }>,
+): boolean {
+  const storedByProductId = new Map(stored.map((row) => [row.productId, row]));
+  if (storedByProductId.size !== computed.length) return false;
+  for (const row of computed) {
+    const existing = storedByProductId.get(row.productId);
+    if (!existing) return false;
+    if (roundDisplayMoney(toDecimal(existing.transportExpenseAllocation ?? 0)) !== row.transportExpenseAllocation) {
+      return false;
+    }
+    if (roundDisplayMoney(toDecimal(existing.transportCostPerUnit ?? 0)) !== row.transportCostPerUnit) {
+      return false;
+    }
+    if (roundDisplayMoney(toDecimal(existing.landedUnitCostKgs ?? 0)) !== row.finalUnitCostKgs) {
+      return false;
+    }
+  }
+  return true;
+}
+

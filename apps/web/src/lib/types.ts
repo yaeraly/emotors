@@ -852,6 +852,7 @@ export type BranchDistributionOrder = {
   receivingLineItems?: BranchReceivingLineItem[];
   receivingProgress?: BranchReceivingProgress;
   canCompleteReceiving?: boolean;
+  transportAllocationReady?: boolean;
   branchInvoice?: BranchInvoice | null;
   createdAt: string;
   updatedAt: string;

@@ -58,9 +58,70 @@ export function buildBranchReceivingTransportPayload(form: BranchReceivingTransp
   return {
     driverName: form.driverName.trim() || undefined,
     vehicleNumber: form.vehicleNumber.trim() || undefined,
-    transportNotes: form.transportNotes.trim() || undefined,
+    comment: form.transportNotes.trim() || undefined,
     transportCostKgs,
   };
+}
+
+export const TRANSPORT_COST_EMPTY_MESSAGE =
+  'Введите транспортный расход.\n\nЕсли доставка была бесплатной, укажите 0.';
+
+export const TRANSPORT_ALLOCATION_SUCCESS_MESSAGE =
+  'Транспортные расходы успешно распределены.\nМожно завершить приемку товара.';
+
+export const COMPLETE_RECEIVING_REQUIRES_ALLOCATION =
+  'Сначала распределите транспортные расходы.';
+
+export type BranchWarehouseTransportAllocationResult = {
+  status: 'ALLOCATED';
+  transportCostKgs: number;
+  totalShipmentWeightKg: number;
+  allocatedAt: string;
+  message: string;
+};
+
+export function validateTransportCostInput(
+  value: string,
+): { ok: true; transportCostKgs: number } | { ok: false; message: string } {
+  if (value.trim() === '') {
+    return { ok: false, message: TRANSPORT_COST_EMPTY_MESSAGE };
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return { ok: false, message: TRANSPORT_COST_EMPTY_MESSAGE };
+  }
+  if (numeric < 0) {
+    return { ok: false, message: 'Транспортный расход не может быть отрицательным' };
+  }
+  return { ok: true, transportCostKgs: numeric };
+}
+
+export function canCompleteBranchReceiving(input: {
+  allSaved: boolean;
+  canCompleteReceiving: boolean;
+  transportAllocationReady: boolean;
+  products: number;
+}) {
+  return (
+    input.allSaved &&
+    input.canCompleteReceiving &&
+    input.transportAllocationReady &&
+    input.products > 0
+  );
+}
+
+export function allocationResponseIsBranchSafe(payload: unknown): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as Record<string, unknown>;
+  const forbidden = [
+    'hqTransferUnitCost',
+    'transportExpenseAllocation',
+    'transportCostPerUnit',
+    'finalUnitCostKgs',
+    'allocatedTotal',
+    'allocations',
+  ];
+  return !forbidden.some((field) => Object.prototype.hasOwnProperty.call(record, field));
 }
 
 /** Derive shortage quantity when the missing-quantity column is hidden. */

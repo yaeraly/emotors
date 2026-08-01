@@ -49,6 +49,7 @@ import {
   canSendInvoiceToCashier,
   canEnterBranchTransportCost,
   canViewProductCost,
+  isBranchWarehouseOperator,
   isHqWarehouseLogisticsOnlyUser,
   isBranchOwnerUser,
   canViewDistribution,
@@ -96,10 +97,20 @@ import { EnterReceivingTransportDto } from './dto/enter-receiving-transport.dto'
 import {
   allocateBranchReceivingTransportCost,
   BRANCH_TRANSPORT_MISSING_WEIGHT_MESSAGE,
+  buildPreReceiveTransportAllocationFingerprint,
   collectMissingWeightProducts,
+  storedTransportAllocationsMatchComputed,
   sumAllocatedTransportCost,
+  type BranchReceivingTransportLineInput,
   type MissingWeightProduct,
 } from './branch-receiving-transport.util';
+import {
+  parseReceivingTransportCostInput,
+  RECEIPT_BLOCKED_STALE_ALLOCATION_MESSAGE,
+  toAuthorizedTransportAllocationPreview,
+  toBranchWarehouseTransportAllocationResult,
+  type TransportAllocationPreview,
+} from './branch-receiving-transport.presenter';
 import { ResolveShortageDto } from './dto/resolve-shortage.dto';
 import { SendToWarehouseDto } from './dto/send-to-warehouse.dto';
 import {
@@ -1292,15 +1303,28 @@ export class DistributionService {
         }
 
         const hasPreallocatedDelivery = Boolean(order.deliveryCostEnteredAt);
-        const transportCostProvided =
-          dto.transportCostKgs !== undefined && dto.transportCostKgs !== null;
-        if (!hasPreallocatedDelivery && !transportCostProvided) {
-          throw new BadRequestException('Укажите транспортный расход, KGS');
+        if (!hasPreallocatedDelivery) {
+          throw new BadRequestException(RECEIPT_BLOCKED_STALE_ALLOCATION_MESSAGE);
         }
-        const transportCostKgs = transportCostProvided
-          ? Math.max(Number(dto.transportCostKgs), 0)
-          : Math.max(Number(order.transportCostKgs ?? 0), 0);
-        const transportLines = [];
+
+        const allocationDraftRows = await tx.branchDistributionReceivingDraftRow.findMany({
+          where: { distributionOrderId: order.id },
+        });
+        const preReceivePreview = this.buildPreReceiveTransportAllocationFromDrafts(
+          order.items,
+          allocationDraftRows,
+          Number(order.transportCostKgs ?? 0),
+        );
+        if (
+          !storedTransportAllocationsMatchComputed(preReceivePreview.allocations, order.items) ||
+          sumAllocatedTransportCost(preReceivePreview.allocations) !==
+            roundDisplayMoney(Number(order.transportCostKgs ?? 0))
+        ) {
+          throw new BadRequestException(RECEIPT_BLOCKED_STALE_ALLOCATION_MESSAGE);
+        }
+
+        const transportCostKgs = Math.max(Number(order.transportCostKgs ?? 0), 0);
+        const transportLines: BranchReceivingTransportLineInput[] = [];
         const resolvedProducts = new Map<string, { productId: string; created: boolean }>();
 
         for (const orderItem of order.items) {
@@ -1347,10 +1371,9 @@ export class DistributionService {
           });
         }
 
-        if (!hasPreallocatedDelivery && transportLines.length) {
+        if (transportLines.length) {
           const missingWeights = collectMissingWeightProducts(transportLines);
           if (missingWeights.length) {
-            // Persist outside the receiving transaction so the block is auditable after rollback.
             await this.prisma.auditLog.create({
               data: {
                 userId: user.id,
@@ -1370,27 +1393,18 @@ export class DistributionService {
           }
         }
 
-        let transportAllocations: ReturnType<typeof allocateBranchReceivingTransportCost> = [];
-        try {
-          transportAllocations = hasPreallocatedDelivery
-            ? []
-            : allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
-        } catch (err) {
-          throw this.mapTransportAllocationError(err);
-        }
-        const transportByProductId = hasPreallocatedDelivery
-          ? new Map(
-              order.items.map((item) => [
-                item.productId,
-                {
-                  productId: item.productId,
-                  transportExpenseAllocation: Number(item.transportExpenseAllocation ?? 0),
-                  transportCostPerUnit: Number(item.transportCostPerUnit ?? 0),
-                  finalUnitCostKgs: Number(item.landedUnitCostKgs ?? item.unitCost),
-                },
-              ]),
-            )
-          : new Map(transportAllocations.map((row) => [row.productId, row]));
+        const transportAllocations: ReturnType<typeof allocateBranchReceivingTransportCost> = [];
+        const transportByProductId = new Map(
+          order.items.map((item) => [
+            item.productId,
+            {
+              productId: item.productId,
+              transportExpenseAllocation: Number(item.transportExpenseAllocation ?? 0),
+              transportCostPerUnit: Number(item.transportCostPerUnit ?? 0),
+              finalUnitCostKgs: Number(item.landedUnitCostKgs ?? item.unitCost),
+            },
+          ]),
+        );
 
         const receiving = await tx.goodsReceiving.create({
           data: {
@@ -1402,56 +1416,13 @@ export class DistributionService {
             receivedAt: new Date(),
             note: dto.note,
             transportCompany: dto.transportCompany?.trim() || null,
-            transportCostKgs: transportCostProvided ? transportCostKgs : 0,
-            driverName: dto.driverName?.trim() || null,
-            vehicleNumber: dto.vehicleNumber?.trim() || null,
+            transportCostKgs,
+            driverName: dto.driverName?.trim() || order.driverName || null,
+            vehicleNumber: dto.vehicleNumber?.trim() || order.vehicleNumber || null,
             arrivalDate: dto.arrivalDate ? new Date(dto.arrivalDate) : new Date(),
-            transportNotes: dto.transportNotes?.trim() || null,
+            transportNotes: dto.transportNotes?.trim() || order.transportNotes || null,
           },
         });
-
-        if (transportCostProvided && !hasPreallocatedDelivery) {
-          await tx.branchDistributionOrder.update({
-            where: { id: order.id },
-            data: {
-              transportCompany: dto.transportCompany?.trim() || null,
-              transportCostKgs,
-              driverName: dto.driverName?.trim() || null,
-              vehicleNumber: dto.vehicleNumber?.trim() || null,
-              transportNotes: dto.transportNotes?.trim() || null,
-              deliveryCostEnteredAt: new Date(),
-              deliveryCostEnteredById: user.id,
-            },
-          });
-          for (const orderItem of order.items) {
-            const allocation = transportByProductId.get(orderItem.productId);
-            if (!allocation) continue;
-            await tx.branchDistributionOrderItem.update({
-              where: { id: orderItem.id },
-              data: {
-                transportExpenseAllocation: allocation.transportExpenseAllocation,
-                transportCostPerUnit: allocation.transportCostPerUnit,
-                landedUnitCostKgs: allocation.finalUnitCostKgs,
-              },
-            });
-          }
-          await this.auditTransfer(tx, user, 'BRANCH_TRANSPORT_COST_ENTERED', order, {
-            transportCostKgs,
-            receivingId: receiving.id,
-            transportCompany: dto.transportCompany?.trim() || null,
-            driverName: dto.driverName?.trim() || null,
-            vehicleNumber: dto.vehicleNumber?.trim() || null,
-          });
-          await this.auditTransfer(tx, user, 'BRANCH_TRANSPORT_COST_ALLOCATED', order, {
-            transportCostKgs,
-            allocatedTotal: sumAllocatedTransportCost(transportAllocations),
-            allocations: transportAllocations,
-          });
-          await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_LANDED_COST_CALCULATED', order, {
-            transportCostKgs,
-            receivingId: receiving.id,
-          });
-        }
 
         const receivingItems = [];
         const shortageItems = [];
@@ -1782,26 +1753,10 @@ export class DistributionService {
       await this.auditTransfer(tx, user, 'GOODS_RECEIVED', order);
       await this.auditTransfer(tx, user, 'BRANCH_RECEIPT_COMPLETED', order, {
         receivingId: receiving.id,
-        transportCostProvided,
-        transportCostKgs: transportCostProvided ? transportCostKgs : null,
+        transportCostKgs,
       });
 
-      const linkedRequest = await tx.branchPurchaseRequest.findFirst({
-        where: { convertedOrderId: order.id, deletedAt: null },
-      });
-      if (linkedRequest) {
-        await tx.branchPurchaseRequest.update({
-          where: { id: linkedRequest.id },
-          data: {
-            status:
-              shortageItems.length > 0
-                ? BranchPurchaseRequestStatus.RECEIVED_WITH_DIFFERENCE
-                : BranchPurchaseRequestStatus.RECEIVED,
-          },
-        });
-      }
-
-      if (transportCostProvided && transportCostKgs > 0) {
+      if (transportCostKgs > 0) {
         const transportInvoice = await this.createTransportExpenseInvoice(
           tx,
           user,
@@ -1815,15 +1770,20 @@ export class DistributionService {
             invoiceNumber: transportInvoice.invoiceNumber,
           });
         }
-      } else if (!transportCostProvided && !hasPreallocatedDelivery) {
-        await this.createWorkflowAlert(tx, user, {
-          branchId: order.branchId,
-          type: AlertType.BRANCH_GOODS_RECEIVED,
-          title: 'Требуется ввод транспортных расходов',
-          message: `По заказу ${order.orderNumber} необходимо внести транспортные расходы`,
-          entityType: 'BranchDistributionOrder',
-          entityId: order.id,
-          recipientRoles: [Role.MANAGER, Role.FRANCHISE_OWNER, Role.WAREHOUSE_OPERATOR],
+      }
+
+      const linkedRequest = await tx.branchPurchaseRequest.findFirst({
+        where: { convertedOrderId: order.id, deletedAt: null },
+      });
+      if (linkedRequest) {
+        await tx.branchPurchaseRequest.update({
+          where: { id: linkedRequest.id },
+          data: {
+            status:
+              shortageItems.length > 0
+                ? BranchPurchaseRequestStatus.RECEIVED_WITH_DIFFERENCE
+                : BranchPurchaseRequestStatus.RECEIVED,
+          },
         });
       }
 
@@ -1920,6 +1880,11 @@ export class DistributionService {
 
       const dispatchedQuantity = Number(orderItem.dispatchedQuantity ?? orderItem.quantity);
       const normalized = normalizeBranchReceivingDraftInput(dto, dispatchedQuantity);
+
+      if (order.deliveryCostEnteredAt) {
+        await this.clearPreReceiveTransportAllocation(tx, order.id);
+        order.deliveryCostEnteredAt = null;
+      }
 
       const saved = await tx.branchDistributionReceivingDraftRow.upsert({
         where: {
@@ -2057,18 +2022,264 @@ export class DistributionService {
         ),
         difference: saved.acceptedQuantity - dispatchedQuantity,
         receivingProgress: progress,
+        transportAllocationReady: Boolean(order.deliveryCostEnteredAt),
       };
     });
   }
 
+  private buildPreReceiveTransportAllocationFromDrafts(
+    orderItems: Array<{
+      id: string;
+      productId: string;
+      sku: string;
+      productName: string;
+      unitCost: number | Prisma.Decimal;
+      unitWeightKgSnapshot?: number | Prisma.Decimal | null;
+      dispatchedQuantity?: number | null;
+      quantity: number;
+    }>,
+    draftRows: Array<{
+      distributionOrderItemId: string;
+      acceptedQuantity: number;
+      isSaved: boolean;
+    }>,
+    transportCostKgs: number,
+  ): TransportAllocationPreview {
+    const draftByItemId = new Map(draftRows.map((row) => [row.distributionOrderItemId, row]));
+    const transportLines: BranchReceivingTransportLineInput[] = [];
+    for (const orderItem of orderItems) {
+      const draft = draftByItemId.get(orderItem.id);
+      const acceptedQuantity = draft?.isSaved
+        ? Number(draft.acceptedQuantity ?? 0)
+        : Number(draft?.acceptedQuantity ?? orderItem.dispatchedQuantity ?? orderItem.quantity);
+      if (acceptedQuantity <= 0) continue;
+      transportLines.push({
+        productId: orderItem.productId,
+        sku: orderItem.sku,
+        productName: orderItem.productName,
+        receivedQuantity: acceptedQuantity,
+        weightKg: Number(orderItem.unitWeightKgSnapshot ?? 0),
+        unitCostKgs: Number(orderItem.unitCost),
+      });
+    }
+
+    const missingWeights = collectMissingWeightProducts(transportLines);
+    if (missingWeights.length) {
+      const error = new Error(BRANCH_TRANSPORT_MISSING_WEIGHT_MESSAGE) as Error & {
+        missingWeightProducts: MissingWeightProduct[];
+      };
+      error.missingWeightProducts = missingWeights;
+      throw error;
+    }
+
+    let allocations: ReturnType<typeof allocateBranchReceivingTransportCost>;
+    try {
+      allocations = allocateBranchReceivingTransportCost(transportLines, transportCostKgs);
+    } catch (err) {
+      throw err;
+    }
+
+    const totalShipmentWeightKg = transportLines.reduce(
+      (sum, line) => sum + line.receivedQuantity * Number(line.weightKg),
+      0,
+    );
+
+    return {
+      totalShipmentWeightKg: Math.round((totalShipmentWeightKg + Number.EPSILON) * 1000) / 1000,
+      transportCostKgs,
+      allocatedTotal: sumAllocatedTransportCost(allocations),
+      allocations: allocations.map((row) => {
+        const source = transportLines.find((line) => line.productId === row.productId);
+        return {
+          ...row,
+          sku: source?.sku,
+          productName: source?.productName,
+          receivedQuantity: source?.receivedQuantity ?? 0,
+          hqTransferUnitCost: Number(source?.unitCostKgs ?? 0),
+        };
+      }),
+    };
+  }
+
+  private async clearPreReceiveTransportAllocation(tx: PrismaTx, orderId: string) {
+    await tx.branchDistributionOrder.update({
+      where: { id: orderId },
+      data: {
+        deliveryCostEnteredAt: null,
+        deliveryCostEnteredById: null,
+      },
+    });
+    await tx.branchDistributionOrderItem.updateMany({
+      where: { orderId },
+      data: {
+        transportExpenseAllocation: 0,
+        transportCostPerUnit: 0,
+        landedUnitCostKgs: null,
+      },
+    });
+  }
+
+  async allocateReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {
+    if (!canReceiveBranchDistribution(user)) {
+      throw new ForbiddenException('Only Branch Warehouse Operator can allocate transport cost');
+    }
+    const parsed = parseReceivingTransportCostInput(dto.transportCostKgs);
+    if (!parsed.ok) {
+      throw new BadRequestException(parsed.message);
+    }
+    const transportCostKgs = parsed.transportCostKgs;
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.branchDistributionOrder.findFirst({
+        where: {
+          id: orderId,
+          deletedAt: null,
+          ...(this.canAccessAllDistributionBranches(user) ? {} : { branchId: user.branchId }),
+        },
+        include: { items: true },
+      });
+      if (!order) throw new NotFoundException('Distribution order not found');
+      if (
+        order.status !== BranchDistributionOrderStatus.SENT &&
+        order.status !== BranchDistributionOrderStatus.SHIPPED
+      ) {
+        throw new BadRequestException('Транспортные расходы можно распределить только до завершения приёмки');
+      }
+
+      const existingReceiving = await tx.goodsReceiving.findFirst({
+        where: { distributionOrderId: order.id, deletedAt: null },
+        select: { id: true },
+      });
+      if (existingReceiving) {
+        throw new BadRequestException('Shipment has already been received');
+      }
+
+      const draftRows = await tx.branchDistributionReceivingDraftRow.findMany({
+        where: { distributionOrderId: order.id },
+      });
+      const progress = buildReceivingProgress(
+        order.items.map((item) => ({
+          id: item.id,
+          expectedQuantity: Number(item.dispatchedQuantity ?? item.quantity),
+        })),
+        draftRows.map((row) => ({
+          itemId: row.distributionOrderItemId,
+          acceptedQuantity: row.acceptedQuantity,
+          damagedQuantity: row.damagedQuantity,
+          missingQuantity: row.missingQuantity,
+          note: row.note,
+          isSaved: row.isSaved,
+          lastSavedAt: row.lastSavedAt,
+        })),
+      );
+      if (progress.products === 0 || progress.checked !== progress.products) {
+        throw new BadRequestException('Сохраните принятые количества по всем позициям перед распределением');
+      }
+
+      let preview: TransportAllocationPreview;
+      try {
+        preview = this.buildPreReceiveTransportAllocationFromDrafts(order.items, draftRows, transportCostKgs);
+      } catch (err) {
+        throw this.mapTransportAllocationError(err);
+      }
+
+      const fingerprint = buildPreReceiveTransportAllocationFingerprint({
+        transportCostKgs,
+        driverName: dto.driverName,
+        vehicleNumber: dto.vehicleNumber,
+        transportNotes: dto.comment?.trim() || dto.deliveryDocument?.trim() || null,
+        lines: draftRows
+          .filter((row) => row.isSaved)
+          .map((row) => ({
+            itemId: row.distributionOrderItemId,
+            acceptedQuantity: row.acceptedQuantity,
+            damagedQuantity: row.damagedQuantity,
+          })),
+      });
+
+      if (
+        order.deliveryCostEnteredAt &&
+        Number(order.transportCostKgs ?? 0) === transportCostKgs &&
+        storedTransportAllocationsMatchComputed(preview.allocations, order.items)
+      ) {
+        return toBranchWarehouseTransportAllocationResult({
+          transportCostKgs,
+          totalShipmentWeightKg: preview.totalShipmentWeightKg,
+          allocatedAt: order.deliveryCostEnteredAt,
+        });
+      }
+
+      const allocatedAt = new Date();
+      await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: {
+          transportCostKgs,
+          driverName: dto.driverName?.trim() || null,
+          vehicleNumber: dto.vehicleNumber?.trim() || null,
+          transportNotes: dto.comment?.trim() || dto.deliveryDocument?.trim() || null,
+          deliveryCostEnteredAt: allocatedAt,
+          deliveryCostEnteredById: user.id,
+        },
+      });
+
+      for (const orderItem of order.items) {
+        const allocation = preview.allocations.find((row) => row.productId === orderItem.productId);
+        if (!allocation) {
+          await tx.branchDistributionOrderItem.update({
+            where: { id: orderItem.id },
+            data: {
+              transportExpenseAllocation: 0,
+              transportCostPerUnit: 0,
+              landedUnitCostKgs: null,
+            },
+          });
+          continue;
+        }
+        await tx.branchDistributionOrderItem.update({
+          where: { id: orderItem.id },
+          data: {
+            transportExpenseAllocation: allocation.transportExpenseAllocation,
+            transportCostPerUnit: allocation.transportCostPerUnit,
+            landedUnitCostKgs: allocation.finalUnitCostKgs,
+          },
+        });
+      }
+
+      await this.auditTransfer(tx, user, 'BRANCH_TRANSPORT_COST_ENTERED', order, {
+        transportCostKgs,
+        totalShipmentWeightKg: preview.totalShipmentWeightKg,
+        fingerprint,
+      });
+      await this.auditTransfer(tx, user, 'BRANCH_TRANSPORT_COST_ALLOCATED', order, {
+        transportCostKgs,
+        allocatedTotal: sumAllocatedTransportCost(preview.allocations),
+        totalShipmentWeightKg: preview.totalShipmentWeightKg,
+      });
+      await this.auditTransfer(tx, user, 'BRANCH_INVENTORY_LANDED_COST_CALCULATED', order, {
+        transportCostKgs,
+        totalShipmentWeightKg: preview.totalShipmentWeightKg,
+      });
+
+      return toBranchWarehouseTransportAllocationResult({
+        transportCostKgs,
+        totalShipmentWeightKg: preview.totalShipmentWeightKg,
+        allocatedAt,
+      });
+    });
+  }
+
   async previewReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {
-    if (!canEnterBranchTransportCost(user) && !canReceiveBranchDistribution(user)) {
+    if (isBranchWarehouseOperator(user)) {
+      throw new ForbiddenException('Недостаточно прав для просмотра себестоимости');
+    }
+    if (!canViewProductCost(user)) {
       throw new ForbiddenException('Недостаточно прав для просмотра распределения транспортных расходов');
     }
-    if (dto.transportCostKgs === undefined || dto.transportCostKgs === null || Number.isNaN(Number(dto.transportCostKgs))) {
-      throw new BadRequestException('Укажите транспортный расход, KGS');
+    const parsed = parseReceivingTransportCostInput(dto.transportCostKgs);
+    if (!parsed.ok) {
+      throw new BadRequestException(parsed.message);
     }
-    const transportCostKgs = Math.max(Number(dto.transportCostKgs), 0);
+    const transportCostKgs = parsed.transportCostKgs;
 
     const order = await this.prisma.branchDistributionOrder.findFirst({
       where: {
@@ -2085,14 +2296,7 @@ export class DistributionService {
       orderBy: { receivedAt: 'desc' },
     });
 
-    const transportLines: Array<{
-      productId: string;
-      sku: string;
-      productName: string;
-      receivedQuantity: number;
-      weightKg: number;
-      unitCostKgs: number;
-    }> = [];
+    const transportLines: BranchReceivingTransportLineInput[] = [];
     for (const orderItem of order.items) {
       let acceptedQuantity = 0;
       if (receiving) {
@@ -2145,7 +2349,7 @@ export class DistributionService {
       0,
     );
 
-    return {
+    return toAuthorizedTransportAllocationPreview({
       totalShipmentWeightKg: Math.round((totalShipmentWeightKg + Number.EPSILON) * 1000) / 1000,
       transportCostKgs,
       allocatedTotal: sumAllocatedTransportCost(allocations),
@@ -2159,7 +2363,7 @@ export class DistributionService {
           hqTransferUnitCost: Number(source?.unitCostKgs ?? 0),
         };
       }),
-    };
+    });
   }
 
   async enterReceivingTransportCost(user: AuthUser, orderId: string, dto: EnterReceivingTransportDto) {
@@ -4302,6 +4506,7 @@ export class DistributionService {
   private async buildBranchReceivingDetailExtras(order: {
     id: string;
     status: BranchDistributionOrderStatus;
+    deliveryCostEnteredAt?: Date | string | null;
     items?: Array<{
       id: string;
       productId: string;
@@ -4321,6 +4526,7 @@ export class DistributionService {
         receivingLineItems: undefined,
         receivingProgress: undefined,
         canCompleteReceiving: false,
+        transportAllocationReady: false,
       };
     }
 
@@ -4333,6 +4539,7 @@ export class DistributionService {
         receivingLineItems: undefined,
         receivingProgress: undefined,
         canCompleteReceiving: false,
+        transportAllocationReady: false,
       };
     }
 
@@ -4359,9 +4566,16 @@ export class DistributionService {
       })),
     );
     const canCompleteReceiving =
-      receivingProgress.products > 0 && receivingProgress.checked === receivingProgress.products;
+      receivingProgress.products > 0 &&
+      receivingProgress.checked === receivingProgress.products &&
+      Boolean(order.deliveryCostEnteredAt);
 
-    return { receivingLineItems, receivingProgress, canCompleteReceiving };
+    return {
+      receivingLineItems,
+      receivingProgress,
+      canCompleteReceiving,
+      transportAllocationReady: Boolean(order.deliveryCostEnteredAt),
+    };
   }
 
   private async getAccessibleOrder(user: AuthUser, id: string) {

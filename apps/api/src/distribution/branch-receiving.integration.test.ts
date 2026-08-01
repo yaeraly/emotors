@@ -92,6 +92,19 @@ async function receiveViaApi(
     assert.ok([200, 201].includes(draftResult.status), JSON.stringify(draftResult.body));
   }
 
+  const allocateResponse = await fetch(`${API}/distribution/orders/${orderId}/transport-cost/allocate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      transportCostKgs: 0,
+    }),
+  });
+  const allocateBody = await allocateResponse.json();
+  assert.ok([200, 201].includes(allocateResponse.status), JSON.stringify(allocateBody));
+
   const response = await fetch(`${API}/distribution/orders/${orderId}/receive`, {
     method: 'POST',
     headers: {
@@ -100,8 +113,6 @@ async function receiveViaApi(
     },
     body: JSON.stringify({
       warehouseId,
-      // Branch Warehouse enters delivery cost on receipt (0 = free / paid elsewhere).
-      transportCostKgs: 0,
     }),
   });
   const body = await response.json();

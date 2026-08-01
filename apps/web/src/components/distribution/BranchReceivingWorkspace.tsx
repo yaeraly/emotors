@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { useBranchReceivingDraft } from '@/hooks/useBranchReceivingDraft';
 import {
@@ -9,10 +9,17 @@ import {
   type BranchReceivingProgress,
 } from '@/lib/branch-receiving-draft';
 import {
+  allocationResponseIsBranchSafe,
   buildBranchReceivingTransportPayload,
   BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS,
   BRANCH_RECEIVING_QUANTITY_HEADER_KEYS,
+  canCompleteBranchReceiving,
+  COMPLETE_RECEIVING_REQUIRES_ALLOCATION,
+  TRANSPORT_ALLOCATION_SUCCESS_MESSAGE,
+  TRANSPORT_COST_EMPTY_MESSAGE,
+  validateTransportCostInput,
   type BranchReceivingTransportFormState,
+  type BranchWarehouseTransportAllocationResult,
 } from '@/lib/branch-receiving-ui';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { GoodsReceiving, ShortageReport } from '@/lib/types';
@@ -23,6 +30,7 @@ type BranchReceivingWorkspaceProps = {
   lineItems: BranchReceivingLineItem[];
   initialProgress?: BranchReceivingProgress;
   canCompleteReceiving?: boolean;
+  initialTransportAllocationReady?: boolean;
   readOnly?: boolean;
   onCompleted?: (result: {
     receiving: GoodsReceiving;
@@ -36,6 +44,7 @@ export function BranchReceivingWorkspace({
   lineItems,
   initialProgress,
   canCompleteReceiving = false,
+  initialTransportAllocationReady = false,
   readOnly = false,
   onCompleted,
 }: BranchReceivingWorkspaceProps) {
@@ -45,28 +54,18 @@ export function BranchReceivingWorkspace({
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [transportAllocationReady, setTransportAllocationReady] = useState(
+    initialTransportAllocationReady,
+  );
+  const [allocationResult, setAllocationResult] =
+    useState<BranchWarehouseTransportAllocationResult | null>(null);
+  const [transportCostError, setTransportCostError] = useState('');
   const [transportForm, setTransportForm] = useState<BranchReceivingTransportFormState>({
     driverName: '',
     vehicleNumber: '',
-    transportCostKgs: '0',
+    transportCostKgs: '',
     transportNotes: '',
   });
-  const [preview, setPreview] = useState<{
-    totalShipmentWeightKg: number;
-    transportCostKgs: number;
-    allocatedTotal: number;
-    allocations: Array<{
-      productId: string;
-      sku?: string;
-      productName?: string;
-      receivedQuantity: number;
-      itemTotalWeightKg: number;
-      hqTransferUnitCost: number;
-      transportExpenseAllocation: number;
-      transportCostPerUnit: number;
-      finalUnitCostKgs: number;
-    }>;
-  } | null>(null);
 
   const canEdit = !readOnly;
 
@@ -87,12 +86,30 @@ export function BranchReceivingWorkspace({
 
   const displayProgress = progress ?? draftProgress;
 
-  const showComplete = canCompleteReceiving && allSaved && displayProgress.products > 0;
+  const showComplete = canCompleteBranchReceiving({
+    allSaved,
+    canCompleteReceiving,
+    transportAllocationReady,
+    products: displayProgress.products,
+  });
+
+  function invalidateTransportAllocation() {
+    setTransportAllocationReady(false);
+    setAllocationResult(null);
+  }
+
+  function updateTransportForm(
+    updater: (current: BranchReceivingTransportFormState) => BranchReceivingTransportFormState,
+  ) {
+    invalidateTransportAllocation();
+    setTransportForm(updater);
+  }
 
   const handleSaveRow = useCallback(
     async (itemId: string) => {
       const ok = await saveRow(itemId);
       if (ok) {
+        invalidateTransportAllocation();
         setSaveToast(t('chinaReceiving.saveState.saved'));
         setTimeout(() => setSaveToast(''), 2000);
       } else {
@@ -102,31 +119,49 @@ export function BranchReceivingWorkspace({
     [saveRow, t],
   );
 
+  useEffect(() => {
+    const hasDirtyRows = Object.values(rows).some(
+      (row) => row.isDirty || row.saveState === 'unsaved' || row.saveState === 'error',
+    );
+    if (hasDirtyRows && transportAllocationReady) {
+      invalidateTransportAllocation();
+    }
+  }, [rows, transportAllocationReady]);
+
   function transportPayload() {
-    const transportCostKgs = Number(transportForm.transportCostKgs);
-    if (!Number.isFinite(transportCostKgs) || transportCostKgs < 0) {
-      throw new Error(t('distribution.deliveryCost'));
+    const validated = validateTransportCostInput(transportForm.transportCostKgs);
+    if (!validated.ok) {
+      throw new Error(validated.message);
     }
     return buildBranchReceivingTransportPayload(transportForm);
   }
 
-  async function loadTransportPreview() {
+  async function allocateTransportCost() {
     setError('');
+    setTransportCostError('');
     setPreviewing(true);
     try {
+      const validated = validateTransportCostInput(transportForm.transportCostKgs);
+      if (!validated.ok) {
+        setTransportCostError(validated.message);
+        return;
+      }
       const payload = transportPayload();
-      const result = await apiFetch<{
-        totalShipmentWeightKg: number;
-        transportCostKgs: number;
-        allocatedTotal: number;
-        allocations: NonNullable<typeof preview>['allocations'];
-      }>(`/distribution/orders/${orderId}/transport-cost/preview`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      setPreview(result);
+      const result = await apiFetch<BranchWarehouseTransportAllocationResult>(
+        `/distribution/orders/${orderId}/transport-cost/allocate`,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!allocationResponseIsBranchSafe(result)) {
+        throw new Error(t('common.error'));
+      }
+      setAllocationResult(result);
+      setTransportAllocationReady(true);
     } catch (err) {
-      setPreview(null);
+      setAllocationResult(null);
+      setTransportAllocationReady(false);
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setPreviewing(false);
@@ -134,6 +169,7 @@ export function BranchReceivingWorkspace({
   }
 
   async function completeReceiving() {
+    if (!showComplete) return;
     setError('');
     setSubmitting(true);
     try {
@@ -146,7 +182,9 @@ export function BranchReceivingWorkspace({
         body: JSON.stringify({
           warehouseId: destinationWarehouseId,
           note: '',
-          ...transport,
+          driverName: transport.driverName,
+          vehicleNumber: transport.vehicleNumber,
+          transportNotes: transport.comment,
         }),
       });
       onCompleted?.(result);
@@ -155,10 +193,6 @@ export function BranchReceivingWorkspace({
     } finally {
       setSubmitting(false);
     }
-  }
-
-  function formatKgs(value: number) {
-    return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} сом`;
   }
 
   return (
@@ -327,7 +361,7 @@ export function BranchReceivingWorkspace({
                 <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.driverName')}</span>
                 <input
                   value={transportForm.driverName}
-                  onChange={(e) => setTransportForm((c) => ({ ...c, driverName: e.target.value }))}
+                  onChange={(e) => updateTransportForm((c) => ({ ...c, driverName: e.target.value }))}
                   className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                 />
               </label>
@@ -335,7 +369,7 @@ export function BranchReceivingWorkspace({
                 <span className="text-sm font-semibold text-slate-700">{t('branchProductRequest.vehicleNumber')}</span>
                 <input
                   value={transportForm.vehicleNumber}
-                  onChange={(e) => setTransportForm((c) => ({ ...c, vehicleNumber: e.target.value }))}
+                  onChange={(e) => updateTransportForm((c) => ({ ...c, vehicleNumber: e.target.value }))}
                   className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                 />
               </label>
@@ -347,15 +381,23 @@ export function BranchReceivingWorkspace({
                   step="0.01"
                   required
                   value={transportForm.transportCostKgs}
-                  onChange={(e) => setTransportForm((c) => ({ ...c, transportCostKgs: e.target.value }))}
-                  className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  onChange={(e) => {
+                    setTransportCostError('');
+                    updateTransportForm((c) => ({ ...c, transportCostKgs: e.target.value }));
+                  }}
+                  className={`mt-2 w-full rounded-xl border px-3 py-2 ${
+                    transportCostError ? 'border-amber-400 bg-amber-50' : 'border-slate-300'
+                  }`}
                 />
+                {transportCostError ? (
+                  <p className="mt-2 whitespace-pre-line text-sm text-amber-800">{transportCostError}</p>
+                ) : null}
               </label>
               <label className="block md:col-span-2">
                 <span className="text-sm font-semibold text-slate-700">{t('crm.notes')}</span>
                 <textarea
                   value={transportForm.transportNotes}
-                  onChange={(e) => setTransportForm((c) => ({ ...c, transportNotes: e.target.value }))}
+                  onChange={(e) => updateTransportForm((c) => ({ ...c, transportNotes: e.target.value }))}
                   className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                   rows={2}
                 />
@@ -371,7 +413,7 @@ export function BranchReceivingWorkspace({
             <button
               type="button"
               disabled={previewing || !allSaved}
-              onClick={() => void loadTransportPreview()}
+              onClick={() => void allocateTransportCost()}
               className="rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-slate-800 disabled:opacity-50"
             >
               {previewing ? t('common.loading') : t('distribution.transportAllocationPreview')}
@@ -384,41 +426,24 @@ export function BranchReceivingWorkspace({
             >
               {submitting ? t('common.loading') : t('distribution.completeReceiving')}
             </button>
+            {!transportAllocationReady && allSaved && canCompleteReceiving ? (
+              <p className="w-full text-sm text-slate-600">{COMPLETE_RECEIVING_REQUIRES_ALLOCATION}</p>
+            ) : null}
           </div>
-          {preview ? (
-            <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4">
-              <div className="grid gap-3 md:grid-cols-3">
+          {allocationResult ? (
+            <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <p className="whitespace-pre-line text-sm font-semibold text-emerald-900">
+                {allocationResult.message || TRANSPORT_ALLOCATION_SUCCESS_MESSAGE}
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                <SummaryCard
+                  label={t('distribution.deliveryCost')}
+                  value={`${Number(allocationResult.transportCostKgs).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} сом`}
+                />
                 <SummaryCard
                   label={t('distribution.shipmentTotalWeight')}
-                  value={`${preview.totalShipmentWeightKg} ${t('distribution.weightUnitKg')}`}
+                  value={`${allocationResult.totalShipmentWeightKg} ${t('distribution.weightUnitKg')}`}
                 />
-                <SummaryCard label={t('distribution.deliveryCost')} value={formatKgs(preview.transportCostKgs)} />
-                <SummaryCard
-                  label={t('distribution.deliveryCostAllocated')}
-                  value={formatKgs(preview.allocatedTotal)}
-                />
-              </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2">SKU</th>
-                      <th className="px-3 py-2">{t('distribution.hqTransferCost')}</th>
-                      <th className="px-3 py-2">{t('distribution.allocatedTransportCost')}</th>
-                      <th className="px-3 py-2">{t('distribution.finalBranchInventoryCost')}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {preview.allocations.map((row) => (
-                      <tr key={row.productId}>
-                        <td className="px-3 py-2">{row.sku || row.productName || row.productId}</td>
-                        <td className="px-3 py-2">{formatKgs(row.hqTransferUnitCost)}</td>
-                        <td className="px-3 py-2">{formatKgs(row.transportExpenseAllocation)}</td>
-                        <td className="px-3 py-2 font-semibold">{formatKgs(row.finalUnitCostKgs)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
             </div>
           ) : null}

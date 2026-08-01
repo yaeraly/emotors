@@ -310,6 +310,7 @@ export default function DistributionOrderDetailPage() {
                 lineItems={order.receivingLineItems!}
                 initialProgress={order.receivingProgress}
                 canCompleteReceiving={order.canCompleteReceiving}
+                initialTransportAllocationReady={order.transportAllocationReady}
                 onCompleted={(result) => {
                   setReceiving(result.receiving);
                   setShortageReport(result.shortageReport);

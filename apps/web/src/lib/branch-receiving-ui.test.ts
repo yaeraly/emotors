@@ -6,13 +6,16 @@ import {
   BRANCH_RECEIVING_PRODUCT_NAME_CELL_CLASS,
   BRANCH_RECEIVING_QUANTITY_HEADER_KEYS,
   REMOVED_BRANCH_RECEIVING_TABLE_COLUMNS,
+  allocationResponseIsBranchSafe,
   allowsProductNameWrapping,
   buildBranchReceivingTransportPayload,
+  canCompleteBranchReceiving,
   computeDifference,
   deriveMissingQuantity,
   productNameDisplayUsesTruncation,
   shouldShowReceivingBranchField,
   shouldShowTransportCompanyField,
+  validateTransportCostInput,
 } from './branch-receiving-ui';
 
 describe('branch-receiving-ui', () => {
@@ -81,7 +84,26 @@ describe('branch-receiving-ui', () => {
     assert.equal(payload.transportCostKgs, 5000);
     assert.equal(payload.driverName, 'Driver');
     assert.equal(payload.vehicleNumber, 'ABC123');
-    assert.equal(payload.transportNotes, 'note');
+    assert.equal(payload.comment, 'note');
+  });
+
+  it('validates transport cost before allocation', () => {
+    assert.equal(validateTransportCostInput('').ok, false);
+    assert.equal(validateTransportCostInput('0').ok, true);
+    assert.equal(canCompleteBranchReceiving({
+      allSaved: true,
+      canCompleteReceiving: true,
+      transportAllocationReady: false,
+      products: 1,
+    }), false);
+    assert.equal(canCompleteBranchReceiving({
+      allSaved: true,
+      canCompleteReceiving: true,
+      transportAllocationReady: true,
+      products: 1,
+    }), true);
+    assert.equal(allocationResponseIsBranchSafe({ status: 'ALLOCATED', transportCostKgs: 0 }), true);
+    assert.equal(allocationResponseIsBranchSafe({ allocations: [] }), false);
   });
 
   it('allows completing receiving without transport company data', () => {
@@ -94,6 +116,6 @@ describe('branch-receiving-ui', () => {
     assert.equal(payload.transportCostKgs, 0);
     assert.equal(payload.driverName, undefined);
     assert.equal(payload.vehicleNumber, undefined);
-    assert.equal(payload.transportNotes, undefined);
+    assert.equal(payload.comment, undefined);
   });
 });

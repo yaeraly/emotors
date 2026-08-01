@@ -300,13 +300,23 @@ export class DistributionController {
   }
 
   @Post('orders/:id/transport-cost/preview')
-  @Roles(Role.OWNER, Role.CEO, Role.WAREHOUSE_OPERATOR)
+  @Roles(Role.OWNER, Role.CEO)
   previewReceivingTransportCost(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Body() dto: EnterReceivingTransportDto,
   ) {
     return this.distributionService.previewReceivingTransportCost(user, id, dto);
+  }
+
+  @Post('orders/:id/transport-cost/allocate')
+  @Roles(Role.WAREHOUSE_OPERATOR)
+  allocateReceivingTransportCost(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: EnterReceivingTransportDto,
+  ) {
+    return this.distributionService.allocateReceivingTransportCost(user, id, dto);
   }
 
   @Post('orders/:id/transport-cost')
