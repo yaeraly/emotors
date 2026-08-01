@@ -46,6 +46,7 @@ export default function CreateFinanceAccountPage() {
           currency: form.currency,
           bankName: showBank ? form.bankName : undefined,
           bankAccountNo: showBank ? form.bankAccountNo : undefined,
+          iban: showBank ? form.iban || undefined : undefined,
           qrProvider: showQr ? form.qrProvider : undefined,
           posTerminalId: showPos ? form.posProvider : undefined,
           notes: form.notes || undefined,
