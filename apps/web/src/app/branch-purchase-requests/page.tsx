@@ -7,6 +7,15 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { BranchProductOrdersSection } from '@/components/BranchProductOrdersSection';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
+import {
+  HqSalesListFilterGrid,
+  HqSalesListTableCard,
+  hqSalesListFilterControlClass,
+  hqSalesListTableClass,
+  hqSalesListTableHeadClass,
+  hqSalesListTableTdClass,
+  hqSalesListTableThClass,
+} from '@/components/HqSalesListLayout';
 import { BRANCH_PRODUCT_ORDERS_LIST_HREF } from '@/lib/branch-product-orders-nav';
 import { BranchProductSearch, type BranchProductOption, isBranchPriceConfigured, parseBranchMoney, resolveBranchDisplayPrice } from '@/components/BranchProductSearch';
 import { branchPurchaseRequestsTitleKey } from '@/lib/distribution-labels';
@@ -633,7 +642,7 @@ function BranchPurchaseRequestsPageInner() {
   }, [branchSalesManagerView, draftIdFromUrl, isCreateMode, requests]);
 
   const visibleRequests = useMemo(() => {
-    if (!ceoInspectorView) return requests;
+    if (!ceoInspectorView && !hqSalesView) return requests;
     const search = listFilters.search.trim().toLowerCase();
     return requests.filter((request) => {
       const matchesSearch =
@@ -648,7 +657,7 @@ function BranchPurchaseRequestsPageInner() {
       const matchesTo = !listFilters.dateTo || createdAt <= new Date(`${listFilters.dateTo}T23:59:59`);
       return matchesSearch && matchesBranch && matchesStatus && matchesPayment && matchesFrom && matchesTo;
     });
-  }, [branches, ceoInspectorView, listFilters, requests]);
+  }, [branches, ceoInspectorView, hqSalesView, listFilters, requests]);
 
   function openRequest(requestId: string) {
     if (!requestId) return;
@@ -833,6 +842,59 @@ function BranchPurchaseRequestsPageInner() {
               </label>
             </div>
           </div>
+        ) : null}
+
+        {hqSalesView && !showForm ? (
+          <HqSalesListFilterGrid>
+            <input
+              value={listFilters.search}
+              onChange={(e) => setListFilters((current) => ({ ...current, search: e.target.value }))}
+              placeholder={t('branchProductRequest.requestNumber')}
+              className={hqSalesListFilterControlClass}
+            />
+            <select
+              value={listFilters.branchId}
+              onChange={(e) => setListFilters((current) => ({ ...current, branchId: e.target.value }))}
+              className={hqSalesListFilterControlClass}
+            >
+              <option value="">{t('common.all')} {t('distribution.branch')}</option>
+              {branches.map((branch) => (
+                <option key={branch.id} value={branch.id}>{branch.name}</option>
+              ))}
+            </select>
+            <select
+              value={listFilters.status}
+              onChange={(e) => setListFilters((current) => ({ ...current, status: e.target.value }))}
+              className={hqSalesListFilterControlClass}
+            >
+              <option value="">{t('common.all')} {t('distribution.status')}</option>
+              {['DRAFT', 'SUBMITTED_TO_HQ', 'PENDING_BRANCH_CONFIRMATION', 'PAYMENT_CONFIRMED', 'READY_FOR_HQ_WAREHOUSE', 'COMPLETED', 'REJECTED', 'CANCELLED'].map((status) => (
+                <option key={status} value={status}>{translateStatus(t, status)}</option>
+              ))}
+            </select>
+            <select
+              value={listFilters.paymentStatus}
+              onChange={(e) => setListFilters((current) => ({ ...current, paymentStatus: e.target.value }))}
+              className={hqSalesListFilterControlClass}
+            >
+              <option value="">{t('common.all')} {t('procurement.payments.paymentStatus')}</option>
+              <option value="UNPAID">{t('paymentStatus.DEBT')}</option>
+              <option value="PENDING_PAYMENT">{translateStatus(t, 'PENDING_PAYMENT')}</option>
+              <option value="PAYMENT_CONFIRMED">{translateStatus(t, 'PAYMENT_CONFIRMED')}</option>
+            </select>
+            <input
+              type="date"
+              value={listFilters.dateFrom}
+              onChange={(e) => setListFilters((current) => ({ ...current, dateFrom: e.target.value }))}
+              className={hqSalesListFilterControlClass}
+            />
+            <input
+              type="date"
+              value={listFilters.dateTo}
+              onChange={(e) => setListFilters((current) => ({ ...current, dateTo: e.target.value }))}
+              className={hqSalesListFilterControlClass}
+            />
+          </HqSalesListFilterGrid>
         ) : null}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
@@ -1037,48 +1099,28 @@ function BranchPurchaseRequestsPageInner() {
           </form>
         ) : null}
 
-        {!(branchSalesManagerView && showForm) ? (
-        <div className={`${hqSalesView ? 'rounded-xl' : 'rounded-3xl'} border border-slate-200 bg-white shadow-sm overflow-x-auto`}>
+        {!(showForm && (branchSalesManagerView || hqSalesView)) ? (
+        hqSalesView ? (
+        <HqSalesListTableCard>
           {loading ? (
-            <p className="px-6 py-10 text-sm text-slate-600">
-              {hqSalesView ? t('operations.hqBranchOrdersLoading') : t('common.loading')}
-            </p>
-          ) : !listError && visibleRequests.length === 0 ? (
-            <p className="px-6 py-10 text-sm text-slate-600">
-              {hqSalesView ? t('operations.hqBranchOrdersEmpty') : t('operations.branchPurchaseRequestsEmpty')}
-            </p>
-          ) : (
-          <table className={`w-full divide-y divide-slate-200 ${hqSalesView ? 'text-xs' : 'text-sm'}`}>
-            <thead className={`bg-slate-50 text-left font-bold uppercase tracking-wide text-slate-500 ${hqSalesView ? 'text-[10px]' : 'text-xs'}`}>
+            <p className="px-6 py-10 text-sm text-slate-600">{t('operations.hqBranchOrdersLoading')}</p>
+          ) : visibleRequests.length === 0 && !listError ? (
+            <p className="px-6 py-10 text-sm text-slate-600">{t('operations.hqBranchOrdersEmpty')}</p>
+          ) : listError ? null : (
+          <table className={hqSalesListTableClass}>
+            <thead className={hqSalesListTableHeadClass}>
               <tr>
-                <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.number') : '#'}</th>
+                <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.number')}</th>
                 {showBranchColumn ? (
-                  <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.branch') : t('distribution.branch')}</th>
+                  <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.branch')}</th>
                 ) : null}
-                {ceoInspectorView ? (
-                  <th className={hqThClass(hqSalesView)}>{t('common.createdDate')}</th>
-                ) : null}
-                {hqSalesView ? <th className={hqThClass(hqSalesView)}>{t('operations.hqBranchOrdersTable.requester')}</th> : null}
-                {hqSalesView ? <th className={hqThClass(hqSalesView)} title={t('operations.hqBranchOrdersTable.hqWarehouseTooltip')}>{t('operations.hqBranchOrdersTable.hqWarehouse')}</th> : null}
-                {!ceoInspectorView ? <th className={hqThClass(hqSalesView)}>{hqSalesView ? t('operations.hqBranchOrdersTable.status') : t('distribution.status')}</th> : null}
-                <th className={`${hqThClass(hqSalesView)} ${hqSalesView ? 'text-center' : ''}`} title={hqSalesView ? t('operations.hqBranchOrdersTable.positionsTooltip') : undefined}>{hqSalesView ? t('operations.hqBranchOrdersTable.positions') : t('distribution.items')}</th>
-                {ceoInspectorView ? (
-                  <>
-                    <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.totalQuantity')}</th>
-                    <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.approvedQuantity')}</th>
-                    <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.estimatedAmount')}</th>
-                    <th className={hqThClass(hqSalesView)}>{t('distribution.status')}</th>
-                  </>
-                ) : hqSalesView ? (
-                  <>
-                    <th className={`${hqThClass(hqSalesView)} text-center`} title={t('operations.hqBranchOrdersTable.quantityTooltip')}>{t('operations.hqBranchOrdersTable.quantity')}</th>
-                    <th className={`${hqThClass(hqSalesView)} text-right`} title={t('operations.hqBranchOrdersTable.amountTooltip')}>{t('operations.hqBranchOrdersTable.amount')}</th>
-                  </>
-                ) : branchOnlyView ? (
-                  <th className={hqThClass(hqSalesView)}>{t('branchProductRequest.totalAmount')}</th>
-                ) : null}
-                {!ceoInspectorView ? <th className={hqThClass(hqSalesView)} title={hqSalesView ? t('operations.hqBranchOrdersTable.dateTooltip') : undefined}>{hqSalesView ? t('operations.hqBranchOrdersTable.date') : t('common.createdDate')}</th> : null}
-                {!hqSalesView ? <th className={hqThClass(hqSalesView)}>{t('common.actions')}</th> : null}
+                <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.requester')}</th>
+                <th className={hqSalesListTableThClass} title={t('operations.hqBranchOrdersTable.hqWarehouseTooltip')}>{t('operations.hqBranchOrdersTable.hqWarehouse')}</th>
+                <th className={hqSalesListTableThClass}>{t('operations.hqBranchOrdersTable.status')}</th>
+                <th className={`${hqSalesListTableThClass} text-center`} title={t('operations.hqBranchOrdersTable.positionsTooltip')}>{t('operations.hqBranchOrdersTable.positions')}</th>
+                <th className={`${hqSalesListTableThClass} text-center`} title={t('operations.hqBranchOrdersTable.quantityTooltip')}>{t('operations.hqBranchOrdersTable.quantity')}</th>
+                <th className={`${hqSalesListTableThClass} text-right`} title={t('operations.hqBranchOrdersTable.amountTooltip')}>{t('operations.hqBranchOrdersTable.amount')}</th>
+                <th className={hqSalesListTableThClass} title={t('operations.hqBranchOrdersTable.dateTooltip')}>{t('operations.hqBranchOrdersTable.date')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -1096,54 +1138,108 @@ function BranchPurchaseRequestsPageInner() {
                   onKeyDown={(event) => handleOrderRowKeyDown(event, request)}
                   tabIndex={0}
                   role="link"
-                  title={hqSalesView ? hqOrderRowHint(t, request.status) : undefined}
-                  className={`cursor-pointer hover:bg-slate-50 ${hqSalesView ? 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500' : ''}`}
+                  title={hqOrderRowHint(t, request.status)}
+                  className="cursor-pointer hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500"
                 >
-                      <td className={hqTdClass(hqSalesView, 'font-bold text-blue-700')}>
+                  <td className={`${hqSalesListTableTdClass} font-bold text-blue-700`}>{request.requestNumber}</td>
+                  {showBranchColumn ? (
+                    <td className={`${hqSalesListTableTdClass} max-w-[7rem] truncate`} title={String(branchName)}>{branchName}</td>
+                  ) : null}
+                  <td className={`${hqSalesListTableTdClass} max-w-[6rem] truncate`} title={request.createdBy?.fullName ?? undefined}>
+                    {request.createdBy?.fullName ?? '-'}
+                  </td>
+                  <td className={`${hqSalesListTableTdClass} max-w-[6rem] truncate`} title={hqWarehouseName}>{hqWarehouseName}</td>
+                  <td className={hqSalesListTableTdClass}>{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
+                  <td className={`${hqSalesListTableTdClass} text-center tabular-nums`}>{request.items.length}</td>
+                  <td className={`${hqSalesListTableTdClass} text-center tabular-nums`}>{totalRequestedQuantity(request)}</td>
+                  <td className={`${hqSalesListTableTdClass} text-right tabular-nums`}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                  <td className={`${hqSalesListTableTdClass} whitespace-nowrap`}>{new Date(request.createdAt).toLocaleDateString()}</td>
+                </tr>
+              );
+              })}
+            </tbody>
+          </table>
+          )}
+        </HqSalesListTableCard>
+        ) : (
+        <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-x-auto">
+          {loading ? (
+            <p className="px-6 py-10 text-sm text-slate-600">{t('common.loading')}</p>
+          ) : !listError && visibleRequests.length === 0 ? (
+            <p className="px-6 py-10 text-sm text-slate-600">{t('operations.branchPurchaseRequestsEmpty')}</p>
+          ) : (
+          <table className="w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className={hqThClass(false)}>#</th>
+                {showBranchColumn ? (
+                  <th className={hqThClass(false)}>{t('distribution.branch')}</th>
+                ) : null}
+                {ceoInspectorView ? (
+                  <th className={hqThClass(false)}>{t('common.createdDate')}</th>
+                ) : null}
+                {!ceoInspectorView ? <th className={hqThClass(false)}>{t('distribution.status')}</th> : null}
+                <th className={hqThClass(false)}>{t('distribution.items')}</th>
+                {ceoInspectorView ? (
+                  <>
+                    <th className={hqThClass(false)}>{t('branchProductRequest.totalQuantity')}</th>
+                    <th className={hqThClass(false)}>{t('branchProductRequest.approvedQuantity')}</th>
+                    <th className={hqThClass(false)}>{t('branchProductRequest.estimatedAmount')}</th>
+                    <th className={hqThClass(false)}>{t('distribution.status')}</th>
+                  </>
+                ) : branchOnlyView ? (
+                  <th className={hqThClass(false)}>{t('branchProductRequest.totalAmount')}</th>
+                ) : null}
+                {!ceoInspectorView ? <th className={hqThClass(false)}>{t('common.createdDate')}</th> : null}
+                <th className={hqThClass(false)}>{t('common.actions')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {visibleRequests.map((request) => {
+                const branchName = branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId;
+                const hqWarehouseName =
+                  request.assignedHqWarehouse?.name ??
+                  request.branch?.assignedHqWarehouse?.name ??
+                  branches.find((branch) => branch.id === request.branchId)?.assignedHqWarehouse?.name ??
+                  '—';
+                return (
+                <tr
+                  key={request.id}
+                  onClick={() => handleRequestRowActivate(request)}
+                  onKeyDown={(event) => handleOrderRowKeyDown(event, request)}
+                  tabIndex={0}
+                  role="link"
+                  className="cursor-pointer hover:bg-slate-50"
+                >
+                  <td className={hqTdClass(false, 'font-bold text-blue-700')}>
                     {request.requestNumber}
                   </td>
                   {showBranchColumn ? (
-                    <td className={hqTdClass(hqSalesView, 'max-w-[7rem] truncate')} title={String(branchName)}>
+                    <td className={hqTdClass(false, 'max-w-[7rem] truncate')} title={String(branchName)}>
                       {branchName}
                     </td>
                   ) : null}
                   {ceoInspectorView ? (
-                    <td className={hqTdClass(hqSalesView)}>{new Date(request.createdAt).toLocaleDateString()}</td>
-                  ) : null}
-                  {hqSalesView ? (
-                    <td className={hqTdClass(hqSalesView, 'max-w-[6rem] truncate')} title={request.createdBy?.fullName ?? undefined}>
-                      {request.createdBy?.fullName ?? '-'}
-                    </td>
-                  ) : null}
-                  {hqSalesView ? (
-                    <td className={hqTdClass(hqSalesView, 'max-w-[6rem] truncate')} title={hqWarehouseName}>
-                      {hqWarehouseName}
-                    </td>
+                    <td className={hqTdClass(false)}>{new Date(request.createdAt).toLocaleDateString()}</td>
                   ) : null}
                   {!ceoInspectorView ? (
-                    <td className={hqTdClass(hqSalesView)}>{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
+                    <td className={hqTdClass(false)}>{resolveRequestStatusLabel(t, request, branchOnlyView)}</td>
                   ) : null}
-                  <td className={hqTdClass(hqSalesView, 'text-center tabular-nums')}>{request.items.length}</td>
+                  <td className={hqTdClass(false, 'text-center tabular-nums')}>{request.items.length}</td>
                   {ceoInspectorView ? (
                     <>
-                      <td className={hqTdClass(hqSalesView)}>{totalRequestedQuantity(request)}</td>
-                      <td className={hqTdClass(hqSalesView)}>{totalApprovedQuantity(request)}</td>
-                      <td className={hqTdClass(hqSalesView)}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
-                      <td className={hqTdClass(hqSalesView)}>{resolveRequestStatusLabel(t, request, false)}</td>
-                    </>
-                  ) : hqSalesView ? (
-                    <>
-                      <td className={hqTdClass(hqSalesView, 'text-center tabular-nums')}>{totalRequestedQuantity(request)}</td>
-                      <td className={hqTdClass(hqSalesView, 'text-right tabular-nums')}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                      <td className={hqTdClass(false)}>{totalRequestedQuantity(request)}</td>
+                      <td className={hqTdClass(false)}>{totalApprovedQuantity(request)}</td>
+                      <td className={hqTdClass(false)}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                      <td className={hqTdClass(false)}>{resolveRequestStatusLabel(t, request, false)}</td>
                     </>
                   ) : branchOnlyView ? (
-                    <td className={hqTdClass(hqSalesView)}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
+                    <td className={hqTdClass(false)}>{Number(request.totalEstimatedAmount ?? 0).toFixed(2)}</td>
                   ) : null}
                   {!ceoInspectorView ? (
-                    <td className={hqTdClass(hqSalesView, 'whitespace-nowrap')}>{new Date(request.createdAt).toLocaleDateString()}</td>
+                    <td className={hqTdClass(false, 'whitespace-nowrap')}>{new Date(request.createdAt).toLocaleDateString()}</td>
                   ) : null}
-                  {!hqSalesView ? (
-                  <td className={hqTdClass(hqSalesView)} onClick={(event) => event.stopPropagation()}>
+                  <td className={hqTdClass(false)} onClick={(event) => event.stopPropagation()}>
                     <div className="flex flex-wrap gap-2">
                       {request.status === 'DRAFT' && canCreate ? (
                         <button
@@ -1183,7 +1279,6 @@ function BranchPurchaseRequestsPageInner() {
                       ) : null}
                     </div>
                   </td>
-                  ) : null}
                 </tr>
               );
               })}
@@ -1191,6 +1286,7 @@ function BranchPurchaseRequestsPageInner() {
           </table>
           )}
         </div>
+        )
         ) : null}
     </>
   );

@@ -4,6 +4,15 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
+import {
+  HqSalesListFilterGrid,
+  HqSalesListTableCard,
+  hqSalesListFilterControlClass,
+  hqSalesListTableClass,
+  hqSalesListTableHeadClass,
+  hqSalesListTableTdClass,
+  hqSalesListTableThClass,
+} from '@/components/HqSalesListLayout';
 import { apiFetch } from '@/lib/api';
 import {
   canManageDistributionOrders,
@@ -95,20 +104,18 @@ export default function DistributionOrdersPage() {
         </div>
       ) : null}
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
-      <div
-        className={`grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm ${operatorView ? 'md:grid-cols-2' : 'md:grid-cols-3'}`}
-      >
+      <HqSalesListFilterGrid columns={operatorView ? 2 : 3}>
         <input
           value={filters.search}
           onChange={(event) => setFilters({ ...filters, search: event.target.value })}
           placeholder={t('distribution.orderNumber')}
-          className="rounded-xl border border-slate-300 px-4 py-3"
+          className={hqSalesListFilterControlClass}
         />
         {!operatorView ? (
           <select
             value={filters.branchId}
             onChange={(event) => setFilters({ ...filters, branchId: event.target.value })}
-            className="rounded-xl border border-slate-300 px-4 py-3"
+            className={hqSalesListFilterControlClass}
           >
             <option value="">{t('common.all')} {t('distribution.branch')}</option>
             {branches.map((branch) => (
@@ -119,7 +126,7 @@ export default function DistributionOrdersPage() {
         <select
           value={filters.status}
           onChange={(event) => setFilters({ ...filters, status: event.target.value })}
-          className="rounded-xl border border-slate-300 px-4 py-3"
+          className={hqSalesListFilterControlClass}
         >
           <option value="">{t('common.all')} {t('distribution.status')}</option>
           {(operatorView
@@ -128,34 +135,34 @@ export default function DistributionOrdersPage() {
             <option key={status} value={status}>{translateStatus(t, status, 'distribution')}</option>
           ))}
         </select>
-      </div>
-      <div className="h-[calc(100vh-300px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="sticky top-0 bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+      </HqSalesListFilterGrid>
+      <HqSalesListTableCard>
+        <table className={hqSalesListTableClass}>
+          <thead className={hqSalesListTableHeadClass}>
             <tr>
-              <th className="px-4 py-3">{t('distribution.orderNumber')}</th>
-              {!operatorView ? <th className="px-4 py-3">{t('distribution.branch')}</th> : null}
-              <th className="px-4 py-3">{t('distribution.sourceWarehouse')}</th>
-              <th className="px-4 py-3">{t('distribution.destinationWarehouse')}</th>
-              <th className="px-4 py-3">{t('distribution.status')}</th>
-              {!showFinancialColumns ? null : <th className="px-4 py-3">{t('distribution.totalAmount')}</th>}
-              {!showFinancialColumns ? null : <th className="px-4 py-3">{t('distribution.totalProfit')}</th>}
-              <th className="px-4 py-3">{t('common.createdDate')}</th>
-              <th className="px-4 py-3">{t('common.actions')}</th>
+              <th className={hqSalesListTableThClass}>{t('distribution.orderNumber')}</th>
+              {!operatorView ? <th className={hqSalesListTableThClass}>{t('distribution.branch')}</th> : null}
+              <th className={hqSalesListTableThClass}>{t('distribution.sourceWarehouse')}</th>
+              <th className={hqSalesListTableThClass}>{t('distribution.destinationWarehouse')}</th>
+              <th className={hqSalesListTableThClass}>{t('distribution.status')}</th>
+              {!showFinancialColumns ? null : <th className={hqSalesListTableThClass}>{t('distribution.totalAmount')}</th>}
+              {!showFinancialColumns ? null : <th className={hqSalesListTableThClass}>{t('distribution.totalProfit')}</th>}
+              <th className={hqSalesListTableThClass}>{t('common.createdDate')}</th>
+              <th className={hqSalesListTableThClass}>{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {orders.map((order) => (
               <tr key={order.id}>
-                <td className="px-4 py-3 font-bold">{order.orderNumber}</td>
-                {!operatorView ? <td className="px-4 py-3">{order.branch?.name}</td> : null}
-                <td className="px-4 py-3">{order.sourceWarehouse?.name}</td>
-                <td className="px-4 py-3">{order.destinationWarehouse?.name}</td>
-                <td className="px-4 py-3">{translateStatus(t, order.status, 'distribution')}</td>
-                {!showFinancialColumns ? null : <td className="px-4 py-3">{formatKgs(order.totalAmount)}</td>}
-                {!showFinancialColumns ? null : <td className="px-4 py-3">{formatKgs(order.totalProfit)}</td>}
-                <td className="px-4 py-3">{new Date(order.createdAt).toLocaleDateString()}</td>
-                <td className="px-4 py-3">
+                <td className={`${hqSalesListTableTdClass} font-bold`}>{order.orderNumber}</td>
+                {!operatorView ? <td className={hqSalesListTableTdClass}>{order.branch?.name}</td> : null}
+                <td className={hqSalesListTableTdClass}>{order.sourceWarehouse?.name}</td>
+                <td className={hqSalesListTableTdClass}>{order.destinationWarehouse?.name}</td>
+                <td className={hqSalesListTableTdClass}>{translateStatus(t, order.status, 'distribution')}</td>
+                {!showFinancialColumns ? null : <td className={hqSalesListTableTdClass}>{formatKgs(order.totalAmount)}</td>}
+                {!showFinancialColumns ? null : <td className={hqSalesListTableTdClass}>{formatKgs(order.totalProfit)}</td>}
+                <td className={hqSalesListTableTdClass}>{new Date(order.createdAt).toLocaleDateString()}</td>
+                <td className={hqSalesListTableTdClass}>
                   <Link
                     href={`/distribution/orders/${order.id}`}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold"
@@ -167,7 +174,7 @@ export default function DistributionOrdersPage() {
             ))}
           </tbody>
         </table>
-      </div>
+      </HqSalesListTableCard>
     </>
   );
 
