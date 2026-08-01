@@ -141,7 +141,7 @@ export default function BranchInvoiceDetailPage() {
     setSuccess('');
     try {
       setInvoice(await apiFetch<BranchInvoice>(`/distribution/invoices/${id}/installment/approve`, { method: 'POST' }));
-      setSuccess(t('distribution.installmentApproved'));
+      setSuccess(t('distribution.installmentApprovedWarehouseReady'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }

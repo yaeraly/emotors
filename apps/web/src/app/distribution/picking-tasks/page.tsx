@@ -30,15 +30,28 @@ export default function PickingTasksPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    Promise.all([
-      apiFetch<PickingTask[]>('/distribution/picking-tasks'),
-      apiFetch<User>('/auth/me'),
-    ])
-      .then(([result, me]) => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const [result, me] = await Promise.all([
+          apiFetch<PickingTask[]>('/distribution/picking-tasks'),
+          apiFetch<User>('/auth/me'),
+        ]);
+        if (cancelled) return;
         setTasks(result);
         setUser(me);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+        setError('');
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : t('common.error'));
+      }
+    }
+    void load();
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+    };
   }, [t]);
 
   if (!canDispatchFromHq(user) && user) {

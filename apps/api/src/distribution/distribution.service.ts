@@ -80,6 +80,7 @@ import {
   isZeroInitialPayment,
   validateBranchOrderInstallmentAmounts,
 } from './branch-order-installment.util';
+import { canStartHqWarehouseFulfillment } from './branch-order-warehouse-eligibility.util';
 import { BranchInstallmentEarlyPaymentService } from './branch-installment-early-payment.service';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
@@ -579,23 +580,45 @@ export class DistributionService {
     return this.prisma.$transaction(async (tx) => {
       const order = await tx.branchDistributionOrder.findFirst({
         where: { id, deletedAt: null },
-        include: { branchInvoices: true, items: true },
+        include: {
+          branchInvoices: { include: { branchOrderInstallment: true } },
+          items: true,
+        },
       });
       if (!order) throw new NotFoundException('Distribution order not found');
-      if (order.status !== BranchDistributionOrderStatus.PAID) {
+      const productInvoice = this.resolveProductBranchInvoice(order);
+      const installment = productInvoice?.branchOrderInstallment ?? null;
+      const eligibility = canStartHqWarehouseFulfillment(order, installment);
+      if (!eligibility.allowed) {
+        if (eligibility.reason === 'INSTALLMENT_PENDING') {
+          throw new BadRequestException('Рассрочка ожидает утверждения CEO — склад не может обработать заказ');
+        }
+        if (eligibility.reason === 'INSTALLMENT_REJECTED') {
+          throw new BadRequestException('Рассрочка отклонена — склад не может обработать заказ');
+        }
         throw new BadRequestException(
           'Order must be fully paid or installment-approved before sending to warehouse',
         );
       }
-      if (!this.resolveProductBranchInvoice(order)?.sentToBranchAt) {
+      if (!productInvoice?.sentToBranchAt) {
         throw new BadRequestException('Invoice must be sent to branch first');
       }
 
-      const updated = await tx.branchDistributionOrder.update({
-        where: { id },
-        data: { status: BranchDistributionOrderStatus.SENT_TO_WAREHOUSE },
-        include: this.include(),
-      });
+      const alreadyInWarehouse =
+        order.status === BranchDistributionOrderStatus.SENT_TO_WAREHOUSE ||
+        order.status === BranchDistributionOrderStatus.PICKING ||
+        order.status === BranchDistributionOrderStatus.PACKED ||
+        order.status === BranchDistributionOrderStatus.SHIPPED;
+      const updated = alreadyInWarehouse
+        ? await tx.branchDistributionOrder.findUniqueOrThrow({
+            where: { id },
+            include: this.include(),
+          })
+        : await tx.branchDistributionOrder.update({
+            where: { id },
+            data: { status: BranchDistributionOrderStatus.SENT_TO_WAREHOUSE },
+            include: this.include(),
+          });
 
       const existingTask = await tx.hqWarehousePickingTask.findUnique({
         where: { distributionOrderId: id },
@@ -609,6 +632,25 @@ export class DistributionService {
             status: HqWarehousePickingTaskStatus.ASSIGNED,
           },
         });
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'HQ_WAREHOUSE_TASK_CREATED',
+            entity: 'HqWarehousePickingTask',
+            entityId: id,
+            metadata: {
+              distributionOrderId: id,
+              sourceHqWarehouseId: order.sourceWarehouseId,
+              installmentApproved: installment?.status === BranchOrderInstallmentStatus.APPROVED,
+              roles: user.roles ?? [user.role],
+            },
+          },
+        });
+      }
+
+      if (alreadyInWarehouse && existingTask) {
+        return this.toResponse(updated);
       }
 
       await this.auditTransfer(tx, user, 'ORDER_ASSIGNED_TO_WAREHOUSE', updated);
@@ -715,6 +757,7 @@ export class DistributionService {
   pick(user: AuthUser, id: string) {
     return this.prisma.$transaction(async (tx) => {
       const order = await this.getAccessibleOrderInTx(tx, user, id);
+      await this.assertWarehouseFulfillmentAllowed(tx, order);
       if (order.status !== BranchDistributionOrderStatus.SENT_TO_WAREHOUSE) {
         throw new BadRequestException('Order must be sent to warehouse before picking');
       }
@@ -2891,6 +2934,29 @@ export class DistributionService {
     }
   }
 
+  private async assertWarehouseFulfillmentAllowed(
+    tx: PrismaTx,
+    order: { id: string; status: BranchDistributionOrderStatus },
+  ) {
+    const invoices = await tx.branchInvoice.findMany({
+      where: { distributionOrderId: order.id, deletedAt: null },
+      include: { branchOrderInstallment: true },
+    });
+    const invoice = this.resolveProductBranchInvoice({ branchInvoices: invoices });
+    const eligibility = canStartHqWarehouseFulfillment(order, invoice?.branchOrderInstallment ?? null);
+    if (!eligibility.allowed) {
+      if (eligibility.reason === 'INSTALLMENT_PENDING') {
+        throw new BadRequestException('Рассрочка ожидает утверждения CEO — склад не может обработать заказ');
+      }
+      if (eligibility.reason === 'INSTALLMENT_REJECTED') {
+        throw new BadRequestException('Рассрочка отклонена — склад не может обработать заказ');
+      }
+      throw new BadRequestException(
+        'Order must be fully paid or installment-approved before warehouse fulfillment',
+      );
+    }
+  }
+
   private async promoteBranchRequestToReadyForWarehouse(
     tx: PrismaTx,
     user: AuthUser,
@@ -2898,41 +2964,198 @@ export class DistributionService {
     distributionOrderId: string,
     reason: 'FULL_PAYMENT' | 'INSTALLMENT_APPROVED',
   ) {
-    if (linkedRequest.status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE) {
+    if (
+      linkedRequest.status === BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE ||
+      linkedRequest.status === BranchPurchaseRequestStatus.COMPLETED
+    ) {
       return;
     }
 
-    await tx.branchPurchaseRequest.update({
-      where: { id: linkedRequest.id },
-      data: { status: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE },
+    const alreadyReady = linkedRequest.status === BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE;
+    if (!alreadyReady) {
+      await tx.branchPurchaseRequest.update({
+        where: { id: linkedRequest.id },
+        data: { status: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE',
+          entity: 'BranchPurchaseRequest',
+          entityId: linkedRequest.id,
+          metadata: {
+            distributionOrderId,
+            reason,
+            oldStatus: linkedRequest.status,
+            newStatus: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+    }
+
+    if (reason === 'INSTALLMENT_APPROVED') {
+      await this.activateHqWarehouseFulfillmentAfterInstallmentApproval(
+        tx,
+        user,
+        linkedRequest,
+        distributionOrderId,
+      );
+      return;
+    }
+
+    if (!alreadyReady) {
+      await this.createWorkflowAlert(tx, user, {
+        branchId: linkedRequest.branchId,
+        type: AlertType.BRANCH_ORDER_READY_FOR_WAREHOUSE,
+        title: 'Заказ готов к комплектации на складе HQ',
+        message: 'Финансовое согласование завершено. Заказ готов к комплектации на складе HQ.',
+        entityType: 'BranchPurchaseRequest',
+        entityId: linkedRequest.id,
+        recipientRoles: [Role.WAREHOUSE_MANAGER],
+      });
+    }
+  }
+
+  private async activateHqWarehouseFulfillmentAfterInstallmentApproval(
+    tx: PrismaTx,
+    user: AuthUser,
+    linkedRequest: { id: string; branchId: string; status: BranchPurchaseRequestStatus },
+    distributionOrderId: string,
+  ) {
+    const order = await tx.branchDistributionOrder.findFirst({
+      where: { id: distributionOrderId, deletedAt: null },
+      include: {
+        branch: { select: { id: true, name: true, code: true } },
+        items: true,
+        branchInvoices: { include: { branchOrderInstallment: true } },
+      },
     });
+    if (!order) return;
+
+    const productInvoice = this.resolveProductBranchInvoice(order);
+    const installment = productInvoice?.branchOrderInstallment ?? null;
+    const eligibility = canStartHqWarehouseFulfillment(order, installment);
+    if (!eligibility.allowed) return;
+
+    const managerAssignment = await tx.hqWarehouseManagerAssignment.findFirst({
+      where: { warehouseId: order.sourceWarehouseId, status: 'ACTIVE' },
+      orderBy: { assignedAt: 'asc' },
+    });
+
+    const alreadyInWarehouse =
+      order.status === BranchDistributionOrderStatus.SENT_TO_WAREHOUSE ||
+      order.status === BranchDistributionOrderStatus.PICKING ||
+      order.status === BranchDistributionOrderStatus.PACKED ||
+      order.status === BranchDistributionOrderStatus.SHIPPED;
+
+    if (!alreadyInWarehouse) {
+      await tx.branchDistributionOrder.update({
+        where: { id: order.id },
+        data: { status: BranchDistributionOrderStatus.SENT_TO_WAREHOUSE },
+      });
+    }
+
+    const existingTask = await tx.hqWarehousePickingTask.findUnique({
+      where: { distributionOrderId: order.id },
+    });
+    let taskCreated = false;
+    if (!existingTask) {
+      await tx.hqWarehousePickingTask.create({
+        data: {
+          distributionOrderId: order.id,
+          sourceHqWarehouseId: order.sourceWarehouseId,
+          assignedWarehouseManagerId: managerAssignment?.userId,
+          status: HqWarehousePickingTaskStatus.ASSIGNED,
+        },
+      });
+      taskCreated = true;
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'HQ_WAREHOUSE_TASK_CREATED',
+          entity: 'BranchDistributionOrder',
+          entityId: order.id,
+          metadata: {
+            distributionOrderId: order.id,
+            branchId: linkedRequest.branchId,
+            installmentId: installment?.id,
+            sourceHqWarehouseId: order.sourceWarehouseId,
+            roles: user.roles ?? [user.role],
+          },
+        },
+      });
+    }
+
+    if (linkedRequest.status !== BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE) {
+      await tx.branchPurchaseRequest.update({
+        where: { id: linkedRequest.id },
+        data: { status: BranchPurchaseRequestStatus.SENT_TO_HQ_WAREHOUSE },
+      });
+    }
+
+    const totalAmount = this.roundMoney(Number(productInvoice?.totalAmount ?? order.totalAmount ?? 0));
+    const firstPaymentAmount = this.roundMoney(Number(installment?.firstPaymentAmount ?? 0));
+    const remainingDebt = computeBranchOrderRemainingDebt(totalAmount, firstPaymentAmount);
+    const approvedProductCount = order.items.filter((item) => item.quantity > 0).length;
 
     await tx.auditLog.create({
       data: {
         userId: user.id,
         role: user.role,
-        action: 'BRANCH_ORDER_READY_FOR_HQ_WAREHOUSE',
-        entity: 'BranchPurchaseRequest',
-        entityId: linkedRequest.id,
+        action: 'ORDER_READY_FOR_HQ_WAREHOUSE',
+        entity: 'BranchDistributionOrder',
+        entityId: order.id,
         metadata: {
-          distributionOrderId,
-          reason,
-          oldStatus: linkedRequest.status,
-          newStatus: BranchPurchaseRequestStatus.READY_FOR_HQ_WAREHOUSE,
+          installmentId: installment?.id,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          branchId: linkedRequest.branchId,
+          previousStatus: order.status,
+          newStatus: BranchDistributionOrderStatus.SENT_TO_WAREHOUSE,
+          totalAmount,
+          initialPayment: firstPaymentAmount,
+          remainingDebt,
+          approvedById: user.id,
+          taskCreated,
           roles: user.roles ?? [user.role],
         },
       },
     });
 
     await this.createWorkflowAlert(tx, user, {
-      branchId: linkedRequest.branchId,
+      branchId: null,
       type: AlertType.BRANCH_ORDER_READY_FOR_WAREHOUSE,
       title: 'Заказ готов к комплектации на складе HQ',
-      message: 'Финансовое согласование завершено. Заказ готов к комплектации на складе HQ.',
-      entityType: 'BranchPurchaseRequest',
-      entityId: linkedRequest.id,
+      message: [
+        `Заказ ${order.orderNumber} готов к комплектации.`,
+        `Филиал: ${order.branch?.name ?? linkedRequest.branchId}.`,
+        `Позиций: ${approvedProductCount}.`,
+        `Тип оплаты: рассрочка.`,
+        `Первоначальный взнос: ${firstPaymentAmount.toFixed(2)} KGS.`,
+        `Остаток долга: ${remainingDebt.toFixed(2)} KGS.`,
+      ].join(' '),
+      entityType: 'BranchDistributionOrder',
+      entityId: order.id,
+      referenceNumber: order.orderNumber,
       recipientRoles: [Role.WAREHOUSE_MANAGER],
     });
+
+    if (taskCreated) {
+      await this.createWorkflowAlert(tx, user, {
+        branchId: null,
+        type: AlertType.PICKING_TASK_ASSIGNED,
+        title: 'Новое задание на комплектацию',
+        message: `Создано задание на комплектацию заказа ${order.orderNumber}`,
+        entityType: 'BranchDistributionOrder',
+        entityId: order.id,
+        referenceNumber: order.orderNumber,
+        recipientRoles: [Role.WAREHOUSE_MANAGER],
+      });
+    }
   }
 
   async requestInvoiceInstallment(user: AuthUser, invoiceId: string, dto: RequestBranchInstallmentDto) {
@@ -3144,7 +3367,7 @@ export class DistributionService {
         message: `Рассрочка по счёту ${invoice.invoiceNumber} утверждена`,
         entityType: 'BranchInvoice',
         entityId: invoice.id,
-        recipientRoles: [Role.ACCOUNTANT, Role.MANAGER],
+        recipientRoles: [Role.ACCOUNTANT, Role.MANAGER, Role.FRANCHISE_OWNER],
       });
 
       const updated = await tx.branchInvoice.findUniqueOrThrow({
