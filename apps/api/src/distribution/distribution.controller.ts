@@ -158,7 +158,7 @@ export class DistributionController {
   }
 
   @Post('orders/:id/cancel')
-  @Roles(...DISTRIBUTION_MANAGE_ROLES, ...DISTRIBUTION_DISPATCH_ROLES)
+  @Roles(...DISTRIBUTION_MANAGE_ROLES, Role.WAREHOUSE_MANAGER)
   cancel(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.distributionService.cancel(user, id);
   }

@@ -35,6 +35,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   canCreateDistributionOrder,
+  canCancelBranchDistributionOrder,
   canConfirmBranchInvoicePayment,
   canDispatchFromHq,
   canManageDistributionOrders,
@@ -1040,7 +1041,30 @@ export class DistributionService {
   }
 
   cancel(user: AuthUser, id: string) {
-    if (!canManageDistributionOrders(user) && !canDispatchFromHq(user)) {
+    if (!canCancelBranchDistributionOrder(user)) {
+      if (canDispatchFromHq(user)) {
+        return this.prisma.$transaction(async (tx) => {
+          const order = await this.getAccessibleOrderInTx(tx, user, id);
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              role: user.role,
+              action: 'HQ_WAREHOUSE_ORDER_CANCELLATION_BLOCKED',
+              entity: 'BranchDistributionOrder',
+              entityId: order.id,
+              metadata: {
+                actorUserId: user.id,
+                actorRole: user.role,
+                orderId: order.id,
+                attemptedAction: 'CANCEL',
+                currentStatus: order.status,
+                roles: user.roles ?? [user.role],
+              },
+            },
+          });
+          throw new ForbiddenException('У менеджера склада HQ нет права отменять заказ филиала.');
+        });
+      }
       throw new ForbiddenException('Недостаточно прав для отмены заказа распределения');
     }
     return this.prisma.$transaction(async (tx) => {

@@ -1543,6 +1543,13 @@ export function canManageDistributionOrders(user: Pick<User, 'role' | 'roles' | 
   return hasFullAccess(user) || hasRole(user, 'HQ_SALES_MANAGER');
 }
 
+/** Commercial branch-order cancellation — HQ Sales / HQ CEO only (not HQ Warehouse Manager). */
+export function canCancelBranchDistributionOrder(
+  user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined,
+) {
+  return canManageDistributionOrders(user);
+}
+
 export function canViewDistribution(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
   if (!user) return false;
   return (

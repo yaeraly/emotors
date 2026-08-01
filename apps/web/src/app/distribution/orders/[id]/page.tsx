@@ -6,6 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import { apiFetch } from '@/lib/api';
 import {
+  canCancelBranchDistributionOrder,
   canDispatchFromHq,
   canEnterBranchTransportCost,
   canManageDistributionOrders,
@@ -99,6 +100,7 @@ export default function DistributionOrderDetailPage() {
   }
 
   const canApprove = canManageDistributionOrders(currentUser);
+  const canCancel = canCancelBranchDistributionOrder(currentUser);
   const canDispatch = canDispatchFromHq(currentUser);
   const canReceiveAtBranch = canReceiveBranchDistribution(currentUser);
   const canEnterTransport = canEnterBranchTransportCost(currentUser);
@@ -181,7 +183,7 @@ export default function DistributionOrderDetailPage() {
                     {t('distribution.complete')}
                   </button>
                 ) : null}
-                {['DRAFT', 'INVOICED', 'PAYMENT_PENDING', 'PAID', 'SENT_TO_WAREHOUSE', 'PICKING', 'PACKED'].includes(order.status) && (canApprove || canDispatch) ? (
+                {['DRAFT', 'INVOICED', 'PAYMENT_PENDING', 'PAID', 'SENT_TO_WAREHOUSE', 'PICKING', 'PACKED'].includes(order.status) && canCancel ? (
                   <button onClick={() => void action('cancel', t('distribution.orderCancelled'))} className="rounded-xl border border-red-200 px-4 py-2 font-semibold text-red-600" type="button">
                     {t('distribution.cancel')}
                   </button>
