@@ -33,6 +33,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { HqStockBookingService } from '../inventory/hq-stock-booking.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { HQ_WAREHOUSE_CANCEL_FORBIDDEN_MESSAGE } from './hq-warehouse-status-transition.util';
 import {
   canCreateDistributionOrder,
   canCancelBranchDistributionOrder,
@@ -1062,7 +1063,7 @@ export class DistributionService {
               },
             },
           });
-          throw new ForbiddenException('У менеджера склада HQ нет права отменять заказ филиала.');
+          throw new ForbiddenException(HQ_WAREHOUSE_CANCEL_FORBIDDEN_MESSAGE);
         });
       }
       throw new ForbiddenException('Недостаточно прав для отмены заказа распределения');

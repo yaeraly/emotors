@@ -49,9 +49,25 @@ export type RepairPlan = {
   needsPickingTask: boolean;
   clearCancelledAt: boolean;
   extendBookings: boolean;
+  restoreInventoryReservations: boolean;
+  restoreFifoReservations: boolean;
   notifyWarehouse: boolean;
   alreadyRestored: boolean;
   plannedChanges: string[];
+  dryRunSummary: {
+    orderId: string;
+    orderNumber: string;
+    currentStatus: string;
+    correctStatus: string | null;
+    installmentStatus: string | null;
+    hqCeoApproval: string | null;
+    cancellationActor: string | null;
+    cancellationRole: string | null;
+    existingReservation: string[];
+    existingShipment: string | null;
+    plannedChanges: string[];
+    blockingRisks: string[];
+  };
 };
 
 type AuditRow = {
@@ -344,6 +360,7 @@ export function buildRepairPlan(input: {
   duplicateShippedOrders: number;
   hasStockMovementsOut: boolean;
   goodsReceivingId: string | null;
+  missingFifoReservations?: boolean;
 }): RepairPlan {
   const actor = findCancellationActor(input.audits, input.order.cancelledAt);
   const previousStatus = inferPreviousDistributionStatus(
@@ -399,8 +416,11 @@ export function buildRepairPlan(input: {
   let plannedPickingTaskStatus: HqWarehousePickingTaskStatus | null = null;
   let needsPickingTask = false;
   const plannedChanges: string[] = [];
+  const willRepair = !alreadyRestored && safety.safe;
+  const restoreFifoReservations = willRepair && Boolean(input.missingFifoReservations);
+  const restoreInventoryReservations = willRepair;
 
-  if (!alreadyRestored && safety.safe) {
+  if (willRepair) {
     plannedDistributionStatus = deriveRestoredDistributionStatus(
       previousStatus,
       input.pickingTask,
@@ -424,6 +444,12 @@ export function buildRepairPlan(input: {
         `hqWarehousePickingTask.status: ${input.pickingTask.status} → ${plannedPickingTaskStatus}`,
       );
     }
+    if (restoreInventoryReservations) {
+      plannedChanges.push('inventoryBalance.reservedQuantity: re-increment approved quantities');
+    }
+    if (restoreFifoReservations) {
+      plannedChanges.push('distributionFifoAllocation: recreate RESERVED (idempotent)');
+    }
     plannedChanges.push('auditLog: UNAUTHORIZED_HQ_WAREHOUSE_CANCELLATION_REVERSED');
     plannedChanges.push('alert: notify HQ Warehouse Manager (if none active)');
   }
@@ -435,10 +461,29 @@ export function buildRepairPlan(input: {
     plannedBprStatus,
     plannedPickingTaskStatus,
     needsPickingTask,
-    clearCancelledAt: !alreadyRestored && safety.safe,
-    extendBookings: !alreadyRestored && safety.safe && Boolean(input.bpr?.id),
-    notifyWarehouse: !alreadyRestored && safety.safe,
+    clearCancelledAt: willRepair,
+    extendBookings: willRepair && Boolean(input.bpr?.id),
+    restoreInventoryReservations,
+    restoreFifoReservations,
+    notifyWarehouse: willRepair,
     alreadyRestored,
     plannedChanges,
+    dryRunSummary: {
+      orderId: investigation.distributionOrderId,
+      orderNumber: investigation.distributionOrderNumber,
+      currentStatus: investigation.currentStatus,
+      correctStatus: plannedDistributionStatus,
+      installmentStatus: investigation.installmentStatus,
+      hqCeoApproval:
+        investigation.installmentStatus === BranchOrderInstallmentStatus.APPROVED
+          ? `APPROVED by ${investigation.installmentApprovedBy ?? 'unknown'} at ${investigation.installmentApprovedAt ?? 'unknown'}`
+          : investigation.installmentStatus,
+      cancellationActor: investigation.cancelledByUserId,
+      cancellationRole: investigation.cancelledByRole,
+      existingReservation: investigation.reservationIds,
+      existingShipment: investigation.shipmentId,
+      plannedChanges,
+      blockingRisks: safety.blockingRisks,
+    },
   };
 }

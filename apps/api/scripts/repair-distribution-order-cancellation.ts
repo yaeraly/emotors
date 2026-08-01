@@ -22,15 +22,18 @@ import {
   PrismaClient,
   Role,
 } from '@prisma/client';
-function addHours(date: Date, hours: number) {
-  return new Date(date.getTime() + hours * 60 * 60 * 1000);
-}
+import { PricingFifoService } from '../src/pricing/pricing-fifo.service';
 import {
   buildRepairPlan,
   type RepairPlan,
 } from '../src/distribution/repair-distribution-order-cancellation.util';
 
 const POST_PAYMENT_BOOKING_HOURS = 72;
+const REPAIRED_BY = 'repair-distribution-order-cancellation.ts';
+
+function addHours(date: Date, hours: number) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
 
 type Args = { orderNumber?: string; orderId?: string; apply: boolean };
 
@@ -45,7 +48,19 @@ function parseArgs(argv: string[]): Args {
 }
 
 function printPlan(plan: RepairPlan, apply: boolean) {
-  console.log(JSON.stringify({ mode: apply ? 'apply' : 'dry-run', ...plan.investigation }, null, 2));
+  console.log('=== dry-run summary ===');
+  console.log(
+    JSON.stringify(
+      {
+        mode: apply ? 'apply' : 'dry-run',
+        ...plan.dryRunSummary,
+      },
+      null,
+      2,
+    ),
+  );
+  console.log('--- investigation ---');
+  console.log(JSON.stringify(plan.investigation, null, 2));
   console.log('--- safety ---');
   console.log(JSON.stringify(plan.safety, null, 2));
   console.log('--- planned ---');
@@ -59,6 +74,8 @@ function printPlan(plan: RepairPlan, apply: boolean) {
         needsPickingTask: plan.needsPickingTask,
         clearCancelledAt: plan.clearCancelledAt,
         extendBookings: plan.extendBookings,
+        restoreInventoryReservations: plan.restoreInventoryReservations,
+        restoreFifoReservations: plan.restoreFifoReservations,
         notifyWarehouse: plan.notifyWarehouse,
         plannedChanges: plan.plannedChanges,
       },
@@ -79,10 +96,15 @@ async function loadPlan(prisma: PrismaClient, args: Args): Promise<RepairPlan | 
       ...(args.orderId ? { id: args.orderId } : { orderNumber: args.orderNumber! }),
     },
     include: {
+      items: true,
       pickingTask: true,
       stockBookings: true,
       branchInvoices: { include: { branchOrderInstallment: true } },
       goodsReceivings: { where: { deletedAt: null }, take: 1 },
+      distributionFifoAllocations: {
+        where: { status: 'RESERVED' },
+        select: { id: true },
+      },
     },
   });
 
@@ -129,7 +151,7 @@ async function loadPlan(prisma: PrismaClient, args: Args): Promise<RepairPlan | 
       referenceType: 'DISTRIBUTION_ORDER',
       referenceId: order.id,
       type: 'OUT',
-      deletedAt: null,
+      status: 'ACTIVE',
     },
   });
 
@@ -138,6 +160,8 @@ async function loadPlan(prisma: PrismaClient, args: Args): Promise<RepairPlan | 
       (invoice) => !invoice.invoiceCategory || invoice.invoiceCategory === 'PRODUCT_ORDER',
     ) ?? null;
   const installment = productInvoice?.branchOrderInstallment ?? null;
+  const missingFifoReservations =
+    order.items.length > 0 && order.distributionFifoAllocations.length === 0;
 
   return buildRepairPlan({
     order: {
@@ -187,7 +211,94 @@ async function loadPlan(prisma: PrismaClient, args: Args): Promise<RepairPlan | 
     duplicateShippedOrders,
     hasStockMovementsOut: stockMovements > 0,
     goodsReceivingId: order.goodsReceivings[0]?.id ?? null,
+    missingFifoReservations,
   });
+}
+
+async function restoreReservations(
+  tx: Parameters<Parameters<PrismaClient['$transaction']>[0]>[0],
+  prisma: PrismaClient,
+  orderId: string,
+  restoreFifo: boolean,
+) {
+  const order = await tx.branchDistributionOrder.findFirstOrThrow({
+    where: { id: orderId, deletedAt: null },
+    include: {
+      items: true,
+      sourceWarehouse: { select: { id: true, branchId: true } },
+      branch: { select: { branchType: true, hqToBranchMarkupPercent: true } },
+    },
+  });
+
+  for (const item of order.items) {
+    if (item.quantity <= 0) continue;
+    const product = await tx.product.findFirst({
+      where: {
+        deletedAt: null,
+        OR: [{ id: item.productId }, { sku: item.sku }],
+      },
+      select: { id: true, hqBranchWholesaleMarkupPercent: true },
+    });
+    if (!product) continue;
+
+    const hqCatalog = await tx.branch.findFirst({
+      where: { code: 'EMOTORS-HQ', deletedAt: null },
+      select: { id: true },
+    });
+    const balanceBranchId = order.sourceWarehouse.branchId ?? hqCatalog?.id;
+    if (!balanceBranchId) continue;
+
+    await tx.inventoryBalance.updateMany({
+      where: {
+        branchId: balanceBranchId,
+        warehouseId: order.sourceWarehouseId,
+        productId: product.id,
+      },
+      data: { reservedQuantity: { increment: item.quantity } },
+    });
+  }
+
+  if (!restoreFifo) return;
+
+  const fifo = new PricingFifoService(prisma as never);
+  for (const item of order.items) {
+    if (item.quantity <= 0) continue;
+    const product = await tx.product.findFirst({
+      where: {
+        deletedAt: null,
+        OR: [{ id: item.productId }, { sku: item.sku }],
+      },
+      select: { id: true, hqBranchWholesaleMarkupPercent: true },
+    });
+    if (!product) continue;
+
+    const productMarkup = Number(product.hqBranchWholesaleMarkupPercent ?? 0);
+    const branchMarkup = Number(order.branch?.hqToBranchMarkupPercent ?? 0);
+    const markupPercent = productMarkup > 0 ? productMarkup : branchMarkup;
+    const isHqOwnedBranch = fifo.isHqBranchType(order.branch.branchType);
+
+    try {
+      await fifo.reserveFifoForDistribution(tx, {
+        productId: product.id,
+        warehouseId: order.sourceWarehouseId,
+        quantity: item.quantity,
+        isHqOwnedBranch,
+        branchPricing: {
+          branchType: order.branch.branchType,
+          hqToBranchMarkupPercent: markupPercent,
+        },
+        distributionOrderId: order.id,
+        distributionOrderItemId: item.id,
+        userId: 'repair-script',
+        userRole: Role.SYSTEM_ADMINISTRATOR,
+      });
+    } catch (err) {
+      console.warn(
+        `FIFO re-reserve skipped for item ${item.sku}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 }
 
 async function applyRepair(prisma: PrismaClient, plan: RepairPlan) {
@@ -236,6 +347,15 @@ async function applyRepair(prisma: PrismaClient, plan: RepairPlan) {
       });
     }
 
+    if (plan.restoreInventoryReservations || plan.restoreFifoReservations) {
+      await restoreReservations(
+        tx,
+        prisma,
+        order.id,
+        plan.restoreFifoReservations,
+      );
+    }
+
     if (plan.needsPickingTask) {
       const existing = await tx.hqWarehousePickingTask.findUnique({
         where: { distributionOrderId: order.id },
@@ -275,6 +395,7 @@ async function applyRepair(prisma: PrismaClient, plan: RepairPlan) {
           action: 'UNAUTHORIZED_HQ_WAREHOUSE_CANCELLATION_REVERSED',
           entity: 'BranchDistributionOrder',
           entityId: order.id,
+          role: Role.SYSTEM_ADMINISTRATOR,
           metadata: {
             distributionOrderId: order.id,
             distributionOrderNumber: order.orderNumber,
@@ -285,6 +406,7 @@ async function applyRepair(prisma: PrismaClient, plan: RepairPlan) {
             originalCancellationReason: plan.investigation.cancellationReason,
             originalCancelledByRole: plan.investigation.cancelledByRole,
             repairReason: 'Unauthorized HQ Warehouse cancellation reversed by repair script',
+            repairedBy: REPAIRED_BY,
             repairedAt: new Date().toISOString(),
           },
         },
@@ -338,14 +460,14 @@ async function main() {
       return;
     }
 
-    if (!plan.safety.safe) {
-      console.error('Repair blocked:', plan.safety.blockingRisks.join(', '));
-      process.exit(1);
-    }
-
     if (plan.alreadyRestored) {
       console.log('Order is not cancelled — no repair needed (idempotent).');
       return;
+    }
+
+    if (!plan.safety.safe) {
+      console.error('Repair blocked:', plan.safety.blockingRisks.join(', '));
+      process.exit(1);
     }
 
     await applyRepair(prisma, plan);
