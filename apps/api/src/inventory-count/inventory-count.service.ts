@@ -36,9 +36,9 @@ import {
 import { InventoryCountQueryDto } from './dto/inventory-count-query.dto';
 import { HqWarehouseAssignmentService } from '../hq-warehouse/hq-warehouse-assignment.service';
 import {
-  compareWarehouseInventoryValuation,
   INVENTORY_VALUATION_MISMATCH_MESSAGE,
   assertInventoryCountLinesMatchAuthoritativeValuation,
+  reconcileWarehouseInventoryFifoParityInTx,
   recomputeInventoryCountLineValuation,
   resolveInventoryCountUnitCostKgs,
 } from '../inventory/inventory-authoritative-value.util';
@@ -991,7 +991,16 @@ export class InventoryCountService {
     user: AuthUser,
     session: { id: string; warehouseId: string },
   ) {
-    const valuationCheck = await compareWarehouseInventoryValuation(tx, session.warehouseId);
+    // Compare current warehouse inventory value against remaining active FIFO only.
+    // Stale balance.totalValueKgs after full/partial FIFO transfer is repaired when qty parity holds.
+    const valuationCheck = await reconcileWarehouseInventoryFifoParityInTx(tx, {
+      warehouseId: session.warehouseId,
+      userId: user.id,
+      userRole: user.role,
+      entity: 'InventoryCountSession',
+      entityId: session.id,
+      reason: 'inventory_count_submit_fifo_parity',
+    });
     if (!valuationCheck.ok) {
       await tx.auditLog.create({
         data: {
@@ -1006,6 +1015,7 @@ export class InventoryCountService {
             expectedValueKgs: valuationCheck.fifoTotalKgs,
             actualValueKgs: valuationCheck.balanceTotalKgs,
             differenceKgs: valuationCheck.differenceKgs,
+            blockingIssues: valuationCheck.blockingIssues,
             timestamp: new Date().toISOString(),
           },
         },

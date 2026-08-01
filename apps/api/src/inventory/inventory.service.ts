@@ -73,7 +73,7 @@ import {
 import { buildLogisticsWithCargo, calculateLandedCosts, CARGO_WEIGHT_LESS_THAN_NET, extractCargoConfig, extractLogisticsCosts, mapStoredProcurementItemToLandedCostInput } from '../procurement/landed-cost.util';
 import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
-import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
+import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
 import { resolveCurrentProductCatalogUnitCost } from './product-catalog-current-cost.util';
 
@@ -1834,18 +1834,24 @@ export class InventoryService {
       totalCostKgs = roundDisplayMoney(quantityAbs * unitCostKgs);
     }
 
-    const currentTotalValue = Number(current?.totalValueKgs ?? 0);
+    const currentTotalValue = roundDisplayMoney(current?.totalValueKgs ?? 0);
+    // OUT must subtract the movement line cost — never remainingQty × blended average,
+    // which keeps transferred China-shipment value in HQ warehouse valuation.
+    const nextTotalValue =
+      quantityDelta > 0
+        ? roundDisplayMoney(currentTotalValue + totalCostKgs)
+        : nextQuantity <= 0
+          ? 0
+          : roundDisplayMoney(Math.max(currentTotalValue - totalCostKgs, 0));
     const nextAverageCost =
       quantityDelta > 0
         ? roundDisplayMoney(
             (currentQuantity * Number(current?.averageCostKgs ?? 0) + totalCostKgs) /
               Math.max(currentQuantity + quantityDelta, 1),
           )
-        : Number(current?.averageCostKgs ?? product.finalCostKgs);
-    const nextTotalValue =
-      quantityDelta > 0
-        ? roundDisplayMoney(currentTotalValue + totalCostKgs)
-        : roundDisplayMoney(nextQuantity * nextAverageCost);
+        : nextQuantity > 0
+          ? deriveDisplayUnitCost(nextTotalValue, nextQuantity)
+          : Number(current?.averageCostKgs ?? product.finalCostKgs);
 
     const movement = await tx.stockMovement.create({
       data: {

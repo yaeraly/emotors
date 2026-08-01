@@ -31,6 +31,7 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { InventoryService } from '../inventory/inventory.service';
 import { HqStockBookingService } from '../inventory/hq-stock-booking.service';
+import { syncInventoryBalanceValuationFromFifoRemainingInTx } from '../inventory/inventory-authoritative-value.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_WAREHOUSE_CANCEL_FORBIDDEN_MESSAGE } from './hq-warehouse-status-transition.util';
@@ -990,6 +991,34 @@ export class DistributionService {
               totalPrice: this.roundMoney(consumed.totalPriceKgs),
               profit: this.roundMoney(consumed.profitKgs),
             },
+          });
+
+          // Align the OUT movement and HQ balance with authoritative FIFO consumption,
+          // so transferred shipment cost leaves HQ warehouse valuation.
+          const outMovement = await tx.stockMovement.findFirst({
+            where: {
+              warehouseId: order.sourceWarehouseId,
+              productId: inventoryProduct.productId,
+              referenceType: 'DISTRIBUTION_ORDER',
+              referenceId: order.id,
+              type: StockMovementType.OUT,
+              status: StockMovementStatus.ACTIVE,
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (outMovement) {
+            await tx.stockMovement.update({
+              where: { id: outMovement.id },
+              data: {
+                unitCostKgs: deriveDisplayUnitCost(consumed.totalCostKgs, consumed.allocatedQty),
+                totalCostKgs: this.roundMoney(consumed.totalCostKgs),
+              },
+            });
+          }
+          await syncInventoryBalanceValuationFromFifoRemainingInTx(tx, {
+            warehouseId: order.sourceWarehouseId,
+            productId: inventoryProduct.productId,
+            branchId: inventoryProduct.branchId,
           });
         }
 
