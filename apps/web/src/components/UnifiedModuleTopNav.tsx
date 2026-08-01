@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import { usesBranchProductOrdersPageNav } from '@/lib/branch-product-orders-nav';
 import {
   resolveActiveUnifiedNavPage,
   resolveModuleForPath,
@@ -21,6 +22,8 @@ function UnifiedModuleTopNavInner({ user }: Props) {
   const searchParams = useSearchParams();
   const { t } = useTranslation();
   const search = searchParams.toString() ? `?${searchParams.toString()}` : '';
+
+  if (usesBranchProductOrdersPageNav(pathname, user)) return null;
 
   const module = resolveModuleForPath(pathname, user);
   if (!shouldShowModuleTopNav(module, user) || !module) return null;

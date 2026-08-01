@@ -31,6 +31,8 @@ export type UnifiedNavModule = {
   pathPrefixes: string[];
   sidebarVisible: (user: User) => boolean;
   pages: UnifiedNavPage[];
+  /** When true, module pages render section tabs below their own header (not in ProtectedShell). */
+  pageLevelSectionNav?: boolean;
 };
 
 function salesVisible(user: User) {
@@ -267,6 +269,7 @@ export const branchSalesManagerNavModules: UnifiedNavModule[] = [
     defaultHref: '/branch-purchase-requests',
     pathPrefixes: ['/branch-purchase-requests', '/branch-manager'],
     sidebarVisible: canViewBranchPurchaseRequests,
+    pageLevelSectionNav: true,
     pages: [
       {
         href: '/branch-purchase-requests',

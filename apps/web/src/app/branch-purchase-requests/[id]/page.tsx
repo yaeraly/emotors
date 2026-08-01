@@ -11,9 +11,11 @@ import {
   canManageOwnBranchProductRequest,
   canSeeHqStockInBranchRequests,
   canViewBranchPurchaseRequests,
+  isBranchSalesManagerUser,
   isExecutiveBranchOrderInspector,
   isHqSalesManagerUser,
 } from '@/lib/rbac';
+import { BranchProductOrdersSection } from '@/components/BranchProductOrdersSection';
 import type { Branch, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -419,6 +421,7 @@ export default function BranchPurchaseRequestDetailPage() {
   const canSeeHqStock = canSeeHqStockInBranchRequests(user);
   const hqStockLoaded = request?.hqStockStatus !== 'unavailable';
   const branchOnlyView = !canSeeHqStock;
+  const branchSalesManagerView = isBranchSalesManagerUser(user);
   const hqSalesView = isHqSalesManagerUser(user);
   const hqCompactTable = hqSalesView && !executiveCompactView;
   const listHref = '/branch-purchase-requests';
@@ -507,17 +510,20 @@ export default function BranchPurchaseRequestDetailPage() {
   const branchWarehouseName =
     warehouses.find((warehouse) => warehouse.id === request.branchWarehouseId)?.name ?? request.branchWarehouseId ?? '-';
 
-  return (
-    <ProtectedShell>
-      <section className="space-y-6">
-        <HqSalesBranchOrdersNav />
+  const detailBody = (
+    <>
+        {hqSalesView ? <HqSalesBranchOrdersNav /> : null}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <Link href={listHref} className="text-sm font-semibold text-blue-600">
-              ← {listLabel}
-            </Link>
-            <h2 className="mt-2 text-3xl font-bold text-slate-950">{request.requestNumber}</h2>
-            <p className="mt-1 text-sm text-slate-500">{resolveRequestStatusLabel(t, request, branchOnlyView)}</p>
+            {!branchSalesManagerView ? (
+              <Link href={listHref} className="text-sm font-semibold text-blue-600">
+                ← {listLabel}
+              </Link>
+            ) : null}
+            {!branchSalesManagerView ? (
+              <h2 className="mt-2 text-3xl font-bold text-slate-950">{request.requestNumber}</h2>
+            ) : null}
+            <p className={`${branchSalesManagerView ? '' : 'mt-1'} text-sm text-slate-500`}>{resolveRequestStatusLabel(t, request, branchOnlyView)}</p>
             {request.partialFulfillmentMessage ? (
               <p className="mt-2 text-sm text-amber-700">{t('branchProductRequest.partialFulfillmentLater')}</p>
             ) : null}
@@ -1006,7 +1012,18 @@ export default function BranchPurchaseRequestDetailPage() {
           </table>
           )}
         </div>
-      </section>
+    </>
+  );
+
+  return (
+    <ProtectedShell>
+      {branchSalesManagerView ? (
+        <BranchProductOrdersSection user={user} title={request.requestNumber}>
+          {detailBody}
+        </BranchProductOrdersSection>
+      ) : (
+        <section className="space-y-6">{detailBody}</section>
+      )}
     </ProtectedShell>
   );
 }
