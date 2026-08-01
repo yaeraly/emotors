@@ -6,6 +6,8 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import {
   HqSalesBranchOrdersTabContent,
+  HqSalesListEmptyState,
+  HqSalesListLoadingState,
   HqSalesListTableCard,
   hqSalesListTableClass,
   hqSalesListTableHeadClass,
@@ -23,19 +25,28 @@ export default function ReceivingsPage() {
   const { t } = useTranslation();
   const [receivings, setReceivings] = useState<GoodsReceiving[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const showBranchColumn = shouldShowBranchColumnForBranchScopedTables(user);
   const hqSalesView = isHqSalesManagerUser(user);
 
   useEffect(() => {
+    setLoading(true);
+    setError('');
     void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
     apiFetch<GoodsReceiving[]>('/distribution/receivings')
       .then(setReceivings)
-      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
+      .finally(() => setLoading(false));
   }, [t]);
 
   const table = (
     <HqSalesListTableCard>
+      {loading ? (
+        <HqSalesListLoadingState />
+      ) : receivings.length === 0 ? (
+        <HqSalesListEmptyState message={t('operations.branchPurchaseRequestsEmpty')} />
+      ) : (
       <table className={hqSalesListTableClass}>
         <thead className={hqSalesListTableHeadClass}>
           <tr>
@@ -73,6 +84,7 @@ export default function ReceivingsPage() {
           ))}
         </tbody>
       </table>
+      )}
     </HqSalesListTableCard>
   );
 

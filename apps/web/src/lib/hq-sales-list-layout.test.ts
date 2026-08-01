@@ -74,8 +74,15 @@ const receivingsPage = readFileSync(join(__dirname, '../app/distribution/receivi
 assertEqual(receivingsPage.includes('HqSalesBranchOrdersTabContent'), true, 'receivings tab uses tab content wrapper');
 assertEqual(receivingsPage.includes('HqSalesListFilterGrid'), false, 'receivings tab has no filters added');
 
+const branchPage = readFileSync(join(__dirname, '../app/branch-purchase-requests/page.tsx'), 'utf8');
+assertEqual(branchPage.includes('HqSalesBranchOrdersTabContent'), true, 'branch orders tab uses tab content wrapper');
+assertEqual(branchPage.includes('onClear'), true, 'branch orders tab supports filter clear');
+
 const layout = readFileSync(join(__dirname, '../components/HqSalesListLayout.tsx'), 'utf8');
 assertEqual(layout.includes('HqSalesBranchOrdersTabContent'), true, 'tab content helper exists');
-assertEqual(layout.includes('h-[calc(100vh-300px)]'), true, 'shared table card scroll height');
+assertEqual(layout.includes('HqSalesListLoadingState'), true, 'shared loading state exists');
+assertEqual(layout.includes('HqSalesListEmptyState'), true, 'shared empty state exists');
+assertEqual(layout.includes('onClear'), true, 'filter grid supports clear action');
+assertEqual(layout.includes('overflow-x-auto'), true, 'shared table card horizontal scroll');
 
 console.log('hq-sales-list-layout.test.ts passed');

@@ -6,7 +6,9 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import {
   HqSalesBranchOrdersTabContent,
+  HqSalesListEmptyState,
   HqSalesListFilterGrid,
+  HqSalesListLoadingState,
   HqSalesListTableCard,
   hqSalesListFilterControlClass,
   hqSalesListTableClass,
@@ -29,7 +31,9 @@ export default function BranchInvoicesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [filters, setFilters] = useState({ search: '', branchId: '', status: '' });
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const emptyFilters = { search: '', branchId: '', status: '' };
   const query = useMemo(() => {
     const params = new URLSearchParams();
     if (filters.search.trim()) params.set('search', filters.search.trim());
@@ -40,6 +44,8 @@ export default function BranchInvoicesPage() {
   }, [filters]);
 
   useEffect(() => {
+    setLoading(true);
+    setError('');
     void apiFetch<User>('/auth/me')
       .then(setUser)
       .catch(() => setUser(null));
@@ -51,13 +57,14 @@ export default function BranchInvoicesPage() {
         setInvoices(invoiceResult);
         setBranches(branchResult);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
+      .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))
+      .finally(() => setLoading(false));
   }, [query, t]);
 
   const hqSalesView = isHqSalesManagerUser(user);
 
   const filtersPanel = (
-    <HqSalesListFilterGrid>
+    <HqSalesListFilterGrid onClear={() => setFilters(emptyFilters)}>
       <input
         value={filters.search}
         onChange={(event) => setFilters({ ...filters, search: event.target.value })}
@@ -89,6 +96,11 @@ export default function BranchInvoicesPage() {
 
   const table = (
     <HqSalesListTableCard>
+      {loading ? (
+        <HqSalesListLoadingState />
+      ) : invoices.length === 0 ? (
+        <HqSalesListEmptyState message={t('operations.branchPurchaseRequestsEmpty')} />
+      ) : (
       <table className={hqSalesListTableClass}>
         <thead className={hqSalesListTableHeadClass}>
           <tr>
@@ -128,6 +140,7 @@ export default function BranchInvoicesPage() {
           ))}
         </tbody>
       </table>
+      )}
     </HqSalesListTableCard>
   );
 

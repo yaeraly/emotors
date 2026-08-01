@@ -1,16 +1,28 @@
 import type { ReactNode } from 'react';
+import { useTranslation } from '@/i18n/useTranslation';
 
 type FilterGridProps = {
   children: ReactNode;
   columns?: 2 | 3;
+  onClear?: () => void;
 };
 
 /** Filter panel shell shared by HQ Sales «Заказы филиалов» and «Заказы на отправку». */
-export function HqSalesListFilterGrid({ children, columns = 3 }: FilterGridProps) {
+export function HqSalesListFilterGrid({ children, columns = 3, onClear }: FilterGridProps) {
+  const { t } = useTranslation();
   const columnClass = columns === 2 ? 'md:grid-cols-2' : 'md:grid-cols-3';
   return (
     <div className={`grid gap-3 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm ${columnClass}`}>
       {children}
+      {onClear ? (
+        <button
+          type="button"
+          onClick={onClear}
+          className="rounded-xl border border-slate-300 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          {t('branches.clearFilters')}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -22,10 +34,19 @@ type TableCardProps = {
 /** Scrollable table card shared by HQ Sales list pages. */
 export function HqSalesListTableCard({ children }: TableCardProps) {
   return (
-    <div className="h-[calc(100vh-300px)] min-h-96 overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
+    <div className="h-[calc(100vh-300px)] min-h-96 overflow-x-auto overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-sm">
       {children}
     </div>
   );
+}
+
+export function HqSalesListLoadingState({ message }: { message?: string }) {
+  const { t } = useTranslation();
+  return <p className="px-6 py-10 text-sm text-slate-600">{message ?? t('common.loading')}</p>;
+}
+
+export function HqSalesListEmptyState({ message }: { message: string }) {
+  return <p className="px-6 py-10 text-sm text-slate-600">{message}</p>;
 }
 
 export const hqSalesListFilterControlClass = 'rounded-xl border border-slate-300 px-4 py-3';

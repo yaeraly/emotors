@@ -6,7 +6,9 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { HqSalesBranchOrdersSection } from '@/components/HqSalesBranchOrdersSection';
 import {
   HqSalesBranchOrdersTabContent,
+  HqSalesListEmptyState,
   HqSalesListFilterGrid,
+  HqSalesListLoadingState,
   HqSalesListTableCard,
   hqSalesListFilterControlClass,
   hqSalesListTableClass,
@@ -48,7 +50,9 @@ export default function DistributionOrdersPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [filters, setFilters] = useState({ search: '', branchId: '', status: '' });
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const emptyFilters = { search: '', branchId: '', status: '' };
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -61,6 +65,8 @@ export default function DistributionOrdersPage() {
 
   useEffect(() => {
     async function load() {
+      setLoading(true);
+      setError('');
       try {
         const me = await apiFetch<User>('/auth/me');
         setCurrentUser(me);
@@ -73,6 +79,8 @@ export default function DistributionOrdersPage() {
         setBranches(branchResult);
       } catch (err) {
         setError(err instanceof Error ? err.message : t('common.error'));
+      } finally {
+        setLoading(false);
       }
     }
     void load();
@@ -107,7 +115,7 @@ export default function DistributionOrdersPage() {
         </div>
       ) : null}
       <HqSalesBranchOrdersTabContent error={error} filters={
-        <HqSalesListFilterGrid columns={operatorView ? 2 : 3}>
+        <HqSalesListFilterGrid columns={operatorView ? 2 : 3} onClear={() => setFilters(emptyFilters)}>
           <input
             value={filters.search}
             onChange={(event) => setFilters({ ...filters, search: event.target.value })}
@@ -141,6 +149,11 @@ export default function DistributionOrdersPage() {
         </HqSalesListFilterGrid>
       }>
       <HqSalesListTableCard>
+        {loading ? (
+          <HqSalesListLoadingState />
+        ) : orders.length === 0 ? (
+          <HqSalesListEmptyState message={t('operations.branchPurchaseRequestsEmpty')} />
+        ) : (
         <table className={hqSalesListTableClass}>
           <thead className={hqSalesListTableHeadClass}>
             <tr>
@@ -157,7 +170,7 @@ export default function DistributionOrdersPage() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {orders.map((order) => (
-              <tr key={order.id}>
+              <tr key={order.id} className="hover:bg-slate-50">
                 <td className={`${hqSalesListTableTdClass} font-bold`}>{order.orderNumber}</td>
                 {!operatorView ? <td className={hqSalesListTableTdClass}>{order.branch?.name}</td> : null}
                 <td className={hqSalesListTableTdClass}>{order.sourceWarehouse?.name}</td>
@@ -178,6 +191,7 @@ export default function DistributionOrdersPage() {
             ))}
           </tbody>
         </table>
+        )}
       </HqSalesListTableCard>
       </HqSalesBranchOrdersTabContent>
     </>
