@@ -13,6 +13,7 @@ import {
   canDeleteBranchWarehouse,
   canManageBranches,
   canInspectAnyBranchWarehouse,
+  shouldHideBranchProfitMetrics,
 } from '@/lib/rbac';
 import type { Branch, BranchType, User, Warehouse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -620,6 +621,10 @@ export default function BranchDetailPage() {
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {Object.entries(dashboard)
               .filter(([key]) => key !== 'branch')
+              .filter(([key]) => {
+                if (!shouldHideBranchProfitMetrics(user)) return true;
+                return key !== 'totalProfit' && key !== 'inventoryValue';
+              })
               .map(([key, value]) => (
                 <div key={key} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">

@@ -44,6 +44,7 @@ import {
   isBranchWarehouseOperator,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { stripConfidentialCommercialFields } from '../rbac/hq-sales-procurement-privacy.util';
 import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { CreatePriceHistoryDto } from './dto/create-price-history.dto';
@@ -398,7 +399,7 @@ export class InventoryService {
                 branchId,
                 sku: { equals: normalizeProductCode(dto.sku), mode: 'insensitive' },
               },
-              include: this.productInclude(),
+              include: this.productIncludeForUser(user),
             })
           : null;
 
@@ -501,7 +502,7 @@ export class InventoryService {
               },
             },
           },
-          include: this.productInclude(),
+          include: this.productIncludeForUser(user),
         });
 
         await this.auditInTx(tx, user, branchId, 'PRODUCT_CREATED', 'Product', product.id, {
@@ -565,7 +566,7 @@ export class InventoryService {
     const [items, total] = await Promise.all([
       this.prisma.product.findMany({
         where,
-        include: this.productInclude(),
+        include: this.productIncludeForUser(user),
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: { updatedAt: 'desc' },
@@ -586,6 +587,7 @@ export class InventoryService {
 
   async product(user: AuthUser, id: string) {
     this.assertCanViewProductCatalog(user);
+    const canViewSensitiveCommercial = canViewProductCost(user);
     const product = await this.prisma.product.findFirst({
       where: {
         id,
@@ -593,31 +595,35 @@ export class InventoryService {
         ...this.buildProductCatalogWhere(user),
       },
       include: {
-        ...this.productInclude(),
-        priceHistory: {
-          include: {
-            createdBy: { select: { id: true, fullName: true, role: true } },
-          },
-          orderBy: { effectiveFrom: 'desc' },
-        },
-        purchasePriceHistory: {
-          include: {
-            supplier: { select: { id: true, name: true } },
-            factory: { select: { id: true, name: true } },
-            changedBy: { select: { id: true, fullName: true, role: true } },
-            procurementOrder: { select: { id: true, orderNumber: true } },
-          },
-          orderBy: { effectiveDate: 'desc' },
-          take: 20,
-        },
-        stockMovements: {
-          include: {
-            warehouse: true,
-            createdBy: { select: { id: true, fullName: true, role: true } },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 100,
-        },
+        ...this.productIncludeForUser(user),
+        ...(canViewSensitiveCommercial
+          ? {
+              priceHistory: {
+                include: {
+                  createdBy: { select: { id: true, fullName: true, role: true } },
+                },
+                orderBy: { effectiveFrom: 'desc' },
+              },
+              purchasePriceHistory: {
+                include: {
+                  supplier: { select: { id: true, name: true } },
+                  factory: { select: { id: true, name: true } },
+                  changedBy: { select: { id: true, fullName: true, role: true } },
+                  procurementOrder: { select: { id: true, orderNumber: true } },
+                },
+                orderBy: { effectiveDate: 'desc' },
+                take: 20,
+              },
+              stockMovements: {
+                include: {
+                  warehouse: true,
+                  createdBy: { select: { id: true, fullName: true, role: true } },
+                },
+                orderBy: { createdAt: 'desc' },
+                take: 100,
+              },
+            }
+          : {}),
       },
     });
 
@@ -1940,6 +1946,18 @@ export class InventoryService {
     };
   }
 
+  private productIncludeForUser(user?: AuthUser) {
+    if (user && !canViewProductCost(user)) {
+      return {
+        branch: true,
+        warehouse: true,
+        productCategory: true,
+        inventoryBalances: { include: { warehouse: true } },
+      };
+    }
+    return this.productInclude();
+  }
+
   private resolveBranchId(user: AuthUser, requestedBranchId?: string) {
     return resolveWritableBranchId(
       user,
@@ -2620,7 +2638,7 @@ export class InventoryService {
       return this.stripCostFields(response);
     }
     if (!canViewProductCost(user)) {
-      return this.stripProductCostOnlyFields(response);
+      return stripConfidentialCommercialFields(response);
     }
     return this.applyProductProfileVisibility(user, response);
   }
@@ -2705,7 +2723,7 @@ export class InventoryService {
     return user && isBranchWarehouseOperator(user)
       ? this.stripCostFields(response)
       : user && !canViewProductCost(user)
-        ? this.stripProductCostOnlyFields(response)
+        ? stripConfidentialCommercialFields(response)
         : response;
   }
 
@@ -2722,45 +2740,7 @@ export class InventoryService {
   }
 
   private stripProductCostOnlyFields<T extends Record<string, unknown>>(payload: T): T {
-    const hidden = [
-      'purchasePriceYuan',
-      'purchaseCostKgs',
-      'transportCostKgs',
-      'finalCostKgs',
-      'marginAmount',
-      'marginPercent',
-      'averageCostKgs',
-      'landedCostKgs',
-      'totalValueKgs',
-      'totalStockValueKgs',
-      'latestYuanRate',
-      'storedFinalCostKgs',
-      'storedCostPriceKgs',
-      'currentFifoUnitCost',
-      'costAvailable',
-      'costSource',
-      'costBatchId',
-      'costReceivedAt',
-      'costWarehouseId',
-      'purchasePriceHistory',
-    ];
-    const next: Record<string, unknown> = { ...payload };
-    for (const key of hidden) {
-      delete next[key];
-    }
-    if (next.product && typeof next.product === 'object') {
-      next.product = this.stripProductCostOnlyFields(next.product as Record<string, unknown>);
-    }
-    if (Array.isArray(next.priceHistory)) {
-      next.priceHistory = next.priceHistory.map((row) => {
-        if (!row || typeof row !== 'object') return row;
-        const historyRow = { ...(row as Record<string, unknown>) };
-        delete historyRow.marginAmount;
-        delete historyRow.marginPercent;
-        return historyRow;
-      });
-    }
-    return next as T;
+    return stripConfidentialCommercialFields(payload);
   }
 
   private stripCostFields<T extends Record<string, unknown>>(payload: T): T {

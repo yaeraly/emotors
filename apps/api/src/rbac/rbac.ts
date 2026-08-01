@@ -263,7 +263,6 @@ export function canViewPricing(user: Pick<AuthUser, 'role' | 'roles' | 'permissi
   if (hasAnyFullAccessRole(roles)) return true;
   if (roles.includes(Role.ACADEMY_DIRECTOR)) return false;
   return [
-    Role.HQ_SALES_MANAGER,
     Role.WAREHOUSE_MANAGER,
     Role.FINANCE_MANAGER,
     Role.HQ_ACCOUNTANT,
@@ -446,6 +445,7 @@ export function canCreateProcurementOrder(user: Pick<AuthUser, 'role' | 'roles' 
 
 export function canViewProcurement(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
   const roles = resolveUserRoles(user);
+  if (isHqSalesManagerScopedUser(user)) return false;
   if (roles.includes(Role.WAREHOUSE_MANAGER) && !hasAnyFullAccessRole(roles)) {
     return false;
   }

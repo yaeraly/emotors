@@ -56,7 +56,6 @@ import { UpdatePricingMasterSettingsDto } from './dto/pricing-master-settings.dt
 const PRICING_VIEW_ROLES = [
   Role.OWNER,
   Role.CEO,
-  Role.HQ_SALES_MANAGER,
   Role.WAREHOUSE_MANAGER,
   Role.FINANCE_MANAGER,
   Role.HQ_ACCOUNTANT,

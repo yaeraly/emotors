@@ -440,14 +440,14 @@ export function shouldShowSaleStatusColumn(
 export function shouldHideSaleProfitColumn(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ) {
-  return isBranchSalesManagerUser(user) || isBranchCashierUser(user);
+  return isBranchSalesManagerUser(user) || isBranchCashierUser(user) || isHqSalesManagerUser(user);
 }
 
-/** Branch Sales must not see customer profit on the Clients (Клиенты) pages. */
+/** Branch Sales and HQ Sales must not see customer profit on the Clients (Клиенты) pages. */
 export function shouldHideCustomerProfit(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ) {
-  return isBranchSalesManagerUser(user);
+  return isBranchSalesManagerUser(user) || isHqSalesManagerUser(user);
 }
 
 /** Branch Cashier must not see product cost or sale profit anywhere in the panel. */
@@ -953,7 +953,29 @@ export function canEditProductUnit(user: Pick<User, 'role' | 'roles' | 'permissi
 
 export function shouldHideProductPricingFromProfile(user: Pick<User, 'role' | 'roles'> | null | undefined) {
   if (!user) return false;
+  if (isHqSalesManagerUser(user)) return true;
   return isSupplyChainManagerUser(user) && !hasFullAccess(user);
+}
+
+/** Hide procurement cost, supplier, factory, margin, profit, and price history for HQ Sales. */
+export function shouldHideConfidentialCommercialData(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  return isHqSalesManagerUser(user) || !canViewProductCost(user);
+}
+
+/** Hide branch total profit and inventory valuation metrics for HQ Sales. */
+export function shouldHideBranchProfitMetrics(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  return shouldHideConfidentialCommercialData(user);
+}
+
+/** Hide inventory stock-value and FIFO valuation summaries. */
+export function shouldHideInventoryValuation(
+  user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
+) {
+  return !canViewProductCost(user);
 }
 
 export function canArchiveProduct(user: Pick<User, 'role' | 'roles' | 'permissions'> | null | undefined) {
@@ -987,10 +1009,10 @@ export function canViewPriceExplanation(user: Pick<User, 'role' | 'roles' | 'per
 export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
   if (!user) return false;
   if (isBranchWarehouseOperator(user)) return false;
+  if (isHqSalesManagerUser(user)) return false;
   if (hasFullAccess(user)) return true;
   if (hasRole(user, 'ACADEMY_DIRECTOR')) return false;
   return hasAnyRole(user, [
-    'HQ_SALES_MANAGER',
     'WAREHOUSE_MANAGER',
     'FINANCE_MANAGER',
     'HQ_ACCOUNTANT',
@@ -1339,6 +1361,7 @@ export function canViewProcurement(user: Pick<User, 'role' | 'roles' | 'permissi
   if (!user) return false;
   if (isBranchOwnerUser(user)) return false;
   if (isWarehouseManagerUser(user)) return false;
+  if (isHqSalesManagerUser(user)) return false;
   return hasPermission(user, 'procurement.manage') || hasPermission(user, 'procurement.view');
 }
 

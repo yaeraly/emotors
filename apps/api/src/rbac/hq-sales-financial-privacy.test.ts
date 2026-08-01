@@ -2,9 +2,17 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Role } from '@prisma/client';
 import {
+  canViewProcurement,
   canViewProductCost,
+  canViewPricing,
   isHqSalesManagerScopedUser,
 } from './rbac';
+import {
+  assertHqSalesCannotAccessProcurementData,
+  stripConfidentialCommercialFields,
+  sanitizeBranchDashboardForRestrictedFinancialView,
+  sanitizeHqB2bSaleForRestrictedFinancialView,
+} from './hq-sales-procurement-privacy.util';
 import {
   presentBranchPurchaseRequestForUser,
   stripBranchPurchaseRequestCostFields,
@@ -13,25 +21,116 @@ import { sanitizeDistributionOrderForBranchCeo } from '../distribution/branch-ce
 import { BranchPurchaseRequestStatus } from '@prisma/client';
 
 describe('hq-sales-financial-privacy', () => {
+  const hqSales = { role: Role.HQ_SALES_MANAGER, roles: [Role.HQ_SALES_MANAGER], branchId: null, permissions: [] };
+
   it('HQ Sales Manager scoped user cannot view product cost', () => {
-    const user = { role: Role.HQ_SALES_MANAGER, roles: [Role.HQ_SALES_MANAGER], branchId: null, permissions: [] };
-    assert.equal(isHqSalesManagerScopedUser(user), true);
-    assert.equal(canViewProductCost(user), false);
+    assert.equal(isHqSalesManagerScopedUser(hqSales), true);
+    assert.equal(canViewProductCost(hqSales), false);
+  });
+
+  it('HQ Sales cannot view procurement or pricing APIs', () => {
+    assert.equal(canViewProcurement(hqSales), false);
+    assert.equal(canViewPricing(hqSales), false);
+  });
+
+  it('procurement data assert throws for HQ Sales', () => {
+    assert.throws(() => assertHqSalesCannotAccessProcurementData(hqSales), /Forbidden/);
   });
 
   it('HQ CEO still sees financial information', () => {
     const user = { role: Role.CEO, roles: [Role.CEO], branchId: null, permissions: [] };
+    assert.equal(canViewProductCost(user), true);
+    assert.equal(canViewProcurement(user), true);
+    assert.equal(canViewPricing(user), true);
+  });
+
+  it('Supply Manager retains procurement visibility', () => {
+    const user = {
+      role: Role.SUPPLY_CHAIN_MANAGER,
+      roles: [Role.SUPPLY_CHAIN_MANAGER],
+      branchId: null,
+      permissions: ['procurement.view', 'procurement.manage'],
+    };
+    assert.equal(canViewProcurement(user), true);
     assert.equal(canViewProductCost(user), true);
   });
 
   it('HQ Finance permissions remain unchanged', () => {
     const user = { role: Role.FINANCE_MANAGER, roles: [Role.FINANCE_MANAGER], branchId: null, permissions: [] };
     assert.equal(canViewProductCost(user), true);
+    assert.equal(canViewPricing(user), true);
   });
 
   it('HQ Accountant permissions remain unchanged', () => {
     const user = { role: Role.HQ_ACCOUNTANT, roles: [Role.HQ_ACCOUNTANT], branchId: null, permissions: [] };
     assert.equal(canViewProductCost(user), true);
+    assert.equal(canViewPricing(user), true);
+  });
+
+  it('strips supplier, factory, and price history from product payloads', () => {
+    const stripped = stripConfidentialCommercialFields({
+      id: 'prod-1',
+      sku: 'SKU-1',
+      name: 'Product',
+      purchasePriceYuan: 100,
+      finalCostKgs: 500,
+      marginAmount: 50,
+      marginPercent: 10,
+      defaultSupplier: { id: 's1', name: 'Supplier' },
+      defaultFactory: { id: 'f1', name: 'Factory' },
+      priceHistory: [{ finalCostKgs: 400, sellingPriceKgs: 600 }],
+      purchasePriceHistory: [{ newPriceYuan: 90 }],
+      sellingPriceKgs: 600,
+    });
+    assert.equal(stripped.purchasePriceYuan, undefined);
+    assert.equal(stripped.finalCostKgs, undefined);
+    assert.equal(stripped.defaultSupplier, undefined);
+    assert.equal(stripped.defaultFactory, undefined);
+    assert.equal(stripped.priceHistory, undefined);
+    assert.equal(stripped.purchasePriceHistory, undefined);
+    assert.equal(stripped.sku, 'SKU-1');
+    assert.equal(stripped.sellingPriceKgs, 600);
+  });
+
+  it('sanitizes HQ B2B sale items without cost snapshots', () => {
+    const sanitized = sanitizeHqB2bSaleForRestrictedFinancialView({
+      id: 'sale-1',
+      totalAmount: 1000,
+      items: [
+        {
+          id: 'line-1',
+          unitPrice: 500,
+          lineTotal: 1000,
+          costPriceSnapshot: 300,
+          basePriceSnapshot: 400,
+          pricingSource: 'POLICY',
+        },
+      ],
+    });
+    assert.equal(sanitized.totalAmount, 1000);
+    const line = (sanitized.items as Array<Record<string, unknown>>)[0];
+    assert.equal(line.unitPrice, 500);
+    assert.equal(line.lineTotal, 1000);
+    assert.equal(line.costPriceSnapshot, undefined);
+    assert.equal(line.basePriceSnapshot, undefined);
+    assert.equal(line.pricingSource, undefined);
+  });
+
+  it('sanitizes branch dashboard without profit or inventory valuation', () => {
+    const sanitized = sanitizeBranchDashboardForRestrictedFinancialView({
+      customerCount: 10,
+      totalSales: 50000,
+      totalProfit: 12000,
+      debtAmount: 1000,
+      inventoryQuantity: 200,
+      inventoryValue: 80000,
+      lowStockCount: 3,
+    });
+    assert.equal(sanitized.totalSales, 50000);
+    assert.equal(sanitized.debtAmount, 1000);
+    assert.equal(sanitized.totalProfit, undefined);
+    assert.equal(sanitized.inventoryValue, undefined);
+    assert.equal(sanitized.inventoryQuantity, 200);
   });
 
   it('strips branch purchase request cost fields for HQ Sales presentation', () => {

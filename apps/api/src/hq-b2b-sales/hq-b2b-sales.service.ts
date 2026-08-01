@@ -26,9 +26,11 @@ import {
   canConvertCustomerToFranchise,
   canManageHqB2bSales,
   canViewHqB2bSales,
+  canViewProductCost,
   hasAnyFullAccessRole,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { sanitizeHqB2bSaleForRestrictedFinancialView } from '../rbac/hq-sales-procurement-privacy.util';
 import { BranchesService } from '../branches/branches.service';
 import { HqB2bPricingService, type B2bCustomerType } from './hq-b2b-pricing.service';
 import { CreateHqB2bCustomerDto } from './dto/create-hq-b2b-customer.dto';
@@ -99,6 +101,9 @@ export class HqB2bSalesService {
   async findOne(user: AuthUser, id: string) {
     this.assertCanView(user);
     const sale = await this.getSaleOrThrow(id);
+    if (!canViewProductCost(user)) {
+      return sanitizeHqB2bSaleForRestrictedFinancialView(sale as Record<string, unknown>);
+    }
     return sale;
   }
 

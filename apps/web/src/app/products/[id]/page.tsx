@@ -16,6 +16,7 @@ import {
   canEditProductUnit,
   canEditPurchasePriceYuan,
   canManagePricingPolicy,
+  shouldHideConfidentialCommercialData,
   shouldHideProductPricingFromProfile,
 } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, ProductPurchasePriceHistory, PurchasePriceChangeReason, User, Warehouse } from '@/lib/types';
@@ -142,6 +143,7 @@ export default function ProductDetailPage() {
   const canSaveWarehouse = !currentWarehouseInactive || Boolean(editForm.warehouseId);
   const canEditUnit = canEditProductUnit(currentUser);
   const hidePricingProfile = shouldHideProductPricingFromProfile(currentUser);
+  const hideConfidentialCommercial = shouldHideConfidentialCommercialData(currentUser);
   const showMaximumPolicy = canManagePricingPolicy(currentUser) || !hidePricingProfile;
 
   const unitOptions = useMemo(
@@ -365,6 +367,7 @@ export default function ProductDetailPage() {
             ) : null}
 
             <div className="grid gap-6 xl:grid-cols-3">
+              {!hideConfidentialCommercial ? (
               <Panel title={t('inventory.productDetail')}>
                 <Info label={t('inventory.currentPurchasePriceYuan')} value={formatYuan(product.purchasePriceYuan)} />
                 <Info label={t('inventory.lastPriceUpdated')} value={product.purchasePriceUpdatedAt ? new Date(product.purchasePriceUpdatedAt).toLocaleString() : '-'} />
@@ -395,6 +398,7 @@ export default function ProductDetailPage() {
                   {t('inventory.viewPurchasePriceHistory')}
                 </button>
               </Panel>
+              ) : null}
               {canEditPurchasePriceYuan(currentUser) ? (
                 <Panel title={t('inventory.updatePurchasePrice')}>
                   <form onSubmit={savePurchasePrice} className="space-y-3">
@@ -429,7 +433,7 @@ export default function ProductDetailPage() {
                 </Panel>
               ) : null}
               {showMaximumPolicy ? <ProductMaximumPolicySection productId={params.id} /> : null}
-              {!hidePricingProfile ? (
+              {!hideConfidentialCommercial && !hidePricingProfile ? (
               <Panel title={t('inventory.priceHistory')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">
                   {product.priceHistory?.length ? product.priceHistory.map((item) => (
@@ -442,6 +446,7 @@ export default function ProductDetailPage() {
                 </div>
               </Panel>
               ) : null}
+              {!hideConfidentialCommercial ? (
               <Panel title={t('inventory.stockMovements')}>
                 <div className="max-h-96 space-y-3 overflow-y-auto">
                   {product.stockMovements?.length ? product.stockMovements.map((movement) => (
@@ -453,8 +458,9 @@ export default function ProductDetailPage() {
                   )) : <p className="text-sm text-slate-500">{t('inventory.noMovements')}</p>}
                 </div>
               </Panel>
+              ) : null}
             </div>
-            {showPurchasePriceHistory ? (
+            {!hideConfidentialCommercial && showPurchasePriceHistory ? (
               <Panel title={t('inventory.purchasePriceHistory')}>
                 <PurchasePriceHistoryTable
                   items={product.purchasePriceHistory ?? []}

@@ -14,9 +14,11 @@ import {
   assertBranchAccountantRestrictedRoute,
   canAssignBranchHqWarehouse,
   canChangeBranchType,
+  canViewProductCost,
   hasAnyHqRole,
   resolveUserRoles,
 } from '../rbac/rbac';
+import { sanitizeBranchDashboardForRestrictedFinancialView } from '../rbac/hq-sales-procurement-privacy.util';
 import { BRANCH_PERMANENT_DELETE_HISTORY_MESSAGE } from '../lifecycle/hq-ceo-lifecycle.constants';
 import {
   assessBranchDeleteBlocking,
@@ -648,7 +650,7 @@ export class BranchesService {
       }),
     ]);
 
-    return {
+    const dashboard = {
       branch,
       customerCount,
       totalSales: sales.reduce((sum, sale) => sum + Number(sale.totalAmount), 0),
@@ -658,6 +660,10 @@ export class BranchesService {
       inventoryValue: inventoryBalances.reduce((sum, item) => sum + Number(item.totalValueKgs), 0),
       lowStockCount,
     };
+    if (!canViewProductCost(user)) {
+      return sanitizeBranchDashboardForRestrictedFinancialView(dashboard);
+    }
+    return dashboard;
   }
 
   private async assertActiveHqWarehouse(warehouseId: string) {

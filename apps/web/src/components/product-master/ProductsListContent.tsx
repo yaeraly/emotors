@@ -7,7 +7,7 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { API_URL, clearToken, getToken, apiFetch } from '@/lib/api';
 import { formatProductUnit } from '@/lib/product-unit';
-import { canDeleteProduct } from '@/lib/rbac';
+import { canDeleteProduct, shouldHideConfidentialCommercialData } from '@/lib/rbac';
 import type { Product, ProductCategory, ProductListResponse, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -125,6 +125,8 @@ export function ProductsListContent() {
     }
   }
 
+  const hideConfidentialCommercial = shouldHideConfidentialCommercialData(currentUser);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -171,7 +173,9 @@ export function ProductsListContent() {
                 <th className="hidden px-3 py-2 md:table-cell">{t('inventory.category')}</th>
                 <th className="hidden px-3 py-2 lg:table-cell">{t('inventory.unit')}</th>
                 <th className="px-3 py-2">{t('inventory.quantity')}</th>
-                <th className="hidden px-3 py-2 lg:table-cell">{t('inventory.finalCost')}</th>
+                {!hideConfidentialCommercial ? (
+                  <th className="hidden px-3 py-2 lg:table-cell">{t('inventory.finalCost')}</th>
+                ) : null}
                 <th className="px-3 py-2">{t('inventory.lowStock')}</th>
                 <th className="px-3 py-2 text-right">{t('common.actions')}</th>
               </tr>
@@ -207,11 +211,13 @@ export function ProductsListContent() {
                   </td>
                   <td className="hidden px-3 py-2 lg:table-cell">{formatProductUnit(product.unit, language, t)}</td>
                   <td className="px-3 py-2">{product.quantity}</td>
-                  <td className="hidden px-3 py-2 lg:table-cell">
-                    {isProductCostAvailable(product)
-                      ? formatKgs(productCatalogUnitCost(product))
-                      : t('inventory.costNotCalculated')}
-                  </td>
+                  {!hideConfidentialCommercial ? (
+                    <td className="hidden px-3 py-2 lg:table-cell">
+                      {isProductCostAvailable(product)
+                        ? formatKgs(productCatalogUnitCost(product))
+                        : t('inventory.costNotCalculated')}
+                    </td>
+                  ) : null}
                   <td className="px-3 py-2">
                     <StockBadge quantity={product.quantity} lowStock={product.lowStock} />
                   </td>

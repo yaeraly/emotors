@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canManageProductCatalog, canManageYuanRate, isBranchOwnerUser, isBranchSalesManagerUser, isBranchWarehouseOperator, isWarehouseManagerUser } from '@/lib/rbac';
+import { canManageProductCatalog, canManageYuanRate, isBranchOwnerUser, isBranchSalesManagerUser, isBranchWarehouseOperator, isWarehouseManagerUser, shouldHideInventoryValuation } from '@/lib/rbac';
 import type { InventoryBalance, ProductListResponse, StockValueReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { BranchSalesManagerWarehousePanel } from '@/components/branch-sales-manager/BranchSalesManagerWarehousePanel';
@@ -22,21 +22,24 @@ export default function InventoryPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      apiFetch<User>('/auth/me'),
-      apiFetch<StockValueReport>('/inventory/stock-value'),
-      apiFetch<InventoryBalance[]>('/inventory/low-stock'),
-      apiFetch<ProductListResponse>('/inventory/products?pageSize=1'),
-    ])
-      .then(([me, stockValueResult, lowStockResult, productsResult]) => {
+    async function load() {
+      try {
+        const me = await apiFetch<User>('/auth/me');
         setCurrentUser(me);
+        const canViewValuation = !shouldHideInventoryValuation(me);
+        const [stockValueResult, lowStockResult, productsResult] = await Promise.all([
+          canViewValuation ? apiFetch<StockValueReport>('/inventory/stock-value') : Promise.resolve(null),
+          canViewValuation ? apiFetch<InventoryBalance[]>('/inventory/low-stock') : Promise.resolve([] as InventoryBalance[]),
+          apiFetch<ProductListResponse>('/inventory/products?pageSize=1'),
+        ]);
         setStockValue(stockValueResult);
         setLowStock(lowStockResult);
         setProducts(productsResult);
-      })
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : t('common.error')),
-      );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('common.error'));
+      }
+    }
+    void load();
   }, [t]);
 
   async function createYuanRate(event: FormEvent<HTMLFormElement>) {
@@ -85,6 +88,7 @@ export default function InventoryPage() {
   }
 
   const hideWarehouseNav = isWarehouseManagerUser(currentUser) || branchSalesManagerView || isBranchOwnerUser(currentUser);
+  const hideInventoryValuation = shouldHideInventoryValuation(currentUser);
 
   return (
     <ProtectedShell>
@@ -130,11 +134,18 @@ export default function InventoryPage() {
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <Card label={t('inventory.totalProducts')} value={String(products?.total ?? 0)} />
-          <Card label={t('inventory.totalStockValue')} value={formatKgs(stockValue?.totalStockValueKgs)} />
-          <Card label={t('inventory.lowStockCount')} value={String(lowStock.length)} />
-          <Card label={t('inventory.totalQuantity')} value={String(stockValue?.totalQuantity ?? 0)} />
+          {!hideInventoryValuation ? (
+            <Card label={t('inventory.totalStockValue')} value={formatKgs(stockValue?.totalStockValueKgs)} />
+          ) : null}
+          {!hideInventoryValuation ? (
+            <Card label={t('inventory.lowStockCount')} value={String(lowStock.length)} />
+          ) : null}
+          {!hideInventoryValuation ? (
+            <Card label={t('inventory.totalQuantity')} value={String(stockValue?.totalQuantity ?? 0)} />
+          ) : null}
         </div>
 
+        {!hideInventoryValuation ? (
         <div className="grid gap-6 xl:grid-cols-3">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm xl:col-span-1">
             <h3 className="text-lg font-bold text-slate-950">{t('inventory.lowStockAlert')}</h3>
@@ -161,6 +172,7 @@ export default function InventoryPage() {
           <Breakdown title={`${t('inventory.stockValue')} · ${t('inventory.warehouse')}`} items={stockValue?.byWarehouse ?? []} empty={t('inventory.noStockValue')} quantityLabel={t('inventory.quantity')} />
           <Breakdown title={`${t('inventory.stockValue')} · ${t('inventory.category')}`} items={stockValue?.byCategory ?? []} empty={t('inventory.noStockValue')} quantityLabel={t('inventory.quantity')} />
         </div>
+        ) : null}
 
         {canManageYuan ? (
         <form onSubmit={createYuanRate} className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-end">
