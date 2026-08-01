@@ -10,7 +10,11 @@ import {
   shouldShowCustomerListEditButton,
   type CustomerListColumnKey,
 } from '@/lib/customer-table-config';
-import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
+import {
+  customerTypeLabelKey,
+  formatBranchCustomerTypeDisplay,
+  loyaltyCategoryLabelKey,
+} from '@/lib/sale-customer-pricing';
 import type { Branch, Customer, CustomerStatus, CustomerType, User } from '@/lib/types';
 import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
@@ -607,6 +611,9 @@ function CustomersPageContent() {
                             onSort={changeSort}
                           />
                         ) : null}
+                        {columnVisible('customerType') ? (
+                          <th className="px-4 py-3">{t('customers.customerType')}</th>
+                        ) : null}
                         {columnVisible('phone') ? (
                           <SortableHeader
                             label={t('crm.phone')}
@@ -705,6 +712,11 @@ function CustomersPageContent() {
                               >
                                 {customer.fullName}
                               </button>
+                            </td>
+                          ) : null}
+                          {columnVisible('customerType') ? (
+                            <td className="px-4 py-3">
+                              <CustomerTypePill customerType={customer.customerType} />
                             </td>
                           ) : null}
                           {columnVisible('phone') ? (
@@ -1315,6 +1327,25 @@ function StatusPill({ status }: { status: CustomerStatus }) {
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
       {t(`status.${status}`)}
+    </span>
+  );
+}
+
+function CustomerTypePill({ customerType }: { customerType?: CustomerType | string | null }) {
+  const { t } = useTranslation();
+  const label = formatBranchCustomerTypeDisplay(customerType, t);
+  const tone =
+    customerType === 'WHOLESALE'
+      ? 'bg-emerald-100 text-emerald-800'
+      : customerType === 'MASTER'
+        ? 'bg-violet-100 text-violet-800'
+        : customerType === 'RETAIL'
+          ? 'bg-slate-100 text-slate-700'
+          : 'bg-slate-50 text-slate-500';
+
+  return (
+    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${tone}`}>
+      {label}
     </span>
   );
 }

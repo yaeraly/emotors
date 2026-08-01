@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
 import { Role } from '@prisma/client';
 import { toRoleAwareCustomerListItem } from './customer-list.presenter';
 
@@ -7,6 +9,7 @@ const baseCustomer = {
   phone: '+996700000000',
   whatsappPhone: '+996700000001',
   status: 'ACTIVE',
+  customerType: 'RETAIL',
   branchId: 'branch-1',
   branch: { id: 'branch-1', name: 'Bishkek', code: 'BK' },
   totalPurchases: 1000,
@@ -22,16 +25,17 @@ const baseCustomer = {
 };
 
 describe('toRoleAwareCustomerListItem', () => {
-  it('strips list-only fields for branch sales manager', () => {
+  it('strips list-only fields for branch sales manager but keeps customerType', () => {
     const item = toRoleAwareCustomerListItem(
       { id: 'u1', role: Role.MANAGER, roles: [Role.MANAGER], branchId: 'branch-1' },
       baseCustomer,
     );
 
-    expect(item).not.toHaveProperty('phone');
-    expect(item).not.toHaveProperty('branch');
-    expect(item).not.toHaveProperty('purchaseCount');
-    expect(item.fullName).toBe('Jane Doe');
+    assert.equal('phone' in item, false);
+    assert.equal('branch' in item, false);
+    assert.equal('purchaseCount' in item, false);
+    assert.equal(item.fullName, 'Jane Doe');
+    assert.equal(item.customerType, 'RETAIL');
   });
 
   it('keeps full list fields for HQ CEO', () => {
@@ -40,8 +44,9 @@ describe('toRoleAwareCustomerListItem', () => {
       baseCustomer,
     );
 
-    expect(item).toHaveProperty('phone', '+996700000000');
-    expect(item).toHaveProperty('branch');
-    expect(item).toHaveProperty('purchaseCount', 3);
+    assert.equal('phone' in item, true);
+    assert.equal('branch' in item, true);
+    assert.equal('purchaseCount' in item, true);
+    assert.equal(item.customerType, 'RETAIL');
   });
 });

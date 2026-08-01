@@ -16,6 +16,23 @@ export function customerTypeLabelKey(customerType?: BranchSaleCustomerType | str
   return 'customers.customerTypeRetail';
 }
 
+export function isBranchListCustomerType(
+  customerType?: string | null,
+): customerType is BranchSaleCustomerType {
+  return customerType === 'RETAIL' || customerType === 'MASTER' || customerType === 'WHOLESALE';
+}
+
+/** Human-readable Branch Clients list label; never returns raw enum values. */
+export function formatBranchCustomerTypeDisplay(
+  customerType: string | null | undefined,
+  translate: (key: string) => string,
+): string {
+  if (!isBranchListCustomerType(customerType)) {
+    return '—';
+  }
+  return translate(customerTypeLabelKey(customerType));
+}
+
 export function loyaltyCategoryLabelKey(category?: string | null) {
   switch (category) {
     case 'SILVER':

@@ -3,6 +3,7 @@ import { isBranchOwnerUser, isBranchSalesManagerUser } from '@/lib/rbac';
 
 export type CustomerListColumnKey =
   | 'fullName'
+  | 'customerType'
   | 'phone'
   | 'whatsappPhone'
   | 'branch'
@@ -30,6 +31,7 @@ const hqColumns: CustomerListColumnKey[] = [
 
 const branchSalesColumns: CustomerListColumnKey[] = [
   'fullName',
+  'customerType',
   'status',
   'totalPurchases',
   'totalDebt',
@@ -39,6 +41,7 @@ const branchSalesColumns: CustomerListColumnKey[] = [
 
 const branchOwnerColumns: CustomerListColumnKey[] = [
   'fullName',
+  'customerType',
   'status',
   'totalPurchases',
   'totalProfit',
