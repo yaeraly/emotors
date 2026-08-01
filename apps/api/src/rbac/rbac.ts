@@ -320,11 +320,17 @@ export function assertBranchAccountantRestrictedRoute(user: Pick<AuthUser, 'role
   }
 }
 
+export function isHqSalesManagerScopedUser(user: Pick<AuthUser, 'role' | 'roles'>) {
+  const roles = resolveUserRoles(user);
+  return roles.includes(Role.HQ_SALES_MANAGER) && !hasAnyFullAccessRole(roles);
+}
+
 export function canViewProductCost(user: Pick<AuthUser, 'role' | 'roles' | 'branchId' | 'permissions'>) {
   if (isBranchOwnerUser(user)) return false;
   if (isBranchWarehouseOperator(user)) return false;
   if (isBranchCashierUser(user)) return false;
   if (isHqWarehouseLogisticsOnlyUser(user)) return false;
+  if (isHqSalesManagerScopedUser(user)) return false;
   return true;
 }
 

@@ -1007,7 +1007,13 @@ export function canViewPricing(user: Pick<User, 'role' | 'roles' | 'permissions'
 
 export function canViewProductCost(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   if (!user) return false;
-  return canViewCostAndProfit(user) && !isBranchOwnerUser(user) && !isBranchWarehouseOperator(user) && !isHqWarehouseLogisticsOnlyUser(user);
+  return (
+    canViewCostAndProfit(user) &&
+    !isBranchOwnerUser(user) &&
+    !isBranchWarehouseOperator(user) &&
+    !isHqWarehouseLogisticsOnlyUser(user) &&
+    !isHqSalesManagerUser(user)
+  );
 }
 
 export function canViewProductCatalog(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {

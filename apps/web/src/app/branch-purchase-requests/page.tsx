@@ -1197,11 +1197,6 @@ function BranchPurchaseRequestsPageInner() {
             <tbody className="divide-y divide-slate-100">
               {visibleRequests.map((request) => {
                 const branchName = branches.find((branch) => branch.id === request.branchId)?.name ?? request.branchId;
-                const hqWarehouseName =
-                  request.assignedHqWarehouse?.name ??
-                  request.branch?.assignedHqWarehouse?.name ??
-                  branches.find((branch) => branch.id === request.branchId)?.assignedHqWarehouse?.name ??
-                  '—';
                 return (
                 <tr
                   key={request.id}

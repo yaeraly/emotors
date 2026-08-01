@@ -3780,7 +3780,7 @@ export class DistributionService {
     if (user && isHqWarehouseLogisticsOnlyUser(user)) {
       return this.sanitizeDistributionOrderForHqWarehouse(response);
     }
-    if (user && isBranchOwnerUser(user)) {
+    if (user && !canViewProductCost(user)) {
       return sanitizeDistributionOrderForBranchCeo(response);
     }
     return response;

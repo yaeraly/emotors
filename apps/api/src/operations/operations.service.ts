@@ -41,7 +41,7 @@ import {
   HQ_SALES_MANAGER_ACCESS_DENIED_MESSAGES,
   HQ_WAREHOUSE_ACCESS_DENIED,
 } from '../hq-warehouse/hq-warehouse-assignment.constants';
-import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canReceiveProcurementToHq, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, resolveUserRoles } from '../rbac/rbac';
+import { canCreateBranchHqOrder, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canReceiveProcurementToHq, canViewProductCost, hasAnyFullAccessRole, hasAnyHqRole, isBranchOwnerUser, resolveUserRoles } from '../rbac/rbac';
 import { activeHqWarehouseWhere, HQ_CATALOG_BRANCH_CODE, isHqWarehouse } from '../warehouse/warehouse.util';
 import {
   INACTIVE_HQ_WAREHOUSE,
@@ -130,8 +130,7 @@ import { ChinaReceivingQueryDto } from './dto/china-receiving-query.dto';
 import {
   canSeeHqStockInBranchRequests,
   isBranchOnlyRequestUser,
-  sanitizeBranchPurchaseRequest,
-  toBranchPurchaseRequestResponse,
+  presentBranchPurchaseRequestForUser,
 } from './branch-purchase-request.presenter';
 import {
   deriveRequestStatusFromLines,
@@ -202,8 +201,9 @@ export class OperationsService {
       orderBy: { createdAt: 'desc' },
     });
     const hideSensitive = isBranchOnlyRequestUser(user, this.canViewAllBranchPurchaseRequests(user));
+    const hideFinancialCost = !canViewProductCost(user);
     return rows.map((row) =>
-      sanitizeBranchPurchaseRequest(toBranchPurchaseRequestResponse(row), hideSensitive),
+      presentBranchPurchaseRequestForUser(row, { hideSensitive, hideFinancialCost }),
     );
   }
 
@@ -248,6 +248,7 @@ export class OperationsService {
     }
     const canViewAll = this.canViewAllBranchPurchaseRequests(user);
     const hideSensitive = isBranchOnlyRequestUser(user, canViewAll);
+    const hideFinancialCost = !canViewProductCost(user);
     let enriched: typeof request & {
       authoritativeTransferCostKgs?: number;
       convertedOrderNumber?: string;
@@ -268,10 +269,7 @@ export class OperationsService {
         };
       }
     }
-    return sanitizeBranchPurchaseRequest(
-      toBranchPurchaseRequestResponse(enriched),
-      hideSensitive,
-    );
+    return presentBranchPurchaseRequestForUser(enriched, { hideSensitive, hideFinancialCost });
   }
 
   async branchProductOptions(
@@ -450,23 +448,38 @@ export class OperationsService {
         }
         return [
           product.id,
-          {
-            branchPriceKgs: pricing.branchPurchasePriceKgs,
-            finalBranchPriceKgs: pricing.branchPurchasePriceKgs,
-            finalBranchPrice: pricing.branchPurchasePriceKgs,
-            costPriceKgs: pricing.costPriceSnapshot,
-            markupPercent: pricing.markupSnapshot,
-            markupAmount: pricing.markupAmountSnapshot,
-            pricingPolicyVersionId: pricing.pricingPolicyVersionId,
-            branchPriceProfileId: pricing.pricingProfileId,
-            pricingSource: pricing.pricingSource,
-            hasPricingPolicy: pricing.hasPricingPolicy,
-            priceConfigured: pricing.priceConfigured,
-            priceMissingReason: pricing.priceMissingReason,
-            pricingRevision: this.branchOrderPricingRevision.current(),
-            quantity: quantity > 0 ? quantity : undefined,
-            lineTotalKgs,
-          },
+          canViewProductCost(user)
+            ? {
+                branchPriceKgs: pricing.branchPurchasePriceKgs,
+                finalBranchPriceKgs: pricing.branchPurchasePriceKgs,
+                finalBranchPrice: pricing.branchPurchasePriceKgs,
+                costPriceKgs: pricing.costPriceSnapshot,
+                markupPercent: pricing.markupSnapshot,
+                markupAmount: pricing.markupAmountSnapshot,
+                pricingPolicyVersionId: pricing.pricingPolicyVersionId,
+                branchPriceProfileId: pricing.pricingProfileId,
+                pricingSource: pricing.pricingSource,
+                hasPricingPolicy: pricing.hasPricingPolicy,
+                priceConfigured: pricing.priceConfigured,
+                priceMissingReason: pricing.priceMissingReason,
+                pricingRevision: this.branchOrderPricingRevision.current(),
+                quantity: quantity > 0 ? quantity : undefined,
+                lineTotalKgs,
+              }
+            : {
+                branchPriceKgs: pricing.branchPurchasePriceKgs,
+                finalBranchPriceKgs: pricing.branchPurchasePriceKgs,
+                finalBranchPrice: pricing.branchPurchasePriceKgs,
+                pricingPolicyVersionId: pricing.pricingPolicyVersionId,
+                branchPriceProfileId: pricing.pricingProfileId,
+                pricingSource: pricing.pricingSource,
+                hasPricingPolicy: pricing.hasPricingPolicy,
+                priceConfigured: pricing.priceConfigured,
+                priceMissingReason: pricing.priceMissingReason,
+                pricingRevision: this.branchOrderPricingRevision.current(),
+                quantity: quantity > 0 ? quantity : undefined,
+                lineTotalKgs,
+              },
         ] as const;
       }),
     );
@@ -882,7 +895,7 @@ export class OperationsService {
       await this.auditBranchRequest(user, updated.branchId, 'BRANCH_REQUEST_REVIEW_SUBMITTED', 'BranchPurchaseRequest', id);
       await this.auditBranchRequest(user, updated.branchId, 'BRANCH_PRODUCT_REQUEST_REJECTED', 'BranchPurchaseRequest', id);
       await this.notifyBranchSalesReviewOutcome(user, updated);
-      return updated;
+      return this.presentBranchPurchaseRequestResponse(user, updated);
     }
 
     return this.submitBranchPurchaseRequestReview(user, id, dto);
@@ -1251,7 +1264,7 @@ export class OperationsService {
 
     await this.notifyBranchSalesReviewOutcome(user, updated);
 
-    return updated;
+    return this.presentBranchPurchaseRequestResponse(user, updated);
   }
 
   async confirmBranchPurchaseRequest(user: AuthUser, id: string) {
@@ -5188,6 +5201,16 @@ export class OperationsService {
       Role.HQ_SALES_MANAGER,
       Role.WAREHOUSE_MANAGER,
     ]);
+  }
+
+  private presentBranchPurchaseRequestResponse(user: AuthUser, request: Record<string, unknown>) {
+    const canViewAll = this.canViewAllBranchPurchaseRequests(user);
+    const hideSensitive = isBranchOnlyRequestUser(user, canViewAll);
+    const hideFinancialCost = !canViewProductCost(user);
+    return presentBranchPurchaseRequestForUser(request as Parameters<typeof presentBranchPurchaseRequestForUser>[0], {
+      hideSensitive,
+      hideFinancialCost,
+    });
   }
 
   private canManageWarehouse(user: AuthUser) {

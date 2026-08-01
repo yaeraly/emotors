@@ -218,6 +218,82 @@ export function resolveBranchDisplayStatus(
 }
 
 /** Branch users may only see Branch Price, Quantity, and Total — never internal pricing layers. */
+/** Remove product cost fields while keeping branch/selling prices and order totals. */
+export function stripBranchPurchaseRequestCostFields<T extends Record<string, unknown>>(request: T): T {
+  const items = Array.isArray(request.items)
+    ? request.items.map((item) => {
+        if (!item || typeof item !== 'object') return item;
+        const next = { ...(item as Record<string, unknown>) };
+        delete next.estimatedUnitCost;
+        delete next.estimatedLineProductCostKgs;
+        delete next.transportExpenseAllocation;
+        delete next.baseCostKgs;
+        return next;
+      })
+    : request.items;
+
+  const next: Record<string, unknown> = { ...request, items };
+  delete next.totalProductCostKgs;
+  delete next.authoritativeTransferCostKgs;
+  delete next.transportCostKgs;
+  return next as T;
+}
+
+export function presentBranchPurchaseRequestForUser<T extends {
+  status: BranchPurchaseRequestStatus;
+  reviewedAt?: Date | string | null;
+  items: Array<{
+    id?: string;
+    productId?: string;
+    sku?: string;
+    productName?: string;
+    unit?: string;
+    note?: string | null;
+    quantity: number;
+    approvedQuantity?: number | null;
+    unavailableQuantity?: number | null;
+    hqAvailableStock?: number | null;
+    currentBranchStock?: number;
+    missingQty?: number | null;
+    transportExpenseAllocation?: unknown;
+    estimatedUnitCost?: unknown;
+    estimatedLineProductCostKgs?: unknown;
+    totalAmount?: unknown;
+    approvedLineTotalKgs?: unknown;
+    wholesalePriceKgs?: unknown;
+    branchPurchasePriceKgs?: unknown;
+    resolvedBranchPriceKgs?: unknown;
+    lineStatus?: string | null;
+    rejectionReasonCode?: string | null;
+    publicComment?: string | null;
+    hasPricingPolicyAtReview?: boolean | null;
+    pricingPolicyVersionId?: unknown;
+    pricingProfileId?: unknown;
+    appliedRuleType?: unknown;
+    appliedRuleId?: unknown;
+    appliedAdjustmentMode?: unknown;
+    appliedAdjustmentValue?: unknown;
+    baseCostKgs?: unknown;
+    baseBranchPriceKgs?: unknown;
+    priceResolvedAt?: unknown;
+    [key: string]: unknown;
+  }>;
+  branch?: { branchType?: string | null } | null;
+  branchType?: string | null;
+  totalEstimatedAmount?: unknown;
+  totalProductCostKgs?: number;
+  [key: string]: unknown;
+}>(
+  request: T,
+  options: { hideSensitive: boolean; hideFinancialCost: boolean },
+) {
+  const full = sanitizeBranchPurchaseRequest(request, options.hideSensitive);
+  if (!options.hideSensitive && options.hideFinancialCost) {
+    return stripBranchPurchaseRequestCostFields(full);
+  }
+  return full;
+}
+
 export function sanitizeBranchPurchaseRequest<T extends {
   status: BranchPurchaseRequestStatus;
   reviewedAt?: Date | string | null;

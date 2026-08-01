@@ -17,6 +17,7 @@ import {
 import { apiFetch } from '@/lib/api';
 import {
   canManageDistributionOrders,
+  canViewProductCost,
   isBranchWarehouseOperator,
   isHqSalesManagerUser,
   isHqWarehouseLogisticsOnlyUser,
@@ -79,7 +80,8 @@ export default function DistributionOrdersPage() {
 
   const operatorView = isBranchWarehouseOperator(currentUser);
   const logisticsOnlyView = isHqWarehouseLogisticsOnlyUser(currentUser);
-  const showFinancialColumns = !operatorView && !logisticsOnlyView;
+  const showOrderTotalColumn = !operatorView && !logisticsOnlyView;
+  const showProfitColumn = showOrderTotalColumn && canViewProductCost(currentUser);
   const hqSalesView = isHqSalesManagerUser(currentUser);
 
   const newOrderAction =
@@ -147,8 +149,8 @@ export default function DistributionOrdersPage() {
               <th className={hqSalesListTableThClass}>{t('distribution.sourceWarehouse')}</th>
               <th className={hqSalesListTableThClass}>{t('distribution.destinationWarehouse')}</th>
               <th className={hqSalesListTableThClass}>{t('distribution.status')}</th>
-              {!showFinancialColumns ? null : <th className={hqSalesListTableThClass}>{t('distribution.totalAmount')}</th>}
-              {!showFinancialColumns ? null : <th className={hqSalesListTableThClass}>{t('distribution.totalProfit')}</th>}
+              {!showOrderTotalColumn ? null : <th className={hqSalesListTableThClass}>{t('distribution.totalAmount')}</th>}
+              {!showProfitColumn ? null : <th className={hqSalesListTableThClass}>{t('distribution.totalProfit')}</th>}
               <th className={hqSalesListTableThClass}>{t('common.createdDate')}</th>
               <th className={hqSalesListTableThClass}>{t('common.actions')}</th>
             </tr>
@@ -161,8 +163,8 @@ export default function DistributionOrdersPage() {
                 <td className={hqSalesListTableTdClass}>{order.sourceWarehouse?.name}</td>
                 <td className={hqSalesListTableTdClass}>{order.destinationWarehouse?.name}</td>
                 <td className={hqSalesListTableTdClass}>{translateStatus(t, order.status, 'distribution')}</td>
-                {!showFinancialColumns ? null : <td className={hqSalesListTableTdClass}>{formatKgs(order.totalAmount)}</td>}
-                {!showFinancialColumns ? null : <td className={hqSalesListTableTdClass}>{formatKgs(order.totalProfit)}</td>}
+                {!showOrderTotalColumn ? null : <td className={hqSalesListTableTdClass}>{formatKgs(order.totalAmount)}</td>}
+                {!showProfitColumn ? null : <td className={hqSalesListTableTdClass}>{formatKgs(order.totalProfit)}</td>}
                 <td className={hqSalesListTableTdClass}>{new Date(order.createdAt).toLocaleDateString()}</td>
                 <td className={hqSalesListTableTdClass}>
                   <Link

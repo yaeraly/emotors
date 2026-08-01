@@ -11,6 +11,7 @@ import {
   canManageOwnBranchProductRequest,
   canSeeHqStockInBranchRequests,
   canViewBranchPurchaseRequests,
+  canViewProductCost,
   isBranchSalesManagerUser,
   isExecutiveBranchOrderInspector,
   isHqSalesManagerUser,
@@ -419,6 +420,7 @@ export default function BranchPurchaseRequestDetailPage() {
   const canCreate = canManageOwnBranchProductRequest(user);
   const canView = canViewBranchPurchaseRequests(user);
   const canSeeHqStock = canSeeHqStockInBranchRequests(user);
+  const canViewCost = canViewProductCost(user);
   const hqStockLoaded = request?.hqStockStatus !== 'unavailable';
   const branchOnlyView = !canSeeHqStock;
   const branchSalesManagerView = isBranchSalesManagerUser(user);
@@ -604,7 +606,7 @@ export default function BranchPurchaseRequestDetailPage() {
             <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalQuantity')}</p>
             <p className="mt-1 font-semibold text-slate-900">{request.totalQuantity ?? request.items.reduce((sum, item) => sum + item.quantity, 0)}</p>
           </div>
-          {!branchOnlyView ? (
+          {!branchOnlyView && canViewCost ? (
             <div>
               <p className="text-xs font-bold uppercase text-slate-400">{t('branchProductRequest.totalProductCost')}</p>
               <p className="mt-1 font-semibold text-slate-900">
@@ -829,9 +831,13 @@ export default function BranchPurchaseRequestDetailPage() {
                 {!branchOnlyView && !reviewable ? (
                   <>
                     <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.wholesalePrice')}</th>
-                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.transportAllocation')}</th>
-                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.estimatedUnitCost')}</th>
-                    <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.totalProductCost')}</th>
+                    {canViewCost ? (
+                      <>
+                        <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.transportAllocation')}</th>
+                        <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.estimatedUnitCost')}</th>
+                        <th className={hqDetailThClass(hqCompactTable)}>{t('branchProductRequest.totalProductCost')}</th>
+                      </>
+                    ) : null}
                   </>
                 ) : null}
                 {branchOnlyView && !reviewed ? (
@@ -991,11 +997,15 @@ export default function BranchPurchaseRequestDetailPage() {
                     {!branchOnlyView && !reviewable ? (
                       <>
                         <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.wholesalePriceKgs)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.transportExpenseAllocation)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.estimatedUnitCost)}</td>
-                        <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>
-                          {formatKgs(item.estimatedLineProductCostKgs)}
-                        </td>
+                        {canViewCost ? (
+                          <>
+                            <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.transportExpenseAllocation)}</td>
+                            <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>{formatKgs(item.estimatedUnitCost)}</td>
+                            <td className={hqDetailTdClass(hqCompactTable, 'text-right tabular-nums')}>
+                              {formatKgs(item.estimatedLineProductCostKgs)}
+                            </td>
+                          </>
+                        ) : null}
                       </>
                     ) : null}
                     {branchOnlyView && !reviewed ? (

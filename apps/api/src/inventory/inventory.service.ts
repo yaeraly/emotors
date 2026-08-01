@@ -38,6 +38,7 @@ import {
   canEditSellingPrice,
   canManageProductCatalog,
   canViewProductCatalog,
+  canViewProductCost,
   hasAnyFullAccessRole,
   isFullAccessRole,
   isBranchWarehouseOperator,
@@ -2614,7 +2615,14 @@ export class InventoryService {
       storedFinalCostKgs: Number(product.finalCostKgs),
     };
     delete (response as { costPriceKgs?: unknown }).costPriceKgs;
-    return user ? this.applyProductProfileVisibility(user, response) : response;
+    if (!user) return response;
+    if (isBranchWarehouseOperator(user)) {
+      return this.stripCostFields(response);
+    }
+    if (!canViewProductCost(user)) {
+      return this.stripProductCostOnlyFields(response);
+    }
+    return this.applyProductProfileVisibility(user, response);
   }
 
   private shouldHideProductPricingFields(user: AuthUser) {
@@ -2694,7 +2702,11 @@ export class InventoryService {
       lowStock: quantity <= balance.product.minStockLevel,
       updatedAt: balance.updatedAt,
     };
-    return user && isBranchWarehouseOperator(user) ? this.stripCostFields(response) : response;
+    return user && isBranchWarehouseOperator(user)
+      ? this.stripCostFields(response)
+      : user && !canViewProductCost(user)
+        ? this.stripProductCostOnlyFields(response)
+        : response;
   }
 
   private assertCanViewProductCatalog(user: AuthUser) {
@@ -2704,9 +2716,51 @@ export class InventoryService {
   }
 
   private assertCanViewProductCost(user: AuthUser) {
-    if (isBranchWarehouseOperator(user)) {
+    if (!canViewProductCost(user)) {
       throw new ForbiddenException('You do not have permission to view product cost');
     }
+  }
+
+  private stripProductCostOnlyFields<T extends Record<string, unknown>>(payload: T): T {
+    const hidden = [
+      'purchasePriceYuan',
+      'purchaseCostKgs',
+      'transportCostKgs',
+      'finalCostKgs',
+      'marginAmount',
+      'marginPercent',
+      'averageCostKgs',
+      'landedCostKgs',
+      'totalValueKgs',
+      'totalStockValueKgs',
+      'latestYuanRate',
+      'storedFinalCostKgs',
+      'storedCostPriceKgs',
+      'currentFifoUnitCost',
+      'costAvailable',
+      'costSource',
+      'costBatchId',
+      'costReceivedAt',
+      'costWarehouseId',
+      'purchasePriceHistory',
+    ];
+    const next: Record<string, unknown> = { ...payload };
+    for (const key of hidden) {
+      delete next[key];
+    }
+    if (next.product && typeof next.product === 'object') {
+      next.product = this.stripProductCostOnlyFields(next.product as Record<string, unknown>);
+    }
+    if (Array.isArray(next.priceHistory)) {
+      next.priceHistory = next.priceHistory.map((row) => {
+        if (!row || typeof row !== 'object') return row;
+        const historyRow = { ...(row as Record<string, unknown>) };
+        delete historyRow.marginAmount;
+        delete historyRow.marginPercent;
+        return historyRow;
+      });
+    }
+    return next as T;
   }
 
   private stripCostFields<T extends Record<string, unknown>>(payload: T): T {
