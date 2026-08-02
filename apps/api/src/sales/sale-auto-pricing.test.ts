@@ -42,9 +42,9 @@ describe('branch sale automatic pricing', () => {
     const priced = calculateFinalSaleUnitPrice({
       basePriceKgs: 1000,
       loyaltyMarkupPercent: 0,
-      minimumPriceKgs: 980,
+      minimumPriceKgs: 1100,
     });
-    assert.equal(priced.finalPriceKgs, 980);
+    assert.equal(priced.finalPriceKgs, 1100);
     assert.equal(priced.minimumPriceApplied, true);
   });
 
