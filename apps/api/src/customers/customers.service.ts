@@ -22,7 +22,7 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { CustomerQueryDto } from './dto/customer-query.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
-import { canArchiveCustomer, canEditCustomerType } from '../rbac/rbac';
+import { canArchiveCustomer, canEditCustomer, canEditCustomerType } from '../rbac/rbac';
 import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../rbac/permanent-delete.util';
 import { isBranchRetailWholesaleCustomerType } from '../sales/sale-customer-pricing.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
@@ -198,6 +198,9 @@ export class CustomersService {
   }
 
   async update(user: AuthUser, id: string, dto: UpdateCustomerDto) {
+    if (!canEditCustomer(user)) {
+      throw new ForbiddenException('У вас нет прав изменять данные клиента');
+    }
     const existing = await this.getAccessibleCustomer(user, id);
 
     if (dto.customerType !== undefined && dto.customerType !== existing.customerType) {

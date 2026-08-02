@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
+import { formatCustomerPriceListUnit } from '@/lib/product-unit';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type SearchCustomer = {
@@ -41,8 +42,7 @@ type PriceListPreview = {
   products: Array<{
     productId: string;
     name: string;
-    unit: string | null;
-    photoUrl?: string | null;
+    unitLabelRu: string;
     finalPriceKgs: number;
     currency: string;
   }>;
@@ -367,35 +367,24 @@ export function SendPriceListModal({
 
             {preview ? (
               <div className="max-h-72 overflow-auto rounded-2xl border border-slate-200">
-                <table className="min-w-full text-sm">
+                <table className="min-w-full table-fixed text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="w-16 px-3 py-2">{t('inventory.photo')}</th>
-                      <th className="px-3 py-2">{t('inventory.name')}</th>
-                      <th className="w-28 px-3 py-2">{t('inventory.unit')}</th>
-                      <th className="w-32 px-3 py-2 text-right">{t('crm.priceListPrice')}</th>
+                      <th className="w-[55%] px-3 py-2">{t('inventory.name')}</th>
+                      <th className="w-[20%] px-3 py-2">{t('inventory.unit')}</th>
+                      <th className="w-[25%] px-3 py-2 text-right">{t('crm.priceListPrice')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {preview.products.slice(0, 50).map((product) => (
                       <tr key={product.productId}>
-                        <td className="w-16 px-3 py-2 text-slate-400">
-                          {product.photoUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={product.photoUrl}
-                              alt=""
-                              className="h-10 w-10 rounded object-cover"
-                            />
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td className="px-3 py-2 font-medium text-slate-900 break-words">
+                        <td className="px-3 py-2 font-medium text-slate-900 break-words whitespace-normal">
                           {product.name}
                         </td>
-                        <td className="w-28 px-3 py-2 text-slate-600">{product.unit ?? '—'}</td>
-                        <td className="w-32 px-3 py-2 text-right font-semibold tabular-nums text-slate-900">
+                        <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
+                          {product.unitLabelRu || formatCustomerPriceListUnit(null)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-900 whitespace-nowrap">
                           {product.finalPriceKgs.toLocaleString('ru-RU')} {product.currency}
                         </td>
                       </tr>

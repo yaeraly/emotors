@@ -1149,6 +1149,14 @@ export function canEditCustomerType(user: Pick<User, 'role' | 'roles' | 'branchI
   );
 }
 
+/** Branch CEO and Branch Sales Manager may not edit customer profiles; HQ retains edit access. */
+export function canEditCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  if (isBranchOwnerUser(user) || isBranchSalesManagerUser(user)) return false;
+  return !user.branchId;
+}
+
 export function canArchiveCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
 }

@@ -1,4 +1,5 @@
 import { CustomerLoyaltyCategory, CustomerType } from '@prisma/client';
+import { formatProductUnitRu } from '../common/product-unit.util';
 import {
   getLoyaltyMarkupPercent,
   type CustomerTypeLoyaltyMarkupMatrix,
@@ -27,8 +28,7 @@ export type InternalPriceListProduct = {
 export type CustomerFacingPriceListProduct = {
   productId: string;
   name: string;
-  unit: string | null;
-  photoUrl: string | null;
+  unitLabelRu: string;
   finalPriceKgs: number;
   currency: string;
 };
@@ -270,6 +270,9 @@ const FORBIDDEN_CUSTOMER_FACING_KEYS = new Set([
   'basepricekgs',
   'pricingchannel',
   'branchpricingpolicysource',
+  'photourl',
+  'photo',
+  'unit',
 ]);
 
 export function assertSafePriceListPayload(payload: Record<string, unknown>) {
@@ -312,8 +315,7 @@ export function toCustomerFacingProduct(
   return {
     productId: product.productId,
     name: product.name,
-    unit: product.unit,
-    photoUrl: product.photoUrl,
+    unitLabelRu: formatProductUnitRu(product.unit),
     finalPriceKgs: product.customerPriceKgs,
     currency: product.currency,
   };

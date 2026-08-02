@@ -13,7 +13,7 @@ import {
 } from './customer-price-list.util';
 
 describe('customer price list PDF', () => {
-  it('renders a multi-page Cyrillic PDF without internal loyalty/SKU/availability details', async () => {
+  it('renders a multi-page Cyrillic PDF without internal loyalty/SKU/availability/photo details', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'price-list-'));
     const filePath = join(dir, 'test.pdf');
 
@@ -22,8 +22,8 @@ describe('customer price list PDF', () => {
       sku: `SKU-${index}`,
       name: `Товар с длинным названием для проверки переноса строки ${index + 1}`,
       category: 'Категория',
-      unit: 'шт',
-      photoUrl: null,
+      unit: 'PCS',
+      photoUrl: 'https://example.com/photo.jpg',
       availabilityStatus: index % 7 === 0 ? ('OUT_OF_STOCK' as const) : ('IN_STOCK' as const),
       availabilityLabel: index % 7 === 0 ? 'Нет в наличии' : 'В наличии',
       customerPriceKgs: 1000 + index,
@@ -60,6 +60,7 @@ describe('customer price list PDF', () => {
     const dto: CustomerFacingPriceListDto = toCustomerFacingPriceListDto(snapshot);
     assert.equal(dto.title, 'Прайс для мастера');
     assert.equal(dto.products[0]?.finalPriceKgs, 1000);
+    assert.equal(dto.products[0]?.unitLabelRu, 'шт.');
 
     const result = await writeCustomerPriceListPdf({ dto, absoluteFilePath: filePath });
     assert.ok(existsSync(filePath));
@@ -70,8 +71,7 @@ describe('customer price list PDF', () => {
     const asText = bytes.toString('latin1');
     assert.match(asText, /%PDF/);
     assert.doesNotMatch(asText, /costPriceKgs|purchasePriceYuan|себестоимость/i);
-    // PDFKit embeds text as binary; assert restricted ASCII labels are absent from stream.
-    assert.doesNotMatch(asText, /SKU-/);
+    assert.doesNotMatch(asText, /SKU-|PCS|photo\.jpg/i);
     assert.doesNotMatch(asText, /Gold|Silver|VIP|Standard/);
     assert.doesNotMatch(asText, /175.?000|1\.5%/);
     assert.doesNotMatch(asText, /loyaltyCategory|purchaseVolume|markupPercent/i);
@@ -79,7 +79,7 @@ describe('customer price list PDF', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('uses simplified customer-facing columns photo/name/unit/price', async () => {
+  it('uses simplified customer-facing columns name/unit/price without photo', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'price-list-cols-'));
     const filePath = join(dir, 'cols.pdf');
     const dto: CustomerFacingPriceListDto = {
@@ -100,9 +100,8 @@ describe('customer price list PDF', () => {
       products: [
         {
           productId: 'p1',
-          name: 'Полное имя товара',
-          unit: 'шт',
-          photoUrl: null,
+          name: 'Полное имя товара без обрезки названия',
+          unitLabelRu: 'шт.',
           finalPriceKgs: 2500,
           currency: 'KGS',
         },
@@ -115,7 +114,6 @@ describe('customer price list PDF', () => {
     const asText = bytes.toString('latin1');
     assert.match(asText, /%PDF/);
     assert.ok(bytes.length > 500);
-    // Ensure product price digits remain present after projection.
     assert.match(asText, /2/);
     await rm(dir, { recursive: true, force: true });
   });

@@ -161,11 +161,13 @@ describe('customer price list utilities', () => {
     assert.equal(dto.title, 'Прайс для мастера');
     assert.equal(dto.products.length, 1);
     assert.equal(dto.products[0]?.name, 'Полное название товара без обрезки');
-    assert.equal(dto.products[0]?.unit, 'шт');
+    assert.equal(dto.products[0]?.unitLabelRu, 'шт.');
     assert.equal(dto.products[0]?.finalPriceKgs, 1144);
     assert.equal(dto.products[0]?.currency, 'KGS');
 
     assert.equal('sku' in (dto.products[0] as object), false);
+    assert.equal('unit' in (dto.products[0] as object), false);
+    assert.equal('photoUrl' in (dto.products[0] as object), false);
     assert.equal('category' in (dto.products[0] as object), false);
     assert.equal('availabilityLabel' in (dto.products[0] as object), false);
     assert.equal('loyaltyCategory' in dto, false);
@@ -188,6 +190,34 @@ describe('customer price list utilities', () => {
         products: [{ sku: 'X', name: 'A', finalPriceKgs: 1, currency: 'KGS' }],
       }),
     );
+    assert.throws(() =>
+      assertCustomerFacingPriceListPayload({
+        products: [{ photoUrl: 'http://x', name: 'A', unitLabelRu: 'шт.', finalPriceKgs: 1, currency: 'KGS' }],
+      }),
+    );
+  });
+
+  it('maps internal PCS unit to Russian unitLabelRu in customer-facing projection', () => {
+    const snapshot = sampleInternalSnapshot({
+      products: [
+        {
+          productId: 'p2',
+          sku: 'SKU-2',
+          name: 'Фильтр масляный',
+          category: null,
+          unit: 'PCS',
+          photoUrl: 'https://example.com/photo.jpg',
+          availabilityStatus: 'IN_STOCK',
+          availabilityLabel: 'В наличии',
+          customerPriceKgs: 500,
+          currency: 'KGS',
+        },
+      ],
+    });
+    const dto = toCustomerFacingPriceListDto(snapshot);
+    assert.equal(dto.products[0]?.unitLabelRu, 'шт.');
+    assert.equal('photoUrl' in (dto.products[0] as object), false);
+    assert.doesNotMatch(JSON.stringify(dto), /PCS|photo/i);
   });
 
   it('retains internal audit metadata on the snapshot while projecting customer output', () => {

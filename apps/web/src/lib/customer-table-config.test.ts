@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { Role } from '@prisma/client';
-import { getCustomerListColumns } from './customer-table-config';
+import { getCustomerListColumns, shouldShowCustomerListEditButton } from './customer-table-config';
 
 describe('getCustomerListColumns', () => {
   it('includes customerType column for branch sales manager after fullName', () => {
@@ -35,5 +35,37 @@ describe('getCustomerListColumns', () => {
     });
 
     assert.equal(columns.includes('customerType'), false);
+  });
+});
+
+describe('shouldShowCustomerListEditButton', () => {
+  it('hides edit for branch CEO and branch sales manager', () => {
+    assert.equal(
+      shouldShowCustomerListEditButton({
+        role: Role.FRANCHISE_OWNER,
+        roles: [Role.FRANCHISE_OWNER],
+        branchId: 'branch-1',
+      }),
+      false,
+    );
+    assert.equal(
+      shouldShowCustomerListEditButton({
+        role: Role.MANAGER,
+        roles: [Role.MANAGER],
+        branchId: 'branch-1',
+      }),
+      false,
+    );
+  });
+
+  it('keeps edit for HQ users', () => {
+    assert.equal(
+      shouldShowCustomerListEditButton({
+        role: Role.CEO,
+        roles: [Role.CEO],
+        branchId: null,
+      }),
+      true,
+    );
   });
 });

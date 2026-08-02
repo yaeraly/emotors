@@ -7,7 +7,7 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { CenteredDialog } from '@/components/CenteredDialog';
 import { apiFetch } from '@/lib/api';
-import { shouldHideCustomerProfit, canEditCustomerType, canSendCustomerPriceList } from '@/lib/rbac';
+import { canEditCustomer, canEditCustomerType, canSendCustomerPriceList, shouldHideCustomerProfit } from '@/lib/rbac';
 import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
@@ -200,7 +200,7 @@ export default function CustomerDetailPage() {
     }
   }
 
-  const canEditProfile = Boolean(currentUser);
+  const canEditProfile = canEditCustomer(currentUser);
   const canEditType = canEditCustomerType(currentUser);
   const canSendPriceList = canSendCustomerPriceList(currentUser);
   const hideCustomerProfit = shouldHideCustomerProfit(currentUser);

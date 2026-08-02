@@ -1,5 +1,5 @@
 import type { User } from '@/lib/types';
-import { isBranchOwnerUser, isBranchSalesManagerUser } from '@/lib/rbac';
+import { canEditCustomer, isBranchOwnerUser, isBranchSalesManagerUser } from '@/lib/rbac';
 
 export type CustomerListColumnKey =
   | 'fullName'
@@ -65,5 +65,5 @@ export function getCustomerListColumns(
 export function shouldShowCustomerListEditButton(
   user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined,
 ) {
-  return !isBranchSalesManagerUser(user);
+  return canEditCustomer(user);
 }

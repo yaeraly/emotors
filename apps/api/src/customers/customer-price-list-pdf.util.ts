@@ -18,7 +18,7 @@ function formatMoney(value: number, currency: string) {
 /**
  * Generate a customer-facing Cyrillic PDF price list.
  * Uses DejaVu fonts for full Cyrillic support.
- * Does not render internal loyalty, markup, SKU, category, or availability fields.
+ * Does not render internal loyalty, markup, SKU, category, availability, or photo fields.
  */
 export async function writeCustomerPriceListPdf(input: {
   dto: CustomerFacingPriceListDto;
@@ -69,8 +69,7 @@ export async function writeCustomerPriceListPdf(input: {
   doc.moveDown(0.8);
 
   const columns = {
-    photo: 40,
-    name: 90,
+    name: 40,
     unit: 400,
     price: 470,
   };
@@ -78,8 +77,7 @@ export async function writeCustomerPriceListPdf(input: {
   const drawHeader = () => {
     const y = doc.y;
     doc.font('Heading').fontSize(8).fillColor('#0f172a');
-    doc.text('Фото', columns.photo, y, { width: 40 });
-    doc.text('Название', columns.name, y, { width: 290 });
+    doc.text('Название', columns.name, y, { width: 340 });
     doc.text('Единица измерения', columns.unit, y, { width: 70 });
     doc.text('Цена', columns.price, y, { width: 85, align: 'right' });
     doc
@@ -94,7 +92,7 @@ export async function writeCustomerPriceListPdf(input: {
 
   for (const product of dto.products) {
     doc.font('Body').fontSize(8);
-    const rowHeight = Math.max(28, doc.heightOfString(product.name, { width: 290 }) + 8);
+    const rowHeight = Math.max(20, doc.heightOfString(product.name, { width: 340 }) + 8);
 
     if (doc.y + rowHeight > doc.page.height - 60) {
       doc.addPage();
@@ -102,10 +100,8 @@ export async function writeCustomerPriceListPdf(input: {
     }
 
     const y = doc.y;
-    doc.font('Body').fontSize(8).fillColor('#94a3b8');
-    doc.text(product.photoUrl ? '•' : '—', columns.photo, y, { width: 40 });
-    doc.fillColor('#0f172a').text(product.name, columns.name, y, { width: 290 });
-    doc.text(product.unit ?? '—', columns.unit, y, { width: 70 });
+    doc.fillColor('#0f172a').text(product.name, columns.name, y, { width: 340 });
+    doc.text(product.unitLabelRu, columns.unit, y, { width: 70 });
     doc.text(formatMoney(product.finalPriceKgs, product.currency), columns.price, y, {
       width: 85,
       align: 'right',
