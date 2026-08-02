@@ -41,8 +41,9 @@ import {
   normalizeWhatsAppPhoneDigits,
   priceListTitleForCustomerType,
   resolvePriceListCategoryMarkupPercent,
-  type SafeCustomerPriceListDto,
-  type SafePriceListProduct,
+  toCustomerFacingPriceListDto,
+  type InternalCustomerPriceListSnapshot,
+  type InternalPriceListProduct,
 } from './customer-price-list.util';
 
 @Injectable()
@@ -120,15 +121,12 @@ export class CustomerPriceListService {
 
   async preview(user: AuthUser, customerId: string) {
     const built = await this.buildPriceList(user, customerId);
-    return {
-      ...built.safeDto,
-      // Preview summary only — products included for UI table, never costs.
-      products: built.safeDto.products,
-    };
+    return toCustomerFacingPriceListDto(built.snapshot);
   }
 
   async generate(user: AuthUser, customerId: string) {
     const built = await this.buildPriceList(user, customerId);
+    const customerFacing = toCustomerFacingPriceListDto(built.snapshot);
     const fileName = `price-list-${customerId}-${Date.now()}.pdf`;
     const relativeDir = join('price-lists', built.customer.branchId);
     const absoluteDir = join(process.cwd(), 'uploads', relativeDir);
@@ -136,7 +134,7 @@ export class CustomerPriceListService {
     const fileUrl = `/uploads/${relativeDir}/${fileName}`.replace(/\\/g, '/');
 
     await writeCustomerPriceListPdf({
-      dto: built.safeDto,
+      dto: customerFacing,
       absoluteFilePath,
     });
 
@@ -147,17 +145,18 @@ export class CustomerPriceListService {
         customerType: built.customer.customerType,
         loyaltyCategory: built.customer.loyaltyCategory,
         loyaltyDiscountPercent: built.loyaltyDiscountPercent,
-        pricingPolicyVersionId: built.safeDto.pricingPolicyVersionId,
-        title: built.safeDto.title,
-        productCount: built.safeDto.productCount,
-        currency: built.safeDto.currency,
+        pricingPolicyVersionId: built.snapshot.pricingPolicyVersionId,
+        title: customerFacing.title,
+        productCount: customerFacing.productCount,
+        currency: customerFacing.currency,
         fileName,
         filePath: absoluteFilePath,
         fileUrl,
         shareStatus: CustomerPriceListShareStatus.GENERATED,
-        snapshotJson: built.safeDto as unknown as Prisma.InputJsonValue,
+        // Internal snapshot retains category/markup/volume for audit; PDF uses customer-facing DTO.
+        snapshotJson: built.snapshot as unknown as Prisma.InputJsonValue,
         generatedById: user.id,
-        generatedAt: new Date(built.safeDto.generatedAt),
+        generatedAt: new Date(built.snapshot.generatedAt),
       },
     });
 
@@ -165,9 +164,11 @@ export class CustomerPriceListService {
       customerId: built.customer.id,
       customerType: built.customer.customerType,
       customerCategory: built.customer.loyaltyCategory,
-      pricingPolicyVersionId: built.safeDto.pricingPolicyVersionId,
-      branchPricingPolicySource: built.safeDto.branchPricingPolicySource,
-      productCount: built.safeDto.productCount,
+      purchaseVolume90Days: built.snapshot.purchaseVolume90Days,
+      categoryMarkupPercent: built.snapshot.categoryMarkupPercent,
+      pricingPolicyVersionId: built.snapshot.pricingPolicyVersionId,
+      branchPricingPolicySource: built.snapshot.branchPricingPolicySource,
+      productCount: customerFacing.productCount,
       generatedBy: user.id,
       channel: null,
       status: CustomerPriceListShareStatus.GENERATED,
@@ -175,7 +176,7 @@ export class CustomerPriceListService {
 
     return {
       priceListId: record.id,
-      ...built.safeDto,
+      ...customerFacing,
       fileUrl: record.fileUrl,
       fileName: record.fileName,
       shareStatus: record.shareStatus,
@@ -186,7 +187,27 @@ export class CustomerPriceListService {
 
   async download(user: AuthUser, priceListId: string) {
     const record = await this.getAccessiblePriceList(user, priceListId);
-    if (!record.filePath || !existsSync(record.filePath)) {
+    if (!record.filePath) {
+      throw new NotFoundException('PDF файл прайс-листа не найден');
+    }
+
+    // Regenerate customer-facing PDF from internal audit snapshot so historical
+    // downloads keep original prices but never expose loyalty/markup/SKU details.
+    const snapshot = record.snapshotJson as InternalCustomerPriceListSnapshot | null;
+    let regenerated = false;
+    if (snapshot && Array.isArray(snapshot.products) && snapshot.products.length > 0) {
+      try {
+        const customerFacing = toCustomerFacingPriceListDto(snapshot);
+        await writeCustomerPriceListPdf({
+          dto: customerFacing,
+          absoluteFilePath: record.filePath,
+        });
+        regenerated = true;
+      } catch {
+        regenerated = false;
+      }
+    }
+    if (!regenerated && !existsSync(record.filePath)) {
       throw new NotFoundException('PDF файл прайс-листа не найден');
     }
 
@@ -239,16 +260,8 @@ export class CustomerPriceListService {
       throw new BadRequestException('У клиента указан некорректный номер телефона.');
     }
 
-    const snapshot = record.snapshotJson as Record<string, unknown> | null;
-    const loyaltyCategoryLabel =
-      typeof snapshot?.loyaltyCategoryLabel === 'string'
-        ? snapshot.loyaltyCategoryLabel
-        : loyaltyCategoryRuLabel(record.loyaltyCategory);
-
     const message = buildPriceListWhatsAppMessage({
       customerName: customer.fullName,
-      customerTypeLabel: customerTypeRuLabel(customer.customerType),
-      loyaltyCategoryLabel,
       branchName: customer.branch.name,
       generatedAt: record.generatedAt,
     });
@@ -427,7 +440,7 @@ export class CustomerPriceListService {
       orderBy: { product: { name: 'asc' } },
     });
 
-    const products: SafePriceListProduct[] = [];
+    const products: InternalPriceListProduct[] = [];
     let pricingPolicyVersionId: string | null = activeVersion.id;
 
     for (const balance of balances) {
@@ -483,7 +496,7 @@ export class CustomerPriceListService {
       throw new BadRequestException('Не найдены товары с настроенными ценами.');
     }
 
-    const safeDto: SafeCustomerPriceListDto = {
+    const snapshot: InternalCustomerPriceListSnapshot = {
       customerId: customer.id,
       customerName: customer.fullName,
       customerPhone: customer.whatsappPhone || customer.phone,
@@ -499,7 +512,7 @@ export class CustomerPriceListService {
       branchPhone: customer.branch.phone,
       branchAddress: customer.branch.address,
       branchPricingPolicySource: branchPolicy.source,
-      title: priceListTitleForCustomerType(customer.customerType, loyaltyCategory),
+      title: priceListTitleForCustomerType(customer.customerType),
       pricingChannel: channel,
       pricingPolicyVersionId,
       generatedAt: new Date().toISOString(),
@@ -510,12 +523,13 @@ export class CustomerPriceListService {
       whatsappApiAvailable: false,
     };
 
-    assertSafePriceListPayload(safeDto as unknown as Record<string, unknown>);
+    // Internal snapshot may retain SKU/category/availability for audit; forbid cost fields only.
+    assertSafePriceListPayload(snapshot as unknown as Record<string, unknown>);
 
     return {
       customer,
       loyaltyDiscountPercent: categoryMarkupPercent,
-      safeDto,
+      snapshot,
     };
   }
 

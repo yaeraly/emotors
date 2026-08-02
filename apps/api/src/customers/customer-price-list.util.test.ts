@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { CustomerLoyaltyCategory, CustomerType } from '@prisma/client';
 import {
+  assertCustomerFacingPriceListPayload,
   assertSafePriceListPayload,
   buildPriceListWhatsAppMessage,
   buildWhatsAppDeepLink,
@@ -11,21 +12,65 @@ import {
   priceListTitleForCustomerType,
   resolvePriceListCategoryMarkupPercent,
   resolvePriceListChannel,
+  toCustomerFacingPriceListDto,
+  type InternalCustomerPriceListSnapshot,
 } from './customer-price-list.util';
 import {
   DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
   calculateFinalSaleUnitPrice,
 } from './customer-loyalty.util';
 
+function sampleInternalSnapshot(
+  overrides: Partial<InternalCustomerPriceListSnapshot> = {},
+): InternalCustomerPriceListSnapshot {
+  return {
+    customerId: 'c1',
+    customerName: 'Айбек Тестов',
+    customerPhone: '+996700000000',
+    customerType: CustomerType.MASTER,
+    customerTypeLabel: 'Мастер',
+    loyaltyCategory: CustomerLoyaltyCategory.STANDARD,
+    loyaltyCategoryLabel: 'Standard',
+    categoryMarkupPercent: 5,
+    loyaltyDiscountPercent: 5,
+    purchaseVolume90Days: 0,
+    branchId: 'b1',
+    branchName: 'Филиал Бишкек',
+    branchPhone: '+996312000000',
+    branchAddress: 'ул. Тестовая 1',
+    branchPricingPolicySource: 'BRANCH',
+    title: 'Прайс для мастера',
+    pricingChannel: 'MASTER',
+    pricingPolicyVersionId: 'v1',
+    generatedAt: '2026-08-02T12:00:00.000Z',
+    currency: 'KGS',
+    validityNote: 'Цены актуальны на дату формирования прайс-листа.',
+    productCount: 1,
+    products: [
+      {
+        productId: 'p1',
+        sku: 'SKU-1',
+        name: 'Полное название товара без обрезки',
+        category: 'Двигатели',
+        unit: 'шт',
+        photoUrl: null,
+        availabilityStatus: 'IN_STOCK',
+        availabilityLabel: 'В наличии',
+        customerPriceKgs: 1144,
+        currency: 'KGS',
+      },
+    ],
+    whatsappApiAvailable: false,
+    ...overrides,
+  };
+}
+
 describe('customer price list utilities', () => {
-  it('maps customer types to price-list titles and channels', () => {
+  it('maps customer types to price-list titles without loyalty category suffix', () => {
     assert.equal(priceListTitleForCustomerType(CustomerType.RETAIL), 'Прайс для розничного клиента');
     assert.equal(priceListTitleForCustomerType(CustomerType.MASTER), 'Прайс для мастера');
     assert.equal(priceListTitleForCustomerType(CustomerType.WHOLESALE), 'Оптовый прайс');
-    assert.equal(
-      priceListTitleForCustomerType(CustomerType.MASTER, CustomerLoyaltyCategory.GOLD),
-      'Прайс для мастера — категория Gold',
-    );
+    assert.doesNotMatch(priceListTitleForCustomerType(CustomerType.MASTER), /Standard|Silver|Gold|VIP|категория/i);
     assert.equal(resolvePriceListChannel(CustomerType.RETAIL), 'RETAIL');
     assert.equal(resolvePriceListChannel(CustomerType.MASTER), 'MASTER');
     assert.equal(resolvePriceListChannel(CustomerType.WHOLESALE), 'WHOLESALE');
@@ -46,18 +91,21 @@ describe('customer price list utilities', () => {
     assert.equal(normalizeWhatsAppPhoneDigits(null), null);
   });
 
-  it('builds WhatsApp deep link without claiming automatic PDF send', () => {
+  it('builds WhatsApp message without loyalty category, volume, or markup', () => {
     const message = buildPriceListWhatsAppMessage({
       customerName: 'Айбек',
-      customerTypeLabel: 'Мастер',
-      loyaltyCategoryLabel: 'Silver',
       branchName: 'Бишкек',
       generatedAt: '01.08.2026, 12:00:00',
     });
     assert.match(message, /Айбек/);
-    assert.match(message, /Мастер/);
-    assert.match(message, /Silver/);
-    assert.match(message, /вручную/);
+    assert.match(message, /Бишкек/);
+    assert.match(message, /01\.08\.2026/);
+    assert.match(message, /менеджеру филиала/);
+    assert.doesNotMatch(message, /Категория/i);
+    assert.doesNotMatch(message, /Standard|Silver|Gold|VIP/);
+    assert.doesNotMatch(message, /Покупки за 90 дней/i);
+    assert.doesNotMatch(message, /наценк/i);
+    assert.doesNotMatch(message, /Markup|Loyalty/i);
     const link = buildWhatsAppDeepLink('996700123456', message);
     assert.match(link, /^https:\/\/wa\.me\/996700123456\?text=/);
   });
@@ -89,7 +137,7 @@ describe('customer price list utilities', () => {
     );
   });
 
-  it('rejects confidential fields in safe DTO', () => {
+  it('rejects confidential cost fields in internal safe DTO', () => {
     assert.doesNotThrow(() =>
       assertSafePriceListPayload({
         customerId: 'c1',
@@ -102,6 +150,61 @@ describe('customer price list utilities', () => {
         costPriceKgs: 50,
       }),
     );
+  });
+
+  it('projects customer-facing DTO without restricted fields and keeps final prices', () => {
+    const snapshot = sampleInternalSnapshot();
+    const dto = toCustomerFacingPriceListDto(snapshot);
+
+    assert.equal(dto.customerName, 'Айбек Тестов');
+    assert.equal(dto.customerTypeLabel, 'Мастер');
+    assert.equal(dto.title, 'Прайс для мастера');
+    assert.equal(dto.products.length, 1);
+    assert.equal(dto.products[0]?.name, 'Полное название товара без обрезки');
+    assert.equal(dto.products[0]?.unit, 'шт');
+    assert.equal(dto.products[0]?.finalPriceKgs, 1144);
+    assert.equal(dto.products[0]?.currency, 'KGS');
+
+    assert.equal('sku' in (dto.products[0] as object), false);
+    assert.equal('category' in (dto.products[0] as object), false);
+    assert.equal('availabilityLabel' in (dto.products[0] as object), false);
+    assert.equal('loyaltyCategory' in dto, false);
+    assert.equal('loyaltyCategoryLabel' in dto, false);
+    assert.equal('purchaseVolume90Days' in dto, false);
+    assert.equal('categoryMarkupPercent' in dto, false);
+    assert.equal('loyaltyDiscountPercent' in dto, false);
+
+    assert.doesNotThrow(() =>
+      assertCustomerFacingPriceListPayload(dto as unknown as Record<string, unknown>),
+    );
+    assert.throws(() =>
+      assertCustomerFacingPriceListPayload({
+        ...dto,
+        loyaltyCategory: 'STANDARD',
+      } as unknown as Record<string, unknown>),
+    );
+    assert.throws(() =>
+      assertCustomerFacingPriceListPayload({
+        products: [{ sku: 'X', name: 'A', finalPriceKgs: 1, currency: 'KGS' }],
+      }),
+    );
+  });
+
+  it('retains internal audit metadata on the snapshot while projecting customer output', () => {
+    const snapshot = sampleInternalSnapshot({
+      loyaltyCategory: CustomerLoyaltyCategory.GOLD,
+      loyaltyCategoryLabel: 'Gold',
+      purchaseVolume90Days: 175_000,
+      categoryMarkupPercent: 1.5,
+    });
+    assert.equal(snapshot.loyaltyCategory, CustomerLoyaltyCategory.GOLD);
+    assert.equal(snapshot.purchaseVolume90Days, 175_000);
+    assert.equal(snapshot.categoryMarkupPercent, 1.5);
+    assert.equal(snapshot.products[0]?.sku, 'SKU-1');
+
+    const dto = toCustomerFacingPriceListDto(snapshot);
+    assert.equal(dto.products[0]?.finalPriceKgs, snapshot.products[0]?.customerPriceKgs);
+    assert.doesNotMatch(JSON.stringify(dto), /Gold|SKU-1|Двигатели|В наличии|1\.5|175000|purchaseVolume/i);
   });
 
   it('calculates master silver final customer price from HQ base and category markup', () => {

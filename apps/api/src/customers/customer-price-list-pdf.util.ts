@@ -2,7 +2,7 @@ import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import PDFDocument from 'pdfkit';
-import type { SafeCustomerPriceListDto } from './customer-price-list.util';
+import type { CustomerFacingPriceListDto } from './customer-price-list.util';
 
 function resolveFontPath(fileName: string) {
   return join(process.cwd(), 'assets', 'fonts', fileName);
@@ -18,9 +18,10 @@ function formatMoney(value: number, currency: string) {
 /**
  * Generate a customer-facing Cyrillic PDF price list.
  * Uses DejaVu fonts for full Cyrillic support.
+ * Does not render internal loyalty, markup, SKU, category, or availability fields.
  */
 export async function writeCustomerPriceListPdf(input: {
-  dto: SafeCustomerPriceListDto;
+  dto: CustomerFacingPriceListDto;
   absoluteFilePath: string;
 }): Promise<{ pageCount: number }> {
   await mkdir(dirname(input.absoluteFilePath), { recursive: true });
@@ -61,11 +62,6 @@ export async function writeCustomerPriceListPdf(input: {
   doc.font('Body').fontSize(10).fillColor('#334155');
   doc.text(`Клиент: ${dto.customerName}`);
   doc.text(`Тип клиента: ${dto.customerTypeLabel}`);
-  doc.text(`Категория: ${dto.loyaltyCategoryLabel}`);
-  doc.text(`Покупки за 90 дней: ${dto.purchaseVolume90Days.toLocaleString('ru-RU')} ${dto.currency}`);
-  if (dto.categoryMarkupPercent > 0) {
-    doc.text(`Применённая наценка: ${dto.categoryMarkupPercent}%`);
-  }
   doc.text(`Дата формирования: ${generatedAt}`);
   doc.text(`Валюта: ${dto.currency}`);
   doc.moveDown(0.4);
@@ -73,23 +69,19 @@ export async function writeCustomerPriceListPdf(input: {
   doc.moveDown(0.8);
 
   const columns = {
-    sku: 40,
-    name: 110,
-    category: 300,
-    unit: 380,
-    availability: 420,
-    price: 490,
+    photo: 40,
+    name: 90,
+    unit: 400,
+    price: 470,
   };
 
   const drawHeader = () => {
     const y = doc.y;
     doc.font('Heading').fontSize(8).fillColor('#0f172a');
-    doc.text('SKU', columns.sku, y, { width: 65 });
-    doc.text('Товар', columns.name, y, { width: 180 });
-    doc.text('Категория', columns.category, y, { width: 70 });
-    doc.text('Ед.', columns.unit, y, { width: 35 });
-    doc.text('Наличие', columns.availability, y, { width: 60 });
-    doc.text('Цена', columns.price, y, { width: 70, align: 'right' });
+    doc.text('Фото', columns.photo, y, { width: 40 });
+    doc.text('Название', columns.name, y, { width: 290 });
+    doc.text('Единица измерения', columns.unit, y, { width: 70 });
+    doc.text('Цена', columns.price, y, { width: 85, align: 'right' });
     doc
       .moveTo(40, y + 12)
       .lineTo(555, y + 12)
@@ -102,7 +94,7 @@ export async function writeCustomerPriceListPdf(input: {
 
   for (const product of dto.products) {
     doc.font('Body').fontSize(8);
-    const rowHeight = Math.max(28, doc.heightOfString(product.name, { width: 180 }) + 8);
+    const rowHeight = Math.max(28, doc.heightOfString(product.name, { width: 290 }) + 8);
 
     if (doc.y + rowHeight > doc.page.height - 60) {
       doc.addPage();
@@ -110,20 +102,14 @@ export async function writeCustomerPriceListPdf(input: {
     }
 
     const y = doc.y;
-    doc.font('Body').fontSize(8).fillColor('#0f172a');
-    doc.text(product.sku, columns.sku, y, { width: 65 });
-    doc.text(product.name, columns.name, y, { width: 180 });
-    doc.text(product.category ?? '—', columns.category, y, { width: 70 });
-    doc.text(product.unit ?? '—', columns.unit, y, { width: 35 });
-    doc
-      .fillColor(product.availabilityStatus === 'OUT_OF_STOCK' ? '#b45309' : '#047857')
-      .text(product.availabilityLabel, columns.availability, y, { width: 60 });
-    doc
-      .fillColor('#0f172a')
-      .text(formatMoney(product.customerPriceKgs, product.currency), columns.price, y, {
-        width: 70,
-        align: 'right',
-      });
+    doc.font('Body').fontSize(8).fillColor('#94a3b8');
+    doc.text(product.photoUrl ? '•' : '—', columns.photo, y, { width: 40 });
+    doc.fillColor('#0f172a').text(product.name, columns.name, y, { width: 290 });
+    doc.text(product.unit ?? '—', columns.unit, y, { width: 70 });
+    doc.text(formatMoney(product.finalPriceKgs, product.currency), columns.price, y, {
+      width: 85,
+      align: 'right',
+    });
     doc.y = y + rowHeight;
   }
 

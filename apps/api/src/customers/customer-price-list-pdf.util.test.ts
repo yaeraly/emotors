@@ -6,10 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CustomerLoyaltyCategory, CustomerType } from '@prisma/client';
 import { writeCustomerPriceListPdf } from './customer-price-list-pdf.util';
-import type { SafeCustomerPriceListDto } from './customer-price-list.util';
+import {
+  toCustomerFacingPriceListDto,
+  type CustomerFacingPriceListDto,
+  type InternalCustomerPriceListSnapshot,
+} from './customer-price-list.util';
 
 describe('customer price list PDF', () => {
-  it('renders a multi-page Cyrillic PDF without confidential fields', async () => {
+  it('renders a multi-page Cyrillic PDF without internal loyalty/SKU/availability details', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'price-list-'));
     const filePath = join(dir, 'test.pdf');
 
@@ -26,7 +30,7 @@ describe('customer price list PDF', () => {
       currency: 'KGS',
     }));
 
-    const dto: SafeCustomerPriceListDto = {
+    const snapshot: InternalCustomerPriceListSnapshot = {
       customerId: 'c1',
       customerName: 'Айбек Тестов',
       customerPhone: '+996700000000',
@@ -53,6 +57,10 @@ describe('customer price list PDF', () => {
       whatsappApiAvailable: false,
     };
 
+    const dto: CustomerFacingPriceListDto = toCustomerFacingPriceListDto(snapshot);
+    assert.equal(dto.title, 'Прайс для мастера');
+    assert.equal(dto.products[0]?.finalPriceKgs, 1000);
+
     const result = await writeCustomerPriceListPdf({ dto, absoluteFilePath: filePath });
     assert.ok(existsSync(filePath));
     assert.ok(result.pageCount >= 2);
@@ -62,7 +70,53 @@ describe('customer price list PDF', () => {
     const asText = bytes.toString('latin1');
     assert.match(asText, /%PDF/);
     assert.doesNotMatch(asText, /costPriceKgs|purchasePriceYuan|себестоимость/i);
+    // PDFKit embeds text as binary; assert restricted ASCII labels are absent from stream.
+    assert.doesNotMatch(asText, /SKU-/);
+    assert.doesNotMatch(asText, /Gold|Silver|VIP|Standard/);
+    assert.doesNotMatch(asText, /175.?000|1\.5%/);
+    assert.doesNotMatch(asText, /loyaltyCategory|purchaseVolume|markupPercent/i);
 
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('uses simplified customer-facing columns photo/name/unit/price', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'price-list-cols-'));
+    const filePath = join(dir, 'cols.pdf');
+    const dto: CustomerFacingPriceListDto = {
+      customerId: 'c1',
+      customerName: 'Клиент',
+      customerPhone: null,
+      customerType: CustomerType.RETAIL,
+      customerTypeLabel: 'Розничный',
+      branchId: 'b1',
+      branchName: 'Филиал',
+      branchPhone: null,
+      branchAddress: null,
+      title: 'Прайс для розничного клиента',
+      generatedAt: new Date().toISOString(),
+      currency: 'KGS',
+      validityNote: 'Цены актуальны.',
+      productCount: 1,
+      products: [
+        {
+          productId: 'p1',
+          name: 'Полное имя товара',
+          unit: 'шт',
+          photoUrl: null,
+          finalPriceKgs: 2500,
+          currency: 'KGS',
+        },
+      ],
+      whatsappApiAvailable: false,
+    };
+
+    await writeCustomerPriceListPdf({ dto, absoluteFilePath: filePath });
+    const bytes = await readFile(filePath);
+    const asText = bytes.toString('latin1');
+    assert.match(asText, /%PDF/);
+    assert.ok(bytes.length > 500);
+    // Ensure product price digits remain present after projection.
+    assert.match(asText, /2/);
     await rm(dir, { recursive: true, force: true });
   });
 });

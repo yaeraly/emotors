@@ -9,7 +9,8 @@ import {
   type SalePricingChannel,
 } from '../sales/sale-customer-pricing.util';
 
-export type SafePriceListProduct = {
+/** Internal product row used for calculation, audit, and history snapshots. */
+export type InternalPriceListProduct = {
   productId: string;
   sku: string;
   name: string;
@@ -22,7 +23,21 @@ export type SafePriceListProduct = {
   currency: string;
 };
 
-export type SafeCustomerPriceListDto = {
+/** Customer-facing product row — only fields needed for the final document. */
+export type CustomerFacingPriceListProduct = {
+  productId: string;
+  name: string;
+  unit: string | null;
+  photoUrl: string | null;
+  finalPriceKgs: number;
+  currency: string;
+};
+
+/** @deprecated Prefer InternalPriceListProduct / CustomerFacingPriceListProduct */
+export type SafePriceListProduct = InternalPriceListProduct;
+
+/** Full internal snapshot retained for audit / history. */
+export type InternalCustomerPriceListSnapshot = {
   customerId: string;
   customerName: string;
   customerPhone: string | null;
@@ -30,9 +45,7 @@ export type SafeCustomerPriceListDto = {
   customerTypeLabel: string;
   loyaltyCategory: CustomerLoyaltyCategory;
   loyaltyCategoryLabel: string;
-  /** Applied category markup percent (0 when branch customization is disabled). */
   categoryMarkupPercent: number;
-  /** @deprecated Use categoryMarkupPercent */
   loyaltyDiscountPercent: number;
   purchaseVolume90Days: number;
   branchId: string;
@@ -47,9 +60,32 @@ export type SafeCustomerPriceListDto = {
   currency: string;
   validityNote: string;
   productCount: number;
-  products: SafePriceListProduct[];
+  products: InternalPriceListProduct[];
   whatsappApiAvailable: boolean;
 };
+
+/** Customer-facing API / PDF / WhatsApp document payload. */
+export type CustomerFacingPriceListDto = {
+  customerId: string;
+  customerName: string;
+  customerPhone: string | null;
+  customerType: CustomerType;
+  customerTypeLabel: string;
+  branchId: string;
+  branchName: string;
+  branchPhone: string | null;
+  branchAddress: string | null;
+  title: string;
+  generatedAt: string;
+  currency: string;
+  validityNote: string;
+  productCount: number;
+  products: CustomerFacingPriceListProduct[];
+  whatsappApiAvailable: boolean;
+};
+
+/** @deprecated Prefer InternalCustomerPriceListSnapshot / CustomerFacingPriceListDto */
+export type SafeCustomerPriceListDto = InternalCustomerPriceListSnapshot;
 
 export const PRICE_LIST_VALIDITY_NOTE =
   'Цены актуальны на дату формирования прайс-листа.\n\nНаличие и цены могут измениться. Уточняйте информацию у менеджера филиала.';
@@ -70,27 +106,16 @@ export function isBranchPriceListCustomerType(
   );
 }
 
-export function priceListTitleForCustomerType(
-  customerType: CustomerType,
-  loyaltyCategory?: CustomerLoyaltyCategory,
-): string {
-  let base: string;
+export function priceListTitleForCustomerType(customerType: CustomerType): string {
   switch (customerType) {
     case CustomerType.MASTER:
-      base = 'Прайс для мастера';
-      break;
+      return 'Прайс для мастера';
     case CustomerType.WHOLESALE:
-      base = 'Оптовый прайс';
-      break;
+      return 'Оптовый прайс';
     case CustomerType.RETAIL:
     default:
-      base = 'Прайс для розничного клиента';
-      break;
+      return 'Прайс для розничного клиента';
   }
-  if (loyaltyCategory) {
-    return `${base} — категория ${loyaltyCategoryRuLabel(loyaltyCategory)}`;
-  }
-  return base;
 }
 
 export function customerTypeRuLabel(customerType: CustomerType): string {
@@ -157,8 +182,6 @@ export function normalizeWhatsAppPhoneDigits(rawPhone: string | null | undefined
 
 export function buildPriceListWhatsAppMessage(input: {
   customerName: string;
-  customerTypeLabel: string;
-  loyaltyCategoryLabel: string;
   branchName: string;
   generatedAt: Date | string;
 }): string {
@@ -172,8 +195,6 @@ export function buildPriceListWhatsAppMessage(input: {
     '',
     'Отправляем актуальный прайс EMOTORS.',
     '',
-    `Тип клиента: ${input.customerTypeLabel}`,
-    `Категория: ${input.loyaltyCategoryLabel}`,
     `Филиал: ${input.branchName}`,
     `Дата формирования: ${generatedAt}`,
     '',
@@ -207,7 +228,7 @@ export function resolvePriceListChannel(customerType: CustomerType): SalePricing
   return resolvePricingChannelFromCustomerType(customerType);
 }
 
-const FORBIDDEN_PRICE_LIST_KEYS = new Set([
+const FORBIDDEN_COST_KEYS = new Set([
   'costpricekgs',
   'finalcostkgs',
   'fifocost',
@@ -225,6 +246,32 @@ const FORBIDDEN_PRICE_LIST_KEYS = new Set([
   'себестоимость',
 ]);
 
+/** Fields that must never appear in customer-facing API/PDF payloads. */
+const FORBIDDEN_CUSTOMER_FACING_KEYS = new Set([
+  ...FORBIDDEN_COST_KEYS,
+  'sku',
+  'productcategory',
+  'category',
+  'stockquantity',
+  'availability',
+  'availabilitystatus',
+  'availabilitylabel',
+  'loyaltycategory',
+  'loyaltycategorylabel',
+  'customercategory',
+  'purchasevolume90days',
+  'purchasevolume',
+  'categorymarkuppercent',
+  'loyaltydiscountpercent',
+  'markuppercent',
+  'markupamount',
+  'markupamountkgs',
+  'baseprice',
+  'basepricekgs',
+  'pricingchannel',
+  'branchpricingpolicysource',
+]);
+
 export function assertSafePriceListPayload(payload: Record<string, unknown>) {
   const visit = (value: unknown) => {
     if (!value || typeof value !== 'object') return;
@@ -233,13 +280,68 @@ export function assertSafePriceListPayload(payload: Record<string, unknown>) {
       return;
     }
     for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-      if (FORBIDDEN_PRICE_LIST_KEYS.has(key.toLowerCase())) {
+      if (FORBIDDEN_COST_KEYS.has(key.toLowerCase())) {
         throw new Error(`Price list payload must not expose confidential field: ${key}`);
       }
       visit(nested);
     }
   };
   visit(payload);
+}
+
+export function assertCustomerFacingPriceListPayload(payload: Record<string, unknown>) {
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (FORBIDDEN_CUSTOMER_FACING_KEYS.has(key.toLowerCase())) {
+        throw new Error(`Customer-facing price list must not expose field: ${key}`);
+      }
+      visit(nested);
+    }
+  };
+  visit(payload);
+}
+
+export function toCustomerFacingProduct(
+  product: InternalPriceListProduct,
+): CustomerFacingPriceListProduct {
+  return {
+    productId: product.productId,
+    name: product.name,
+    unit: product.unit,
+    photoUrl: product.photoUrl,
+    finalPriceKgs: product.customerPriceKgs,
+    currency: product.currency,
+  };
+}
+
+export function toCustomerFacingPriceListDto(
+  snapshot: InternalCustomerPriceListSnapshot,
+): CustomerFacingPriceListDto {
+  const dto: CustomerFacingPriceListDto = {
+    customerId: snapshot.customerId,
+    customerName: snapshot.customerName,
+    customerPhone: snapshot.customerPhone,
+    customerType: snapshot.customerType,
+    customerTypeLabel: snapshot.customerTypeLabel,
+    branchId: snapshot.branchId,
+    branchName: snapshot.branchName,
+    branchPhone: snapshot.branchPhone,
+    branchAddress: snapshot.branchAddress,
+    title: priceListTitleForCustomerType(snapshot.customerType),
+    generatedAt: snapshot.generatedAt,
+    currency: snapshot.currency,
+    validityNote: snapshot.validityNote,
+    productCount: snapshot.productCount,
+    products: snapshot.products.map(toCustomerFacingProduct),
+    whatsappApiAvailable: snapshot.whatsappApiAvailable,
+  };
+  assertCustomerFacingPriceListPayload(dto as unknown as Record<string, unknown>);
+  return dto;
 }
 
 export function formatAvailabilityLabel(availableQty: number): {

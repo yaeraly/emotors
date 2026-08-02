@@ -19,6 +19,7 @@ type SearchCustomer = {
   branchName: string;
 };
 
+/** Customer-facing preview / generated document payload. */
 type PriceListPreview = {
   priceListId?: string;
   customerId: string;
@@ -26,14 +27,12 @@ type PriceListPreview = {
   customerPhone: string | null;
   customerType: string;
   customerTypeLabel: string;
-  loyaltyCategory: string;
-  loyaltyCategoryLabel: string;
-  categoryMarkupPercent?: number;
-  loyaltyDiscountPercent: number;
-  purchaseVolume90Days?: number;
   branchName: string;
+  branchPhone?: string | null;
+  branchAddress?: string | null;
   title: string;
   generatedAt: string;
+  validityNote?: string;
   productCount: number;
   fileUrl?: string | null;
   fileName?: string | null;
@@ -41,12 +40,10 @@ type PriceListPreview = {
   whatsappRequiresManualPdfAttachment?: boolean;
   products: Array<{
     productId: string;
-    sku: string;
     name: string;
-    category: string | null;
     unit: string | null;
-    availabilityLabel: string;
-    customerPriceKgs: number;
+    photoUrl?: string | null;
+    finalPriceKgs: number;
     currency: string;
   }>;
 };
@@ -104,10 +101,6 @@ export function SendPriceListModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open, selected, initialCustomerId]);
 
-  function appliedMarkupPercent(data: PriceListPreview) {
-    return data.categoryMarkupPercent ?? data.loyaltyDiscountPercent ?? 0;
-  }
-
   async function runSearch(term: string) {
     try {
       const data = await apiFetch<SearchCustomer[]>(
@@ -139,9 +132,8 @@ export function SendPriceListModal({
           phone: previewData.customerPhone ?? '',
           customerType: previewData.customerType,
           customerTypeLabel: previewData.customerTypeLabel,
-          loyaltyCategory: previewData.loyaltyCategory,
-          loyaltyCategoryLabel: previewData.loyaltyCategoryLabel,
-          purchaseVolume90Days: previewData.purchaseVolume90Days,
+          loyaltyCategory: '',
+          loyaltyCategoryLabel: '',
           status: 'ACTIVE',
           branchId: '',
           branchName: previewData.branchName,
@@ -337,46 +329,38 @@ export function SendPriceListModal({
         ) : (
           <div className="mt-5 space-y-4">
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+              <p className="text-base font-bold text-slate-950">EMOTORS</p>
               <p>
-                <span className="font-semibold">{t('crm.fullName')}:</span> {selected.fullName}
+                <span className="font-semibold">{t('crm.branch')}:</span>{' '}
+                {preview?.branchName ?? selected.branchName}
               </p>
+              {preview?.branchPhone ? (
+                <p>
+                  <span className="font-semibold">{t('crm.phone')}:</span> {preview.branchPhone}
+                </p>
+              ) : null}
+              {preview?.branchAddress ? <p>{preview.branchAddress}</p> : null}
               <p>
-                <span className="font-semibold">{t('crm.phone')}:</span>{' '}
-                {selected.phone || preview?.customerPhone || '—'}
+                <span className="font-semibold">{t('crm.fullName')}:</span>{' '}
+                {preview?.customerName ?? selected.fullName}
               </p>
               <p>
                 <span className="font-semibold">{t('customers.customerType')}:</span>{' '}
-                {selected.customerTypeLabel}
-              </p>
-              <p>
-                <span className="font-semibold">{t('customers.loyaltyCategory')}:</span>{' '}
-                {selected.loyaltyCategoryLabel}
+                {preview?.customerTypeLabel ?? selected.customerTypeLabel}
               </p>
               {preview ? (
                 <>
-                  <p>
-                    <span className="font-semibold">{t('customers.purchaseVolume90Days')}:</span>{' '}
-                    {(preview.purchaseVolume90Days ?? selected.purchaseVolume90Days ?? 0).toLocaleString(
-                      'ru-RU',
-                    )}{' '}
-                    KGS
-                  </p>
-                  <p>
-                    <span className="font-semibold">{t('customers.currentAdditionalMarkup')}:</span>{' '}
-                    {appliedMarkupPercent(preview)}%
-                  </p>
                   <p>
                     <span className="font-semibold">{t('crm.priceListTitle')}:</span>{' '}
                     {preview.title}
                   </p>
                   <p>
-                    <span className="font-semibold">{t('crm.priceListProductCount')}:</span>{' '}
-                    {preview.productCount}
-                  </p>
-                  <p>
                     <span className="font-semibold">{t('crm.priceListGeneratedAt')}:</span>{' '}
                     {new Date(preview.generatedAt).toLocaleString('ru-RU')}
                   </p>
+                  {preview.validityNote ? (
+                    <p className="mt-2 whitespace-pre-line text-slate-600">{preview.validityNote}</p>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -386,20 +370,33 @@ export function SendPriceListModal({
                 <table className="min-w-full text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-3 py-2">SKU</th>
-                      <th className="px-3 py-2">{t('crm.fullName')}</th>
-                      <th className="px-3 py-2">{t('crm.priceListAvailability')}</th>
-                      <th className="px-3 py-2 text-right">{t('crm.priceListPrice')}</th>
+                      <th className="w-16 px-3 py-2">{t('inventory.photo')}</th>
+                      <th className="px-3 py-2">{t('inventory.name')}</th>
+                      <th className="w-28 px-3 py-2">{t('inventory.unit')}</th>
+                      <th className="w-32 px-3 py-2 text-right">{t('crm.priceListPrice')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {preview.products.slice(0, 50).map((product) => (
                       <tr key={product.productId}>
-                        <td className="px-3 py-2 text-slate-600">{product.sku}</td>
-                        <td className="px-3 py-2 font-medium text-slate-900">{product.name}</td>
-                        <td className="px-3 py-2 text-slate-600">{product.availabilityLabel}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-slate-900">
-                          {product.customerPriceKgs.toLocaleString('ru-RU')} {product.currency}
+                        <td className="w-16 px-3 py-2 text-slate-400">
+                          {product.photoUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={product.photoUrl}
+                              alt=""
+                              className="h-10 w-10 rounded object-cover"
+                            />
+                          ) : (
+                            '—'
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-medium text-slate-900 break-words">
+                          {product.name}
+                        </td>
+                        <td className="w-28 px-3 py-2 text-slate-600">{product.unit ?? '—'}</td>
+                        <td className="w-32 px-3 py-2 text-right font-semibold tabular-nums text-slate-900">
+                          {product.finalPriceKgs.toLocaleString('ru-RU')} {product.currency}
                         </td>
                       </tr>
                     ))}
