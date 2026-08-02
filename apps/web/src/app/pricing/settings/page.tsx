@@ -26,10 +26,17 @@ type LoyaltySettings = {
   silverThresholdKgs: number;
   goldThresholdKgs: number;
   vipThresholdKgs: number;
-  standardDiscountPercent: number;
-  silverDiscountPercent: number;
-  goldDiscountPercent: number;
-  vipDiscountPercent: number;
+  standardMaxKgs: number;
+  silverMaxKgs: number;
+  goldMaxKgs: number;
+  vipMaxKgs: number | null;
+  standardMarkupPercent: number;
+  silverMarkupPercent: number;
+  goldMarkupPercent: number;
+  vipMarkupPercent: number;
+  minAllowedMarkupPercent: number;
+  maxAllowedMarkupPercent: number;
+  branchCustomizationEnabled: boolean;
   allowDowngrade: boolean;
 };
 
@@ -102,15 +109,25 @@ export default function PricingSettingsPage() {
       const updated = await apiFetch<LoyaltySettings>('/pricing/loyalty-settings', {
         method: 'PUT',
         body: JSON.stringify({
-          purchaseWindow: loyaltyDraft.purchaseWindow,
+          purchaseWindow: loyaltyDraft.purchaseWindow ?? 'ROLLING_90_DAYS',
           standardThresholdKgs: Number(loyaltyDraft.standardThresholdKgs ?? 0),
           silverThresholdKgs: Number(loyaltyDraft.silverThresholdKgs ?? 0),
           goldThresholdKgs: Number(loyaltyDraft.goldThresholdKgs ?? 0),
           vipThresholdKgs: Number(loyaltyDraft.vipThresholdKgs ?? 0),
-          standardDiscountPercent: Number(loyaltyDraft.standardDiscountPercent ?? 0),
-          silverDiscountPercent: Number(loyaltyDraft.silverDiscountPercent ?? 0),
-          goldDiscountPercent: Number(loyaltyDraft.goldDiscountPercent ?? 0),
-          vipDiscountPercent: Number(loyaltyDraft.vipDiscountPercent ?? 0),
+          standardMaxKgs: Number(loyaltyDraft.standardMaxKgs ?? 0),
+          silverMaxKgs: Number(loyaltyDraft.silverMaxKgs ?? 0),
+          goldMaxKgs: Number(loyaltyDraft.goldMaxKgs ?? 0),
+          vipMaxKgs:
+            loyaltyDraft.vipMaxKgs == null || Number.isNaN(Number(loyaltyDraft.vipMaxKgs))
+              ? null
+              : Number(loyaltyDraft.vipMaxKgs),
+          standardMarkupPercent: Number(loyaltyDraft.standardMarkupPercent ?? 0),
+          silverMarkupPercent: Number(loyaltyDraft.silverMarkupPercent ?? 0),
+          goldMarkupPercent: Number(loyaltyDraft.goldMarkupPercent ?? 0),
+          vipMarkupPercent: Number(loyaltyDraft.vipMarkupPercent ?? 0),
+          minAllowedMarkupPercent: Number(loyaltyDraft.minAllowedMarkupPercent ?? 0),
+          maxAllowedMarkupPercent: Number(loyaltyDraft.maxAllowedMarkupPercent ?? 0),
+          branchCustomizationEnabled: Boolean(loyaltyDraft.branchCustomizationEnabled),
           allowDowngrade: Boolean(loyaltyDraft.allowDowngrade),
         }),
       });
@@ -246,12 +263,13 @@ export default function PricingSettingsPage() {
       {loyalty ? (
         <div className="mt-6 max-w-2xl space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">{t('pricing.loyaltySettings')}</h2>
+          <p className="text-sm text-slate-600">{t('pricing.loyaltyBranchMarkupHint')}</p>
 
           <label className="block text-sm">
             <span className="mb-1 block text-slate-500">{t('pricing.loyaltyPurchaseWindow')}</span>
             <select
               disabled={!canManage}
-              value={loyaltyDraft.purchaseWindow ?? 'TOTAL'}
+              value={loyaltyDraft.purchaseWindow ?? 'ROLLING_90_DAYS'}
               onChange={(e) =>
                 setLoyaltyDraft((d) => ({
                   ...d,
@@ -270,10 +288,13 @@ export default function PricingSettingsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             {(
               [
-                ['standardThresholdKgs', 'Standard'],
-                ['silverThresholdKgs', 'Silver'],
-                ['goldThresholdKgs', 'Gold'],
-                ['vipThresholdKgs', 'VIP'],
+                ['standardThresholdKgs', 'Standard min'],
+                ['standardMaxKgs', 'Standard max'],
+                ['silverThresholdKgs', 'Silver min'],
+                ['silverMaxKgs', 'Silver max'],
+                ['goldThresholdKgs', 'Gold min'],
+                ['goldMaxKgs', 'Gold max'],
+                ['vipThresholdKgs', 'VIP min'],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="block text-sm">
@@ -292,14 +313,14 @@ export default function PricingSettingsPage() {
             ))}
           </div>
 
-          <p className="text-sm font-semibold text-slate-700">{t('pricing.loyaltyDiscounts')}</p>
+          <p className="text-sm font-semibold text-slate-700">{t('pricing.loyaltyMarkups')}</p>
           <div className="grid gap-4 md:grid-cols-2">
             {(
               [
-                ['standardDiscountPercent', 'Standard'],
-                ['silverDiscountPercent', 'Silver'],
-                ['goldDiscountPercent', 'Gold'],
-                ['vipDiscountPercent', 'VIP'],
+                ['standardMarkupPercent', 'Standard'],
+                ['silverMarkupPercent', 'Silver'],
+                ['goldMarkupPercent', 'Gold'],
+                ['vipMarkupPercent', 'VIP'],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="block text-sm">
@@ -309,6 +330,7 @@ export default function PricingSettingsPage() {
                   disabled={!canManage}
                   min={0}
                   max={100}
+                  step="0.1"
                   value={loyaltyDraft[key] ?? 0}
                   onChange={(e) =>
                     setLoyaltyDraft((d) => ({ ...d, [key]: Number(e.target.value) }))
@@ -318,6 +340,61 @@ export default function PricingSettingsPage() {
               </label>
             ))}
           </div>
+
+          <p className="text-sm font-semibold text-slate-700">{t('pricing.loyaltyMarkupLimits')}</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block text-slate-500">{t('pricing.loyaltyMinAllowedMarkup')}</span>
+              <input
+                type="number"
+                disabled={!canManage}
+                min={0}
+                max={100}
+                step="0.1"
+                value={loyaltyDraft.minAllowedMarkupPercent ?? 0}
+                onChange={(e) =>
+                  setLoyaltyDraft((d) => ({
+                    ...d,
+                    minAllowedMarkupPercent: Number(e.target.value),
+                  }))
+                }
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-slate-500">{t('pricing.loyaltyMaxAllowedMarkup')}</span>
+              <input
+                type="number"
+                disabled={!canManage}
+                min={0}
+                max={100}
+                step="0.1"
+                value={loyaltyDraft.maxAllowedMarkupPercent ?? 0}
+                onChange={(e) =>
+                  setLoyaltyDraft((d) => ({
+                    ...d,
+                    maxAllowedMarkupPercent: Number(e.target.value),
+                  }))
+                }
+                className="w-full rounded-lg border border-slate-300 px-3 py-2"
+              />
+            </label>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              disabled={!canManage}
+              checked={Boolean(loyaltyDraft.branchCustomizationEnabled)}
+              onChange={(e) =>
+                setLoyaltyDraft((d) => ({
+                  ...d,
+                  branchCustomizationEnabled: e.target.checked,
+                }))
+              }
+            />
+            {t('pricing.branchCustomizationEnabled')}
+          </label>
 
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input

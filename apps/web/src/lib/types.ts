@@ -285,6 +285,8 @@ export type Customer = {
   loyaltyCategory?: CustomerLoyaltyCategory;
   customerCategory?: CustomerLoyaltyCategory;
   purchaseVolume?: number;
+  currentMarkupPercent?: number;
+  currentAdditionalMarkup?: number;
   currentDiscountPercent?: number;
   currentDiscount?: number;
   notes?: string | null;

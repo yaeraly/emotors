@@ -1162,6 +1162,7 @@ model Branch {
   convertedFromCustomers    Customer[]                    @relation("CustomerFranchiseConversion")
   hqB2bSales                HqB2bSale[]
   customerPriceLists        CustomerPriceList[]
+  branchPricingPolicy       BranchPricingPolicy?
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
   deletedAt                 DateTime?
@@ -1334,23 +1335,62 @@ model PricingMasterSettings {
 
 /// HQ CEO-configured customer loyalty thresholds and discount percents.
 model LoyaltyProgramSettings {
-  id                        String                @id @default(cuid())
-  singletonKey              String                @unique @default("DEFAULT")
-  purchaseWindow            LoyaltyPurchaseWindow @default(TOTAL)
-  standardThresholdKgs      Decimal               @default(0) @db.Decimal(14, 2)
-  silverThresholdKgs        Decimal               @default(0) @db.Decimal(14, 2)
-  goldThresholdKgs          Decimal               @default(0) @db.Decimal(14, 2)
-  vipThresholdKgs           Decimal               @default(0) @db.Decimal(14, 2)
-  standardDiscountPercent   Decimal               @default(0) @db.Decimal(8, 2)
-  silverDiscountPercent     Decimal               @default(0) @db.Decimal(8, 2)
-  goldDiscountPercent       Decimal               @default(0) @db.Decimal(8, 2)
-  vipDiscountPercent        Decimal               @default(0) @db.Decimal(8, 2)
-  allowDowngrade            Boolean               @default(false)
-  updatedById               String?
-  updatedBy                 User?                 @relation("LoyaltyProgramSettingsUpdater", fields: [updatedById], references: [id])
-  createdAt                 DateTime              @default(now())
-  updatedAt                 DateTime              @updatedAt
+  id                         String                @id @default(cuid())
+  singletonKey               String                @unique @default("DEFAULT")
+  purchaseWindow             LoyaltyPurchaseWindow @default(ROLLING_90_DAYS)
+  standardThresholdKgs       Decimal               @default(0) @db.Decimal(14, 2)
+  silverThresholdKgs         Decimal               @default(50000) @db.Decimal(14, 2)
+  goldThresholdKgs           Decimal               @default(150000) @db.Decimal(14, 2)
+  vipThresholdKgs            Decimal               @default(300000) @db.Decimal(14, 2)
+  standardMaxKgs             Decimal               @default(49999) @db.Decimal(14, 2)
+  silverMaxKgs               Decimal               @default(149999) @db.Decimal(14, 2)
+  goldMaxKgs                 Decimal               @default(299999) @db.Decimal(14, 2)
+  vipMaxKgs                  Decimal?              @db.Decimal(14, 2)
+  /// @deprecated Prefer markup fields. Kept for backward-compatible reads.
+  standardDiscountPercent    Decimal               @default(0) @db.Decimal(8, 2)
+  silverDiscountPercent      Decimal               @default(0) @db.Decimal(8, 2)
+  goldDiscountPercent        Decimal               @default(0) @db.Decimal(8, 2)
+  vipDiscountPercent         Decimal               @default(0) @db.Decimal(8, 2)
+  standardMarkupPercent      Decimal               @default(5) @db.Decimal(8, 2)
+  silverMarkupPercent        Decimal               @default(3) @db.Decimal(8, 2)
+  goldMarkupPercent          Decimal               @default(1.5) @db.Decimal(8, 2)
+  vipMarkupPercent           Decimal               @default(0) @db.Decimal(8, 2)
+  minAllowedMarkupPercent    Decimal               @default(0) @db.Decimal(8, 2)
+  maxAllowedMarkupPercent    Decimal               @default(20) @db.Decimal(8, 2)
+  branchCustomizationEnabled Boolean               @default(true)
+  allowDowngrade             Boolean               @default(false)
+  updatedById                String?
+  updatedBy                  User?                 @relation("LoyaltyProgramSettingsUpdater", fields: [updatedById], references: [id])
+  createdAt                  DateTime              @default(now())
+  updatedAt                  DateTime              @updatedAt
 
+  @@index([updatedById])
+}
+
+/// Branch CEO customer pricing policy: loyalty thresholds + additional selling-price markup.
+/// Never affects себестоимость / FIFO / inventory valuation.
+model BranchPricingPolicy {
+  id                      String   @id @default(cuid())
+  branchId                String   @unique
+  branch                  Branch   @relation(fields: [branchId], references: [id])
+  standardMinKgs          Decimal  @default(0) @db.Decimal(14, 2)
+  standardMaxKgs          Decimal  @default(49999) @db.Decimal(14, 2)
+  silverMinKgs            Decimal  @default(50000) @db.Decimal(14, 2)
+  silverMaxKgs            Decimal  @default(149999) @db.Decimal(14, 2)
+  goldMinKgs              Decimal  @default(150000) @db.Decimal(14, 2)
+  goldMaxKgs              Decimal  @default(299999) @db.Decimal(14, 2)
+  vipMinKgs               Decimal  @default(300000) @db.Decimal(14, 2)
+  vipMaxKgs               Decimal? @db.Decimal(14, 2)
+  standardMarkupPercent   Decimal  @default(5) @db.Decimal(8, 2)
+  silverMarkupPercent     Decimal  @default(3) @db.Decimal(8, 2)
+  goldMarkupPercent       Decimal  @default(1.5) @db.Decimal(8, 2)
+  vipMarkupPercent        Decimal  @default(0) @db.Decimal(8, 2)
+  updatedById             String?
+  updatedBy               User?    @relation("BranchPricingPolicyUpdater", fields: [updatedById], references: [id])
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([branchId])
   @@index([updatedById])
 }
 
@@ -1462,6 +1502,7 @@ model User {
   pricingSimulationsCreated                       PricingSimulation[]                 @relation("PricingSimulationCreator")
   pricingMasterSettingsUpdated                    PricingMasterSettings[]             @relation("PricingMasterSettingsUpdater")
   loyaltyProgramSettingsUpdated                   LoyaltyProgramSettings[]            @relation("LoyaltyProgramSettingsUpdater")
+  branchPricingPoliciesUpdated                    BranchPricingPolicy[]               @relation("BranchPricingPolicyUpdater")
   customerPriceListsGenerated                     CustomerPriceList[]                 @relation("CustomerPriceListGenerator")
   kpiTargets                                      BranchKpiTarget[]                   @relation("KpiTargetCreator")
   npsSurveys                                      NpsSurvey[]                         @relation("NpsSurveyCreator")

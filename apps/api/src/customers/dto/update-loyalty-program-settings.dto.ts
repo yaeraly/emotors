@@ -1,6 +1,6 @@
 import { LoyaltyPurchaseWindow } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsNumber, IsOptional, Max, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsNumber, IsOptional, Max, Min, ValidateIf } from 'class-validator';
 
 export class UpdateLoyaltyProgramSettingsDto {
   @IsOptional()
@@ -35,9 +35,82 @@ export class UpdateLoyaltyProgramSettingsDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  standardMaxKgs?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  silverMaxKgs?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  goldMaxKgs?: number;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null && value !== undefined && value !== '')
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  vipMaxKgs?: number | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  standardMarkupPercent?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  silverMarkupPercent?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  goldMarkupPercent?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  vipMarkupPercent?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  minAllowedMarkupPercent?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  maxAllowedMarkupPercent?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  branchCustomizationEnabled?: boolean;
+
+  /** @deprecated Prefer markup fields */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
   @Max(100)
   standardDiscountPercent?: number;
 
+  /** @deprecated Prefer markup fields */
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -45,6 +118,7 @@ export class UpdateLoyaltyProgramSettingsDto {
   @Max(100)
   silverDiscountPercent?: number;
 
+  /** @deprecated Prefer markup fields */
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
@@ -52,6 +126,7 @@ export class UpdateLoyaltyProgramSettingsDto {
   @Max(100)
   goldDiscountPercent?: number;
 
+  /** @deprecated Prefer markup fields */
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

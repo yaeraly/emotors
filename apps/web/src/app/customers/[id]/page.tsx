@@ -409,8 +409,18 @@ export default function CustomerDetailPage() {
                     )}
                   />
                   <Info
-                    label={t('customers.currentDiscount')}
-                    value={`${Number((customer as { currentDiscountPercent?: number; currentDiscount?: number }).currentDiscountPercent ?? (customer as { currentDiscount?: number }).currentDiscount ?? 0)}%`}
+                    label={t('customers.currentAdditionalMarkup')}
+                    value={`${Number(
+                      (customer as { currentMarkupPercent?: number; currentAdditionalMarkup?: number })
+                        .currentMarkupPercent ??
+                        (customer as { currentAdditionalMarkup?: number }).currentAdditionalMarkup ??
+                        (customer as { currentDiscountPercent?: number }).currentDiscountPercent ??
+                        0,
+                    )}%`}
+                  />
+                  <Info
+                    label={t('customers.finalPriceType')}
+                    value={t(customerTypeLabelKey(customer.customerType))}
                   />
                   <Info
                     label={t('customers.lastPurchaseDate')}
@@ -435,7 +445,7 @@ export default function CustomerDetailPage() {
                     value={customer.totalPurchases}
                   />
                   <Amount
-                    label={t('customers.purchaseVolume')}
+                    label={t('customers.purchaseVolume90Days')}
                     value={Number(
                       (customer as { purchaseVolume?: number }).purchaseVolume ??
                         customer.totalPurchases ??

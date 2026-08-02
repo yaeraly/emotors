@@ -12,6 +12,7 @@ import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
   appliedPriceLabelKey,
   customerTypeLabelKey,
+  loyaltyCategoryLabelKey,
   preserveSaleLineQuantity,
   resolvePricingChannelFromCustomerType,
 } from '@/lib/sale-customer-pricing';
@@ -291,10 +292,33 @@ export default function NewSalePage() {
   }
 
   async function handleCustomerSelect(customer: SaleCustomerOption) {
-    setSelectedCustomer(customer);
     setError('');
-    if (items.length > 0) {
-      await recalculateDraftPricesForCustomer(customer);
+    try {
+      const refreshed = await apiFetch<Customer>(`/customers/${customer.id}`);
+      const nextCustomer: SaleCustomerOption = {
+        ...customer,
+        customerType:
+          refreshed.customerType === 'WHOLESALE'
+            ? 'WHOLESALE'
+            : refreshed.customerType === 'MASTER'
+              ? 'MASTER'
+              : 'RETAIL',
+        loyaltyCategory: refreshed.loyaltyCategory ?? refreshed.customerCategory,
+        customerCategory: refreshed.customerCategory ?? refreshed.loyaltyCategory,
+        currentMarkupPercent: refreshed.currentMarkupPercent,
+        currentAdditionalMarkup: refreshed.currentAdditionalMarkup,
+        currentDiscountPercent: refreshed.currentDiscountPercent,
+        totalDebtAmount: Number(refreshed.totalDebtAmount ?? customer.totalDebtAmount),
+      };
+      setSelectedCustomer(nextCustomer);
+      if (items.length > 0) {
+        await recalculateDraftPricesForCustomer(nextCustomer);
+      }
+    } catch {
+      setSelectedCustomer(customer);
+      if (items.length > 0) {
+        await recalculateDraftPricesForCustomer(customer);
+      }
     }
   }
 
@@ -719,6 +743,13 @@ export default function NewSalePage() {
               : refreshedCustomer.customerType === 'MASTER'
                 ? 'MASTER'
                 : 'RETAIL',
+          loyaltyCategory:
+            refreshedCustomer.loyaltyCategory ?? refreshedCustomer.customerCategory,
+          customerCategory:
+            refreshedCustomer.customerCategory ?? refreshedCustomer.loyaltyCategory,
+          currentMarkupPercent: refreshedCustomer.currentMarkupPercent,
+          currentAdditionalMarkup: refreshedCustomer.currentAdditionalMarkup,
+          currentDiscountPercent: refreshedCustomer.currentDiscountPercent,
           totalDebtAmount: Number(refreshedCustomer.totalDebtAmount ?? 0),
           hasOverdueInstallment: selectedCustomer.hasOverdueInstallment,
         };
@@ -827,6 +858,24 @@ export default function NewSalePage() {
                     <p className="mt-2 text-sm text-slate-600">
                       {t('customers.customerType')}:{' '}
                       {t(customerTypeLabelKey(selectedCustomer.customerType))}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {t('customers.loyaltyCategory')}:{' '}
+                      {t(
+                        loyaltyCategoryLabelKey(
+                          selectedCustomer.loyaltyCategory ?? selectedCustomer.customerCategory,
+                        ),
+                      )}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {t('customers.currentAdditionalMarkup')}:{' '}
+                      {Number(
+                        selectedCustomer.currentMarkupPercent ??
+                          selectedCustomer.currentAdditionalMarkup ??
+                          selectedCustomer.currentDiscountPercent ??
+                          0,
+                      )}
+                      %
                     </p>
                     <p className="mt-1 text-sm text-slate-600">
                       {t('sales.appliedPriceType')}:{' '}

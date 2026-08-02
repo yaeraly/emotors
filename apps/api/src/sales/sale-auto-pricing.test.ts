@@ -1,20 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { CustomerLoyaltyCategory, CustomerType } from '@prisma/client';
-import { calculateFinalSaleUnitPrice, getLoyaltyDiscountPercent } from '../customers/customer-loyalty.util';
+import {
+  calculateFinalSaleUnitPrice,
+  DEFAULT_LOYALTY_MARKUPS,
+  getLoyaltyMarkupPercent,
+} from '../customers/customer-loyalty.util';
 import {
   assertCustomerTypePriceOrder,
   resolvePricingChannelFromCustomerType,
 } from './sale-customer-pricing.util';
 
 describe('branch sale automatic pricing', () => {
-  const discounts = {
-    standardDiscountPercent: 0,
-    silverDiscountPercent: 2,
-    goldDiscountPercent: 4,
-    vipDiscountPercent: 6,
-  };
-
   it('selects retail/master/wholesale base prices by customer type', () => {
     assert.equal(resolvePricingChannelFromCustomerType(CustomerType.RETAIL), 'RETAIL');
     assert.equal(resolvePricingChannelFromCustomerType(CustomerType.MASTER), 'MASTER');
@@ -31,35 +28,46 @@ describe('branch sale automatic pricing', () => {
     );
   });
 
-  it('applies configurable loyalty discount on backend final price', () => {
-    const discount = getLoyaltyDiscountPercent(CustomerLoyaltyCategory.GOLD, discounts);
+  it('applies branch loyalty markup on HQ customer-type base price', () => {
+    const markup = getLoyaltyMarkupPercent(CustomerLoyaltyCategory.SILVER, DEFAULT_LOYALTY_MARKUPS);
     const priced = calculateFinalSaleUnitPrice({
-      basePriceKgs: 1100,
-      loyaltyDiscountPercent: discount,
+      basePriceKgs: 1000,
+      loyaltyMarkupPercent: markup,
       minimumPriceKgs: 900,
     });
-    assert.equal(priced.finalPriceKgs, 1056);
+    assert.equal(priced.finalPriceKgs, 1030);
   });
 
   it('never sells below minimum allowed price', () => {
     const priced = calculateFinalSaleUnitPrice({
       basePriceKgs: 1000,
-      loyaltyDiscountPercent: 10,
+      loyaltyMarkupPercent: 0,
       minimumPriceKgs: 980,
     });
     assert.equal(priced.finalPriceKgs, 980);
     assert.equal(priced.minimumPriceApplied, true);
   });
 
-  it('branch cannot keep a client override below calculated auto price floor', () => {
+  it('branch cannot keep a client override below calculated auto price', () => {
     const auto = calculateFinalSaleUnitPrice({
       basePriceKgs: 1200,
-      loyaltyDiscountPercent: 0,
+      loyaltyMarkupPercent: 5,
       minimumPriceKgs: 1000,
     });
     const attemptedOverride = 900;
     const charged = Math.max(attemptedOverride, auto.finalPriceKgs, 1000);
-    assert.equal(auto.finalPriceKgs, 1200);
-    assert.equal(charged, 1200);
+    assert.equal(auto.finalPriceKgs, 1260);
+    assert.equal(charged, 1260);
+  });
+
+  it('does not mutate cost fields when calculating selling price', () => {
+    const unitCost = 700;
+    const priced = calculateFinalSaleUnitPrice({
+      basePriceKgs: 1000,
+      loyaltyMarkupPercent: 5,
+      minimumPriceKgs: 0,
+    });
+    assert.equal(unitCost, 700);
+    assert.equal(priced.finalPriceKgs, 1050);
   });
 });

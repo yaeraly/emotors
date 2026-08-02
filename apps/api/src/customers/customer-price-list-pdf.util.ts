@@ -63,7 +63,7 @@ export async function writeCustomerPriceListPdf(input: {
   doc.text(`Тип клиента: ${dto.customerTypeLabel}`);
   doc.text(`Категория: ${dto.loyaltyCategoryLabel}`);
   if (dto.loyaltyDiscountPercent > 0) {
-    doc.text(`Скидка: ${dto.loyaltyDiscountPercent}%`);
+    doc.text(`Доп. наценка: ${dto.loyaltyDiscountPercent}%`);
   }
   doc.text(`Дата формирования: ${generatedAt}`);
   doc.text(`Валюта: ${dto.currency}`);

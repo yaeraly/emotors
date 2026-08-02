@@ -27,7 +27,8 @@ import { assertCanPermanentDeleteBusinessData, auditPermanentDelete } from '../r
 import { isBranchRetailWholesaleCustomerType } from '../sales/sale-customer-pricing.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { toRoleAwareCustomerListItem } from './customer-list.presenter';
-import { getLoyaltyDiscountPercent } from './customer-loyalty.util';
+import { BranchPricingPolicyService } from './branch-pricing-policy.service';
+import { getLoyaltyMarkupPercent } from './customer-loyalty.util';
 import { LoyaltyProgramSettingsService } from './loyalty-program-settings.service';
 
 type CustomerSaleHistory = {
@@ -61,6 +62,7 @@ export class CustomersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
+    private readonly branchPricingPolicyService: BranchPricingPolicyService,
   ) {}
 
   async findAll(user: AuthUser, query: CustomerQueryDto) {
@@ -86,50 +88,60 @@ export class CustomersService {
       ];
     }
 
-    const [customers, loyaltyConfig] = await Promise.all([
-      this.prisma.customer.findMany({
-        where,
-        select: {
-          id: true,
-          fullName: true,
-          phone: true,
-          whatsappPhone: true,
-          status: true,
-          customerType: true,
-          loyaltyCategory: true,
-          purchaseVolume: true,
-          lastPurchaseAt: true,
-          branchId: true,
-          branch: {
-            select: {
-              id: true,
-              name: true,
-              code: true,
-            },
-          },
-          totalPurchaseAmount: true,
-          totalProfitAmount: true,
-          totalDebtAmount: true,
-          createdAt: true,
-          updatedAt: true,
-          sales: {
-            where: { deletedAt: null, status: SaleStatus.FINALIZED },
-            select: {
-              id: true,
-              saleDate: true,
-            },
-            orderBy: { saleDate: 'desc' },
+    const customers = await this.prisma.customer.findMany({
+      where,
+      select: {
+        id: true,
+        fullName: true,
+        phone: true,
+        whatsappPhone: true,
+        status: true,
+        customerType: true,
+        loyaltyCategory: true,
+        purchaseVolume: true,
+        lastPurchaseAt: true,
+        branchId: true,
+        branch: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
           },
         },
-        orderBy: { updatedAt: 'desc' },
-      }),
-      this.loyaltyProgramSettingsService.getConfig(),
-    ]);
+        totalPurchaseAmount: true,
+        totalProfitAmount: true,
+        totalDebtAmount: true,
+        createdAt: true,
+        updatedAt: true,
+        sales: {
+          where: { deletedAt: null, status: SaleStatus.FINALIZED },
+          select: {
+            id: true,
+            saleDate: true,
+          },
+          orderBy: { saleDate: 'desc' },
+        },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    const branchIds = Array.from(new Set(customers.map((customer) => customer.branchId)));
+    const policyEntries = await Promise.all(
+      branchIds.map(async (branchId) => [
+        branchId,
+        await this.branchPricingPolicyService.getEffectivePolicy(branchId),
+      ] as const),
+    );
+    const policies = new Map(policyEntries);
 
     return customers.map((customer) =>
       toRoleAwareCustomerListItem(
         user,
-        this.toCustomerListItem(customer, customer.sales, loyaltyConfig),
+        this.toCustomerListItem(
+          customer,
+          customer.sales,
+          policies.get(customer.branchId)!,
+        ),
       ),
     );
   }
@@ -175,14 +187,14 @@ export class CustomersService {
     });
 
     await this.audit(user, branchId, 'CUSTOMER_CREATED', 'Customer', customer.id);
-    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
-    return this.toCustomerProfile(customer, customer.events, customer.sales, loyaltyConfig);
+    const policy = await this.branchPricingPolicyService.getEffectivePolicy(customer.branchId);
+    return this.toCustomerProfile(customer, customer.events, customer.sales, policy);
   }
 
   async findOne(user: AuthUser, id: string) {
     const customer = await this.getAccessibleCustomer(user, id);
-    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
-    return this.toCustomerProfile(customer, customer.events, customer.sales, loyaltyConfig);
+    const policy = await this.branchPricingPolicyService.getEffectivePolicy(customer.branchId);
+    return this.toCustomerProfile(customer, customer.events, customer.sales, policy);
   }
 
   async update(user: AuthUser, id: string, dto: UpdateCustomerDto) {
@@ -249,8 +261,8 @@ export class CustomersService {
         },
       );
     }
-    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
-    return this.toCustomerProfile(customer, customer.events, customer.sales, loyaltyConfig);
+    const policy = await this.branchPricingPolicyService.getEffectivePolicy(customer.branchId);
+    return this.toCustomerProfile(customer, customer.events, customer.sales, policy);
   }
 
   async permanentDelete(user: AuthUser, id: string) {
@@ -458,9 +470,9 @@ export class CustomersService {
       })),
     ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
-    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
+    const policy = await this.branchPricingPolicyService.getEffectivePolicy(customer.branchId);
     return {
-      customer: this.toCustomerProfile(customer, events, customer.sales, loyaltyConfig),
+      customer: this.toCustomerProfile(customer, events, customer.sales, policy),
       events,
       whatsappEvents: events.filter(
         (event) => event.type === CustomerEventType.WHATSAPP,
@@ -622,7 +634,7 @@ export class CustomersService {
   >(
     customer: T,
     sales: { id: string; saleDate: Date }[],
-    loyaltyConfig: Awaited<ReturnType<LoyaltyProgramSettingsService['getConfig']>>,
+    policy: Awaited<ReturnType<BranchPricingPolicyService['getEffectivePolicy']>>,
   ) {
     const purchaseCount = sales.length;
     const lastPurchaseDate = customer.lastPurchaseAt ?? sales[0]?.saleDate ?? null;
@@ -631,7 +643,7 @@ export class CustomersService {
     const totalDebt = Number(customer.totalDebtAmount);
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
     const purchaseVolume = Number(customer.purchaseVolume ?? totalPurchases);
-    const currentDiscountPercent = getLoyaltyDiscountPercent(loyaltyCategory, loyaltyConfig);
+    const currentMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, policy);
 
     return {
       id: customer.id,
@@ -643,8 +655,10 @@ export class CustomersService {
       loyaltyCategory,
       customerCategory: loyaltyCategory,
       purchaseVolume,
-      currentDiscountPercent,
-      currentDiscount: currentDiscountPercent,
+      currentMarkupPercent,
+      currentAdditionalMarkup: currentMarkupPercent,
+      currentDiscountPercent: 0,
+      currentDiscount: 0,
       branchId: customer.branchId,
       branch: customer.branch,
       totalPurchases,
@@ -685,7 +699,7 @@ export class CustomersService {
     customer: T,
     _events: CustomerEvent[],
     sales: CustomerSaleHistory[],
-    loyaltyConfig: Awaited<ReturnType<LoyaltyProgramSettingsService['getConfig']>>,
+    policy: Awaited<ReturnType<BranchPricingPolicyService['getEffectivePolicy']>>,
   ) {
     const totalPurchases = Number(customer.totalPurchaseAmount);
     const totalProfit = Number(customer.totalProfitAmount);
@@ -696,7 +710,7 @@ export class CustomersService {
       purchaseCount > 0 ? totalPurchases / purchaseCount : 0;
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
     const purchaseVolume = Number(customer.purchaseVolume ?? totalPurchases);
-    const currentDiscountPercent = getLoyaltyDiscountPercent(loyaltyCategory, loyaltyConfig);
+    const currentMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, policy);
 
     return {
       id: customer.id,
@@ -710,8 +724,10 @@ export class CustomersService {
       loyaltyCategory,
       customerCategory: loyaltyCategory,
       purchaseVolume,
-      currentDiscountPercent,
-      currentDiscount: currentDiscountPercent,
+      currentMarkupPercent,
+      currentAdditionalMarkup: currentMarkupPercent,
+      currentDiscountPercent: 0,
+      currentDiscount: 0,
       notes: customer.notes,
       totalPurchases,
       totalProfit,

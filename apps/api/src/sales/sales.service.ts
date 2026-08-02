@@ -22,9 +22,10 @@ import {
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CommissionsService } from '../commissions/commissions.service';
+import { BranchPricingPolicyService } from '../customers/branch-pricing-policy.service';
 import {
   calculateFinalSaleUnitPrice,
-  getLoyaltyDiscountPercent,
+  getLoyaltyMarkupPercent,
 } from '../customers/customer-loyalty.util';
 import { LoyaltyProgramSettingsService } from '../customers/loyalty-program-settings.service';
 import { InventoryService } from '../inventory/inventory.service';
@@ -69,6 +70,7 @@ export class SalesService {
     private readonly saleInstallmentApprovalService: SaleInstallmentApprovalService,
     private readonly notificationsService: NotificationsService,
     private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
+    private readonly branchPricingPolicyService: BranchPricingPolicyService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -260,7 +262,9 @@ export class SalesService {
         whatsappPhone: true,
         status: true,
         customerType: true,
+        loyaltyCategory: true,
         totalDebtAmount: true,
+        branchId: true,
         sales: {
           where: { deletedAt: null, status: SaleStatus.FINALIZED },
           select: { saleDate: true },
@@ -291,17 +295,38 @@ export class SalesService {
       : [];
     const overdueCustomerIds = new Set(overdueInstallments.map((row) => row.customerId));
 
-    return customers.map((customer) => ({
-      id: customer.id,
-      fullName: customer.fullName,
-      phone: customer.phone,
-      whatsappPhone: customer.whatsappPhone,
-      status: customer.status,
-      customerType: customer.customerType,
-      lastPurchaseDate: customer.sales[0]?.saleDate ?? null,
-      totalDebtAmount: Number(customer.totalDebtAmount),
-      hasOverdueInstallment: overdueCustomerIds.has(customer.id),
-    }));
+    const branchIds = [...new Set(customers.map((customer) => customer.branchId))];
+    const policies = new Map(
+      await Promise.all(
+        branchIds.map(async (branchId) => [
+          branchId,
+          await this.branchPricingPolicyService.getEffectivePolicy(branchId),
+        ] as const),
+      ),
+    );
+
+    return customers.map((customer) => {
+      const policy = policies.get(customer.branchId);
+      const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
+      const currentMarkupPercent = policy
+        ? getLoyaltyMarkupPercent(loyaltyCategory, policy)
+        : 0;
+      return {
+        id: customer.id,
+        fullName: customer.fullName,
+        phone: customer.phone,
+        whatsappPhone: customer.whatsappPhone,
+        status: customer.status,
+        customerType: customer.customerType,
+        loyaltyCategory,
+        customerCategory: loyaltyCategory,
+        currentMarkupPercent,
+        currentAdditionalMarkup: currentMarkupPercent,
+        lastPurchaseDate: customer.sales[0]?.saleDate ?? null,
+        totalDebtAmount: Number(customer.totalDebtAmount),
+        hasOverdueInstallment: overdueCustomerIds.has(customer.id),
+      };
+    });
   }
 
   async searchProductOptions(user: AuthUser, query: SaleProductSearchQueryDto) {
@@ -1428,7 +1453,8 @@ export class SalesService {
 
   /**
    * Backend is the single source of truth for Branch Sale unit prices:
-   * Customer Type price → loyalty discount → minimum price floor.
+   * HQ Customer Type price → Branch loyalty additional markup → minimum price floor.
+   * Never modifies себестоимость / FIFO / inventory valuation.
    * Branch users cannot override the calculated selling price.
    */
   private async applyAutomaticSalePricing(
@@ -1442,9 +1468,11 @@ export class SalesService {
     dto: CreateSaleDto,
   ) {
     const channel = this.resolvePricingChannelFromCustomer(customer.customerType);
-    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
+    const branchPolicy = await this.branchPricingPolicyService.getEffectivePolicy(
+      customer.branchId,
+    );
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
-    const loyaltyDiscountPercent = getLoyaltyDiscountPercent(loyaltyCategory, loyaltyConfig);
+    const loyaltyMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, branchPolicy);
     const allowManualOverride = hasAnyFullAccessRole(resolveUserRoles(user));
 
     for (const item of dto.items) {
@@ -1465,13 +1493,12 @@ export class SalesService {
 
       const priced = calculateFinalSaleUnitPrice({
         basePriceKgs: basePrice,
-        loyaltyDiscountPercent,
+        loyaltyMarkupPercent,
         minimumPriceKgs: minimumPrice,
       });
 
       const clientPrice = roundDisplayMoney(Number(item.unitPrice || 0));
       if (!allowManualOverride && Math.abs(clientPrice - priced.finalPriceKgs) > 0.01) {
-        // Overwrite client-supplied price; Branch Sales cannot override calculated price.
         await this.prisma.auditLog.create({
           data: {
             userId: user.id,
@@ -1498,48 +1525,26 @@ export class SalesService {
         data: {
           userId: user.id,
           role: user.role,
-          action: 'AUTO_PRICE_SELECTED',
+          action: 'CUSTOMER_FINAL_PRICE_CALCULATED',
           entity: 'Customer',
           entityId: customer.id,
           metadata: {
             customerId: customer.id,
             productId: item.productId,
             customerType: customer.customerType,
+            loyaltyCategory,
             pricingChannel: channel,
-            oldValue: clientPrice,
+            oldValue: priced.basePriceKgs,
             newValue: priced.finalPriceKgs,
-            basePriceKgs: priced.basePriceKgs,
+            markupPercent: priced.markupPercent,
+            markupAmountKgs: priced.markupAmountKgs,
+            minimumPriceApplied: priced.minimumPriceApplied,
             userId: user.id,
             branchId: customer.branchId,
             timestamp: new Date().toISOString(),
           },
         },
       });
-
-      if (priced.discountPercent > 0) {
-        await this.prisma.auditLog.create({
-          data: {
-            userId: user.id,
-            role: user.role,
-            action: 'LOYALTY_DISCOUNT_APPLIED',
-            entity: 'Customer',
-            entityId: customer.id,
-            metadata: {
-              customerId: customer.id,
-              productId: item.productId,
-              loyaltyCategory,
-              oldValue: priced.basePriceKgs,
-              newValue: priced.finalPriceKgs,
-              discountPercent: priced.discountPercent,
-              discountAmountKgs: priced.discountAmountKgs,
-              minimumPriceApplied: priced.minimumPriceApplied,
-              userId: user.id,
-              branchId: customer.branchId,
-              timestamp: new Date().toISOString(),
-            },
-          },
-        });
-      }
     }
   }
 
@@ -1844,21 +1849,28 @@ export class SalesService {
       },
     });
 
-    if (options?.userId && options.role && options.branchId) {
-      await this.loyaltyProgramSettingsService.refreshCustomerLoyalty(tx, {
-        customerId,
-        branchId: options.branchId,
-        userId: options.userId,
-        role: options.role,
-      });
-    } else if (sales[0]) {
-      await this.loyaltyProgramSettingsService.refreshCustomerLoyalty(tx, {
-        customerId,
-        branchId: sales[0].branchId,
-        userId: 'system',
-        role: 'SYSTEM',
-      });
-    }
+    const branchId = options?.branchId ?? sales[0]?.branchId;
+    if (!branchId) return;
+
+    const branchPolicy = await this.branchPricingPolicyService.getEffectivePolicy(branchId);
+    const categoryRanges = {
+      standardMinKgs: branchPolicy.standardMinKgs,
+      standardMaxKgs: branchPolicy.standardMaxKgs,
+      silverMinKgs: branchPolicy.silverMinKgs,
+      silverMaxKgs: branchPolicy.silverMaxKgs,
+      goldMinKgs: branchPolicy.goldMinKgs,
+      goldMaxKgs: branchPolicy.goldMaxKgs,
+      vipMinKgs: branchPolicy.vipMinKgs,
+      vipMaxKgs: branchPolicy.vipMaxKgs,
+    };
+
+    await this.loyaltyProgramSettingsService.refreshCustomerLoyalty(tx, {
+      customerId,
+      branchId,
+      userId: options?.userId ?? 'system',
+      role: options?.role ?? 'SYSTEM',
+      categoryRanges,
+    });
   }
 
   private buildReceiptText(input: {

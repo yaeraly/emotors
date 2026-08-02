@@ -12,6 +12,11 @@ export type SaleCustomerOption = {
   whatsappPhone?: string | null;
   status: CustomerStatus;
   customerType?: 'RETAIL' | 'MASTER' | 'WHOLESALE';
+  loyaltyCategory?: 'STANDARD' | 'SILVER' | 'GOLD' | 'VIP';
+  customerCategory?: 'STANDARD' | 'SILVER' | 'GOLD' | 'VIP';
+  currentMarkupPercent?: number;
+  currentAdditionalMarkup?: number;
+  currentDiscountPercent?: number;
   lastPurchaseDate?: string | null;
   totalDebtAmount: number;
   hasOverdueInstallment: boolean;

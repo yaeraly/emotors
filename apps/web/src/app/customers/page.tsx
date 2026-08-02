@@ -1129,8 +1129,18 @@ function CustomerProfileDrawer({
             )}
           />
           <Info
-            label={t('customers.currentDiscount')}
-            value={`${Number((customer as { currentDiscountPercent?: number; currentDiscount?: number }).currentDiscountPercent ?? (customer as { currentDiscount?: number }).currentDiscount ?? 0)}%`}
+            label={t('customers.currentAdditionalMarkup')}
+            value={`${Number(
+              (customer as { currentMarkupPercent?: number; currentAdditionalMarkup?: number })
+                .currentMarkupPercent ??
+                (customer as { currentAdditionalMarkup?: number }).currentAdditionalMarkup ??
+                (customer as { currentDiscountPercent?: number }).currentDiscountPercent ??
+                0,
+            )}%`}
+          />
+          <Info
+            label={t('customers.finalPriceType')}
+            value={t(customerTypeLabelKey(customer.customerType))}
           />
           <Info
             label={t('customers.lastPurchaseDate')}
@@ -1147,7 +1157,7 @@ function CustomerProfileDrawer({
           <div className="grid gap-3 md:grid-cols-2">
             <Metric label={t('crm.totalPurchaseAmount')} value={formatKgs(customer.totalPurchases)} />
             <Metric
-              label={t('customers.purchaseVolume')}
+              label={t('customers.purchaseVolume90Days')}
               value={formatKgs(
                 Number(
                   (customer as { purchaseVolume?: number }).purchaseVolume ??

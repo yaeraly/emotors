@@ -1,8 +1,11 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { BranchPricingPolicyService } from '../customers/branch-pricing-policy.service';
+import { PreviewBranchPricingDto } from '../customers/dto/preview-branch-pricing.dto';
+import { UpdateBranchPricingPolicyDto } from '../customers/dto/update-branch-pricing-policy.dto';
 import { BranchInstallmentEarlyPaymentService } from '../distribution/branch-installment-early-payment.service';
 import { RejectInstallmentEarlyPaymentDto } from '../distribution/dto/reject-installment-early-payment.dto';
 import { ProductQueryDto } from '../inventory/dto/product-query.dto';
@@ -19,7 +22,29 @@ export class BranchCeoController {
   constructor(
     private readonly service: BranchCeoService,
     private readonly earlyPaymentService: BranchInstallmentEarlyPaymentService,
+    private readonly branchPricingPolicyService: BranchPricingPolicyService,
   ) {}
+
+  @Get('pricing-policy')
+  @Roles(...BRANCH_CEO_ROLES)
+  getPricingPolicy(@CurrentUser() user: AuthUser) {
+    return this.branchPricingPolicyService.getForBranchCeo(user);
+  }
+
+  @Put('pricing-policy')
+  @Roles(...BRANCH_CEO_ROLES)
+  updatePricingPolicy(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateBranchPricingPolicyDto,
+  ) {
+    return this.branchPricingPolicyService.updateForBranchCeo(user, dto);
+  }
+
+  @Post('pricing-policy/preview')
+  @Roles(...BRANCH_CEO_ROLES)
+  previewPricing(@CurrentUser() user: AuthUser, @Body() dto: PreviewBranchPricingDto) {
+    return this.branchPricingPolicyService.preview(user, dto);
+  }
 
   @Get('product-directory')
   @Roles(...BRANCH_CEO_ROLES)

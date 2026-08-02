@@ -10,10 +10,14 @@ import { toApiMoneyKgs } from '../common/authoritative-money.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy } from '../rbac/rbac';
 import {
-  assertLoyaltyDiscountRange,
+  assertLoyaltyCategoryRanges,
+  assertLoyaltyMarkupRange,
   assertLoyaltyThresholdOrder,
-  getLoyaltyDiscountPercent,
+  DEFAULT_LOYALTY_CATEGORY_RANGES,
+  DEFAULT_LOYALTY_MARKUPS,
+  getLoyaltyMarkupPercent,
   loyaltyCategoryRank,
+  rangesFromThresholds,
   resolveNextLoyaltyCategory,
   rollingWindowStartDate,
   type LoyaltyProgramConfig,
@@ -40,29 +44,61 @@ export class LoyaltyProgramSettingsService {
       throw new ForbiddenException('Only HQ CEO can configure loyalty categories');
     }
 
+    const existing = await this.ensureDefaults();
     const next = {
-      purchaseWindow: dto.purchaseWindow ?? LoyaltyPurchaseWindow.TOTAL,
-      standardThresholdKgs: Number(dto.standardThresholdKgs ?? 0),
-      silverThresholdKgs: Number(dto.silverThresholdKgs ?? 0),
-      goldThresholdKgs: Number(dto.goldThresholdKgs ?? 0),
-      vipThresholdKgs: Number(dto.vipThresholdKgs ?? 0),
-      standardDiscountPercent: Number(dto.standardDiscountPercent ?? 0),
-      silverDiscountPercent: Number(dto.silverDiscountPercent ?? 0),
-      goldDiscountPercent: Number(dto.goldDiscountPercent ?? 0),
-      vipDiscountPercent: Number(dto.vipDiscountPercent ?? 0),
-      allowDowngrade: Boolean(dto.allowDowngrade ?? false),
+      purchaseWindow: dto.purchaseWindow ?? LoyaltyPurchaseWindow.ROLLING_90_DAYS,
+      standardThresholdKgs: Number(dto.standardThresholdKgs ?? existing.standardThresholdKgs),
+      silverThresholdKgs: Number(dto.silverThresholdKgs ?? existing.silverThresholdKgs),
+      goldThresholdKgs: Number(dto.goldThresholdKgs ?? existing.goldThresholdKgs),
+      vipThresholdKgs: Number(dto.vipThresholdKgs ?? existing.vipThresholdKgs),
+      standardMaxKgs: Number(dto.standardMaxKgs ?? existing.standardMaxKgs),
+      silverMaxKgs: Number(dto.silverMaxKgs ?? existing.silverMaxKgs),
+      goldMaxKgs: Number(dto.goldMaxKgs ?? existing.goldMaxKgs),
+      vipMaxKgs:
+        dto.vipMaxKgs === undefined
+          ? existing.vipMaxKgs == null
+            ? null
+            : Number(existing.vipMaxKgs)
+          : dto.vipMaxKgs,
+      standardMarkupPercent: Number(
+        dto.standardMarkupPercent ??
+          dto.standardDiscountPercent ??
+          existing.standardMarkupPercent,
+      ),
+      silverMarkupPercent: Number(
+        dto.silverMarkupPercent ?? dto.silverDiscountPercent ?? existing.silverMarkupPercent,
+      ),
+      goldMarkupPercent: Number(
+        dto.goldMarkupPercent ?? dto.goldDiscountPercent ?? existing.goldMarkupPercent,
+      ),
+      vipMarkupPercent: Number(
+        dto.vipMarkupPercent ?? dto.vipDiscountPercent ?? existing.vipMarkupPercent,
+      ),
+      minAllowedMarkupPercent: Number(
+        dto.minAllowedMarkupPercent ?? existing.minAllowedMarkupPercent,
+      ),
+      maxAllowedMarkupPercent: Number(
+        dto.maxAllowedMarkupPercent ?? existing.maxAllowedMarkupPercent,
+      ),
+      branchCustomizationEnabled: Boolean(
+        dto.branchCustomizationEnabled ?? existing.branchCustomizationEnabled,
+      ),
+      allowDowngrade: Boolean(dto.allowDowngrade ?? existing.allowDowngrade),
     };
 
     try {
       assertLoyaltyThresholdOrder(next);
-      assertLoyaltyDiscountRange(next);
+      assertLoyaltyCategoryRanges(rangesFromThresholds(next));
+      assertLoyaltyMarkupRange(next, {
+        minAllowedMarkupPercent: next.minAllowedMarkupPercent,
+        maxAllowedMarkupPercent: next.maxAllowedMarkupPercent,
+      });
     } catch (error) {
       throw new BadRequestException(
         error instanceof Error ? error.message : 'Invalid loyalty configuration',
       );
     }
 
-    const existing = await this.ensureDefaults();
     const updated = await this.prisma.loyaltyProgramSettings.update({
       where: { id: existing.id },
       data: {
@@ -71,10 +107,22 @@ export class LoyaltyProgramSettingsService {
         silverThresholdKgs: next.silverThresholdKgs,
         goldThresholdKgs: next.goldThresholdKgs,
         vipThresholdKgs: next.vipThresholdKgs,
-        standardDiscountPercent: next.standardDiscountPercent,
-        silverDiscountPercent: next.silverDiscountPercent,
-        goldDiscountPercent: next.goldDiscountPercent,
-        vipDiscountPercent: next.vipDiscountPercent,
+        standardMaxKgs: next.standardMaxKgs,
+        silverMaxKgs: next.silverMaxKgs,
+        goldMaxKgs: next.goldMaxKgs,
+        vipMaxKgs: next.vipMaxKgs,
+        standardMarkupPercent: next.standardMarkupPercent,
+        silverMarkupPercent: next.silverMarkupPercent,
+        goldMarkupPercent: next.goldMarkupPercent,
+        vipMarkupPercent: next.vipMarkupPercent,
+        // Keep legacy discount columns synced to zero — selling price uses markup.
+        standardDiscountPercent: 0,
+        silverDiscountPercent: 0,
+        goldDiscountPercent: 0,
+        vipDiscountPercent: 0,
+        minAllowedMarkupPercent: next.minAllowedMarkupPercent,
+        maxAllowedMarkupPercent: next.maxAllowedMarkupPercent,
+        branchCustomizationEnabled: next.branchCustomizationEnabled,
         allowDowngrade: next.allowDowngrade,
         updatedById: user.id,
       },
@@ -99,9 +147,14 @@ export class LoyaltyProgramSettingsService {
     return this.toApi(updated);
   }
 
-  async getDiscountPercentForCategory(category: CustomerLoyaltyCategory): Promise<number> {
+  async getMarkupPercentForCategory(category: CustomerLoyaltyCategory): Promise<number> {
     const config = await this.getConfig();
-    return getLoyaltyDiscountPercent(category, config);
+    return getLoyaltyMarkupPercent(category, config);
+  }
+
+  /** @deprecated Prefer getMarkupPercentForCategory */
+  async getDiscountPercentForCategory(category: CustomerLoyaltyCategory): Promise<number> {
+    return this.getMarkupPercentForCategory(category);
   }
 
   async computePurchaseVolume(
@@ -133,6 +186,16 @@ export class LoyaltyProgramSettingsService {
       userId: string;
       role: string;
       asOf?: Date;
+      categoryRanges?: {
+        standardMinKgs: number;
+        standardMaxKgs: number;
+        silverMinKgs: number;
+        silverMaxKgs: number;
+        goldMinKgs: number;
+        goldMaxKgs: number;
+        vipMinKgs: number;
+        vipMaxKgs: number | null;
+      };
     },
   ) {
     const config = await this.getConfig();
@@ -151,10 +214,14 @@ export class LoyaltyProgramSettingsService {
       input.customerId,
       input.asOf ?? new Date(),
     );
+    const categoryConfig = input.categoryRanges ?? rangesFromThresholds(config);
     const nextCategory = resolveNextLoyaltyCategory({
       currentCategory: customer.loyaltyCategory,
       purchaseVolumeKgs: purchaseVolume,
-      config,
+      config: {
+        ...categoryConfig,
+        allowDowngrade: config.allowDowngrade,
+      },
     });
 
     const latestSale = await tx.sale.findFirst({
@@ -207,7 +274,7 @@ export class LoyaltyProgramSettingsService {
           data: {
             userId: input.userId,
             role: input.role,
-            action: 'LOYALTY_CATEGORY_UPGRADED',
+            action: 'CUSTOMER_CATEGORY_AUTO_UPGRADED',
             entity: 'Customer',
             entityId: input.customerId,
             metadata: {
@@ -231,20 +298,52 @@ export class LoyaltyProgramSettingsService {
     const existing = await this.prisma.loyaltyProgramSettings.findUnique({
       where: { singletonKey: 'DEFAULT' },
     });
-    if (existing) return existing;
+    if (existing) {
+      const needsBackfill =
+        Number(existing.silverThresholdKgs) === 0 &&
+        Number(existing.goldThresholdKgs) === 0 &&
+        Number(existing.vipThresholdKgs) === 0;
+      if (!needsBackfill) return existing;
+      return this.prisma.loyaltyProgramSettings.update({
+        where: { id: existing.id },
+        data: {
+          purchaseWindow: LoyaltyPurchaseWindow.ROLLING_90_DAYS,
+          standardThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.standardMinKgs,
+          silverThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.silverMinKgs,
+          goldThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.goldMinKgs,
+          vipThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.vipMinKgs,
+          standardMaxKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.standardMaxKgs,
+          silverMaxKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.silverMaxKgs,
+          goldMaxKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.goldMaxKgs,
+          vipMaxKgs: null,
+          ...DEFAULT_LOYALTY_MARKUPS,
+          minAllowedMarkupPercent: 0,
+          maxAllowedMarkupPercent: 20,
+          branchCustomizationEnabled: true,
+        },
+      });
+    }
 
     return this.prisma.loyaltyProgramSettings.create({
       data: {
         singletonKey: 'DEFAULT',
-        purchaseWindow: LoyaltyPurchaseWindow.TOTAL,
-        standardThresholdKgs: 0,
-        silverThresholdKgs: 0,
-        goldThresholdKgs: 0,
-        vipThresholdKgs: 0,
+        purchaseWindow: LoyaltyPurchaseWindow.ROLLING_90_DAYS,
+        standardThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.standardMinKgs,
+        silverThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.silverMinKgs,
+        goldThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.goldMinKgs,
+        vipThresholdKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.vipMinKgs,
+        standardMaxKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.standardMaxKgs,
+        silverMaxKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.silverMaxKgs,
+        goldMaxKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.goldMaxKgs,
+        vipMaxKgs: null,
         standardDiscountPercent: 0,
         silverDiscountPercent: 0,
         goldDiscountPercent: 0,
         vipDiscountPercent: 0,
+        ...DEFAULT_LOYALTY_MARKUPS,
+        minAllowedMarkupPercent: 0,
+        maxAllowedMarkupPercent: 20,
+        branchCustomizationEnabled: true,
         allowDowngrade: false,
       },
     });
@@ -256,10 +355,21 @@ export class LoyaltyProgramSettingsService {
     silverThresholdKgs: Prisma.Decimal | number;
     goldThresholdKgs: Prisma.Decimal | number;
     vipThresholdKgs: Prisma.Decimal | number;
+    standardMaxKgs: Prisma.Decimal | number;
+    silverMaxKgs: Prisma.Decimal | number;
+    goldMaxKgs: Prisma.Decimal | number;
+    vipMaxKgs: Prisma.Decimal | number | null;
     standardDiscountPercent: Prisma.Decimal | number;
     silverDiscountPercent: Prisma.Decimal | number;
     goldDiscountPercent: Prisma.Decimal | number;
     vipDiscountPercent: Prisma.Decimal | number;
+    standardMarkupPercent: Prisma.Decimal | number;
+    silverMarkupPercent: Prisma.Decimal | number;
+    goldMarkupPercent: Prisma.Decimal | number;
+    vipMarkupPercent: Prisma.Decimal | number;
+    minAllowedMarkupPercent: Prisma.Decimal | number;
+    maxAllowedMarkupPercent: Prisma.Decimal | number;
+    branchCustomizationEnabled: boolean;
     allowDowngrade: boolean;
   }): LoyaltyProgramConfig {
     return {
@@ -268,10 +378,21 @@ export class LoyaltyProgramSettingsService {
       silverThresholdKgs: toApiMoneyKgs(settings.silverThresholdKgs),
       goldThresholdKgs: toApiMoneyKgs(settings.goldThresholdKgs),
       vipThresholdKgs: toApiMoneyKgs(settings.vipThresholdKgs),
-      standardDiscountPercent: Number(settings.standardDiscountPercent),
-      silverDiscountPercent: Number(settings.silverDiscountPercent),
-      goldDiscountPercent: Number(settings.goldDiscountPercent),
-      vipDiscountPercent: Number(settings.vipDiscountPercent),
+      standardMaxKgs: toApiMoneyKgs(settings.standardMaxKgs),
+      silverMaxKgs: toApiMoneyKgs(settings.silverMaxKgs),
+      goldMaxKgs: toApiMoneyKgs(settings.goldMaxKgs),
+      vipMaxKgs: settings.vipMaxKgs == null ? null : toApiMoneyKgs(settings.vipMaxKgs),
+      standardDiscountPercent: 0,
+      silverDiscountPercent: 0,
+      goldDiscountPercent: 0,
+      vipDiscountPercent: 0,
+      standardMarkupPercent: Number(settings.standardMarkupPercent),
+      silverMarkupPercent: Number(settings.silverMarkupPercent),
+      goldMarkupPercent: Number(settings.goldMarkupPercent),
+      vipMarkupPercent: Number(settings.vipMarkupPercent),
+      minAllowedMarkupPercent: Number(settings.minAllowedMarkupPercent),
+      maxAllowedMarkupPercent: Number(settings.maxAllowedMarkupPercent),
+      branchCustomizationEnabled: Boolean(settings.branchCustomizationEnabled),
       allowDowngrade: settings.allowDowngrade,
     };
   }
@@ -283,10 +404,21 @@ export class LoyaltyProgramSettingsService {
     silverThresholdKgs: Prisma.Decimal | number;
     goldThresholdKgs: Prisma.Decimal | number;
     vipThresholdKgs: Prisma.Decimal | number;
+    standardMaxKgs: Prisma.Decimal | number;
+    silverMaxKgs: Prisma.Decimal | number;
+    goldMaxKgs: Prisma.Decimal | number;
+    vipMaxKgs: Prisma.Decimal | number | null;
     standardDiscountPercent: Prisma.Decimal | number;
     silverDiscountPercent: Prisma.Decimal | number;
     goldDiscountPercent: Prisma.Decimal | number;
     vipDiscountPercent: Prisma.Decimal | number;
+    standardMarkupPercent: Prisma.Decimal | number;
+    silverMarkupPercent: Prisma.Decimal | number;
+    goldMarkupPercent: Prisma.Decimal | number;
+    vipMarkupPercent: Prisma.Decimal | number;
+    minAllowedMarkupPercent: Prisma.Decimal | number;
+    maxAllowedMarkupPercent: Prisma.Decimal | number;
+    branchCustomizationEnabled: boolean;
     allowDowngrade: boolean;
     updatedAt: Date;
   }) {

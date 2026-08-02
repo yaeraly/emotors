@@ -122,6 +122,20 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     ],
   },
   {
+    id: 'branch-pricing-policy',
+    labelKey: 'nav.branchPricingPolicy',
+    defaultHref: '/branch-ceo/pricing-policy',
+    pathPrefixes: ['/branch-ceo/pricing-policy'],
+    sidebarVisible: isBranchOwnerUser,
+    pages: [
+      {
+        href: '/branch-ceo/pricing-policy',
+        labelKey: 'nav.branchPricingPolicy',
+        isVisible: isBranchOwnerUser,
+      },
+    ],
+  },
+  {
     id: 'service',
     labelKey: 'service.title',
     defaultHref: '/service',

@@ -16,7 +16,8 @@ import { createReadStream, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { AuthUser } from '../auth/auth.types';
 import { toApiMoneyKgs } from '../common/authoritative-money.util';
-import { calculateFinalSaleUnitPrice, getLoyaltyDiscountPercent } from './customer-loyalty.util';
+import { BranchPricingPolicyService } from './branch-pricing-policy.service';
+import { calculateFinalSaleUnitPrice, getLoyaltyMarkupPercent } from './customer-loyalty.util';
 import { LoyaltyProgramSettingsService } from './loyalty-program-settings.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,6 +50,7 @@ export class CustomerPriceListService {
     private readonly prisma: PrismaService,
     private readonly pricingResolution: PricingResolutionService,
     private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
+    private readonly branchPricingPolicyService: BranchPricingPolicyService,
   ) {}
 
   async searchCustomers(user: AuthUser, search?: string) {
@@ -340,9 +342,11 @@ export class CustomerPriceListService {
     }
 
     const channel = resolvePricingChannelFromCustomerType(customer.customerType);
-    const loyaltyConfig = await this.loyaltyProgramSettingsService.getConfig();
+    const branchPolicy = await this.branchPricingPolicyService.getEffectivePolicy(
+      customer.branchId,
+    );
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
-    const loyaltyDiscountPercent = getLoyaltyDiscountPercent(loyaltyCategory, loyaltyConfig);
+    const loyaltyMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, branchPolicy);
 
     const activeVersion = await this.prisma.pricingPolicyVersion.findFirst({
       where: { status: 'ACTIVE' },
@@ -415,7 +419,7 @@ export class CustomerPriceListService {
 
       const priced = calculateFinalSaleUnitPrice({
         basePriceKgs: basePrice,
-        loyaltyDiscountPercent,
+        loyaltyMarkupPercent,
         minimumPriceKgs: minPrice,
       });
       const availableQty = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
@@ -451,7 +455,7 @@ export class CustomerPriceListService {
       customerTypeLabel: customerTypeRuLabel(customer.customerType),
       loyaltyCategory,
       loyaltyCategoryLabel: loyaltyCategoryRuLabel(loyaltyCategory),
-      loyaltyDiscountPercent,
+      loyaltyDiscountPercent: loyaltyMarkupPercent,
       branchId: customer.branchId,
       branchName: customer.branch.name,
       branchPhone: customer.branch.phone,
@@ -471,7 +475,7 @@ export class CustomerPriceListService {
 
     return {
       customer,
-      loyaltyDiscountPercent,
+      loyaltyDiscountPercent: loyaltyMarkupPercent,
       safeDto,
     };
   }
