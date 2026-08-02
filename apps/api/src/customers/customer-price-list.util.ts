@@ -1,4 +1,5 @@
 import { CustomerLoyaltyCategory, CustomerType } from '@prisma/client';
+import { getLoyaltyMarkupPercent, type LoyaltyMarkupConfig } from './customer-loyalty.util';
 import {
   resolvePricingChannelFromCustomerType,
   type SalePricingChannel,
@@ -25,11 +26,16 @@ export type SafeCustomerPriceListDto = {
   customerTypeLabel: string;
   loyaltyCategory: CustomerLoyaltyCategory;
   loyaltyCategoryLabel: string;
+  /** Applied category markup percent (0 when branch customization is disabled). */
+  categoryMarkupPercent: number;
+  /** @deprecated Use categoryMarkupPercent */
   loyaltyDiscountPercent: number;
+  purchaseVolume90Days: number;
   branchId: string;
   branchName: string;
   branchPhone: string | null;
   branchAddress: string | null;
+  branchPricingPolicySource: 'BRANCH' | 'HQ_DEFAULT';
   title: string;
   pricingChannel: SalePricingChannel;
   pricingPolicyVersionId: string | null;
@@ -42,7 +48,7 @@ export type SafeCustomerPriceListDto = {
 };
 
 export const PRICE_LIST_VALIDITY_NOTE =
-  'Цены актуальны на дату формирования прайс-листа. Наличие и цена могут измениться. Уточняйте у менеджера.';
+  'Цены актуальны на дату формирования прайс-листа.\n\nНаличие и цены могут измениться. Уточняйте информацию у менеджера филиала.';
 
 const BRANCH_CUSTOMER_TYPES = new Set<CustomerType>([
   CustomerType.RETAIL,
@@ -60,16 +66,27 @@ export function isBranchPriceListCustomerType(
   );
 }
 
-export function priceListTitleForCustomerType(customerType: CustomerType): string {
+export function priceListTitleForCustomerType(
+  customerType: CustomerType,
+  loyaltyCategory?: CustomerLoyaltyCategory,
+): string {
+  let base: string;
   switch (customerType) {
     case CustomerType.MASTER:
-      return 'Прайс для мастера';
+      base = 'Прайс для мастера';
+      break;
     case CustomerType.WHOLESALE:
-      return 'Оптовый прайс';
+      base = 'Оптовый прайс';
+      break;
     case CustomerType.RETAIL:
     default:
-      return 'Прайс для розничного клиента';
+      base = 'Прайс для розничного клиента';
+      break;
   }
+  if (loyaltyCategory) {
+    return `${base} — категория ${loyaltyCategoryRuLabel(loyaltyCategory)}`;
+  }
+  return base;
 }
 
 export function customerTypeRuLabel(customerType: CustomerType): string {
@@ -137,6 +154,7 @@ export function normalizeWhatsAppPhoneDigits(rawPhone: string | null | undefined
 export function buildPriceListWhatsAppMessage(input: {
   customerName: string;
   customerTypeLabel: string;
+  loyaltyCategoryLabel: string;
   branchName: string;
   generatedAt: Date | string;
 }): string {
@@ -148,15 +166,27 @@ export function buildPriceListWhatsAppMessage(input: {
   return [
     `Здравствуйте, ${input.customerName}!`,
     '',
-    `Отправляем актуальный прайс EMOTORS для категории «${input.customerTypeLabel}».`,
+    'Отправляем актуальный прайс EMOTORS.',
     '',
+    `Тип клиента: ${input.customerTypeLabel}`,
+    `Категория: ${input.loyaltyCategoryLabel}`,
     `Филиал: ${input.branchName}`,
     `Дата формирования: ${generatedAt}`,
     '',
-    'По вопросам наличия и заказа обращайтесь к вашему менеджеру.',
+    'По вопросам наличия и заказа обращайтесь к менеджеру филиала.',
     '',
     'PDF-файл прайс-листа прикрепите вручную из скачанного документа.',
   ].join('\n');
+}
+
+export function resolvePriceListCategoryMarkupPercent(
+  branchPolicy: LoyaltyMarkupConfig & { branchCustomizationEnabled: boolean },
+  loyaltyCategory: CustomerLoyaltyCategory,
+): number {
+  if (!branchPolicy.branchCustomizationEnabled) {
+    return 0;
+  }
+  return getLoyaltyMarkupPercent(loyaltyCategory, branchPolicy);
 }
 
 export function buildWhatsAppDeepLink(phoneDigits: string, message: string): string {

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
 import { apiFetch, clearToken } from '@/lib/api';
-import { canArchiveCustomer, canCreateCustomer, canEditCustomerType, canPermanentDeleteCustomer, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser, shouldHideCustomerProfit } from '@/lib/rbac';
+import { canArchiveCustomer, canCreateCustomer, canEditCustomerType, canPermanentDeleteCustomer, canSendCustomerPriceList, isBranchOwnerUser, isBranchPanelUser, isBranchSalesManagerUser, shouldHideCustomerProfit } from '@/lib/rbac';
 import {
   getCustomerListColumns,
   shouldShowCustomerListEditButton,
@@ -130,6 +130,7 @@ function CustomersPageContent() {
   const isBranchPanel = isBranchPanelUser(currentUser);
   const branchSalesManagerView = isBranchSalesManagerUser(currentUser);
   const branchOwnerView = isBranchOwnerUser(currentUser);
+  const canSendPriceList = canSendCustomerPriceList(currentUser);
   const hideCustomerProfit = shouldHideCustomerProfit(currentUser);
   const usesRouteArchiveNav = branchSalesManagerView || branchOwnerView;
   const visibleColumns = getCustomerListColumns(currentUser);
@@ -495,7 +496,7 @@ function CustomersPageContent() {
           </div>
 
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            {branchSalesManagerView && !archiveView ? (
+            {canSendPriceList && !archiveView ? (
               <button
                 onClick={() => {
                   setPriceListCustomerId(null);
@@ -796,7 +797,7 @@ function CustomersPageContent() {
                                 >
                                   {t('common.open')}
                                 </Link>
-                                {branchSalesManagerView && !archiveView ? (
+                                {canSendPriceList && !archiveView ? (
                                   <button
                                     onClick={() => {
                                       setPriceListCustomerId(customer.id);

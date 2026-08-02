@@ -9,14 +9,21 @@ import {
   isBranchPriceListCustomerType,
   normalizeWhatsAppPhoneDigits,
   priceListTitleForCustomerType,
+  resolvePriceListCategoryMarkupPercent,
   resolvePriceListChannel,
 } from './customer-price-list.util';
+import { DEFAULT_LOYALTY_MARKUPS } from './customer-loyalty.util';
+import { calculateFinalSaleUnitPrice } from './customer-loyalty.util';
 
 describe('customer price list utilities', () => {
   it('maps customer types to price-list titles and channels', () => {
     assert.equal(priceListTitleForCustomerType(CustomerType.RETAIL), 'Прайс для розничного клиента');
     assert.equal(priceListTitleForCustomerType(CustomerType.MASTER), 'Прайс для мастера');
     assert.equal(priceListTitleForCustomerType(CustomerType.WHOLESALE), 'Оптовый прайс');
+    assert.equal(
+      priceListTitleForCustomerType(CustomerType.MASTER, CustomerLoyaltyCategory.GOLD),
+      'Прайс для мастера — категория Gold',
+    );
     assert.equal(resolvePriceListChannel(CustomerType.RETAIL), 'RETAIL');
     assert.equal(resolvePriceListChannel(CustomerType.MASTER), 'MASTER');
     assert.equal(resolvePriceListChannel(CustomerType.WHOLESALE), 'WHOLESALE');
@@ -41,14 +48,54 @@ describe('customer price list utilities', () => {
     const message = buildPriceListWhatsAppMessage({
       customerName: 'Айбек',
       customerTypeLabel: 'Мастер',
+      loyaltyCategoryLabel: 'Silver',
       branchName: 'Бишкек',
       generatedAt: '01.08.2026, 12:00:00',
     });
     assert.match(message, /Айбек/);
     assert.match(message, /Мастер/);
+    assert.match(message, /Silver/);
     assert.match(message, /вручную/);
     const link = buildWhatsAppDeepLink('996700123456', message);
     assert.match(link, /^https:\/\/wa\.me\/996700123456\?text=/);
+  });
+
+  it('applies category markup only when branch customization is enabled', () => {
+    assert.equal(
+      resolvePriceListCategoryMarkupPercent(
+        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+        CustomerLoyaltyCategory.SILVER,
+      ),
+      3,
+    );
+    assert.equal(
+      resolvePriceListCategoryMarkupPercent(
+        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: false },
+        CustomerLoyaltyCategory.SILVER,
+      ),
+      0,
+    );
+    assert.equal(
+      resolvePriceListCategoryMarkupPercent(
+        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+        CustomerLoyaltyCategory.VIP,
+      ),
+      0,
+    );
+    assert.equal(
+      resolvePriceListCategoryMarkupPercent(
+        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+        CustomerLoyaltyCategory.STANDARD,
+      ),
+      5,
+    );
+    assert.equal(
+      resolvePriceListCategoryMarkupPercent(
+        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+        CustomerLoyaltyCategory.GOLD,
+      ),
+      1.5,
+    );
   });
 
   it('rejects confidential fields in safe DTO', () => {
@@ -64,6 +111,20 @@ describe('customer price list utilities', () => {
         costPriceKgs: 50,
       }),
     );
+  });
+
+  it('calculates master silver final customer price from HQ base and category markup', () => {
+    const markup = resolvePriceListCategoryMarkupPercent(
+      { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+      CustomerLoyaltyCategory.SILVER,
+    );
+    const priced = calculateFinalSaleUnitPrice({
+      basePriceKgs: 1100,
+      loyaltyMarkupPercent: markup,
+      minimumPriceKgs: 0,
+    });
+    assert.equal(markup, 3);
+    assert.equal(priced.finalPriceKgs, 1133);
   });
 
   it('keeps loyalty category labels distinct from customer type', () => {

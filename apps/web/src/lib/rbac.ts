@@ -1133,6 +1133,14 @@ export function canCreateCustomer(user: Pick<User, 'role' | 'roles' | 'branchId'
   );
 }
 
+/** Branch CEO or Branch Sales Manager may generate and share customer price lists. */
+export function canSendCustomerPriceList(
+  user: Pick<User, 'role' | 'roles' | 'branchId' | 'permissions'> | null | undefined,
+) {
+  if (!user?.branchId || !hasPermission(user, 'crm.manage')) return false;
+  return isBranchOwnerUser(user) || isBranchSalesManagerUser(user);
+}
+
 export function canEditCustomerType(user: Pick<User, 'role' | 'roles' | 'branchId'> | null | undefined) {
   return (
     hasFullAccess(user) ||

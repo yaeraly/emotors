@@ -13,6 +13,7 @@ type SearchCustomer = {
   customerTypeLabel: string;
   loyaltyCategory: string;
   loyaltyCategoryLabel: string;
+  purchaseVolume90Days?: number;
   status: string;
   branchId: string;
   branchName: string;
@@ -27,7 +28,9 @@ type PriceListPreview = {
   customerTypeLabel: string;
   loyaltyCategory: string;
   loyaltyCategoryLabel: string;
+  categoryMarkupPercent?: number;
   loyaltyDiscountPercent: number;
+  purchaseVolume90Days?: number;
   branchName: string;
   title: string;
   generatedAt: string;
@@ -101,6 +104,10 @@ export function SendPriceListModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, open, selected, initialCustomerId]);
 
+  function appliedMarkupPercent(data: PriceListPreview) {
+    return data.categoryMarkupPercent ?? data.loyaltyDiscountPercent ?? 0;
+  }
+
   async function runSearch(term: string) {
     try {
       const data = await apiFetch<SearchCustomer[]>(
@@ -134,6 +141,7 @@ export function SendPriceListModal({
           customerTypeLabel: previewData.customerTypeLabel,
           loyaltyCategory: previewData.loyaltyCategory,
           loyaltyCategoryLabel: previewData.loyaltyCategoryLabel,
+          purchaseVolume90Days: previewData.purchaseVolume90Days,
           status: 'ACTIVE',
           branchId: '',
           branchName: previewData.branchName,
@@ -167,44 +175,24 @@ export function SendPriceListModal({
     }
   }
 
-  async function generatePdf() {
-    if (!selected) return;
-    setLoading(true);
-    setError('');
-    setWhatsappHint('');
-    try {
-      const data = await apiFetch<PriceListPreview>(
-        `/customer-price-lists/customers/${selected.id}/generate`,
-        { method: 'POST' },
-      );
-      setGenerated(data);
-      setPreview(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    } finally {
-      setLoading(false);
-    }
+  async function ensureGenerated(): Promise<string | null> {
+    if (generated?.priceListId) return generated.priceListId;
+    if (!selected) return null;
+    const data = await apiFetch<PriceListPreview>(
+      `/customer-price-lists/customers/${selected.id}/generate`,
+      { method: 'POST' },
+    );
+    setGenerated(data);
+    setPreview(data);
+    return data.priceListId ?? null;
   }
 
   async function downloadPdf() {
-    if (!generated?.priceListId) {
-      await generatePdf();
-    }
-    const priceListId = generated?.priceListId;
-    if (!priceListId && !selected) return;
-
+    if (!preview || loading) return;
     setLoading(true);
     setError('');
     try {
-      let id = generated?.priceListId;
-      if (!id && selected) {
-        const data = await apiFetch<PriceListPreview>(
-          `/customer-price-lists/customers/${selected.id}/generate`,
-          { method: 'POST' },
-        );
-        setGenerated(data);
-        id = data.priceListId;
-      }
+      const id = await ensureGenerated();
       if (!id) throw new Error(t('common.error'));
 
       const token = getToken();
@@ -229,20 +217,12 @@ export function SendPriceListModal({
   }
 
   async function sendWhatsApp() {
+    if (!preview || loading) return;
     setLoading(true);
     setError('');
     setWhatsappHint('');
     try {
-      let id = generated?.priceListId;
-      if (!id && selected) {
-        const data = await apiFetch<PriceListPreview>(
-          `/customer-price-lists/customers/${selected.id}/generate`,
-          { method: 'POST' },
-        );
-        setGenerated(data);
-        setPreview(data);
-        id = data.priceListId;
-      }
+      const id = await ensureGenerated();
       if (!id) throw new Error(t('common.error'));
 
       const result = await apiFetch<WhatsAppResult>(
@@ -252,7 +232,6 @@ export function SendPriceListModal({
 
       if (!result.whatsappApiAvailable) {
         setWhatsappHint(t('crm.priceListWhatsAppManualHint'));
-        // Also trigger PDF download so manager can attach it.
         const token = getToken();
         const response = await fetch(`${API_URL}/customer-price-lists/${id}/download`, {
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -315,22 +294,39 @@ export function SendPriceListModal({
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
               />
             </label>
-            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
-              {results.map((customer) => (
-                <button
-                  key={customer.id}
-                  type="button"
-                  onClick={() => void selectCustomer(customer)}
-                  className="block w-full rounded-2xl border border-slate-200 px-4 py-3 text-left hover:bg-slate-50"
-                >
-                  <p className="font-semibold text-slate-900">{customer.fullName}</p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    {customer.phone} · {customer.customerTypeLabel} ·{' '}
-                    {customer.loyaltyCategoryLabel} · {customer.branchName} ·{' '}
-                    {t(`status.${customer.status}`)}
-                  </p>
-                </button>
-              ))}
+            <div className="mt-3 max-h-80 overflow-y-auto rounded-2xl border border-slate-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">{t('crm.fullName')}</th>
+                    <th className="px-3 py-2">{t('crm.phone')}</th>
+                    <th className="px-3 py-2">{t('customers.customerType')}</th>
+                    <th className="px-3 py-2">{t('customers.loyaltyCategory')}</th>
+                    <th className="px-3 py-2">{t('customers.purchaseVolume90Days')}</th>
+                    <th className="px-3 py-2">{t('crm.branch')}</th>
+                    <th className="px-3 py-2">{t('crm.status')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {results.map((customer) => (
+                    <tr
+                      key={customer.id}
+                      onClick={() => void selectCustomer(customer)}
+                      className="cursor-pointer hover:bg-slate-50"
+                    >
+                      <td className="px-3 py-2 font-medium text-slate-900">{customer.fullName}</td>
+                      <td className="px-3 py-2 text-slate-600">{customer.phone}</td>
+                      <td className="px-3 py-2 text-slate-600">{customer.customerTypeLabel}</td>
+                      <td className="px-3 py-2 text-slate-600">{customer.loyaltyCategoryLabel}</td>
+                      <td className="px-3 py-2 text-slate-600">
+                        {(customer.purchaseVolume90Days ?? 0).toLocaleString('ru-RU')} KGS
+                      </td>
+                      <td className="px-3 py-2 text-slate-600">{customer.branchName}</td>
+                      <td className="px-3 py-2 text-slate-600">{t(`status.${customer.status}`)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
               {results.length === 0 ? (
                 <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
                   {t('crm.noCustomers')}
@@ -355,12 +351,20 @@ export function SendPriceListModal({
               <p>
                 <span className="font-semibold">{t('customers.loyaltyCategory')}:</span>{' '}
                 {selected.loyaltyCategoryLabel}
-                {preview && preview.loyaltyDiscountPercent > 0
-                  ? ` (${preview.loyaltyDiscountPercent}%)`
-                  : ''}
               </p>
               {preview ? (
                 <>
+                  <p>
+                    <span className="font-semibold">{t('customers.purchaseVolume90Days')}:</span>{' '}
+                    {(preview.purchaseVolume90Days ?? selected.purchaseVolume90Days ?? 0).toLocaleString(
+                      'ru-RU',
+                    )}{' '}
+                    KGS
+                  </p>
+                  <p>
+                    <span className="font-semibold">{t('customers.currentAdditionalMarkup')}:</span>{' '}
+                    {appliedMarkupPercent(preview)}%
+                  </p>
                   <p>
                     <span className="font-semibold">{t('crm.priceListTitle')}:</span>{' '}
                     {preview.title}

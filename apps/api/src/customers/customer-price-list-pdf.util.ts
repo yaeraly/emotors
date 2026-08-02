@@ -62,8 +62,9 @@ export async function writeCustomerPriceListPdf(input: {
   doc.text(`Клиент: ${dto.customerName}`);
   doc.text(`Тип клиента: ${dto.customerTypeLabel}`);
   doc.text(`Категория: ${dto.loyaltyCategoryLabel}`);
-  if (dto.loyaltyDiscountPercent > 0) {
-    doc.text(`Доп. наценка: ${dto.loyaltyDiscountPercent}%`);
+  doc.text(`Покупки за 90 дней: ${dto.purchaseVolume90Days.toLocaleString('ru-RU')} ${dto.currency}`);
+  if (dto.categoryMarkupPercent > 0) {
+    doc.text(`Применённая наценка: ${dto.categoryMarkupPercent}%`);
   }
   doc.text(`Дата формирования: ${generatedAt}`);
   doc.text(`Валюта: ${dto.currency}`);

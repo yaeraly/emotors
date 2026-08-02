@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { AuthUser } from '../auth/auth.types';
 import { toApiMoneyKgs } from '../common/authoritative-money.util';
 import { BranchPricingPolicyService } from './branch-pricing-policy.service';
-import { calculateFinalSaleUnitPrice, getLoyaltyMarkupPercent } from './customer-loyalty.util';
+import { calculateFinalSaleUnitPrice } from './customer-loyalty.util';
 import { LoyaltyProgramSettingsService } from './loyalty-program-settings.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -40,6 +40,7 @@ import {
   loyaltyCategoryRuLabel,
   normalizeWhatsAppPhoneDigits,
   priceListTitleForCustomerType,
+  resolvePriceListCategoryMarkupPercent,
   type SafeCustomerPriceListDto,
   type SafePriceListProduct,
 } from './customer-price-list.util';
@@ -86,25 +87,35 @@ export class CustomerPriceListService {
         loyaltyCategory: true,
         status: true,
         branchId: true,
+        purchaseVolume: true,
         branch: { select: { id: true, name: true, code: true } },
       },
       orderBy: { updatedAt: 'desc' },
       take: 30,
     });
 
-    return customers.map((customer) => ({
-      id: customer.id,
-      fullName: customer.fullName,
-      phone: customer.phone,
-      whatsappPhone: customer.whatsappPhone,
-      customerType: customer.customerType,
-      customerTypeLabel: customerTypeRuLabel(customer.customerType),
-      loyaltyCategory: customer.loyaltyCategory,
-      loyaltyCategoryLabel: loyaltyCategoryRuLabel(customer.loyaltyCategory),
-      status: customer.status,
-      branchId: customer.branchId,
-      branchName: customer.branch.name,
-    }));
+    return Promise.all(
+      customers.map(async (customer) => {
+        const purchaseVolume90Days = await this.loyaltyProgramSettingsService.computePurchaseVolume(
+          this.prisma,
+          customer.id,
+        );
+        return {
+          id: customer.id,
+          fullName: customer.fullName,
+          phone: customer.phone,
+          whatsappPhone: customer.whatsappPhone,
+          customerType: customer.customerType,
+          customerTypeLabel: customerTypeRuLabel(customer.customerType),
+          loyaltyCategory: customer.loyaltyCategory,
+          loyaltyCategoryLabel: loyaltyCategoryRuLabel(customer.loyaltyCategory),
+          purchaseVolume90Days,
+          status: customer.status,
+          branchId: customer.branchId,
+          branchName: customer.branch.name,
+        };
+      }),
+    );
   }
 
   async preview(user: AuthUser, customerId: string) {
@@ -150,12 +161,15 @@ export class CustomerPriceListService {
       },
     });
 
-    await this.audit(user, built.customer.branchId, 'CUSTOMER_PRICE_LIST_GENERATED', record.id, {
+    await this.audit(user, built.customer.branchId, 'BRANCH_CUSTOMER_PRICE_LIST_GENERATED', record.id, {
       customerId: built.customer.id,
       customerType: built.customer.customerType,
+      customerCategory: built.customer.loyaltyCategory,
       pricingPolicyVersionId: built.safeDto.pricingPolicyVersionId,
+      branchPricingPolicySource: built.safeDto.branchPricingPolicySource,
       productCount: built.safeDto.productCount,
       generatedBy: user.id,
+      channel: null,
       status: CustomerPriceListShareStatus.GENERATED,
     });
 
@@ -185,9 +199,10 @@ export class CustomerPriceListService {
       },
     });
 
-    await this.audit(user, record.branchId, 'CUSTOMER_PRICE_LIST_DOWNLOADED', record.id, {
+    await this.audit(user, record.branchId, 'BRANCH_CUSTOMER_PRICE_LIST_DOWNLOADED', record.id, {
       customerId: record.customerId,
       customerType: record.customerType,
+      customerCategory: record.loyaltyCategory,
       pricingPolicyVersionId: record.pricingPolicyVersionId,
       productCount: record.productCount,
       generatedBy: record.generatedById,
@@ -221,14 +236,19 @@ export class CustomerPriceListService {
       customer.whatsappPhone || customer.phone,
     );
     if (!phoneDigits) {
-      throw new BadRequestException(
-        'У клиента некорректный номер телефона для WhatsApp. Укажите номер в формате +996XXXXXXXXX.',
-      );
+      throw new BadRequestException('У клиента указан некорректный номер телефона.');
     }
+
+    const snapshot = record.snapshotJson as Record<string, unknown> | null;
+    const loyaltyCategoryLabel =
+      typeof snapshot?.loyaltyCategoryLabel === 'string'
+        ? snapshot.loyaltyCategoryLabel
+        : loyaltyCategoryRuLabel(record.loyaltyCategory);
 
     const message = buildPriceListWhatsAppMessage({
       customerName: customer.fullName,
       customerTypeLabel: customerTypeRuLabel(customer.customerType),
+      loyaltyCategoryLabel,
       branchName: customer.branch.name,
       generatedAt: record.generatedAt,
     });
@@ -243,9 +263,10 @@ export class CustomerPriceListService {
       },
     });
 
-    await this.audit(user, record.branchId, 'CUSTOMER_PRICE_LIST_WHATSAPP_OPENED', record.id, {
+    await this.audit(user, record.branchId, 'BRANCH_CUSTOMER_PRICE_LIST_WHATSAPP_OPENED', record.id, {
       customerId: record.customerId,
       customerType: record.customerType,
+      customerCategory: record.loyaltyCategory,
       pricingPolicyVersionId: record.pricingPolicyVersionId,
       productCount: record.productCount,
       generatedBy: record.generatedById,
@@ -346,7 +367,14 @@ export class CustomerPriceListService {
       customer.branchId,
     );
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
-    const loyaltyMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, branchPolicy);
+    const categoryMarkupPercent = resolvePriceListCategoryMarkupPercent(
+      branchPolicy,
+      loyaltyCategory,
+    );
+    const purchaseVolume90Days = await this.loyaltyProgramSettingsService.computePurchaseVolume(
+      this.prisma,
+      customer.id,
+    );
 
     const activeVersion = await this.prisma.pricingPolicyVersion.findFirst({
       where: { status: 'ACTIVE' },
@@ -419,7 +447,7 @@ export class CustomerPriceListService {
 
       const priced = calculateFinalSaleUnitPrice({
         basePriceKgs: basePrice,
-        loyaltyMarkupPercent,
+        loyaltyMarkupPercent: categoryMarkupPercent,
         minimumPriceKgs: minPrice,
       });
       const availableQty = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
@@ -455,12 +483,15 @@ export class CustomerPriceListService {
       customerTypeLabel: customerTypeRuLabel(customer.customerType),
       loyaltyCategory,
       loyaltyCategoryLabel: loyaltyCategoryRuLabel(loyaltyCategory),
-      loyaltyDiscountPercent: loyaltyMarkupPercent,
+      categoryMarkupPercent,
+      loyaltyDiscountPercent: categoryMarkupPercent,
+      purchaseVolume90Days,
       branchId: customer.branchId,
       branchName: customer.branch.name,
       branchPhone: customer.branch.phone,
       branchAddress: customer.branch.address,
-      title: priceListTitleForCustomerType(customer.customerType),
+      branchPricingPolicySource: branchPolicy.source,
+      title: priceListTitleForCustomerType(customer.customerType, loyaltyCategory),
       pricingChannel: channel,
       pricingPolicyVersionId,
       generatedAt: new Date().toISOString(),
@@ -475,7 +506,7 @@ export class CustomerPriceListService {
 
     return {
       customer,
-      loyaltyDiscountPercent: loyaltyMarkupPercent,
+      loyaltyDiscountPercent: categoryMarkupPercent,
       safeDto,
     };
   }

@@ -7,10 +7,11 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { CenteredDialog } from '@/components/CenteredDialog';
 import { apiFetch } from '@/lib/api';
-import { shouldHideCustomerProfit, canEditCustomerType } from '@/lib/rbac';
+import { shouldHideCustomerProfit, canEditCustomerType, canSendCustomerPriceList } from '@/lib/rbac';
 import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
+import { SendPriceListModal } from '@/components/customers/SendPriceListModal';
 import type {
   Customer,
   CustomerEvent,
@@ -82,6 +83,7 @@ export default function CustomerDetailPage() {
     null,
   );
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [priceListModalOpen, setPriceListModalOpen] = useState(false);
 
   useEffect(() => {
     void apiFetch<User>('/auth/me')
@@ -200,6 +202,7 @@ export default function CustomerDetailPage() {
 
   const canEditProfile = Boolean(currentUser);
   const canEditType = canEditCustomerType(currentUser);
+  const canSendPriceList = canSendCustomerPriceList(currentUser);
   const hideCustomerProfit = shouldHideCustomerProfit(currentUser);
 
   return (
@@ -273,6 +276,15 @@ export default function CustomerDetailPage() {
                   >
                     {t('crm.whatsappHistory')}
                   </button>
+                  {canSendPriceList ? (
+                    <button
+                      type="button"
+                      onClick={() => setPriceListModalOpen(true)}
+                      className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                    >
+                      {t('crm.sendPriceList')}
+                    </button>
+                  ) : null}
                 </div>
 
                 {isEditing ? (
@@ -738,6 +750,11 @@ export default function CustomerDetailPage() {
           </>
         ) : null}
       </section>
+      <SendPriceListModal
+        open={priceListModalOpen}
+        initialCustomerId={customerId}
+        onClose={() => setPriceListModalOpen(false)}
+      />
     </ProtectedShell>
   );
 }
