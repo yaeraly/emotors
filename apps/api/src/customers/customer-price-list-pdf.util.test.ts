@@ -75,6 +75,8 @@ describe('customer price list PDF', () => {
     assert.doesNotMatch(asText, /Gold|Silver|VIP|Standard/);
     assert.doesNotMatch(asText, /175.?000|1\.5%/);
     assert.doesNotMatch(asText, /loyaltyCategory|purchaseVolume|markupPercent/i);
+    assert.doesNotMatch(asText, /Клиент:|Тип клиента:|Валюта:|Айбек Тестов|Мастер/);
+    assert.doesNotMatch(asText, /Наличие и цены могут измениться|менеджеру филиала/i);
 
     await rm(dir, { recursive: true, force: true });
   });
@@ -84,18 +86,12 @@ describe('customer price list PDF', () => {
     const filePath = join(dir, 'cols.pdf');
     const dto: CustomerFacingPriceListDto = {
       customerId: 'c1',
-      customerName: 'Клиент',
-      customerPhone: null,
-      customerType: CustomerType.RETAIL,
-      customerTypeLabel: 'Розничный',
       branchId: 'b1',
       branchName: 'Филиал',
       branchPhone: null,
       branchAddress: null,
       title: 'Прайс для розничного клиента',
       generatedAt: new Date().toISOString(),
-      currency: 'KGS',
-      validityNote: 'Цены актуальны.',
       productCount: 1,
       products: [
         {
@@ -114,7 +110,7 @@ describe('customer price list PDF', () => {
     const asText = bytes.toString('latin1');
     assert.match(asText, /%PDF/);
     assert.ok(bytes.length > 500);
-    assert.match(asText, /2/);
+    assert.doesNotMatch(asText, /Клиент:|Тип клиента:|Валюта:|Наличие и цены/i);
     await rm(dir, { recursive: true, force: true });
   });
 });

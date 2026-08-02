@@ -148,7 +148,7 @@ export class CustomerPriceListService {
         pricingPolicyVersionId: built.snapshot.pricingPolicyVersionId,
         title: customerFacing.title,
         productCount: customerFacing.productCount,
-        currency: customerFacing.currency,
+        currency: built.snapshot.currency,
         fileName,
         filePath: absoluteFilePath,
         fileUrl,
@@ -261,7 +261,6 @@ export class CustomerPriceListService {
     }
 
     const message = buildPriceListWhatsAppMessage({
-      customerName: customer.fullName,
       branchName: customer.branch.name,
       generatedAt: record.generatedAt,
     });

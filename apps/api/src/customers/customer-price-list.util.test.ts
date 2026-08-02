@@ -91,21 +91,25 @@ describe('customer price list utilities', () => {
     assert.equal(normalizeWhatsAppPhoneDigits(null), null);
   });
 
-  it('builds WhatsApp message without loyalty category, volume, or markup', () => {
+  it('builds WhatsApp message without customer metadata, loyalty details, or validity note', () => {
     const message = buildPriceListWhatsAppMessage({
-      customerName: 'Айбек',
       branchName: 'Бишкек',
       generatedAt: '01.08.2026, 12:00:00',
     });
-    assert.match(message, /Айбек/);
+    assert.match(message, /Здравствуйте!/);
     assert.match(message, /Бишкек/);
     assert.match(message, /01\.08\.2026/);
-    assert.match(message, /менеджеру филиала/);
+    assert.doesNotMatch(message, /Клиент:/i);
+    assert.doesNotMatch(message, /Тип клиента:/i);
+    assert.doesNotMatch(message, /Валюта:/i);
+    assert.doesNotMatch(message, /Айбек/);
     assert.doesNotMatch(message, /Категория/i);
     assert.doesNotMatch(message, /Standard|Silver|Gold|VIP/);
     assert.doesNotMatch(message, /Покупки за 90 дней/i);
     assert.doesNotMatch(message, /наценк/i);
     assert.doesNotMatch(message, /Markup|Loyalty/i);
+    assert.doesNotMatch(message, /Наличие и цены могут измениться/i);
+    assert.doesNotMatch(message, /менеджеру филиала/i);
     const link = buildWhatsAppDeepLink('996700123456', message);
     assert.match(link, /^https:\/\/wa\.me\/996700123456\?text=/);
   });
@@ -156,8 +160,11 @@ describe('customer price list utilities', () => {
     const snapshot = sampleInternalSnapshot();
     const dto = toCustomerFacingPriceListDto(snapshot);
 
-    assert.equal(dto.customerName, 'Айбек Тестов');
-    assert.equal(dto.customerTypeLabel, 'Мастер');
+    assert.equal('customerName' in dto, false);
+    assert.equal('customerType' in dto, false);
+    assert.equal('customerTypeLabel' in dto, false);
+    assert.equal('currency' in dto, false);
+    assert.equal('validityNote' in dto, false);
     assert.equal(dto.title, 'Прайс для мастера');
     assert.equal(dto.products.length, 1);
     assert.equal(dto.products[0]?.name, 'Полное название товара без обрезки');
@@ -231,10 +238,16 @@ describe('customer price list utilities', () => {
     assert.equal(snapshot.purchaseVolume90Days, 175_000);
     assert.equal(snapshot.categoryMarkupPercent, 1.5);
     assert.equal(snapshot.products[0]?.sku, 'SKU-1');
+    assert.equal(snapshot.customerName, 'Айбек Тестов');
+    assert.equal(snapshot.customerTypeLabel, 'Мастер');
+    assert.equal(snapshot.validityNote.length > 0, true);
 
     const dto = toCustomerFacingPriceListDto(snapshot);
     assert.equal(dto.products[0]?.finalPriceKgs, snapshot.products[0]?.customerPriceKgs);
-    assert.doesNotMatch(JSON.stringify(dto), /Gold|SKU-1|Двигатели|В наличии|1\.5|175000|purchaseVolume/i);
+    const dtoJson = JSON.stringify(dto);
+    assert.doesNotMatch(dtoJson, /Gold|SKU-1|Двигатели|В наличии|1\.5|175000|purchaseVolume/i);
+    assert.doesNotMatch(dtoJson, /"customerName"|"customerType"|"customerTypeLabel"|"validityNote"/);
+    assert.doesNotMatch(dtoJson, /Наличие и цены могут измениться/i);
   });
 
   it('calculates master silver final customer price from HQ base and category markup', () => {

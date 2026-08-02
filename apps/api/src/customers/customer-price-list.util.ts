@@ -67,18 +67,12 @@ export type InternalCustomerPriceListSnapshot = {
 /** Customer-facing API / PDF / WhatsApp document payload. */
 export type CustomerFacingPriceListDto = {
   customerId: string;
-  customerName: string;
-  customerPhone: string | null;
-  customerType: CustomerType;
-  customerTypeLabel: string;
   branchId: string;
   branchName: string;
   branchPhone: string | null;
   branchAddress: string | null;
   title: string;
   generatedAt: string;
-  currency: string;
-  validityNote: string;
   productCount: number;
   products: CustomerFacingPriceListProduct[];
   whatsappApiAvailable: boolean;
@@ -181,7 +175,6 @@ export function normalizeWhatsAppPhoneDigits(rawPhone: string | null | undefined
 }
 
 export function buildPriceListWhatsAppMessage(input: {
-  customerName: string;
   branchName: string;
   generatedAt: Date | string;
 }): string {
@@ -191,14 +184,12 @@ export function buildPriceListWhatsAppMessage(input: {
       : input.generatedAt.toLocaleString('ru-RU');
 
   return [
-    `Здравствуйте, ${input.customerName}!`,
+    'Здравствуйте!',
     '',
     'Отправляем актуальный прайс EMOTORS.',
     '',
     `Филиал: ${input.branchName}`,
     `Дата формирования: ${generatedAt}`,
-    '',
-    'По вопросам наличия и заказа обращайтесь к менеджеру филиала.',
     '',
     'PDF-файл прайс-листа прикрепите вручную из скачанного документа.',
   ].join('\n');
@@ -326,18 +317,12 @@ export function toCustomerFacingPriceListDto(
 ): CustomerFacingPriceListDto {
   const dto: CustomerFacingPriceListDto = {
     customerId: snapshot.customerId,
-    customerName: snapshot.customerName,
-    customerPhone: snapshot.customerPhone,
-    customerType: snapshot.customerType,
-    customerTypeLabel: snapshot.customerTypeLabel,
     branchId: snapshot.branchId,
     branchName: snapshot.branchName,
     branchPhone: snapshot.branchPhone,
     branchAddress: snapshot.branchAddress,
     title: priceListTitleForCustomerType(snapshot.customerType),
     generatedAt: snapshot.generatedAt,
-    currency: snapshot.currency,
-    validityNote: snapshot.validityNote,
     productCount: snapshot.productCount,
     products: snapshot.products.map(toCustomerFacingProduct),
     whatsappApiAvailable: snapshot.whatsappApiAvailable,

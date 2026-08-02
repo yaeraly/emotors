@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
+import {
+  buildCustomerPriceListPreviewHeader,
+  type CustomerPriceListPreview,
+} from '@/lib/customer-price-list-preview';
 import { formatCustomerPriceListUnit } from '@/lib/product-unit';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -21,32 +25,7 @@ type SearchCustomer = {
 };
 
 /** Customer-facing preview / generated document payload. */
-type PriceListPreview = {
-  priceListId?: string;
-  customerId: string;
-  customerName: string;
-  customerPhone: string | null;
-  customerType: string;
-  customerTypeLabel: string;
-  branchName: string;
-  branchPhone?: string | null;
-  branchAddress?: string | null;
-  title: string;
-  generatedAt: string;
-  validityNote?: string;
-  productCount: number;
-  fileUrl?: string | null;
-  fileName?: string | null;
-  whatsappApiAvailable: boolean;
-  whatsappRequiresManualPdfAttachment?: boolean;
-  products: Array<{
-    productId: string;
-    name: string;
-    unitLabelRu: string;
-    finalPriceKgs: number;
-    currency: string;
-  }>;
-};
+type PriceListPreview = CustomerPriceListPreview;
 
 type WhatsAppResult = {
   whatsappLink: string;
@@ -128,10 +107,10 @@ export function SendPriceListModal({
       setSelected(
         customer ?? {
           id: previewData.customerId,
-          fullName: previewData.customerName,
-          phone: previewData.customerPhone ?? '',
-          customerType: previewData.customerType,
-          customerTypeLabel: previewData.customerTypeLabel,
+          fullName: '',
+          phone: '',
+          customerType: '',
+          customerTypeLabel: '',
           loyaltyCategory: '',
           loyaltyCategoryLabel: '',
           status: 'ACTIVE',
@@ -249,6 +228,8 @@ export function SendPriceListModal({
 
   if (!open) return null;
 
+  const previewHeader = preview ? buildCustomerPriceListPreviewHeader(preview) : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/40 p-4">
       <div className="mt-8 w-full max-w-4xl rounded-3xl bg-white p-6 shadow-xl">
@@ -328,42 +309,21 @@ export function SendPriceListModal({
           </div>
         ) : (
           <div className="mt-5 space-y-4">
-            <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
-              <p className="text-base font-bold text-slate-950">EMOTORS</p>
-              <p>
-                <span className="font-semibold">{t('crm.branch')}:</span>{' '}
-                {preview?.branchName ?? selected.branchName}
-              </p>
-              {preview?.branchPhone ? (
-                <p>
-                  <span className="font-semibold">{t('crm.phone')}:</span> {preview.branchPhone}
-                </p>
-              ) : null}
-              {preview?.branchAddress ? <p>{preview.branchAddress}</p> : null}
-              <p>
-                <span className="font-semibold">{t('crm.fullName')}:</span>{' '}
-                {preview?.customerName ?? selected.fullName}
-              </p>
-              <p>
-                <span className="font-semibold">{t('customers.customerType')}:</span>{' '}
-                {preview?.customerTypeLabel ?? selected.customerTypeLabel}
-              </p>
-              {preview ? (
-                <>
-                  <p>
-                    <span className="font-semibold">{t('crm.priceListTitle')}:</span>{' '}
-                    {preview.title}
-                  </p>
-                  <p>
-                    <span className="font-semibold">{t('crm.priceListGeneratedAt')}:</span>{' '}
-                    {new Date(preview.generatedAt).toLocaleString('ru-RU')}
-                  </p>
-                  {preview.validityNote ? (
-                    <p className="mt-2 whitespace-pre-line text-slate-600">{preview.validityNote}</p>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
+            {previewHeader ? (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                <p className="text-base font-bold text-slate-950">{previewHeader.brand}</p>
+                <p>{previewHeader.branchName}</p>
+                {previewHeader.branchPhone ? <p>Тел: {previewHeader.branchPhone}</p> : null}
+                {previewHeader.branchAddress ? <p>{previewHeader.branchAddress}</p> : null}
+                <p className="mt-2 text-base font-semibold text-slate-950">{previewHeader.title}</p>
+                <p>Дата формирования: {previewHeader.generatedAtLabel}</p>
+              </div>
+            ) : (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                <p className="text-base font-bold text-slate-950">EMOTORS</p>
+                <p>{selected.branchName}</p>
+              </div>
+            )}
 
             {preview ? (
               <div className="max-h-72 overflow-auto rounded-2xl border border-slate-200">

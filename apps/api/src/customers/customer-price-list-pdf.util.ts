@@ -60,12 +60,7 @@ export async function writeCustomerPriceListPdf(input: {
 
   doc.font('Heading').fontSize(14).fillColor('#0f172a').text(dto.title);
   doc.font('Body').fontSize(10).fillColor('#334155');
-  doc.text(`Клиент: ${dto.customerName}`);
-  doc.text(`Тип клиента: ${dto.customerTypeLabel}`);
   doc.text(`Дата формирования: ${generatedAt}`);
-  doc.text(`Валюта: ${dto.currency}`);
-  doc.moveDown(0.4);
-  doc.fontSize(9).fillColor('#64748b').text(dto.validityNote, { width: 515 });
   doc.moveDown(0.8);
 
   const columns = {
