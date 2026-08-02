@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
+import {
+  normalizeFranchiseSalesCatalogResponse,
+  type FranchiseSalesCatalogListResponse,
+  type FranchiseSalesCatalogRow,
+} from '@/lib/franchise-sales-catalog';
 import { canManagePricingPolicy } from '@/lib/rbac';
 import type { BranchType, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -83,12 +88,15 @@ export default function PricingOverridesPage() {
     const [overrideRows, branchRows, productRows, me] = await Promise.all([
       apiFetch<OverrideRow[]>(`/pricing/overrides${query}`),
       apiFetch<BranchOption[]>('/branches'),
-      apiFetch<ProductOption[]>('/pricing/franchise-sales'),
+      apiFetch<FranchiseSalesCatalogListResponse | FranchiseSalesCatalogRow[]>(
+        '/pricing/franchise-sales',
+      ),
       apiFetch<User>('/auth/me'),
     ]);
     setOverrides(overrideRows);
     setBranches(branchRows.filter((branch) => branch.branchType === 'FRANCHISE'));
-    setProducts(productRows.map((row) => ({ id: row.id, name: row.name, sku: row.sku })));
+    const catalog = normalizeFranchiseSalesCatalogResponse(productRows);
+    setProducts(catalog.items.map((row) => ({ id: row.id, name: row.name, sku: row.sku })));
     setUser(me);
   }
 

@@ -3,6 +3,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PricingHubNav } from '@/components/pricing/PricingHubNav';
 import { apiFetch } from '@/lib/api';
+import {
+  hasFranchiseSalesActiveMarkup,
+  isFranchiseSalesCostAvailable,
+  normalizeFranchiseSalesCatalogResponse,
+  resolveFranchiseSalesDisplayedBranchPriceKgs,
+  type FranchiseSalesCatalogListResponse,
+  type FranchiseSalesCatalogRow,
+} from '@/lib/franchise-sales-catalog';
 import { applyHqBranchWholesaleMarkup } from '@/lib/pricing-table-utils';
 import { canManagePricingPolicy } from '@/lib/rbac';
 import type { User } from '@/lib/types';
@@ -10,24 +18,7 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 type BranchOption = { id: string; name: string; code?: string; branchType: string };
 
-type FranchiseSalesRow = {
-  id: string;
-  name: string;
-  sku: string;
-  categoryName: string;
-  costPriceKgs: number | null;
-  costAvailable?: boolean;
-  markupConfigured?: boolean;
-  hqMarkupPercent: number;
-  baseFranchiseMarkupPercent?: number;
-  recommendedMarkupPercent?: number | null;
-  branchPriceKgs: number | null;
-  finalBranchPriceKgs?: number | null;
-  masterBranchPriceKgs?: number | null;
-  priceConfigured?: boolean;
-  pricingPolicyVersionId?: string | null;
-  lastUpdated: string;
-};
+type FranchiseSalesRow = FranchiseSalesCatalogRow;
 
 type EditableFranchiseRow = FranchiseSalesRow & {
   draftMarkup: number;
@@ -44,13 +35,11 @@ function formatPrice(value: number) {
 }
 
 function isCostAvailable(row: Pick<FranchiseSalesRow, 'costAvailable' | 'costPriceKgs'>) {
-  if (row.costAvailable === false) return false;
-  if (row.costPriceKgs == null) return false;
-  return Number(row.costPriceKgs) > 0;
+  return isFranchiseSalesCostAvailable(row);
 }
 
 function hasActiveMarkup(markupPercent: number) {
-  return Number.isFinite(markupPercent) && markupPercent > 0;
+  return hasFranchiseSalesActiveMarkup(markupPercent);
 }
 
 function savedMarkupPercent(row: Pick<FranchiseSalesRow, 'baseFranchiseMarkupPercent' | 'hqMarkupPercent'>) {
@@ -77,13 +66,8 @@ function resolveDraftMarkupFromProduct(product: FranchiseSalesRow) {
   return 0;
 }
 
-function resolveDisplayedBranchPriceKgs(
-  row: Pick<FranchiseSalesRow, 'branchPriceKgs' | 'finalBranchPriceKgs' | 'masterBranchPriceKgs'>,
-) {
-  const raw = row.finalBranchPriceKgs ?? row.branchPriceKgs ?? row.masterBranchPriceKgs;
-  if (raw === null || raw === undefined) return null;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+function resolveDisplayedBranchPriceKgs(row: FranchiseSalesRow) {
+  return resolveFranchiseSalesDisplayedBranchPriceKgs(row);
 }
 
 function resolveBranchPriceKgs(row: EditableFranchiseRow) {
@@ -101,6 +85,7 @@ export default function PricingBranchesPage() {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const [success, setSuccess] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -113,13 +98,19 @@ export default function PricingBranchesPage() {
   async function loadProducts(selectedBranchId: string) {
     setLoading(true);
     setError('');
+    setWarning('');
     try {
       const query = `?branchId=${encodeURIComponent(selectedBranchId)}`;
-      const products = await apiFetch<FranchiseSalesRow[]>(`/pricing/franchise-sales${query}`);
+      const payload = await apiFetch<FranchiseSalesCatalogListResponse | FranchiseSalesRow[]>(
+        `/pricing/franchise-sales${query}`,
+      );
+      const catalog = normalizeFranchiseSalesCatalogResponse(payload);
+      const products = catalog.items;
       const categoryNames = Array.from(
         new Set(products.map((p) => p.categoryName).filter(Boolean)),
       ).sort((a, b) => a.localeCompare(b, 'ru'));
       setCategories(categoryNames);
+      setWarning(catalog.warning ?? '');
       setRows(
         products.map((product) => {
           const displayedPrice = resolveDisplayedBranchPriceKgs(product);
@@ -131,6 +122,12 @@ export default function PricingBranchesPage() {
             finalBranchPriceKgs: displayedPrice,
             masterBranchPriceKgs: displayedPrice,
             priceConfigured: product.priceConfigured ?? Boolean(displayedPrice),
+            markupConfigured: product.markupConfigured ?? hasActiveMarkup(draftMarkup),
+            configurationStatus:
+              product.configurationStatus ??
+              (product.priceConfigured || hasActiveMarkup(draftMarkup)
+                ? 'CONFIGURED'
+                : 'NOT_CONFIGURED'),
             draftMarkup,
             isDirty: false,
           };
@@ -139,6 +136,7 @@ export default function PricingBranchesPage() {
       setPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+      setWarning('');
       setRows([]);
       setCategories([]);
     } finally {
@@ -304,6 +302,9 @@ export default function PricingBranchesPage() {
     <>
       <PricingHubNav activeTab="branches" />
       {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
+      {warning ? (
+        <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{warning}</p>
+      ) : null}
       {success ? (
         <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white shadow-lg">
           {success}
@@ -385,10 +386,17 @@ export default function PricingBranchesPage() {
                 </td>
               </tr>
             ) : null}
-            {!loading && filteredRows.length === 0 ? (
+            {!loading && !error && filteredRows.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
                   {t('pricing.productsNotFound')}
+                </td>
+              </tr>
+            ) : null}
+            {!loading && error && filteredRows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                  {t('common.error')}
                 </td>
               </tr>
             ) : null}

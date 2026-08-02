@@ -5,6 +5,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  buildFranchiseSalesCatalogListResponse,
+  buildFranchiseSalesCatalogProductWhere,
   buildFranchiseSalesCatalogRow,
   filterActiveCatalogProducts,
   filterFranchiseSalesCatalogRows,
@@ -48,6 +50,7 @@ describe('franchise-sales catalog inclusion', () => {
     assert.equal(row.baseFranchiseMarkupPercent, 15);
     assert.equal(row.branchPriceKgs, 115);
     assert.equal(row.pricingPolicyVersionId, 'ver-1');
+    assert.equal(row.configurationStatus, 'CONFIGURED');
   });
 
   it('includes active product without pricing', () => {
@@ -64,6 +67,67 @@ describe('franchise-sales catalog inclusion', () => {
     assert.equal(row.baseFranchiseMarkupPercent, 0);
     assert.equal(row.branchPriceKgs, null);
     assert.equal(row.priceConfigured, false);
+    assert.equal(row.configurationStatus, 'NOT_CONFIGURED');
+  });
+
+  it('includes product without category rule / override and keeps it unconfigured', () => {
+    const row = buildFranchiseSalesCatalogRow(
+      { ...baseProduct, categoryId: null, productCategory: null },
+      { available: true, costPriceKgs: 1662.97 },
+      {
+        baseFranchiseMarkupPercent: 0,
+        baseBranchPriceKgs: 1670,
+        resolvedPriceKgs: 1670,
+        pricingPolicyVersionId: null,
+        pricingProfileId: null,
+        appliedRuleType: 'BASE_FRANCHISE',
+        costSource: 'HQ_FIFO_ACTIVE_LAYER',
+      },
+      { id: 'branch-1', name: 'Branch 1' },
+    );
+    assert.equal(row.sku, 'SKU001');
+    assert.equal(row.markupConfigured, false);
+    assert.equal(row.branchPriceKgs, null);
+    assert.equal(row.finalBranchPriceKgs, null);
+    assert.equal(row.configurationStatus, 'NOT_CONFIGURED');
+  });
+
+  it('builds catalog list response with warning when active policy version is missing', () => {
+    const row = buildFranchiseSalesCatalogRow(
+      baseProduct,
+      { available: true, costPriceKgs: 100 },
+      null,
+      null,
+    );
+    const response = buildFranchiseSalesCatalogListResponse({
+      items: [row],
+      activePricingPolicyVersionId: null,
+      activePricingPolicyVersionNumber: null,
+    });
+    assert.equal(response.items.length, 1);
+    assert.equal(response.total, 1);
+    assert.equal(response.activePricingPolicyVersionId, null);
+    assert.match(String(response.warning), /Активная версия ценовой политики не настроена/i);
+  });
+
+  it('does not warn when active policy version exists', () => {
+    const response = buildFranchiseSalesCatalogListResponse({
+      items: [],
+      activePricingPolicyVersionId: 'ver-1',
+      activePricingPolicyVersionNumber: 3,
+    });
+    assert.equal(response.warning, null);
+    assert.equal(response.activePricingPolicyVersionNumber, 3);
+  });
+
+  it('catalog product where starts from HQ catalog, not pricing rules', () => {
+    const where = buildFranchiseSalesCatalogProductWhere('hq-branch-id');
+    assert.equal(where.deletedAt, null);
+    assert.equal(where.isActive, true);
+    assert.ok(Array.isArray(where.OR));
+    assert.deepEqual(where.OR[0], { branchId: 'hq-branch-id' });
+    assert.equal('pricingPolicyVersionId' in where, false);
+    assert.equal('hqBranchWholesaleMarkupPercent' in where, false);
   });
 
   it('includes multiple active products from catalog filter', () => {

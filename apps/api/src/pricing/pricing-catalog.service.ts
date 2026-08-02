@@ -8,6 +8,7 @@ import { BranchType, MaximumMarkupOverrideReasonCode, MaximumPricePolicy, Maximu
 import { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { canManagePricingPolicy, canViewPricing } from '../rbac/rbac';
+import { ensureHqCatalogBranch } from '../product-catalog/hq-product-catalog.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { UpdateCategoryMarkupDto, UpdateProductPricingDto } from './dto/pricing-catalog.dto';
 import { UpdateCategoryMaximumPolicyDto } from './dto/category-maximum-policy.dto';
@@ -58,7 +59,11 @@ import {
   type RetailMarkupInput,
   type WholesaleMarkupInput,
 } from './product-markup-resolution.util';
-import { buildFranchiseSalesCatalogRow } from './pricing-franchise-sales-catalog.util';
+import {
+  buildFranchiseSalesCatalogListResponse,
+  buildFranchiseSalesCatalogProductWhere,
+  buildFranchiseSalesCatalogRow,
+} from './pricing-franchise-sales-catalog.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -419,20 +424,27 @@ export class PricingCatalogService {
 
   async listFranchiseSalesProducts(user: AuthUser, branchId?: string) {
     this.assertCanView(user);
-    // Sync FIFO layers once for the whole catalog — never per product.
-    await this.fifoService.syncFifoBatchesFromHqStockMovements();
+
+    // Sync once for the catalog page. Never fail the product list if sync errors.
+    try {
+      await this.fifoService.syncFifoBatchesFromHqStockMovements();
+    } catch {
+      // Keep listing products; costs may show as unconfigured until sync succeeds.
+    }
 
     const displayBranch = await this.resolveCatalogDisplayBranch(branchId);
-    const hqBranch = await this.prisma.branch.findFirst({
-      where: { code: HQ_CATALOG_BRANCH_CODE },
-      select: { id: true },
-    });
-    if (!hqBranch) return [];
+    const hqBranch = await ensureHqCatalogBranch(this.prisma);
 
-    // Start from active HQ Product Catalog. Do not inner-join pricing rules,
-    // FIFO layers, stock, or overrides — those are optional lookups.
+    const activeVersion = await this.prisma.pricingPolicyVersion.findFirst({
+      where: { status: PricingPolicyVersionStatus.ACTIVE },
+      orderBy: { versionNumber: 'desc' },
+      select: { id: true, versionNumber: true },
+    });
+
+    // Base dataset = HQ Product Catalog (active + not deleted).
+    // Pricing rules / FIFO / overrides are LEFT JOIN-style optional lookups only.
     const products = await this.prisma.product.findMany({
-      where: { branchId: hqBranch.id, deletedAt: null, isActive: true },
+      where: buildFranchiseSalesCatalogProductWhere(hqBranch.id),
       include: {
         productCategory: {
           select: {
@@ -451,47 +463,73 @@ export class PricingCatalogService {
       orderBy: { name: 'asc' },
     });
 
-    return Promise.all(
+    const displayBranchRef = displayBranch
+      ? { id: displayBranch.id, name: displayBranch.name }
+      : null;
+
+    const items = await Promise.all(
       products.map(async (product) => {
-        const fifoCost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
-        const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
+        try {
+          // Read-only cost lookup — listing must not rewrite FIFO batches.
+          const fifoCost = await this.fifoService.getOldestActiveHqFifoCost({
+            productId: product.id,
+            catalogReadOnly: true,
+          });
+          const costAvailable = Boolean(fifoCost.available && fifoCost.costPriceKgs > 0);
 
-        let engine: Awaited<ReturnType<PricingEngineService['resolvePrice']>> | null = null;
-        if (displayBranch && costAvailable) {
-          try {
-            engine = await this.pricingEngine.resolvePrice({
-              productId: product.id,
-              branchId: displayBranch.id,
-              priceType: PricingEnginePriceType.BRANCH_PURCHASE,
-            });
-          } catch {
-            engine = null;
+          let engine: Awaited<ReturnType<PricingEngineService['resolvePrice']>> | null = null;
+          if (displayBranch && costAvailable && activeVersion) {
+            try {
+              engine = await this.pricingEngine.resolvePrice({
+                productId: product.id,
+                branchId: displayBranch.id,
+                priceType: PricingEnginePriceType.BRANCH_PURCHASE,
+                pricingPolicyVersionId: activeVersion.id,
+              });
+            } catch {
+              engine = null;
+            }
           }
-        }
 
-        return buildFranchiseSalesCatalogRow(
-          product,
-          {
-            available: fifoCost.available,
-            costPriceKgs: fifoCost.costPriceKgs,
-            source: fifoCost.source,
-            batchId: fifoCost.batchId,
-          },
-          engine
-            ? {
-                baseFranchiseMarkupPercent: engine.baseFranchiseMarkupPercent,
-                baseBranchPriceKgs: engine.baseBranchPriceKgs,
-                resolvedPriceKgs: engine.resolvedPriceKgs,
-                pricingPolicyVersionId: engine.pricingPolicyVersionId,
-                pricingProfileId: engine.pricingProfileId,
-                appliedRuleType: engine.appliedRuleType,
-                costSource: engine.costSource,
-              }
-            : null,
-          displayBranch ? { id: displayBranch.id, name: displayBranch.name } : null,
-        );
+          return buildFranchiseSalesCatalogRow(
+            product,
+            {
+              available: fifoCost.available,
+              costPriceKgs: fifoCost.costPriceKgs,
+              source: fifoCost.source,
+              batchId: fifoCost.batchId,
+            },
+            engine
+              ? {
+                  baseFranchiseMarkupPercent: engine.baseFranchiseMarkupPercent,
+                  baseBranchPriceKgs: engine.baseBranchPriceKgs,
+                  resolvedPriceKgs: engine.resolvedPriceKgs,
+                  pricingPolicyVersionId: engine.pricingPolicyVersionId,
+                  pricingPolicyVersionNumber: activeVersion?.versionNumber ?? null,
+                  pricingProfileId: engine.pricingProfileId,
+                  appliedRuleType: engine.appliedRuleType,
+                  costSource: engine.costSource,
+                }
+              : null,
+            displayBranchRef,
+          );
+        } catch {
+          // One product enrichment failure must never empty the whole catalog.
+          return buildFranchiseSalesCatalogRow(
+            product,
+            { available: false, costPriceKgs: 0, source: 'NO_FIFO_LAYER', batchId: null },
+            null,
+            displayBranchRef,
+          );
+        }
       }),
     );
+
+    return buildFranchiseSalesCatalogListResponse({
+      items,
+      activePricingPolicyVersionId: activeVersion?.id ?? null,
+      activePricingPolicyVersionNumber: activeVersion?.versionNumber ?? null,
+    });
   }
 
   async updateFranchiseSalesProduct(
@@ -544,8 +582,8 @@ export class PricingCatalogService {
       });
     });
 
-    const rows = await this.listFranchiseSalesProducts(user, branchId);
-    const row = rows.find((item) => item.id === productId);
+    const listed = await this.listFranchiseSalesProducts(user, branchId);
+    const row = listed.items.find((item) => item.id === productId);
     if (!row) throw new NotFoundException('Product not found after update');
     this.branchOrderPricingRevision.bump();
     return row;
