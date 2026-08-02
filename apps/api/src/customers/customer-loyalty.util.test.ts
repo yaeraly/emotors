@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { CustomerLoyaltyCategory, LoyaltyPurchaseWindow } from '@prisma/client';
+import { CustomerLoyaltyCategory, CustomerType, LoyaltyPurchaseWindow } from '@prisma/client';
 import {
   assertLoyaltyCategoryRanges,
   assertLoyaltyMarkupRange,
   assertLoyaltyThresholdOrder,
   calculateFinalSaleUnitPrice,
+  DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
   DEFAULT_LOYALTY_CATEGORY_RANGES,
   DEFAULT_LOYALTY_MARKUPS,
   getLoyaltyMarkupPercent,
@@ -44,22 +45,127 @@ describe('customer loyalty utilities', () => {
     );
   });
 
-  it('uses configurable loyalty markups', () => {
+  it('uses configurable loyalty markups per customer type', () => {
     assert.equal(
-      getLoyaltyMarkupPercent(CustomerLoyaltyCategory.STANDARD, DEFAULT_LOYALTY_MARKUPS),
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.STANDARD,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.RETAIL,
+      ),
       5,
     );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.SILVER,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.RETAIL,
+      ),
+      3,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.GOLD,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.RETAIL,
+      ),
+      1.5,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.VIP,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.RETAIL,
+      ),
+      0,
+    );
+
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.STANDARD,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.MASTER,
+      ),
+      6,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.SILVER,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.MASTER,
+      ),
+      4,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.GOLD,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.MASTER,
+      ),
+      2,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.VIP,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.MASTER,
+      ),
+      1,
+    );
+
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.STANDARD,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.WHOLESALE,
+      ),
+      5,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.SILVER,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.WHOLESALE,
+      ),
+      3,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.GOLD,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.WHOLESALE,
+      ),
+      1.5,
+    );
+    assert.equal(
+      getLoyaltyMarkupPercent(
+        CustomerLoyaltyCategory.VIP,
+        DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+        CustomerType.WHOLESALE,
+      ),
+      0,
+    );
+  });
+
+  it('keeps legacy single-set markup resolution for backward compatibility', () => {
     assert.equal(
       getLoyaltyMarkupPercent(CustomerLoyaltyCategory.SILVER, DEFAULT_LOYALTY_MARKUPS),
       3,
     );
-    assert.equal(
-      getLoyaltyMarkupPercent(CustomerLoyaltyCategory.GOLD, DEFAULT_LOYALTY_MARKUPS),
-      1.5,
-    );
-    assert.equal(
-      getLoyaltyMarkupPercent(CustomerLoyaltyCategory.VIP, DEFAULT_LOYALTY_MARKUPS),
-      0,
+  });
+
+  it('throws clear error when matrix rule is missing', () => {
+    const incomplete = {
+      ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+      masterGoldMarkupPercent: undefined as unknown as number,
+    };
+    assert.throws(
+      () =>
+        getLoyaltyMarkupPercent(
+          CustomerLoyaltyCategory.GOLD,
+          incomplete,
+          CustomerType.MASTER,
+        ),
+      /Мастер.*Gold.*не настроена наценка/,
     );
   });
 
@@ -103,6 +209,36 @@ describe('customer loyalty utilities', () => {
     assert.equal(priced.minimumPriceApplied, false);
   });
 
+  it('calculates master gold final price from type-specific markup', () => {
+    const markup = getLoyaltyMarkupPercent(
+      CustomerLoyaltyCategory.GOLD,
+      DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+      CustomerType.MASTER,
+    );
+    const priced = calculateFinalSaleUnitPrice({
+      basePriceKgs: 1100,
+      loyaltyMarkupPercent: markup,
+      minimumPriceKgs: 0,
+    });
+    assert.equal(markup, 2);
+    assert.equal(priced.finalPriceKgs, 1122);
+  });
+
+  it('calculates wholesale vip final price with zero markup', () => {
+    const markup = getLoyaltyMarkupPercent(
+      CustomerLoyaltyCategory.VIP,
+      DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+      CustomerType.WHOLESALE,
+    );
+    const priced = calculateFinalSaleUnitPrice({
+      basePriceKgs: 1000,
+      loyaltyMarkupPercent: markup,
+      minimumPriceKgs: 0,
+    });
+    assert.equal(markup, 0);
+    assert.equal(priced.finalPriceKgs, 1000);
+  });
+
   it('never sells below minimum allowed price', () => {
     const protectedPrice = calculateFinalSaleUnitPrice({
       basePriceKgs: 1000,
@@ -134,9 +270,9 @@ describe('customer loyalty utilities', () => {
     );
   });
 
-  it('enforces HQ markup limits', () => {
+  it('enforces HQ markup limits for the full customer-type matrix', () => {
     assert.doesNotThrow(() =>
-      assertLoyaltyMarkupRange(DEFAULT_LOYALTY_MARKUPS, {
+      assertLoyaltyMarkupRange(DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS, {
         minAllowedMarkupPercent: 0,
         maxAllowedMarkupPercent: 20,
       }),
@@ -144,7 +280,7 @@ describe('customer loyalty utilities', () => {
     assert.throws(
       () =>
         assertLoyaltyMarkupRange(
-          { ...DEFAULT_LOYALTY_MARKUPS, standardMarkupPercent: 25 },
+          { ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS, retailStandardMarkupPercent: 25 },
           { minAllowedMarkupPercent: 0, maxAllowedMarkupPercent: 20 },
         ),
       /between 0% and 20%/,
@@ -152,7 +288,7 @@ describe('customer loyalty utilities', () => {
     assert.throws(
       () =>
         assertLoyaltyMarkupRange(
-          { ...DEFAULT_LOYALTY_MARKUPS, silverMarkupPercent: -1 },
+          { ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS, masterSilverMarkupPercent: -1 },
           { minAllowedMarkupPercent: 0, maxAllowedMarkupPercent: 20 },
         ),
       /cannot be negative/,

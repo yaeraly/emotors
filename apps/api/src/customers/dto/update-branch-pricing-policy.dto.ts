@@ -48,23 +48,103 @@ export class UpdateBranchPricingPolicyDto {
   @IsNumber()
   @Min(0)
   @Max(100)
-  standardMarkupPercent!: number;
+  retailStandardMarkupPercent!: number;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(100)
-  silverMarkupPercent!: number;
+  retailSilverMarkupPercent!: number;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(100)
-  goldMarkupPercent!: number;
+  retailGoldMarkupPercent!: number;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
   @Max(100)
-  vipMarkupPercent!: number;
+  retailVipMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  masterStandardMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  masterSilverMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  masterGoldMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  masterVipMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  wholesaleStandardMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  wholesaleSilverMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  wholesaleGoldMarkupPercent!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  wholesaleVipMarkupPercent!: number;
+
+  /** @deprecated Prefer matrix fields */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  standardMarkupPercent?: number;
+
+  /** @deprecated Prefer matrix fields */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  silverMarkupPercent?: number;
+
+  /** @deprecated Prefer matrix fields */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  goldMarkupPercent?: number;
+
+  /** @deprecated Prefer matrix fields */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  vipMarkupPercent?: number;
 }

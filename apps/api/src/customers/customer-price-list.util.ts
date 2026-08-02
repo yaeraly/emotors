@@ -1,5 +1,9 @@
 import { CustomerLoyaltyCategory, CustomerType } from '@prisma/client';
-import { getLoyaltyMarkupPercent, type LoyaltyMarkupConfig } from './customer-loyalty.util';
+import {
+  getLoyaltyMarkupPercent,
+  type CustomerTypeLoyaltyMarkupMatrix,
+  type LoyaltyMarkupConfig,
+} from './customer-loyalty.util';
 import {
   resolvePricingChannelFromCustomerType,
   type SalePricingChannel,
@@ -180,13 +184,16 @@ export function buildPriceListWhatsAppMessage(input: {
 }
 
 export function resolvePriceListCategoryMarkupPercent(
-  branchPolicy: LoyaltyMarkupConfig & { branchCustomizationEnabled: boolean },
+  branchPolicy: (LoyaltyMarkupConfig | CustomerTypeLoyaltyMarkupMatrix) & {
+    branchCustomizationEnabled: boolean;
+  },
   loyaltyCategory: CustomerLoyaltyCategory,
+  customerType: CustomerType,
 ): number {
   if (!branchPolicy.branchCustomizationEnabled) {
     return 0;
   }
-  return getLoyaltyMarkupPercent(loyaltyCategory, branchPolicy);
+  return getLoyaltyMarkupPercent(loyaltyCategory, branchPolicy, customerType);
 }
 
 export function buildWhatsAppDeepLink(phoneDigits: string, message: string): string {

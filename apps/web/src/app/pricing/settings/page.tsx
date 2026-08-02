@@ -34,6 +34,18 @@ type LoyaltySettings = {
   silverMarkupPercent: number;
   goldMarkupPercent: number;
   vipMarkupPercent: number;
+  retailStandardMarkupPercent: number;
+  retailSilverMarkupPercent: number;
+  retailGoldMarkupPercent: number;
+  retailVipMarkupPercent: number;
+  masterStandardMarkupPercent: number;
+  masterSilverMarkupPercent: number;
+  masterGoldMarkupPercent: number;
+  masterVipMarkupPercent: number;
+  wholesaleStandardMarkupPercent: number;
+  wholesaleSilverMarkupPercent: number;
+  wholesaleGoldMarkupPercent: number;
+  wholesaleVipMarkupPercent: number;
   minAllowedMarkupPercent: number;
   maxAllowedMarkupPercent: number;
   branchCustomizationEnabled: boolean;
@@ -121,10 +133,18 @@ export default function PricingSettingsPage() {
             loyaltyDraft.vipMaxKgs == null || Number.isNaN(Number(loyaltyDraft.vipMaxKgs))
               ? null
               : Number(loyaltyDraft.vipMaxKgs),
-          standardMarkupPercent: Number(loyaltyDraft.standardMarkupPercent ?? 0),
-          silverMarkupPercent: Number(loyaltyDraft.silverMarkupPercent ?? 0),
-          goldMarkupPercent: Number(loyaltyDraft.goldMarkupPercent ?? 0),
-          vipMarkupPercent: Number(loyaltyDraft.vipMarkupPercent ?? 0),
+          retailStandardMarkupPercent: Number(loyaltyDraft.retailStandardMarkupPercent ?? 5),
+          retailSilverMarkupPercent: Number(loyaltyDraft.retailSilverMarkupPercent ?? 3),
+          retailGoldMarkupPercent: Number(loyaltyDraft.retailGoldMarkupPercent ?? 1.5),
+          retailVipMarkupPercent: Number(loyaltyDraft.retailVipMarkupPercent ?? 0),
+          masterStandardMarkupPercent: Number(loyaltyDraft.masterStandardMarkupPercent ?? 6),
+          masterSilverMarkupPercent: Number(loyaltyDraft.masterSilverMarkupPercent ?? 4),
+          masterGoldMarkupPercent: Number(loyaltyDraft.masterGoldMarkupPercent ?? 2),
+          masterVipMarkupPercent: Number(loyaltyDraft.masterVipMarkupPercent ?? 1),
+          wholesaleStandardMarkupPercent: Number(loyaltyDraft.wholesaleStandardMarkupPercent ?? 5),
+          wholesaleSilverMarkupPercent: Number(loyaltyDraft.wholesaleSilverMarkupPercent ?? 3),
+          wholesaleGoldMarkupPercent: Number(loyaltyDraft.wholesaleGoldMarkupPercent ?? 1.5),
+          wholesaleVipMarkupPercent: Number(loyaltyDraft.wholesaleVipMarkupPercent ?? 0),
           minAllowedMarkupPercent: Number(loyaltyDraft.minAllowedMarkupPercent ?? 0),
           maxAllowedMarkupPercent: Number(loyaltyDraft.maxAllowedMarkupPercent ?? 0),
           branchCustomizationEnabled: Boolean(loyaltyDraft.branchCustomizationEnabled),
@@ -314,31 +334,74 @@ export default function PricingSettingsPage() {
           </div>
 
           <p className="text-sm font-semibold text-slate-700">{t('pricing.loyaltyMarkups')}</p>
-          <div className="grid gap-4 md:grid-cols-2">
-            {(
-              [
-                ['standardMarkupPercent', 'Standard'],
-                ['silverMarkupPercent', 'Silver'],
-                ['goldMarkupPercent', 'Gold'],
-                ['vipMarkupPercent', 'VIP'],
-              ] as const
-            ).map(([key, label]) => (
-              <label key={key} className="block text-sm">
-                <span className="mb-1 block text-slate-500">{label}</span>
-                <input
-                  type="number"
-                  disabled={!canManage}
-                  min={0}
-                  max={100}
-                  step="0.1"
-                  value={loyaltyDraft[key] ?? 0}
-                  onChange={(e) =>
-                    setLoyaltyDraft((d) => ({ ...d, [key]: Number(e.target.value) }))
-                  }
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                />
-              </label>
-            ))}
+          <p className="text-xs text-slate-500">{t('branchCeo.pricingCustomerTypeMarkups')}</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-2 py-2">{t('customers.customerType')}</th>
+                  <th className="px-2 py-2">Standard %</th>
+                  <th className="px-2 py-2">Silver %</th>
+                  <th className="px-2 py-2">Gold %</th>
+                  <th className="px-2 py-2">VIP %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(
+                  [
+                    [
+                      'RETAIL',
+                      'retailStandardMarkupPercent',
+                      'retailSilverMarkupPercent',
+                      'retailGoldMarkupPercent',
+                      'retailVipMarkupPercent',
+                    ],
+                    [
+                      'MASTER',
+                      'masterStandardMarkupPercent',
+                      'masterSilverMarkupPercent',
+                      'masterGoldMarkupPercent',
+                      'masterVipMarkupPercent',
+                    ],
+                    [
+                      'WHOLESALE',
+                      'wholesaleStandardMarkupPercent',
+                      'wholesaleSilverMarkupPercent',
+                      'wholesaleGoldMarkupPercent',
+                      'wholesaleVipMarkupPercent',
+                    ],
+                  ] as const
+                ).map(([type, ...fields]) => (
+                  <tr key={type} className="border-b border-slate-100">
+                    <td className="px-2 py-2 font-semibold text-slate-800">
+                      {t(
+                        type === 'RETAIL'
+                          ? 'customers.customerTypeRetail'
+                          : type === 'MASTER'
+                            ? 'customers.customerTypeMaster'
+                            : 'customers.customerTypeWholesale',
+                      )}
+                    </td>
+                    {fields.map((field) => (
+                      <td key={field} className="px-2 py-2">
+                        <input
+                          type="number"
+                          disabled={!canManage}
+                          min={0}
+                          max={100}
+                          step="0.1"
+                          value={loyaltyDraft[field] ?? 0}
+                          onChange={(e) =>
+                            setLoyaltyDraft((d) => ({ ...d, [field]: Number(e.target.value) }))
+                          }
+                          className="w-full min-w-[4.5rem] rounded-lg border border-slate-300 px-2 py-1.5"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           <p className="text-sm font-semibold text-slate-700">{t('pricing.loyaltyMarkupLimits')}</p>

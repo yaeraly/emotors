@@ -6,7 +6,22 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
 import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
 
-type BranchPricingPolicy = {
+type MarkupMatrix = {
+  retailStandardMarkupPercent: number;
+  retailSilverMarkupPercent: number;
+  retailGoldMarkupPercent: number;
+  retailVipMarkupPercent: number;
+  masterStandardMarkupPercent: number;
+  masterSilverMarkupPercent: number;
+  masterGoldMarkupPercent: number;
+  masterVipMarkupPercent: number;
+  wholesaleStandardMarkupPercent: number;
+  wholesaleSilverMarkupPercent: number;
+  wholesaleGoldMarkupPercent: number;
+  wholesaleVipMarkupPercent: number;
+};
+
+type BranchPricingPolicy = MarkupMatrix & {
   branchId: string;
   standardMinKgs: number;
   standardMaxKgs: number;
@@ -16,10 +31,6 @@ type BranchPricingPolicy = {
   goldMaxKgs: number;
   vipMinKgs: number;
   vipMaxKgs: number | null;
-  standardMarkupPercent: number;
-  silverMarkupPercent: number;
-  goldMarkupPercent: number;
-  vipMarkupPercent: number;
   minAllowedMarkupPercent: number;
   maxAllowedMarkupPercent: number;
   branchCustomizationEnabled: boolean;
@@ -39,7 +50,7 @@ type PreviewResult = {
   affectsCostOrFifo: boolean;
 };
 
-type Draft = {
+type Draft = MarkupMatrix & {
   standardMinKgs: number;
   standardMaxKgs: number;
   silverMinKgs: number;
@@ -48,36 +59,45 @@ type Draft = {
   goldMaxKgs: number;
   vipMinKgs: number;
   vipMaxKgs: number | null;
-  standardMarkupPercent: number;
-  silverMarkupPercent: number;
-  goldMarkupPercent: number;
-  vipMarkupPercent: number;
 };
 
 const CATEGORIES = [
+  { key: 'STANDARD' as const, minKey: 'standardMinKgs' as const, maxKey: 'standardMaxKgs' as const },
+  { key: 'SILVER' as const, minKey: 'silverMinKgs' as const, maxKey: 'silverMaxKgs' as const },
+  { key: 'GOLD' as const, minKey: 'goldMinKgs' as const, maxKey: 'goldMaxKgs' as const },
+  { key: 'VIP' as const, minKey: 'vipMinKgs' as const, maxKey: 'vipMaxKgs' as const },
+];
+
+const MATRIX_ROWS: Array<{
+  type: 'RETAIL' | 'MASTER' | 'WHOLESALE';
+  fields: Array<keyof MarkupMatrix>;
+}> = [
   {
-    key: 'STANDARD' as const,
-    minKey: 'standardMinKgs' as const,
-    maxKey: 'standardMaxKgs' as const,
-    markupKey: 'standardMarkupPercent' as const,
+    type: 'RETAIL',
+    fields: [
+      'retailStandardMarkupPercent',
+      'retailSilverMarkupPercent',
+      'retailGoldMarkupPercent',
+      'retailVipMarkupPercent',
+    ],
   },
   {
-    key: 'SILVER' as const,
-    minKey: 'silverMinKgs' as const,
-    maxKey: 'silverMaxKgs' as const,
-    markupKey: 'silverMarkupPercent' as const,
+    type: 'MASTER',
+    fields: [
+      'masterStandardMarkupPercent',
+      'masterSilverMarkupPercent',
+      'masterGoldMarkupPercent',
+      'masterVipMarkupPercent',
+    ],
   },
   {
-    key: 'GOLD' as const,
-    minKey: 'goldMinKgs' as const,
-    maxKey: 'goldMaxKgs' as const,
-    markupKey: 'goldMarkupPercent' as const,
-  },
-  {
-    key: 'VIP' as const,
-    minKey: 'vipMinKgs' as const,
-    maxKey: 'vipMaxKgs' as const,
-    markupKey: 'vipMarkupPercent' as const,
+    type: 'WHOLESALE',
+    fields: [
+      'wholesaleStandardMarkupPercent',
+      'wholesaleSilverMarkupPercent',
+      'wholesaleGoldMarkupPercent',
+      'wholesaleVipMarkupPercent',
+    ],
   },
 ];
 
@@ -91,10 +111,18 @@ function toDraft(policy: BranchPricingPolicy): Draft {
     goldMaxKgs: policy.goldMaxKgs,
     vipMinKgs: policy.vipMinKgs,
     vipMaxKgs: policy.vipMaxKgs,
-    standardMarkupPercent: policy.standardMarkupPercent,
-    silverMarkupPercent: policy.silverMarkupPercent,
-    goldMarkupPercent: policy.goldMarkupPercent,
-    vipMarkupPercent: policy.vipMarkupPercent,
+    retailStandardMarkupPercent: policy.retailStandardMarkupPercent,
+    retailSilverMarkupPercent: policy.retailSilverMarkupPercent,
+    retailGoldMarkupPercent: policy.retailGoldMarkupPercent,
+    retailVipMarkupPercent: policy.retailVipMarkupPercent,
+    masterStandardMarkupPercent: policy.masterStandardMarkupPercent,
+    masterSilverMarkupPercent: policy.masterSilverMarkupPercent,
+    masterGoldMarkupPercent: policy.masterGoldMarkupPercent,
+    masterVipMarkupPercent: policy.masterVipMarkupPercent,
+    wholesaleStandardMarkupPercent: policy.wholesaleStandardMarkupPercent,
+    wholesaleSilverMarkupPercent: policy.wholesaleSilverMarkupPercent,
+    wholesaleGoldMarkupPercent: policy.wholesaleGoldMarkupPercent,
+    wholesaleVipMarkupPercent: policy.wholesaleVipMarkupPercent,
   };
 }
 
@@ -106,12 +134,12 @@ export default function BranchCeoPricingPolicyPage() {
   const [success, setSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [previewCustomerType, setPreviewCustomerType] = useState<'RETAIL' | 'MASTER' | 'WHOLESALE'>(
-    'WHOLESALE',
+    'MASTER',
   );
   const [previewCategory, setPreviewCategory] = useState<'STANDARD' | 'SILVER' | 'GOLD' | 'VIP'>(
-    'SILVER',
+    'GOLD',
   );
-  const [previewBasePrice, setPreviewBasePrice] = useState('1000');
+  const [previewBasePrice, setPreviewBasePrice] = useState('1100');
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
@@ -135,9 +163,10 @@ export default function BranchCeoPricingPolicyPage() {
         method: 'PUT',
         body: JSON.stringify({
           ...draft,
-          vipMaxKgs: draft.vipMaxKgs == null || Number.isNaN(Number(draft.vipMaxKgs))
-            ? null
-            : Number(draft.vipMaxKgs),
+          vipMaxKgs:
+            draft.vipMaxKgs == null || Number.isNaN(Number(draft.vipMaxKgs))
+              ? null
+              : Number(draft.vipMaxKgs),
         }),
       });
       setPolicy(updated);
@@ -271,27 +300,45 @@ export default function BranchCeoPricingPolicyPage() {
 
             <article className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm space-y-4">
               <h3 className="text-lg font-bold text-slate-950">
-                {t('branchCeo.pricingAdditionalMarkup')}
+                {t('branchCeo.pricingCustomerTypeMarkups')}
               </h3>
               <p className="text-sm text-slate-600">{t('branchCeo.pricingMarkupHint')}</p>
-              <div className="grid gap-3 md:grid-cols-2">
-                {CATEGORIES.map((category) => (
-                  <label key={category.key} className="block text-sm">
-                    <span className="mb-1 block text-slate-500">
-                      {t(loyaltyCategoryLabelKey(category.key))} (%)
-                    </span>
-                    <input
-                      type="number"
-                      min={policy.minAllowedMarkupPercent}
-                      max={policy.maxAllowedMarkupPercent}
-                      step="0.1"
-                      disabled={!policy.canEdit}
-                      value={draft[category.markupKey]}
-                      onChange={(e) => updateDraftNumber(category.markupKey, e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 disabled:bg-slate-50"
-                    />
-                  </label>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                      <th className="px-3 py-2">{t('customers.customerType')}</th>
+                      {CATEGORIES.map((category) => (
+                        <th key={category.key} className="px-3 py-2">
+                          {t(loyaltyCategoryLabelKey(category.key))} (%)
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {MATRIX_ROWS.map((row) => (
+                      <tr key={row.type} className="border-b border-slate-100">
+                        <td className="px-3 py-3 font-semibold text-slate-800">
+                          {t(customerTypeLabelKey(row.type))}
+                        </td>
+                        {row.fields.map((field) => (
+                          <td key={field} className="px-3 py-2">
+                            <input
+                              type="number"
+                              min={policy.minAllowedMarkupPercent}
+                              max={policy.maxAllowedMarkupPercent}
+                              step="0.1"
+                              disabled={!policy.canEdit}
+                              value={draft[field]}
+                              onChange={(e) => updateDraftNumber(field, e.target.value)}
+                              className="w-full min-w-[5rem] rounded-lg border border-slate-300 px-2 py-1.5 disabled:bg-slate-50"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
               {policy.canEdit ? (
                 <button

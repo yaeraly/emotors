@@ -1,4 +1,8 @@
-import { CustomerLoyaltyCategory, LoyaltyPurchaseWindow } from '@prisma/client';
+import {
+  CustomerLoyaltyCategory,
+  CustomerType,
+  LoyaltyPurchaseWindow,
+} from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 
@@ -20,11 +24,28 @@ export type LoyaltyCategoryRangeConfig = {
   vipMaxKgs: number | null;
 };
 
+/** Single loyalty-tier markup set (legacy / one customer type). */
 export type LoyaltyMarkupConfig = {
   standardMarkupPercent: number;
   silverMarkupPercent: number;
   goldMarkupPercent: number;
   vipMarkupPercent: number;
+};
+
+/** Branch/HQ matrix: Customer Type × Loyalty Category additional selling-price markup. */
+export type CustomerTypeLoyaltyMarkupMatrix = {
+  retailStandardMarkupPercent: number;
+  retailSilverMarkupPercent: number;
+  retailGoldMarkupPercent: number;
+  retailVipMarkupPercent: number;
+  masterStandardMarkupPercent: number;
+  masterSilverMarkupPercent: number;
+  masterGoldMarkupPercent: number;
+  masterVipMarkupPercent: number;
+  wholesaleStandardMarkupPercent: number;
+  wholesaleSilverMarkupPercent: number;
+  wholesaleGoldMarkupPercent: number;
+  wholesaleVipMarkupPercent: number;
 };
 
 /** @deprecated Use LoyaltyMarkupConfig */
@@ -37,6 +58,7 @@ export type LoyaltyDiscountConfig = {
 
 export type LoyaltyProgramConfig = LoyaltyThresholdConfig &
   LoyaltyMarkupConfig &
+  CustomerTypeLoyaltyMarkupMatrix &
   LoyaltyDiscountConfig & {
     standardMaxKgs: number;
     silverMaxKgs: number;
@@ -60,12 +82,103 @@ export const DEFAULT_LOYALTY_CATEGORY_RANGES: LoyaltyCategoryRangeConfig = {
   vipMaxKgs: null,
 };
 
+/** @deprecated Prefer DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS */
 export const DEFAULT_LOYALTY_MARKUPS: LoyaltyMarkupConfig = {
   standardMarkupPercent: 5,
   silverMarkupPercent: 3,
   goldMarkupPercent: 1.5,
   vipMarkupPercent: 0,
 };
+
+export const DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS: CustomerTypeLoyaltyMarkupMatrix = {
+  retailStandardMarkupPercent: 5,
+  retailSilverMarkupPercent: 3,
+  retailGoldMarkupPercent: 1.5,
+  retailVipMarkupPercent: 0,
+  masterStandardMarkupPercent: 6,
+  masterSilverMarkupPercent: 4,
+  masterGoldMarkupPercent: 2,
+  masterVipMarkupPercent: 1,
+  wholesaleStandardMarkupPercent: 5,
+  wholesaleSilverMarkupPercent: 3,
+  wholesaleGoldMarkupPercent: 1.5,
+  wholesaleVipMarkupPercent: 0,
+};
+
+const CUSTOMER_TYPE_LABEL_RU: Record<
+  'RETAIL' | 'MASTER' | 'WHOLESALE',
+  string
+> = {
+  RETAIL: 'Розничный',
+  MASTER: 'Мастер',
+  WHOLESALE: 'Оптовый',
+};
+
+const LOYALTY_CATEGORY_LABEL: Record<CustomerLoyaltyCategory, string> = {
+  [CustomerLoyaltyCategory.STANDARD]: 'Standard',
+  [CustomerLoyaltyCategory.SILVER]: 'Silver',
+  [CustomerLoyaltyCategory.GOLD]: 'Gold',
+  [CustomerLoyaltyCategory.VIP]: 'VIP',
+};
+
+export type BranchSaleCustomerType = 'RETAIL' | 'MASTER' | 'WHOLESALE';
+
+export function isBranchSaleCustomerType(
+  customerType: CustomerType | string | null | undefined,
+): customerType is BranchSaleCustomerType {
+  return (
+    customerType === 'RETAIL' ||
+    customerType === 'MASTER' ||
+    customerType === 'WHOLESALE'
+  );
+}
+
+export function markupMatrixFieldFor(
+  customerType: BranchSaleCustomerType,
+  category: CustomerLoyaltyCategory,
+): keyof CustomerTypeLoyaltyMarkupMatrix {
+  const typePrefix =
+    customerType === 'MASTER'
+      ? 'master'
+      : customerType === 'WHOLESALE'
+        ? 'wholesale'
+        : 'retail';
+  const categorySuffix =
+    category === CustomerLoyaltyCategory.SILVER
+      ? 'Silver'
+      : category === CustomerLoyaltyCategory.GOLD
+        ? 'Gold'
+        : category === CustomerLoyaltyCategory.VIP
+          ? 'Vip'
+          : 'Standard';
+  return `${typePrefix}${categorySuffix}MarkupPercent` as keyof CustomerTypeLoyaltyMarkupMatrix;
+}
+
+export function markupsForCustomerType(
+  matrix: CustomerTypeLoyaltyMarkupMatrix,
+  customerType: BranchSaleCustomerType,
+): LoyaltyMarkupConfig {
+  return {
+    standardMarkupPercent: Number(
+      matrix[markupMatrixFieldFor(customerType, CustomerLoyaltyCategory.STANDARD)],
+    ),
+    silverMarkupPercent: Number(
+      matrix[markupMatrixFieldFor(customerType, CustomerLoyaltyCategory.SILVER)],
+    ),
+    goldMarkupPercent: Number(
+      matrix[markupMatrixFieldFor(customerType, CustomerLoyaltyCategory.GOLD)],
+    ),
+    vipMarkupPercent: Number(
+      matrix[markupMatrixFieldFor(customerType, CustomerLoyaltyCategory.VIP)],
+    ),
+  };
+}
+
+export function legacyMarkupsFromMatrix(
+  matrix: CustomerTypeLoyaltyMarkupMatrix,
+): LoyaltyMarkupConfig {
+  return markupsForCustomerType(matrix, 'WHOLESALE');
+}
 
 const CATEGORY_RANK: Record<CustomerLoyaltyCategory, number> = {
   [CustomerLoyaltyCategory.STANDARD]: 0,
@@ -78,30 +191,63 @@ export function loyaltyCategoryRank(category: CustomerLoyaltyCategory): number {
   return CATEGORY_RANK[category] ?? 0;
 }
 
+/**
+ * Resolve additional selling-price markup for Customer Type × Loyalty Category.
+ * Throws a clear configuration error when the rule is missing/invalid.
+ */
 export function getLoyaltyMarkupPercent(
   category: CustomerLoyaltyCategory,
-  config: LoyaltyMarkupConfig,
+  config: LoyaltyMarkupConfig | CustomerTypeLoyaltyMarkupMatrix,
+  customerType?: CustomerType | null,
 ): number {
+  if (customerType != null && isBranchSaleCustomerType(customerType) && isMarkupMatrix(config)) {
+    const typeKey = customerType as BranchSaleCustomerType;
+    const field = markupMatrixFieldFor(typeKey, category);
+    if (!(field in config) || config[field] === undefined || config[field] === null) {
+      throw new Error(
+        `Для типа клиента «${CUSTOMER_TYPE_LABEL_RU[typeKey]}» и категории «${LOYALTY_CATEGORY_LABEL[category]}» не настроена наценка.`,
+      );
+    }
+    const value = Number(config[field]);
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        `Для типа клиента «${CUSTOMER_TYPE_LABEL_RU[typeKey]}» и категории «${LOYALTY_CATEGORY_LABEL[category]}» не настроена наценка.`,
+      );
+    }
+    return value;
+  }
+
+  // Legacy single-set config (tests / backward-compatible callers).
+  const legacy = config as LoyaltyMarkupConfig;
   switch (category) {
     case CustomerLoyaltyCategory.SILVER:
-      return Number(config.silverMarkupPercent ?? 0);
+      return Number(legacy.silverMarkupPercent ?? 0);
     case CustomerLoyaltyCategory.GOLD:
-      return Number(config.goldMarkupPercent ?? 0);
+      return Number(legacy.goldMarkupPercent ?? 0);
     case CustomerLoyaltyCategory.VIP:
-      return Number(config.vipMarkupPercent ?? 0);
+      return Number(legacy.vipMarkupPercent ?? 0);
     case CustomerLoyaltyCategory.STANDARD:
     default:
-      return Number(config.standardMarkupPercent ?? 0);
+      return Number(legacy.standardMarkupPercent ?? 0);
   }
+}
+
+function isMarkupMatrix(config: object): config is CustomerTypeLoyaltyMarkupMatrix {
+  return 'retailStandardMarkupPercent' in config || 'masterStandardMarkupPercent' in config;
 }
 
 /** @deprecated Prefer getLoyaltyMarkupPercent — discounts are no longer applied to selling price. */
 export function getLoyaltyDiscountPercent(
   category: CustomerLoyaltyCategory,
-  config: LoyaltyDiscountConfig | LoyaltyMarkupConfig,
+  config: LoyaltyDiscountConfig | LoyaltyMarkupConfig | CustomerTypeLoyaltyMarkupMatrix,
+  customerType?: CustomerType | null,
 ): number {
-  if ('standardMarkupPercent' in config) {
-    return getLoyaltyMarkupPercent(category, config as LoyaltyMarkupConfig);
+  if (isMarkupMatrix(config as object) || 'standardMarkupPercent' in (config as object)) {
+    return getLoyaltyMarkupPercent(
+      category,
+      config as LoyaltyMarkupConfig | CustomerTypeLoyaltyMarkupMatrix,
+      customerType,
+    );
   }
   switch (category) {
     case CustomerLoyaltyCategory.SILVER:
@@ -279,7 +425,7 @@ export function assertLoyaltyCategoryRanges(config: LoyaltyCategoryRangeConfig) 
 }
 
 export function assertLoyaltyMarkupRange(
-  config: LoyaltyMarkupConfig,
+  config: LoyaltyMarkupConfig | CustomerTypeLoyaltyMarkupMatrix,
   limits?: { minAllowedMarkupPercent?: number; maxAllowedMarkupPercent?: number },
 ) {
   const minAllowed = Number(limits?.minAllowedMarkupPercent ?? 0);
@@ -289,14 +435,43 @@ export function assertLoyaltyMarkupRange(
     throw new Error('HQ markup limits are invalid');
   }
 
-  for (const [label, value] of [
-    ['Standard', config.standardMarkupPercent],
-    ['Silver', config.silverMarkupPercent],
-    ['Gold', config.goldMarkupPercent],
-    ['VIP', config.vipMarkupPercent],
-  ] as const) {
-    const numeric = Number(value ?? 0);
-    if (!Number.isFinite(numeric) || numeric < 0) {
+  const entries: Array<[string, number]> = isMarkupMatrix(config)
+    ? (
+        [
+          ['RETAIL', CustomerLoyaltyCategory.STANDARD],
+          ['RETAIL', CustomerLoyaltyCategory.SILVER],
+          ['RETAIL', CustomerLoyaltyCategory.GOLD],
+          ['RETAIL', CustomerLoyaltyCategory.VIP],
+          ['MASTER', CustomerLoyaltyCategory.STANDARD],
+          ['MASTER', CustomerLoyaltyCategory.SILVER],
+          ['MASTER', CustomerLoyaltyCategory.GOLD],
+          ['MASTER', CustomerLoyaltyCategory.VIP],
+          ['WHOLESALE', CustomerLoyaltyCategory.STANDARD],
+          ['WHOLESALE', CustomerLoyaltyCategory.SILVER],
+          ['WHOLESALE', CustomerLoyaltyCategory.GOLD],
+          ['WHOLESALE', CustomerLoyaltyCategory.VIP],
+        ] as const
+      ).map(([type, category]) => {
+        const field = markupMatrixFieldFor(type, category);
+        return [
+          `${CUSTOMER_TYPE_LABEL_RU[type]}/${LOYALTY_CATEGORY_LABEL[category]}`,
+          Number(config[field]),
+        ];
+      })
+    : [
+        ['Standard', Number((config as LoyaltyMarkupConfig).standardMarkupPercent)],
+        ['Silver', Number((config as LoyaltyMarkupConfig).silverMarkupPercent)],
+        ['Gold', Number((config as LoyaltyMarkupConfig).goldMarkupPercent)],
+        ['VIP', Number((config as LoyaltyMarkupConfig).vipMarkupPercent)],
+      ];
+
+  const seen = new Set<string>();
+  for (const [label, numeric] of entries) {
+    if (seen.has(label)) {
+      throw new Error(`Duplicate markup rule for ${label}`);
+    }
+    seen.add(label);
+    if (!Number.isFinite(numeric) || Number.isNaN(numeric) || numeric < 0) {
       throw new Error(`${label} additional markup cannot be negative`);
     }
     if (numeric < minAllowed || numeric > maxAllowed) {
@@ -305,6 +480,52 @@ export function assertLoyaltyMarkupRange(
       );
     }
   }
+}
+
+type MarkupMatrixSource = {
+  [K in keyof CustomerTypeLoyaltyMarkupMatrix]?: Prisma.Decimal | number | null;
+} & {
+  standardMarkupPercent?: Prisma.Decimal | number | null;
+  silverMarkupPercent?: Prisma.Decimal | number | null;
+  goldMarkupPercent?: Prisma.Decimal | number | null;
+  vipMarkupPercent?: Prisma.Decimal | number | null;
+};
+
+export function readMarkupMatrix(row: MarkupMatrixSource): CustomerTypeLoyaltyMarkupMatrix {
+  const fallback = DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS;
+  const legacyStandard = Number(row.standardMarkupPercent ?? fallback.wholesaleStandardMarkupPercent);
+  const legacySilver = Number(row.silverMarkupPercent ?? fallback.wholesaleSilverMarkupPercent);
+  const legacyGold = Number(row.goldMarkupPercent ?? fallback.wholesaleGoldMarkupPercent);
+  const legacyVip = Number(row.vipMarkupPercent ?? fallback.wholesaleVipMarkupPercent);
+
+  return {
+    retailStandardMarkupPercent: Number(
+      row.retailStandardMarkupPercent ?? legacyStandard,
+    ),
+    retailSilverMarkupPercent: Number(row.retailSilverMarkupPercent ?? legacySilver),
+    retailGoldMarkupPercent: Number(row.retailGoldMarkupPercent ?? legacyGold),
+    retailVipMarkupPercent: Number(row.retailVipMarkupPercent ?? legacyVip),
+    masterStandardMarkupPercent: Number(
+      row.masterStandardMarkupPercent ?? fallback.masterStandardMarkupPercent,
+    ),
+    masterSilverMarkupPercent: Number(
+      row.masterSilverMarkupPercent ?? fallback.masterSilverMarkupPercent,
+    ),
+    masterGoldMarkupPercent: Number(
+      row.masterGoldMarkupPercent ?? fallback.masterGoldMarkupPercent,
+    ),
+    masterVipMarkupPercent: Number(
+      row.masterVipMarkupPercent ?? fallback.masterVipMarkupPercent,
+    ),
+    wholesaleStandardMarkupPercent: Number(
+      row.wholesaleStandardMarkupPercent ?? legacyStandard,
+    ),
+    wholesaleSilverMarkupPercent: Number(
+      row.wholesaleSilverMarkupPercent ?? legacySilver,
+    ),
+    wholesaleGoldMarkupPercent: Number(row.wholesaleGoldMarkupPercent ?? legacyGold),
+    wholesaleVipMarkupPercent: Number(row.wholesaleVipMarkupPercent ?? legacyVip),
+  };
 }
 
 /** @deprecated Prefer assertLoyaltyMarkupRange */

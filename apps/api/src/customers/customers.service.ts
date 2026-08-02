@@ -643,7 +643,13 @@ export class CustomersService {
     const totalDebt = Number(customer.totalDebtAmount);
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
     const purchaseVolume = Number(customer.purchaseVolume ?? totalPurchases);
-    const currentMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, policy);
+    const customerType = customer.customerType ?? CustomerType.RETAIL;
+    let currentMarkupPercent = 0;
+    try {
+      currentMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, policy, customerType);
+    } catch {
+      currentMarkupPercent = 0;
+    }
 
     return {
       id: customer.id,
@@ -651,7 +657,7 @@ export class CustomersService {
       phone: customer.phone,
       whatsappPhone: customer.whatsappPhone,
       status: customer.status,
-      customerType: customer.customerType ?? CustomerType.RETAIL,
+      customerType,
       loyaltyCategory,
       customerCategory: loyaltyCategory,
       purchaseVolume,
@@ -710,7 +716,13 @@ export class CustomersService {
       purchaseCount > 0 ? totalPurchases / purchaseCount : 0;
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
     const purchaseVolume = Number(customer.purchaseVolume ?? totalPurchases);
-    const currentMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, policy);
+    const customerType = customer.customerType ?? CustomerType.RETAIL;
+    let currentMarkupPercent = 0;
+    try {
+      currentMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, policy, customerType);
+    } catch {
+      currentMarkupPercent = 0;
+    }
 
     return {
       id: customer.id,
@@ -720,7 +732,7 @@ export class CustomersService {
       branchId: customer.branchId,
       branch: customer.branch,
       status: customer.status,
-      customerType: customer.customerType ?? CustomerType.RETAIL,
+      customerType,
       loyaltyCategory,
       customerCategory: loyaltyCategory,
       purchaseVolume,

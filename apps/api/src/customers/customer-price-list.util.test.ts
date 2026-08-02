@@ -12,8 +12,10 @@ import {
   resolvePriceListCategoryMarkupPercent,
   resolvePriceListChannel,
 } from './customer-price-list.util';
-import { DEFAULT_LOYALTY_MARKUPS } from './customer-loyalty.util';
-import { calculateFinalSaleUnitPrice } from './customer-loyalty.util';
+import {
+  DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+  calculateFinalSaleUnitPrice,
+} from './customer-loyalty.util';
 
 describe('customer price list utilities', () => {
   it('maps customer types to price-list titles and channels', () => {
@@ -63,38 +65,27 @@ describe('customer price list utilities', () => {
   it('applies category markup only when branch customization is enabled', () => {
     assert.equal(
       resolvePriceListCategoryMarkupPercent(
-        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+        { ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
         CustomerLoyaltyCategory.SILVER,
+        CustomerType.WHOLESALE,
       ),
       3,
     );
     assert.equal(
       resolvePriceListCategoryMarkupPercent(
-        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: false },
+        { ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS, branchCustomizationEnabled: false },
         CustomerLoyaltyCategory.SILVER,
+        CustomerType.WHOLESALE,
       ),
       0,
     );
     assert.equal(
       resolvePriceListCategoryMarkupPercent(
-        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
-        CustomerLoyaltyCategory.VIP,
-      ),
-      0,
-    );
-    assert.equal(
-      resolvePriceListCategoryMarkupPercent(
-        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
-        CustomerLoyaltyCategory.STANDARD,
-      ),
-      5,
-    );
-    assert.equal(
-      resolvePriceListCategoryMarkupPercent(
-        { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+        { ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
         CustomerLoyaltyCategory.GOLD,
+        CustomerType.MASTER,
       ),
-      1.5,
+      2,
     );
   });
 
@@ -115,16 +106,17 @@ describe('customer price list utilities', () => {
 
   it('calculates master silver final customer price from HQ base and category markup', () => {
     const markup = resolvePriceListCategoryMarkupPercent(
-      { ...DEFAULT_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
+      { ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS, branchCustomizationEnabled: true },
       CustomerLoyaltyCategory.SILVER,
+      CustomerType.MASTER,
     );
     const priced = calculateFinalSaleUnitPrice({
       basePriceKgs: 1100,
       loyaltyMarkupPercent: markup,
       minimumPriceKgs: 0,
     });
-    assert.equal(markup, 3);
-    assert.equal(priced.finalPriceKgs, 1133);
+    assert.equal(markup, 4);
+    assert.equal(priced.finalPriceKgs, 1144);
   });
 
   it('keeps loyalty category labels distinct from customer type', () => {

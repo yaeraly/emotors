@@ -308,9 +308,18 @@ export class SalesService {
     return customers.map((customer) => {
       const policy = policies.get(customer.branchId);
       const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
-      const currentMarkupPercent = policy
-        ? getLoyaltyMarkupPercent(loyaltyCategory, policy)
-        : 0;
+      let currentMarkupPercent = 0;
+      if (policy) {
+        try {
+          currentMarkupPercent = getLoyaltyMarkupPercent(
+            loyaltyCategory,
+            policy,
+            customer.customerType,
+          );
+        } catch {
+          currentMarkupPercent = 0;
+        }
+      }
       return {
         id: customer.id,
         fullName: customer.fullName,
@@ -1472,7 +1481,18 @@ export class SalesService {
       customer.branchId,
     );
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
-    const loyaltyMarkupPercent = getLoyaltyMarkupPercent(loyaltyCategory, branchPolicy);
+    let loyaltyMarkupPercent: number;
+    try {
+      loyaltyMarkupPercent = getLoyaltyMarkupPercent(
+        loyaltyCategory,
+        branchPolicy,
+        customer.customerType,
+      );
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Markup rule is missing',
+      );
+    }
     const allowManualOverride = hasAnyFullAccessRole(resolveUserRoles(user));
 
     for (const item of dto.items) {

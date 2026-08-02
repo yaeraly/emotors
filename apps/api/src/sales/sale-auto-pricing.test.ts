@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { CustomerLoyaltyCategory, CustomerType } from '@prisma/client';
 import {
   calculateFinalSaleUnitPrice,
-  DEFAULT_LOYALTY_MARKUPS,
+  DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
   getLoyaltyMarkupPercent,
 } from '../customers/customer-loyalty.util';
 import {
@@ -29,13 +29,32 @@ describe('branch sale automatic pricing', () => {
   });
 
   it('applies branch loyalty markup on HQ customer-type base price', () => {
-    const markup = getLoyaltyMarkupPercent(CustomerLoyaltyCategory.SILVER, DEFAULT_LOYALTY_MARKUPS);
+    const markup = getLoyaltyMarkupPercent(
+      CustomerLoyaltyCategory.SILVER,
+      DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+      CustomerType.WHOLESALE,
+    );
     const priced = calculateFinalSaleUnitPrice({
       basePriceKgs: 1000,
       loyaltyMarkupPercent: markup,
       minimumPriceKgs: 900,
     });
     assert.equal(priced.finalPriceKgs, 1030);
+  });
+
+  it('applies master-specific markup on master base price', () => {
+    const markup = getLoyaltyMarkupPercent(
+      CustomerLoyaltyCategory.GOLD,
+      DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
+      CustomerType.MASTER,
+    );
+    const priced = calculateFinalSaleUnitPrice({
+      basePriceKgs: 1100,
+      loyaltyMarkupPercent: markup,
+      minimumPriceKgs: 0,
+    });
+    assert.equal(markup, 2);
+    assert.equal(priced.finalPriceKgs, 1122);
   });
 
   it('never sells below minimum allowed price', () => {

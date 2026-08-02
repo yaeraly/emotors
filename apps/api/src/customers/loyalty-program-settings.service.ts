@@ -13,11 +13,14 @@ import {
   assertLoyaltyCategoryRanges,
   assertLoyaltyMarkupRange,
   assertLoyaltyThresholdOrder,
+  DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
   DEFAULT_LOYALTY_CATEGORY_RANGES,
   DEFAULT_LOYALTY_MARKUPS,
   getLoyaltyMarkupPercent,
+  legacyMarkupsFromMatrix,
   loyaltyCategoryRank,
   rangesFromThresholds,
+  readMarkupMatrix,
   resolveNextLoyaltyCategory,
   rollingWindowStartDate,
   type LoyaltyProgramConfig,
@@ -45,6 +48,48 @@ export class LoyaltyProgramSettingsService {
     }
 
     const existing = await this.ensureDefaults();
+    const existingMatrix = readMarkupMatrix(existing);
+    const matrix = readMarkupMatrix({
+      ...existingMatrix,
+      retailStandardMarkupPercent:
+        dto.retailStandardMarkupPercent ?? existingMatrix.retailStandardMarkupPercent,
+      retailSilverMarkupPercent:
+        dto.retailSilverMarkupPercent ?? existingMatrix.retailSilverMarkupPercent,
+      retailGoldMarkupPercent:
+        dto.retailGoldMarkupPercent ?? existingMatrix.retailGoldMarkupPercent,
+      retailVipMarkupPercent:
+        dto.retailVipMarkupPercent ?? existingMatrix.retailVipMarkupPercent,
+      masterStandardMarkupPercent:
+        dto.masterStandardMarkupPercent ?? existingMatrix.masterStandardMarkupPercent,
+      masterSilverMarkupPercent:
+        dto.masterSilverMarkupPercent ?? existingMatrix.masterSilverMarkupPercent,
+      masterGoldMarkupPercent:
+        dto.masterGoldMarkupPercent ?? existingMatrix.masterGoldMarkupPercent,
+      masterVipMarkupPercent:
+        dto.masterVipMarkupPercent ?? existingMatrix.masterVipMarkupPercent,
+      wholesaleStandardMarkupPercent:
+        dto.wholesaleStandardMarkupPercent ??
+        dto.standardMarkupPercent ??
+        dto.standardDiscountPercent ??
+        existingMatrix.wholesaleStandardMarkupPercent,
+      wholesaleSilverMarkupPercent:
+        dto.wholesaleSilverMarkupPercent ??
+        dto.silverMarkupPercent ??
+        dto.silverDiscountPercent ??
+        existingMatrix.wholesaleSilverMarkupPercent,
+      wholesaleGoldMarkupPercent:
+        dto.wholesaleGoldMarkupPercent ??
+        dto.goldMarkupPercent ??
+        dto.goldDiscountPercent ??
+        existingMatrix.wholesaleGoldMarkupPercent,
+      wholesaleVipMarkupPercent:
+        dto.wholesaleVipMarkupPercent ??
+        dto.vipMarkupPercent ??
+        dto.vipDiscountPercent ??
+        existingMatrix.wholesaleVipMarkupPercent,
+    });
+    const legacy = legacyMarkupsFromMatrix(matrix);
+
     const next = {
       purchaseWindow: dto.purchaseWindow ?? LoyaltyPurchaseWindow.ROLLING_90_DAYS,
       standardThresholdKgs: Number(dto.standardThresholdKgs ?? existing.standardThresholdKgs),
@@ -60,20 +105,8 @@ export class LoyaltyProgramSettingsService {
             ? null
             : Number(existing.vipMaxKgs)
           : dto.vipMaxKgs,
-      standardMarkupPercent: Number(
-        dto.standardMarkupPercent ??
-          dto.standardDiscountPercent ??
-          existing.standardMarkupPercent,
-      ),
-      silverMarkupPercent: Number(
-        dto.silverMarkupPercent ?? dto.silverDiscountPercent ?? existing.silverMarkupPercent,
-      ),
-      goldMarkupPercent: Number(
-        dto.goldMarkupPercent ?? dto.goldDiscountPercent ?? existing.goldMarkupPercent,
-      ),
-      vipMarkupPercent: Number(
-        dto.vipMarkupPercent ?? dto.vipDiscountPercent ?? existing.vipMarkupPercent,
-      ),
+      ...matrix,
+      ...legacy,
       minAllowedMarkupPercent: Number(
         dto.minAllowedMarkupPercent ?? existing.minAllowedMarkupPercent,
       ),
@@ -89,7 +122,7 @@ export class LoyaltyProgramSettingsService {
     try {
       assertLoyaltyThresholdOrder(next);
       assertLoyaltyCategoryRanges(rangesFromThresholds(next));
-      assertLoyaltyMarkupRange(next, {
+      assertLoyaltyMarkupRange(matrix, {
         minAllowedMarkupPercent: next.minAllowedMarkupPercent,
         maxAllowedMarkupPercent: next.maxAllowedMarkupPercent,
       });
@@ -111,10 +144,8 @@ export class LoyaltyProgramSettingsService {
         silverMaxKgs: next.silverMaxKgs,
         goldMaxKgs: next.goldMaxKgs,
         vipMaxKgs: next.vipMaxKgs,
-        standardMarkupPercent: next.standardMarkupPercent,
-        silverMarkupPercent: next.silverMarkupPercent,
-        goldMarkupPercent: next.goldMarkupPercent,
-        vipMarkupPercent: next.vipMarkupPercent,
+        ...matrix,
+        ...legacy,
         // Keep legacy discount columns synced to zero — selling price uses markup.
         standardDiscountPercent: 0,
         silverDiscountPercent: 0,
@@ -317,6 +348,7 @@ export class LoyaltyProgramSettingsService {
           goldMaxKgs: DEFAULT_LOYALTY_CATEGORY_RANGES.goldMaxKgs,
           vipMaxKgs: null,
           ...DEFAULT_LOYALTY_MARKUPS,
+          ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
           minAllowedMarkupPercent: 0,
           maxAllowedMarkupPercent: 20,
           branchCustomizationEnabled: true,
@@ -341,6 +373,7 @@ export class LoyaltyProgramSettingsService {
         goldDiscountPercent: 0,
         vipDiscountPercent: 0,
         ...DEFAULT_LOYALTY_MARKUPS,
+        ...DEFAULT_CUSTOMER_TYPE_LOYALTY_MARKUPS,
         minAllowedMarkupPercent: 0,
         maxAllowedMarkupPercent: 20,
         branchCustomizationEnabled: true,
@@ -367,11 +400,25 @@ export class LoyaltyProgramSettingsService {
     silverMarkupPercent: Prisma.Decimal | number;
     goldMarkupPercent: Prisma.Decimal | number;
     vipMarkupPercent: Prisma.Decimal | number;
+    retailStandardMarkupPercent?: Prisma.Decimal | number;
+    retailSilverMarkupPercent?: Prisma.Decimal | number;
+    retailGoldMarkupPercent?: Prisma.Decimal | number;
+    retailVipMarkupPercent?: Prisma.Decimal | number;
+    masterStandardMarkupPercent?: Prisma.Decimal | number;
+    masterSilverMarkupPercent?: Prisma.Decimal | number;
+    masterGoldMarkupPercent?: Prisma.Decimal | number;
+    masterVipMarkupPercent?: Prisma.Decimal | number;
+    wholesaleStandardMarkupPercent?: Prisma.Decimal | number;
+    wholesaleSilverMarkupPercent?: Prisma.Decimal | number;
+    wholesaleGoldMarkupPercent?: Prisma.Decimal | number;
+    wholesaleVipMarkupPercent?: Prisma.Decimal | number;
     minAllowedMarkupPercent: Prisma.Decimal | number;
     maxAllowedMarkupPercent: Prisma.Decimal | number;
     branchCustomizationEnabled: boolean;
     allowDowngrade: boolean;
   }): LoyaltyProgramConfig {
+    const matrix = readMarkupMatrix(settings);
+    const legacy = legacyMarkupsFromMatrix(matrix);
     return {
       purchaseWindow: settings.purchaseWindow,
       standardThresholdKgs: toApiMoneyKgs(settings.standardThresholdKgs),
@@ -386,10 +433,8 @@ export class LoyaltyProgramSettingsService {
       silverDiscountPercent: 0,
       goldDiscountPercent: 0,
       vipDiscountPercent: 0,
-      standardMarkupPercent: Number(settings.standardMarkupPercent),
-      silverMarkupPercent: Number(settings.silverMarkupPercent),
-      goldMarkupPercent: Number(settings.goldMarkupPercent),
-      vipMarkupPercent: Number(settings.vipMarkupPercent),
+      ...matrix,
+      ...legacy,
       minAllowedMarkupPercent: Number(settings.minAllowedMarkupPercent),
       maxAllowedMarkupPercent: Number(settings.maxAllowedMarkupPercent),
       branchCustomizationEnabled: Boolean(settings.branchCustomizationEnabled),
@@ -416,6 +461,18 @@ export class LoyaltyProgramSettingsService {
     silverMarkupPercent: Prisma.Decimal | number;
     goldMarkupPercent: Prisma.Decimal | number;
     vipMarkupPercent: Prisma.Decimal | number;
+    retailStandardMarkupPercent?: Prisma.Decimal | number;
+    retailSilverMarkupPercent?: Prisma.Decimal | number;
+    retailGoldMarkupPercent?: Prisma.Decimal | number;
+    retailVipMarkupPercent?: Prisma.Decimal | number;
+    masterStandardMarkupPercent?: Prisma.Decimal | number;
+    masterSilverMarkupPercent?: Prisma.Decimal | number;
+    masterGoldMarkupPercent?: Prisma.Decimal | number;
+    masterVipMarkupPercent?: Prisma.Decimal | number;
+    wholesaleStandardMarkupPercent?: Prisma.Decimal | number;
+    wholesaleSilverMarkupPercent?: Prisma.Decimal | number;
+    wholesaleGoldMarkupPercent?: Prisma.Decimal | number;
+    wholesaleVipMarkupPercent?: Prisma.Decimal | number;
     minAllowedMarkupPercent: Prisma.Decimal | number;
     maxAllowedMarkupPercent: Prisma.Decimal | number;
     branchCustomizationEnabled: boolean;

@@ -367,10 +367,18 @@ export class CustomerPriceListService {
       customer.branchId,
     );
     const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
-    const categoryMarkupPercent = resolvePriceListCategoryMarkupPercent(
-      branchPolicy,
-      loyaltyCategory,
-    );
+    let categoryMarkupPercent: number;
+    try {
+      categoryMarkupPercent = resolvePriceListCategoryMarkupPercent(
+        branchPolicy,
+        loyaltyCategory,
+        customer.customerType,
+      );
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Markup rule is missing',
+      );
+    }
     const purchaseVolume90Days = await this.loyaltyProgramSettingsService.computePurchaseVolume(
       this.prisma,
       customer.id,
