@@ -23,6 +23,7 @@ describe('product catalog FIFO cost mapping', () => {
     });
     assert.equal(mapped.finalCostKgs, 1662.97);
     assert.equal(mapped.currentFifoUnitCost, 1662.97);
+    assert.equal(mapped.currentHqFifoUnitCost, 1662.97);
     assert.equal(mapped.costAvailable, true);
     assert.equal(mapped.costSource, 'HQ_FIFO_ACTIVE_LAYER');
   });

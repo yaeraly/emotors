@@ -77,6 +77,8 @@ export async function resolveProcurementReceiptLayerUnitCost(
     productId: string;
     batchUnitCostKgs: number;
     movementUnitCostKgs?: number | null;
+    movementTotalCostKgs?: number | null;
+    movementQuantity?: number | null;
   },
 ) {
   const receivingItem = await client.procurementGoodsReceivingItem.findFirst({
@@ -85,6 +87,14 @@ export async function resolveProcurementReceiptLayerUnitCost(
   });
 
   if (!receivingItem?.procurementItemId) {
+    const fromMovement = resolveAuthoritativeFifoLayerUnitCost({
+      initialQuantity: Math.abs(Number(input.movementQuantity ?? 0)),
+      batchUnitCostKgs: input.batchUnitCostKgs,
+      movementUnitCostKgs: input.movementUnitCostKgs,
+      movementTotalCostKgs: input.movementTotalCostKgs,
+      movementQuantity: input.movementQuantity,
+    });
+    if (fromMovement > 0) return fromMovement;
     return resolveStoredFifoCatalogUnitCostFromSources({
       batchUnitCostKgs: input.batchUnitCostKgs,
       movementUnitCostKgs: input.movementUnitCostKgs,
@@ -102,21 +112,32 @@ export async function resolveProcurementReceiptLayerUnitCost(
     }),
   ]);
 
-  const fromLineTotal = resolveAuthoritativeFifoLayerUnitCost({
+  // 1) Exact procurement unit fields beat total÷qty (avoids 0.06 rounding drift).
+  const exactUnit = resolveStoredFifoCatalogUnitCostFromSources({
+    snapshotUnitLandedCostKgs: snapshot?.unitLandedCostKgs,
+    orderLineFinalUnitCostKgs: orderItem?.finalCostKgs,
+    // Intentionally omit batch/movement here — those may hold stale averages
+    // such as 407.53 / 309.78 while the receipt total is authoritative.
+  });
+  if (exactUnit > 0) return exactUnit;
+
+  // 2) Authoritative receipt total ÷ received qty (China landed chain).
+  const fromReceiptTotal = resolveAuthoritativeFifoLayerUnitCost({
     initialQuantity: Number(orderItem?.quantity ?? 0),
     batchUnitCostKgs: input.batchUnitCostKgs,
     movementUnitCostKgs: input.movementUnitCostKgs,
-    movementTotalCostKgs: orderItem?.totalCostKgs != null ? Number(orderItem.totalCostKgs) : null,
-    movementQuantity: orderItem?.quantity != null ? Number(orderItem.quantity) : null,
+    movementTotalCostKgs:
+      orderItem?.totalCostKgs != null
+        ? Number(orderItem.totalCostKgs)
+        : (input.movementTotalCostKgs ?? null),
+    movementQuantity:
+      orderItem?.quantity != null ? Number(orderItem.quantity) : (input.movementQuantity ?? null),
   });
-  if (fromLineTotal > 0) {
-    return fromLineTotal;
-  }
+  if (fromReceiptTotal > 0) return fromReceiptTotal;
 
+  // 3) Last resort: stored batch / movement unit fields.
   return resolveStoredFifoCatalogUnitCostFromSources({
     batchUnitCostKgs: input.batchUnitCostKgs,
-    snapshotUnitLandedCostKgs: snapshot?.unitLandedCostKgs,
-    orderLineFinalUnitCostKgs: orderItem?.finalCostKgs,
     movementUnitCostKgs: input.movementUnitCostKgs,
   });
 }
@@ -126,6 +147,18 @@ export async function resolveFifoLayerCatalogUnitCost(
   batch: Pick<FifoBatchRow, 'referenceType' | 'referenceId' | 'productId' | 'unitCostKgs'>,
   movement: MovementRow | null,
 ) {
+  if (isBusinessProcurementReceiptReference(batch.referenceType) && batch.referenceId) {
+    return resolveProcurementReceiptLayerUnitCost(client, {
+      receivingId: batch.referenceId,
+      productId: batch.productId,
+      batchUnitCostKgs: n(batch.unitCostKgs),
+      movementUnitCostKgs: movement ? n(movement.unitCostKgs) : null,
+      movementTotalCostKgs: movement ? n(movement.totalCostKgs) : null,
+      movementQuantity: movement ? movement.quantity : null,
+    });
+  }
+
+  // Non-procurement layers: prefer movement landed total over possibly stale batch unit.
   if (movement) {
     const fromMovement = resolveAuthoritativeFifoLayerUnitCost({
       initialQuantity: Math.abs(Number(movement.quantity)),
@@ -134,18 +167,7 @@ export async function resolveFifoLayerCatalogUnitCost(
       movementUnitCostKgs: n(movement.unitCostKgs),
       movementTotalCostKgs: n(movement.totalCostKgs),
     });
-    if (fromMovement > 0) {
-      return fromMovement;
-    }
-  }
-
-  if (isBusinessProcurementReceiptReference(batch.referenceType) && batch.referenceId) {
-    return resolveProcurementReceiptLayerUnitCost(client, {
-      receivingId: batch.referenceId,
-      productId: batch.productId,
-      batchUnitCostKgs: n(batch.unitCostKgs),
-      movementUnitCostKgs: movement ? n(movement.unitCostKgs) : null,
-    });
+    if (fromMovement > 0) return fromMovement;
   }
 
   return resolveStoredFifoCatalogUnitCostFromSources({
@@ -259,6 +281,37 @@ export async function resolveCurrentProductCatalogUnitCost(
       warehouseId: batch.warehouseId,
       procurementOrderItemId,
     };
+  }
+
+  // Positive HQ inventory without an active FIFO layer is a reconciliation error —
+  // never silently fall back to Product.finalCostKgs / purchaseCostKgs / averageCost.
+  const hqBalance = await client.inventoryBalance.aggregate({
+    where: {
+      productId: { in: productIds },
+      warehouse: {
+        warehouseType: WarehouseType.HQ,
+        deletedAt: null,
+        isActive: true,
+        ...(input.branchId ? { branchId: input.branchId } : {}),
+        ...(input.warehouseId ? { id: input.warehouseId } : {}),
+      },
+    },
+    _sum: { quantity: true },
+  });
+  const hqQuantity = Number(hqBalance._sum.quantity ?? 0);
+  if (hqQuantity > 0) {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        kind: 'HQ_FIFO_RECONCILIATION_ERROR',
+        message:
+          'HQ InventoryBalance quantity > 0 but no active HQ FIFO layer with remainingQuantity > 0',
+        productId: input.productId,
+        productIds,
+        warehouseId: input.warehouseId ?? null,
+        hqQuantity,
+      }),
+    );
   }
 
   return {

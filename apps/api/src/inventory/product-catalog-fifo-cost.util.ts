@@ -4,6 +4,8 @@ import { resolveAuthoritativeFifoLayerUnitCost } from '../pricing/pricing-fifo-u
 export type ProductCatalogFifoCostFields = {
   /** Oldest active HQ FIFO batch unit landed cost (remainingQuantity > 0). */
   currentFifoUnitCost: number | null;
+  /** Explicit alias used by HQ Product Catalog (Справочник товаров). */
+  currentHqFifoUnitCost: number | null;
   finalCostKgs: number | null;
   costAvailable: boolean;
   costSource: string;
@@ -15,6 +17,8 @@ export type ProductCatalogFifoCostFields = {
 /**
  * Map shared HQ FIFO resolver output to Product Catalog API fields.
  * Never use Product.costPriceKgs, Product.finalCostKgs, or InventoryBalance.averageCostKgs.
+ *
+ * Semantic: Себестоимость = unit cost of the next active HQ FIFO layer that will be issued.
  */
 export function mapProductCatalogFifoCost(input: {
   fifo: OldestActiveHqFifoCostResult;
@@ -23,6 +27,7 @@ export function mapProductCatalogFifoCost(input: {
   const currentFifoUnitCost = costAvailable ? input.fifo.costPriceKgs : null;
   return {
     currentFifoUnitCost,
+    currentHqFifoUnitCost: currentFifoUnitCost,
     finalCostKgs: currentFifoUnitCost,
     costAvailable,
     costSource: input.fifo.source,
@@ -86,7 +91,7 @@ function compareFifoCatalogLayers(a: FifoCatalogLayerInput, b: FifoCatalogLayerI
 
 /**
  * Authoritative product-catalog unit cost from oldest active FIFO layer.
- * Uses movement landed total ÷ received qty when available (Decimal-backed).
+ * Prefers exact stored unit fields; derives from total÷qty only as last resort.
  */
 export function resolveOldestActiveFifoCatalogUnitCost(layers: FifoCatalogLayerInput[]) {
   const active = layers
@@ -97,6 +102,8 @@ export function resolveOldestActiveFifoCatalogUnitCost(layers: FifoCatalogLayerI
     return { unitCostKgs: null, batchId: null };
   }
 
+  // Prefer movement landed total ÷ qty over a possibly stale batch.unitCostKgs
+  // (e.g. inventory average 407.53 / purchase-only 309.78).
   const unitCostKgs = resolveAuthoritativeFifoLayerUnitCost({
     initialQuantity: oldest.initialQuantity,
     batchUnitCostKgs: oldest.batchUnitCostKgs,

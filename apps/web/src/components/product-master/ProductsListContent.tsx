@@ -291,17 +291,19 @@ function formatKgs(value: number | string | null | undefined) {
 }
 
 function isProductCostAvailable(
-  product: Pick<Product, 'currentFifoUnitCost' | 'costAvailable'>,
+  product: Pick<Product, 'currentFifoUnitCost' | 'currentHqFifoUnitCost' | 'costAvailable'>,
 ) {
   if (product.costAvailable !== true) return false;
-  const cost = product.currentFifoUnitCost;
+  const cost = product.currentHqFifoUnitCost ?? product.currentFifoUnitCost;
   if (cost == null) return false;
   return Number(cost) > 0;
 }
 
-function productCatalogUnitCost(product: Pick<Product, 'currentFifoUnitCost' | 'costAvailable'>) {
+function productCatalogUnitCost(
+  product: Pick<Product, 'currentFifoUnitCost' | 'currentHqFifoUnitCost' | 'costAvailable'>,
+) {
   if (!isProductCostAvailable(product)) return null;
-  return product.currentFifoUnitCost!;
+  return product.currentHqFifoUnitCost ?? product.currentFifoUnitCost!;
 }
 
 function categoryName(category: ProductCategory, language: string) {

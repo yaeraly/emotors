@@ -28,6 +28,7 @@ const RESTRICTED_PRODUCT_ROOT_KEYS = [
   'storedFinalCostKgs',
   'storedCostPriceKgs',
   'currentFifoUnitCost',
+  'currentHqFifoUnitCost',
   'costAvailable',
   'costSource',
   'costBatchId',

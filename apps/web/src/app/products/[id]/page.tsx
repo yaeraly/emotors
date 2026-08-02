@@ -378,9 +378,9 @@ export default function ProductDetailPage() {
                   label={t('inventory.finalCostKgs')}
                   value={
                     product.costAvailable === true &&
-                    product.currentFifoUnitCost != null &&
-                    product.currentFifoUnitCost > 0
-                      ? formatKgs(product.currentFifoUnitCost)
+                    (product.currentHqFifoUnitCost ?? product.currentFifoUnitCost) != null &&
+                    Number(product.currentHqFifoUnitCost ?? product.currentFifoUnitCost) > 0
+                      ? formatKgs(product.currentHqFifoUnitCost ?? product.currentFifoUnitCost)
                       : t('inventory.costNotCalculated')
                   }
                 />
