@@ -95,6 +95,23 @@ describe('sale registration price layout', () => {
   it('does not keep the old eight-column price layout', () => {
     assert.doesNotMatch(pageSource, /1\.8fr_.*0\.9fr_.*0\.9fr_.*0\.9fr/);
   });
+
+  it('does not show duplicated recommended and sale price text before the input', () => {
+    assert.doesNotMatch(pageSource, /sales\.recommendedPrice'\)\}: \{formatKgs\(item\.recommendedPrice\)\}/);
+    assert.doesNotMatch(pageSource, /\{' · '\}/);
+    assert.doesNotMatch(
+      pageSource,
+      /sales\.sellingPrice'\)\}: \{formatKgs\(Number\(item\.unitPrice/,
+    );
+  });
+
+  it('vertically centers the line total block label and amount', () => {
+    assert.match(
+      pageSource,
+      /flex min-w-0 flex-col justify-center gap-1 rounded-xl bg-slate-50/,
+    );
+    assert.match(pageSource, /lg:items-center/);
+  });
 });
 
 describe('sale price validation unchanged', () => {

@@ -1135,7 +1135,7 @@ export default function NewSalePage() {
                 return (
                   <div
                     key={`${item.productId}-${index}`}
-                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,0.75fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-start"
+                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,0.75fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-center"
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.product')}</p>
@@ -1192,14 +1192,6 @@ export default function NewSalePage() {
                           {t('sales.priceChangedByManager')}
                         </p>
                       ) : null}
-                      {item.hasPricingPolicy &&
-                      (item.unitPriceManuallyEdited || priceState?.kind === 'changed-manually') ? (
-                        <p className="mt-1 text-xs text-slate-500">
-                          {t('sales.recommendedPrice')}: {formatKgs(item.recommendedPrice)}
-                          {' · '}
-                          {t('sales.sellingPrice')}: {formatKgs(Number(item.unitPrice || 0))}
-                        </p>
-                      ) : null}
                     </div>
                     {item.maxDiscountPercent > 0 && !branchSalesManagerView ? (
                       <SaleInput
@@ -1209,7 +1201,7 @@ export default function NewSalePage() {
                         onChange={(value) => updateItem(index, { discountPercent: value })}
                       />
                     ) : null}
-                    <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm">
+                    <div className="flex min-w-0 flex-col justify-center gap-1 rounded-xl bg-slate-50 px-3 py-3 text-sm">
                       <p className="text-xs font-semibold uppercase text-slate-400">
                         {t('sales.totalAmount')}
                       </p>
@@ -1217,7 +1209,7 @@ export default function NewSalePage() {
                     </div>
                     <button
                       onClick={() => removeItem(index)}
-                      className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 lg:self-center"
+                      className="rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-50"
                       type="button"
                     >
                       {t('common.delete')}
