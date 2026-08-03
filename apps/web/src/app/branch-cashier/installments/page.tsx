@@ -6,6 +6,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
+import {
+  branchCashierInstallmentsColumnWidthClass,
+  branchCashierInstallmentsTruncatedCellClass,
+  branchCashierInstallmentsTruncatedTooltip,
+} from '@/lib/branch-cashier-installments-table-ui';
 import type { BranchAccountantInvoice } from '@/lib/types';
 
 type InstallmentScope = 'active' | 'overdue' | 'closed';
@@ -96,23 +101,27 @@ export default function BranchCashierInstallmentsPage() {
           ) : (
             <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
               <colgroup>
-                <col className="w-[4%]" />
-                <col className="w-[8%]" />
-                <col className="w-[14%]" />
+                <col className={branchCashierInstallmentsColumnWidthClass('invoiceNo')} />
+                <col className={branchCashierInstallmentsColumnWidthClass('receipt')} />
+                <col className="w-[12%]" />
                 <col className="w-[7%]" />
                 <col className="w-[7%]" />
                 <col className="w-[7%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
                 <col className="w-[7%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
-                <col className="w-[14%]" />
+                <col className="w-[7%]" />
+                <col className="w-[6%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[12%]" />
               </colgroup>
               <thead className="bg-slate-50">
                 <tr>
-                  <th className={thClass}>{t('branchCashier.colInvoiceNo')}</th>
-                  <th className={thClass}>{t('branchCashier.colReceipt')}</th>
+                  <th className={`${thClass} ${branchCashierInstallmentsColumnWidthClass('invoiceNo')}`}>
+                    {t('branchCashier.colInvoiceNo')}
+                  </th>
+                  <th className={`${thClass} ${branchCashierInstallmentsColumnWidthClass('receipt')}`}>
+                    {t('branchCashier.colReceipt')}
+                  </th>
                   <th className={thClass}>{t('branchCashier.colCustomer')}</th>
                   <th className={`${thClass} text-right`}>{t('branchCashier.colAmount')}</th>
                   <th className={`${thClass} text-right`}>{t('branchCashier.colPaid')}</th>
@@ -132,9 +141,11 @@ export default function BranchCashierInstallmentsPage() {
 
                   return (
                     <tr key={invoice.id} className="hover:bg-blue-50/40">
-                      <td className={`${tdClass} font-bold text-blue-700`}>{invoice.invoiceNumber}</td>
-                      <td className={`${tdClass} max-w-0`} title={receipt !== '—' ? receipt : undefined}>
-                        <span className="block truncate">{receipt}</span>
+                      <td className={`${tdClass} ${branchCashierInstallmentsTruncatedCellClass} font-bold text-blue-700`}>
+                        <InstallmentTruncatedValue value={invoice.invoiceNumber} />
+                      </td>
+                      <td className={`${tdClass} ${branchCashierInstallmentsTruncatedCellClass}`}>
+                        <InstallmentTruncatedValue value={receipt} />
                       </td>
                       <td className={`${tdClass} max-w-0`} title={customer !== '—' ? customer : undefined}>
                         <span className="block truncate">{customer}</span>
@@ -200,6 +211,20 @@ export default function BranchCashierInstallmentsPage() {
         </div>
       </section>
     </ProtectedShell>
+  );
+}
+
+function InstallmentTruncatedValue({ value }: { value: string }) {
+  const tooltip = branchCashierInstallmentsTruncatedTooltip(value);
+
+  return (
+    <span
+      className="block truncate"
+      title={tooltip}
+      tabIndex={tooltip ? 0 : undefined}
+    >
+      {value}
+    </span>
   );
 }
 
