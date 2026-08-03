@@ -4,6 +4,8 @@ import { BranchInvoicePaymentType, BranchInvoiceStatus } from '@prisma/client';
 import {
   isRetailInstallmentCashierVisible,
   isRetailInstallmentInvoice,
+  isRetailInstallmentInCashierScope,
+  classifyRetailInstallmentCashierScope,
   resolveRetailInstallmentPaidAmount,
   resolveRetailInstallmentRemainingDebt,
   resolveRetailInstallmentRequiredPayment,
@@ -66,7 +68,7 @@ describe('sale-installment-invoice.util', () => {
     assert.equal(isRetailInstallmentCashierVisible(baseInvoice), true);
   });
 
-  it('hides closed installment from cashier list', () => {
+  it('hides closed installment from active cashier list', () => {
     assert.equal(
       isRetailInstallmentCashierVisible({
         ...baseInvoice,
@@ -83,6 +85,42 @@ describe('sale-installment-invoice.util', () => {
       }),
       false,
     );
+  });
+
+  it('classifies overdue installments when due date has passed', () => {
+    const overdue = {
+      ...baseInvoice,
+      sale: {
+        installmentApproval: {
+          ...baseInvoice.sale.installmentApproval,
+          dueDate: '2020-01-01',
+        },
+      },
+    };
+    assert.equal(classifyRetailInstallmentCashierScope(overdue, new Date('2026-08-03')), 'overdue');
+    assert.equal(isRetailInstallmentInCashierScope(overdue, 'overdue', new Date('2026-08-03')), true);
+    assert.equal(isRetailInstallmentInCashierScope(overdue, 'active', new Date('2026-08-03')), false);
+  });
+
+  it('classifies fully paid installments as closed', () => {
+    const closed = {
+      ...baseInvoice,
+      status: BranchInvoiceStatus.PAID,
+      debtAmount: 0,
+      sale: {
+        installmentApproval: {
+          status: 'PAID',
+          initialPayment: 0,
+          installmentPaidAmount: 100_000,
+          remainingDebt: 0,
+          financedAmount: 100_000,
+          dueDate: '2026-12-31',
+        },
+      },
+    };
+    assert.equal(classifyRetailInstallmentCashierScope(closed), 'closed');
+    assert.equal(isRetailInstallmentInCashierScope(closed, 'closed'), true);
+    assert.equal(isRetailInstallmentInCashierScope(closed, 'active'), false);
   });
 
   it('calculates remaining debt after partial payment', () => {

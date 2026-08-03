@@ -17,7 +17,7 @@ import { AuthUser } from '../auth/auth.types';
 import { BranchInstallmentEarlyPaymentService } from '../distribution/branch-installment-early-payment.service';
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
 import { isBranchCashierInvoiceVisible } from '../distribution/branch-cashier-invoice-visibility.util';
-import { isRetailInstallmentCashierVisible, isRetailInstallmentInvoice } from '../sales/sale-installment-invoice.util';
+import { isRetailInstallmentInCashierScope, isRetailInstallmentInvoice } from '../sales/sale-installment-invoice.util';
 import {
   assertRetailSaleFinanceAllowed,
   buildActiveAccountantInvoiceWhere,
@@ -90,7 +90,14 @@ export class BranchAccountantService {
         include: {
           customer: { select: { id: true, fullName: true, phone: true } },
           items: true,
-          installmentApproval: true,
+          installmentApproval: {
+            include: {
+              payments: {
+                orderBy: { createdAt: 'desc' as const },
+                take: 20,
+              },
+            },
+          },
         },
       },
       payments: {
@@ -541,13 +548,24 @@ export class BranchAccountantService {
 
   async listCashierInstallments(user: AuthUser, query: BranchAccountantInvoiceQueryDto) {
     this.assertBranchCashier(user);
+    const scope = query.scope ?? 'active';
     const where: Prisma.BranchInvoiceWhereInput = {
       deletedAt: null,
       branchId: user.branchId!,
       invoiceCategory: 'RETAIL_SALE',
       paymentType: BranchInvoicePaymentType.INSTALLMENT,
       sentToCashierAt: { not: null },
-      status: { in: [BranchInvoiceStatus.ISSUED, BranchInvoiceStatus.PARTIALLY_PAID, BranchInvoiceStatus.OVERDUE] },
+      status:
+        scope === 'closed'
+          ? {
+              in: [
+                BranchInvoiceStatus.ISSUED,
+                BranchInvoiceStatus.PARTIALLY_PAID,
+                BranchInvoiceStatus.OVERDUE,
+                BranchInvoiceStatus.PAID,
+              ],
+            }
+          : { in: [BranchInvoiceStatus.ISSUED, BranchInvoiceStatus.PARTIALLY_PAID, BranchInvoiceStatus.OVERDUE] },
     };
     if (query.search?.trim()) {
       where.OR = [
@@ -564,7 +582,7 @@ export class BranchAccountantService {
     });
 
     return invoices
-      .filter((invoice) => isRetailInstallmentCashierVisible(invoice))
+      .filter((invoice) => isRetailInstallmentInCashierScope(invoice, scope))
       .map((invoice) => sanitizeRetailInstallmentCashierInvoice(invoice));
   }
 
@@ -581,7 +599,7 @@ export class BranchAccountantService {
       },
       include: this.invoiceInclude(),
     });
-    if (!invoice || !isRetailInstallmentCashierVisible(invoice)) {
+    if (!invoice || !isRetailInstallmentInCashierScope(invoice, 'all')) {
       throw new NotFoundException('Рассрочка не найдена');
     }
     return sanitizeRetailInstallmentCashierInvoice(invoice);

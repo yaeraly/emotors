@@ -14,6 +14,8 @@ const WORKFLOW_STATUSES = [
   'CANCELLED',
 ] as const;
 
+const INSTALLMENT_SCOPES = ['active', 'overdue', 'closed', 'all'] as const;
+
 export class BranchAccountantInvoiceQueryDto {
   @IsOptional()
   @IsString()
@@ -26,6 +28,10 @@ export class BranchAccountantInvoiceQueryDto {
   @IsOptional()
   @IsEnum(WORKFLOW_STATUSES)
   workflowStatus?: AccountantInvoiceWorkflowStatus;
+
+  @IsOptional()
+  @IsEnum(INSTALLMENT_SCOPES)
+  scope?: (typeof INSTALLMENT_SCOPES)[number];
 
   @IsOptional()
   @Type(() => Date)

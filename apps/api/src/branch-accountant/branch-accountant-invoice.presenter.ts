@@ -275,13 +275,31 @@ export function sanitizeBranchCashierInvoice(invoice: any) {
 export function sanitizeRetailInstallmentCashierInvoice(invoice: any) {
   const base = sanitizeAccountantInvoice(invoice);
   const retail = base.retailInstallment;
+  const paymentDates = (invoice.payments ?? [])
+    .map((payment: { paidAt?: Date | string | null }) => payment.paidAt)
+    .filter(Boolean)
+    .map((value: Date | string) => new Date(value).getTime());
+  const installmentPaymentDates = (invoice.sale?.installmentApproval?.payments ?? [])
+    .map((payment: { createdAt?: Date | string | null }) => payment.createdAt)
+    .filter(Boolean)
+    .map((value: Date | string) => new Date(value).getTime());
+  const lastPaymentMs = Math.max(0, ...paymentDates, ...installmentPaymentDates);
+
   return {
     ...base,
+    saleNumber: base.saleReceiptNumber ?? invoice.sale?.receiptNumber ?? null,
     paidAmount: retail?.paidAmount ?? base.paidAmount,
     remainingAmount: retail?.remainingDebt ?? base.remainingAmount,
     debtAmount: retail?.remainingDebt ?? base.debtAmount,
     requiredPaymentAmount: base.requiredPaymentAmount,
+    initialPayment: retail?.initialPayment ?? 0,
     nextPaymentDate: retail?.dueDate ?? base.dueDate ?? null,
+    installmentEndDate: retail?.dueDate ?? base.dueDate ?? null,
+    lastPaymentDate: lastPaymentMs > 0 ? new Date(lastPaymentMs).toISOString() : null,
+    installmentScope:
+      retail?.status === 'PAID' || Number(retail?.remainingDebt ?? base.remainingAmount) <= 0.009
+        ? 'closed'
+        : 'active',
     installmentSchedule: retail
       ? [
           {

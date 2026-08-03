@@ -166,6 +166,13 @@ export default function BranchAccountantInvoiceDetailPage() {
   const canReview = invoice?.workflowStatus === 'PENDING_ACCOUNTANT_REVIEW';
   const installmentPending = invoice?.branchOrderInstallment?.status === 'PENDING';
   const installmentApproved = invoice?.branchOrderInstallment?.status === 'APPROVED';
+  const retailInstallment = invoice?.retailInstallment;
+  const retailInstallmentReady =
+    Boolean(retailInstallment) &&
+    invoice?.paymentType === 'INSTALLMENT' &&
+    (retailInstallment?.status === 'APPROVED' || retailInstallment?.status === 'ACTIVE') &&
+    !invoice?.sentToCashierAt &&
+    invoice?.workflowStatus === 'READY_FOR_CASHIER';
   const zeroInitial =
     invoice?.branchOrderInstallment?.zeroInitialPayment ||
     !invoice?.branchOrderInstallment?.firstPaymentRequired;
@@ -175,6 +182,7 @@ export default function BranchAccountantInvoiceDetailPage() {
     (installmentApproved && !zeroInitial && !firstPaymentDone);
   const showLegacySend =
     canLegacySendToCashier && !invoice?.sentToCashierAt && !installmentPending && !activeEarlyPayment;
+  const showSendToCashier = showLegacySend || retailInstallmentReady;
   const canRequestEarlyPayment =
     installmentApproved && invoice?.status !== 'PAID' && !activeEarlyPayment && (zeroInitial || firstPaymentDone);
 
@@ -295,6 +303,23 @@ export default function BranchAccountantInvoiceDetailPage() {
               <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{t('branchAccountant.installmentPendingCeo')}</p>
             ) : null}
 
+            {retailInstallment ? (
+              <section className="rounded-3xl border border-green-200 bg-green-50 p-6 shadow-sm space-y-2">
+                <h3 className="font-bold">{t('branchAccountant.installmentApproved')}</h3>
+                <p className="text-sm">
+                  {t('sales.installmentInitialPayment')}: {formatKgs(retailInstallment.initialPayment)} ·{' '}
+                  {t('sales.paidAmount')}: {formatKgs(retailInstallment.paidAmount)} ·{' '}
+                  {t('sales.installmentRemainingDebt')}: {formatKgs(retailInstallment.remainingDebt)}
+                  {retailInstallment.dueDate
+                    ? ` · ${t('sales.installmentColDueDate')}: ${new Date(retailInstallment.dueDate).toLocaleDateString('ru-RU')}`
+                    : ''}
+                </p>
+                {invoice.sentToCashierAt ? (
+                  <p className="text-sm font-semibold text-green-800">{t('branchAccountant.sentToCashierDone')}</p>
+                ) : null}
+              </section>
+            ) : null}
+
             {installmentApproved && invoice.branchOrderInstallment ? (
               <section className="rounded-3xl border border-green-200 bg-green-50 p-6 shadow-sm space-y-2">
                 <h3 className="font-bold">{t('branchAccountant.installmentApproved')}</h3>
@@ -395,7 +420,7 @@ export default function BranchAccountantInvoiceDetailPage() {
               </p>
             ) : null}
 
-            {showLegacySend ? (
+            {showSendToCashier ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <button type="button" onClick={() => void sendToCashier()} className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white">
                   {t('distribution.sendToCashier')}

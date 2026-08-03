@@ -6,7 +6,6 @@ import {
 } from '@prisma/client';
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from './branch-installment-early-payment.util';
 import {
-  isRetailInstallmentCashierVisible,
   isRetailInstallmentInvoice,
   resolveRetailInstallmentInitialPayment,
   resolveRetailInstallmentPaidAmount,
@@ -108,9 +107,9 @@ export function isBranchCashierInvoiceVisible(invoice: CashierVisibilityInvoiceL
     return true;
   }
 
-  // Zero-initial or post-first-payment installment: invisible until early payment is sent.
+  // Retail installments belong exclusively in Branch Cashier → Рассрочка.
   if (isRetailInstallmentInvoice(invoice as Parameters<typeof isRetailInstallmentInvoice>[0])) {
-    return isRetailInstallmentCashierVisible(invoice as Parameters<typeof isRetailInstallmentCashierVisible>[0]);
+    return false;
   }
 
   return false;

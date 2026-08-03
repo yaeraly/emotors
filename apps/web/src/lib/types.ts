@@ -980,6 +980,11 @@ export type BranchAccountantInvoice = {
   receivedAmountEnteredBySales?: number | null;
   expectedChangeAmount?: number | null;
   nextPaymentDate?: string | null;
+  installmentEndDate?: string | null;
+  lastPaymentDate?: string | null;
+  saleNumber?: string | null;
+  saleReceiptNumber?: string | null;
+  initialPayment?: number | null;
   installmentSchedule?: Array<{ installmentNumber: number; dueDate?: string | null; amount: number }>;
   installmentEarlyPaymentRequests?: Array<{
     id: string;

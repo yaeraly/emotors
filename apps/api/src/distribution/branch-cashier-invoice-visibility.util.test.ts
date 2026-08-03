@@ -173,4 +173,28 @@ describe('isBranchCashierInvoiceVisible', () => {
       false,
     );
   });
+
+  it('never shows retail installment invoices in Счета к оплате', () => {
+    assert.equal(
+      isBranchCashierInvoiceVisible({
+        invoiceCategory: 'RETAIL_SALE',
+        saleId: 'sale-1',
+        sentToCashierAt: new Date(),
+        status: BranchInvoiceStatus.ISSUED,
+        paymentType: BranchInvoicePaymentType.INSTALLMENT,
+        debtAmount: 50_000,
+        sale: {
+          installmentApproval: {
+            status: 'ACTIVE',
+            initialPayment: 0,
+            installmentPaidAmount: 0,
+            remainingDebt: 50_000,
+            financedAmount: 50_000,
+            dueDate: '2026-12-31',
+          },
+        },
+      }),
+      false,
+    );
+  });
 });

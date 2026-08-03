@@ -101,7 +101,11 @@ export default function BranchCashierInstallmentDetailPage() {
       setAmount('');
       idempotencyKeyRef.current = null;
       await loadAccounts(method);
-      setSuccess(t('branchCashier.paymentAcceptedClosed'));
+      setSuccess(
+        Number(updated.remainingAmount) <= 0.009
+          ? t('branchCashier.paymentAcceptedClosed')
+          : t('branchCashier.paymentAcceptedPartial'),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -214,6 +218,37 @@ export default function BranchCashierInstallmentDetailPage() {
                 </button>
               </form>
             ) : null}
+
+            <section
+              id="payment-history"
+              className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+            >
+              <h3 className="text-lg font-bold">{t('branchCashier.paymentHistory')}</h3>
+              {(invoice.payments?.length ?? 0) === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">—</p>
+              ) : (
+                <table className="mt-4 min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="text-left text-xs font-bold uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2">{t('branchCashier.lastPaymentDate')}</th>
+                      <th className="px-3 py-2">{t('branchAccountant.amount')}</th>
+                      <th className="px-3 py-2">{t('distribution.paymentMethod')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(invoice.payments ?? []).map((payment) => (
+                      <tr key={payment.id}>
+                        <td className="px-3 py-2">
+                          {payment.paidAt ? new Date(payment.paidAt).toLocaleString('ru-RU') : '—'}
+                        </td>
+                        <td className="px-3 py-2 font-semibold">{formatKgs(payment.amount)}</td>
+                        <td className="px-3 py-2">{payment.method}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
           </>
         ) : null}
       </section>

@@ -76,17 +76,60 @@ export function resolveRetailInstallmentRequiredPayment(invoice: RetailInstallme
 }
 
 export function isRetailInstallmentCashierVisible(invoice: RetailInstallmentInvoiceLike) {
-  if (!invoice.sentToCashierAt) return false;
-  if (invoice.status === BranchInvoiceStatus.PAID || invoice.status === 'PAID') return false;
+  const scope = classifyRetailInstallmentCashierScope(invoice);
+  return scope === 'active' || scope === 'overdue';
+}
+
+export type RetailInstallmentCashierScope = 'active' | 'overdue' | 'closed';
+
+export function classifyRetailInstallmentCashierScope(
+  invoice: RetailInstallmentInvoiceLike,
+  now: Date = new Date(),
+): RetailInstallmentCashierScope | null {
+  if (!invoice.sentToCashierAt) return null;
   if (invoice.status === BranchInvoiceStatus.CANCELLED || invoice.status === 'CANCELLED') {
-    return false;
+    return null;
   }
+
   const approval = invoice.sale?.installmentApproval;
-  if (!approval) return false;
-  if (approval.status === 'PAID' || approval.status === 'CANCELLED' || approval.status === 'REJECTED') {
-    return false;
+  if (!approval) return null;
+  if (approval.status === 'CANCELLED' || approval.status === 'REJECTED') {
+    return null;
   }
-  return resolveRetailInstallmentRemainingDebt(invoice) > 0.009;
+
+  const remainingDebt = resolveRetailInstallmentRemainingDebt(invoice);
+  const isClosed =
+    invoice.status === BranchInvoiceStatus.PAID ||
+    invoice.status === 'PAID' ||
+    approval.status === 'PAID' ||
+    remainingDebt <= 0.009;
+
+  if (isClosed) return 'closed';
+
+  const dueDateRaw = approval.dueDate;
+  if (dueDateRaw) {
+    const dueDate = new Date(dueDateRaw);
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const dueDay = new Date(dueDate);
+    dueDay.setHours(0, 0, 0, 0);
+    if (dueDay.getTime() < today.getTime()) {
+      return 'overdue';
+    }
+  }
+
+  return 'active';
+}
+
+export function isRetailInstallmentInCashierScope(
+  invoice: RetailInstallmentInvoiceLike,
+  scope: RetailInstallmentCashierScope | 'all' = 'active',
+  now: Date = new Date(),
+) {
+  const classified = classifyRetailInstallmentCashierScope(invoice, now);
+  if (!classified) return false;
+  if (scope === 'all') return true;
+  return classified === scope;
 }
 
 export { isZeroInitialPayment };
