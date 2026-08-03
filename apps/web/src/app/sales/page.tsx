@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { canCreateSale, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
+import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
@@ -194,12 +195,22 @@ export default function SalesPage() {
                         </td>
                       ) : null}
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/sales/${sale.id}`}
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                        >
-                          {t('common.open')}
-                        </Link>
+                        <div className="flex flex-wrap gap-2">
+                          <Link
+                            href={`/sales/${sale.id}`}
+                            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {t('common.open')}
+                          </Link>
+                          {canEditDraftSale(user, sale) ? (
+                            <Link
+                              href={draftSaleEditHref(sale.id)}
+                              className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                            >
+                              {t('common.edit')}
+                            </Link>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))

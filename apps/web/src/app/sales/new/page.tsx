@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { FormEvent, ReactNode, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { SaleLinePricingTooltip } from '@/components/SaleLinePricingTooltip';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { SaleCustomerSearch, type SaleCustomerOption } from '@/components/SaleCustomerSearch';
@@ -36,6 +36,14 @@ import {
   type PaymentPartRow,
 } from '@/lib/sale-payment-parts';
 import type { Customer, PaymentMethod, Sale, User, WhatsAppDraftResponse } from '@/lib/types';
+import {
+  canEditDraftSale,
+  customerOptionFromSale,
+  mapSaleItemToFormSeed,
+  pricingChannelForSaleCustomer,
+  resolveInstallmentFieldsFromSale,
+  resolvePaymentTypeFromSale,
+} from '@/lib/sale-draft-edit';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 
@@ -76,7 +84,23 @@ function formatPriceInput(value: number) {
 
 
 export default function NewSalePage() {
+  return (
+    <Suspense
+      fallback={
+        <ProtectedShell>
+          <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">...</p>
+        </ProtectedShell>
+      }
+    >
+      <NewSalePageContent />
+    </Suspense>
+  );
+}
+
+function NewSalePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editSaleId = searchParams.get('edit');
   const { t } = useTranslation();
   const productSearchRef = useRef<HTMLInputElement>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -105,6 +129,7 @@ export default function NewSalePage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [pricingPolicyWarning, setPricingPolicyWarning] = useState('');
+  const [loadingDraft, setLoadingDraft] = useState(Boolean(editSaleId));
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const canEditSalePrice = Boolean(user);
@@ -117,6 +142,68 @@ export default function NewSalePage() {
       .then(setUser)
       .catch(() => null);
   }, []);
+
+  useEffect(() => {
+    if (!editSaleId || !user) return;
+    void loadExistingDraft(editSaleId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editSaleId, user?.id]);
+
+  async function loadExistingDraft(saleId: string) {
+    setLoadingDraft(true);
+    setError('');
+
+    try {
+      const sale = await apiFetch<Sale>(`/sales/${saleId}`);
+      if (!canEditDraftSale(user, sale)) {
+        setError(t('sales.draftEditBlocked'));
+        return;
+      }
+
+      const customer = customerOptionFromSale(sale);
+      setSelectedCustomer(customer);
+      setDraftSale(sale);
+      setNotes(sale.notes ?? '');
+
+      const resolvedPaymentType = resolvePaymentTypeFromSale(sale);
+      setPaymentType(resolvedPaymentType);
+      if (resolvedPaymentType === 'INSTALLMENT') {
+        const installmentFields = resolveInstallmentFieldsFromSale(sale);
+        setDownPayment(installmentFields.downPayment);
+        setFinalPaymentDate(installmentFields.finalPaymentDate);
+      } else {
+        setDownPayment('');
+        setFinalPaymentDate('');
+      }
+
+      const channel = pricingChannelForSaleCustomer(customer);
+      const hydratedItems = await Promise.all(
+        (sale.items ?? []).map(async (item) => {
+          if (!item.productSku) {
+            return mapSaleItemToFormSeed(item, null, customer) satisfies SaleItemForm;
+          }
+          const params = new URLSearchParams({
+            search: item.productSku,
+            pricingChannel: channel,
+          });
+          try {
+            const products = await apiFetch<SaleProductOption[]>(
+              `/sales/product-options?${params.toString()}`,
+            );
+            const product = products.find((row) => row.id === item.productId);
+            return mapSaleItemToFormSeed(item, product ?? null, customer) satisfies SaleItemForm;
+          } catch {
+            return mapSaleItemToFormSeed(item, null, customer) satisfies SaleItemForm;
+          }
+        }),
+      );
+      setItems(hydratedItems);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setLoadingDraft(false);
+    }
+  }
 
   const totals = useMemo(() => {
     const totalAmount = roundMoney(
@@ -592,7 +679,7 @@ export default function NewSalePage() {
         sale.pricingPolicyVersionId &&
         draftSale.pricingPolicyVersionId !== sale.pricingPolicyVersionId
       ) {
-        setPricingPolicyWarning(t('sales.pricingPolicyChangedWarning'));
+        setPricingPolicyWarning(t('sales.pricingPolicyChangedOnSaveWarning'));
       } else {
         setPricingPolicyWarning('');
       }
@@ -898,7 +985,7 @@ export default function NewSalePage() {
               {t('sales.registerSale')}
             </p>
             <h2 className="text-3xl font-bold text-slate-950">
-              {t('sales.registerSale')}
+              {draftSale ? `${t('sales.editDraft')} ${draftSale.receiptNumber}` : t('sales.registerSale')}
             </h2>
             <p className="mt-2 text-slate-500">
               {t('sales.registerSaleHint')}
@@ -912,6 +999,12 @@ export default function NewSalePage() {
             {saving ? t('common.loading') : t('sales.saveDraft')}
           </button>
         </div>
+
+        {loadingDraft ? (
+          <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            {t('common.loading')}
+          </p>
+        ) : null}
 
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 whitespace-pre-line">

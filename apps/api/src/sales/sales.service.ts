@@ -65,6 +65,13 @@ import {
   validateSalePriceRange,
 } from './sale-price-range.util';
 import { assertBranchSalesManagerCanCancelSale } from './branch-sales-workflow.util';
+import {
+  assertSaleDraftEditable,
+  buildDraftSaleSnapshot,
+  diffDraftSaleItemChanges,
+  editableDraftStatusesForUser,
+  SALE_DRAFT_EDIT_BLOCKED_MESSAGE,
+} from './sale-draft-edit.util';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 import { CreateSaleItemDto } from './dto/create-sale.dto';
 
@@ -595,14 +602,32 @@ export class SalesService {
   async updateDraft(user: AuthUser, id: string, dto: CreateSaleDto) {
     assertBranchCashierCannotManageSales(user);
     return this.prisma.$transaction(async (tx) => {
-      const sale = await this.getAccessibleSaleInTx(tx, user, id);
+      const sale = await tx.sale.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+        },
+        include: {
+          items: true,
+          installments: { orderBy: { dueDate: 'asc' } },
+          installmentApproval: true,
+        },
+      });
 
-      if (
-        sale.status !== SaleStatus.DRAFT &&
-        sale.status !== SaleStatus.SENT_TO_CUSTOMER
-      ) {
-        throw new BadRequestException('Cannot edit finalized or approved sale');
+      if (!sale) {
+        throw new NotFoundException('Sale not found');
       }
+
+      assertSaleDraftEditable(user, sale);
+
+      const previousSnapshot = buildDraftSaleSnapshot({
+        customerId: sale.customerId,
+        notes: sale.notes,
+        totalAmount: sale.totalAmount,
+        pricingPolicyVersionId: sale.pricingPolicyVersionId,
+        items: sale.items,
+      });
 
       const customer = await this.getCustomerForSale(tx, user, dto.customerId);
       this.applyCustomerPricingChannels(customer, dto);
@@ -651,6 +676,23 @@ export class SalesService {
         receiptStatus: 'DRAFT',
         payments: activePayments,
       });
+
+      const editableStatuses = editableDraftStatusesForUser(user);
+      const statusGuard = await tx.sale.updateMany({
+        where: {
+          id: sale.id,
+          deletedAt: null,
+          status: { in: editableStatuses },
+        },
+        data: { updatedAt: new Date() },
+      });
+      if (statusGuard.count !== 1) {
+        throw new BadRequestException(
+          isBranchSalesManagerUser(user)
+            ? SALE_DRAFT_EDIT_BLOCKED_MESSAGE
+            : 'Cannot edit finalized or approved sale',
+        );
+      }
 
       await tx.saleItem.deleteMany({ where: { saleId: sale.id } });
       await tx.installmentSchedule.deleteMany({ where: { saleId: sale.id } });
@@ -712,6 +754,75 @@ export class SalesService {
           { id: sale.id, branchId: customer.branchId },
           dto,
           totals.totalAmount,
+        );
+      }
+
+      const newSnapshot = buildDraftSaleSnapshot({
+        customerId: customer.id,
+        notes: dto.notes ?? null,
+        totalAmount: totals.totalAmount,
+        pricingPolicyVersionId: totals.pricingPolicyVersionId,
+        items: totals.items.map((item) => ({
+          productId: item.productId ?? null,
+          productSku: item.productSku ?? null,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+      });
+      const itemDiff = diffDraftSaleItemChanges(previousSnapshot.items, dto.items);
+      const editedAt = new Date().toISOString();
+
+      await this.auditInTx(tx, user, customer.branchId, 'BRANCH_SALE_DRAFT_EDITED', 'Sale', sale.id, {
+        saleId: sale.id,
+        branchId: customer.branchId,
+        previousValues: previousSnapshot,
+        newValues: newSnapshot,
+        editedBy: user.id,
+        editedAt,
+      });
+
+      for (const item of itemDiff.added) {
+        await this.auditInTx(tx, user, customer.branchId, 'BRANCH_SALE_DRAFT_ITEM_ADDED', 'Sale', sale.id, {
+          saleId: sale.id,
+          branchId: customer.branchId,
+          productId: item.productId,
+          previousValues: null,
+          newValues: item,
+          editedBy: user.id,
+          editedAt,
+        });
+      }
+
+      for (const item of itemDiff.removed) {
+        await this.auditInTx(tx, user, customer.branchId, 'BRANCH_SALE_DRAFT_ITEM_REMOVED', 'Sale', sale.id, {
+          saleId: sale.id,
+          branchId: customer.branchId,
+          productId: item.productId,
+          previousValues: item,
+          newValues: null,
+          editedBy: user.id,
+          editedAt,
+        });
+      }
+
+      for (const change of itemDiff.priceChanged) {
+        await this.auditInTx(
+          tx,
+          user,
+          customer.branchId,
+          'BRANCH_SALE_DRAFT_PRICE_CHANGED',
+          'Sale',
+          sale.id,
+          {
+            saleId: sale.id,
+            branchId: customer.branchId,
+            productId: change.productId,
+            previousValues: { unitPrice: change.previousPrice },
+            newValues: { unitPrice: change.newPrice },
+            editedBy: user.id,
+            editedAt,
+          },
         );
       }
 

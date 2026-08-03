@@ -1813,10 +1813,15 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.priceChangedByManager': 'Цена изменена менеджером',
     'sales.manualPriceResetOnCustomerChange':
       'Клиент изменён. Цены пересчитаны, ручная цена продажи сброшена к рекомендуемой.',
+    'sales.pricingPolicyChangedOnSaveWarning':
+      'Баа саясаты өзгөрдү. Сактоодон мурун бааларды текшериңиз.',
+    'sales.draftEditBlocked':
+      'Сатууну өзгөртүүгө болбойт, анткени ал «Черновик» статусунан чыгып кетти.',
+    'sales.editDraft': 'Черновикти өзгөртүү',
     'sales.pricingPolicyChangedWarning':
-      'Ценовая политика изменилась. Проверьте цены перед регистрацией продажи.',
+      'Баа саясаты өзгөрдү. Сатууну каттоодон мурун бааларды текшериңиз.',
     'sales.priceOutOfRangeBlocked':
-      'Невозможно зарегистрировать продажу.\n\nДля некоторых товаров цена находится вне разрешённого диапазона.',
+      'Уруксат берилбеген баа чегинен тышкары сатууну аяктоого болбойт',
     'sales.maximumPrice': 'Максималдуу баа',
     'sales.paymentMethods.CASH': 'Накталай',
     'sales.paymentMethods.QR': 'QR-код',
@@ -5214,6 +5219,11 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.priceChangedByManager': 'Цена изменена менеджером',
     'sales.manualPriceResetOnCustomerChange':
       'Клиент изменён. Цены пересчитаны, ручная цена продажи сброшена к рекомендуемой.',
+    'sales.pricingPolicyChangedOnSaveWarning':
+      'Ценовая политика изменилась. Проверьте цены перед сохранением.',
+    'sales.draftEditBlocked':
+      'Продажу нельзя изменить, потому что она уже вышла из статуса «Черновик».',
+    'sales.editDraft': 'Изменить черновик',
     'sales.pricingPolicyChangedWarning':
       'Ценовая политика изменилась. Проверьте цены перед регистрацией продажи.',
     'sales.priceOutOfRangeBlocked':
@@ -8638,6 +8648,11 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.priceChangedByManager': 'Price changed by manager',
     'sales.manualPriceResetOnCustomerChange':
       'Customer changed. Prices were recalculated and the manual sale price was reset to recommended.',
+    'sales.pricingPolicyChangedOnSaveWarning':
+      'Pricing policy changed. Review prices before saving.',
+    'sales.draftEditBlocked':
+      'This sale can no longer be edited because it is no longer in Draft status.',
+    'sales.editDraft': 'Edit draft',
     'sales.pricingPolicyChangedWarning':
       'Pricing policy changed. Review prices before registering the sale.',
     'sales.priceOutOfRangeBlocked':

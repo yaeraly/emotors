@@ -16,6 +16,7 @@ import {
   canVoidPayment,
   shouldHideSaleProfitColumn,
 } from '@/lib/rbac';
+import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import {
   canBranchCeoCancelInstallmentRequest,
   installmentBlocksCompletion,
@@ -321,6 +322,14 @@ export default function SaleDetailPage() {
               </div>
 
               <div className="mt-6 flex flex-wrap gap-2">
+                  {canEditDraftSale(currentUser, sale) ? (
+                    <Link
+                      href={draftSaleEditHref(sale.id)}
+                      className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                    >
+                      {t('common.edit')}
+                    </Link>
+                  ) : null}
                   {canManageSaleWorkflow(currentUser) ? (
                     <>
                   <button
