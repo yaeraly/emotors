@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -20,12 +19,9 @@ const thClass = 'px-1.5 py-1.5 text-left text-[10px] font-bold uppercase trackin
 const tdClass = 'px-1.5 py-1.5 align-middle';
 const tdMoneyClass = `${tdClass} text-right tabular-nums whitespace-nowrap`;
 const actionBtnClass =
-  'rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-slate-700 hover:bg-slate-50';
-const actionBtnPrimaryClass =
-  'rounded border border-blue-200 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-blue-700 hover:bg-blue-50';
+  'inline-flex rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-slate-700 hover:bg-slate-50';
 
 export default function BranchCashierInstallmentsPage() {
-  const router = useRouter();
   const { t } = useTranslation();
   const [installments, setInstallments] = useState<BranchAccountantInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,7 +108,7 @@ export default function BranchCashierInstallmentsPage() {
                 <col className="w-[6%]" />
                 <col className="w-[7%]" />
                 <col className="w-[7%]" />
-                <col className="w-[12%]" />
+                <col className="w-[9%]" />
               </colgroup>
               <thead className="bg-slate-50">
                 <tr>
@@ -173,34 +169,13 @@ export default function BranchCashierInstallmentsPage() {
                         {formatCompactDate(invoice.lastPaymentDate)}
                       </td>
                       <td className={tdClass}>
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex flex-wrap gap-0.5">
-                            <Link
-                              href={`/branch-cashier/installments/${invoice.id}`}
-                              className={actionBtnClass}
-                              title={t('common.open')}
-                            >
-                              {t('branchCashier.actionOpenShort')}
-                            </Link>
-                            {scope !== 'closed' ? (
-                              <button
-                                type="button"
-                                onClick={() => router.push(`/branch-cashier/installments/${invoice.id}`)}
-                                className={actionBtnPrimaryClass}
-                                title={t('branchCashier.acceptPayment')}
-                              >
-                                {t('branchCashier.actionPayShort')}
-                              </button>
-                            ) : null}
-                          </div>
-                          <Link
-                            href={`/branch-cashier/installments/${invoice.id}#payment-history`}
-                            className={`${actionBtnClass} w-fit`}
-                            title={t('branchCashier.paymentHistory')}
-                          >
-                            {t('branchCashier.actionHistoryShort')}
-                          </Link>
-                        </div>
+                        <Link
+                          href={`/branch-cashier/installments/${invoice.id}`}
+                          className={actionBtnClass}
+                          title={t('common.open')}
+                        >
+                          {t('branchCashier.actionOpenShort')}
+                        </Link>
                       </td>
                     </tr>
                   );

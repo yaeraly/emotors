@@ -20,6 +20,12 @@ import {
   buildSelectableOwnerAccountsWhere,
 } from './finance-account-ownership.util';
 import {
+  BRANCH_CASHIER_RECEIVING_ACCOUNT_AUDIT,
+  type BranchCashierReceivingAccountResolution,
+  resolveBranchCashierReceivingAccount,
+} from './branch-cashier-receiving-account.util';
+import { resolveDefaultBranchAccountId } from './branch-payment-posting.repair.util';
+import {
   BRANCH_CASHIER_PAYMENT_AUDIT,
   INVOICE_ALREADY_PAID_MESSAGE,
   resolveBranchCashierNetPayment,
@@ -55,6 +61,142 @@ export class BranchCashierPaymentService {
     private readonly prisma: PrismaService,
     private readonly ledgerService: FinanceLedgerService,
   ) {}
+
+  async resolveReceivingAccount(
+    user: AuthUser,
+    paymentMethod: string,
+    options: {
+      installmentId?: string;
+      invoiceId?: string;
+      audit?: boolean;
+    } = {},
+  ): Promise<BranchCashierReceivingAccountResolution> {
+    if (!user.branchId) {
+      throw new ForbiddenException('Branch cashier access required');
+    }
+    if (!paymentMethod?.trim()) {
+      throw new BadRequestException('Выберите способ оплаты');
+    }
+
+    const where = buildSelectableOwnerAccountsWhere(user, { forPayment: true });
+    const assignedAccountIds = await getActiveAssignmentAccountIds(this.prisma, user.id);
+    const allowedTypes = resolveAllowedTypesForMethod(paymentMethod);
+    if (!allowedTypes?.length) {
+      throw new BadRequestException('Неподдерживаемый способ оплаты');
+    }
+
+    const accounts = await this.prisma.financeAccount.findMany({
+      where: {
+        ...where,
+        ...(assignedAccountIds.size > 0 ? { id: { in: [...assignedAccountIds] } } : {}),
+        typeCode: { in: [...allowedTypes] },
+      },
+      select: {
+        id: true,
+        name: true,
+        accountNumber: true,
+        typeCode: true,
+        currency: true,
+        status: true,
+        scope: true,
+        branchId: true,
+        currentBalance: true,
+        availableBalance: true,
+      },
+      orderBy: [{ name: 'asc' }],
+    });
+
+    const assignments = assignedAccountIds.size
+      ? await this.prisma.financeAccountAssignment.findMany({
+          where: {
+            userId: user.id,
+            isActive: true,
+            accountId: { in: accounts.map((account) => account.id) },
+          },
+          select: { accountId: true, isPrimary: true },
+        })
+      : [];
+    const primaryByAccountId = new Map(
+      assignments.map((assignment) => [assignment.accountId, assignment.isPrimary]),
+    );
+
+    const branchDefaultAccountId = await resolveDefaultBranchAccountId(
+      this.prisma,
+      user.branchId,
+      paymentMethod,
+    );
+
+    const resolution = resolveBranchCashierReceivingAccount({
+      paymentMethod,
+      branchDefaultAccountId,
+      eligibleAccounts: accounts.map((account) => ({
+        id: account.id,
+        name: account.name,
+        accountNumber: account.accountNumber,
+        typeCode: account.typeCode,
+        currentBalance: Number(account.currentBalance ?? 0),
+        availableBalance: Number(account.availableBalance ?? 0),
+        isPrimaryAssignment: primaryByAccountId.get(account.id) ?? false,
+      })),
+    });
+
+    if (options.audit && resolution.status === 'resolved') {
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: BRANCH_CASHIER_RECEIVING_ACCOUNT_AUDIT.RECEIVING_ACCOUNT_AUTO_RESOLVED,
+          entity: 'FinanceAccount',
+          entityId: resolution.account.id,
+          metadata: {
+            installmentId: options.installmentId ?? null,
+            invoiceId: options.invoiceId ?? null,
+            branchId: user.branchId,
+            paymentMethod,
+            accountId: resolution.account.id,
+            accountType: resolution.account.typeCode,
+            resolution: resolution.resolution,
+            actorUserId: user.id,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+    }
+
+    return resolution;
+  }
+
+  async resolveReceivingAccountOrThrow(
+    user: AuthUser,
+    paymentMethod: string,
+    options: {
+      installmentId?: string;
+      invoiceId?: string;
+      clientAccountId?: string | null;
+      audit?: boolean;
+    } = {},
+  ) {
+    const resolution = await this.resolveReceivingAccount(user, paymentMethod, {
+      installmentId: options.installmentId,
+      invoiceId: options.invoiceId,
+      audit: options.audit,
+    });
+
+    if (resolution.status !== 'resolved') {
+      throw new BadRequestException(resolution.message);
+    }
+
+    if (
+      options.clientAccountId?.trim() &&
+      options.clientAccountId.trim() !== resolution.account.id
+    ) {
+      throw new BadRequestException(
+        'Выбранный счёт не соответствует способу оплаты. Обновите страницу и повторите попытку.',
+      );
+    }
+
+    return resolution.account;
+  }
 
   async listSelectableAccounts(user: AuthUser, paymentMethod?: string) {
     if (!user.branchId) {

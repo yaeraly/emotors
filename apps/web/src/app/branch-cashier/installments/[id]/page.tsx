@@ -1,81 +1,79 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
+import {
+  BRANCH_CASHIER_INSTALLMENT_PAYMENT_METHODS,
+  branchCashierPaymentMethodLabelKey,
+  buildReceivingAccountResolveQuery,
+  type BranchCashierReceivingAccountResolution,
+} from '@/lib/branch-cashier-receiving-account';
 import { computeFullPaymentChange } from '@/lib/sale-full-payment';
-import type { BranchAccountantInvoice, BranchPaymentMethod, FinanceAccount } from '@/lib/types';
-
-const methods: BranchPaymentMethod[] = ['CASH', 'QR', 'BANK', 'TRANSFER'];
+import type { BranchAccountantInvoice, BranchPaymentMethod } from '@/lib/types';
 
 export default function BranchCashierInstallmentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const [invoice, setInvoice] = useState<BranchAccountantInvoice | null>(null);
-  const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<BranchPaymentMethod>('CASH');
-  const [financeAccountId, setFinanceAccountId] = useState('');
+  const [accountResolution, setAccountResolution] =
+    useState<BranchCashierReceivingAccountResolution | null>(null);
+  const [accountLoading, setAccountLoading] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
 
-  const selectedAccount = useMemo(
-    () => accounts.find((account) => account.id === financeAccountId) ?? null,
-    [accounts, financeAccountId],
-  );
+  const resolvedAccount =
+    accountResolution?.status === 'resolved' ? accountResolution.account : null;
+  const accountError =
+    accountResolution && accountResolution.status !== 'resolved'
+      ? accountResolution.message
+      : '';
 
-  async function loadAccounts(paymentMethod: BranchPaymentMethod) {
-    const accountData = await apiFetch<FinanceAccount[]>(
-      `/branch-cashier/accounts?paymentMethod=${paymentMethod}`,
-    );
-    setAccounts(accountData);
-    if (accountData.some((account) => account.id === financeAccountId)) {
-      return;
-    }
-    if (accountData.length === 1) {
-      setFinanceAccountId(accountData[0].id);
-    } else {
-      setFinanceAccountId('');
-    }
+  async function loadInvoice() {
+    const invoiceData = await apiFetch<BranchAccountantInvoice>(`/branch-cashier/installments/${id}`);
+    setInvoice(invoiceData);
   }
 
-  async function load() {
+  async function resolveAccount(paymentMethod: BranchPaymentMethod) {
+    setAccountLoading(true);
     try {
-      const invoiceData = await apiFetch<BranchAccountantInvoice>(`/branch-cashier/installments/${id}`);
-      setInvoice(invoiceData);
-      await loadAccounts(method);
+      const resolution = await apiFetch<BranchCashierReceivingAccountResolution>(
+        `/branch-cashier/accounts/resolve${buildReceivingAccountResolveQuery(paymentMethod, id)}`,
+      );
+      setAccountResolution(resolution);
     } catch (err) {
+      setAccountResolution(null);
       setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setAccountLoading(false);
     }
   }
 
   useEffect(() => {
-    void load();
+    void loadInvoice().catch((err) => {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   useEffect(() => {
-    void loadAccounts(method).catch((err) => {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    });
+    void resolveAccount(method);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method]);
+  }, [method, id]);
 
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting) return;
+    if (submitting || !resolvedAccount) return;
     setError('');
     setSuccess('');
-    if (!financeAccountId) {
-      setError(t('branchCashier.selectAccount'));
-      return;
-    }
     try {
       setSubmitting(true);
       if (!idempotencyKeyRef.current) {
@@ -92,7 +90,7 @@ export default function BranchCashierInstallmentDetailPage() {
           receivedAmount: received,
           changeAmount: change > 0.009 ? change : undefined,
           method,
-          financeAccountId,
+          financeAccountId: resolvedAccount.id,
           note: note || undefined,
           idempotencyKey: idempotencyKeyRef.current,
         }),
@@ -100,7 +98,7 @@ export default function BranchCashierInstallmentDetailPage() {
       setInvoice(updated);
       setAmount('');
       idempotencyKeyRef.current = null;
-      await loadAccounts(method);
+      await resolveAccount(method);
       setSuccess(
         Number(updated.remainingAmount) <= 0.009
           ? t('branchCashier.paymentAcceptedClosed')
@@ -120,6 +118,7 @@ export default function BranchCashierInstallmentDetailPage() {
     receivedAmount > 0
       ? computeFullPaymentChange(remainingAmount, receivedAmount)
       : null;
+  const canSubmitPayment = Boolean(resolvedAccount) && !accountLoading && !submitting;
 
   return (
     <ProtectedShell>
@@ -154,9 +153,10 @@ export default function BranchCashierInstallmentDetailPage() {
             </section>
 
             {invoice.workflowStatus !== 'PAID' && Number(invoice.remainingAmount) > 0 ? (
-              <form onSubmit={submitPayment} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-                <h3 className="md:col-span-2 text-lg font-bold">{t('branchCashier.receivedAmount')}</h3>
-                <label className="block md:col-span-2">
+              <form onSubmit={submitPayment} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold">{t('branchCashier.acceptPayment')}</h3>
+
+                <label className="block">
                   <span className="text-sm font-semibold">{t('branchCashier.receivedAmount')}</span>
                   <input
                     value={amount}
@@ -169,50 +169,68 @@ export default function BranchCashierInstallmentDetailPage() {
                     required
                   />
                 </label>
+
                 {changePreview && changePreview.changeAmount > 0.009 ? (
-                  <div className="rounded-2xl bg-green-50 p-4 md:col-span-2">
+                  <div className="rounded-2xl bg-green-50 p-4">
                     <p className="text-xs font-semibold uppercase text-green-700">{t('sales.changeAmount')}</p>
                     <p className="font-bold text-green-900">{formatKgs(changePreview.changeAmount)}</p>
                   </div>
                 ) : null}
-                <label className="block md:col-span-2">
-                  <span className="text-sm font-semibold">{t('branchCashier.depositAccount')}</span>
+
+                <label className="block">
+                  <span className="text-sm font-semibold">{t('distribution.paymentMethod')}</span>
                   <select
-                    value={financeAccountId}
-                    onChange={(e) => setFinanceAccountId(e.target.value)}
+                    value={method}
+                    onChange={(e) => setMethod(e.target.value as BranchPaymentMethod)}
                     className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                    required
                   >
-                    <option value="">{t('branchCashier.selectAccount')}</option>
-                    {accounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name} ({account.accountNumber}) — {formatKgs(account.currentBalance)}
+                    {BRANCH_CASHIER_INSTALLMENT_PAYMENT_METHODS.map((item) => (
+                      <option key={item} value={item}>
+                        {t(branchCashierPaymentMethodLabelKey(item))}
                       </option>
                     ))}
                   </select>
                 </label>
-                {selectedAccount ? (
-                  <div className="rounded-2xl bg-slate-50 p-4 md:col-span-2">
-                    <p className="text-xs font-semibold uppercase text-slate-400">{t('branchCashier.accountBalance')}</p>
-                    <p className="font-bold text-slate-950">{formatKgs(selectedAccount.currentBalance)}</p>
+
+                <div className="block">
+                  <span className="text-sm font-semibold">{t('branchCashier.depositAccount')}</span>
+                  <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                    {accountLoading ? (
+                      <span className="text-slate-500">{t('common.loading')}</span>
+                    ) : resolvedAccount ? (
+                      <span className="break-words">{formatAccountLabel(resolvedAccount)}</span>
+                    ) : (
+                      <span>—</span>
+                    )}
                   </div>
+                </div>
+
+                <div className="block">
+                  <span className="text-sm font-semibold">{t('branchCashier.accountBalance')}</span>
+                  <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-950">
+                    {accountLoading ? (
+                      <span className="font-normal text-slate-500">{t('common.loading')}</span>
+                    ) : resolvedAccount ? (
+                      formatKgs(resolvedAccount.currentBalance)
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
+
+                {accountError ? (
+                  <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{accountError}</p>
                 ) : null}
-                <label className="block">
-                  <span className="text-sm font-semibold">{t('distribution.paymentMethod')}</span>
-                  <select value={method} onChange={(e) => setMethod(e.target.value as BranchPaymentMethod)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                    {methods.map((item) => (
-                      <option key={item} value={item}>{item}</option>
-                    ))}
-                  </select>
-                </label>
+
                 <label className="block">
                   <span className="text-sm font-semibold">{t('crm.notes')}</span>
                   <input value={note} onChange={(e) => setNote(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
                 </label>
+
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:opacity-60 md:col-span-2"
+                  disabled={!canSubmitPayment}
+                  className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
                 >
                   {t('distribution.submitPaymentCashier')}
                 </button>
@@ -263,6 +281,14 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="font-bold text-slate-950">{value}</p>
     </div>
   );
+}
+
+function formatAccountLabel(account: {
+  name: string;
+  accountNumber: string;
+  typeCode: string;
+}) {
+  return `${account.name} (${account.typeCode})`;
 }
 
 function formatKgs(value: number | string | null | undefined) {

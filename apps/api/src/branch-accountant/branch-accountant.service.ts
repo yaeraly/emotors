@@ -521,6 +521,19 @@ export class BranchAccountantService {
     return this.branchCashierPaymentService.listSelectableAccounts(user, paymentMethod);
   }
 
+  async resolveCashierReceivingAccount(
+    user: AuthUser,
+    paymentMethod: string,
+    installmentId?: string,
+  ) {
+    this.assertBranchCashier(user);
+    return this.branchCashierPaymentService.resolveReceivingAccount(user, paymentMethod, {
+      installmentId,
+      invoiceId: installmentId,
+      audit: true,
+    });
+  }
+
   async submitCashierPayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
     this.assertBranchCashier(user);
     const invoice = await this.prisma.branchInvoice.findFirst({

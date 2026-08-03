@@ -81,4 +81,10 @@ describe('branch cashier installments page layout', () => {
   it('does not reintroduce horizontal scrolling wrapper', () => {
     assert.doesNotMatch(pageSource, /overflow-x-auto/);
   });
+
+  it('keeps only the open action in the actions column', () => {
+    assert.match(pageSource, /branchCashier\.actionOpenShort/);
+    assert.doesNotMatch(pageSource, /actionPayShort/);
+    assert.doesNotMatch(pageSource, /actionHistoryShort/);
+  });
 });

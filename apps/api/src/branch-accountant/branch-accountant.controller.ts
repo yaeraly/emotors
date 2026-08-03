@@ -108,6 +108,16 @@ export class BranchCashierController {
     return this.service.listCashierAccounts(user, paymentMethod);
   }
 
+  @Get('accounts/resolve')
+  @Roles(Role.CASHIER, Role.OWNER, Role.CEO)
+  resolveReceivingAccount(
+    @CurrentUser() user: AuthUser,
+    @Query('paymentMethod') paymentMethod: string,
+    @Query('installmentId') installmentId?: string,
+  ) {
+    return this.service.resolveCashierReceivingAccount(user, paymentMethod, installmentId);
+  }
+
   @Get('invoices')
   @Roles(Role.CASHIER, Role.OWNER, Role.CEO)
   listInvoices(@CurrentUser() user: AuthUser, @Query() query: BranchAccountantInvoiceQueryDto) {

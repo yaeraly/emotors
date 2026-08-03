@@ -47,6 +47,7 @@ import { CASHIER_ASSIGNMENT_OPERATIONS } from '../rbac/cashier-capability.util';
 import { assertCashierPaymentAllowed } from '../finance/finance-assignment.util';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
 import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
+import { BRANCH_CASHIER_RECEIVING_ACCOUNT_AUDIT } from '../finance/branch-cashier-receiving-account.util';
 import { resolveBranchPaymentNetAmount } from '../finance/branch-payment-posting.util';
 import { assertRetailSaleFinanceAllowed } from './branch-sale-rejection.util';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
@@ -1586,9 +1587,36 @@ export class SalesService {
         throw new ConflictException('Оплата уже отправлена на подтверждение');
       }
 
-      if (!dto.financeAccountId?.trim()) {
-        throw new BadRequestException('Выберите счёт или кассу для зачисления');
-      }
+      const resolvedAccount = await this.branchCashierPaymentService.resolveReceivingAccountOrThrow(
+        user,
+        dto.method,
+        {
+          installmentId: invoiceId,
+          invoiceId,
+          clientAccountId: dto.financeAccountId,
+          audit: true,
+        },
+      );
+      const financeAccountId = resolvedAccount.id;
+
+      await this.auditInTx(
+        tx,
+        user,
+        invoice.branchId,
+        BRANCH_CASHIER_RECEIVING_ACCOUNT_AUDIT.PAYMENT_METHOD_SELECTED,
+        'BranchInvoice',
+        invoice.id,
+        {
+          installmentId: invoiceId,
+          invoiceId,
+          branchId: invoice.branchId,
+          paymentMethod: dto.method,
+          accountId: financeAccountId,
+          accountType: resolvedAccount.typeCode,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        },
+      );
 
       const currentRemaining = resolveRetailInstallmentRemainingDebt({
         ...invoice,
@@ -1617,7 +1645,7 @@ export class SalesService {
           method: dto.method,
           note: dto.note?.trim() || `branch-installment-invoice:${invoice.id}`,
           receiptReference: dto.receiptReference,
-          financeAccountId: dto.financeAccountId,
+          financeAccountId,
           idempotencyKey: dto.idempotencyKey?.trim() || null,
           confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
           submittedAt: new Date(),
@@ -1629,7 +1657,7 @@ export class SalesService {
       });
 
       const creditResult = await this.branchCashierPaymentService.creditAccountForPayment(tx, user, {
-        accountId: dto.financeAccountId,
+        accountId: financeAccountId,
         branchId: invoice.branchId,
         netAcceptedAmount: amount,
         paymentId: branchPayment.id,
@@ -1667,7 +1695,7 @@ export class SalesService {
           note: `branch-installment-invoice:${invoice.id}`,
           createdById: user.id,
           status: PaymentRecordStatus.ACTIVE,
-          financeAccountId: dto.financeAccountId,
+          financeAccountId,
         },
       });
 
@@ -1769,6 +1797,10 @@ export class SalesService {
         amount,
         paidAfterTotal,
         remainingAfter,
+        paymentMethod: dto.method,
+        accountId: financeAccountId,
+        accountType: resolvedAccount.typeCode,
+        actorUserId: user.id,
         roles: user.roles ?? [user.role],
       });
 
