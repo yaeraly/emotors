@@ -1,4 +1,5 @@
-import type { Role, User } from './types';
+import type { Role, Sale, User } from './types';
+import { isDeletableInstallmentDraft } from './sale-installment';
 
 const ALL_PERMISSIONS = [
   'users.manage',
@@ -1271,6 +1272,18 @@ export function canSubmitSaleInstallmentRequest(
   user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
 ) {
   return isBranchSalesManagerUser(user) && hasPermission(user, 'sales.manage');
+}
+
+export function canDeleteInstallmentDraft(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+  sale: Pick<Sale, 'branchId' | 'status' | 'deletedAt' | 'paymentType' | 'paidAmount' | 'paymentStatus' | 'sentToCashierAt' | 'installmentApproval'> & {
+    branchInvoice?: { id: string; deletedAt?: string | null } | null;
+    payments?: Array<{ id: string }>;
+  },
+) {
+  if (!user || !isBranchSalesManagerUser(user)) return false;
+  if (!user.branchId || sale.branchId !== user.branchId) return false;
+  return isDeletableInstallmentDraft(sale);
 }
 
 /** Only cashier-capable branch roles may record sale payments (not Branch Sales Manager). */

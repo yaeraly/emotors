@@ -17,6 +17,7 @@ import {
   Prisma,
   Role,
   SaleInstallmentApprovalStatus,
+  SalePaymentType,
   SaleStatus,
 } from '@prisma/client';
 import { createHash } from 'crypto';
@@ -29,6 +30,12 @@ import {
 } from '../rbac/rbac';
 import { resolvePricingChannelFromCustomerType } from './sale-customer-pricing.util';
 import { BranchSaleInvoiceService } from './branch-sale-invoice.service';
+import {
+  assertCanDeleteInstallmentDraft,
+  BRANCH_INSTALLMENT_DRAFT_DELETE_AUDIT,
+  INSTALLMENT_DRAFT_DELETE_BLOCKED_MESSAGE,
+  INSTALLMENT_DRAFT_DELETE_STATUS_CHANGED_MESSAGE,
+} from './branch-installment-draft-delete.util';
 import {
   BRANCH_SALE_REJECTION_AUDIT,
   cancelRetailSaleInvoicesAfterRejectionInTx,
@@ -764,6 +771,110 @@ export class SaleInstallmentApprovalService {
       });
 
       return this.serializeApproval(updated);
+    });
+  }
+
+  async deleteInstallmentDraft(user: AuthUser, saleId: string, reason?: string) {
+    if (!isBranchSalesManagerUser(user)) {
+      throw new ForbiddenException('Недостаточно прав для удаления черновика рассрочки');
+    }
+    if (!user.branchId) {
+      throw new ForbiddenException('You can only access your own branch');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await tx.sale.findFirst({
+        where: {
+          id: saleId,
+          branchId: user.branchId,
+          deletedAt: null,
+        },
+        include: {
+          installmentApproval: {
+            include: {
+              payments: { select: { id: true } },
+            },
+          },
+          branchInvoice: { select: { id: true, deletedAt: true } },
+          payments: { select: { id: true } },
+          salesCommissions: { select: { id: true } },
+        },
+      });
+
+      if (!sale) {
+        throw new NotFoundException('Sale not found');
+      }
+
+      assertCanDeleteInstallmentDraft({
+        ...sale,
+        paidAmount: Number(sale.paidAmount),
+      });
+
+      const [paymentCount, fifoAllocationCount, warehouseReleaseCount] = await Promise.all([
+        tx.payment.count({ where: { saleId: sale.id } }),
+        tx.saleFifoAllocation.count({ where: { saleId: sale.id } }),
+        tx.warehouseReleaseOrder.count({ where: { saleId: sale.id, deletedAt: null } }),
+      ]);
+
+      if (paymentCount > 0 || fifoAllocationCount > 0 || warehouseReleaseCount > 0) {
+        throw new BadRequestException(INSTALLMENT_DRAFT_DELETE_BLOCKED_MESSAGE);
+      }
+
+      const previousStatus = sale.installmentApproval?.status ?? sale.status;
+      const deletedAt = new Date();
+
+      const locked = await tx.sale.updateMany({
+        where: {
+          id: sale.id,
+          deletedAt: null,
+          branchId: user.branchId,
+          status: SaleStatus.DRAFT,
+          paymentType: SalePaymentType.INSTALLMENT,
+          paidAmount: 0,
+          paymentStatus: PaymentStatus.DEBT,
+          sentToCashierAt: null,
+          installmentApproval: {
+            status: SaleInstallmentApprovalStatus.DRAFT,
+            submittedAt: null,
+            submittedById: null,
+            approvedAt: null,
+            approvedById: null,
+          },
+        },
+        data: { deletedAt },
+      });
+
+      if (locked.count !== 1) {
+        throw new ConflictException(INSTALLMENT_DRAFT_DELETE_STATUS_CHANGED_MESSAGE);
+      }
+
+      await tx.saleItem.deleteMany({ where: { saleId: sale.id } });
+      await tx.installmentSchedule.deleteMany({ where: { saleId: sale.id } });
+      await tx.receipt.deleteMany({ where: { saleId: sale.id } });
+      if (sale.installmentApproval) {
+        await tx.saleInstallmentApproval.delete({ where: { id: sale.installmentApproval.id } });
+      }
+
+      await tx.alert.updateMany({
+        where: {
+          entityType: 'Sale',
+          entityId: sale.id,
+          archivedAt: null,
+        },
+        data: { archivedAt: deletedAt },
+      });
+
+      await this.auditInTx(tx, user, sale.branchId, BRANCH_INSTALLMENT_DRAFT_DELETE_AUDIT, 'Sale', sale.id, {
+        saleId: sale.id,
+        saleNumber: sale.receiptNumber,
+        branchId: sale.branchId,
+        previousStatus,
+        deletedBy: user.id,
+        deletedAt: deletedAt.toISOString(),
+        reason: reason?.trim() || null,
+      });
+
+      return { success: true, saleId: sale.id };
     });
   }
 

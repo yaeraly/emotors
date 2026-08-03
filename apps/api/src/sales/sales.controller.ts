@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -142,6 +143,12 @@ export class SalesController {
   @Roles(Role.MANAGER)
   returnRejectedSaleToDraft(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.saleInstallmentApprovalService.returnRejectedSaleToDraft(user, id);
+  }
+
+  @Delete(':id/installment-draft')
+  @Roles(Role.MANAGER)
+  deleteInstallmentDraft(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.saleInstallmentApprovalService.deleteInstallmentDraft(user, id);
   }
 
   @Get('customer-options')

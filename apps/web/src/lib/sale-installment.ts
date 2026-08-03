@@ -82,6 +82,37 @@ export function canReturnRejectedSaleToDraft(
   return approval?.status === 'REJECTED' || approval?.status === 'CANCELLED';
 }
 
+export function isDeletableInstallmentDraft(
+  sale: Pick<
+    Sale,
+    | 'status'
+    | 'deletedAt'
+    | 'paymentType'
+    | 'paidAmount'
+    | 'paymentStatus'
+    | 'sentToCashierAt'
+    | 'installmentApproval'
+  > & {
+    branchInvoice?: { id: string; deletedAt?: string | null } | null;
+    payments?: Array<{ id: string }>;
+  },
+) {
+  if (sale.deletedAt) return false;
+  if (sale.status !== 'DRAFT') return false;
+  if (sale.paymentType !== 'INSTALLMENT') return false;
+  if (!sale.installmentApproval) return false;
+  if (sale.installmentApproval.status !== 'DRAFT') return false;
+  if (sale.installmentApproval.submittedAt) return false;
+  if (sale.installmentApproval.approvedAt) return false;
+  if (sale.installmentApproval.rejectedAt) return false;
+  if (sale.sentToCashierAt) return false;
+  if (Number(sale.paidAmount) > 0.009) return false;
+  if (sale.paymentStatus !== 'DEBT') return false;
+  if (sale.branchInvoice && !sale.branchInvoice.deletedAt) return false;
+  if ((sale.payments?.length ?? 0) > 0) return false;
+  return true;
+}
+
 export function computeRemainingDebt(totalAmount: number, downPayment: number) {
   return Math.max(Math.round((totalAmount - downPayment + Number.EPSILON) * 100) / 100, 0);
 }

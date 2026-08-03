@@ -1841,6 +1841,9 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.installmentApproved': 'Бөлүп төлөө макулдады',
     'sales.installmentRejected': 'Бөлүп төлөө четке кагылды',
     'sales.installmentDraft': 'Бөлүп төлөө черновиги',
+    'sales.deleteInstallmentDraftTitle': 'Бөлүп төлөө черновигин өчүрөсүзбү?',
+    'sales.deleteInstallmentDraftMessage': 'Черновик жана сакталган товарлар өчүрүлөт. Бул аракетти кайтаруу мүмкүн эмес.',
+    'sales.installmentDraftDeleted': 'Бөлүп төлөө черновиги өчүрүлдү.',
     'sales.installmentRequiresCeoApproval': 'Бөлүп төлөөнү филиал жетекчиси макулдашы керек',
     'sales.installmentTermsRequired': 'Бөлүп төлөө шарттарын толтуруңуз',
     'sales.registeredSentToCashier':
@@ -5265,6 +5268,9 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.rejectedBy': 'Отклонил',
     'sales.rejectedAt': 'Дата отклонения',
     'sales.installmentDraft': 'Черновик рассрочки',
+    'sales.deleteInstallmentDraftTitle': 'Удалить черновик рассрочки?',
+    'sales.deleteInstallmentDraftMessage': 'Черновик и сохранённые товары будут удалены. Это действие нельзя отменить.',
+    'sales.installmentDraftDeleted': 'Черновик рассрочки удалён.',
     'sales.installmentRequiresCeoApproval': 'Рассрочка должна быть одобрена руководителем филиала',
     'sales.installmentTermsRequired': 'Укажите условия рассрочки',
     'sales.registeredSentToCashier':
@@ -8712,6 +8718,9 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.rejectedBy': 'Rejected by',
     'sales.rejectedAt': 'Rejected at',
     'sales.installmentDraft': 'Installment draft',
+    'sales.deleteInstallmentDraftTitle': 'Delete installment draft?',
+    'sales.deleteInstallmentDraftMessage': 'The draft and saved items will be removed. This action cannot be undone.',
+    'sales.installmentDraftDeleted': 'Installment draft deleted.',
     'sales.installmentRequiresCeoApproval': 'Installment must be approved by the branch CEO',
     'sales.installmentTermsRequired': 'Enter installment terms',
     'sales.registeredSentToCashier':

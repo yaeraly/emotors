@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canCreateSale, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
+import { canCreateSale, canDeleteInstallmentDraft, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import { installmentStatusLabelKey } from '@/lib/sale-installment';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
@@ -22,6 +23,9 @@ export default function SalesPage() {
   const [paymentStatus, setPaymentStatus] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const hideProfitColumn = shouldHideSaleProfitColumn(user);
   const showSaleStatusColumn = shouldShowSaleStatusColumn(user);
@@ -66,6 +70,25 @@ export default function SalesPage() {
     }
   }
 
+  async function confirmDeleteInstallmentDraft() {
+    if (!deleteTarget || deleting) return;
+
+    setDeleting(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      await apiFetch(`/sales/${deleteTarget.id}/installment-draft`, { method: 'DELETE' });
+      setSales((current) => current.filter((row) => row.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      setSuccess(t('sales.installmentDraftDeleted'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <ProtectedShell>
       <section className="space-y-6">
@@ -94,6 +117,11 @@ export default function SalesPage() {
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+          </p>
+        ) : null}
+        {success ? (
+          <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {success}
           </p>
         ) : null}
 
@@ -211,6 +239,15 @@ export default function SalesPage() {
                               {t('common.edit')}
                             </Link>
                           ) : null}
+                          {canDeleteInstallmentDraft(user, sale) ? (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(sale)}
+                              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                            >
+                              {t('common.delete')}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -221,6 +258,17 @@ export default function SalesPage() {
           </div>
         </div>
       </section>
+      <DeleteConfirmModal
+        open={Boolean(deleteTarget)}
+        title={t('sales.deleteInstallmentDraftTitle')}
+        message={t('sales.deleteInstallmentDraftMessage')}
+        confirmButtonLabel={t('common.delete')}
+        loading={deleting}
+        onClose={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        onConfirm={confirmDeleteInstallmentDraft}
+      />
     </ProtectedShell>
   );
 }
