@@ -35,6 +35,12 @@ import {
   validatePaymentParts,
   type PaymentPartRow,
 } from '@/lib/sale-payment-parts';
+import {
+  buildFullPaymentRows,
+  canFinalizeFullPaymentSale,
+  formatFullPaymentAmount,
+  shouldUseBranchCashierFullPaymentFlow,
+} from '@/lib/sale-full-payment';
 import type { Customer, PaymentMethod, Sale, User, WhatsAppDraftResponse } from '@/lib/types';
 import {
   canEditDraftSale,
@@ -132,6 +138,7 @@ function NewSalePageContent() {
   const [loadingDraft, setLoadingDraft] = useState(Boolean(editSaleId));
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
+  const branchCashierHandoffFlow = shouldUseBranchCashierFullPaymentFlow(user);
   const canEditSalePrice = Boolean(user);
   const canApprove = canApproveSale(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
@@ -231,6 +238,13 @@ function NewSalePageContent() {
   }, [items, paymentRows]);
 
   useEffect(() => {
+    if (paymentType !== 'FULL_PAYMENT') return;
+    setPaymentRows(buildFullPaymentRows(totals.totalAmount, paymentRows[0]?.method || 'CASH'));
+    setPaymentsSynced(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentType, totals.totalAmount]);
+
+  useEffect(() => {
     if (paymentType !== 'INSTALLMENT') return;
     const down = Number(downPayment || 0);
     setPaymentRows((current) => [
@@ -311,12 +325,17 @@ function NewSalePageContent() {
     !hasMissingPricing &&
     draftSale?.status !== 'FINALIZED' &&
     draftSale?.status !== 'CANCELLED' &&
+    draftSale?.status !== 'WAITING_FOR_CASHIER_PAYMENT' &&
     (paymentType === 'FULL_PAYMENT'
-      ? totals.totalAmount > 0 &&
-        paymentValidation.ok &&
-        paymentComplete &&
-        !hasBlockingPriceError &&
-        !hasMissingPricing
+      ? canFinalizeFullPaymentSale({
+          user,
+          paymentType,
+          totalAmount: totals.totalAmount,
+          hasBlockingPriceError,
+          hasMissingPricing,
+          paymentValidationOk: paymentValidation.ok,
+          paymentComplete,
+        })
       : installmentApproved || installmentApproval?.status === 'ACTIVE');
 
   const appliedPricingChannel = useMemo(
@@ -901,17 +920,20 @@ function NewSalePageContent() {
       return;
     }
 
-    if (draftSale.status === 'FINALIZED' || draftSale.status === 'CANCELLED') {
+    if (
+      draftSale.status === 'FINALIZED' ||
+      draftSale.status === 'CANCELLED' ||
+      draftSale.status === 'WAITING_FOR_CASHIER_PAYMENT'
+    ) {
       setError(t('sales.saleAlreadyCompleted'));
       return;
     }
 
-    if (paymentType === 'FULL_PAYMENT' && !paymentValidation.ok) {
-      setError(formatPaymentError(paymentValidation));
-      return;
-    }
-
-    if (paymentType === 'FULL_PAYMENT' && !paymentComplete) {
+    if (
+      paymentType === 'FULL_PAYMENT' &&
+      !branchCashierHandoffFlow &&
+      (!paymentValidation.ok || !paymentComplete)
+    ) {
       setError(formatPaymentError(paymentValidation));
       return;
     }
@@ -920,6 +942,10 @@ function NewSalePageContent() {
       setError(t('sales.installmentRequiresCeoApproval'));
       return;
     }
+
+    setSaving(true);
+    setError('');
+    setSuccess('');
 
     try {
       if (selectedCustomer) {
@@ -949,17 +975,26 @@ function NewSalePageContent() {
         if (nextCustomer.customerType !== selectedCustomer.customerType) {
           setSelectedCustomer(nextCustomer);
           await recalculateDraftPricesForCustomer(nextCustomer);
-          const saved = await saveDraft();
-          if (!saved) return;
         }
       }
 
-      const finalized = await apiFetch<Sale>(`/sales/${draftSale.id}/finalize`, {
+      const saved = await saveDraft();
+      if (!saved) return;
+
+      const finalized = await apiFetch<Sale>(`/sales/${saved.id}/finalize`, {
         method: 'POST',
       });
+      setDraftSale(finalized);
+      if (branchCashierHandoffFlow && paymentType === 'FULL_PAYMENT') {
+        setSuccess(t('sales.registeredSentToCashier'));
+        router.push('/sales');
+        return;
+      }
       router.push(`/sales/${finalized.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -1394,7 +1429,25 @@ function NewSalePageContent() {
 
           {paymentType === 'FULL_PAYMENT' ? (
             <div className="mt-6 space-y-4">
-              {paymentRows.length === 1 ? (
+              {branchCashierHandoffFlow ? (
+                <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  <SaleInput
+                    label={t('sales.paidAmount')}
+                    type="number"
+                    value={formatFullPaymentAmount(totals.totalAmount)}
+                    onChange={() => undefined}
+                    readOnly
+                  />
+                  <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm">
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      {t('sales.debtAmount')}
+                    </p>
+                    <p className="mt-1 text-lg font-bold text-slate-900">
+                      {formatKgs(totals.totalAmount)}
+                    </p>
+                  </div>
+                </div>
+              ) : paymentRows.length === 1 ? (
                 <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                   <label className="block min-w-0">
                     <span className="text-sm font-semibold text-slate-700">
@@ -1556,7 +1609,9 @@ function NewSalePageContent() {
             </div>
           ) : null}
 
-          {paymentType === 'FULL_PAYMENT' && !paymentValidation.ok ? (
+          {paymentType === 'FULL_PAYMENT' &&
+          !branchCashierHandoffFlow &&
+          !paymentValidation.ok ? (
             <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
               {formatPaymentError(paymentValidation)}
             </p>

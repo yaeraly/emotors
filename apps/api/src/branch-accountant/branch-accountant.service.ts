@@ -20,6 +20,7 @@ import { DistributionService } from '../distribution/distribution.service';
 import { CreateInstallmentEarlyPaymentDto } from '../distribution/dto/create-installment-early-payment.dto';
 import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { SalesService } from '../sales/sales.service';
 import {
   canSendInvoiceToCashier,
   hasAnyFullAccessRole,
@@ -40,6 +41,7 @@ export class BranchAccountantService {
     private readonly prisma: PrismaService,
     private readonly distributionService: DistributionService,
     private readonly earlyPaymentService: BranchInstallmentEarlyPaymentService,
+    private readonly salesService: SalesService,
   ) {}
 
   private assertBranchAccountant(user: AuthUser) {
@@ -72,6 +74,12 @@ export class BranchAccountantService {
           },
         },
       },
+      sale: {
+        include: {
+          customer: { select: { id: true, fullName: true, phone: true } },
+          items: true,
+        },
+      },
       payments: {
         where: { deletedAt: null },
         orderBy: { paidAt: 'desc' as const },
@@ -92,7 +100,10 @@ export class BranchAccountantService {
     };
   }
 
-  private async attachLinkedRequest<T extends { distributionOrderId: string }>(invoice: T) {
+  private async attachLinkedRequest<T extends { distributionOrderId: string | null }>(invoice: T) {
+    if (!invoice.distributionOrderId) {
+      return invoice;
+    }
     const linkedRequest = await this.prisma.branchPurchaseRequest.findFirst({
       where: { convertedOrderId: invoice.distributionOrderId, deletedAt: null },
       select: { id: true, requestNumber: true },
@@ -439,7 +450,14 @@ export class BranchAccountantService {
 
   async submitCashierPayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
     this.assertBranchCashier(user);
-    await this.distributionService.submitInvoicePayment(user, id, dto);
+    const invoice = await this.prisma.branchInvoice.findFirst({
+      where: { id, deletedAt: null, branchId: user.branchId! },
+      select: { id: true, invoiceCategory: true, saleId: true },
+    });
+    const result = await this.distributionService.submitInvoicePayment(user, id, dto);
+    if (invoice?.invoiceCategory === 'RETAIL_SALE' && invoice.saleId) {
+      await this.salesService.syncRetailSalePaymentFromInvoice(user, id);
+    }
     return this.getCashierInvoice(user, id);
   }
 

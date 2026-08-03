@@ -19,6 +19,7 @@ import {
   PricingEnginePriceType,
   Prisma,
   Role,
+  SalePaymentType,
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
@@ -65,6 +66,15 @@ import {
   validateSalePriceRange,
 } from './sale-price-range.util';
 import { assertBranchSalesManagerCanCancelSale } from './branch-sales-workflow.util';
+import { BranchSaleInvoiceService } from './branch-sale-invoice.service';
+import {
+  assertFullPaymentRegistrationAllowed,
+  buildExpectedPaymentState,
+  FULL_PAYMENT_INSTALLMENT_WARNING,
+  mapBranchPaymentMethodToSalePaymentMethod,
+  resolveSalePaymentType,
+  shouldRegisterFullPaymentForCashier,
+} from './sale-full-payment.util';
 import {
   assertSaleDraftEditable,
   buildDraftSaleSnapshot,
@@ -104,6 +114,7 @@ export class SalesService {
     private readonly notificationsService: NotificationsService,
     private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
     private readonly branchPricingPolicyService: BranchPricingPolicyService,
+    private readonly branchSaleInvoiceService: BranchSaleInvoiceService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -126,6 +137,11 @@ export class SalesService {
       const saleDate = dto.saleDate ?? new Date();
       const receiptNumber = await this.generateReceiptNumber(tx, saleDate);
       const totals = await this.calculateSaleWithFreeze(user, customer.branchId, dto);
+      const paymentType = resolveSalePaymentType(dto.paymentType);
+      const expectedPaymentState =
+        paymentType === SalePaymentType.FULL_PAYMENT
+          ? buildExpectedPaymentState(totals.totalAmount)
+          : null;
       const draftReceiptText = this.buildReceiptText({
         receiptNumber,
         customerName: customer.fullName,
@@ -151,9 +167,11 @@ export class SalesService {
           totalAmount: totals.totalAmount,
           totalCost: totals.totalCost,
           profitAmount: totals.profitAmount,
-          paidAmount: 0,
-          debtAmount: totals.totalAmount,
-          paymentStatus: PaymentStatus.DEBT,
+          paidAmount: expectedPaymentState?.paidAmount ?? 0,
+          debtAmount: expectedPaymentState?.debtAmount ?? totals.totalAmount,
+          paymentStatus: expectedPaymentState?.paymentStatus ?? PaymentStatus.DEBT,
+          paymentType,
+          expectedPaymentAmount: expectedPaymentState?.expectedPaymentAmount ?? null,
           status: SaleStatus.DRAFT,
           draftReceiptText,
           notes: dto.notes,
@@ -200,6 +218,15 @@ export class SalesService {
         paymentType: dto.paymentType ?? 'FULL_PAYMENT',
         status: sale.status,
       });
+      if ((dto.paymentType ?? 'FULL_PAYMENT') === 'FULL_PAYMENT') {
+        await this.audit(user, sale.branchId, 'BRANCH_FULL_PAYMENT_SELECTED', 'Sale', sale.id, {
+          saleId: sale.id,
+          branchId: sale.branchId,
+          saleTotal: sale.totalAmount,
+          expectedPaymentAmount: sale.expectedPaymentAmount ?? sale.totalAmount,
+          paymentType: SalePaymentType.FULL_PAYMENT,
+        });
+      }
       return sale;
     });
   }
@@ -641,6 +668,11 @@ export class SalesService {
       });
       const saleDate = dto.saleDate ?? sale.saleDate;
       const totals = await this.calculateSaleWithFreeze(user, customer.branchId, dto);
+      const paymentType = resolveSalePaymentType(dto.paymentType);
+      const expectedPaymentState =
+        paymentType === SalePaymentType.FULL_PAYMENT
+          ? buildExpectedPaymentState(totals.totalAmount)
+          : null;
       const paymentAggregate = await tx.payment.aggregate({
         where: { saleId: sale.id, status: PaymentRecordStatus.ACTIVE },
         _sum: { amount: true },
@@ -651,7 +683,10 @@ export class SalesService {
       const debtAmount = this.roundMoney(
         Math.max(totals.totalAmount - paidAmount, 0),
       );
-      const paymentStatus = this.getPaymentStatus(totals.totalAmount, paidAmount);
+      const paymentStatus =
+        expectedPaymentState && paidAmount <= 0.009
+          ? expectedPaymentState.paymentStatus
+          : this.getPaymentStatus(totals.totalAmount, paidAmount);
       const activePayments = await tx.payment.findMany({
         where: { saleId: sale.id, status: PaymentRecordStatus.ACTIVE },
         select: {
@@ -707,9 +742,14 @@ export class SalesService {
           totalAmount: totals.totalAmount,
           totalCost: totals.totalCost,
           profitAmount: totals.profitAmount,
-          paidAmount,
-          debtAmount,
+          paidAmount: expectedPaymentState && paidAmount <= 0.009 ? 0 : paidAmount,
+          debtAmount:
+            expectedPaymentState && paidAmount <= 0.009
+              ? expectedPaymentState.debtAmount
+              : debtAmount,
           paymentStatus,
+          paymentType,
+          expectedPaymentAmount: expectedPaymentState?.expectedPaymentAmount ?? null,
           draftReceiptText,
           notes: dto.notes,
           items: { create: totals.items },
@@ -1118,200 +1158,29 @@ export class SalesService {
 
   async finalize(user: AuthUser, id: string) {
     assertBranchCashierCannotManageSales(user);
+
+    const preview = await this.prisma.sale.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+      },
+      select: {
+        id: true,
+        paymentType: true,
+        status: true,
+      },
+    });
+    if (!preview) {
+      throw new NotFoundException('Sale not found');
+    }
+
+    if (shouldRegisterFullPaymentForCashier(user, preview.paymentType)) {
+      return this.registerFullPaymentForCashier(user, id);
+    }
+
     await this.prisma.$transaction(async (tx) => {
-      const sale = await tx.sale.findFirst({
-        where: {
-          id,
-          deletedAt: null,
-          ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
-        },
-        include: {
-          items: true,
-          installments: { orderBy: { dueDate: 'asc' } },
-          installmentApproval: true,
-          customer: true,
-          seller: true,
-        },
-      });
-
-      if (!sale) {
-        throw new NotFoundException('Sale not found');
-      }
-
-      if (sale.status === SaleStatus.FINALIZED || sale.status === SaleStatus.CANCELLED) {
-        throw new BadRequestException('Sale is already completed or cancelled');
-      }
-
-      await this.refreshSalePaymentState(tx, sale.id);
-      const refreshedSale = await tx.sale.findUniqueOrThrow({
-        where: { id: sale.id },
-        include: {
-          items: true,
-          installments: { orderBy: { dueDate: 'asc' } },
-          installmentApproval: true,
-          customer: true,
-          seller: true,
-        },
-      });
-
-      const requiresInstallmentApproval =
-        this.saleInstallmentApprovalService.saleRequiresInstallmentApproval(refreshedSale);
-      const isFullPayment =
-        this.saleInstallmentApprovalService.saleIsFullPayment(refreshedSale);
-
-      if (requiresInstallmentApproval) {
-        await this.saleInstallmentApprovalService.assertCanFinalizeInstallmentSale(
-          tx,
-          refreshedSale as any,
-        );
-      } else if (!isFullPayment) {
-        throw new BadRequestException('Укажите условия рассрочки или полную оплату');
-      } else {
-        if (Number(refreshedSale.debtAmount) > 0.009) {
-          throw new BadRequestException(
-            'Для полной оплаты сумма платежа должна покрывать стоимость продажи',
-          );
-        }
-        if (Number(refreshedSale.paidAmount) + 0.009 < Number(refreshedSale.totalAmount)) {
-          throw new BadRequestException('Недостаточная сумма оплаты для завершения продажи');
-        }
-      }
-
-      const finalizeItems = refreshedSale.items.map((item) => ({
-        productId: item.productId ?? undefined,
-        productName: item.productName,
-        productSku: item.productSku ?? undefined,
-        quantity: item.quantity,
-        unitPrice: Number(item.unitPrice),
-        unitCost: Number(item.unitCost),
-        priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? undefined,
-        priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? undefined,
-        pricingChannel: this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
-      }));
-
-      await this.validateSaleStock(user, refreshedSale.branchId, finalizeItems);
-      await this.assertSaleItemsResolvablePricing(user, refreshedSale.branchId, finalizeItems);
-      await this.assertSaleItemPricesWithinAuthoritativeRange(
-        user,
-        refreshedSale.branchId,
-        refreshedSale.customer,
-        finalizeItems,
-        refreshedSale.id,
-      );
-      await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems, {
-        automaticCustomerPricing: true,
-      });
-
-      if (
-        refreshedSale.pricingPolicyVersionId &&
-        finalizeItems.some((item) => item.productId)
-      ) {
-        const currentVersionId = await this.resolveCurrentPricingPolicyVersionId(
-          refreshedSale.branchId,
-          finalizeItems.find((item) => item.productId)?.productId as string,
-          this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
-        );
-        if (
-          currentVersionId &&
-          currentVersionId !== refreshedSale.pricingPolicyVersionId
-        ) {
-          await this.auditInTx(
-            tx,
-            user,
-            refreshedSale.branchId,
-            'BRANCH_SALE_PRICE_VALIDATED',
-            'Sale',
-            refreshedSale.id,
-            {
-              reason: 'PRICING_POLICY_CHANGED',
-              oldPricingPolicyVersionId: refreshedSale.pricingPolicyVersionId,
-              newPricingPolicyVersionId: currentVersionId,
-              message: PRICING_POLICY_CHANGED_MESSAGE,
-            },
-          );
-        }
-      }
-
-      const refreshed = await tx.sale.findUniqueOrThrow({
-        where: { id: sale.id },
-        include: { payments: true, customer: true, seller: true, items: true },
-      });
-      const finalReceiptText = this.buildReceiptText({
-        receiptNumber: refreshed.receiptNumber,
-        customerName: refreshed.customer.fullName,
-        customerPhone: refreshed.customer.phone,
-        sellerName: refreshed.seller.fullName,
-        saleDate: refreshed.saleDate,
-        items: refreshed.items,
-        totalAmount: Number(refreshed.totalAmount),
-        paidAmount: Number(refreshed.paidAmount),
-        debtAmount: Number(refreshed.debtAmount),
-        paymentStatus: refreshed.paymentStatus,
-        receiptStatus: 'FINAL',
-        payments: refreshed.payments,
-      });
-
-      await tx.sale.update({
-        where: { id: sale.id },
-        data: {
-          status: SaleStatus.FINALIZED,
-          finalizedAt: new Date(),
-          receipt: {
-            update: {
-              qrCodeData: finalReceiptText,
-            },
-          },
-        },
-      });
-
-      await tx.customerEvent.create({
-        data: {
-          customerId: sale.customerId,
-          branchId: sale.branchId,
-          type: CustomerEventType.SALE,
-          message: `Finalized sale ${sale.receiptNumber}: ${Number(
-            sale.totalAmount,
-          ).toFixed(2)} KGS`,
-          createdById: user.id,
-        },
-      });
-
-      await this.pricingCatalogService.applyFifoCostsOnFinalize(
-        tx,
-        user,
-        { id: sale.id, branchId: sale.branchId, items: refreshed.items },
-        (productId) => this.getProductWarehouseId(tx, productId),
-      );
-
-      for (const item of refreshed.items) {
-        if (!item.productId) {
-          continue;
-        }
-
-        const latestItem = await tx.saleItem.findUniqueOrThrow({ where: { id: item.id } });
-
-        await this.inventoryService.createStockMovementInTx(tx, user, {
-          productId: item.productId,
-          warehouseId: await this.getProductWarehouseId(tx, item.productId),
-          type: StockMovementType.SALE,
-          quantity: item.quantity,
-          unitCostKgs: Number(latestItem.unitCost),
-          referenceType: 'SALE',
-          referenceId: sale.id,
-          note: `Sale ${sale.receiptNumber}`,
-        });
-      }
-
-      await this.refreshCustomerFinancials(tx, sale.customerId, {
-        userId: user.id,
-        role: user.role,
-        branchId: sale.branchId,
-      });
-      await this.commissionsService.createSalesCommission(tx, sale.id);
-
-      if (requiresInstallmentApproval) {
-        await this.saleInstallmentApprovalService.activateOnSaleFinalize(tx, user, sale.id);
-      }
+      await this.finalizeSaleInTx(tx, user, id);
     });
 
     const finalized = await this.findOne(user, id);
@@ -1323,6 +1192,439 @@ export class SalesService {
       isFullPayment,
     });
     return finalized;
+  }
+
+  async registerFullPaymentForCashier(user: AuthUser, id: string) {
+    assertBranchCashierCannotManageSales(user);
+
+    const sale = await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.sale.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+        },
+        include: {
+          items: true,
+          customer: true,
+          seller: true,
+          branchInvoice: true,
+        },
+      });
+      if (!existing) {
+        throw new NotFoundException('Sale not found');
+      }
+
+      if (existing.status === SaleStatus.WAITING_FOR_CASHIER_PAYMENT && existing.branchInvoice) {
+        return tx.sale.findUniqueOrThrow({
+          where: { id: existing.id },
+          include: this.saleInclude(),
+        });
+      }
+
+      assertFullPaymentRegistrationAllowed(existing);
+      const paymentType = existing.paymentType ?? SalePaymentType.FULL_PAYMENT;
+      if (paymentType !== SalePaymentType.FULL_PAYMENT) {
+        throw new BadRequestException('Only full-payment sales can be sent to cashier');
+      }
+
+      const finalizeItems = existing.items.map((item) => ({
+        productId: item.productId ?? undefined,
+        productName: item.productName,
+        productSku: item.productSku ?? undefined,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        unitCost: Number(item.unitCost),
+        priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? undefined,
+        priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? undefined,
+        pricingChannel: this.resolvePricingChannelFromCustomer(existing.customer.customerType),
+      }));
+
+      await this.validateSaleStock(user, existing.branchId, finalizeItems);
+      await this.assertSaleItemsResolvablePricing(user, existing.branchId, finalizeItems);
+      await this.assertSaleItemPricesWithinAuthoritativeRange(
+        user,
+        existing.branchId,
+        existing.customer,
+        finalizeItems,
+        existing.id,
+      );
+      await this.pricingService.validateSaleItems(user, existing.branchId, finalizeItems, {
+        automaticCustomerPricing: true,
+      });
+
+      const totals = await this.calculateSaleWithFreeze(user, existing.branchId, {
+        customerId: existing.customerId,
+        items: finalizeItems,
+        paymentType: 'FULL_PAYMENT',
+      });
+      const expectedState = buildExpectedPaymentState(totals.totalAmount);
+      const invoice = await this.branchSaleInvoiceService.ensureRetailSaleInvoiceInTx(tx, user, {
+        id: existing.id,
+        branchId: existing.branchId,
+        receiptNumber: existing.receiptNumber,
+        totalAmount: totals.totalAmount,
+        saleDate: existing.saleDate,
+      });
+
+      const previousStatus = existing.status;
+      const updated = await tx.sale.update({
+        where: { id: existing.id },
+        data: {
+          totalAmount: totals.totalAmount,
+          totalCost: totals.totalCost,
+          profitAmount: totals.profitAmount,
+          paymentType: SalePaymentType.FULL_PAYMENT,
+          expectedPaymentAmount: expectedState.expectedPaymentAmount,
+          paidAmount: expectedState.paidAmount,
+          debtAmount: expectedState.debtAmount,
+          paymentStatus: expectedState.paymentStatus,
+          status: SaleStatus.WAITING_FOR_CASHIER_PAYMENT,
+          sentToCashierAt: invoice.sentToCashierAt ?? new Date(),
+          sentToCashierById: user.id,
+        },
+        include: this.saleInclude(),
+      });
+
+      await this.auditInTx(tx, user, existing.branchId, 'BRANCH_SALE_REGISTERED', 'Sale', existing.id, {
+        saleId: existing.id,
+        invoiceId: invoice.id,
+        branchId: existing.branchId,
+        customerId: existing.customerId,
+        saleTotal: totals.totalAmount,
+        expectedPaymentAmount: expectedState.expectedPaymentAmount,
+        confirmedPaidAmount: 0,
+        remainingAmount: expectedState.debtAmount,
+        paymentType: SalePaymentType.FULL_PAYMENT,
+        previousStatus,
+        newStatus: SaleStatus.WAITING_FOR_CASHIER_PAYMENT,
+        actorUserId: user.id,
+        actorRole: user.role,
+      });
+
+      await this.branchSaleInvoiceService.notifyCashierInTx(tx, user, {
+        branchId: existing.branchId,
+        saleId: existing.id,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        customerId: existing.customerId,
+        saleTotal: totals.totalAmount,
+      });
+
+      return updated;
+    });
+
+    return this.toSaleResponse(sale);
+  }
+
+  async syncRetailSalePaymentFromInvoice(user: AuthUser, invoiceId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: {
+          id: invoiceId,
+          deletedAt: null,
+          branchId: user.branchId!,
+          invoiceCategory: 'RETAIL_SALE',
+          saleId: { not: null },
+        },
+        include: {
+          sale: {
+            include: {
+              items: true,
+              installments: { orderBy: { dueDate: 'asc' } },
+              installmentApproval: true,
+              customer: true,
+              seller: true,
+              payments: { where: { status: PaymentRecordStatus.ACTIVE } },
+            },
+          },
+          payments: {
+            where: {
+              deletedAt: null,
+              confirmationStatus: 'CONFIRMED',
+            },
+            orderBy: { confirmedAt: 'desc' },
+          },
+        },
+      });
+      if (!invoice?.sale) {
+        throw new NotFoundException('Retail sale invoice not found');
+      }
+
+      const sale = invoice.sale;
+      const confirmedPayment = invoice.payments[0];
+      if (!confirmedPayment) {
+        return;
+      }
+
+      const existingLinkedPayment = await tx.payment.findFirst({
+        where: {
+          saleId: sale.id,
+          status: PaymentRecordStatus.ACTIVE,
+          note: `branch-invoice:${invoice.id}`,
+        },
+      });
+      if (existingLinkedPayment) {
+        if (sale.status === SaleStatus.FINALIZED) {
+          return;
+        }
+      } else {
+        const amount = this.roundMoney(Number(confirmedPayment.amount));
+        await tx.payment.create({
+          data: {
+            branchId: sale.branchId,
+            saleId: sale.id,
+            customerId: sale.customerId,
+            amount,
+            method: mapBranchPaymentMethodToSalePaymentMethod(confirmedPayment.method) as PaymentMethod,
+            paidAt: confirmedPayment.paidAt ?? new Date(),
+            note: `branch-invoice:${invoice.id}`,
+            createdById: user.id,
+          },
+        });
+      }
+
+      await this.refreshSalePaymentState(tx, sale.id);
+      const refreshed = await tx.sale.findUniqueOrThrow({
+        where: { id: sale.id },
+        include: {
+          items: true,
+          installments: { orderBy: { dueDate: 'asc' } },
+          installmentApproval: true,
+          customer: true,
+          seller: true,
+          payments: { where: { status: PaymentRecordStatus.ACTIVE } },
+        },
+      });
+
+      if (
+        Number(refreshed.paidAmount) + 0.009 >= Number(refreshed.totalAmount) &&
+        refreshed.status !== SaleStatus.FINALIZED
+      ) {
+        await this.finalizeSaleInTx(tx, user, sale.id, refreshed);
+        await this.auditInTx(
+          tx,
+          user,
+          sale.branchId,
+          'BRANCH_CASHIER_PAYMENT_ACCEPTED',
+          'Sale',
+          sale.id,
+          {
+            saleId: sale.id,
+            invoiceId: invoice.id,
+            branchId: sale.branchId,
+            customerId: sale.customerId,
+            saleTotal: Number(refreshed.totalAmount),
+            expectedPaymentAmount: Number(refreshed.expectedPaymentAmount ?? refreshed.totalAmount),
+            confirmedPaidAmount: Number(refreshed.paidAmount),
+            remainingAmount: Number(refreshed.debtAmount),
+            paymentType: SalePaymentType.FULL_PAYMENT,
+            previousStatus: SaleStatus.WAITING_FOR_CASHIER_PAYMENT,
+            newStatus: SaleStatus.FINALIZED,
+            actorUserId: user.id,
+            actorRole: user.role,
+          },
+        );
+      }
+    });
+  }
+
+  private async finalizeSaleInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    id: string,
+    preloadedSale?: Awaited<ReturnType<typeof this.loadSaleForFinalize>>,
+  ) {
+    const sale =
+      preloadedSale ??
+      (await this.loadSaleForFinalize(tx, user, id));
+
+    if (sale.status === SaleStatus.FINALIZED || sale.status === SaleStatus.CANCELLED) {
+      throw new BadRequestException('Sale is already completed or cancelled');
+    }
+
+    await this.refreshSalePaymentState(tx, sale.id);
+    const refreshedSale = await this.loadSaleForFinalize(tx, user, sale.id);
+
+    const requiresInstallmentApproval =
+      this.saleInstallmentApprovalService.saleRequiresInstallmentApproval(refreshedSale);
+    const isFullPayment =
+      this.saleInstallmentApprovalService.saleIsFullPayment(refreshedSale);
+
+    if (requiresInstallmentApproval) {
+      await this.saleInstallmentApprovalService.assertCanFinalizeInstallmentSale(
+        tx,
+        refreshedSale as any,
+      );
+    } else if (!isFullPayment) {
+      throw new BadRequestException(FULL_PAYMENT_INSTALLMENT_WARNING);
+    } else {
+      if (Number(refreshedSale.debtAmount) > 0.009) {
+        throw new BadRequestException(
+          'Для полной оплаты сумма платежа должна покрывать стоимость продажи',
+        );
+      }
+      if (Number(refreshedSale.paidAmount) + 0.009 < Number(refreshedSale.totalAmount)) {
+        throw new BadRequestException('Недостаточная сумма оплаты для завершения продажи');
+      }
+    }
+
+    const finalizeItems = refreshedSale.items.map((item) => ({
+      productId: item.productId ?? undefined,
+      productName: item.productName,
+      productSku: item.productSku ?? undefined,
+      quantity: item.quantity,
+      unitPrice: Number(item.unitPrice),
+      unitCost: Number(item.unitCost),
+      priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? undefined,
+      priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? undefined,
+      pricingChannel: this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
+    }));
+
+    await this.validateSaleStock(user, refreshedSale.branchId, finalizeItems);
+    await this.assertSaleItemsResolvablePricing(user, refreshedSale.branchId, finalizeItems);
+    await this.assertSaleItemPricesWithinAuthoritativeRange(
+      user,
+      refreshedSale.branchId,
+      refreshedSale.customer,
+      finalizeItems,
+      refreshedSale.id,
+    );
+    await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems, {
+      automaticCustomerPricing: true,
+    });
+
+    if (
+      refreshedSale.pricingPolicyVersionId &&
+      finalizeItems.some((item) => item.productId)
+    ) {
+      const currentVersionId = await this.resolveCurrentPricingPolicyVersionId(
+        refreshedSale.branchId,
+        finalizeItems.find((item) => item.productId)?.productId as string,
+        this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
+      );
+      if (
+        currentVersionId &&
+        currentVersionId !== refreshedSale.pricingPolicyVersionId
+      ) {
+        await this.auditInTx(
+          tx,
+          user,
+          refreshedSale.branchId,
+          'BRANCH_SALE_PRICE_VALIDATED',
+          'Sale',
+          refreshedSale.id,
+          {
+            reason: 'PRICING_POLICY_CHANGED',
+            oldPricingPolicyVersionId: refreshedSale.pricingPolicyVersionId,
+            newPricingPolicyVersionId: currentVersionId,
+            message: PRICING_POLICY_CHANGED_MESSAGE,
+          },
+        );
+      }
+    }
+
+    const refreshed = await tx.sale.findUniqueOrThrow({
+      where: { id: sale.id },
+      include: { payments: true, customer: true, seller: true, items: true },
+    });
+    const finalReceiptText = this.buildReceiptText({
+      receiptNumber: refreshed.receiptNumber,
+      customerName: refreshed.customer.fullName,
+      customerPhone: refreshed.customer.phone,
+      sellerName: refreshed.seller.fullName,
+      saleDate: refreshed.saleDate,
+      items: refreshed.items,
+      totalAmount: Number(refreshed.totalAmount),
+      paidAmount: Number(refreshed.paidAmount),
+      debtAmount: Number(refreshed.debtAmount),
+      paymentStatus: refreshed.paymentStatus,
+      receiptStatus: 'FINAL',
+      payments: refreshed.payments,
+    });
+
+    await tx.sale.update({
+      where: { id: sale.id },
+      data: {
+        status: SaleStatus.FINALIZED,
+        finalizedAt: new Date(),
+        receipt: {
+          update: {
+            qrCodeData: finalReceiptText,
+          },
+        },
+      },
+    });
+
+    await tx.customerEvent.create({
+      data: {
+        customerId: sale.customerId,
+        branchId: sale.branchId,
+        type: CustomerEventType.SALE,
+        message: `Finalized sale ${sale.receiptNumber}: ${Number(
+          sale.totalAmount,
+        ).toFixed(2)} KGS`,
+        createdById: user.id,
+      },
+    });
+
+    await this.pricingCatalogService.applyFifoCostsOnFinalize(
+      tx,
+      user,
+      { id: sale.id, branchId: sale.branchId, items: refreshed.items },
+      (productId) => this.getProductWarehouseId(tx, productId),
+    );
+
+    for (const item of refreshed.items) {
+      if (!item.productId) {
+        continue;
+      }
+
+      const latestItem = await tx.saleItem.findUniqueOrThrow({ where: { id: item.id } });
+
+      await this.inventoryService.createStockMovementInTx(tx, user, {
+        productId: item.productId,
+        warehouseId: await this.getProductWarehouseId(tx, item.productId),
+        type: StockMovementType.SALE,
+        quantity: item.quantity,
+        unitCostKgs: Number(latestItem.unitCost),
+        referenceType: 'SALE',
+        referenceId: sale.id,
+        note: `Sale ${sale.receiptNumber}`,
+      });
+    }
+
+    await this.refreshCustomerFinancials(tx, sale.customerId, {
+      userId: user.id,
+      role: user.role,
+      branchId: sale.branchId,
+    });
+    await this.commissionsService.createSalesCommission(tx, sale.id);
+
+    if (requiresInstallmentApproval) {
+      await this.saleInstallmentApprovalService.activateOnSaleFinalize(tx, user, sale.id);
+    }
+  }
+
+  private async loadSaleForFinalize(tx: PrismaTx, user: AuthUser, id: string) {
+    const sale = await tx.sale.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        ...(this.canAccessAllBranches(user) ? {} : { branchId: user.branchId }),
+      },
+      include: {
+        items: true,
+        installments: { orderBy: { dueDate: 'asc' } },
+        installmentApproval: true,
+        customer: true,
+        seller: true,
+      },
+    });
+    if (!sale) {
+      throw new NotFoundException('Sale not found');
+    }
+    return sale;
   }
 
   async cancel(user: AuthUser, id: string) {
@@ -1636,6 +1938,14 @@ export class SalesService {
         },
       },
       receipt: true,
+      branchInvoice: {
+        select: {
+          id: true,
+          invoiceNumber: true,
+          status: true,
+          sentToCashierAt: true,
+        },
+      },
     };
   }
 
@@ -2243,7 +2553,11 @@ export class SalesService {
     return hasAnyFullAccessRole(user.roles?.length ? user.roles : [user.role]);
   }
 
-  private getPaymentStatus(totalAmount: number, paidAmount: number) {
+  private getPaymentStatus(totalAmount: number, paidAmount: number, options?: { awaitingCashier?: boolean }) {
+    if (options?.awaitingCashier && paidAmount <= 0.009) {
+      return PaymentStatus.WAITING_FOR_CASHIER;
+    }
+
     if (paidAmount >= totalAmount) {
       return PaymentStatus.PAID;
     }
@@ -2444,6 +2758,10 @@ export class SalesService {
       profitAmount: Number(sale.profitAmount),
       paidAmount: Number(sale.paidAmount),
       debtAmount: Number(sale.debtAmount),
+      expectedPaymentAmount:
+        sale.expectedPaymentAmount != null ? Number(sale.expectedPaymentAmount) : null,
+      paymentType: sale.paymentType ?? null,
+      sentToCashierAt: sale.sentToCashierAt ?? null,
       items: sale.items?.map((item: any) => ({
         ...item,
         unitPrice: Number(item.unitPrice),

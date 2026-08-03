@@ -1,0 +1,145 @@
+import { Injectable } from '@nestjs/common';
+import {
+  AlertType,
+  BranchInvoiceCategory,
+  BranchInvoicePaymentType,
+  BranchInvoiceStatus,
+  Prisma,
+  Role,
+  SalePaymentType,
+} from '@prisma/client';
+import { AuthUser } from '../auth/auth.types';
+import { NotificationsService } from '../notifications/notifications.service';
+import { PrismaService } from '../prisma/prisma.service';
+
+type PrismaTx = Prisma.TransactionClient;
+
+@Injectable()
+export class BranchSaleInvoiceService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
+
+  async generateInvoiceNumber(tx: PrismaTx) {
+    const count = await tx.branchInvoice.count();
+    return `BI-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(count + 1).padStart(5, '0')}`;
+  }
+
+  async ensureRetailSaleInvoiceInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    sale: {
+      id: string;
+      branchId: string;
+      receiptNumber: string;
+      totalAmount: Prisma.Decimal | number;
+      saleDate: Date;
+    },
+  ) {
+    const existing = await tx.branchInvoice.findFirst({
+      where: { saleId: sale.id, deletedAt: null },
+    });
+    if (existing) {
+      if (!existing.sentToCashierAt) {
+        const now = new Date();
+        return tx.branchInvoice.update({
+          where: { id: existing.id },
+          data: {
+            sentToBranchAt: existing.sentToBranchAt ?? now,
+            sentToCashierAt: now,
+            paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+            totalAmount: sale.totalAmount,
+            paidAmount: 0,
+            debtAmount: sale.totalAmount,
+            status: BranchInvoiceStatus.ISSUED,
+          },
+        });
+      }
+      return existing;
+    }
+
+    const totalAmount = Number(sale.totalAmount);
+    const now = new Date();
+    const invoice = await tx.branchInvoice.create({
+      data: {
+        invoiceNumber: await this.generateInvoiceNumber(tx),
+        branchId: sale.branchId,
+        saleId: sale.id,
+        invoiceCategory: BranchInvoiceCategory.RETAIL_SALE,
+        status: BranchInvoiceStatus.ISSUED,
+        paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+        totalAmount,
+        paidAmount: 0,
+        debtAmount: totalAmount,
+        dueDate: sale.saleDate,
+        issuedAt: now,
+        sentToBranchAt: now,
+        sentToCashierAt: now,
+        createdById: user.id,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'BRANCH_INVOICE_CREATED',
+        entity: 'BranchInvoice',
+        entityId: invoice.id,
+        metadata: {
+          saleId: sale.id,
+          branchId: sale.branchId,
+          invoiceId: invoice.id,
+          saleTotal: totalAmount,
+          paymentType: SalePaymentType.FULL_PAYMENT,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
+
+    return invoice;
+  }
+
+  async notifyCashierInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    input: {
+      branchId: string;
+      saleId: string;
+      invoiceId: string;
+      invoiceNumber: string;
+      customerId: string;
+      saleTotal: number;
+    },
+  ) {
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'BRANCH_INVOICE_SENT_TO_CASHIER',
+        entity: 'BranchInvoice',
+        entityId: input.invoiceId,
+        metadata: {
+          saleId: input.saleId,
+          invoiceId: input.invoiceId,
+          branchId: input.branchId,
+          customerId: input.customerId,
+          saleTotal: input.saleTotal,
+          paymentType: SalePaymentType.FULL_PAYMENT,
+          roles: user.roles ?? [user.role],
+        },
+      },
+    });
+
+    await this.notificationsService.notifyInTx(tx, user, {
+      branchId: input.branchId,
+      type: AlertType.BRANCH_INVOICE_CREATED,
+      title: 'Счёт передан кассиру',
+      message: `Счёт ${input.invoiceNumber} по продаже передан кассиру на оплату`,
+      entityType: 'BranchInvoice',
+      entityId: input.invoiceId,
+      recipientRoles: [Role.CASHIER],
+    });
+  }
+}

@@ -1715,6 +1715,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'paymentStatus.PAID': 'Төлөндү',
     'paymentStatus.PARTIAL': 'Жарым-жартылай',
     'paymentStatus.DEBT': 'Карыз',
+    'paymentStatus.WAITING_FOR_CASHIER': 'Кассирдин төлөмүн күтүүдө',
 
     'sales.title': 'Сатуу',
     'sales.newSale': 'Жаңы сатуу',
@@ -1844,6 +1845,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.installmentDraft': 'Бөлүп төлөө черновиги',
     'sales.installmentRequiresCeoApproval': 'Бөлүп төлөөнү филиал жетекчиси макулдашы керек',
     'sales.installmentTermsRequired': 'Бөлүп төлөө шарттарын толтуруңуз',
+    'sales.registeredSentToCashier':
+      'Сатуу катталды. Эсеп төлөмдү кабыл алуу үчүн кассирге жөнөтүлдү.',
     'sales.installmentRequestSubmitted': 'Бөлүп төлөө өтүнүчү жөнөтүлдү',
     'sales.installmentRequestApproved': 'Бөлүп төлөө өтүнүчү макулдады',
     'sales.installmentRequestRejected': 'Бөлүп төлөө өтүнүчү четке кагылды',
@@ -5121,6 +5124,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'paymentStatus.PAID': 'Оплачено',
     'paymentStatus.PARTIAL': 'Частично',
     'paymentStatus.DEBT': 'Долг',
+    'paymentStatus.WAITING_FOR_CASHIER': 'Ожидает оплаты кассиром',
 
     'sales.title': 'Продажи',
     'sales.newSale': 'Новая продажа',
@@ -5250,6 +5254,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.installmentDraft': 'Черновик рассрочки',
     'sales.installmentRequiresCeoApproval': 'Рассрочка должна быть одобрена руководителем филиала',
     'sales.installmentTermsRequired': 'Укажите условия рассрочки',
+    'sales.registeredSentToCashier':
+      'Продажа зарегистрирована. Счет отправлен кассиру для принятия оплаты.',
     'sales.installmentRequestSubmitted': 'Рассрочка отправлена Branch CEO на одобрение.',
     'sales.installmentRequestApproved': 'Заявка на рассрочку одобрена',
     'sales.installmentRequestRejected': 'Заявка на рассрочку отклонена',
@@ -8550,6 +8556,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'paymentStatus.PAID': 'Paid',
     'paymentStatus.PARTIAL': 'Partial',
     'paymentStatus.DEBT': 'Debt',
+    'paymentStatus.WAITING_FOR_CASHIER': 'Waiting for cashier payment',
 
     'sales.title': 'Sales',
     'sales.newSale': 'New Sale',
@@ -8679,6 +8686,8 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.installmentDraft': 'Installment draft',
     'sales.installmentRequiresCeoApproval': 'Installment must be approved by the branch CEO',
     'sales.installmentTermsRequired': 'Enter installment terms',
+    'sales.registeredSentToCashier':
+      'Sale registered. The invoice has been sent to the cashier for payment acceptance.',
     'sales.installmentRequestSubmitted': 'Installment request submitted',
     'sales.installmentRequestApproved': 'Installment request approved',
     'sales.installmentRequestRejected': 'Installment request rejected',

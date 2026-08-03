@@ -62,6 +62,7 @@ export function resolveAccountantInvoiceWorkflowStatus(invoice: InvoiceLike): Ac
 export function sanitizeAccountantInvoice(invoice: any) {
   const workflowStatus = resolveAccountantInvoiceWorkflowStatus(invoice);
   const order = invoice.distributionOrder;
+  const sale = invoice.sale;
   const linkedRequest = order?.branchPurchaseRequest ?? null;
   const installment = invoice.branchOrderInstallment
     ? (() => {
@@ -166,9 +167,13 @@ export function sanitizeAccountantInvoice(invoice: any) {
     branchId: invoice.branchId,
     branch: invoice.branch ? { id: invoice.branch.id, name: invoice.branch.name, code: invoice.branch.code } : null,
     distributionOrderId: invoice.distributionOrderId,
-    orderNumber: order?.orderNumber ?? null,
+    saleId: invoice.saleId ?? null,
+    orderNumber: order?.orderNumber ?? sale?.receiptNumber ?? null,
     branchPurchaseRequestId: linkedRequest?.id ?? null,
     branchPurchaseRequestNumber: linkedRequest?.requestNumber ?? null,
+    customerName: sale?.customer?.fullName ?? null,
+    customerPhone: sale?.customer?.phone ?? null,
+    saleReceiptNumber: sale?.receiptNumber ?? null,
     workflowStatus,
     paymentType: invoice.paymentType ?? null,
     status: invoice.status,
@@ -181,16 +186,16 @@ export function sanitizeAccountantInvoice(invoice: any) {
     issuedAt: invoice.issuedAt,
     sentToBranchAt: invoice.sentToBranchAt,
     sentToCashierAt: invoice.sentToCashierAt,
-    itemCount: order?.items?.length ?? 0,
-    items: (order?.items ?? []).map((item: any) => ({
+    itemCount: order?.items?.length ?? sale?.items?.length ?? 0,
+    items: (order?.items ?? sale?.items ?? []).map((item: any) => ({
       id: item.id,
       productId: item.productId,
-      sku: item.sku,
+      sku: item.productSku ?? item.sku,
       productName: item.productName,
       quantity: item.quantity,
       unitPrice: Number(item.unitPrice),
-      lineTotal: Number(item.totalPrice),
-      unit: item.product?.unit ?? null,
+      lineTotal: Number(item.totalPrice ?? item.unitPrice * item.quantity),
+      unit: item.product?.unit ?? item.unit ?? null,
     })),
     branchOrderInstallment: installment,
     installmentEarlyPaymentRequests: earlyPaymentRequests,

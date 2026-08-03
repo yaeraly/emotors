@@ -60,7 +60,7 @@ export type ServiceOrderStatus =
   | 'CANCELLED';
 export type RepairStatus = 'PENDING' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
 export type WarrantyStatus = 'ACTIVE' | 'EXPIRED' | 'CANCELLED';
-export type PaymentStatus = 'PAID' | 'PARTIAL' | 'DEBT';
+export type PaymentStatus = 'PAID' | 'PARTIAL' | 'DEBT' | 'WAITING_FOR_CASHIER';
 export type PaymentRecordStatus = 'ACTIVE' | 'VOID';
 export type StockMovementStatus = 'ACTIVE' | 'VOID';
 export type PaymentMethod =
@@ -171,6 +171,7 @@ export type SaleStatus =
   | 'DRAFT'
   | 'SENT_TO_CUSTOMER'
   | 'APPROVED_BY_CUSTOMER'
+  | 'WAITING_FOR_CASHIER_PAYMENT'
   | 'FINALIZED'
   | 'CANCELLED';
 export type BranchDistributionOrderStatus =
@@ -1243,6 +1244,9 @@ export type Sale = {
   paidAmount: number;
   debtAmount: number;
   paymentStatus: PaymentStatus;
+  paymentType?: 'FULL_PAYMENT' | 'INSTALLMENT' | null;
+  expectedPaymentAmount?: number | null;
+  sentToCashierAt?: string | null;
   status: SaleStatus;
   draftReceiptText?: string | null;
   whatsappMessageText?: string | null;

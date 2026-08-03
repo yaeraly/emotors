@@ -247,6 +247,12 @@ enum PaymentStatus {
   PAID
   PARTIAL
   DEBT
+  WAITING_FOR_CASHIER
+}
+
+enum SalePaymentType {
+  FULL_PAYMENT
+  INSTALLMENT
 }
 
 enum PaymentRecordStatus {
@@ -274,6 +280,7 @@ enum SaleStatus {
   DRAFT
   SENT_TO_CUSTOMER
   APPROVED_BY_CUSTOMER
+  WAITING_FOR_CASHIER_PAYMENT
   FINALIZED
   CANCELLED
 }
@@ -993,6 +1000,7 @@ enum BranchInvoicePaymentType {
 enum BranchInvoiceCategory {
   PRODUCT_ORDER
   TRANSPORT_EXPENSE
+  RETAIL_SALE
 }
 
 enum BranchPaymentMethod {
@@ -1511,6 +1519,7 @@ model User {
   customerEvents                                  CustomerEvent[]
   followUps                                       FollowUp[]
   sales                                           Sale[]                              @relation("SaleSeller")
+  sentSalesToCashier                              Sale[]                              @relation("SaleCashierSender")
   payments                                        Payment[]                           @relation("PaymentCreator")
   productPriceHistory                             ProductPriceHistory[]               @relation("ProductPriceHistoryCreator")
   productPurchasePriceHistory                     ProductPurchasePriceHistory[]       @relation("ProductPurchasePriceHistoryChanger")
@@ -1917,6 +1926,11 @@ model Sale {
   paidAmount             Decimal                  @default(0) @db.Decimal(14, 2)
   debtAmount             Decimal                  @default(0) @db.Decimal(14, 2)
   paymentStatus          PaymentStatus            @default(DEBT)
+  paymentType            SalePaymentType?
+  expectedPaymentAmount  Decimal?                 @db.Decimal(14, 2)
+  sentToCashierAt        DateTime?
+  sentToCashierById      String?
+  sentToCashierBy        User?                    @relation("SaleCashierSender", fields: [sentToCashierById], references: [id])
   status                 SaleStatus               @default(DRAFT)
   draftReceiptText       String?
   whatsappMessageText    String?
@@ -1930,6 +1944,7 @@ model Sale {
   installments           InstallmentSchedule[]
   installmentApproval    SaleInstallmentApproval?
   receipt                Receipt?
+  branchInvoice          BranchInvoice?
   salesCommissions       SalesCommission[]
   createdAt              DateTime                 @default(now())
   updatedAt              DateTime                 @updatedAt
@@ -1940,6 +1955,8 @@ model Sale {
   @@index([sellerId])
   @@index([paymentStatus])
   @@index([status])
+  @@index([sentToCashierAt])
+  @@index([sentToCashierById])
   @@index([saleDate])
   @@index([receiptNumber])
 }
@@ -4095,8 +4112,10 @@ model BranchInvoice {
   invoiceNumber          String                    @unique
   branchId               String
   branch                 Branch                    @relation(fields: [branchId], references: [id])
-  distributionOrderId    String
-  distributionOrder      BranchDistributionOrder   @relation(fields: [distributionOrderId], references: [id])
+  distributionOrderId    String?
+  distributionOrder      BranchDistributionOrder?  @relation(fields: [distributionOrderId], references: [id])
+  saleId                 String?                   @unique
+  sale                   Sale?                     @relation(fields: [saleId], references: [id])
   goodsReceivingId       String?                   @unique
   goodsReceiving         GoodsReceiving?           @relation(fields: [goodsReceivingId], references: [id])
   invoiceCategory        BranchInvoiceCategory     @default(PRODUCT_ORDER)

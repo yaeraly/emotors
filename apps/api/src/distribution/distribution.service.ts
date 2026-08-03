@@ -3303,7 +3303,7 @@ export class DistributionService {
     invoice: {
       id: string;
       branchId: string;
-      distributionOrderId: string;
+      distributionOrderId: string | null;
       totalAmount: Prisma.Decimal;
       invoiceNumber: string;
     },
@@ -3331,9 +3331,11 @@ export class DistributionService {
       data: { paidAmount, debtAmount, status },
     });
 
-    const order = await tx.branchDistributionOrder.findFirst({
-      where: { id: invoice.distributionOrderId, deletedAt: null },
-    });
+    const order = invoice.distributionOrderId
+      ? await tx.branchDistributionOrder.findFirst({
+          where: { id: invoice.distributionOrderId, deletedAt: null },
+        })
+      : null;
     if (order) {
       const orderStatus =
         status === BranchInvoiceStatus.PAID

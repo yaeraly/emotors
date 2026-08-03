@@ -4,6 +4,7 @@ import { CustomersModule } from '../customers/customers.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PricingModule } from '../pricing/pricing.module';
+import { BranchSaleInvoiceService } from './branch-sale-invoice.service';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 import { SalesController } from './sales.controller';
 import { SalesService } from './sales.service';
@@ -17,6 +18,7 @@ import { SalesService } from './sales.service';
     CustomersModule,
   ],
   controllers: [SalesController],
-  providers: [SalesService, SaleInstallmentApprovalService],
+  providers: [SalesService, SaleInstallmentApprovalService, BranchSaleInvoiceService],
+  exports: [SalesService, BranchSaleInvoiceService],
 })
 export class SalesModule {}
