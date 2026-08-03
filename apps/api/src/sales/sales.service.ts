@@ -42,7 +42,7 @@ import { PricingResolutionService } from '../pricing/pricing-resolution.service'
 import { PricingService } from '../pricing/pricing.service';
 import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { assertBranchCashierCannotManageSales, assertBranchSalesManagerCannotApproveSale, hasAnyFullAccessRole, hasAnyHqRole, isBranchSalesManagerUser, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
+import { assertBranchCashierCannotManageSales, hasAnyFullAccessRole, hasAnyHqRole, isBranchSalesManagerUser, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
 import { CASHIER_ASSIGNMENT_OPERATIONS } from '../rbac/cashier-capability.util';
 import { assertCashierPaymentAllowed } from '../finance/finance-assignment.util';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
@@ -1026,27 +1026,6 @@ export class SalesService {
       whatsappLink,
       whatsappMessageText,
     };
-  }
-
-  async approve(user: AuthUser, id: string) {
-    assertBranchCashierCannotManageSales(user);
-    assertBranchSalesManagerCannotApproveSale(user);
-    const sale = await this.getAccessibleSale(user, id);
-
-    if (sale.status === SaleStatus.CANCELLED || sale.status === SaleStatus.FINALIZED) {
-      throw new BadRequestException('Cannot approve this sale');
-    }
-
-    const updated = await this.prisma.sale.update({
-      where: { id: sale.id },
-      data: {
-        status: SaleStatus.APPROVED_BY_CUSTOMER,
-        approvedAt: new Date(),
-      },
-      include: this.saleInclude(),
-    });
-
-    return this.toSaleResponse(updated);
   }
 
   async addPayment(user: AuthUser, id: string, dto: AddPaymentDto) {

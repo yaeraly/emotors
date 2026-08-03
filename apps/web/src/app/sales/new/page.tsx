@@ -7,7 +7,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { SaleCustomerSearch, type SaleCustomerOption } from '@/components/SaleCustomerSearch';
 import { SaleProductSearch, type SaleProductOption } from '@/components/SaleProductSearch';
 import { apiFetch } from '@/lib/api';
-import { canApproveSale, canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser, shouldSyncSalePaymentsOnDraftSave } from '@/lib/rbac';
+import { canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser, shouldSyncSalePaymentsOnDraftSave } from '@/lib/rbac';
 import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
   appliedPriceLabelKey,
@@ -146,7 +146,6 @@ function NewSalePageContent() {
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const branchCashierHandoffFlow = shouldUseBranchCashierFullPaymentFlow(user);
   const canEditSalePrice = Boolean(user);
-  const canApprove = canApproveSale(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
   const canCreateCustomerAction = canCreateCustomer(user);
 
@@ -768,20 +767,6 @@ function NewSalePageContent() {
       setDraftSale(response.sale);
       window.open(response.whatsappLink, '_blank', 'noopener,noreferrer');
       setError(t('sales.whatsappSent'));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    }
-  }
-
-  async function approveSale() {
-    const sale = await saveDraft();
-    if (!sale) return;
-
-    try {
-      const approved = await apiFetch<Sale>(`/sales/${sale.id}/approve`, {
-        method: 'POST',
-      });
-      setDraftSale(approved);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -1730,15 +1715,6 @@ function NewSalePageContent() {
                 className="w-full rounded-xl border border-green-200 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 sm:w-auto"
               >
                 {t('sales.sendWhatsApp')}
-              </button>
-            ) : null}
-            {canApprove ? (
-              <button
-                onClick={() => void approveSale()}
-                type="button"
-                className="w-full rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 sm:w-auto"
-              >
-                {t('sales.markApproved')}
               </button>
             ) : null}
             {paymentType === 'INSTALLMENT' && canSubmitInstallment && isInstallmentDraft ? (

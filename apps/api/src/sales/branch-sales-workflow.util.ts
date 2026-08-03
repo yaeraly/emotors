@@ -18,7 +18,6 @@ export type SaleCancellationContext = {
 const BRANCH_SALES_MANAGER_CANCELLABLE_STATUSES: SaleStatus[] = [
   SaleStatus.DRAFT,
   SaleStatus.SENT_TO_CUSTOMER,
-  SaleStatus.APPROVED_BY_CUSTOMER,
 ];
 
 export function canAcceptSalePayment(

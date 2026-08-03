@@ -6,7 +6,6 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import {
-  canApproveSale,
   canApproveSaleInstallmentRequest,
   canCancelSale,
   canCancelSaleInstallmentRequest,
@@ -110,7 +109,7 @@ export default function SaleDetailPage() {
   }
 
   async function runSaleAction(
-    path: 'send-whatsapp' | 'approve' | 'finalize' | 'cancel',
+    path: 'send-whatsapp' | 'finalize' | 'cancel',
   ) {
     setError('');
     setSuccess('');
@@ -361,16 +360,6 @@ export default function SaleDetailPage() {
                   >
                     {t('sales.sendWhatsApp')}
                   </button>
-                  {canApproveSale(currentUser) ? (
-                    <button
-                      onClick={() => void runSaleAction('approve')}
-                      disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
-                      className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-                      type="button"
-                    >
-                      {t('sales.markApproved')}
-                    </button>
-                  ) : null}
                   {canSubmitSaleInstallmentRequest(currentUser) && isInstallment ? (
                     <button
                       onClick={() => void submitInstallmentRequest()}

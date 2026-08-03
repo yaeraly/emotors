@@ -188,12 +188,6 @@ export class SalesController {
     return this.salesService.sendWhatsApp(user, id);
   }
 
-  @Post(':id/approve')
-  @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
-  approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.salesService.approve(user, id);
-  }
-
   @Post(':id/payments')
   @Roles(
     Role.OWNER,

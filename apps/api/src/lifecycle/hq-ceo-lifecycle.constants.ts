@@ -30,7 +30,6 @@ export const BRANCH_ACTIVE_DISTRIBUTION_STATUSES: BranchDistributionOrderStatus[
 export const BRANCH_ACTIVE_SALE_STATUSES: SaleStatus[] = [
   SaleStatus.DRAFT,
   SaleStatus.SENT_TO_CUSTOMER,
-  SaleStatus.APPROVED_BY_CUSTOMER,
 ];
 
 export const WAREHOUSE_OUTGOING_SHIPMENT_STATUSES: BranchDistributionOrderStatus[] = [

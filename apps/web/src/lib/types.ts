@@ -170,7 +170,6 @@ export type InventoryCountSession = {
 export type SaleStatus =
   | 'DRAFT'
   | 'SENT_TO_CUSTOMER'
-  | 'APPROVED_BY_CUSTOMER'
   | 'WAITING_FOR_CASHIER_PAYMENT'
   | 'FINALIZED'
   | 'CANCELLED';
