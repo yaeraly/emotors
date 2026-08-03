@@ -134,7 +134,7 @@ export function canAccessFinancePath(user: User, pathname: string) {
       if (pathname.match(/^\/finance\/accounts\/[^/]+$/) && !pathname.startsWith('/finance/accounts/new')) {
         return true;
       }
-      return ['/finance/accounts', '/finance/shifts'].some(
+      return ['/finance/accounts'].some(
         (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
       );
     }

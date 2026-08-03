@@ -100,7 +100,7 @@ assertEqual(
 
 assertEqual(canAccessFinancePath(branchCashier, '/finance/payments/pending'), false, 'branch cashier cannot access standalone payments');
 assertEqual(canAccessFinancePath(branchCashier, '/finance/accounts'), true, 'branch cashier can access accounts');
-assertEqual(canAccessFinancePath(branchCashier, '/finance/shifts'), true, 'branch cashier can access shifts');
+assertEqual(canAccessFinancePath(branchCashier, '/finance/shifts'), false, 'branch cashier cannot access shifts');
 assertEqual(canAccessFinancePath(branchCashier, '/finance/dashboard'), false, 'cashier cannot access dashboard');
 assertEqual(canAccessFinancePath(branchAccountant, '/finance/dashboard'), true, 'accountant can access dashboard');
 

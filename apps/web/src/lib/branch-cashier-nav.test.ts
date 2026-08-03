@@ -29,11 +29,14 @@ assertEqual(cashierSidebar.includes("t('branchCashier.installments')"), true, 'b
 assertEqual(cashierSidebar.includes("t('finance.myAccounts')"), true, 'branch cashier sidebar keeps accounts');
 assertEqual(cashierSidebar.includes("t('branchCashier.accountTransfers')"), true, 'branch cashier sidebar keeps transfers');
 assertEqual(cashierSidebar.includes('sidebarPaymentsNavClass'), false, 'branch cashier sidebar has no payments nav class');
+assertEqual(cashierSidebar.includes("t('finance.myShifts')"), false, 'branch cashier sidebar has no Мои смены label');
+assertEqual(cashierSidebar.includes('/finance/shifts'), false, 'branch cashier sidebar has no shifts route');
+assertEqual(cashierSidebar.includes('sidebarShiftsNavClass'), false, 'branch cashier sidebar has no shifts nav class');
 
 assertEqual(canAccessPath(branchCashier, '/finance/payments/pending'), false, 'branch cashier cannot open pending payments');
 assertEqual(canAccessPath(branchCashier, '/finance/payments'), false, 'branch cashier cannot open payments list');
 assertEqual(canAccessPath(branchCashier, '/finance/accounts'), true, 'branch cashier can open accounts');
-assertEqual(canAccessPath(branchCashier, '/finance/shifts'), true, 'branch cashier can open shifts');
+assertEqual(canAccessPath(branchCashier, '/finance/shifts'), false, 'branch cashier cannot open shifts');
 assertEqual(canAccessPath(branchCashier, '/branch-cashier/invoices'), true, 'branch cashier can open invoices');
 assertEqual(canAccessPath(branchCashier, '/branch-cashier/installments'), true, 'branch cashier can open installments');
 assertEqual(canAccessPath(branchCashier, '/branch-cashier/transfers'), true, 'branch cashier can open transfers');
