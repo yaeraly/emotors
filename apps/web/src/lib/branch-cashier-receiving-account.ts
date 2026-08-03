@@ -41,10 +41,15 @@ export function branchCashierPaymentMethodLabelKey(method: BranchPaymentMethod):
 
 export function buildReceivingAccountResolveQuery(
   paymentMethod: BranchPaymentMethod,
-  installmentId?: string,
+  contextId?: string,
+  options?: { invoiceId?: string },
 ) {
   const params = new URLSearchParams();
   params.set('paymentMethod', paymentMethod);
-  if (installmentId) params.set('installmentId', installmentId);
+  if (options?.invoiceId) {
+    params.set('installmentId', options.invoiceId);
+  } else if (contextId) {
+    params.set('installmentId', contextId);
+  }
   return `?${params.toString()}`;
 }

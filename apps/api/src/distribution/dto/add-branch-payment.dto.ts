@@ -3,13 +3,15 @@ import { Type } from 'class-transformer';
 import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class AddBranchPaymentDto {
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0.01)
-  amount!: number;
+  amount?: number;
 
+  @IsOptional()
   @IsEnum(BranchPaymentMethod)
-  method!: BranchPaymentMethod;
+  method?: BranchPaymentMethod;
 
   @IsOptional()
   @IsString()
@@ -26,6 +28,26 @@ export class AddBranchPaymentDto {
   @IsNumber()
   @Min(0)
   changeAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  cashAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  qrAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  cashAccountId?: string;
+
+  @IsOptional()
+  @IsString()
+  qrAccountId?: string;
 
   @IsOptional()
   @IsString()

@@ -1425,29 +1425,35 @@ export class SalesService {
       }
 
       const sale = invoice.sale;
-      const confirmedPayment = invoice.payments[0];
-      if (!confirmedPayment) {
+      const confirmedPayments = invoice.payments;
+      if (!confirmedPayments.length) {
         return;
       }
 
-      const netAcceptedAmount = resolveBranchPaymentNetAmount(confirmedPayment);
-      this.branchCashierPaymentService.assertConfirmedPaymentPosted(
-        confirmedPayment,
-        netAcceptedAmount,
-      );
+      for (const confirmedPayment of confirmedPayments) {
+        const netAcceptedAmount = resolveBranchPaymentNetAmount(confirmedPayment);
+        this.branchCashierPaymentService.assertConfirmedPaymentPosted(
+          confirmedPayment,
+          netAcceptedAmount,
+        );
 
-      const existingLinkedPayment = await tx.payment.findFirst({
-        where: {
-          saleId: sale.id,
-          status: PaymentRecordStatus.ACTIVE,
-          note: `branch-invoice:${invoice.id}`,
-        },
-      });
-      if (existingLinkedPayment) {
-        if (sale.status === SaleStatus.FINALIZED) {
-          return;
+        const linkedNote = `branch-invoice:${invoice.id}:bp:${confirmedPayment.id}`;
+        const existingLinkedPayment = await tx.payment.findFirst({
+          where: {
+            saleId: sale.id,
+            status: PaymentRecordStatus.ACTIVE,
+            OR: [
+              { note: linkedNote },
+              ...(confirmedPayments.length === 1
+                ? [{ note: `branch-invoice:${invoice.id}` }]
+                : []),
+            ],
+          },
+        });
+        if (existingLinkedPayment) {
+          continue;
         }
-      } else {
+
         const amount = this.roundMoney(Number(confirmedPayment.amount));
         await tx.payment.create({
           data: {
@@ -1465,11 +1471,15 @@ export class SalesService {
                 ? Number(confirmedPayment.changeAmount)
                 : null,
             paidAt: confirmedPayment.paidAt ?? new Date(),
-            note: `branch-invoice:${invoice.id}`,
+            note: linkedNote,
             createdById: user.id,
             financeAccountId: confirmedPayment.financeAccountId,
           },
         });
+      }
+
+      if (sale.status === SaleStatus.FINALIZED) {
+        return;
       }
 
       await this.refreshSalePaymentState(tx, sale.id);
@@ -1585,6 +1595,10 @@ export class SalesService {
       });
       if (pending) {
         throw new ConflictException('Оплата уже отправлена на подтверждение');
+      }
+
+      if (!dto.method) {
+        throw new BadRequestException('Выберите способ оплаты');
       }
 
       const resolvedAccount = await this.branchCashierPaymentService.resolveReceivingAccountOrThrow(

@@ -90,6 +90,10 @@ import { BranchInstallmentEarlyPaymentService } from './branch-installment-early
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
 import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
 import {
+  BRANCH_SPLIT_PAYMENT_AUDIT,
+  isSplitCashierPaymentInput,
+} from '../finance/branch-cashier-split-payment.util';
+import {
   BRANCH_CUSTOMER_PAYMENT_AUDIT,
   BRANCH_PAYMENT_POSTING_REQUIRED_MESSAGE,
 } from '../finance/branch-payment-posting.util';
@@ -3024,6 +3028,170 @@ export class DistributionService {
       invoice.invoiceCategory === BranchInvoiceCategory.RETAIL_SALE &&
       invoice.paymentType === BranchInvoicePaymentType.FULL_PAYMENT;
 
+    if (isBranchCashier && isSplitCashierPaymentInput(dto)) {
+      if (dto.idempotencyKey) {
+        const existingSplit = await this.branchCashierPaymentService.findIdempotentSplitPayments(
+          tx,
+          dto.idempotencyKey,
+        );
+        if (existingSplit?.length) {
+          const refreshed = await tx.branchInvoice.findUniqueOrThrow({
+            where: { id: invoice.id },
+            include: this.invoiceInclude(),
+          });
+          return this.toInvoiceResponse(refreshed);
+        }
+      }
+
+      if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
+        throw new BadRequestException('Рассрочка ожидает утверждения CEO');
+      }
+
+      const earlyPaymentRequest = await this.earlyPaymentService.findCashierVisibleRequest(tx, invoice.id);
+      if (
+        !earlyPaymentRequest &&
+        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+        !installment.firstPaymentRequired
+      ) {
+        throw new BadRequestException('Оплата доступна только через досрочное погашение');
+      }
+      if (
+        !earlyPaymentRequest &&
+        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+        installment.firstPaymentRequired &&
+        installment.firstPaymentConfirmed
+      ) {
+        throw new BadRequestException('Создайте и отправьте запрос досрочного погашения');
+      }
+
+      if (earlyPaymentRequest) {
+        if (earlyPaymentRequest.status !== BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER) {
+          throw new BadRequestException('Запрос досрочного погашения не отправлен в кассу');
+        }
+      }
+
+      const splitResult = await this.branchCashierPaymentService.processSplitInvoicePaymentInTx(tx, user, {
+        invoice: {
+          id: invoice.id,
+          branchId: invoice.branchId,
+          saleId: invoice.saleId,
+          status: invoice.status,
+        },
+        dto,
+        payableAmount: remainingDebt,
+        isFullPayment: isRetailFullPayment,
+      });
+
+      if (earlyPaymentRequest) {
+        const approvedAmount = this.roundMoney(
+          Number(earlyPaymentRequest.approvedAmount ?? earlyPaymentRequest.requestedAmount),
+        );
+        if (Math.abs(splitResult.allocation.totalNetAmount - approvedAmount) > 0.009) {
+          throw new BadRequestException('Сумма должна совпадать с утверждённой суммой досрочного погашения');
+        }
+        await this.earlyPaymentService.markPaymentSubmitted(tx, earlyPaymentRequest.id);
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'EARLY_PAYMENT_PROCESSED',
+            entity: 'BranchInstallmentEarlyPaymentRequest',
+            entityId: earlyPaymentRequest.id,
+            metadata: {
+              invoiceId: invoice.id,
+              amount: splitResult.allocation.totalNetAmount,
+              roles: user.roles ?? [user.role],
+            },
+          },
+        });
+        if (earlyPaymentRequest.financeAccountId) {
+          const account = await tx.financeAccount.findFirst({
+            where: { id: earlyPaymentRequest.financeAccountId, deletedAt: null },
+          });
+          if (!account || Number(account.availableBalance) < splitResult.allocation.totalNetAmount) {
+            throw new BadRequestException('Недостаточно средств на счёте филиала');
+          }
+          await tx.financeAccount.update({
+            where: { id: earlyPaymentRequest.financeAccountId },
+            data: {
+              currentBalance: { decrement: splitResult.allocation.totalNetAmount },
+              availableBalance: { decrement: splitResult.allocation.totalNetAmount },
+            },
+          });
+        }
+      }
+
+      await this.branchCashierPaymentService.assertRetailInvoicePaymentsPosted(tx, invoice.id);
+      const result = await this.applyConfirmedPaymentTotals(tx, user, invoice);
+      const updatedInvoice = await tx.branchInvoice.findUniqueOrThrow({
+        where: { id: invoice.id },
+      });
+      const newStatus = updatedInvoice.status;
+      await tx.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: this.branchCashierPaymentService.buildPaymentAuditAction(
+            splitResult.oldInvoiceStatus,
+            newStatus,
+          ),
+          entity: 'BranchInvoice',
+          entityId: invoice.id,
+          metadata: {
+            invoiceId: invoice.id,
+            branchId: invoice.branchId,
+            saleId: invoice.saleId ?? null,
+            cashAccountId: splitResult.cashAccountId,
+            qrAccountId: splitResult.qrAccountId,
+            totalNetAmount: splitResult.allocation.totalNetAmount,
+            oldInvoiceStatus: splitResult.oldInvoiceStatus,
+            newInvoiceStatus: newStatus,
+            actorUserId: user.id,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      });
+      if (newStatus === BranchInvoiceStatus.PAID) {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: BRANCH_SPLIT_PAYMENT_AUDIT.INVOICE_PAID,
+            entity: 'BranchInvoice',
+            entityId: invoice.id,
+            metadata: {
+              invoiceId: invoice.id,
+              branchId: invoice.branchId,
+              totalNetAmount: splitResult.allocation.totalNetAmount,
+              actorUserId: user.id,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+      }
+      if (installment) {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: BRANCH_SPLIT_PAYMENT_AUDIT.INSTALLMENT_PAYMENT_RECEIVED,
+            entity: 'BranchOrderInstallment',
+            entityId: installment.id,
+            metadata: {
+              invoiceId: invoice.id,
+              branchId: invoice.branchId,
+              totalNetAmount: splitResult.allocation.totalNetAmount,
+              oldRemainingAmount: remainingDebt,
+              newRemainingAmount: splitResult.allocation.remainingAfterPayment,
+              actorUserId: user.id,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+      }
+      return result;
+    }
+
     let amount: number;
     let receivedAmount: number | null = null;
     let changeAmount: number | null = null;
@@ -3032,6 +3200,9 @@ export class DistributionService {
     if (isBranchCashier) {
       if (!dto.financeAccountId?.trim()) {
         throw new BadRequestException('Выберите счёт или кассу для зачисления');
+      }
+      if (!dto.method) {
+        throw new BadRequestException('Выберите способ оплаты');
       }
       const resolved = this.branchCashierPaymentService.resolveNetPayment({
         remainingDebt,
@@ -3050,6 +3221,9 @@ export class DistributionService {
       if (amount <= 0) throw new BadRequestException('Payment amount must be greater than 0');
       if (amount > remainingDebt) {
         throw new BadRequestException('Payment amount cannot exceed invoice debt');
+      }
+      if (!dto.method) {
+        throw new BadRequestException('Выберите способ оплаты');
       }
     }
 
@@ -3455,6 +3629,9 @@ export class DistributionService {
       if (amount <= 0) throw new BadRequestException('Payment amount must be greater than 0');
       if (amount > Number(invoice.debtAmount)) {
         throw new BadRequestException('Payment amount cannot exceed invoice debt');
+      }
+      if (!dto.method) {
+        throw new BadRequestException('Выберите способ оплаты');
       }
 
       await tx.branchPayment.create({

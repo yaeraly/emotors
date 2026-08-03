@@ -6,44 +6,113 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
-import { computeFullPaymentChange } from '@/lib/sale-full-payment';
+import {
+  buildReceivingAccountResolveQuery,
+  type BranchCashierReceivingAccountResolution,
+} from '@/lib/branch-cashier-receiving-account';
+import {
+  computeSplitRemaining,
+  parseSplitAmount,
+  previewSplitCashierPayment,
+} from '@/lib/branch-cashier-split-payment';
 import { translateStatus } from '@/lib/translate-status';
-import type { BranchAccountantInvoice, BranchPaymentMethod, FinanceAccount } from '@/lib/types';
-
-const methods: BranchPaymentMethod[] = ['CASH', 'QR', 'BANK', 'TRANSFER'];
+import type { BranchAccountantInvoice } from '@/lib/types';
 
 export default function BranchCashierInvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const [invoice, setInvoice] = useState<BranchAccountantInvoice | null>(null);
-  const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
-  const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState<BranchPaymentMethod>('CASH');
-  const [financeAccountId, setFinanceAccountId] = useState('');
-  const [receiptReference, setReceiptReference] = useState('');
+  const [cashAmount, setCashAmount] = useState('0');
+  const [qrAmount, setQrAmount] = useState('0');
+  const [cashAccountResolution, setCashAccountResolution] =
+    useState<BranchCashierReceivingAccountResolution | null>(null);
+  const [qrAccountResolution, setQrAccountResolution] =
+    useState<BranchCashierReceivingAccountResolution | null>(null);
+  const [cashAccountLoading, setCashAccountLoading] = useState(false);
+  const [qrAccountLoading, setQrAccountLoading] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const idempotencyKeyRef = useRef<string | null>(null);
 
-  const selectedAccount = useMemo(
-    () => accounts.find((account) => account.id === financeAccountId) ?? null,
-    [accounts, financeAccountId],
-  );
+  const early = invoice?.activeEarlyPaymentRequest ?? null;
+  const isRetailFullPayment =
+    invoice?.invoiceCategory === 'RETAIL_SALE' && invoice.paymentType === 'FULL_PAYMENT';
+  const remainingAmount = Number(invoice?.remainingAmount ?? 0);
+  const payableAmount = early
+    ? Number(early.approvedAmount ?? early.requestedAmount ?? remainingAmount)
+    : isRetailFullPayment
+      ? remainingAmount
+      : Number(invoice?.requiredPaymentAmount ?? remainingAmount);
+  const isFullPayment = isRetailFullPayment;
 
-  async function loadAccounts(paymentMethod: BranchPaymentMethod) {
-    const accountData = await apiFetch<FinanceAccount[]>(
-      `/branch-cashier/accounts?paymentMethod=${paymentMethod}`,
-    );
-    setAccounts(accountData);
-    if (accountData.some((account) => account.id === financeAccountId)) {
+  const cashGross = parseSplitAmount(cashAmount);
+  const qrGross = parseSplitAmount(qrAmount);
+  const totalEntered = useMemo(
+    () => Math.round((cashGross + qrGross + Number.EPSILON) * 100) / 100,
+    [cashGross, qrGross],
+  );
+  const remainingPreview = computeSplitRemaining(
+    isFullPayment ? remainingAmount : remainingAmount,
+    totalEntered,
+  );
+  const splitPreview = previewSplitCashierPayment({
+    payableAmount: remainingAmount,
+    isFullPayment,
+    cashAmount,
+    qrAmount,
+  });
+  const preview = 'error' in splitPreview ? null : splitPreview;
+
+  const resolvedCashAccount =
+    cashAccountResolution?.status === 'resolved' ? cashAccountResolution.account : null;
+  const resolvedQrAccount =
+    qrAccountResolution?.status === 'resolved' ? qrAccountResolution.account : null;
+  const cashAccountError =
+    cashGross > 0 && cashAccountResolution && cashAccountResolution.status !== 'resolved'
+      ? cashAccountResolution.message
+      : '';
+  const qrAccountError =
+    qrGross > 0 && qrAccountResolution && qrAccountResolution.status !== 'resolved'
+      ? qrAccountResolution.message
+      : '';
+
+  async function resolveCashAccount() {
+    if (cashGross <= 0) {
+      setCashAccountResolution(null);
       return;
     }
-    if (accountData.length === 1) {
-      setFinanceAccountId(accountData[0].id);
-    } else {
-      setFinanceAccountId('');
+    setCashAccountLoading(true);
+    try {
+      const resolution = await apiFetch<BranchCashierReceivingAccountResolution>(
+        `/branch-cashier/accounts/resolve${buildReceivingAccountResolveQuery('CASH', id, { invoiceId: id })}`,
+      );
+      setCashAccountResolution(resolution);
+    } catch (err) {
+      setCashAccountResolution(null);
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setCashAccountLoading(false);
+    }
+  }
+
+  async function resolveQrAccount() {
+    if (qrGross <= 0) {
+      setQrAccountResolution(null);
+      return;
+    }
+    setQrAccountLoading(true);
+    try {
+      const resolution = await apiFetch<BranchCashierReceivingAccountResolution>(
+        `/branch-cashier/accounts/resolve${buildReceivingAccountResolveQuery('QR', id, { invoiceId: id })}`,
+      );
+      setQrAccountResolution(resolution);
+    } catch (err) {
+      setQrAccountResolution(null);
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setQrAccountLoading(false);
     }
   }
 
@@ -51,12 +120,8 @@ export default function BranchCashierInvoiceDetailPage() {
     try {
       const invoiceData = await apiFetch<BranchAccountantInvoice>(`/branch-cashier/invoices/${id}`);
       setInvoice(invoiceData);
-      const initialAmount =
-        invoiceData.receivedAmountEnteredBySales != null
-          ? invoiceData.receivedAmountEnteredBySales
-          : invoiceData.requiredPaymentAmount ?? invoiceData.remainingAmount;
-      setAmount(String(initialAmount));
-      await loadAccounts(method);
+      setCashAmount('0');
+      setQrAmount('0');
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -68,64 +133,83 @@ export default function BranchCashierInvoiceDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    void loadAccounts(method).catch((err) => {
-      setError(err instanceof Error ? err.message : t('common.error'));
-    });
+    void resolveCashAccount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method]);
+  }, [cashGross > 0, id]);
+
+  useEffect(() => {
+    void resolveQrAccount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrGross > 0, id]);
+
+  const canSubmit =
+    !submitting &&
+    (cashGross <= 0 || Boolean(resolvedCashAccount)) &&
+    (qrGross <= 0 || Boolean(resolvedQrAccount)) &&
+    !cashAccountLoading &&
+    !qrAccountLoading;
 
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting) return;
+    if (!canSubmit || submitting) return;
     setError('');
     setSuccess('');
-    if (!financeAccountId) {
-      setError(t('branchCashier.selectAccount'));
+
+    if ('error' in splitPreview) {
+      setError(splitPreview.error);
       return;
     }
+
+    if (early) {
+      const approved = Number(early.approvedAmount ?? early.requestedAmount ?? 0);
+      if (Math.abs(splitPreview.totalNetAmount - approved) > 0.009) {
+        setError(t('branchCashier.splitEarlyAmountMismatch'));
+        return;
+      }
+    }
+
+    if (cashGross > 0 && !resolvedCashAccount) {
+      setError(cashAccountError || t('branchCashier.splitMissingCashAccount'));
+      return;
+    }
+    if (qrGross > 0 && !resolvedQrAccount) {
+      setError(qrAccountError || t('branchCashier.splitMissingQrAccount'));
+      return;
+    }
+
     try {
       setSubmitting(true);
       if (!idempotencyKeyRef.current) {
         idempotencyKeyRef.current = crypto.randomUUID();
       }
-      const remaining = Number(invoice?.remainingAmount ?? 0);
-      const received = Number(amount || 0);
-      const change = isRetailFullPayment
-        ? computeFullPaymentChange(remaining, received).changeAmount
-        : 0;
 
       const updated = await apiFetch<BranchAccountantInvoice>(`/branch-cashier/invoices/${id}/payments`, {
         method: 'POST',
         body: JSON.stringify({
-          amount: isRetailFullPayment ? remaining : received,
-          receivedAmount: received,
-          changeAmount: change > 0.009 ? change : undefined,
-          method,
-          financeAccountId,
-          note,
-          receiptReference: receiptReference || undefined,
+          cashAmount: cashGross > 0 ? cashGross : undefined,
+          qrAmount: qrGross > 0 ? qrGross : undefined,
+          cashAccountId: resolvedCashAccount?.id,
+          qrAccountId: resolvedQrAccount?.id,
+          note: note || undefined,
           idempotencyKey: idempotencyKeyRef.current,
         }),
       });
       setInvoice(updated);
+      setCashAmount('0');
+      setQrAmount('0');
       idempotencyKeyRef.current = null;
-      await loadAccounts(method);
-      setSuccess(t('branchCashier.paymentAcceptedClosed'));
+
+      if (updated.workflowStatus === 'PAID' || Number(updated.remainingAmount) <= 0.009) {
+        setSuccess(t('branchCashier.paymentAcceptedInvoicePaid'));
+      } else {
+        setSuccess(t('branchCashier.paymentAcceptedInstallmentPartial'));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
       setSubmitting(false);
     }
   }
-
-  const early = invoice?.activeEarlyPaymentRequest ?? null;
-  const amountLocked = Boolean(early);
-  const isRetailFullPayment =
-    invoice?.invoiceCategory === 'RETAIL_SALE' && invoice.paymentType === 'FULL_PAYMENT';
-  const remainingAmount = Number(invoice?.remainingAmount ?? 0);
-  const cashierChange = invoice
-    ? computeFullPaymentChange(remainingAmount, Number(amount || 0))
-    : null;
 
   return (
     <ProtectedShell>
@@ -197,71 +281,92 @@ export default function BranchCashierInvoiceDetailPage() {
             ) : null}
 
             {invoice.workflowStatus !== 'PAID' ? (
-              <form onSubmit={submitPayment} className="grid gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:grid-cols-2">
-                <h3 className="md:col-span-2 text-lg font-bold">{t('distribution.cashierPayment')}</h3>
+              <form onSubmit={submitPayment} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h3 className="text-lg font-bold">{t('distribution.cashierPayment')}</h3>
+
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-400">{t('branchCashier.splitPayableAmount')}</p>
+                  <p className="text-xl font-bold text-slate-950">{formatKgs(payableAmount)}</p>
+                </div>
+
                 <label className="block">
-                  <span className="text-sm font-semibold">{t('branchCashier.receivedAmount')}</span>
+                  <span className="text-sm font-semibold">{t('branchCashier.splitCashAmount')}</span>
                   <input
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    value={cashAmount}
+                    onChange={(e) => setCashAmount(e.target.value)}
                     type="number"
-                    min="0.01"
+                    min="0"
                     step="0.01"
-                    readOnly={amountLocked}
-                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 read-only:bg-slate-50"
-                    required
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                   />
                 </label>
-                {cashierChange && cashierChange.changeAmount > 0.009 ? (
-                  <div className="rounded-2xl bg-green-50 p-4">
-                    <p className="text-xs font-semibold uppercase text-green-700">{t('sales.changeAmount')}</p>
-                    <p className="font-bold text-green-900">{formatKgs(cashierChange.changeAmount)}</p>
-                  </div>
-                ) : (
-                  <div />
-                )}
-                <label className="block md:col-span-2">
-                  <span className="text-sm font-semibold">{t('branchCashier.depositAccount')}</span>
-                  <select
-                    value={financeAccountId}
-                    onChange={(e) => setFinanceAccountId(e.target.value)}
-                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
-                    required
-                  >
-                    <option value="">{t('branchCashier.selectAccount')}</option>
-                    {accounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name} ({account.accountNumber}) — {formatKgs(account.currentBalance)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {selectedAccount ? (
-                  <div className="rounded-2xl bg-slate-50 p-4 md:col-span-2">
-                    <p className="text-xs font-semibold uppercase text-slate-400">{t('branchCashier.accountBalance')}</p>
-                    <p className="font-bold text-slate-950">{formatKgs(selectedAccount.currentBalance)}</p>
+
+                {cashGross > 0 ? (
+                  <div className="block">
+                    <span className="text-sm font-semibold">{t('branchCashier.splitCashAccount')}</span>
+                    <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                      {cashAccountLoading ? (
+                        <span className="text-slate-500">{t('common.loading')}</span>
+                      ) : resolvedCashAccount ? (
+                        <span>{formatAccountLabel(resolvedCashAccount)}</span>
+                      ) : (
+                        <span className="text-red-700">{cashAccountError || t('branchCashier.splitMissingCashAccount')}</span>
+                      )}
+                    </div>
                   </div>
                 ) : null}
+
                 <label className="block">
-                  <span className="text-sm font-semibold">{t('distribution.paymentMethod')}</span>
-                  <select value={method} onChange={(e) => setMethod(e.target.value as BranchPaymentMethod)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">
-                    {methods.map((item) => (
-                      <option key={item} value={item}>{item}</option>
-                    ))}
-                  </select>
+                  <span className="text-sm font-semibold">{t('branchCashier.splitQrAmount')}</span>
+                  <input
+                    value={qrAmount}
+                    onChange={(e) => setQrAmount(e.target.value)}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
+                  />
                 </label>
+
+                {qrGross > 0 ? (
+                  <div className="block">
+                    <span className="text-sm font-semibold">{t('branchCashier.splitQrAccount')}</span>
+                    <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                      {qrAccountLoading ? (
+                        <span className="text-slate-500">{t('common.loading')}</span>
+                      ) : resolvedQrAccount ? (
+                        <span>{formatAccountLabel(resolvedQrAccount)}</span>
+                      ) : (
+                        <span className="text-red-700">{qrAccountError || t('branchCashier.splitMissingQrAccount')}</span>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Summary label={t('branchCashier.splitTotalEntered')} value={formatKgs(totalEntered)} />
+                  <Summary
+                    label={t('branchCashier.splitRemaining')}
+                    value={formatKgs(isFullPayment ? remainingPreview : preview?.remainingAfterPayment ?? remainingPreview)}
+                  />
+                </div>
+
+                {preview && preview.cashChangeAmount > 0.009 ? (
+                  <div className="rounded-2xl bg-green-50 p-4">
+                    <p className="text-xs font-semibold uppercase text-green-700">{t('branchCashier.splitChange')}</p>
+                    <p className="font-bold text-green-900">{formatKgs(preview.cashChangeAmount)}</p>
+                  </div>
+                ) : null}
+
                 <label className="block">
-                  <span className="text-sm font-semibold">{t('distribution.receiptReference')}</span>
-                  <input value={receiptReference} onChange={(e) => setReceiptReference(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
-                </label>
-                <label className="block md:col-span-2">
                   <span className="text-sm font-semibold">{t('crm.notes')}</span>
                   <input value={note} onChange={(e) => setNote(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2" />
                 </label>
+
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:opacity-60 md:col-span-2"
+                  disabled={!canSubmit}
+                  className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
                 >
                   {t('distribution.submitPaymentCashier')}
                 </button>
@@ -281,6 +386,19 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="font-bold text-slate-950">{value}</p>
     </div>
   );
+}
+
+function Summary({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="font-bold text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function formatAccountLabel(account: { name: string; accountNumber: string; currentBalance: number }) {
+  return `${account.name} (${account.accountNumber}) — ${formatKgs(account.currentBalance)}`;
 }
 
 function formatKgs(value: number | string | null | undefined) {

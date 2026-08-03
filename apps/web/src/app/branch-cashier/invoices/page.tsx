@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -8,8 +8,10 @@ import { apiFetch } from '@/lib/api';
 import { translateStatus } from '@/lib/translate-status';
 import type { BranchAccountantInvoice } from '@/lib/types';
 
+const actionBtnClass =
+  'inline-flex rounded border border-slate-300 px-2 py-1 text-xs font-semibold leading-tight text-slate-700 hover:bg-slate-50';
+
 export default function BranchCashierInvoicesPage() {
-  const router = useRouter();
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<BranchAccountantInvoice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,22 +51,26 @@ export default function BranchCashierInvoicesPage() {
                   <th className="px-4 py-3">{t('branchAccountant.amount')}</th>
                   <th className="px-4 py-3">{t('branchCashier.requiredPayment')}</th>
                   <th className="px-4 py-3">{t('distribution.status')}</th>
+                  <th className="px-4 py-3">{t('branchCashier.colActions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {invoices.map((invoice) => (
-                  <tr
-                    key={invoice.id}
-                    className="cursor-pointer hover:bg-blue-50"
-                    onClick={() => router.push(`/branch-cashier/invoices/${invoice.id}`)}
-                    tabIndex={0}
-                    role="link"
-                  >
+                  <tr key={invoice.id} className="hover:bg-blue-50/40">
                     <td className="px-4 py-3 font-bold">{invoice.invoiceNumber}</td>
                     <td className="px-4 py-3">{invoice.orderNumber ?? '—'}</td>
                     <td className="px-4 py-3">{formatKgs(invoice.totalAmount)}</td>
                     <td className="px-4 py-3">{formatKgs(invoice.requiredPaymentAmount)}</td>
                     <td className="px-4 py-3">{translateStatus(t, invoice.workflowStatus, 'branchAccountant')}</td>
+                    <td className="px-4 py-3">
+                      <Link
+                        href={`/branch-cashier/invoices/${invoice.id}`}
+                        className={actionBtnClass}
+                        title={t('common.open')}
+                      >
+                        {t('branchCashier.actionOpenShort')}
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>
