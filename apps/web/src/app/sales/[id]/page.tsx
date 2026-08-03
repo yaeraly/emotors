@@ -600,6 +600,9 @@ export default function SaleDetailPage() {
                     {installmentCancelled && installmentApproval?.rejectionReason
                       ? `: ${installmentApproval.rejectionReason}`
                       : ''}
+                    {installmentApproved && installmentApproval?.approvalComment
+                      ? `: ${installmentApproval.approvalComment}`
+                      : ''}
                   </p>
                 ) : null}
                 {showCancelForm ? (

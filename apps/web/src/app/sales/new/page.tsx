@@ -101,6 +101,7 @@ export default function NewSalePage() {
   const [saving, setSaving] = useState(false);
   const [submittingInstallment, setSubmittingInstallment] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const canApprove = canApproveSale(user);
@@ -209,6 +210,7 @@ export default function NewSalePage() {
     installmentApproval?.status === 'PENDING_BRANCH_CEO_APPROVAL';
   const installmentApproved = installmentApproval?.status === 'APPROVED';
   const installmentRejected = installmentApproval?.status === 'REJECTED';
+  const installmentCancelled = installmentApproval?.status === 'CANCELLED';
   const canFinalize =
     Boolean(draftSale) &&
     Boolean(selectedCustomer) &&
@@ -525,6 +527,7 @@ export default function NewSalePage() {
       return null;
     }
     setSaving(true);
+    setSuccess('');
 
     try {
       let sale = await apiFetch<Sale>(
@@ -615,12 +618,14 @@ export default function NewSalePage() {
 
     setSubmittingInstallment(true);
     setError('');
+    setSuccess('');
 
     try {
       await apiFetch(`/sales/${sale.id}/installment-request/submit`, { method: 'POST' });
       const updated = await apiFetch<Sale>(`/sales/${sale.id}`);
       setDraftSale(updated);
       setError('');
+      setSuccess(t('sales.installmentRequestSubmitted'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {
@@ -810,6 +815,11 @@ export default function NewSalePage() {
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
+          </p>
+        ) : null}
+        {success ? (
+          <p className="rounded-xl bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">
+            {success}
           </p>
         ) : null}
 
@@ -1358,13 +1368,13 @@ export default function NewSalePage() {
               className={`mt-4 rounded-xl px-4 py-3 text-sm font-semibold ${
                 installmentApproved
                   ? 'bg-green-50 text-green-800'
-                  : installmentRejected
+                  : installmentRejected || installmentCancelled
                     ? 'bg-red-50 text-red-700'
                     : 'bg-amber-50 text-amber-800'
               }`}
             >
               {t(installmentStatusKey)}
-              {installmentRejected && installmentApproval?.rejectionReason
+              {(installmentRejected || installmentCancelled) && installmentApproval?.rejectionReason
                 ? `: ${installmentApproval.rejectionReason}`
                 : ''}
             </p>

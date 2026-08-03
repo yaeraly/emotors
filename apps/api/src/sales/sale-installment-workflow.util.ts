@@ -1,15 +1,28 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { PaymentStatus, SaleInstallmentApprovalStatus, SaleStatus } from '@prisma/client';
 
 export const BRANCH_CEO_PENDING_STATUSES: SaleInstallmentApprovalStatus[] = [
   SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL,
 ];
 
+/** Statuses from which a new submission may (re)start the Branch CEO approval flow. */
+export const SUBMITTABLE_INSTALLMENT_STATUSES: SaleInstallmentApprovalStatus[] = [
+  SaleInstallmentApprovalStatus.DRAFT,
+  SaleInstallmentApprovalStatus.REJECTED,
+  SaleInstallmentApprovalStatus.CANCELLED,
+];
+
 export const INSTALLMENT_DECISION_CONFLICT_MESSAGE =
   'Решение по этой рассрочке уже принято. Обновите страницу.';
 
+export const INSTALLMENT_ALREADY_SUBMITTED_MESSAGE =
+  'Заявка на рассрочку уже отправлена и ожидает решения Branch CEO.';
+
 export const INSTALLMENT_CANCELLATION_BLOCKED_MESSAGE =
   'Рассрочку нельзя отменить на текущем этапе.';
+
+export const INSTALLMENT_SELF_DECISION_FORBIDDEN_MESSAGE =
+  'Нельзя принимать решение по собственной заявке на рассрочку.';
 
 export function isPendingBranchCeoInstallmentDecision(status: SaleInstallmentApprovalStatus) {
   return BRANCH_CEO_PENDING_STATUSES.includes(status);
@@ -66,6 +79,23 @@ export function resolveStatusAfterBranchCeoApproval() {
   return SaleInstallmentApprovalStatus.APPROVED;
 }
 
+export function canSubmitInstallmentRequest(status: SaleInstallmentApprovalStatus) {
+  return SUBMITTABLE_INSTALLMENT_STATUSES.includes(status);
+}
+
+export function assertCanSubmitInstallmentRequest(status: SaleInstallmentApprovalStatus) {
+  if (canSubmitInstallmentRequest(status)) {
+    return;
+  }
+  if (
+    isPendingBranchCeoInstallmentDecision(status) ||
+    status === SaleInstallmentApprovalStatus.PENDING_APPROVAL
+  ) {
+    throw new ConflictException(INSTALLMENT_ALREADY_SUBMITTED_MESSAGE);
+  }
+  throw new ConflictException(INSTALLMENT_DECISION_CONFLICT_MESSAGE);
+}
+
 export function assertBranchCeoCanApproveInstallment(status: SaleInstallmentApprovalStatus) {
   if (!canBranchCeoApproveInstallment(status)) {
     throw new ConflictException(INSTALLMENT_DECISION_CONFLICT_MESSAGE);
@@ -86,6 +116,16 @@ export function assertBranchCeoCanCancelInstallment(input: {
 }) {
   if (!canBranchCeoCancelInstallment(input)) {
     throw new BadRequestException(INSTALLMENT_CANCELLATION_BLOCKED_MESSAGE);
+  }
+}
+
+/** Branch Sales Manager cannot approve, reject, or cancel a request they submitted themselves. */
+export function assertActorDidNotSubmitInstallmentRequest(
+  submittedById: string | null | undefined,
+  actorUserId: string,
+) {
+  if (submittedById && submittedById === actorUserId) {
+    throw new ForbiddenException(INSTALLMENT_SELF_DECISION_FORBIDDEN_MESSAGE);
   }
 }
 

@@ -2,11 +2,16 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { PaymentStatus, Role, SaleInstallmentApprovalStatus, SaleStatus } from '@prisma/client';
 import {
+  assertActorDidNotSubmitInstallmentRequest,
+  assertCanSubmitInstallmentRequest,
   canBranchCeoApproveInstallment,
   canBranchCeoCancelInstallment,
   canBranchCeoRejectInstallment,
+  canSubmitInstallmentRequest,
+  INSTALLMENT_ALREADY_SUBMITTED_MESSAGE,
   INSTALLMENT_CANCELLATION_BLOCKED_MESSAGE,
   INSTALLMENT_DECISION_CONFLICT_MESSAGE,
+  INSTALLMENT_SELF_DECISION_FORBIDDEN_MESSAGE,
   isPendingBranchCeoInstallmentDecision,
   resolveStatusAfterBranchCeoApproval,
 } from './sale-installment-workflow.util';
@@ -73,5 +78,50 @@ describe('sale installment branch CEO workflow', () => {
 
   it('branch CEO role is franchise owner scoped to branch', () => {
     assert.equal(Role.FRANCHISE_OWNER, 'FRANCHISE_OWNER');
+  });
+
+  it('submission is allowed from draft, rejected, or cancelled requests', () => {
+    assert.equal(canSubmitInstallmentRequest(SaleInstallmentApprovalStatus.DRAFT), true);
+    assert.equal(canSubmitInstallmentRequest(SaleInstallmentApprovalStatus.REJECTED), true);
+    assert.equal(canSubmitInstallmentRequest(SaleInstallmentApprovalStatus.CANCELLED), true);
+  });
+
+  it('submission is blocked while already pending branch CEO decision', () => {
+    assert.equal(
+      canSubmitInstallmentRequest(SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL),
+      false,
+    );
+    assert.throws(
+      () => assertCanSubmitInstallmentRequest(SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL),
+      new RegExp(INSTALLMENT_ALREADY_SUBMITTED_MESSAGE),
+    );
+  });
+
+  it('resubmitting an already-decided request raises the decision conflict message', () => {
+    assert.throws(
+      () => assertCanSubmitInstallmentRequest(SaleInstallmentApprovalStatus.APPROVED),
+      new RegExp(INSTALLMENT_DECISION_CONFLICT_MESSAGE),
+    );
+    assert.throws(
+      () => assertCanSubmitInstallmentRequest(SaleInstallmentApprovalStatus.ACTIVE),
+      new RegExp(INSTALLMENT_DECISION_CONFLICT_MESSAGE),
+    );
+  });
+
+  it('repeated submission of a draft request does not throw (idempotent re-send)', () => {
+    assert.doesNotThrow(() => assertCanSubmitInstallmentRequest(SaleInstallmentApprovalStatus.DRAFT));
+  });
+
+  it('Branch Sales Manager cannot approve, reject, or cancel their own submitted request', () => {
+    assert.throws(
+      () => assertActorDidNotSubmitInstallmentRequest('user-1', 'user-1'),
+      new RegExp(INSTALLMENT_SELF_DECISION_FORBIDDEN_MESSAGE),
+    );
+  });
+
+  it('Branch CEO who did not submit the request may act on it', () => {
+    assert.doesNotThrow(() => assertActorDidNotSubmitInstallmentRequest('user-1', 'user-2'));
+    assert.doesNotThrow(() => assertActorDidNotSubmitInstallmentRequest(null, 'user-2'));
+    assert.doesNotThrow(() => assertActorDidNotSubmitInstallmentRequest(undefined, 'user-2'));
   });
 });

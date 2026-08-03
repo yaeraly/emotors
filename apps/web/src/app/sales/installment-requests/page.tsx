@@ -410,6 +410,12 @@ export default function SaleInstallmentRequestsPage() {
                     value={selectedRequest.rejectionReason}
                   />
                 ) : null}
+                {selectedRequest.approvalComment ? (
+                  <Detail
+                    label={t('sales.installmentApprovalComment')}
+                    value={selectedRequest.approvalComment}
+                  />
+                ) : null}
 
                 {selectedRequest.sale.installments?.length ? (
                   <div>

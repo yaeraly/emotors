@@ -1184,6 +1184,7 @@ export type SaleInstallmentApproval = {
   notes?: string | null;
   submittedAt?: string | null;
   approvedAt?: string | null;
+  approvalComment?: string | null;
   rejectedAt?: string | null;
   rejectionReason?: string | null;
   submittedBy?: Pick<User, 'id' | 'fullName' | 'role'> | null;

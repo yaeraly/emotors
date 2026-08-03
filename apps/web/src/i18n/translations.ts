@@ -5216,7 +5216,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'sales.installmentDraft': 'Черновик рассрочки',
     'sales.installmentRequiresCeoApproval': 'Рассрочка должна быть одобрена руководителем филиала',
     'sales.installmentTermsRequired': 'Укажите условия рассрочки',
-    'sales.installmentRequestSubmitted': 'Заявка на рассрочку отправлена',
+    'sales.installmentRequestSubmitted': 'Рассрочка отправлена Branch CEO на одобрение.',
     'sales.installmentRequestApproved': 'Заявка на рассрочку одобрена',
     'sales.installmentRequestRejected': 'Заявка на рассрочку отклонена',
     'sales.installmentRequestsTitle': 'Заявки на рассрочку',

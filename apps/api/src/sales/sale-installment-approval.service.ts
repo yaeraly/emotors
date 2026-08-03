@@ -30,12 +30,16 @@ import { CancelSaleInstallmentDto } from './dto/cancel-sale-installment.dto';
 import { SaleInstallmentRequestQueryDto } from './dto/sale-installment-request-query.dto';
 import { CreateSaleDto } from './dto/create-sale.dto';
 import {
+  assertActorDidNotSubmitInstallmentRequest,
   assertBranchCeoCanApproveInstallment,
   assertBranchCeoCanCancelInstallment,
   assertBranchCeoCanRejectInstallment,
+  assertCanSubmitInstallmentRequest,
   BRANCH_CEO_PENDING_STATUSES,
+  INSTALLMENT_CANCELLATION_BLOCKED_MESSAGE,
   INSTALLMENT_DECISION_CONFLICT_MESSAGE,
   resolveStatusAfterBranchCeoApproval,
+  SUBMITTABLE_INSTALLMENT_STATUSES,
   validateInstallmentTerms,
 } from './sale-installment-workflow.util';
 
@@ -73,6 +77,7 @@ type SaleWithApprovalContext = {
     financedAmount: Prisma.Decimal;
     totalAmount: Prisma.Decimal;
     dueDate?: Date | null;
+    submittedById?: string | null;
   } | null;
 };
 
@@ -373,17 +378,37 @@ export class SaleInstallmentApprovalService {
         throw new ConflictException('Нельзя отправить заявку для завершённой продажи');
       }
 
+      try {
+        assertCanSubmitInstallmentRequest(approval.status);
+      } catch (err) {
+        await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_DECISION_BLOCKED', 'SaleInstallmentApproval', approval.id, {
+          saleId: sale.id,
+          orderId: sale.id,
+          previousStatus: approval.status,
+          newStatus: approval.status,
+          reason: err instanceof Error ? err.message : 'submission blocked',
+        });
+        throw err;
+      }
+
+      const downPayment = this.roundMoney(Number(approval.initialPayment));
+      const remainingDebt = this.roundMoney(Number(approval.financedAmount));
+      validateInstallmentTerms({
+        totalAmount: Number(sale.totalAmount),
+        initialPayment: downPayment,
+        financedAmount: remainingDebt,
+        dueDate: approval.dueDate ?? null,
+      });
+
       const terms = this.buildTermsSnapshot(sale, {
         initialPayment: approval.initialPayment,
         financedAmount: approval.financedAmount,
         dueDate: approval.dueDate ?? null,
       });
-      const downPayment = this.roundMoney(Number(approval.initialPayment));
-      const remainingDebt = this.roundMoney(Number(approval.financedAmount));
       const existing = approval;
 
-      const updatedApproval = await tx.saleInstallmentApproval.update({
-        where: { id: existing.id },
+      const transition = await tx.saleInstallmentApproval.updateMany({
+        where: { id: existing.id, status: { in: SUBMITTABLE_INSTALLMENT_STATUSES } },
         data: {
           status: SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL,
           requestVersion:
@@ -402,10 +427,18 @@ export class SaleInstallmentApprovalService {
           submittedAt: new Date(),
           approvedById: null,
           approvedAt: null,
+          approvalComment: null,
           rejectedById: null,
           rejectedAt: null,
           rejectionReason: null,
         },
+      });
+      if (transition.count !== 1) {
+        throw new ConflictException(INSTALLMENT_DECISION_CONFLICT_MESSAGE);
+      }
+
+      const updatedApproval = await tx.saleInstallmentApproval.findUniqueOrThrow({
+        where: { id: existing.id },
         include: this.installmentApprovalInclude(),
       });
 
@@ -425,7 +458,7 @@ export class SaleInstallmentApprovalService {
         type: AlertType.SALE_INSTALLMENT_REQUESTED,
         branchId: sale.branchId,
         title: 'Новая заявка на рассрочку',
-        message: `Новая заявка на рассрочку №${updatedApproval.requestNumber} от менеджера ${user.fullName}. Клиент: ${sale.customer.fullName}. Сумма: ${Number(sale.totalAmount).toFixed(2)}. Первоначальный взнос: ${downPayment.toFixed(2)}. Остаток: ${remainingDebt.toFixed(2)}.`,
+        message: `Новая заявка на рассрочку №${updatedApproval.requestNumber} от менеджера ${user.fullName}. Клиент: ${sale.customer.fullName}. Сумма продажи: ${Number(sale.totalAmount).toFixed(2)}. Первоначальный взнос: ${downPayment.toFixed(2)}. Остаток: ${remainingDebt.toFixed(2)}.${approval.dueDate ? ` Срок рассрочки: до ${approval.dueDate.toLocaleDateString('ru-RU')}.` : ''}`,
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updatedApproval.requestNumber,
@@ -447,7 +480,19 @@ export class SaleInstallmentApprovalService {
       if (!approval) {
         throw new NotFoundException('Заявка на рассрочку не найдена');
       }
-      assertBranchCeoCanApproveInstallment(approval.status);
+      try {
+        assertActorDidNotSubmitInstallmentRequest(approval.submittedById, user.id);
+        assertBranchCeoCanApproveInstallment(approval.status);
+      } catch (err) {
+        await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_DECISION_BLOCKED', 'SaleInstallmentApproval', approval.id, {
+          saleId: sale.id,
+          orderId: sale.id,
+          previousStatus: approval.status,
+          newStatus: approval.status,
+          reason: err instanceof Error ? err.message : 'approval blocked',
+        });
+        throw err;
+      }
       this.assertTermsMatch(sale, approval);
       validateInstallmentTerms({
         totalAmount: Number(sale.totalAmount),
@@ -458,13 +503,22 @@ export class SaleInstallmentApprovalService {
 
       const previousStatus = approval.status;
       const nextStatus = resolveStatusAfterBranchCeoApproval();
-      const updated = await tx.saleInstallmentApproval.update({
-        where: { id: approval.id },
+      const approvalComment = dto.approvalComment?.trim() || null;
+      const transition = await tx.saleInstallmentApproval.updateMany({
+        where: { id: approval.id, status: { in: BRANCH_CEO_PENDING_STATUSES } },
         data: {
           status: nextStatus,
           approvedById: user.id,
           approvedAt: new Date(),
+          approvalComment,
         },
+      });
+      if (transition.count !== 1) {
+        throw new ConflictException(INSTALLMENT_DECISION_CONFLICT_MESSAGE);
+      }
+
+      const updated = await tx.saleInstallmentApproval.findUniqueOrThrow({
+        where: { id: approval.id },
         include: this.installmentApprovalInclude(),
       });
 
@@ -477,14 +531,14 @@ export class SaleInstallmentApprovalService {
         initialPayment: Number(approval.initialPayment),
         remainingDebt: Number(approval.financedAmount),
         term: approval.dueDate?.toISOString() ?? null,
-        reason: dto.approvalComment?.trim() || null,
+        reason: approvalComment,
       });
 
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.SALE_INSTALLMENT_APPROVED,
         branchId: sale.branchId,
         title: 'Рассрочка одобрена',
-        message: `Заявка на рассрочку №${updated.requestNumber} одобрена руководителем филиала.${dto.approvalComment?.trim() ? ` Комментарий: ${dto.approvalComment.trim()}.` : ''}`,
+        message: `Заявка на рассрочку №${updated.requestNumber} одобрена руководителем филиала.${approvalComment ? ` Комментарий: ${approvalComment}.` : ''}`,
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updated.requestNumber,
@@ -506,18 +560,37 @@ export class SaleInstallmentApprovalService {
       if (!approval) {
         throw new NotFoundException('Заявка на рассрочку не найдена');
       }
-      assertBranchCeoCanRejectInstallment(approval.status);
+      try {
+        assertActorDidNotSubmitInstallmentRequest(approval.submittedById, user.id);
+        assertBranchCeoCanRejectInstallment(approval.status);
+      } catch (err) {
+        await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_DECISION_BLOCKED', 'SaleInstallmentApproval', approval.id, {
+          saleId: sale.id,
+          orderId: sale.id,
+          previousStatus: approval.status,
+          newStatus: approval.status,
+          reason: err instanceof Error ? err.message : 'rejection blocked',
+        });
+        throw err;
+      }
 
       const previousStatus = approval.status;
       const rejectionReason = dto.rejectionReason.trim();
-      const updated = await tx.saleInstallmentApproval.update({
-        where: { id: approval.id },
+      const transition = await tx.saleInstallmentApproval.updateMany({
+        where: { id: approval.id, status: { in: BRANCH_CEO_PENDING_STATUSES } },
         data: {
           status: SaleInstallmentApprovalStatus.REJECTED,
           rejectedById: user.id,
           rejectedAt: new Date(),
           rejectionReason,
         },
+      });
+      if (transition.count !== 1) {
+        throw new ConflictException(INSTALLMENT_DECISION_CONFLICT_MESSAGE);
+      }
+
+      const updated = await tx.saleInstallmentApproval.findUniqueOrThrow({
+        where: { id: approval.id },
         include: this.installmentApprovalInclude(),
       });
 
@@ -560,21 +633,47 @@ export class SaleInstallmentApprovalService {
         throw new NotFoundException('Заявка на рассрочку не найдена');
       }
 
-      assertBranchCeoCanCancelInstallment({
+      const cancellationEligibility = {
         approvalStatus: approval.status,
         saleStatus: sale.status,
         salePaidAmount: Number(sale.paidAmount),
         salePaymentStatus: sale.paymentStatus,
-      });
+      };
+
+      try {
+        assertActorDidNotSubmitInstallmentRequest(approval.submittedById, user.id);
+        assertBranchCeoCanCancelInstallment(cancellationEligibility);
+      } catch (err) {
+        await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_DECISION_BLOCKED', 'SaleInstallmentApproval', approval.id, {
+          saleId: sale.id,
+          orderId: sale.id,
+          previousStatus: approval.status,
+          newStatus: approval.status,
+          reason: err instanceof Error ? err.message : 'cancellation blocked',
+        });
+        throw err;
+      }
 
       const previousStatus = approval.status;
       const cancellationReason = dto.cancellationReason.trim();
-      const updated = await tx.saleInstallmentApproval.update({
-        where: { id: approval.id },
+      const cancellableStatuses = [
+        ...BRANCH_CEO_PENDING_STATUSES,
+        SaleInstallmentApprovalStatus.PENDING_APPROVAL,
+        SaleInstallmentApprovalStatus.APPROVED,
+      ];
+      const transition = await tx.saleInstallmentApproval.updateMany({
+        where: { id: approval.id, status: { in: cancellableStatuses } },
         data: {
           status: SaleInstallmentApprovalStatus.CANCELLED,
           rejectionReason: cancellationReason,
         },
+      });
+      if (transition.count !== 1) {
+        throw new BadRequestException(INSTALLMENT_CANCELLATION_BLOCKED_MESSAGE);
+      }
+
+      const updated = await tx.saleInstallmentApproval.findUniqueOrThrow({
+        where: { id: approval.id },
         include: this.installmentApprovalInclude(),
       });
 

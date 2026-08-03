@@ -2215,6 +2215,7 @@ model SaleInstallmentApproval {
   approvedById          String?
   approvedBy            User?                         @relation("SaleInstallmentApprovedBy", fields: [approvedById], references: [id])
   approvedAt            DateTime?
+  approvalComment       String?
   rejectedById          String?
   rejectedBy            User?                         @relation("SaleInstallmentRejectedBy", fields: [rejectedById], references: [id])
   rejectedAt            DateTime?
