@@ -10,6 +10,7 @@ import { FinanceLedgerService } from './finance-ledger.service';
 import { FinancePaymentsService } from './finance-payments.service';
 import { FinanceReconciliationService } from './finance-reconciliation.service';
 import { BranchCashierPaymentService } from './branch-cashier-payment.service';
+import { BranchFinanceTransfersService } from './branch-finance-transfers.service';
 import { FinanceReportsService } from './finance-reports.service';
 import { FinanceShiftsService } from './finance-shifts.service';
 import { FinanceTransfersService } from './finance-transfers.service';
@@ -30,7 +31,14 @@ import { FinanceTransfersService } from './finance-transfers.service';
     FinanceExpensesService,
     FinanceReconciliationService,
     BranchCashierPaymentService,
+    BranchFinanceTransfersService,
   ],
-  exports: [FinanceLedgerService, FinanceAccountsService, FinanceExpensesService, BranchCashierPaymentService],
+  exports: [
+    FinanceLedgerService,
+    FinanceAccountsService,
+    FinanceExpensesService,
+    BranchCashierPaymentService,
+    BranchFinanceTransfersService,
+  ],
 })
 export class FinanceModule {}

@@ -433,6 +433,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 <Link href="/branch-accountant/invoices" className={sidebarNavClass(pathname, '/branch-accountant/invoices')}>
                   {t('branchAccountant.invoicesToPay')}
                 </Link>
+                <Link href="/branch-accountant/transfers" className={sidebarNavClass(pathname, '/branch-accountant/transfers')}>
+                  {t('branchAccountant.accountTransfersReview')}
+                </Link>
                 <Link href="/tax" className={sidebarNavClass(pathname, '/tax')}>
                   {t('tax.title')}
                 </Link>
@@ -462,6 +465,9 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                 </Link>
                 <Link href="/branch-cashier/installments" className={sidebarNavClass(pathname, '/branch-cashier/installments')}>
                   {t('branchCashier.installments')}
+                </Link>
+                <Link href="/branch-cashier/transfers" className={sidebarNavClass(pathname, '/branch-cashier/transfers')}>
+                  {t('branchCashier.accountTransfers')}
                 </Link>
                 <Link href="/service/cashier" className={sidebarNavClass(pathname, '/service/cashier')}>
                   {t('branchCashier.servicePayment')}

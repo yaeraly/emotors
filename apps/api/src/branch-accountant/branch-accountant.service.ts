@@ -30,6 +30,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BranchSaleInvoiceService } from '../sales/branch-sale-invoice.service';
 import { SalesService } from '../sales/sales.service';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
+import { BranchFinanceTransfersService } from '../finance/branch-finance-transfers.service';
 import {
   canSendInvoiceToCashier,
   hasAnyFullAccessRole,
@@ -44,6 +45,13 @@ import {
 import { BranchAccountantInvoiceQueryDto } from './dto/branch-accountant-invoice-query.dto';
 import { BranchAccountantInstallmentRequestDto } from './dto/installment-request.dto';
 import { SelectPaymentTypeDto } from './dto/select-payment-type.dto';
+import {
+  CreateBranchFinanceTransferDto,
+  RejectBranchFinanceTransferDto,
+  ReviewBranchFinanceTransferDto,
+  UpdateBranchFinanceTransferDto,
+} from './dto/branch-finance-transfer.dto';
+import { FinanceTransferStatus } from '@prisma/client';
 
 @Injectable()
 export class BranchAccountantService {
@@ -54,6 +62,7 @@ export class BranchAccountantService {
     private readonly salesService: SalesService,
     private readonly branchSaleInvoiceService: BranchSaleInvoiceService,
     private readonly branchCashierPaymentService: BranchCashierPaymentService,
+    private readonly branchFinanceTransfersService: BranchFinanceTransfersService,
   ) {}
 
   private assertBranchAccountant(user: AuthUser) {
@@ -636,5 +645,29 @@ export class BranchAccountantService {
   async sendEarlyPaymentToCashier(user: AuthUser, invoiceId: string, requestId: string) {
     await this.earlyPaymentService.sendToCashier(user, invoiceId, requestId);
     return this.getInvoice(user, invoiceId);
+  }
+
+  listCashierTransfers(user: AuthUser) {
+    return this.branchFinanceTransfersService.listCashierTransfers(user);
+  }
+
+  createBranchTransfer(user: AuthUser, dto: CreateBranchFinanceTransferDto) {
+    return this.branchFinanceTransfersService.createTransfer(user, dto);
+  }
+
+  updateBranchTransfer(user: AuthUser, id: string, dto: UpdateBranchFinanceTransferDto) {
+    return this.branchFinanceTransfersService.updateTransfer(user, id, dto);
+  }
+
+  listAccountantTransfers(user: AuthUser, status?: FinanceTransferStatus) {
+    return this.branchFinanceTransfersService.listAccountantTransfers(user, status);
+  }
+
+  approveBranchTransfer(user: AuthUser, id: string, dto: ReviewBranchFinanceTransferDto) {
+    return this.branchFinanceTransfersService.approveTransfer(user, id, dto);
+  }
+
+  rejectBranchTransfer(user: AuthUser, id: string, dto: RejectBranchFinanceTransferDto) {
+    return this.branchFinanceTransfersService.rejectTransfer(user, id, dto);
   }
 }

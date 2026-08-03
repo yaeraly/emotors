@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/current-user.decorator';
@@ -11,6 +11,13 @@ import { BranchAccountantService } from './branch-accountant.service';
 import { BranchAccountantInvoiceQueryDto } from './dto/branch-accountant-invoice-query.dto';
 import { BranchAccountantInstallmentRequestDto } from './dto/installment-request.dto';
 import { SelectPaymentTypeDto } from './dto/select-payment-type.dto';
+import {
+  CreateBranchFinanceTransferDto,
+  RejectBranchFinanceTransferDto,
+  ReviewBranchFinanceTransferDto,
+  UpdateBranchFinanceTransferDto,
+} from './dto/branch-finance-transfer.dto';
+import { FinanceTransferStatus } from '@prisma/client';
 
 @Controller('branch-accountant')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -92,6 +99,35 @@ export class BranchAccountantController {
   ) {
     return this.service.sendEarlyPaymentToCashier(user, id, requestId);
   }
+
+  @Get('transfers')
+  @Roles(Role.ACCOUNTANT)
+  listTransfers(
+    @CurrentUser() user: AuthUser,
+    @Query('status') status?: FinanceTransferStatus,
+  ) {
+    return this.service.listAccountantTransfers(user, status);
+  }
+
+  @Post('transfers/:id/approve')
+  @Roles(Role.ACCOUNTANT)
+  approveTransfer(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ReviewBranchFinanceTransferDto,
+  ) {
+    return this.service.approveBranchTransfer(user, id, dto);
+  }
+
+  @Post('transfers/:id/reject')
+  @Roles(Role.ACCOUNTANT)
+  rejectTransfer(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: RejectBranchFinanceTransferDto,
+  ) {
+    return this.service.rejectBranchTransfer(user, id, dto);
+  }
 }
 
 @Controller('branch-cashier')
@@ -160,5 +196,27 @@ export class BranchCashierController {
     @Body() dto: AddBranchPaymentDto,
   ) {
     return this.service.submitCashierInstallmentPayment(user, id, dto);
+  }
+
+  @Get('transfers')
+  @Roles(Role.CASHIER)
+  listTransfers(@CurrentUser() user: AuthUser) {
+    return this.service.listCashierTransfers(user);
+  }
+
+  @Post('transfers')
+  @Roles(Role.CASHIER)
+  createTransfer(@CurrentUser() user: AuthUser, @Body() dto: CreateBranchFinanceTransferDto) {
+    return this.service.createBranchTransfer(user, dto);
+  }
+
+  @Patch('transfers/:id')
+  @Roles(Role.CASHIER)
+  updateTransfer(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateBranchFinanceTransferDto,
+  ) {
+    return this.service.updateBranchTransfer(user, id, dto);
   }
 }
