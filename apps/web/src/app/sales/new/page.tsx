@@ -1135,7 +1135,7 @@ export default function NewSalePage() {
                 return (
                   <div
                     key={`${item.productId}-${index}`}
-                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.1fr)_minmax(0,0.9fr)_auto] lg:items-start"
+                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,0.75fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-start"
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.product')}</p>
@@ -1159,36 +1159,6 @@ export default function NewSalePage() {
                           : undefined
                       }
                     />
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('pricing.tooltip.minPrice')}
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-slate-900">
-                        {item.hasPricingPolicy && item.minimumPrice > 0
-                          ? formatKgs(item.minimumPrice)
-                          : t('sales.priceNotConfigured')}
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('sales.recommendedPrice')}
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-slate-900">
-                        {item.hasPricingPolicy && item.recommendedPrice > 0
-                          ? formatKgs(item.recommendedPrice)
-                          : t('sales.priceNotConfigured')}
-                      </p>
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold uppercase text-slate-400">
-                        {t('sales.maximumPrice')}
-                      </p>
-                      <p className="mt-2 text-sm font-semibold text-slate-900">
-                        {item.hasPricingPolicy && item.hasMaximumPrice && item.maximumPrice
-                          ? formatKgs(item.maximumPrice)
-                          : t('sales.priceNotConfigured')}
-                      </p>
-                    </div>
                     <div className="min-w-0">
                       <SaleInput
                         label={t('sales.sellingPrice')}

@@ -2,6 +2,8 @@
 
 import { InfoPopover } from '@/components/InfoPopover';
 import { useTranslation } from '@/i18n/useTranslation';
+import { formatKgsLocalized } from '@/lib/money';
+import { buildSaleLinePricingTooltipContent } from '@/lib/sale-line-pricing-tooltip.util';
 
 type Props = {
   minimumPrice: number;
@@ -11,11 +13,8 @@ type Props = {
   hasPricingPolicy: boolean;
 };
 
-function formatSom(value: number) {
-  return `${value.toLocaleString('ru-RU', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} сом`;
+function formatMoneyKgs(value: number) {
+  return `${formatKgsLocalized(value)} KGS`;
 }
 
 export function SaleLinePricingTooltip({
@@ -27,40 +26,34 @@ export function SaleLinePricingTooltip({
 }: Props) {
   const { t } = useTranslation();
 
-  const minimumLabel = hasPricingPolicy && minimumPrice > 0
-    ? formatSom(minimumPrice)
-    : t('sales.pricingTooltip.notConfigured');
-  const recommendedLabel = hasPricingPolicy && recommendedPrice > 0
-    ? formatSom(recommendedPrice)
-    : t('sales.pricingTooltip.notConfigured');
-  const maximumLabel =
-    hasPricingPolicy && hasMaximumPrice && maximumPrice != null && maximumPrice > 0
-      ? formatSom(maximumPrice)
-      : t('sales.pricingTooltip.notConfigured');
+  const content = buildSaleLinePricingTooltipContent({
+    minimumPrice,
+    recommendedPrice,
+    maximumPrice,
+    hasMaximumPrice,
+    hasPricingPolicy,
+    formatMoney: formatMoneyKgs,
+    labels: {
+      title: t('sales.pricingTooltip.rangeTitle'),
+      minimum: t('pricing.minimumSellingPrice'),
+      recommended: t('sales.recommendedPrice'),
+      maximum: t('sales.maximumPrice'),
+      notConfigured: t('sales.pricingTooltip.rangeNotConfigured'),
+      valueNotConfigured: t('sales.pricingTooltip.notConfigured'),
+    },
+  });
 
   return (
     <InfoPopover
       label={t('sales.pricingInfoAriaLabel')}
       content={
-        <div className="space-y-3">
-          <div>
-            <p className="font-semibold text-slate-900 dark:text-slate-100">
-              {t('pricing.minimumSellingPrice')}: {minimumLabel}
+        <div className="space-y-2">
+          <p className="font-semibold text-slate-900 dark:text-slate-100">{content.title}</p>
+          {content.lines.map((line) => (
+            <p key={line} className="text-slate-700 dark:text-slate-200">
+              {line}
             </p>
-            <p className="mt-1 text-slate-500">{t('sales.pricingTooltip.minimumHint')}</p>
-          </div>
-          <div>
-            <p className="font-semibold text-slate-900 dark:text-slate-100">
-              {t('pricing.recommendedRetailPrice')}: {recommendedLabel}
-            </p>
-            <p className="mt-1 text-slate-500">{t('sales.pricingTooltip.recommendedHint')}</p>
-          </div>
-          <div>
-            <p className="font-semibold text-slate-900 dark:text-slate-100">
-              {t('sales.maximumPrice')}: {maximumLabel}
-            </p>
-            <p className="mt-1 text-slate-500">{t('sales.pricingTooltip.maximumHint')}</p>
-          </div>
+          ))}
         </div>
       }
     />
