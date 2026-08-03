@@ -10,6 +10,13 @@ import {
   computeBranchOrderRemainingDebt,
 } from '../distribution/branch-order-installment.util';
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
+import {
+  isRetailInstallmentInvoice,
+  resolveRetailInstallmentInitialPayment,
+  resolveRetailInstallmentPaidAmount,
+  resolveRetailInstallmentRemainingDebt,
+  resolveRetailInstallmentRequiredPayment,
+} from '../sales/sale-installment-invoice.util';
 
 export type AccountantInvoiceWorkflowStatus =
   | 'PENDING_ACCOUNTANT_REVIEW'
@@ -97,12 +104,29 @@ export function sanitizeAccountantInvoice(invoice: any) {
     : null;
 
   const remainingAmount = Number(invoice.debtAmount ?? 0);
+  const retailInstallmentApproval = invoice.sale?.installmentApproval;
+  const retailInstallment = isRetailInstallmentInvoice(invoice) && retailInstallmentApproval
+    ? {
+        id: retailInstallmentApproval.id,
+        requestNumber: retailInstallmentApproval.requestNumber,
+        status: retailInstallmentApproval.status,
+        totalAmount: Number(retailInstallmentApproval.totalAmount ?? invoice.totalAmount),
+        initialPayment: resolveRetailInstallmentInitialPayment(retailInstallmentApproval),
+        paidAmount: resolveRetailInstallmentPaidAmount({ ...invoice, sale: invoice.sale }),
+        remainingDebt: resolveRetailInstallmentRemainingDebt({ ...invoice, sale: invoice.sale }),
+        dueDate: retailInstallmentApproval.dueDate ?? invoice.dueDate ?? null,
+        zeroInitialPayment: resolveRetailInstallmentInitialPayment(retailInstallmentApproval) <= 0,
+      }
+    : null;
+
   const activeEarlyPayment = (invoice.installmentEarlyPaymentRequests ?? []).find(
     (row: { status: BranchInstallmentEarlyPaymentStatus; sentToCashierAt?: Date | string | null }) =>
       row.status === BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO ||
       CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES.includes(row.status),
   );
-  const requiredPaymentAmount = activeEarlyPayment
+  const requiredPaymentAmount = retailInstallment
+    ? resolveRetailInstallmentRequiredPayment({ ...invoice, sale: invoice.sale })
+    : activeEarlyPayment
     ? Number(activeEarlyPayment.approvedAmount ?? activeEarlyPayment.requestedAmount ?? 0)
     : installment?.status === BranchOrderInstallmentStatus.APPROVED
       ? installment.firstPaymentRequired && !installment.firstPaymentConfirmed
@@ -198,6 +222,7 @@ export function sanitizeAccountantInvoice(invoice: any) {
       unit: item.product?.unit ?? item.unit ?? null,
     })),
     branchOrderInstallment: installment,
+    retailInstallment,
     installmentEarlyPaymentRequests: earlyPaymentRequests,
     activeEarlyPaymentRequest: cashierVisibleEarlyPayment,
     payments: (invoice.payments ?? []).map((payment: any) => ({
@@ -226,6 +251,29 @@ export function sanitizeBranchCashierInvoice(invoice: any) {
       quantity: item.quantity,
       unit: item.unit,
     })),
+  };
+}
+
+export function sanitizeRetailInstallmentCashierInvoice(invoice: any) {
+  const base = sanitizeAccountantInvoice(invoice);
+  const retail = base.retailInstallment;
+  return {
+    ...base,
+    paidAmount: retail?.paidAmount ?? base.paidAmount,
+    remainingAmount: retail?.remainingDebt ?? base.remainingAmount,
+    debtAmount: retail?.remainingDebt ?? base.debtAmount,
+    requiredPaymentAmount: base.requiredPaymentAmount,
+    nextPaymentDate: retail?.dueDate ?? base.dueDate ?? null,
+    installmentSchedule: retail
+      ? [
+          {
+            installmentNumber: 1,
+            dueDate: retail.dueDate,
+            amount: retail.remainingDebt,
+          },
+        ]
+      : [],
+    items: [],
   };
 }
 

@@ -5,11 +5,35 @@ import {
   BranchOrderInstallmentStatus,
 } from '@prisma/client';
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from './branch-installment-early-payment.util';
+import {
+  isRetailInstallmentCashierVisible,
+  isRetailInstallmentInvoice,
+  resolveRetailInstallmentInitialPayment,
+  resolveRetailInstallmentPaidAmount,
+  resolveRetailInstallmentRemainingDebt,
+  resolveRetailInstallmentRequiredPayment,
+} from '../sales/sale-installment-invoice.util';
 
 export type CashierVisibilityInvoiceLike = {
+  invoiceCategory?: string | null;
+  saleId?: string | null;
   sentToCashierAt?: Date | string | null;
   status: BranchInvoiceStatus | string;
   paymentType?: BranchInvoicePaymentType | string | null;
+  totalAmount?: number | { toString(): string };
+  paidAmount?: number | { toString(): string };
+  debtAmount?: number | { toString(): string };
+  sale?: {
+    installmentApproval?: {
+      status: string;
+      initialPayment: number | { toString(): string };
+      installmentPaidAmount?: number | { toString(): string } | null;
+      remainingDebt?: number | { toString(): string } | null;
+      financedAmount: number | { toString(): string };
+      dueDate?: Date | string | null;
+      requestNumber?: string;
+    } | null;
+  } | null;
   branchOrderInstallment?: {
     status: BranchOrderInstallmentStatus | string;
     firstPaymentRequired?: boolean;
@@ -77,6 +101,10 @@ export function isBranchCashierInvoiceVisible(invoice: CashierVisibilityInvoiceL
   }
 
   // Zero-initial or post-first-payment installment: invisible until early payment is sent.
+  if (isRetailInstallmentInvoice(invoice as Parameters<typeof isRetailInstallmentInvoice>[0])) {
+    return isRetailInstallmentCashierVisible(invoice as Parameters<typeof isRetailInstallmentCashierVisible>[0]);
+  }
+
   return false;
 }
 

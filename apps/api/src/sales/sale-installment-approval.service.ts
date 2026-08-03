@@ -28,6 +28,7 @@ import {
   isBranchSalesManagerUser,
 } from '../rbac/rbac';
 import { resolvePricingChannelFromCustomerType } from './sale-customer-pricing.util';
+import { BranchSaleInvoiceService } from './branch-sale-invoice.service';
 import { SalesService } from './sales.service';
 import { ReceiveInstallmentPaymentDto } from './dto/receive-installment-payment.dto';
 import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
@@ -105,6 +106,7 @@ export class SaleInstallmentApprovalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly branchSaleInvoiceService: BranchSaleInvoiceService,
     @Inject(forwardRef(() => SalesService))
     private readonly salesService: SalesService,
   ) {}
@@ -480,7 +482,7 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_SUBMITTED', 'SaleInstallmentApproval', updatedApproval.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'INSTALLMENT_SUBMITTED', 'SaleInstallmentApproval', updatedApproval.id, {
         saleId: sale.id,
         orderId: sale.id,
         requestVersion: updatedApproval.requestVersion,
@@ -560,7 +562,7 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_APPROVED', 'SaleInstallmentApproval', updated.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'INSTALLMENT_APPROVED', 'SaleInstallmentApproval', updated.id, {
         saleId: sale.id,
         orderId: sale.id,
         previousStatus,
@@ -572,6 +574,26 @@ export class SaleInstallmentApprovalService {
         reason: approvalComment,
       });
 
+      const invoice = await this.branchSaleInvoiceService.ensureRetailInstallmentInvoiceInTx(tx, user, {
+        id: sale.id,
+        branchId: sale.branchId,
+        receiptNumber: sale.receiptNumber,
+        totalAmount: sale.totalAmount,
+        saleDate: new Date(),
+        dueDate: approval.dueDate,
+      });
+
+      await this.branchSaleInvoiceService.notifyAccountantInTx(tx, user, {
+        branchId: sale.branchId,
+        saleId: sale.id,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        customerName: sale.customer.fullName,
+        saleTotal: Number(sale.totalAmount),
+        initialPayment: Number(approval.initialPayment),
+        remainingDebt: Number(approval.financedAmount),
+      });
+
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.SALE_INSTALLMENT_APPROVED,
         branchId: sale.branchId,
@@ -580,7 +602,7 @@ export class SaleInstallmentApprovalService {
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updated.requestNumber,
-        recipientRoles: [Role.MANAGER],
+        recipientRoles: [Role.MANAGER, Role.ACCOUNTANT],
       });
 
       return this.serializeApproval(updated);
@@ -632,7 +654,7 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_REJECTED', 'SaleInstallmentApproval', updated.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'INSTALLMENT_REJECTED', 'SaleInstallmentApproval', updated.id, {
         saleId: sale.id,
         orderId: sale.id,
         previousStatus,
@@ -715,7 +737,7 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, sale.branchId, 'BRANCH_INSTALLMENT_CANCELLED', 'SaleInstallmentApproval', updated.id, {
+      await this.auditInTx(tx, user, sale.branchId, 'INSTALLMENT_CANCELLED', 'SaleInstallmentApproval', updated.id, {
         saleId: sale.id,
         orderId: sale.id,
         previousStatus,
@@ -758,27 +780,11 @@ export class SaleInstallmentApprovalService {
       where: { id: approval.id },
       data: {
         status: SaleInstallmentApprovalStatus.ACTIVE,
-        installmentPaidAmount: downPayment,
-        remainingDebt,
+        installmentPaidAmount: 0,
+        remainingDebt: totalAmount,
       },
       include: this.installmentApprovalInclude(),
     });
-
-    if (downPayment > 0) {
-      const sale = await tx.sale.findUniqueOrThrow({ where: { id: saleId } });
-      await tx.saleInstallmentPayment.create({
-        data: {
-          installmentApprovalId: approval.id,
-          branchId: sale.branchId,
-          amount: downPayment,
-          method: PaymentMethod.CASH,
-          note: 'Первоначальный взнос',
-          paidAfterTotal: downPayment,
-          remainingAfter: remainingDebt,
-          createdById: user.id,
-        },
-      });
-    }
 
     await this.auditInTx(tx, user, approval.branchId, 'SALE_INSTALLMENT_ACTIVATED', 'SaleInstallmentApproval', approval.id, {
       saleId,
@@ -982,14 +988,14 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
-      await this.auditInTx(tx, user, approval.branchId, 'SALE_INSTALLMENT_PAYMENT_ADDED', 'SaleInstallmentApproval', approval.id, {
+      await this.auditInTx(tx, user, approval.branchId, 'INSTALLMENT_PAYMENT_RECEIVED', 'SaleInstallmentApproval', approval.id, {
         amount,
         paidAfterTotal,
         remainingAfter,
       });
 
       if (nextStatus === SaleInstallmentApprovalStatus.PAID) {
-        await this.auditInTx(tx, user, approval.branchId, 'SALE_INSTALLMENT_CLOSED', 'SaleInstallmentApproval', approval.id, {
+        await this.auditInTx(tx, user, approval.branchId, 'INSTALLMENT_CLOSED', 'SaleInstallmentApproval', approval.id, {
           saleId: approval.saleId,
         });
         await this.notificationsService.notifyInTx(tx, user, {
@@ -1015,11 +1021,6 @@ export class SaleInstallmentApprovalService {
     const approval = sale.installmentApproval;
     if (!approval || approval.status !== SaleInstallmentApprovalStatus.APPROVED) {
       throw new BadRequestException('Рассрочка должна быть одобрена руководителем филиала');
-    }
-
-    const downPayment = this.roundMoney(Number(approval.initialPayment));
-    if (Number(sale.paidAmount) + 0.009 < downPayment) {
-      throw new BadRequestException('Необходимо принять первоначальный взнос перед завершением продажи');
     }
 
     this.assertTermsMatch(sale, approval);

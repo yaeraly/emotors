@@ -1686,20 +1686,20 @@ function NewSalePageContent() {
             {paymentType === 'FULL_PAYMENT' ? (
               <button
                 onClick={() => void finalizeSale()}
-                disabled={!canFinalize}
+                disabled={!canFinalize || saving}
                 type="button"
                 className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 sm:w-auto"
               >
-                {t('sales.finalizeSale')}
+                {saving ? t('common.loading') : t('sales.finalizeSale')}
               </button>
             ) : installmentApproved ? (
               <button
                 onClick={() => void finalizeSale()}
-                disabled={!canFinalize}
+                disabled={!canFinalize || saving}
                 type="button"
                 className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 sm:w-auto"
               >
-                {t('sales.finalizeSale')}
+                {saving ? t('common.loading') : t('sales.finalizeSale')}
               </button>
             ) : null}
             <button

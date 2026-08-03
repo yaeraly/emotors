@@ -11,15 +11,18 @@ import {
   BranchOrderInstallmentStatus,
   Prisma,
   Role,
+  SaleInstallmentApprovalStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { BranchInstallmentEarlyPaymentService } from '../distribution/branch-installment-early-payment.service';
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
 import { isBranchCashierInvoiceVisible } from '../distribution/branch-cashier-invoice-visibility.util';
+import { isRetailInstallmentCashierVisible, isRetailInstallmentInvoice } from '../sales/sale-installment-invoice.util';
 import { DistributionService } from '../distribution/distribution.service';
 import { CreateInstallmentEarlyPaymentDto } from '../distribution/dto/create-installment-early-payment.dto';
 import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { BranchSaleInvoiceService } from '../sales/branch-sale-invoice.service';
 import { SalesService } from '../sales/sales.service';
 import {
   canSendInvoiceToCashier,
@@ -30,6 +33,7 @@ import {
   buildWorkflowStatusWhere,
   sanitizeAccountantInvoice,
   sanitizeBranchCashierInvoice,
+  sanitizeRetailInstallmentCashierInvoice,
 } from './branch-accountant-invoice.presenter';
 import { BranchAccountantInvoiceQueryDto } from './dto/branch-accountant-invoice-query.dto';
 import { BranchAccountantInstallmentRequestDto } from './dto/installment-request.dto';
@@ -42,6 +46,7 @@ export class BranchAccountantService {
     private readonly distributionService: DistributionService,
     private readonly earlyPaymentService: BranchInstallmentEarlyPaymentService,
     private readonly salesService: SalesService,
+    private readonly branchSaleInvoiceService: BranchSaleInvoiceService,
   ) {}
 
   private assertBranchAccountant(user: AuthUser) {
@@ -78,6 +83,7 @@ export class BranchAccountantService {
         include: {
           customer: { select: { id: true, fullName: true, phone: true } },
           items: true,
+          installmentApproval: true,
         },
       },
       payments: {
@@ -358,9 +364,36 @@ export class BranchAccountantService {
 
     const invoice = await this.prisma.branchInvoice.findFirst({
       where: { id, deletedAt: null, branchId: user.branchId! },
-      include: { branchOrderInstallment: true },
+      include: { branchOrderInstallment: true, sale: { include: { installmentApproval: true } } },
     });
     if (!invoice) throw new NotFoundException('Счёт не найден');
+
+    if (isRetailInstallmentInvoice(invoice)) {
+      if (!invoice.sentToBranchAt) {
+        throw new BadRequestException('Счёт ещё не доступен бухгалтеру');
+      }
+      if (invoice.sentToCashierAt) {
+        throw new BadRequestException('Счёт уже передан кассиру');
+      }
+      if (invoice.status === BranchInvoiceStatus.PAID || invoice.status === BranchInvoiceStatus.CANCELLED) {
+        throw new BadRequestException('Счёт уже закрыт');
+      }
+      const approval = invoice.sale?.installmentApproval;
+      if (!approval || approval.status === SaleInstallmentApprovalStatus.REJECTED || approval.status === SaleInstallmentApprovalStatus.CANCELLED) {
+        throw new BadRequestException('Рассрочка недоступна для передачи кассиру');
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        await this.branchSaleInvoiceService.sendRetailInstallmentToCashierInTx(tx, user, {
+          branchId: invoice.branchId,
+          saleId: invoice.saleId!,
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+        });
+      });
+      return this.getInvoice(user, id);
+    }
+
     if (!invoice.paymentType) {
       throw new BadRequestException('Сначала выберите тип оплаты');
     }
@@ -452,13 +485,70 @@ export class BranchAccountantService {
     this.assertBranchCashier(user);
     const invoice = await this.prisma.branchInvoice.findFirst({
       where: { id, deletedAt: null, branchId: user.branchId! },
-      select: { id: true, invoiceCategory: true, saleId: true },
+      select: { id: true, invoiceCategory: true, saleId: true, paymentType: true },
     });
+    if (invoice && isRetailInstallmentInvoice(invoice)) {
+      throw new BadRequestException('Для рассрочки используйте раздел «Рассрочка»');
+    }
     const result = await this.distributionService.submitInvoicePayment(user, id, dto);
     if (invoice?.invoiceCategory === 'RETAIL_SALE' && invoice.saleId) {
       await this.salesService.syncRetailSalePaymentFromInvoice(user, id);
     }
     return this.getCashierInvoice(user, id);
+  }
+
+  async listCashierInstallments(user: AuthUser, query: BranchAccountantInvoiceQueryDto) {
+    this.assertBranchCashier(user);
+    const where: Prisma.BranchInvoiceWhereInput = {
+      deletedAt: null,
+      branchId: user.branchId!,
+      invoiceCategory: 'RETAIL_SALE',
+      paymentType: BranchInvoicePaymentType.INSTALLMENT,
+      sentToCashierAt: { not: null },
+      status: { in: [BranchInvoiceStatus.ISSUED, BranchInvoiceStatus.PARTIALLY_PAID, BranchInvoiceStatus.OVERDUE] },
+    };
+    if (query.search?.trim()) {
+      where.OR = [
+        { invoiceNumber: { contains: query.search.trim(), mode: 'insensitive' } },
+        { sale: { receiptNumber: { contains: query.search.trim(), mode: 'insensitive' } } },
+        { sale: { customer: { fullName: { contains: query.search.trim(), mode: 'insensitive' } } } },
+      ];
+    }
+
+    const invoices = await this.prisma.branchInvoice.findMany({
+      where,
+      include: this.invoiceInclude(),
+      orderBy: { sentToCashierAt: 'desc' },
+    });
+
+    return invoices
+      .filter((invoice) => isRetailInstallmentCashierVisible(invoice))
+      .map((invoice) => sanitizeRetailInstallmentCashierInvoice(invoice));
+  }
+
+  async getCashierInstallment(user: AuthUser, id: string) {
+    this.assertBranchCashier(user);
+    const invoice = await this.prisma.branchInvoice.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        branchId: user.branchId!,
+        invoiceCategory: 'RETAIL_SALE',
+        paymentType: BranchInvoicePaymentType.INSTALLMENT,
+        sentToCashierAt: { not: null },
+      },
+      include: this.invoiceInclude(),
+    });
+    if (!invoice || !isRetailInstallmentCashierVisible(invoice)) {
+      throw new NotFoundException('Рассрочка не найдена');
+    }
+    return sanitizeRetailInstallmentCashierInvoice(invoice);
+  }
+
+  async submitCashierInstallmentPayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
+    this.assertBranchCashier(user);
+    await this.salesService.receiveRetailInstallmentCashierPayment(user, id, dto);
+    return this.getCashierInstallment(user, id);
   }
 
   async listEarlyPaymentRequests(user: AuthUser, invoiceId: string) {

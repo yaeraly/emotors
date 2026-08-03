@@ -965,6 +965,20 @@ export type BranchAccountantInvoice = {
     unit?: string | null;
   }>;
   branchOrderInstallment?: BranchOrderInstallment | null;
+  retailInstallment?: {
+    id: string;
+    requestNumber?: string;
+    status: string;
+    totalAmount: number;
+    initialPayment: number;
+    paidAmount: number;
+    remainingDebt: number;
+    dueDate?: string | null;
+    zeroInitialPayment?: boolean;
+  } | null;
+  customerName?: string | null;
+  nextPaymentDate?: string | null;
+  installmentSchedule?: Array<{ installmentNumber: number; dueDate?: string | null; amount: number }>;
   installmentEarlyPaymentRequests?: Array<{
     id: string;
     installmentId?: string | null;

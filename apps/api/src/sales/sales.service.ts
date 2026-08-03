@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -8,6 +9,8 @@ import {
 } from '@nestjs/common';
 import {
   AlertType,
+  BranchInvoiceStatus,
+  BranchPaymentConfirmationStatus,
   CustomerEventType,
   CustomerLoyaltyCategory,
   CustomerStatus,
@@ -20,6 +23,7 @@ import {
   Prisma,
   Role,
   SalePaymentType,
+  SaleInstallmentApprovalStatus,
   SaleStatus,
   StockMovementType,
 } from '@prisma/client';
@@ -83,7 +87,13 @@ import {
   SALE_DRAFT_EDIT_BLOCKED_MESSAGE,
 } from './sale-draft-edit.util';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
+import {
+  isRetailInstallmentInvoice,
+  resolveRetailInstallmentPaidAmount,
+  resolveRetailInstallmentRemainingDebt,
+} from './sale-installment-invoice.util';
 import { CreateSaleItemDto } from './dto/create-sale.dto';
+import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -1426,6 +1436,223 @@ export class SalesService {
           },
         );
       }
+    });
+  }
+
+  async receiveRetailInstallmentCashierPayment(
+    user: AuthUser,
+    invoiceId: string,
+    dto: AddBranchPaymentDto,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const invoice = await tx.branchInvoice.findFirst({
+        where: {
+          id: invoiceId,
+          deletedAt: null,
+          branchId: user.branchId!,
+          invoiceCategory: 'RETAIL_SALE',
+          saleId: { not: null },
+          sentToCashierAt: { not: null },
+        },
+        include: {
+          sale: {
+            include: {
+              installmentApproval: true,
+              customer: true,
+            },
+          },
+        },
+      });
+      if (!invoice?.sale?.installmentApproval) {
+        throw new NotFoundException('Рассрочка не найдена');
+      }
+      if (!isRetailInstallmentInvoice(invoice)) {
+        throw new BadRequestException('Счёт не является рассрочкой по розничной продаже');
+      }
+
+      const approval = invoice.sale.installmentApproval;
+      if (
+        approval.status !== SaleInstallmentApprovalStatus.ACTIVE &&
+        approval.status !== SaleInstallmentApprovalStatus.APPROVED
+      ) {
+        throw new ConflictException('Платежи принимаются только по активной рассрочке');
+      }
+      if (invoice.status === BranchInvoiceStatus.PAID || invoice.status === BranchInvoiceStatus.CANCELLED) {
+        throw new BadRequestException('Счёт уже закрыт');
+      }
+
+      const pending = await tx.branchPayment.findFirst({
+        where: {
+          invoiceId: invoice.id,
+          deletedAt: null,
+          confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
+        },
+      });
+      if (pending) {
+        throw new ConflictException('Оплата уже отправлена на подтверждение');
+      }
+
+      const amount = this.roundMoney(Number(dto.amount));
+      if (amount <= 0) {
+        throw new BadRequestException('Сумма платежа должна быть больше нуля');
+      }
+
+      const currentRemaining = resolveRetailInstallmentRemainingDebt({
+        ...invoice,
+        sale: invoice.sale,
+      });
+      if (amount > currentRemaining + 0.009) {
+        throw new BadRequestException(`Максимальная сумма платежа: ${currentRemaining.toFixed(2)}.`);
+      }
+
+      const duplicateNote = `branch-installment-invoice:${invoice.id}:${amount}:${new Date().toISOString().slice(0, 10)}`;
+      const recentDuplicate = await tx.branchPayment.findFirst({
+        where: {
+          invoiceId: invoice.id,
+          deletedAt: null,
+          amount,
+          confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
+          createdAt: { gte: new Date(Date.now() - 60_000) },
+        },
+      });
+      if (recentDuplicate) {
+        throw new ConflictException('Дублирующий платёж уже зарегистрирован');
+      }
+
+      const branchPayment = await tx.branchPayment.create({
+        data: {
+          branchId: invoice.branchId,
+          invoiceId: invoice.id,
+          amount,
+          method: dto.method,
+          note: dto.note?.trim() || duplicateNote,
+          receiptReference: dto.receiptReference,
+          confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
+          submittedAt: new Date(),
+          confirmedAt: new Date(),
+          confirmedById: user.id,
+          paidAt: new Date(),
+          createdById: user.id,
+        },
+      });
+
+      const paidAfterTotal = this.roundMoney(
+        resolveRetailInstallmentPaidAmount({ ...invoice, sale: invoice.sale }) + amount,
+      );
+      const totalAmount = this.roundMoney(Number(approval.totalAmount));
+      const remainingAfter = this.roundMoney(totalAmount - paidAfterTotal);
+      const nextApprovalStatus =
+        remainingAfter <= 0.009
+          ? SaleInstallmentApprovalStatus.PAID
+          : SaleInstallmentApprovalStatus.ACTIVE;
+
+      await tx.payment.create({
+        data: {
+          branchId: invoice.branchId,
+          saleId: invoice.saleId!,
+          customerId: invoice.sale.customerId,
+          amount,
+          method: mapBranchPaymentMethodToSalePaymentMethod(dto.method) as PaymentMethod,
+          note: `branch-installment-invoice:${invoice.id}`,
+          createdById: user.id,
+          status: PaymentRecordStatus.ACTIVE,
+        },
+      });
+
+      await tx.saleInstallmentPayment.create({
+        data: {
+          installmentApprovalId: approval.id,
+          branchId: invoice.branchId,
+          amount,
+          method: mapBranchPaymentMethodToSalePaymentMethod(dto.method) as PaymentMethod,
+          note: dto.note?.trim() || 'Платёж по рассрочке',
+          paidAfterTotal,
+          remainingAfter: Math.max(remainingAfter, 0),
+          createdById: user.id,
+        },
+      });
+
+      await tx.saleInstallmentApproval.update({
+        where: { id: approval.id },
+        data: {
+          status: nextApprovalStatus,
+          installmentPaidAmount: paidAfterTotal,
+          remainingDebt: Math.max(remainingAfter, 0),
+        },
+      });
+
+      const invoicePaidAmount = paidAfterTotal;
+      const invoiceDebtAmount = Math.max(totalAmount - invoicePaidAmount, 0);
+      const invoiceStatus =
+        invoiceDebtAmount <= 0.009
+          ? BranchInvoiceStatus.PAID
+          : invoicePaidAmount > 0
+            ? BranchInvoiceStatus.PARTIALLY_PAID
+            : BranchInvoiceStatus.ISSUED;
+
+      await tx.branchInvoice.update({
+        where: { id: invoice.id },
+        data: {
+          paidAmount: invoicePaidAmount,
+          debtAmount: invoiceDebtAmount,
+          status: invoiceStatus,
+        },
+      });
+
+      const paymentAggregate = await tx.payment.aggregate({
+        where: { saleId: invoice.saleId!, status: PaymentRecordStatus.ACTIVE },
+        _sum: { amount: true },
+      });
+      const salePaid = this.roundMoney(Number(paymentAggregate._sum.amount ?? 0));
+      await tx.sale.update({
+        where: { id: invoice.saleId! },
+        data: {
+          paidAmount: salePaid,
+          debtAmount: Math.max(totalAmount - salePaid, 0),
+          paymentStatus:
+            salePaid >= totalAmount - 0.009
+              ? PaymentStatus.PAID
+              : salePaid > 0
+                ? PaymentStatus.PARTIAL
+                : PaymentStatus.DEBT,
+        },
+      });
+
+      await this.auditInTx(tx, user, invoice.branchId, 'INSTALLMENT_PAYMENT_RECEIVED', 'BranchInvoice', invoice.id, {
+        saleId: invoice.saleId,
+        invoiceId: invoice.id,
+        branchPaymentId: branchPayment.id,
+        amount,
+        paidAfterTotal,
+        remainingAfter,
+        roles: user.roles ?? [user.role],
+      });
+
+      if (nextApprovalStatus === SaleInstallmentApprovalStatus.PAID) {
+        await this.auditInTx(tx, user, invoice.branchId, 'INSTALLMENT_CLOSED', 'SaleInstallmentApproval', approval.id, {
+          saleId: invoice.saleId,
+          invoiceId: invoice.id,
+        });
+        await this.notificationsService.notifyInTx(tx, user, {
+          type: AlertType.SALE_INSTALLMENT_PAID,
+          branchId: invoice.branchId,
+          title: 'Рассрочка погашена',
+          message: `Рассрочка №${approval.requestNumber} полностью оплачена.`,
+          entityType: 'SaleInstallmentApproval',
+          entityId: approval.id,
+          referenceNumber: approval.requestNumber,
+          recipientRoles: [Role.MANAGER, Role.FRANCHISE_OWNER, Role.ACCOUNTANT],
+        });
+      }
+
+      return {
+        invoiceId: invoice.id,
+        paidAmount: invoicePaidAmount,
+        debtAmount: invoiceDebtAmount,
+        status: invoiceStatus,
+        approvalStatus: nextApprovalStatus,
+        remainingDebt: Math.max(remainingAfter, 0),
+      };
     });
   }
 

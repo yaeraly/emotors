@@ -120,4 +120,26 @@ export class BranchCashierController {
   ) {
     return this.service.submitCashierPayment(user, id, dto);
   }
+
+  @Get('installments')
+  @Roles(Role.CASHIER, Role.OWNER, Role.CEO)
+  listInstallments(@CurrentUser() user: AuthUser, @Query() query: BranchAccountantInvoiceQueryDto) {
+    return this.service.listCashierInstallments(user, query);
+  }
+
+  @Get('installments/:id')
+  @Roles(Role.CASHIER, Role.OWNER, Role.CEO)
+  getInstallment(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.getCashierInstallment(user, id);
+  }
+
+  @Post('installments/:id/payments')
+  @Roles(Role.CASHIER)
+  submitInstallmentPayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AddBranchPaymentDto,
+  ) {
+    return this.service.submitCashierInstallmentPayment(user, id, dto);
+  }
 }
