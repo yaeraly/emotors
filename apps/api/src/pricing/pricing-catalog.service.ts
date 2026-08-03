@@ -470,8 +470,8 @@ export class PricingCatalogService {
     const items = await Promise.all(
       products.map(async (product) => {
         try {
-          // Read-only cost lookup — listing must not rewrite FIFO batches.
-          const fifoCost = await this.fifoService.getOldestActiveHqFifoCost({
+          // Pricing cost basis (survives HQ stock = 0). Not current-inventory FIFO alone.
+          const fifoCost = await this.fifoService.getPricingCostBasis({
             productId: product.id,
             catalogReadOnly: true,
           });
@@ -517,7 +517,7 @@ export class PricingCatalogService {
           // One product enrichment failure must never empty the whole catalog.
           return buildFranchiseSalesCatalogRow(
             product,
-            { available: false, costPriceKgs: 0, source: 'NO_FIFO_LAYER', batchId: null },
+            { available: false, costPriceKgs: 0, source: 'NO_COST_BASIS', batchId: null },
             null,
             displayBranchRef,
           );
@@ -550,9 +550,12 @@ export class PricingCatalogService {
     if (!product) throw new NotFoundException('Product not found');
 
     await this.fifoService.syncFifoBatchesFromHqStockMovements();
-    const cost = await this.fifoService.getOldestActiveHqFifoCost(product.id);
+    // Allow markup edits using the stable pricing cost basis even when HQ stock is 0.
+    const cost = await this.fifoService.getPricingCostBasis(product.id);
     if (!cost.available || cost.costPriceKgs <= 0) {
-      throw new BadRequestException('HQ unit cost is unavailable — product has no HQ inventory layer');
+      throw new BadRequestException(
+        'Pricing cost basis is unavailable — no active FIFO layer, published snapshot, or depleted receipt cost',
+      );
     }
     const nextMarkups = {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
@@ -2541,7 +2544,7 @@ export class PricingCatalogService {
     product: Parameters<PricingCatalogService['formatRetailCatalogRow']>[0],
     displayBranch: Awaited<ReturnType<PricingCatalogService['resolveCatalogDisplayBranch']>>,
   ) {
-    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const cost = await this.fifoService.getPricingCostBasis(product.id);
     const masterPrices = pricesFromMarkups(cost.costPriceKgs, {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
       minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),
@@ -2629,7 +2632,7 @@ export class PricingCatalogService {
     product: Parameters<PricingCatalogService['formatWholesaleCatalogRow']>[0],
     displayBranch: Awaited<ReturnType<PricingCatalogService['resolveCatalogDisplayBranch']>>,
   ) {
-    const cost = await this.fifoService.getLatestHqCostPrice(product.id);
+    const cost = await this.fifoService.getPricingCostBasis(product.id);
     const masterPrices = pricesFromMarkups(cost.costPriceKgs, {
       wholesaleMarkupPercent: Number(product.wholesaleMarkupPercent),
       minimumWholesaleMarkupPercent: Number(product.minimumWholesaleMarkupPercent),

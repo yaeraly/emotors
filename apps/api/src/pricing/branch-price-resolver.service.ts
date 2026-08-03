@@ -106,7 +106,7 @@ export class BranchPriceResolverService {
     const pricingPolicyVersionNumber = activeVersion?.versionNumber ?? null;
 
     if (!pricingPolicyVersionId) {
-      const fifo = await this.fifoService.getOldestActiveHqFifoCost(
+      const fifo = await this.fifoService.getPricingCostBasis(
         {
           productId,
           ...(options?.warehouseId ? { warehouseId: options.warehouseId } : {}),

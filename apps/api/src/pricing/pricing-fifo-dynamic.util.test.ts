@@ -41,11 +41,19 @@ describe('FIFO dynamic pricing layer selection', () => {
     assert.notEqual(cost, 5500);
   });
 
-  it('returns null when no FIFO layer remains', () => {
+  it('returns null when no FIFO layer remains (current inventory cost only)', () => {
     const cost = selectActiveFifoUnitCost([
       { remainingQuantity: 0, unitCostKgs: 5000, receivedAt: '2026-01-01' },
       { remainingQuantity: 0, unitCostKgs: 6000, receivedAt: '2026-02-01' },
     ]);
     assert.equal(cost, null);
+  });
+
+  it('documents that Pricing Policy must use getPricingCostBasis when inventory cost is empty', () => {
+    // See pricing-cost-basis.util.test.ts — depleted layers remain valid pricing bases.
+    assert.equal(
+      selectActiveFifoUnitCost([{ remainingQuantity: 0, unitCostKgs: 407.53, receivedAt: '2026-01-01' }]),
+      null,
+    );
   });
 });

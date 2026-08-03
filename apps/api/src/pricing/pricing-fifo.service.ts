@@ -1,8 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import { BranchType, Prisma, StockMovementType, WarehouseType } from '@prisma/client';
+import {
+  BranchType,
+  PricingPolicyVersionStatus,
+  Prisma,
+  StockMovementType,
+  WarehouseType,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { pricesFromMarkups } from './pricing-calculator.util';
+import {
+  resolvePricingCostBasisFallback,
+  type PricingCostBasisSource,
+} from './pricing-cost-basis.util';
 import { buildFifoAllocationLines } from './pricing-fifo-allocation.util';
 import {
   allocateLayerConsumptionCost,
@@ -44,6 +54,17 @@ export type OldestActiveHqFifoCostResult = {
   batchId: string | null;
   receivedAt: Date | null;
   warehouseId?: string | null;
+};
+
+/** Pricing Policy / Branch Sales cost basis (may outlive current HQ stock). */
+export type PricingCostBasisResult = {
+  costPriceKgs: number;
+  available: boolean;
+  source: PricingCostBasisSource;
+  batchId: string | null;
+  receivedAt: Date | null;
+  warehouseId?: string | null;
+  pricingPolicyVersionId?: string | null;
 };
 
 export type OldestActiveHqFifoCostInput =
@@ -406,6 +427,7 @@ export class PricingFifoService {
     }
 
     // No active HQ FIFO layer — do not use average, balance, supplier, or product snapshots.
+    // Inventory/current-cost callers stop here. Pricing Policy must use getPricingCostBasis().
     return {
       costPriceKgs: 0,
       available: false,
@@ -413,6 +435,155 @@ export class PricingFifoService {
       batchId: null,
       receivedAt: null,
       warehouseId: warehouseId ?? null,
+    };
+  }
+
+  /**
+   * Stable Pricing Policy / Branch Sales cost basis.
+   *
+   * Priority:
+   * 1. Active remaining HQ FIFO layer (current inventory cost)
+   * 2. Active published PricingPolicyVersionProductSnapshot.costPriceKgs
+   * 3. Latest depleted HQ FIFO layer that still carries a valid unit cost
+   *
+   * Does NOT invent averages or mutate inventory. Sold-out HQ stock keeps a
+   * valid pricing cost basis so published selling prices do not collapse to 0.
+   */
+  async getPricingCostBasis(
+    input: OldestActiveHqFifoCostInput,
+    tx?: PrismaTx,
+  ): Promise<PricingCostBasisResult> {
+    const productId = typeof input === 'string' ? input : input.productId;
+    const warehouseId = typeof input === 'string' ? undefined : input.warehouseId;
+    const active = await this.getLatestHqCostPrice(input, tx);
+    if (active.available && active.costPriceKgs > 0.009) {
+      return {
+        costPriceKgs: active.costPriceKgs,
+        available: true,
+        source: 'HQ_FIFO_ACTIVE_LAYER',
+        batchId: active.batchId,
+        receivedAt: active.receivedAt,
+        warehouseId: active.warehouseId ?? warehouseId ?? null,
+        pricingPolicyVersionId: null,
+      };
+    }
+
+    const client = tx ?? this.prisma;
+    const productIds = await this.resolveHqFifoProductIds(client, productId);
+
+    const activeVersion = await client.pricingPolicyVersion.findFirst({
+      where: { status: PricingPolicyVersionStatus.ACTIVE },
+      orderBy: { versionNumber: 'desc' },
+      select: { id: true },
+    });
+
+    let snapshotCostKgs: number | null = null;
+    let snapshotId: string | null = null;
+    let pricingPolicyVersionId: string | null = activeVersion?.id ?? null;
+    if (activeVersion) {
+      const snapshot = await client.pricingPolicyVersionProductSnapshot.findFirst({
+        where: {
+          versionId: activeVersion.id,
+          productId: { in: productIds },
+          costPriceKgs: { gt: 0 },
+        },
+        orderBy: { costPriceKgs: 'desc' },
+        select: { id: true, costPriceKgs: true, versionId: true },
+      });
+      if (snapshot) {
+        snapshotCostKgs = Number(snapshot.costPriceKgs);
+        snapshotId = snapshot.id;
+        pricingPolicyVersionId = snapshot.versionId;
+      }
+    }
+
+    const depletedBatches = await client.fifoInventoryBatch.findMany({
+      where: {
+        productId: { in: productIds },
+        remainingQuantity: { lte: 0 },
+        ...(warehouseId ? { warehouseId } : {}),
+        warehouse: {
+          warehouseType: WarehouseType.HQ,
+          deletedAt: null,
+          isActive: true,
+        },
+      },
+      orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      take: 25,
+    });
+
+    const depletedLayers: Array<{
+      id: string;
+      remainingQuantity: number;
+      unitCostKgs: number;
+      receivedAt: Date;
+      warehouseId: string;
+    }> = [];
+
+    for (const batch of depletedBatches) {
+      if (batch.referenceType === SEED_FIFO_REFERENCE_TYPE) continue;
+      const movement = batch.stockMovementId
+        ? await client.stockMovement.findFirst({
+            where: { id: batch.stockMovementId },
+            select: {
+              id: true,
+              quantity: true,
+              unitCostKgs: true,
+              totalCostKgs: true,
+              referenceType: true,
+              referenceId: true,
+              note: true,
+            },
+          })
+        : null;
+      if (
+        isSeedStockMovementReference({
+          referenceType: batch.referenceType,
+          referenceId: batch.referenceId,
+          note: movement?.note,
+        }) ||
+        (movement &&
+          isSeedStockMovementReference({
+            referenceType: movement.referenceType,
+            referenceId: movement.referenceId,
+            note: movement.note,
+          }))
+      ) {
+        continue;
+      }
+
+      const unitCostKgs = await resolveFifoLayerCatalogUnitCost(client, batch, movement);
+      if (unitCostKgs > 0.009) {
+        depletedLayers.push({
+          id: batch.id,
+          remainingQuantity: Number(batch.remainingQuantity),
+          unitCostKgs,
+          receivedAt: batch.receivedAt,
+          warehouseId: batch.warehouseId,
+        });
+      }
+    }
+
+    const fallback = resolvePricingCostBasisFallback({
+      snapshotCostKgs,
+      snapshotId,
+      depletedLayers,
+    });
+
+    const matchedLayer =
+      fallback.source === 'HQ_FIFO_DEPLETED_LAYER'
+        ? depletedLayers.find((layer) => layer.id === fallback.sourceRecordId)
+        : null;
+
+    return {
+      costPriceKgs: fallback.costPriceKgs,
+      available: fallback.available,
+      source: fallback.source,
+      batchId: matchedLayer?.id ?? null,
+      receivedAt: matchedLayer?.receivedAt ?? null,
+      warehouseId: matchedLayer?.warehouseId ?? warehouseId ?? null,
+      pricingPolicyVersionId:
+        fallback.source === 'PRICING_POLICY_SNAPSHOT' ? pricingPolicyVersionId : null,
     };
   }
 

@@ -111,7 +111,9 @@ export class PricingEngineService {
               })
             : null);
 
-    const cost = await this.fifoService.getOldestActiveHqFifoCost(pricingProduct.id);
+    // Pricing cost basis must survive HQ stock reaching zero after full transfer.
+    // Current-inventory FIFO (remaining > 0 only) is NOT used as the sole source.
+    const cost = await this.fifoService.getPricingCostBasis(pricingProduct.id);
     const costAvailable = Boolean(cost.available && cost.costPriceKgs > 0);
     const baseCostKgs = costAvailable ? cost.costPriceKgs : 0;
     const baseFranchiseMarkupPercent = Number(pricingProduct.hqBranchWholesaleMarkupPercent ?? 0);

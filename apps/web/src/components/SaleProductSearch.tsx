@@ -204,7 +204,13 @@ export function SaleProductSearch({
                   {showRecommendedPriceLabel || product.hasRecommendedPrice === false
                     ? t('pricing.recommendedRetailPrice')
                     : t('sales.productSearch.sellingPrice')}
-                  : {(product.recommendedRetailPriceKgs ?? product.sellingPriceKgs).toLocaleString('ru-RU')} KGS
+                  :{' '}
+                  {product.hasRecommendedPrice === false ||
+                  !(product.recommendedRetailPriceKgs ?? product.sellingPriceKgs)
+                    ? t('sales.priceNotConfigured')
+                    : `${Number(
+                        product.recommendedRetailPriceKgs ?? product.sellingPriceKgs,
+                      ).toLocaleString('ru-RU')} KGS`}
                 </p>
               </button>
             </li>
