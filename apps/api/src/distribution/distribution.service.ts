@@ -91,7 +91,8 @@ import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.s
 import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
 import {
   BRANCH_SPLIT_PAYMENT_AUDIT,
-  isSplitCashierPaymentInput,
+  isMultiMethodCashierPaymentInput,
+  normalizeCashierPaymentAllocations,
 } from '../finance/branch-cashier-split-payment.util';
 import {
   BRANCH_CUSTOMER_PAYMENT_AUDIT,
@@ -3028,11 +3029,13 @@ export class DistributionService {
       invoice.invoiceCategory === BranchInvoiceCategory.RETAIL_SALE &&
       invoice.paymentType === BranchInvoicePaymentType.FULL_PAYMENT;
 
-    if (isBranchCashier && isSplitCashierPaymentInput(dto)) {
+    if (isBranchCashier && isMultiMethodCashierPaymentInput(dto)) {
+      const normalizedAllocations = normalizeCashierPaymentAllocations(dto);
       if (dto.idempotencyKey) {
         const existingSplit = await this.branchCashierPaymentService.findIdempotentSplitPayments(
           tx,
           dto.idempotencyKey,
+          normalizedAllocations.map((row) => row.method),
         );
         if (existingSplit?.length) {
           const refreshed = await tx.branchInvoice.findUniqueOrThrow({
@@ -3141,8 +3144,8 @@ export class DistributionService {
             invoiceId: invoice.id,
             branchId: invoice.branchId,
             saleId: invoice.saleId ?? null,
-            cashAccountId: splitResult.cashAccountId,
-            qrAccountId: splitResult.qrAccountId,
+            cashAccountId: splitResult.accountIds.CASH ?? null,
+            qrAccountId: splitResult.accountIds.QR ?? null,
             totalNetAmount: splitResult.allocation.totalNetAmount,
             oldInvoiceStatus: splitResult.oldInvoiceStatus,
             newInvoiceStatus: newStatus,

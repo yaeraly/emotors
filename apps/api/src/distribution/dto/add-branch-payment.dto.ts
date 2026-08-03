@@ -1,6 +1,28 @@
 import { BranchPaymentMethod } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+
+export class BranchPaymentAllocationDto {
+  @IsEnum(BranchPaymentMethod)
+  method!: BranchPaymentMethod;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  amount!: number;
+
+  @IsOptional()
+  @IsString()
+  accountId?: string;
+}
 
 export class AddBranchPaymentDto {
   @IsOptional()
@@ -48,6 +70,12 @@ export class AddBranchPaymentDto {
   @IsOptional()
   @IsString()
   qrAccountId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BranchPaymentAllocationDto)
+  allocations?: BranchPaymentAllocationDto[];
 
   @IsOptional()
   @IsString()

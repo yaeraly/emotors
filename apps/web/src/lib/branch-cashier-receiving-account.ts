@@ -25,6 +25,12 @@ export const BRANCH_CASHIER_INSTALLMENT_PAYMENT_METHODS: BranchPaymentMethod[] =
   'BANK',
 ];
 
+export const BRANCH_CASHIER_INVOICE_PAYMENT_METHODS: BranchPaymentMethod[] = [
+  'CASH',
+  'QR',
+  'BANK',
+];
+
 export function branchCashierPaymentMethodLabelKey(method: BranchPaymentMethod): string {
   switch (method) {
     case 'CASH':

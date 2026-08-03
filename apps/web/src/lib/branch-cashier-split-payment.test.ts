@@ -4,57 +4,93 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import {
-  BRANCH_SPLIT_PAYMENT_ERRORS,
-  computeSplitRemaining,
-  previewSplitCashierPayment,
-} from './branch-cashier-split-payment';
+  addPaymentMethodRow,
+  availablePaymentMethods,
+  BRANCH_MULTI_METHOD_PAYMENT_ERRORS,
+  canAddPaymentMethod,
+  computePaymentRemaining,
+  createInitialPaymentRows,
+  createPaymentMethodRow,
+  previewMultiMethodCashierPayment,
+  removePaymentMethodRow,
+} from './branch-cashier-multi-method-payment';
 
-describe('previewSplitCashierPayment', () => {
-  it('splits full payment with cash change', () => {
-    const result = previewSplitCashierPayment({
+describe('branch cashier multi-method payment ui helpers', () => {
+  it('starts with one cash row', () => {
+    const rows = createInitialPaymentRows();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.method, 'CASH');
+  });
+
+  it('adds unused payment methods only', () => {
+    let rows = createInitialPaymentRows();
+    rows = addPaymentMethodRow(rows);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map((row) => row.method), ['CASH', 'QR']);
+    rows = addPaymentMethodRow(rows);
+    assert.deepEqual(rows.map((row) => row.method), ['CASH', 'QR', 'BANK']);
+    assert.equal(canAddPaymentMethod(rows), false);
+  });
+
+  it('prevents duplicate methods in available list', () => {
+    const rows = [
+      createPaymentMethodRow('CASH', '0'),
+      createPaymentMethodRow('QR', '0'),
+    ];
+    assert.deepEqual(availablePaymentMethods(rows), ['BANK']);
+    assert.deepEqual(new Set(availablePaymentMethods(rows, 'CASH')), new Set(['BANK', 'CASH']));
+  });
+
+  it('removes rows but keeps at least one', () => {
+    const rows = [
+      createPaymentMethodRow('CASH', '1000'),
+      createPaymentMethodRow('QR', '0'),
+    ];
+    const afterRemove = removePaymentMethodRow(rows, rows[1]!.id);
+    assert.equal(afterRemove.length, 1);
+    assert.equal(removePaymentMethodRow(afterRemove, afterRemove[0]!.id).length, 1);
+  });
+});
+
+describe('previewMultiMethodCashierPayment', () => {
+  it('supports cash + qr + bank full payment preview', () => {
+    const result = previewMultiMethodCashierPayment({
       payableAmount: 100_000,
       isFullPayment: true,
-      cashAmount: '50000',
-      qrAmount: '60000',
+      rows: [
+        createPaymentMethodRow('CASH', '20000'),
+        createPaymentMethodRow('QR', '30000'),
+        createPaymentMethodRow('BANK', '50000'),
+      ],
     });
     assert.ok(!('error' in result));
-    assert.equal(result.qrNetAmount, 60_000);
-    assert.equal(result.cashNetAmount, 40_000);
-    assert.equal(result.cashChangeAmount, 10_000);
     assert.equal(result.totalNetAmount, 100_000);
   });
 
-  it('accepts partial installment repayment split', () => {
-    const result = previewSplitCashierPayment({
-      payableAmount: 80_000,
-      isFullPayment: false,
-      cashAmount: '10000',
-      qrAmount: '15000',
-    });
-    assert.ok(!('error' in result));
-    assert.equal(result.totalNetAmount, 25_000);
-    assert.equal(result.remainingAfterPayment, 55_000);
-  });
-
-  it('rejects qr above payable amount', () => {
-    const result = previewSplitCashierPayment({
+  it('rejects non-cash overpayment', () => {
+    const result = previewMultiMethodCashierPayment({
       payableAmount: 50_000,
       isFullPayment: true,
-      cashAmount: '0',
-      qrAmount: '60000',
+      rows: [
+        createPaymentMethodRow('QR', '30000'),
+        createPaymentMethodRow('BANK', '30000'),
+      ],
     });
-    assert.equal('error' in result && result.error, BRANCH_SPLIT_PAYMENT_ERRORS.QR_OVER_PAYABLE);
+    assert.equal(
+      'error' in result && result.error,
+      BRANCH_MULTI_METHOD_PAYMENT_ERRORS.NON_CASH_OVER_PAYABLE,
+    );
   });
 });
 
-describe('computeSplitRemaining', () => {
+describe('computePaymentRemaining', () => {
   it('never returns negative remaining', () => {
-    assert.equal(computeSplitRemaining(100_000, 110_000), 0);
-    assert.equal(computeSplitRemaining(100_000, 60_000), 40_000);
+    assert.equal(computePaymentRemaining(100_000, 110_000), 0);
+    assert.equal(computePaymentRemaining(100_000, 60_000), 40_000);
   });
 });
 
-describe('branch cashier invoices table and split payment form', () => {
+describe('branch cashier invoices table and multi-method payment form', () => {
   const tableSource = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), '../app/branch-cashier/invoices/page.tsx'),
     'utf8',
@@ -74,17 +110,16 @@ describe('branch cashier invoices table and split payment form', () => {
     assert.doesNotMatch(tableSource, /onClick=\{\(\) => router\.push/);
   });
 
-  it('renders split payment fields on invoice detail', () => {
+  it('renders multi-method payment section on invoice detail', () => {
     assert.match(detailSource, /branchCashier\.splitPayableAmount/);
-    assert.match(detailSource, /branchCashier\.splitCashAmount/);
-    assert.match(detailSource, /branchCashier\.splitQrAmount/);
+    assert.match(detailSource, /branchCashier\.paymentMethodsSection/);
+    assert.match(detailSource, /branchCashier\.addPaymentMethod/);
     assert.match(detailSource, /branchCashier\.splitTotalEntered/);
     assert.match(detailSource, /branchCashier\.splitRemaining/);
-    assert.match(detailSource, /cashAmount/);
-    assert.match(detailSource, /qrAmount/);
+    assert.match(detailSource, /allocations/);
   });
 
-  it('uses read-only account resolution for cash and qr', () => {
+  it('uses read-only account resolution without manual account select', () => {
     assert.match(detailSource, /\/branch-cashier\/accounts\/resolve/);
     assert.doesNotMatch(detailSource, /<select[^>]*financeAccountId/);
   });

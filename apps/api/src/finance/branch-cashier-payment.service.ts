@@ -40,11 +40,12 @@ import {
 } from './branch-payment-posting.util';
 import { FinanceLedgerService } from './finance-ledger.service';
 import {
-  BRANCH_SPLIT_PAYMENT_AUDIT,
-  isSplitCashierPaymentInput,
-  resolveSplitCashierPayment,
+  allocationPostedAuditAction,
+  BRANCH_MULTI_METHOD_PAYMENT_AUDIT,
+  isMultiMethodCashierPaymentInput,
+  normalizeCashierPaymentAllocations,
+  resolveMultiMethodCashierPayment,
   splitPaymentIdempotencyKey,
-  type SplitPaymentAllocation,
 } from './branch-cashier-split-payment.util';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -205,22 +206,27 @@ export class BranchCashierPaymentService {
     return resolution.account;
   }
 
-  async findIdempotentSplitPayments(tx: PrismaTx, idempotencyKey?: string | null) {
+  async findIdempotentSplitPayments(
+    tx: PrismaTx,
+    idempotencyKey?: string | null,
+    methods?: string[],
+  ) {
     if (!idempotencyKey?.trim()) return null;
+    const keys = (methods?.length
+      ? methods
+      : ['CASH', 'QR', 'BANK']
+    ).map((method) => splitPaymentIdempotencyKey(idempotencyKey.trim(), method));
     const payments = await tx.branchPayment.findMany({
       where: {
         deletedAt: null,
-        OR: [
-          { idempotencyKey: splitPaymentIdempotencyKey(idempotencyKey.trim(), 'CASH') },
-          { idempotencyKey: splitPaymentIdempotencyKey(idempotencyKey.trim(), 'QR') },
-        ],
+        idempotencyKey: { in: keys },
       },
       include: { financeAccount: true },
     });
     return payments.length ? payments : null;
   }
 
-  async processSplitInvoicePaymentInTx(
+  async processMultiMethodInvoicePaymentInTx(
     tx: PrismaTx,
     user: AuthUser,
     input: {
@@ -231,6 +237,11 @@ export class BranchCashierPaymentService {
         status: BranchInvoiceStatus;
       };
       dto: {
+        allocations?: Array<{
+          method?: string | null;
+          amount?: number | null;
+          accountId?: string | null;
+        }> | null;
         cashAmount?: number | null;
         qrAmount?: number | null;
         cashAccountId?: string | null;
@@ -243,34 +254,33 @@ export class BranchCashierPaymentService {
       isFullPayment: boolean;
     },
   ) {
-    if (!isSplitCashierPaymentInput(input.dto)) {
-      throw new BadRequestException('Split payment amounts are required');
+    if (!isMultiMethodCashierPaymentInput(input.dto)) {
+      throw new BadRequestException('Payment allocations are required');
     }
 
-    const allocation = resolveSplitCashierPayment({
+    const normalizedAllocations = normalizeCashierPaymentAllocations(input.dto);
+    const allocation = resolveMultiMethodCashierPayment({
       payableAmount: input.payableAmount,
       isFullPayment: input.isFullPayment,
-      cashGrossAmount: Number(input.dto.cashAmount ?? 0),
-      qrGrossAmount: Number(input.dto.qrAmount ?? 0),
+      allocations: normalizedAllocations.map((row) => ({
+        method: row.method,
+        grossAmount: row.grossAmount,
+      })),
     });
 
-    const cashAccount =
-      allocation.cashNetAmount > 0.009
-        ? await this.resolveReceivingAccountOrThrow(user, 'CASH', {
-            invoiceId: input.invoice.id,
-            clientAccountId: input.dto.cashAccountId,
-          })
-        : null;
-    const qrAccount =
-      allocation.qrNetAmount > 0.009
-        ? await this.resolveReceivingAccountOrThrow(user, 'QR', {
-            invoiceId: input.invoice.id,
-            clientAccountId: input.dto.qrAccountId,
-          })
-        : null;
+    const accountByMethod = new Map<string, { id: string }>();
+    for (const row of normalizedAllocations) {
+      const resolved = allocation.allocations.find((item) => item.method === row.method);
+      if (!resolved || resolved.netAmount <= 0.009) continue;
+      const account = await this.resolveReceivingAccountOrThrow(user, row.method, {
+        invoiceId: input.invoice.id,
+        clientAccountId: row.accountId,
+      });
+      accountByMethod.set(row.method, account);
+    }
 
     const createdPayments: Array<{
-      method: 'CASH' | 'QR';
+      method: string;
       paymentId: string;
       accountId: string;
       netAmount: number;
@@ -283,21 +293,27 @@ export class BranchCashierPaymentService {
     const baseIdempotencyKey = input.dto.idempotencyKey?.trim() || null;
     const oldInvoiceStatus = input.invoice.status;
 
-    if (allocation.cashNetAmount > 0.009 && cashAccount) {
+    for (const row of allocation.allocations) {
+      if (row.netAmount <= 0.009) continue;
+      const account = accountByMethod.get(row.method);
+      if (!account) {
+        throw new BadRequestException(`Не удалось определить счёт для способа оплаты ${row.method}`);
+      }
+
       const payment = await tx.branchPayment.create({
         data: {
           branchId: input.invoice.branchId,
           invoiceId: input.invoice.id,
-          amount: allocation.cashNetAmount,
-          receivedAmount: allocation.cashGrossAmount,
-          changeAmount: allocation.cashChangeAmount > 0.009 ? allocation.cashChangeAmount : null,
-          netAcceptedAmount: allocation.cashNetAmount,
-          method: 'CASH',
-          note: input.dto.note?.trim() || `split-cash:${input.invoice.id}`,
+          amount: row.netAmount,
+          receivedAmount: row.grossAmount,
+          changeAmount: row.changeAmount > 0.009 ? row.changeAmount : null,
+          netAcceptedAmount: row.netAmount,
+          method: row.method as 'CASH' | 'QR' | 'BANK' | 'TRANSFER',
+          note: input.dto.note?.trim() || `multi-${row.method.toLowerCase()}:${input.invoice.id}`,
           receiptReference: input.dto.receiptReference,
-          financeAccountId: cashAccount.id,
+          financeAccountId: account.id,
           idempotencyKey: baseIdempotencyKey
-            ? splitPaymentIdempotencyKey(baseIdempotencyKey, 'CASH')
+            ? splitPaymentIdempotencyKey(baseIdempotencyKey, row.method)
             : null,
           confirmationStatus: 'CONFIRMED',
           submittedAt: new Date(),
@@ -307,119 +323,72 @@ export class BranchCashierPaymentService {
           createdById: user.id,
         },
       });
+
       const credit = await this.creditAccountForPayment(tx, user, {
-        accountId: cashAccount.id,
+        accountId: account.id,
         branchId: input.invoice.branchId,
-        netAcceptedAmount: allocation.cashNetAmount,
+        netAcceptedAmount: row.netAmount,
         paymentId: payment.id,
         invoiceId: input.invoice.id,
         saleId: input.invoice.saleId,
-        paymentMethod: 'CASH',
-        receivedAmount: allocation.cashGrossAmount,
-        changeAmount: allocation.cashChangeAmount,
+        paymentMethod: row.method,
+        receivedAmount: row.grossAmount,
+        changeAmount: row.changeAmount > 0.009 ? row.changeAmount : null,
         notes: input.dto.note ?? undefined,
       });
+
       await tx.branchPayment.update({
         where: { id: payment.id },
         data: { ledgerEntryId: credit.ledgerEntryId },
       });
+
       createdPayments.push({
-        method: 'CASH',
+        method: row.method,
         paymentId: payment.id,
-        accountId: cashAccount.id,
-        netAmount: allocation.cashNetAmount,
-        grossAmount: allocation.cashGrossAmount,
-        changeAmount: allocation.cashChangeAmount,
+        accountId: account.id,
+        netAmount: row.netAmount,
+        grossAmount: row.grossAmount,
+        changeAmount: row.changeAmount,
         ledgerEntryId: credit.ledgerEntryId,
         newBalance: credit.newBalance,
       });
+
       await tx.auditLog.create({
         data: {
           userId: user.id,
           role: user.role,
-          action: BRANCH_SPLIT_PAYMENT_AUDIT.CASH_PAYMENT_POSTED,
+          action: BRANCH_MULTI_METHOD_PAYMENT_AUDIT.ALLOCATION_CREATED,
           entity: 'BranchPayment',
           entityId: payment.id,
           metadata: {
             invoiceId: input.invoice.id,
             branchId: input.invoice.branchId,
-            accountId: cashAccount.id,
-            paymentMethod: 'CASH',
-            grossAmount: allocation.cashGrossAmount,
-            changeAmount: allocation.cashChangeAmount,
-            netAmount: allocation.cashNetAmount,
+            accountId: account.id,
+            paymentMethod: row.method,
+            grossAmount: row.grossAmount,
+            changeAmount: row.changeAmount,
+            netAmount: row.netAmount,
             actorUserId: user.id,
             timestamp: new Date().toISOString(),
           },
         },
       });
-    }
 
-    if (allocation.qrNetAmount > 0.009 && qrAccount) {
-      const payment = await tx.branchPayment.create({
-        data: {
-          branchId: input.invoice.branchId,
-          invoiceId: input.invoice.id,
-          amount: allocation.qrNetAmount,
-          receivedAmount: allocation.qrGrossAmount,
-          changeAmount: null,
-          netAcceptedAmount: allocation.qrNetAmount,
-          method: 'QR',
-          note: input.dto.note?.trim() || `split-qr:${input.invoice.id}`,
-          receiptReference: input.dto.receiptReference,
-          financeAccountId: qrAccount.id,
-          idempotencyKey: baseIdempotencyKey
-            ? splitPaymentIdempotencyKey(baseIdempotencyKey, 'QR')
-            : null,
-          confirmationStatus: 'CONFIRMED',
-          submittedAt: new Date(),
-          confirmedAt: new Date(),
-          confirmedById: user.id,
-          paidAt: new Date(),
-          createdById: user.id,
-        },
-      });
-      const credit = await this.creditAccountForPayment(tx, user, {
-        accountId: qrAccount.id,
-        branchId: input.invoice.branchId,
-        netAcceptedAmount: allocation.qrNetAmount,
-        paymentId: payment.id,
-        invoiceId: input.invoice.id,
-        saleId: input.invoice.saleId,
-        paymentMethod: 'QR',
-        receivedAmount: allocation.qrGrossAmount,
-        changeAmount: null,
-        notes: input.dto.note ?? undefined,
-      });
-      await tx.branchPayment.update({
-        where: { id: payment.id },
-        data: { ledgerEntryId: credit.ledgerEntryId },
-      });
-      createdPayments.push({
-        method: 'QR',
-        paymentId: payment.id,
-        accountId: qrAccount.id,
-        netAmount: allocation.qrNetAmount,
-        grossAmount: allocation.qrGrossAmount,
-        changeAmount: 0,
-        ledgerEntryId: credit.ledgerEntryId,
-        newBalance: credit.newBalance,
-      });
       await tx.auditLog.create({
         data: {
           userId: user.id,
           role: user.role,
-          action: BRANCH_SPLIT_PAYMENT_AUDIT.QR_PAYMENT_POSTED,
+          action: allocationPostedAuditAction(row.method),
           entity: 'BranchPayment',
           entityId: payment.id,
           metadata: {
             invoiceId: input.invoice.id,
             branchId: input.invoice.branchId,
-            accountId: qrAccount.id,
-            paymentMethod: 'QR',
-            grossAmount: allocation.qrGrossAmount,
-            changeAmount: 0,
-            netAmount: allocation.qrNetAmount,
+            accountId: account.id,
+            paymentMethod: row.method,
+            grossAmount: row.grossAmount,
+            changeAmount: row.changeAmount,
+            netAmount: row.netAmount,
             actorUserId: user.id,
             timestamp: new Date().toISOString(),
           },
@@ -431,19 +400,23 @@ export class BranchCashierPaymentService {
       data: {
         userId: user.id,
         role: user.role,
-        action: BRANCH_SPLIT_PAYMENT_AUDIT.SPLIT_PAYMENT_CONFIRMED,
+        action: BRANCH_MULTI_METHOD_PAYMENT_AUDIT.MULTI_METHOD_PAYMENT_CONFIRMED,
         entity: 'BranchInvoice',
         entityId: input.invoice.id,
         metadata: {
           invoiceId: input.invoice.id,
           saleId: input.invoice.saleId ?? null,
           branchId: input.invoice.branchId,
-          cashAccountId: cashAccount?.id ?? null,
-          qrAccountId: qrAccount?.id ?? null,
-          cashGrossAmount: allocation.cashGrossAmount,
-          cashChangeAmount: allocation.cashChangeAmount,
-          cashNetAmount: allocation.cashNetAmount,
-          qrAmount: allocation.qrNetAmount,
+          allocations: createdPayments.map((payment) => ({
+            paymentId: payment.paymentId,
+            paymentMethod: payment.method,
+            accountId: payment.accountId,
+            grossAmount: payment.grossAmount,
+            changeAmount: payment.changeAmount,
+            netAmount: payment.netAmount,
+          })),
+          cashReceived: allocation.cashGrossAmount,
+          cashChange: allocation.cashChangeAmount,
           totalNetAmount: allocation.totalNetAmount,
           oldRemainingAmount: input.payableAmount,
           newRemainingAmount: allocation.remainingAfterPayment,
@@ -457,8 +430,25 @@ export class BranchCashierPaymentService {
       allocation,
       createdPayments,
       oldInvoiceStatus,
-      cashAccountId: cashAccount?.id ?? null,
-      qrAccountId: qrAccount?.id ?? null,
+      accountIds: Object.fromEntries(
+        createdPayments.map((payment) => [payment.method, payment.accountId]),
+      ),
+    };
+  }
+
+  /** @deprecated Use processMultiMethodInvoicePaymentInTx */
+  async processSplitInvoicePaymentInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    input: Parameters<BranchCashierPaymentService['processMultiMethodInvoicePaymentInTx']>[2] & {
+      dto: Parameters<BranchCashierPaymentService['processMultiMethodInvoicePaymentInTx']>[2]['dto'];
+    },
+  ) {
+    const result = await this.processMultiMethodInvoicePaymentInTx(tx, user, input);
+    return {
+      ...result,
+      cashAccountId: result.accountIds.CASH ?? null,
+      qrAccountId: result.accountIds.QR ?? null,
     };
   }
 
