@@ -25,6 +25,13 @@ import {
   resolveBranchCashierNetPayment,
   roundCashierMoney,
 } from './branch-cashier-payment.util';
+import {
+  assertPaymentMethodMatchesAccountType,
+  BRANCH_CUSTOMER_PAYMENT_AUDIT,
+  BRANCH_PAYMENT_POSTING_REQUIRED_MESSAGE,
+  paymentRequiresLedgerPosting,
+  resolveBranchPaymentNetAmount,
+} from './branch-payment-posting.util';
 import { FinanceLedgerService } from './finance-ledger.service';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -49,18 +56,22 @@ export class BranchCashierPaymentService {
     private readonly ledgerService: FinanceLedgerService,
   ) {}
 
-  async listSelectableAccounts(user: AuthUser) {
+  async listSelectableAccounts(user: AuthUser, paymentMethod?: string) {
     if (!user.branchId) {
       throw new ForbiddenException('Branch cashier access required');
     }
 
     const where = buildSelectableOwnerAccountsWhere(user, { forPayment: true });
     const assignedAccountIds = await getActiveAssignmentAccountIds(this.prisma, user.id);
+    const allowedTypes = paymentMethod
+      ? resolveAllowedTypesForMethod(paymentMethod)
+      : null;
 
     const accounts = await this.prisma.financeAccount.findMany({
       where: {
         ...where,
         ...(assignedAccountIds.size > 0 ? { id: { in: [...assignedAccountIds] } } : {}),
+        ...(allowedTypes ? { typeCode: { in: [...allowedTypes] } } : {}),
       },
       select: {
         id: true,
@@ -127,6 +138,14 @@ export class BranchCashierPaymentService {
     return account;
   }
 
+  assertPaymentAccountType(
+    paymentMethod: string | undefined,
+    account: { typeCode: string },
+  ) {
+    if (!paymentMethod) return;
+    assertPaymentMethodMatchesAccountType(paymentMethod, account.typeCode);
+  }
+
   async lockInvoiceForPayment(tx: PrismaTx, invoiceId: string, branchId: string) {
     await tx.$queryRaw`SELECT id FROM "BranchInvoice" WHERE id = ${invoiceId} FOR UPDATE`;
     const invoice = await tx.branchInvoice.findFirst({
@@ -168,6 +187,7 @@ export class BranchCashierPaymentService {
       input.accountId,
       input.branchId,
     );
+    this.assertPaymentAccountType(input.paymentMethod, account);
     const oldBalance = roundCashierMoney(Number(account.currentBalance));
 
     const ledgerEntry = await this.ledgerService.postLedgerEntry(tx, user, {
@@ -184,6 +204,28 @@ export class BranchCashierPaymentService {
     });
 
     const newBalance = roundCashierMoney(Number(ledgerEntry.afterBalance));
+
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: BRANCH_CUSTOMER_PAYMENT_AUDIT.ACCOUNT_TRANSACTION_CREATED,
+        entity: 'FinanceLedgerEntry',
+        entityId: ledgerEntry.id,
+        metadata: {
+          invoiceId: input.invoiceId,
+          paymentId: input.paymentId,
+          saleId: input.saleId ?? null,
+          branchId: input.branchId,
+          accountId: account.id,
+          paymentMethod: input.paymentMethod ?? null,
+          netCreditedAmount: netAcceptedAmount,
+          changeAmount: input.changeAmount ?? null,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
 
     await tx.auditLog.create({
       data: {
@@ -247,5 +289,52 @@ export class BranchCashierPaymentService {
       return BRANCH_CASHIER_PAYMENT_AUDIT.INVOICE_PARTIALLY_PAID;
     }
     return BRANCH_CASHIER_PAYMENT_AUDIT.PAYMENT_ACCEPTED;
+  }
+
+  assertConfirmedPaymentPosted(
+    payment: { ledgerEntryId?: string | null; confirmationStatus: string },
+    netAcceptedAmount: number,
+  ) {
+    if (netAcceptedAmount <= 0) return;
+    if (payment.confirmationStatus !== 'CONFIRMED') return;
+    if (!payment.ledgerEntryId) {
+      throw new BadRequestException(BRANCH_PAYMENT_POSTING_REQUIRED_MESSAGE);
+    }
+  }
+
+  async assertRetailInvoicePaymentsPosted(tx: PrismaTx, invoiceId: string) {
+    const payments = await tx.branchPayment.findMany({
+      where: {
+        invoiceId,
+        deletedAt: null,
+        confirmationStatus: 'CONFIRMED',
+      },
+    });
+
+    for (const payment of payments) {
+      const netAcceptedAmount = resolveBranchPaymentNetAmount(payment);
+      if (
+        paymentRequiresLedgerPosting({
+          confirmationStatus: payment.confirmationStatus,
+          netAcceptedAmount,
+        })
+      ) {
+        this.assertConfirmedPaymentPosted(payment, netAcceptedAmount);
+      }
+    }
+  }
+}
+
+function resolveAllowedTypesForMethod(paymentMethod: string) {
+  switch (paymentMethod) {
+    case 'CASH':
+      return ['CASH', 'PETTY_CASH'] as const;
+    case 'QR':
+      return ['QR'] as const;
+    case 'BANK':
+    case 'TRANSFER':
+      return ['BANK', 'DEPOSIT'] as const;
+    default:
+      return null;
   }
 }

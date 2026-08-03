@@ -32,24 +32,31 @@ export default function BranchCashierInvoiceDetailPage() {
     [accounts, financeAccountId],
   );
 
+  async function loadAccounts(paymentMethod: BranchPaymentMethod) {
+    const accountData = await apiFetch<FinanceAccount[]>(
+      `/branch-cashier/accounts?paymentMethod=${paymentMethod}`,
+    );
+    setAccounts(accountData);
+    if (accountData.some((account) => account.id === financeAccountId)) {
+      return;
+    }
+    if (accountData.length === 1) {
+      setFinanceAccountId(accountData[0].id);
+    } else {
+      setFinanceAccountId('');
+    }
+  }
+
   async function load() {
     try {
-      const [invoiceData, accountData] = await Promise.all([
-        apiFetch<BranchAccountantInvoice>(`/branch-cashier/invoices/${id}`),
-        apiFetch<FinanceAccount[]>('/branch-cashier/accounts'),
-      ]);
+      const invoiceData = await apiFetch<BranchAccountantInvoice>(`/branch-cashier/invoices/${id}`);
       setInvoice(invoiceData);
-      setAccounts(accountData);
       const initialAmount =
         invoiceData.receivedAmountEnteredBySales != null
           ? invoiceData.receivedAmountEnteredBySales
           : invoiceData.requiredPaymentAmount ?? invoiceData.remainingAmount;
       setAmount(String(initialAmount));
-      if (accountData.length === 1) {
-        setFinanceAccountId(accountData[0].id);
-      } else if (!financeAccountId && accountData[0]) {
-        setFinanceAccountId(accountData[0].id);
-      }
+      await loadAccounts(method);
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -59,6 +66,13 @@ export default function BranchCashierInvoiceDetailPage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    void loadAccounts(method).catch((err) => {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [method]);
 
   async function submitPayment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -95,13 +109,8 @@ export default function BranchCashierInvoiceDetailPage() {
       });
       setInvoice(updated);
       idempotencyKeyRef.current = null;
-      const refreshedAccounts = await apiFetch<FinanceAccount[]>('/branch-cashier/accounts');
-      setAccounts(refreshedAccounts);
-      setSuccess(
-        updated.workflowStatus === 'PAID'
-          ? t('branchCashier.paymentAcceptedClosed')
-          : t('branchCashier.paymentAcceptedPartial'),
-      );
+      await loadAccounts(method);
+      setSuccess(t('branchCashier.paymentAcceptedClosed'));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     } finally {

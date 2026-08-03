@@ -101,8 +101,11 @@ export class BranchCashierController {
 
   @Get('accounts')
   @Roles(Role.CASHIER)
-  listAccounts(@CurrentUser() user: AuthUser) {
-    return this.service.listCashierAccounts(user);
+  listAccounts(
+    @CurrentUser() user: AuthUser,
+    @Query('paymentMethod') paymentMethod?: string,
+  ) {
+    return this.service.listCashierAccounts(user, paymentMethod);
   }
 
   @Get('invoices')

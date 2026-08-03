@@ -47,6 +47,7 @@ import { CASHIER_ASSIGNMENT_OPERATIONS } from '../rbac/cashier-capability.util';
 import { assertCashierPaymentAllowed } from '../finance/finance-assignment.util';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
 import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
+import { resolveBranchPaymentNetAmount } from '../finance/branch-payment-posting.util';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
@@ -1442,6 +1443,12 @@ export class SalesService {
       if (!confirmedPayment) {
         return;
       }
+
+      const netAcceptedAmount = resolveBranchPaymentNetAmount(confirmedPayment);
+      this.branchCashierPaymentService.assertConfirmedPaymentPosted(
+        confirmedPayment,
+        netAcceptedAmount,
+      );
 
       const existingLinkedPayment = await tx.payment.findFirst({
         where: {

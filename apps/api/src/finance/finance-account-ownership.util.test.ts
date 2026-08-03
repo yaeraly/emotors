@@ -229,6 +229,17 @@ describe('FinanceAccount access by role', () => {
     assert.deepEqual(resolveFinanceScopeFilter(hqCeo as never), {});
   });
 
+  it('branch CEO, accountant, and cashier query the same branch-owned accounts', () => {
+    const ceoWhere = buildSelectableOwnerAccountsWhere(branchCeo as never);
+    const accountantWhere = buildSelectableOwnerAccountsWhere(branchAccountant as never);
+    const cashierWhere = buildSelectableOwnerAccountsWhere(branchCashier as never, { forPayment: true });
+    assert.deepEqual(ceoWhere.scope, accountantWhere.scope);
+    assert.deepEqual(ceoWhere.branchId, accountantWhere.branchId);
+    assert.equal(ceoWhere.scope, FinanceAccountScope.BRANCH);
+    assert.equal(cashierWhere.scope, FinanceAccountScope.BRANCH);
+    assert.equal(cashierWhere.branchId, 'branch-a');
+  });
+
   it('payment selector filters exclude inactive and deleted accounts', () => {
     const where = buildSelectableOwnerAccountsWhere(branchAccountant as never, {
       forPayment: true,

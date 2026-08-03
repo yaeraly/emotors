@@ -89,6 +89,10 @@ import { canStartHqWarehouseFulfillment } from './branch-order-warehouse-eligibi
 import { BranchInstallmentEarlyPaymentService } from './branch-installment-early-payment.service';
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
 import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
+import {
+  BRANCH_CUSTOMER_PAYMENT_AUDIT,
+  BRANCH_PAYMENT_POSTING_REQUIRED_MESSAGE,
+} from '../finance/branch-payment-posting.util';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
@@ -3190,6 +3194,12 @@ export class DistributionService {
     });
 
     if (autoValidate) {
+      if (isBranchCashier && netAcceptedAmount > 0 && !creditResult) {
+        throw new BadRequestException(BRANCH_PAYMENT_POSTING_REQUIRED_MESSAGE);
+      }
+      if (isRetailFullPayment && netAcceptedAmount > 0) {
+        await this.branchCashierPaymentService.assertRetailInvoicePaymentsPosted(tx, invoice.id);
+      }
       const result = await this.applyConfirmedPaymentTotals(tx, user, invoice);
       if (isBranchCashier && creditResult) {
         const updatedInvoice = await tx.branchInvoice.findUniqueOrThrow({
@@ -3221,6 +3231,33 @@ export class DistributionService {
               newInvoiceStatus: newStatus,
               actorUserId: user.id,
               timestamp: new Date().toISOString(),
+            },
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: BRANCH_CUSTOMER_PAYMENT_AUDIT.PAYMENT_CONFIRMED,
+            entity: 'BranchPayment',
+            entityId: payment.id,
+            metadata: {
+              saleId: invoice.saleId ?? null,
+              saleNumber: null,
+              invoiceId: invoice.id,
+              paymentId: payment.id,
+              branchId: invoice.branchId,
+              accountId: creditResult.accountId,
+              paymentMethod: dto.method,
+              oldBalance: creditResult.oldBalance,
+              paymentAmount: netAcceptedAmount,
+              changeAmount,
+              netCreditedAmount: netAcceptedAmount,
+              newBalance: creditResult.newBalance,
+              actorUserId: user.id,
+              actorRole: user.role,
+              timestamp: new Date().toISOString(),
+              reason: 'cashier_confirmation',
             },
           },
         });
@@ -3461,6 +3498,7 @@ export class DistributionService {
       distributionOrderId: string | null;
       totalAmount: Prisma.Decimal;
       invoiceNumber: string;
+      invoiceCategory?: BranchInvoiceCategory;
     },
   ) {
     const paidAggregate = await tx.branchPayment.aggregate({
@@ -3480,6 +3518,13 @@ export class DistributionService {
         : paidAmount > 0
           ? BranchInvoiceStatus.PARTIALLY_PAID
           : BranchInvoiceStatus.ISSUED;
+
+    if (
+      invoice.invoiceCategory === BranchInvoiceCategory.RETAIL_SALE &&
+      (status === BranchInvoiceStatus.PAID || status === BranchInvoiceStatus.PARTIALLY_PAID)
+    ) {
+      await this.branchCashierPaymentService.assertRetailInvoicePaymentsPosted(tx, invoice.id);
+    }
 
     await tx.branchInvoice.update({
       where: { id: invoice.id },

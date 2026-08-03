@@ -483,9 +483,9 @@ export class BranchAccountantService {
     return sanitizeBranchCashierInvoice(enriched);
   }
 
-  async listCashierAccounts(user: AuthUser) {
+  async listCashierAccounts(user: AuthUser, paymentMethod?: string) {
     this.assertBranchCashier(user);
-    return this.branchCashierPaymentService.listSelectableAccounts(user);
+    return this.branchCashierPaymentService.listSelectableAccounts(user, paymentMethod);
   }
 
   async submitCashierPayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
