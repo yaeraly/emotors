@@ -13,7 +13,7 @@ export default function FinanceIndexPage() {
     void apiFetch<User>('/auth/me')
       .then((user) => {
         if (isBranchCashierUser(user)) {
-          router.replace('/finance/payments/pending');
+          router.replace('/branch-cashier/invoices');
           return;
         }
         router.replace('/finance/dashboard');

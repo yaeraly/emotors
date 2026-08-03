@@ -1340,6 +1340,7 @@ export function isBranchAccountantForbiddenPath(pathname: string) {
 
 const BRANCH_CASHIER_FINANCE_FORBIDDEN_PREFIXES = [
   '/finance/dashboard',
+  '/finance/payments',
   '/finance/income',
   '/finance/expenses',
   '/finance/transfers',

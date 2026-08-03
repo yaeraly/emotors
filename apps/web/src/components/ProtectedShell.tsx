@@ -10,7 +10,7 @@ import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDi
 import { SYSADMIN_NAV_SECTIONS } from '@/lib/sysadmin-nav';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
-import { sidebarFinanceNavClass, sidebarNavClass, sidebarPaymentsNavClass, sidebarShiftsNavClass } from '@/lib/nav-matching';
+import { sidebarFinanceNavClass, sidebarNavClass, sidebarShiftsNavClass } from '@/lib/nav-matching';
 import { UnifiedModuleTopNav } from './UnifiedModuleTopNav';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { NotificationBell } from './NotificationBell';
@@ -453,9 +453,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
               <>
                 <Link href="/finance/accounts" className={sidebarNavClass(pathname, '/finance/accounts')}>
                   {t('finance.myAccounts')}
-                </Link>
-                <Link href="/finance/payments/pending" className={sidebarPaymentsNavClass(pathname)}>
-                  {t('finance.payments')}
                 </Link>
                 <Link href="/finance/shifts?status=OPEN" className={sidebarShiftsNavClass(pathname)}>
                   {t('finance.myShifts')}

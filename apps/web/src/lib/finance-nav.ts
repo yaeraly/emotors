@@ -2,7 +2,7 @@ import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import type { User } from './types';
 import { hasCashierCapability } from './cashier-capability';
 import { canManageFinanceAccounts, isHqFinanceUser } from './finance-rbac';
-import { isHqAccountantUser, isHqCashierUser } from './rbac';
+import { isHqAccountantUser, isHqCashierUser, isBranchCashierUser } from './rbac';
 
 export type FinanceNavSection = ModuleSectionLink & {
   roles: Array<'cashier' | 'manage' | 'view' | 'owner' | 'hq'>;
@@ -99,6 +99,7 @@ export function isCashierOnlyFinanceUser(user: User | null | undefined) {
 
 export function financeRootHrefForUser(user: User | null | undefined) {
   if (isHqCashierUser(user)) return '/finance/cashier-bills';
+  if (isBranchCashierUser(user)) return '/finance/accounts';
   return isCashierOnlyFinanceUser(user) ? '/finance/payments/pending' : '/finance/dashboard';
 }
 
@@ -128,6 +129,15 @@ export function canAccessFinancePath(user: User, pathname: string) {
     return false;
   }
   if (isCashierOnlyFinanceUser(user)) {
+    if (isBranchCashierUser(user)) {
+      if (pathname === '/finance' || pathname === '/finance/') return true;
+      if (pathname.match(/^\/finance\/accounts\/[^/]+$/) && !pathname.startsWith('/finance/accounts/new')) {
+        return true;
+      }
+      return ['/finance/accounts', '/finance/shifts'].some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+      );
+    }
     if (pathname === '/finance' || pathname === '/finance/') return true;
     if (pathname.match(/^\/finance\/accounts\/[^/]+$/) && !pathname.startsWith('/finance/accounts/new')) {
       return true;
