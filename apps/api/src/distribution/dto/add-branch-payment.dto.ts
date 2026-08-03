@@ -13,6 +13,26 @@ export class AddBranchPaymentDto {
 
   @IsOptional()
   @IsString()
+  financeAccountId?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  receivedAmount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  changeAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
+
+  @IsOptional()
+  @IsString()
   note?: string;
 
   @IsOptional()

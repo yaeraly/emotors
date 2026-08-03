@@ -87,6 +87,8 @@ import {
 } from './branch-order-installment.util';
 import { canStartHqWarehouseFulfillment } from './branch-order-warehouse-eligibility.util';
 import { BranchInstallmentEarlyPaymentService } from './branch-installment-early-payment.service';
+import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
+import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
 import { BranchInvoiceQueryDto } from './dto/branch-invoice-query.dto';
 import { CreateDistributionOrderDto } from './dto/create-distribution-order.dto';
 import { DistributionOrderQueryDto } from './dto/distribution-order-query.dto';
@@ -148,6 +150,7 @@ export class DistributionService {
     private readonly pricingFifoService: PricingFifoService,
     private readonly pricingResolutionService: PricingResolutionService,
     private readonly earlyPaymentService: BranchInstallmentEarlyPaymentService,
+    private readonly branchCashierPaymentService: BranchCashierPaymentService,
   ) {}
 
   create(user: AuthUser, dto: CreateDistributionOrderDto) {
@@ -2961,158 +2964,310 @@ export class DistributionService {
     if (!canSubmitBranchInvoicePayment(user)) {
       throw new ForbiddenException('Недостаточно прав для отправки оплаты');
     }
-    return this.prisma.$transaction(async (tx) => {
-      const invoice = await tx.branchInvoice.findFirst({
-        where: { id, deletedAt: null, branchId: user.branchId! },
-        include: { distributionOrder: true, branchOrderInstallment: true },
+    return this.prisma.$transaction((tx) => this.submitInvoicePaymentInTx(tx, user, id, dto));
+  }
+
+  async submitInvoicePaymentInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    id: string,
+    dto: AddBranchPaymentDto,
+  ) {
+    const isBranchCashier = canSubmitBranchInvoicePayment(user);
+    if (isBranchCashier) {
+      await this.branchCashierPaymentService.lockInvoiceForPayment(tx, id, user.branchId!);
+    }
+    const invoice = await tx.branchInvoice.findFirst({
+      where: { id, deletedAt: null, branchId: user.branchId! },
+      include: { distributionOrder: true, branchOrderInstallment: true },
+    });
+    if (!invoice) throw new NotFoundException('Branch invoice not found');
+    if (!invoice.sentToCashierAt) {
+      throw new BadRequestException('Счёт ещё не передан кассиру бухгалтером');
+    }
+    if (!isBranchCashier && invoice.status === BranchInvoiceStatus.CANCELLED) {
+      throw new BadRequestException('Cannot pay cancelled invoice');
+    }
+
+    if (isBranchCashier && dto.idempotencyKey) {
+      const existing = await this.branchCashierPaymentService.findIdempotentPayment(
+        tx,
+        dto.idempotencyKey,
+      );
+      if (existing) {
+        const refreshed = await tx.branchInvoice.findUniqueOrThrow({
+          where: { id: invoice.id },
+          include: this.invoiceInclude(),
+        });
+        return this.toInvoiceResponse(refreshed);
+      }
+    }
+
+    const pending = await tx.branchPayment.findFirst({
+      where: {
+        invoiceId: invoice.id,
+        deletedAt: null,
+        confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
+      },
+    });
+    if (pending) {
+      throw new BadRequestException('Оплата уже отправлена на подтверждение');
+    }
+
+    const installment = invoice.branchOrderInstallment;
+    const remainingDebt = this.roundMoney(Number(invoice.debtAmount));
+    const isRetailFullPayment =
+      invoice.invoiceCategory === BranchInvoiceCategory.RETAIL_SALE &&
+      invoice.paymentType === BranchInvoicePaymentType.FULL_PAYMENT;
+
+    let amount: number;
+    let receivedAmount: number | null = null;
+    let changeAmount: number | null = null;
+    let netAcceptedAmount: number;
+
+    if (isBranchCashier) {
+      if (!dto.financeAccountId?.trim()) {
+        throw new BadRequestException('Выберите счёт или кассу для зачисления');
+      }
+      const resolved = this.branchCashierPaymentService.resolveNetPayment({
+        remainingDebt,
+        isFullPayment: isRetailFullPayment || Math.abs((dto.amount ?? 0) - remainingDebt) < 0.01,
+        amount: dto.amount,
+        receivedAmount: dto.receivedAmount ?? dto.amount,
+        changeAmount: dto.changeAmount,
       });
-      if (!invoice) throw new NotFoundException('Branch invoice not found');
-      if (!invoice.sentToCashierAt) {
-        throw new BadRequestException('Счёт ещё не передан кассиру бухгалтером');
-      }
-      if (invoice.status === BranchInvoiceStatus.CANCELLED) {
-        throw new BadRequestException('Cannot pay cancelled invoice');
-      }
-      const pending = await tx.branchPayment.findFirst({
-        where: {
-          invoiceId: invoice.id,
-          deletedAt: null,
-          confirmationStatus: BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,
-        },
-      });
-      if (pending) {
-        throw new BadRequestException('Оплата уже отправлена на подтверждение');
-      }
-      const amount = this.roundMoney(Number(dto.amount));
+      netAcceptedAmount = resolved.netAcceptedAmount;
+      receivedAmount = resolved.receivedAmount;
+      changeAmount = resolved.changeAmount;
+      amount = netAcceptedAmount;
+    } else {
+      amount = this.roundMoney(Number(dto.amount));
+      netAcceptedAmount = amount;
       if (amount <= 0) throw new BadRequestException('Payment amount must be greater than 0');
-      if (amount > Number(invoice.debtAmount)) {
+      if (amount > remainingDebt) {
         throw new BadRequestException('Payment amount cannot exceed invoice debt');
       }
+    }
 
-      const installment = invoice.branchOrderInstallment;
-      if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
-        throw new BadRequestException('Рассрочка ожидает утверждения CEO');
+    if (installment?.status === BranchOrderInstallmentStatus.PENDING) {
+      throw new BadRequestException('Рассрочка ожидает утверждения CEO');
+    }
+
+    const earlyPaymentRequest = await this.earlyPaymentService.findCashierVisibleRequest(tx, invoice.id);
+    if (
+      !earlyPaymentRequest &&
+      installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+      !installment.firstPaymentRequired
+    ) {
+      throw new BadRequestException('Оплата доступна только через досрочное погашение');
+    }
+    if (
+      !earlyPaymentRequest &&
+      installment?.status === BranchOrderInstallmentStatus.APPROVED &&
+      installment.firstPaymentRequired &&
+      installment.firstPaymentConfirmed
+    ) {
+      throw new BadRequestException('Создайте и отправьте запрос досрочного погашения');
+    }
+
+    if (earlyPaymentRequest) {
+      const approvedAmount = this.roundMoney(
+        Number(earlyPaymentRequest.approvedAmount ?? earlyPaymentRequest.requestedAmount),
+      );
+      if (Math.abs(amount - approvedAmount) > 0.009) {
+        throw new BadRequestException('Сумма должна совпадать с утверждённой суммой досрочного погашения');
       }
-
-      const earlyPaymentRequest = await this.earlyPaymentService.findCashierVisibleRequest(tx, invoice.id);
-      if (
-        !earlyPaymentRequest &&
-        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
-        !installment.firstPaymentRequired
-      ) {
-        throw new BadRequestException('Оплата доступна только через досрочное погашение');
+      if (earlyPaymentRequest.status !== BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER) {
+        throw new BadRequestException('Запрос досрочного погашения не отправлен в кассу');
       }
-      if (
-        !earlyPaymentRequest &&
-        installment?.status === BranchOrderInstallmentStatus.APPROVED &&
-        installment.firstPaymentRequired &&
-        installment.firstPaymentConfirmed
-      ) {
-        throw new BadRequestException('Создайте и отправьте запрос досрочного погашения');
-      }
-
-      if (earlyPaymentRequest) {
-        const approvedAmount = this.roundMoney(
-          Number(earlyPaymentRequest.approvedAmount ?? earlyPaymentRequest.requestedAmount),
-        );
-        if (Math.abs(amount - approvedAmount) > 0.009) {
-          throw new BadRequestException('Сумма должна совпадать с утверждённой суммой досрочного погашения');
-        }
-        if (earlyPaymentRequest.status !== BranchInstallmentEarlyPaymentStatus.SENT_TO_CASHIER) {
-          throw new BadRequestException('Запрос досрочного погашения не отправлен в кассу');
-        }
-        if (earlyPaymentRequest.financeAccountId) {
-          const account = await tx.financeAccount.findFirst({
-            where: { id: earlyPaymentRequest.financeAccountId, deletedAt: null },
-          });
-          if (!account || Number(account.availableBalance) < amount) {
-            throw new BadRequestException('Недостаточно средств на счёте филиала');
-          }
-        }
-      }
-
-      const autoValidate = this.shouldAutoValidatePayment(invoice, amount, installment, earlyPaymentRequest);
-      const confirmationStatus = autoValidate
-        ? BranchPaymentConfirmationStatus.CONFIRMED
-        : BranchPaymentConfirmationStatus.PENDING_CONFIRMATION;
-
-      const payment = await tx.branchPayment.create({
-        data: {
-          branchId: invoice.branchId,
-          invoiceId: invoice.id,
-          amount,
-          method: dto.method,
-          note: dto.note,
-          receiptReference: dto.receiptReference,
-          confirmationStatus,
-          submittedAt: new Date(),
-          earlyPaymentRequestId: earlyPaymentRequest?.id ?? null,
-          ...(autoValidate
-            ? { confirmedAt: new Date(), confirmedById: user.id, paidAt: new Date() }
-            : {}),
-          createdById: user.id,
-        },
-      });
-
-      if (earlyPaymentRequest) {
-        await this.earlyPaymentService.markPaymentSubmitted(tx, earlyPaymentRequest.id);
-        await tx.auditLog.create({
-          data: {
-            userId: user.id,
-            role: user.role,
-            action: 'EARLY_PAYMENT_PROCESSED',
-            entity: 'BranchInstallmentEarlyPaymentRequest',
-            entityId: earlyPaymentRequest.id,
-            metadata: {
-              invoiceId: invoice.id,
-              amount,
-              roles: user.roles ?? [user.role],
-            },
-          },
+      if (earlyPaymentRequest.financeAccountId) {
+        const account = await tx.financeAccount.findFirst({
+          where: { id: earlyPaymentRequest.financeAccountId, deletedAt: null },
         });
-        if (earlyPaymentRequest.financeAccountId) {
-          await tx.financeAccount.update({
-            where: { id: earlyPaymentRequest.financeAccountId },
-            data: {
-              currentBalance: { decrement: amount },
-              availableBalance: { decrement: amount },
-            },
-          });
+        if (!account || Number(account.availableBalance) < amount) {
+          throw new BadRequestException('Недостаточно средств на счёте филиала');
         }
       }
+    }
 
+    const autoValidate = this.shouldAutoValidatePayment(invoice, amount, installment, earlyPaymentRequest);
+    const confirmationStatus = autoValidate
+      ? BranchPaymentConfirmationStatus.CONFIRMED
+      : BranchPaymentConfirmationStatus.PENDING_CONFIRMATION;
+
+    const payment = await tx.branchPayment.create({
+      data: {
+        branchId: invoice.branchId,
+        invoiceId: invoice.id,
+        amount,
+        receivedAmount,
+        changeAmount,
+        netAcceptedAmount,
+        method: dto.method,
+        note: dto.note,
+        receiptReference: dto.receiptReference,
+        financeAccountId: isBranchCashier && autoValidate ? dto.financeAccountId : null,
+        idempotencyKey: dto.idempotencyKey?.trim() || null,
+        confirmationStatus,
+        submittedAt: new Date(),
+        earlyPaymentRequestId: earlyPaymentRequest?.id ?? null,
+        ...(autoValidate
+          ? { confirmedAt: new Date(), confirmedById: user.id, paidAt: new Date() }
+          : {}),
+        createdById: user.id,
+      },
+    });
+
+    let creditResult: Awaited<
+      ReturnType<BranchCashierPaymentService['creditAccountForPayment']>
+    > | null = null;
+
+    if (isBranchCashier && autoValidate && dto.financeAccountId) {
+      creditResult = await this.branchCashierPaymentService.creditAccountForPayment(tx, user, {
+        accountId: dto.financeAccountId,
+        branchId: invoice.branchId,
+        netAcceptedAmount,
+        paymentId: payment.id,
+        invoiceId: invoice.id,
+        saleId: invoice.saleId,
+        paymentMethod: dto.method,
+        receivedAmount,
+        changeAmount,
+      });
+      await tx.branchPayment.update({
+        where: { id: payment.id },
+        data: { ledgerEntryId: creditResult.ledgerEntryId },
+      });
+    }
+
+    if (earlyPaymentRequest) {
+      await this.earlyPaymentService.markPaymentSubmitted(tx, earlyPaymentRequest.id);
       await tx.auditLog.create({
         data: {
           userId: user.id,
           role: user.role,
-          action: autoValidate ? 'BRANCH_PAYMENT_AUTO_CONFIRMED' : 'BRANCH_PAYMENT_SUBMITTED',
-          entity: 'BranchPayment',
-          entityId: payment.id,
-          metadata: { invoiceId: invoice.id, amount, method: dto.method, autoValidate, roles: user.roles ?? [user.role] },
+          action: 'EARLY_PAYMENT_PROCESSED',
+          entity: 'BranchInstallmentEarlyPaymentRequest',
+          entityId: earlyPaymentRequest.id,
+          metadata: {
+            invoiceId: invoice.id,
+            amount,
+            roles: user.roles ?? [user.role],
+          },
         },
       });
-
-      if (autoValidate) {
-        return this.applyConfirmedPaymentTotals(tx, user, invoice);
+      if (earlyPaymentRequest.financeAccountId) {
+        await tx.financeAccount.update({
+          where: { id: earlyPaymentRequest.financeAccountId },
+          data: {
+            currentBalance: { decrement: amount },
+            availableBalance: { decrement: amount },
+          },
+        });
       }
+    }
 
-      await this.syncBranchPurchaseRequestPaymentStatus(tx, invoice.distributionOrderId, 'PAYMENT_SUBMITTED', user);
-      await this.createWorkflowAlert(tx, user, {
-        branchId: invoice.branchId,
-        type: AlertType.BRANCH_PAYMENT_SUBMITTED,
-        title: 'Оплата требует проверки HQ Finance',
-        message: `Оплата по счёту ${invoice.invoiceNumber} требует ручной проверки HQ Finance`,
-        entityType: 'BranchInvoice',
-        entityId: invoice.id,
-        recipientRoles: [Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT],
-      });
-
-      const updated = await tx.branchInvoice.findUniqueOrThrow({
-        where: { id: invoice.id },
-        include: this.invoiceInclude(),
-      });
-      return this.toInvoiceResponse(updated);
+    const oldInvoiceStatus = invoice.status;
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: autoValidate ? 'BRANCH_PAYMENT_AUTO_CONFIRMED' : 'BRANCH_PAYMENT_SUBMITTED',
+        entity: 'BranchPayment',
+        entityId: payment.id,
+        metadata: {
+          invoiceId: invoice.id,
+          amount,
+          netAcceptedAmount,
+          receivedAmount,
+          changeAmount,
+          method: dto.method,
+          autoValidate,
+          financeAccountId: dto.financeAccountId ?? null,
+          roles: user.roles ?? [user.role],
+        },
+      },
     });
+
+    if (autoValidate) {
+      const result = await this.applyConfirmedPaymentTotals(tx, user, invoice);
+      if (isBranchCashier && creditResult) {
+        const updatedInvoice = await tx.branchInvoice.findUniqueOrThrow({
+          where: { id: invoice.id },
+        });
+        const newStatus = updatedInvoice.status;
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: this.branchCashierPaymentService.buildPaymentAuditAction(
+              oldInvoiceStatus,
+              newStatus,
+            ),
+            entity: 'BranchInvoice',
+            entityId: invoice.id,
+            metadata: {
+              invoiceId: invoice.id,
+              paymentId: payment.id,
+              saleId: invoice.saleId ?? null,
+              branchId: invoice.branchId,
+              accountId: creditResult.accountId,
+              oldBalance: creditResult.oldBalance,
+              acceptedAmount: netAcceptedAmount,
+              changeAmount,
+              netAcceptedAmount,
+              newBalance: creditResult.newBalance,
+              oldInvoiceStatus,
+              newInvoiceStatus: newStatus,
+              actorUserId: user.id,
+              timestamp: new Date().toISOString(),
+            },
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: BRANCH_CASHIER_PAYMENT_AUDIT.PAYMENT_ACCEPTED,
+            entity: 'BranchPayment',
+            entityId: payment.id,
+            metadata: {
+              invoiceId: invoice.id,
+              paymentId: payment.id,
+              saleId: invoice.saleId ?? null,
+              branchId: invoice.branchId,
+              accountId: creditResult.accountId,
+              paymentMethod: dto.method,
+              receivedAmount,
+              changeAmount,
+              netAcceptedAmount,
+              currency: creditResult.currency,
+              status: confirmationStatus,
+              acceptedBy: user.id,
+              acceptedAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
+      return result;
+    }
+
+    await this.syncBranchPurchaseRequestPaymentStatus(tx, invoice.distributionOrderId, 'PAYMENT_SUBMITTED', user);
+    await this.createWorkflowAlert(tx, user, {
+      branchId: invoice.branchId,
+      type: AlertType.BRANCH_PAYMENT_SUBMITTED,
+      title: 'Оплата требует проверки HQ Finance',
+      message: `Оплата по счёту ${invoice.invoiceNumber} требует ручной проверки HQ Finance`,
+      entityType: 'BranchInvoice',
+      entityId: invoice.id,
+      recipientRoles: [Role.FINANCE_MANAGER, Role.HQ_ACCOUNTANT],
+    });
+
+    const updated = await tx.branchInvoice.findUniqueOrThrow({
+      where: { id: invoice.id },
+      include: this.invoiceInclude(),
+    });
+    return this.toInvoiceResponse(updated);
   }
 
   private shouldAutoValidatePayment(

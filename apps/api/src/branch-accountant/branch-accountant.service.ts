@@ -24,6 +24,7 @@ import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto'
 import { PrismaService } from '../prisma/prisma.service';
 import { BranchSaleInvoiceService } from '../sales/branch-sale-invoice.service';
 import { SalesService } from '../sales/sales.service';
+import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
 import {
   canSendInvoiceToCashier,
   hasAnyFullAccessRole,
@@ -47,6 +48,7 @@ export class BranchAccountantService {
     private readonly earlyPaymentService: BranchInstallmentEarlyPaymentService,
     private readonly salesService: SalesService,
     private readonly branchSaleInvoiceService: BranchSaleInvoiceService,
+    private readonly branchCashierPaymentService: BranchCashierPaymentService,
   ) {}
 
   private assertBranchAccountant(user: AuthUser) {
@@ -481,6 +483,11 @@ export class BranchAccountantService {
     return sanitizeBranchCashierInvoice(enriched);
   }
 
+  async listCashierAccounts(user: AuthUser) {
+    this.assertBranchCashier(user);
+    return this.branchCashierPaymentService.listSelectableAccounts(user);
+  }
+
   async submitCashierPayment(user: AuthUser, id: string, dto: AddBranchPaymentDto) {
     this.assertBranchCashier(user);
     const invoice = await this.prisma.branchInvoice.findFirst({
@@ -490,10 +497,14 @@ export class BranchAccountantService {
     if (invoice && isRetailInstallmentInvoice(invoice)) {
       throw new BadRequestException('Для рассрочки используйте раздел «Рассрочка»');
     }
-    const result = await this.distributionService.submitInvoicePayment(user, id, dto);
-    if (invoice?.invoiceCategory === 'RETAIL_SALE' && invoice.saleId) {
-      await this.salesService.syncRetailSalePaymentFromInvoice(user, id);
-    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.distributionService.submitInvoicePaymentInTx(tx, user, id, dto);
+      if (invoice?.invoiceCategory === 'RETAIL_SALE' && invoice.saleId) {
+        await this.salesService.syncRetailSalePaymentFromInvoiceInTx(tx, user, id);
+      }
+    });
+
     return this.getCashierInvoice(user, id);
   }
 

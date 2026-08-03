@@ -99,6 +99,12 @@ export class BranchAccountantController {
 export class BranchCashierController {
   constructor(private readonly service: BranchAccountantService) {}
 
+  @Get('accounts')
+  @Roles(Role.CASHIER)
+  listAccounts(@CurrentUser() user: AuthUser) {
+    return this.service.listCashierAccounts(user);
+  }
+
   @Get('invoices')
   @Roles(Role.CASHIER, Role.OWNER, Role.CEO)
   listInvoices(@CurrentUser() user: AuthUser, @Query() query: BranchAccountantInvoiceQueryDto) {

@@ -45,6 +45,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { assertBranchCashierCannotManageSales, assertBranchSalesManagerCannotApproveSale, hasAnyFullAccessRole, hasAnyHqRole, isBranchSalesManagerUser, resolveUserRoles, shouldStripSaleFinancialFields, shouldStripSaleWorkflowStatus } from '../rbac/rbac';
 import { CASHIER_ASSIGNMENT_OPERATIONS } from '../rbac/cashier-capability.util';
 import { assertCashierPaymentAllowed } from '../finance/finance-assignment.util';
+import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
+import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
@@ -129,6 +131,7 @@ export class SalesService {
     private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
     private readonly branchPricingPolicyService: BranchPricingPolicyService,
     private readonly branchSaleInvoiceService: BranchSaleInvoiceService,
+    private readonly branchCashierPaymentService: BranchCashierPaymentService,
   ) {}
 
   create(user: AuthUser, dto: CreateSaleDto) {
@@ -1392,7 +1395,16 @@ export class SalesService {
   }
 
   async syncRetailSalePaymentFromInvoice(user: AuthUser, invoiceId: string) {
-    await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction((tx) =>
+      this.syncRetailSalePaymentFromInvoiceInTx(tx, user, invoiceId),
+    );
+  }
+
+  async syncRetailSalePaymentFromInvoiceInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    invoiceId: string,
+  ) {
       const invoice = await tx.branchInvoice.findFirst({
         where: {
           id: invoiceId,
@@ -1451,9 +1463,18 @@ export class SalesService {
             customerId: sale.customerId,
             amount,
             method: mapBranchPaymentMethodToSalePaymentMethod(confirmedPayment.method) as PaymentMethod,
+            cashReceived:
+              confirmedPayment.receivedAmount != null
+                ? Number(confirmedPayment.receivedAmount)
+                : null,
+            changeAmount:
+              confirmedPayment.changeAmount != null
+                ? Number(confirmedPayment.changeAmount)
+                : null,
             paidAt: confirmedPayment.paidAt ?? new Date(),
             note: `branch-invoice:${invoice.id}`,
             createdById: user.id,
+            financeAccountId: confirmedPayment.financeAccountId,
           },
         });
       }
@@ -1500,7 +1521,6 @@ export class SalesService {
           },
         );
       }
-    });
   }
 
   async receiveRetailInstallmentCashierPayment(
@@ -1509,6 +1529,22 @@ export class SalesService {
     dto: AddBranchPaymentDto,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      await this.branchCashierPaymentService.lockInvoiceForPayment(tx, invoiceId, user.branchId!);
+
+      if (dto.idempotencyKey) {
+        const existing = await this.branchCashierPaymentService.findIdempotentPayment(
+          tx,
+          dto.idempotencyKey,
+        );
+        if (existing) {
+          return {
+            invoiceId,
+            paymentId: existing.id,
+            idempotent: true,
+          };
+        }
+      }
+
       const invoice = await tx.branchInvoice.findFirst({
         where: {
           id: invoiceId,
@@ -1541,9 +1577,6 @@ export class SalesService {
       ) {
         throw new ConflictException('Платежи принимаются только по активной рассрочке');
       }
-      if (invoice.status === BranchInvoiceStatus.PAID || invoice.status === BranchInvoiceStatus.CANCELLED) {
-        throw new BadRequestException('Счёт уже закрыт');
-      }
 
       const pending = await tx.branchPayment.findFirst({
         where: {
@@ -1556,41 +1589,39 @@ export class SalesService {
         throw new ConflictException('Оплата уже отправлена на подтверждение');
       }
 
-      const amount = this.roundMoney(Number(dto.amount));
-      if (amount <= 0) {
-        throw new BadRequestException('Сумма платежа должна быть больше нуля');
+      if (!dto.financeAccountId?.trim()) {
+        throw new BadRequestException('Выберите счёт или кассу для зачисления');
       }
 
       const currentRemaining = resolveRetailInstallmentRemainingDebt({
         ...invoice,
         sale: invoice.sale,
       });
-      if (amount > currentRemaining + 0.009) {
-        throw new BadRequestException(`Максимальная сумма платежа: ${currentRemaining.toFixed(2)}.`);
-      }
-
-      const duplicateNote = `branch-installment-invoice:${invoice.id}:${amount}:${new Date().toISOString().slice(0, 10)}`;
-      const recentDuplicate = await tx.branchPayment.findFirst({
-        where: {
-          invoiceId: invoice.id,
-          deletedAt: null,
-          amount,
-          confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
-          createdAt: { gte: new Date(Date.now() - 60_000) },
-        },
+      const resolved = this.branchCashierPaymentService.resolveNetPayment({
+        remainingDebt: currentRemaining,
+        isFullPayment: false,
+        amount: dto.amount,
+        receivedAmount: dto.receivedAmount ?? dto.amount,
+        changeAmount: dto.changeAmount,
       });
-      if (recentDuplicate) {
-        throw new ConflictException('Дублирующий платёж уже зарегистрирован');
-      }
+      const amount = resolved.netAcceptedAmount;
+      const receivedAmount = resolved.receivedAmount;
+      const changeAmount = resolved.changeAmount;
+      const oldInvoiceStatus = invoice.status;
 
       const branchPayment = await tx.branchPayment.create({
         data: {
           branchId: invoice.branchId,
           invoiceId: invoice.id,
           amount,
+          receivedAmount,
+          changeAmount,
+          netAcceptedAmount: amount,
           method: dto.method,
-          note: dto.note?.trim() || duplicateNote,
+          note: dto.note?.trim() || `branch-installment-invoice:${invoice.id}`,
           receiptReference: dto.receiptReference,
+          financeAccountId: dto.financeAccountId,
+          idempotencyKey: dto.idempotencyKey?.trim() || null,
           confirmationStatus: BranchPaymentConfirmationStatus.CONFIRMED,
           submittedAt: new Date(),
           confirmedAt: new Date(),
@@ -1598,6 +1629,23 @@ export class SalesService {
           paidAt: new Date(),
           createdById: user.id,
         },
+      });
+
+      const creditResult = await this.branchCashierPaymentService.creditAccountForPayment(tx, user, {
+        accountId: dto.financeAccountId,
+        branchId: invoice.branchId,
+        netAcceptedAmount: amount,
+        paymentId: branchPayment.id,
+        invoiceId: invoice.id,
+        saleId: invoice.saleId,
+        paymentMethod: dto.method,
+        receivedAmount,
+        changeAmount,
+      });
+
+      await tx.branchPayment.update({
+        where: { id: branchPayment.id },
+        data: { ledgerEntryId: creditResult.ledgerEntryId },
       });
 
       const paidAfterTotal = this.roundMoney(
@@ -1616,10 +1664,13 @@ export class SalesService {
           saleId: invoice.saleId!,
           customerId: invoice.sale.customerId,
           amount,
+          cashReceived: receivedAmount,
+          changeAmount,
           method: mapBranchPaymentMethodToSalePaymentMethod(dto.method) as PaymentMethod,
           note: `branch-installment-invoice:${invoice.id}`,
           createdById: user.id,
           status: PaymentRecordStatus.ACTIVE,
+          financeAccountId: dto.financeAccountId,
         },
       });
 
@@ -1682,6 +1733,38 @@ export class SalesService {
         },
       });
 
+      await this.auditInTx(tx, user, invoice.branchId, BRANCH_CASHIER_PAYMENT_AUDIT.PAYMENT_ACCEPTED, 'BranchPayment', branchPayment.id, {
+        invoiceId: invoice.id,
+        paymentId: branchPayment.id,
+        saleId: invoice.saleId,
+        branchId: invoice.branchId,
+        accountId: creditResult.accountId,
+        paymentMethod: dto.method,
+        receivedAmount,
+        changeAmount,
+        netAcceptedAmount: amount,
+        currency: creditResult.currency,
+        acceptedBy: user.id,
+        acceptedAt: new Date().toISOString(),
+      });
+
+      await this.auditInTx(tx, user, invoice.branchId, this.branchCashierPaymentService.buildPaymentAuditAction(oldInvoiceStatus, invoiceStatus), 'BranchInvoice', invoice.id, {
+        invoiceId: invoice.id,
+        paymentId: branchPayment.id,
+        saleId: invoice.saleId,
+        branchId: invoice.branchId,
+        accountId: creditResult.accountId,
+        oldBalance: creditResult.oldBalance,
+        acceptedAmount: amount,
+        changeAmount,
+        netAcceptedAmount: amount,
+        newBalance: creditResult.newBalance,
+        oldInvoiceStatus,
+        newInvoiceStatus: invoiceStatus,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+      });
+
       await this.auditInTx(tx, user, invoice.branchId, 'INSTALLMENT_PAYMENT_RECEIVED', 'BranchInvoice', invoice.id, {
         saleId: invoice.saleId,
         invoiceId: invoice.id,
@@ -1716,6 +1799,7 @@ export class SalesService {
         status: invoiceStatus,
         approvalStatus: nextApprovalStatus,
         remainingDebt: Math.max(remainingAfter, 0),
+        accountBalance: creditResult.newBalance,
       };
     });
   }

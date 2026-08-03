@@ -4154,9 +4154,17 @@ model BranchPayment {
   invoiceId          String
   invoice            BranchInvoice                   @relation(fields: [invoiceId], references: [id])
   amount             Decimal                         @db.Decimal(14, 2)
+  receivedAmount     Decimal?                        @db.Decimal(14, 2)
+  changeAmount       Decimal?                        @db.Decimal(14, 2)
+  netAcceptedAmount  Decimal?                        @db.Decimal(14, 2)
   method             BranchPaymentMethod
   note               String?
   receiptReference   String?
+  financeAccountId   String?
+  financeAccount     FinanceAccount?                 @relation(fields: [financeAccountId], references: [id])
+  ledgerEntryId      String?                         @unique
+  ledgerEntry        FinanceLedgerEntry?             @relation(fields: [ledgerEntryId], references: [id])
+  idempotencyKey     String?                         @unique
   confirmationStatus BranchPaymentConfirmationStatus @default(CONFIRMED)
   paidAt             DateTime                        @default(now())
   submittedAt        DateTime?
@@ -4178,6 +4186,7 @@ model BranchPayment {
   @@index([branchId])
   @@index([invoiceId])
   @@index([earlyPaymentRequestId])
+  @@index([financeAccountId])
   @@index([method])
   @@index([paidAt])
   @@index([createdById])
@@ -5724,6 +5733,7 @@ model FinanceAccount {
   reconciliations             FinanceReconciliation[]
   investments                 FinanceInvestment[]
   intendedProcurementPayments ProcurementSupplierPayment[]  @relation("ProcurementPaymentIntendedAccount")
+  branchPayments              BranchPayment[]
   actualProcurementPayments   ProcurementSupplierPayment[]  @relation("ProcurementPaymentActualAccount")
   transportExpenses           ProcurementTransportExpense[] @relation("TransportExpenseFinanceAccount")
   installmentEarlyPayments    BranchInstallmentEarlyPaymentRequest[]
@@ -5787,6 +5797,7 @@ model FinanceLedgerEntry {
   financeInvestment          FinanceInvestment?
   procurementSupplierPayment ProcurementSupplierPayment?  @relation("ProcurementSupplierPaymentLedgerEntry")
   transportExpense           ProcurementTransportExpense? @relation("TransportExpenseLedgerEntry")
+  branchPayment              BranchPayment?
 
   @@index([accountId])
   @@index([branchId])

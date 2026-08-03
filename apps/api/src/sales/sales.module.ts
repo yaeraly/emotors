@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CommissionsModule } from '../commissions/commissions.module';
 import { CustomersModule } from '../customers/customers.module';
+import { FinanceModule } from '../finance/finance.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PricingModule } from '../pricing/pricing.module';
@@ -16,6 +17,7 @@ import { SalesService } from './sales.service';
     PricingModule,
     NotificationsModule,
     CustomersModule,
+    FinanceModule,
   ],
   controllers: [SalesController],
   providers: [SalesService, SaleInstallmentApprovalService, BranchSaleInvoiceService],
