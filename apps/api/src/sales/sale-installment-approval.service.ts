@@ -29,6 +29,11 @@ import {
 } from '../rbac/rbac';
 import { resolvePricingChannelFromCustomerType } from './sale-customer-pricing.util';
 import { BranchSaleInvoiceService } from './branch-sale-invoice.service';
+import {
+  BRANCH_SALE_REJECTION_AUDIT,
+  cancelRetailSaleInvoicesAfterRejectionInTx,
+  canReturnRejectedSaleToDraft,
+} from './branch-sale-rejection.util';
 import { SalesService } from './sales.service';
 import { ReceiveInstallmentPaymentDto } from './dto/receive-installment-payment.dto';
 import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
@@ -654,6 +659,25 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
+      const cancelledInvoiceIds = await cancelRetailSaleInvoicesAfterRejectionInTx(tx, user, {
+        saleId: sale.id,
+        branchId: sale.branchId,
+        rejectionReason,
+        previousApprovalStatus: previousStatus,
+      });
+
+      await this.auditInTx(tx, user, sale.branchId, BRANCH_SALE_REJECTION_AUDIT.SALE_REJECTED, 'Sale', sale.id, {
+        saleId: sale.id,
+        invoiceId: cancelledInvoiceIds[0] ?? null,
+        branchId: sale.branchId,
+        previousStatus,
+        newStatus: updated.status,
+        rejectionReason,
+        actorUserId: user.id,
+        actorRole: user.role,
+        timestamp: new Date().toISOString(),
+      });
+
       await this.auditInTx(tx, user, sale.branchId, 'INSTALLMENT_REJECTED', 'SaleInstallmentApproval', updated.id, {
         saleId: sale.id,
         orderId: sale.id,
@@ -669,12 +693,74 @@ export class SaleInstallmentApprovalService {
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.SALE_INSTALLMENT_REJECTED,
         branchId: sale.branchId,
-        title: 'Рассрочка отклонена',
-        message: `Заявка на рассрочку №${updated.requestNumber} отклонена. Причина: ${rejectionReason}.`,
+        title: 'Продажа отклонена',
+        message: `Продажа отклонена Branch CEO. Причина: ${rejectionReason}`,
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updated.requestNumber,
         recipientRoles: [Role.MANAGER],
+      });
+
+      return this.serializeApproval(updated);
+    });
+  }
+
+  async returnRejectedSaleToDraft(user: AuthUser, saleId: string) {
+    if (!isBranchSalesManagerUser(user)) {
+      throw new ForbiddenException('Недостаточно прав для возврата продажи в черновик');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const sale = await this.getSaleForApproval(tx, user, saleId);
+      const approval = sale.installmentApproval;
+      if (!approval) {
+        throw new NotFoundException('Заявка на рассрочку не найдена');
+      }
+      if (!canReturnRejectedSaleToDraft(approval)) {
+        throw new BadRequestException('Вернуть в черновик можно только отклонённую или отменённую продажу');
+      }
+
+      const previousStatus = approval.status;
+      await tx.saleInstallmentApproval.update({
+        where: { id: approval.id },
+        data: {
+          status: SaleInstallmentApprovalStatus.DRAFT,
+          rejectedById: null,
+          rejectedAt: null,
+          rejectionReason: null,
+          approvedById: null,
+          approvedAt: null,
+          approvalComment: null,
+          submittedById: null,
+          submittedAt: null,
+        },
+      });
+
+      if (sale.status !== SaleStatus.DRAFT) {
+        await tx.sale.update({
+          where: { id: sale.id },
+          data: {
+            status: SaleStatus.DRAFT,
+            sentToCashierAt: null,
+            sentToCashierById: null,
+            paymentStatus: PaymentStatus.DEBT,
+          },
+        });
+      }
+
+      const updated = await tx.saleInstallmentApproval.findUniqueOrThrow({
+        where: { id: approval.id },
+        include: this.installmentApprovalInclude(),
+      });
+
+      await this.auditInTx(tx, user, sale.branchId, BRANCH_SALE_REJECTION_AUDIT.RETURNED_TO_DRAFT, 'Sale', sale.id, {
+        saleId: sale.id,
+        branchId: sale.branchId,
+        previousStatus,
+        newStatus: updated.status,
+        actorUserId: user.id,
+        actorRole: user.role,
+        timestamp: new Date().toISOString(),
       });
 
       return this.serializeApproval(updated);
@@ -737,6 +823,25 @@ export class SaleInstallmentApprovalService {
         include: this.installmentApprovalInclude(),
       });
 
+      const cancelledInvoiceIds = await cancelRetailSaleInvoicesAfterRejectionInTx(tx, user, {
+        saleId: sale.id,
+        branchId: sale.branchId,
+        rejectionReason: cancellationReason,
+        previousApprovalStatus: previousStatus,
+      });
+
+      await this.auditInTx(tx, user, sale.branchId, BRANCH_SALE_REJECTION_AUDIT.SALE_REJECTED, 'Sale', sale.id, {
+        saleId: sale.id,
+        invoiceId: cancelledInvoiceIds[0] ?? null,
+        branchId: sale.branchId,
+        previousStatus,
+        newStatus: updated.status,
+        rejectionReason: cancellationReason,
+        actorUserId: user.id,
+        actorRole: user.role,
+        timestamp: new Date().toISOString(),
+      });
+
       await this.auditInTx(tx, user, sale.branchId, 'INSTALLMENT_CANCELLED', 'SaleInstallmentApproval', updated.id, {
         saleId: sale.id,
         orderId: sale.id,
@@ -752,8 +857,8 @@ export class SaleInstallmentApprovalService {
       await this.notificationsService.notifyInTx(tx, user, {
         type: AlertType.SALE_INSTALLMENT_REJECTED,
         branchId: sale.branchId,
-        title: 'Рассрочка отменена',
-        message: `Заявка на рассрочку №${updated.requestNumber} отменена. Причина: ${cancellationReason}.`,
+        title: 'Продажа отклонена',
+        message: `Продажа отклонена Branch CEO. Причина: ${cancellationReason}`,
         entityType: 'Sale',
         entityId: sale.id,
         referenceNumber: updated.requestNumber,

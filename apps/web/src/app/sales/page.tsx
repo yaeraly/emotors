@@ -6,6 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { canCreateSale, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
+import { installmentStatusLabelKey } from '@/lib/sale-installment';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
@@ -191,7 +192,7 @@ export default function SalesPage() {
                       </td>
                       {showSaleStatusColumn ? (
                         <td className="px-4 py-3">
-                          <SaleStatusPill status={sale.status} />
+                          <SaleWorkflowPill sale={sale} />
                         </td>
                       ) : null}
                       <td className="px-4 py-3">
@@ -249,6 +250,26 @@ function PaymentStatusPill({ status }: { status: PaymentStatus }) {
       {t(`paymentStatus.${status}`)}
     </span>
   );
+}
+
+function SaleWorkflowPill({ sale }: { sale: Sale }) {
+  const { t } = useTranslation();
+  const installmentKey = installmentStatusLabelKey(sale.installmentApproval?.status);
+  if (installmentKey) {
+    const rejected =
+      sale.installmentApproval?.status === 'REJECTED' ||
+      sale.installmentApproval?.status === 'CANCELLED';
+    return (
+      <span
+        className={`rounded-full px-3 py-1 text-xs font-bold ${
+          rejected ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'
+        }`}
+      >
+        {t(installmentKey)}
+      </span>
+    );
+  }
+  return <SaleStatusPill status={sale.status} />;
 }
 
 function SaleStatusPill({ status }: { status: SaleStatus }) {

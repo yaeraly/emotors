@@ -138,6 +138,12 @@ export class SalesController {
     return this.saleInstallmentApprovalService.cancelInstallmentRequest(user, id, dto);
   }
 
+  @Post(':id/return-to-draft')
+  @Roles(Role.MANAGER)
+  returnRejectedSaleToDraft(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.saleInstallmentApprovalService.returnRejectedSaleToDraft(user, id);
+  }
+
   @Get('customer-options')
   @Roles(Role.OWNER, Role.CEO, Role.SYSTEM_ADMINISTRATOR, Role.FRANCHISE_OWNER, Role.MANAGER)
   searchCustomers(

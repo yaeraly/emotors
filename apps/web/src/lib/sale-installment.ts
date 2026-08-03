@@ -76,6 +76,12 @@ export function canBranchCeoCancelInstallmentRequest(
   );
 }
 
+export function canReturnRejectedSaleToDraft(
+  approval: Pick<SaleInstallmentApproval, 'status'> | null | undefined,
+) {
+  return approval?.status === 'REJECTED' || approval?.status === 'CANCELLED';
+}
+
 export function computeRemainingDebt(totalAmount: number, downPayment: number) {
   return Math.max(Math.round((totalAmount - downPayment + Number.EPSILON) * 100) / 100, 0);
 }

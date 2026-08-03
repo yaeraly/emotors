@@ -60,6 +60,14 @@ export function isBranchCashierInvoiceVisible(invoice: CashierVisibilityInvoiceL
     return false;
   }
 
+  const retailApproval = invoice.sale?.installmentApproval;
+  if (
+    retailApproval?.status === 'REJECTED' ||
+    retailApproval?.status === 'CANCELLED'
+  ) {
+    return false;
+  }
+
   const earlyRequests = invoice.installmentEarlyPaymentRequests ?? [];
   const hasCeoApprovedNotSent = earlyRequests.some(
     (row) => row.status === BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO,

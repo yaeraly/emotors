@@ -48,6 +48,7 @@ import { assertCashierPaymentAllowed } from '../finance/finance-assignment.util'
 import { BranchCashierPaymentService } from '../finance/branch-cashier-payment.service';
 import { BRANCH_CASHIER_PAYMENT_AUDIT } from '../finance/branch-cashier-payment.util';
 import { resolveBranchPaymentNetAmount } from '../finance/branch-payment-posting.util';
+import { assertRetailSaleFinanceAllowed } from './branch-sale-rejection.util';
 import { activeBranchWarehouseWhere } from '../warehouse/warehouse.util';
 import { HQ_CATALOG_BRANCH_CODE } from '../warehouse/warehouse.util';
 import { AddPaymentDto } from './dto/add-payment.dto';
@@ -975,6 +976,11 @@ export class SalesService {
           },
         },
         branch: true,
+        installmentApproval: {
+          include: {
+            rejectedBy: { select: { id: true, fullName: true, role: true } },
+          },
+        },
       },
       orderBy: { saleDate: 'desc' },
     });
@@ -1576,6 +1582,11 @@ export class SalesService {
       if (!isRetailInstallmentInvoice(invoice)) {
         throw new BadRequestException('Счёт не является рассрочкой по розничной продаже');
       }
+
+      assertRetailSaleFinanceAllowed({
+        invoiceStatus: invoice.status,
+        installmentApproval: invoice.sale.installmentApproval,
+      });
 
       const approval = invoice.sale.installmentApproval;
       if (

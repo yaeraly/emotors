@@ -18,6 +18,11 @@ import { BranchInstallmentEarlyPaymentService } from '../distribution/branch-ins
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
 import { isBranchCashierInvoiceVisible } from '../distribution/branch-cashier-invoice-visibility.util';
 import { isRetailInstallmentCashierVisible, isRetailInstallmentInvoice } from '../sales/sale-installment-invoice.util';
+import {
+  assertRetailSaleFinanceAllowed,
+  buildActiveAccountantInvoiceWhere,
+  isRetailSaleWorkflowStopped,
+} from '../sales/branch-sale-rejection.util';
 import { DistributionService } from '../distribution/distribution.service';
 import { CreateInstallmentEarlyPaymentDto } from '../distribution/dto/create-installment-early-payment.dto';
 import { AddBranchPaymentDto } from '../distribution/dto/add-branch-payment.dto';
@@ -132,6 +137,10 @@ export class BranchAccountantService {
       include: this.invoiceInclude(),
     });
     if (!invoice) throw new NotFoundException('Счёт не найден');
+    assertRetailSaleFinanceAllowed({
+      invoiceStatus: invoice.status,
+      installmentApproval: invoice.sale?.installmentApproval,
+    });
     return this.attachLinkedRequest(invoice);
   }
 
@@ -256,9 +265,7 @@ export class BranchAccountantService {
   async listInvoices(user: AuthUser, query: BranchAccountantInvoiceQueryDto) {
     this.assertBranchAccountant(user);
     const where: Prisma.BranchInvoiceWhereInput = {
-      deletedAt: null,
-      branchId: user.branchId!,
-      sentToBranchAt: { not: null },
+      ...buildActiveAccountantInvoiceWhere(user.branchId!),
     };
 
     if (query.search?.trim()) {
@@ -381,6 +388,10 @@ export class BranchAccountantService {
         throw new BadRequestException('Счёт уже закрыт');
       }
       const approval = invoice.sale?.installmentApproval;
+      assertRetailSaleFinanceAllowed({
+        invoiceStatus: invoice.status,
+        installmentApproval: approval,
+      });
       if (!approval || approval.status === SaleInstallmentApprovalStatus.REJECTED || approval.status === SaleInstallmentApprovalStatus.CANCELLED) {
         throw new BadRequestException('Рассрочка недоступна для передачи кассиру');
       }
@@ -415,11 +426,26 @@ export class BranchAccountantService {
       branchId: user.branchId!,
       sentToCashierAt: { not: null },
       status: { in: [BranchInvoiceStatus.ISSUED, BranchInvoiceStatus.PARTIALLY_PAID, BranchInvoiceStatus.OVERDUE] },
-      NOT: {
-        installmentEarlyPaymentRequests: {
-          some: { status: BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO },
+      AND: [
+        {
+          NOT: {
+            sale: {
+              installmentApproval: {
+                status: {
+                  in: [SaleInstallmentApprovalStatus.REJECTED, SaleInstallmentApprovalStatus.CANCELLED],
+                },
+              },
+            },
+          },
         },
-      },
+        {
+          NOT: {
+            installmentEarlyPaymentRequests: {
+              some: { status: BranchInstallmentEarlyPaymentStatus.APPROVED_BY_BRANCH_CEO },
+            },
+          },
+        },
+      ],
       OR: [
         { paymentType: BranchInvoicePaymentType.FULL_PAYMENT },
         {
@@ -492,7 +518,12 @@ export class BranchAccountantService {
     this.assertBranchCashier(user);
     const invoice = await this.prisma.branchInvoice.findFirst({
       where: { id, deletedAt: null, branchId: user.branchId! },
-      select: { id: true, invoiceCategory: true, saleId: true, paymentType: true },
+      include: { sale: { include: { installmentApproval: true } } },
+    });
+    if (!invoice) throw new NotFoundException('Счёт не найден');
+    assertRetailSaleFinanceAllowed({
+      invoiceStatus: invoice.status,
+      installmentApproval: invoice.sale?.installmentApproval,
     });
     if (invoice && isRetailInstallmentInvoice(invoice)) {
       throw new BadRequestException('Для рассрочки используйте раздел «Рассрочка»');

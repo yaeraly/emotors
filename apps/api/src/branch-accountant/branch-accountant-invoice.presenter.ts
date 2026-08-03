@@ -40,10 +40,22 @@ type InvoiceLike = {
   } | null;
 };
 
-export function resolveAccountantInvoiceWorkflowStatus(invoice: InvoiceLike): AccountantInvoiceWorkflowStatus {
+export function resolveAccountantInvoiceWorkflowStatus(invoice: InvoiceLike & {
+  sale?: {
+    installmentApproval?: { status: string } | null;
+  } | null;
+}): AccountantInvoiceWorkflowStatus {
   if (invoice.status === BranchInvoiceStatus.CANCELLED) return 'CANCELLED';
   if (invoice.status === BranchInvoiceStatus.PAID) return 'PAID';
   if (invoice.status === BranchInvoiceStatus.PARTIALLY_PAID) return 'PARTIALLY_PAID';
+
+  const retailApproval = invoice.sale?.installmentApproval;
+  if (
+    retailApproval?.status === 'REJECTED' ||
+    retailApproval?.status === 'CANCELLED'
+  ) {
+    return 'REJECTED';
+  }
 
   const hasPendingPayment = invoice.payments?.some(
     (payment) => payment.confirmationStatus === BranchPaymentConfirmationStatus.PENDING_CONFIRMATION,

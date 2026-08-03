@@ -19,6 +19,7 @@ import {
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import {
   canBranchCeoCancelInstallmentRequest,
+  canReturnRejectedSaleToDraft,
   installmentBlocksCompletion,
   installmentStatusLabelKey,
   isPendingBranchCeoInstallmentDecision,
@@ -205,6 +206,21 @@ export default function SaleDetailPage() {
     }
   }
 
+  async function returnRejectedSaleToDraft() {
+    setSubmittingInstallment(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/sales/${saleId}/return-to-draft`, { method: 'POST' });
+      await loadSale();
+      setSuccess(t('sales.returnedToDraft'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmittingInstallment(false);
+    }
+  }
+
   async function rejectInstallmentRequest() {
     if (!rejectionReason.trim()) {
       setError(t('sales.installmentRejectionReasonRequired'));
@@ -240,11 +256,16 @@ export default function SaleDetailPage() {
   const canCancelInstallment =
     canCancelSaleInstallmentRequest(currentUser) &&
     canBranchCeoCancelInstallmentRequest(installmentApproval, sale);
+  const canReturnToDraft =
+    canSubmitSaleInstallmentRequest(currentUser) &&
+    canReturnRejectedSaleToDraft(installmentApproval);
   const canFinalize =
     Boolean(sale) &&
     sale?.status !== 'FINALIZED' &&
     sale?.status !== 'CANCELLED' &&
-    !installmentBlocksCompletion(sale);
+    !installmentBlocksCompletion(sale) &&
+    !installmentRejected &&
+    !installmentCancelled;
 
   return (
     <ProtectedShell>
@@ -357,6 +378,8 @@ export default function SaleDetailPage() {
                         submittingInstallment ||
                         installmentPending ||
                         installmentApproved ||
+                        installmentRejected ||
+                        installmentCancelled ||
                         sale.status === 'FINALIZED' ||
                         sale.status === 'CANCELLED'
                       }
@@ -404,6 +427,16 @@ export default function SaleDetailPage() {
                       className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
                     >
                       {t('sales.cancelInstallment')}
+                    </button>
+                  ) : null}
+                  {canReturnToDraft ? (
+                    <button
+                      onClick={() => void returnRejectedSaleToDraft()}
+                      disabled={submittingInstallment}
+                      type="button"
+                      className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                    >
+                      {t('sales.returnToDraft')}
                     </button>
                   ) : null}
                   <button
@@ -684,6 +717,18 @@ export default function SaleDetailPage() {
                       <p>
                         <span className="font-semibold">{t('sales.sentForApprovalAt')}:</span>{' '}
                         {new Date(installmentApproval.submittedAt).toLocaleString()}
+                      </p>
+                    ) : null}
+                    {installmentRejected && installmentApproval.rejectedBy ? (
+                      <p>
+                        <span className="font-semibold">{t('sales.rejectedBy')}:</span>{' '}
+                        {installmentApproval.rejectedBy.fullName}
+                      </p>
+                    ) : null}
+                    {installmentRejected && installmentApproval.rejectedAt ? (
+                      <p>
+                        <span className="font-semibold">{t('sales.rejectedAt')}:</span>{' '}
+                        {new Date(installmentApproval.rejectedAt).toLocaleString()}
                       </p>
                     ) : null}
                   </div>
