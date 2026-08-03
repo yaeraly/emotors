@@ -63,6 +63,12 @@ export class CreateFinanceAccountDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  openingBalance?: number;
 }
 
 export class UpdateFinanceAccountDto {

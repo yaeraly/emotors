@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -40,6 +41,15 @@ import {
 } from './finance-account-ownership.util';
 import { getActiveAssignmentAccountIds, listCashierEligibleEmployees } from './finance-assignment.util';
 import { FinanceLedgerService } from './finance-ledger.service';
+import {
+  assertBranchAccountantCanCreateAccount,
+  buildBranchAccountDuplicateWhere,
+  parseNonNegativeOpeningBalance,
+  resolveBranchAccountCreateAuditAction,
+  shouldPostOpeningBalanceLedger,
+  validateBranchAccountTypeFields,
+  ZERO_BALANCE_ACCOUNT_CREATED_MESSAGE,
+} from './finance-branch-account-create.util';
 import { buildFinanceDocumentNumber, roundMoney } from './finance-number.util';
 import { AssignFinanceAccountDto, CreateFinanceAccountDto, FinanceAccountQueryDto, SetOpeningBalanceDto, UpdateFinanceAccountDto } from './dto/finance-account.dto';
 
@@ -354,6 +364,8 @@ export class FinanceAccountsService {
       throw new ForbiddenException('Forbidden');
     }
 
+    assertBranchAccountantCanCreateAccount(user, dto);
+
     const typeDefinition = await this.prisma.financeAccountTypeDefinition.findFirst({
       where: { code: dto.typeCode, isActive: true },
     });
@@ -361,9 +373,11 @@ export class FinanceAccountsService {
       throw new BadRequestException('Unknown account type');
     }
 
+    const openingBalance = parseNonNegativeOpeningBalance(dto.openingBalance);
+
     const { scope, branchId } = resolveFinanceAccountOwner({
-      scope: dto.scope,
-      branchId: dto.branchId,
+      scope: isBranchAccountantUser(user) ? FinanceAccountScope.BRANCH : dto.scope,
+      branchId: isBranchAccountantUser(user) ? user.branchId : dto.branchId,
       userBranchId: user.branchId,
     });
 
@@ -376,6 +390,9 @@ export class FinanceAccountsService {
       }
       if (user.branchId && user.branchId !== branchId) {
         throw new ForbiddenException('Branch isolation violation');
+      }
+      if (isBranchAccountantUser(user)) {
+        validateBranchAccountTypeFields(dto);
       }
     }
 
@@ -396,8 +413,25 @@ export class FinanceAccountsService {
     }
 
     const accountName = assertValidFinanceAccountName(dto.name);
+    const currency = (dto.currency ?? 'KGS').trim().toUpperCase();
+    if (!currency) {
+      throw new BadRequestException('Currency is required');
+    }
 
     return this.prisma.$transaction(async (tx) => {
+      if (scope === FinanceAccountScope.BRANCH && branchId) {
+        const duplicateChecks = buildBranchAccountDuplicateWhere(branchId, {
+          ...dto,
+          name: accountName,
+        });
+        for (const check of duplicateChecks) {
+          const existing = await tx.financeAccount.findFirst({ where: check.where as any });
+          if (existing) {
+            throw new ConflictException(check.message);
+          }
+        }
+      }
+
       const account = await tx.financeAccount.create({
         data: {
           accountNumber: buildFinanceDocumentNumber('FAC'),
@@ -405,18 +439,22 @@ export class FinanceAccountsService {
           scope,
           branchId,
           typeCode: dto.typeCode,
-          currency: dto.currency ?? 'KGS',
+          currency,
+          openingBalance,
+          currentBalance: 0,
+          availableBalance: 0,
+          pendingBalance: 0,
           // HQ accounts start as Draft; Accountant activates. Branch accounts stay Active.
           status:
             scope === FinanceAccountScope.HQ
               ? FinanceAccountStatus.DRAFT
               : FinanceAccountStatus.ACTIVE,
-          bankName: dto.bankName,
-          bankAccountNo: dto.bankAccountNo,
-          iban: dto.iban,
+          bankName: dto.bankName?.trim() || null,
+          bankAccountNo: dto.bankAccountNo?.trim() || null,
+          iban: dto.iban?.trim() || null,
           responsibleEmployeeId: dto.responsibleEmployeeId,
-          qrProvider: dto.qrProvider,
-          qrMerchantId: dto.qrMerchantId,
+          qrProvider: dto.qrProvider?.trim() || null,
+          qrMerchantId: dto.qrMerchantId?.trim() || null,
           posTerminalId: dto.posTerminalId,
           notes: dto.notes,
           createdById: user.id,
@@ -427,32 +465,62 @@ export class FinanceAccountsService {
 
       assertFinanceAccountOwnershipInvariant(account);
 
-      await tx.auditLog.create({
-        data: {
-          userId: user.id,
-          role: user.role,
-          action: 'finance.account.create',
-          entity: 'FinanceAccount',
-          entityId: account.id,
-          metadata: {
-            accountId: account.id,
-            ownerType: account.scope,
-            branchId,
-            userId: user.id,
-            ownershipAction: ACCOUNT_OWNERSHIP_AUDIT.CREATED,
-            employeeId: user.id,
-            role: user.role,
-            operation: 'CREATE_ACCOUNT',
-            amount: 0,
-            transactionNumber: account.accountNumber,
-            previousValue: null,
-            newValue: { status: account.status, name: account.name, scope: account.scope },
-            timestamp: new Date().toISOString(),
-          },
-        },
+      if (shouldPostOpeningBalanceLedger(openingBalance)) {
+        await this.ledgerService.postLedgerEntry(tx, user, {
+          accountId: account.id,
+          branchId: account.branchId,
+          entryType: FinanceLedgerEntryType.OPENING_BALANCE,
+          amount: openingBalance,
+          currency: account.currency,
+          notes: 'Opening balance on account creation',
+        });
+      }
+
+      const refreshed = await tx.financeAccount.findUniqueOrThrow({
+        where: { id: account.id },
+        include: this.accountInclude(),
       });
 
-      return account;
+      const auditActions = resolveBranchAccountCreateAuditAction(dto.typeCode, openingBalance);
+      for (const action of auditActions) {
+        await tx.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action,
+            entity: 'FinanceAccount',
+            entityId: account.id,
+            metadata: {
+              accountId: account.id,
+              accountType: dto.typeCode,
+              ownerType: account.scope,
+              branchId,
+              currency: account.currency,
+              openingBalance,
+              currentBalance: Number(refreshed.currentBalance),
+              createdBy: user.id,
+              createdAt: new Date().toISOString(),
+              ownershipAction: ACCOUNT_OWNERSHIP_AUDIT.CREATED,
+              employeeId: user.id,
+              role: user.role,
+              operation: 'CREATE_ACCOUNT',
+              transactionNumber: account.accountNumber,
+              previousValue: null,
+              newValue: {
+                status: account.status,
+                name: account.name,
+                scope: account.scope,
+                openingBalance,
+                currentBalance: Number(refreshed.currentBalance),
+              },
+              message:
+                openingBalance <= 0 ? ZERO_BALANCE_ACCOUNT_CREATED_MESSAGE : undefined,
+            },
+          },
+        });
+      }
+
+      return this.toAccountResponse(refreshed);
     });
   }
 
@@ -824,6 +892,23 @@ export class FinanceAccountsService {
       const entryCount = await tx.financeLedgerEntry.count({ where: { accountId: id } });
       if (entryCount > 0) {
         throw new BadRequestException('Opening balance can only be set before transactions');
+      }
+
+      if (!shouldPostOpeningBalanceLedger(amount)) {
+        await tx.financeAccount.update({
+          where: { id },
+          data: {
+            openingBalance: 0,
+            currentBalance: 0,
+            availableBalance: 0,
+            pendingBalance: 0,
+            updatedById: user.id,
+          },
+        });
+        return tx.financeAccount.findUniqueOrThrow({
+          where: { id },
+          include: this.accountInclude(),
+        });
       }
 
       // Persist openingBalance metadata only — ledger post is the balance source of truth.

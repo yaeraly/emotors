@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { AccountAssignmentsPanel } from '@/components/finance/AccountAssignmentsPanel';
 import {
   FinanceErrorState,
@@ -25,6 +25,7 @@ export default function FinanceAccountDetailsPage() {
   const { t } = useTranslation();
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<User | null>(null);
   const [account, setAccount] = useState<FinanceAccount & { ledgerEntries?: FinanceLedgerEntry[] } | null>(null);
   const [error, setError] = useState('');
@@ -126,6 +127,11 @@ export default function FinanceAccountDetailsPage() {
       ]}
     >
       {error ? <FinanceErrorState message={error} /> : null}
+      {searchParams.get('created') === 'zero' ? (
+        <p className="mb-4 rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">
+          {t('finance.zeroBalanceAccountCreated')}
+        </p>
+      ) : null}
       {loading ? <FinanceLoadingState /> : null}
       {account ? (
         <>
