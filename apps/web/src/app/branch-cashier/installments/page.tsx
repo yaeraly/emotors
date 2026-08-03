@@ -6,10 +6,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
-import { getStatusLabel } from '@/lib/translate-status';
 import type { BranchAccountantInvoice } from '@/lib/types';
 
 type InstallmentScope = 'active' | 'overdue' | 'closed';
+type InstallmentDisplayStatus = 'active' | 'overdue' | 'closed';
+
+const thClass = 'px-1.5 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500';
+const tdClass = 'px-1.5 py-1.5 align-middle';
+const tdMoneyClass = `${tdClass} text-right tabular-nums whitespace-nowrap`;
+const actionBtnClass =
+  'rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-slate-700 hover:bg-slate-50';
+const actionBtnPrimaryClass =
+  'rounded border border-blue-200 px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-blue-700 hover:bg-blue-50';
 
 export default function BranchCashierInstallmentsPage() {
   const router = useRouter();
@@ -86,94 +94,108 @@ export default function BranchCashierInstallmentsPage() {
                   : t('branchCashier.emptyInstallments')}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-bold uppercase text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">{t('branchAccountant.invoiceNo')}</th>
-                    <th className="px-4 py-3">{t('sales.receiptNumber')}</th>
-                    <th className="px-4 py-3">{t('sales.customer')}</th>
-                    <th className="px-4 py-3">{t('branchAccountant.amount')}</th>
-                    <th className="px-4 py-3">{t('sales.paidAmount')}</th>
-                    <th className="px-4 py-3">{t('sales.installmentRemainingDebt')}</th>
-                    <th className="px-4 py-3">{t('sales.installmentInitialPayment')}</th>
-                    <th className="px-4 py-3">{t('branchCashier.nextPaymentDate')}</th>
-                    <th className="px-4 py-3">{t('branchCashier.installmentEndDate')}</th>
-                    <th className="px-4 py-3">{t('common.status')}</th>
-                    <th className="px-4 py-3">{t('branchCashier.lastPaymentDate')}</th>
-                    <th className="px-4 py-3">{t('common.actions')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {installments.map((invoice) => (
+            <table className="w-full table-fixed divide-y divide-slate-200 text-xs">
+              <colgroup>
+                <col className="w-[4%]" />
+                <col className="w-[8%]" />
+                <col className="w-[14%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                <col className="w-[8%]" />
+                <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                <col className="w-[8%]" />
+                <col className="w-[14%]" />
+              </colgroup>
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className={thClass}>{t('branchCashier.colInvoiceNo')}</th>
+                  <th className={thClass}>{t('branchCashier.colReceipt')}</th>
+                  <th className={thClass}>{t('branchCashier.colCustomer')}</th>
+                  <th className={`${thClass} text-right`}>{t('branchCashier.colAmount')}</th>
+                  <th className={`${thClass} text-right`}>{t('branchCashier.colPaid')}</th>
+                  <th className={`${thClass} text-right`}>{t('branchCashier.colRemaining')}</th>
+                  <th className={`${thClass} text-right`}>{t('branchCashier.colInitialPayment')}</th>
+                  <th className={thClass}>{t('branchCashier.colNextPayment')}</th>
+                  <th className={thClass}>{t('branchCashier.colTerm')}</th>
+                  <th className={thClass}>{t('branchCashier.colStatus')}</th>
+                  <th className={thClass}>{t('branchCashier.colLastPayment')}</th>
+                  <th className={thClass}>{t('branchCashier.colActions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {installments.map((invoice) => {
+                  const receipt = resolveReceiptNumber(invoice);
+                  const customer = invoice.customerName ?? '—';
+
+                  return (
                     <tr key={invoice.id} className="hover:bg-blue-50/40">
-                      <td className="px-4 py-3 font-bold text-blue-700">{invoice.invoiceNumber}</td>
-                      <td className="px-4 py-3">
-                        {invoice.saleNumber ?? invoice.saleReceiptNumber ?? invoice.orderNumber ?? '—'}
+                      <td className={`${tdClass} font-bold text-blue-700`}>{invoice.invoiceNumber}</td>
+                      <td className={`${tdClass} max-w-0`} title={receipt !== '—' ? receipt : undefined}>
+                        <span className="block truncate">{receipt}</span>
                       </td>
-                      <td className="px-4 py-3">{invoice.customerName ?? '—'}</td>
-                      <td className="px-4 py-3">{formatKgs(invoice.totalAmount)}</td>
-                      <td className="px-4 py-3">{formatKgs(invoice.paidAmount)}</td>
-                      <td className="px-4 py-3 font-semibold text-red-700">
-                        {formatKgs(invoice.remainingAmount)}
+                      <td className={`${tdClass} max-w-0`} title={customer !== '—' ? customer : undefined}>
+                        <span className="block truncate">{customer}</span>
                       </td>
-                      <td className="px-4 py-3">
-                        {formatKgs(invoice.initialPayment ?? invoice.retailInstallment?.initialPayment)}
+                      <td className={tdMoneyClass}>{formatCompactAmount(invoice.totalAmount)}</td>
+                      <td className={tdMoneyClass}>{formatCompactAmount(invoice.paidAmount)}</td>
+                      <td className={`${tdMoneyClass} font-semibold text-red-700`}>
+                        {formatCompactAmount(invoice.remainingAmount)}
                       </td>
-                      <td className="px-4 py-3">
-                        {invoice.nextPaymentDate
-                          ? new Date(invoice.nextPaymentDate).toLocaleDateString('ru-RU')
-                          : '—'}
+                      <td className={tdMoneyClass}>
+                        {formatCompactAmount(invoice.initialPayment ?? invoice.retailInstallment?.initialPayment)}
                       </td>
-                      <td className="px-4 py-3">
-                        {invoice.installmentEndDate || invoice.retailInstallment?.dueDate
-                          ? new Date(
-                              invoice.installmentEndDate ?? invoice.retailInstallment!.dueDate!,
-                            ).toLocaleDateString('ru-RU')
-                          : '—'}
+                      <td className={`${tdClass} whitespace-nowrap`}>
+                        {formatCompactDate(invoice.nextPaymentDate)}
                       </td>
-                      <td className="px-4 py-3">
-                        {getStatusLabel({
-                          module: 'sale',
-                          status: invoice.status,
-                          t,
-                        })}
+                      <td className={`${tdClass} whitespace-nowrap`}>
+                        {formatCompactDate(
+                          invoice.installmentEndDate ?? invoice.retailInstallment?.dueDate ?? null,
+                        )}
                       </td>
-                      <td className="px-4 py-3">
-                        {invoice.lastPaymentDate
-                          ? new Date(invoice.lastPaymentDate).toLocaleDateString('ru-RU')
-                          : '—'}
+                      <td className={tdClass}>
+                        <InstallmentStatusBadge invoice={invoice} t={t} />
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Link
-                            href={`/branch-cashier/installments/${invoice.id}`}
-                            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                          >
-                            {t('common.open')}
-                          </Link>
-                          {scope !== 'closed' ? (
-                            <button
-                              type="button"
-                              onClick={() => router.push(`/branch-cashier/installments/${invoice.id}`)}
-                              className="rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                      <td className={`${tdClass} whitespace-nowrap`}>
+                        {formatCompactDate(invoice.lastPaymentDate)}
+                      </td>
+                      <td className={tdClass}>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex flex-wrap gap-0.5">
+                            <Link
+                              href={`/branch-cashier/installments/${invoice.id}`}
+                              className={actionBtnClass}
+                              title={t('common.open')}
                             >
-                              {t('branchCashier.acceptPayment')}
-                            </button>
-                          ) : null}
+                              {t('branchCashier.actionOpenShort')}
+                            </Link>
+                            {scope !== 'closed' ? (
+                              <button
+                                type="button"
+                                onClick={() => router.push(`/branch-cashier/installments/${invoice.id}`)}
+                                className={actionBtnPrimaryClass}
+                                title={t('branchCashier.acceptPayment')}
+                              >
+                                {t('branchCashier.actionPayShort')}
+                              </button>
+                            ) : null}
+                          </div>
                           <Link
                             href={`/branch-cashier/installments/${invoice.id}#payment-history`}
-                            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                            className={`${actionBtnClass} w-fit`}
+                            title={t('branchCashier.paymentHistory')}
                           >
-                            {t('branchCashier.paymentHistory')}
+                            {t('branchCashier.actionHistoryShort')}
                           </Link>
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       </section>
@@ -181,6 +203,69 @@ export default function BranchCashierInstallmentsPage() {
   );
 }
 
-function formatKgs(value: number | string | null | undefined) {
-  return `${Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 2, minimumFractionDigits: 2 })} сом`;
+function InstallmentStatusBadge({
+  invoice,
+  t,
+}: {
+  invoice: BranchAccountantInvoice;
+  t: (key: string) => string;
+}) {
+  const status = resolveInstallmentDisplayStatus(invoice);
+  const labelKey =
+    status === 'closed'
+      ? 'branchCashier.installmentStatusClosed'
+      : status === 'overdue'
+        ? 'branchCashier.installmentStatusOverdue'
+        : 'branchCashier.installmentStatusActive';
+  const tone =
+    status === 'closed'
+      ? 'bg-slate-100 text-slate-600'
+      : status === 'overdue'
+        ? 'bg-red-100 text-red-700'
+        : 'bg-emerald-100 text-emerald-700';
+
+  return (
+    <span className={`inline-flex whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-bold ${tone}`}>
+      {t(labelKey)}
+    </span>
+  );
+}
+
+function resolveReceiptNumber(invoice: BranchAccountantInvoice) {
+  return invoice.saleNumber ?? invoice.saleReceiptNumber ?? invoice.orderNumber ?? '—';
+}
+
+function resolveInstallmentDisplayStatus(invoice: BranchAccountantInvoice): InstallmentDisplayStatus {
+  const remaining = Number(invoice.remainingAmount ?? 0);
+  const isClosed =
+    invoice.status === 'PAID' ||
+    invoice.retailInstallment?.status === 'PAID' ||
+    remaining <= 0.009;
+
+  if (isClosed) return 'closed';
+  if (invoice.status === 'OVERDUE') return 'overdue';
+
+  const dueDateRaw = invoice.nextPaymentDate ?? invoice.retailInstallment?.dueDate;
+  if (dueDateRaw) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDay = new Date(dueDateRaw);
+    dueDay.setHours(0, 0, 0, 0);
+    if (dueDay.getTime() < today.getTime()) return 'overdue';
+  }
+
+  return 'active';
+}
+
+function formatCompactAmount(value: number | string | null | undefined) {
+  return Number(value ?? 0).toLocaleString('ru-RU', { maximumFractionDigits: 0 });
+}
+
+function formatCompactDate(value: string | null | undefined) {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+  });
 }
