@@ -345,12 +345,14 @@ export class PricingService {
         maximumPriceKgs = maxFreeze.resolvedPriceKgs;
       }
 
+      // Branch automatic customer pricing still enforces authoritative min/max.
+      // Frontend-supplied limits are never trusted — values come from the pricing engine.
       const validation = validateSellingPriceLimits({
         unitPrice: item.unitPrice,
         minimumPriceKgs: minResult.resolvedPriceKgs,
         recommendedPriceKgs: recommendedResult.resolvedPriceKgs,
-        maximumPriceKgs: options?.automaticCustomerPricing ? null : maximumPriceKgs,
-        maximumPolicy: options?.automaticCustomerPricing ? 'DISABLED' : maximumPolicy,
+        maximumPriceKgs,
+        maximumPolicy,
       });
 
       if (!validation.ok) {

@@ -60,3 +60,25 @@ export function preserveSaleLineQuantity<T extends { quantity: string }>(
 ): T {
   return { ...refreshed, quantity: existing.quantity };
 }
+
+/** Display helper: HQ customer-type base + loyalty markup, floored at minimum. */
+export function applyLoyaltyMarkupToRecommendedPrice(input: {
+  basePriceKgs: number;
+  loyaltyMarkupPercent?: number | null;
+  minimumPriceKgs?: number | null;
+  maximumPriceKgs?: number | null;
+}): number {
+  const base = Math.max(0, Number(input.basePriceKgs || 0));
+  const markup = Math.max(0, Number(input.loyaltyMarkupPercent || 0));
+  const minimum = Math.max(0, Number(input.minimumPriceKgs || 0));
+  const maximum =
+    input.maximumPriceKgs != null && Number(input.maximumPriceKgs) > 0
+      ? Number(input.maximumPriceKgs)
+      : null;
+  const provisional = Math.round((base * (1 + markup / 100) + Number.EPSILON) * 100) / 100;
+  let finalPrice = minimum > 0 && provisional < minimum ? minimum : provisional;
+  if (maximum != null && finalPrice > maximum) {
+    finalPrice = maximum;
+  }
+  return finalPrice;
+}

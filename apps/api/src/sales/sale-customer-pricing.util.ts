@@ -26,6 +26,14 @@ export function minimumPriceTypeForChannel(
   return PricingEnginePriceType.RETAIL_MINIMUM;
 }
 
+export function maximumPriceTypeForChannel(
+  channel: SalePricingChannel,
+): PricingEnginePriceType {
+  if (channel === 'WHOLESALE') return PricingEnginePriceType.WHOLESALE_MAXIMUM;
+  if (channel === 'MASTER') return PricingEnginePriceType.MASTER_MAXIMUM;
+  return PricingEnginePriceType.RETAIL_MAXIMUM;
+}
+
 export function assertBranchSaleCustomerTypeAllowed(customerType: CustomerType) {
   if (
     customerType === CustomerType.DEALER ||

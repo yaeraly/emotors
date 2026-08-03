@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   appliedPriceLabelKey,
+  applyLoyaltyMarkupToRecommendedPrice,
   customerTypeLabelKey,
   formatBranchCustomerTypeDisplay,
   preserveSaleLineQuantity,
@@ -48,6 +49,16 @@ describe('sale-customer-pricing', () => {
     const merged = preserveSaleLineQuantity(existing, refreshed);
     assert.equal(merged.quantity, '5');
     assert.equal(merged.unitPrice, '80');
+  });
+
+  it('defaults sale price to loyalty-adjusted recommended within max', () => {
+    const recommended = applyLoyaltyMarkupToRecommendedPrice({
+      basePriceKgs: 1000,
+      loyaltyMarkupPercent: 5,
+      minimumPriceKgs: 900,
+      maximumPriceKgs: 1400,
+    });
+    assert.equal(recommended, 1050);
   });
 });
 

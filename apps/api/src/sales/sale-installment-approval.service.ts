@@ -2,11 +2,15 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import {
   AlertType,
+  CustomerLoyaltyCategory,
+  CustomerType,
   PaymentMethod,
   PaymentRecordStatus,
   PaymentStatus,
@@ -23,6 +27,8 @@ import {
   isBranchOwnerUser,
   isBranchSalesManagerUser,
 } from '../rbac/rbac';
+import { resolvePricingChannelFromCustomerType } from './sale-customer-pricing.util';
+import { SalesService } from './sales.service';
 import { ReceiveInstallmentPaymentDto } from './dto/receive-installment-payment.dto';
 import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
 import { ApproveSaleInstallmentDto } from './dto/approve-sale-installment.dto';
@@ -58,9 +64,17 @@ type SaleWithApprovalContext = {
   notes: string | null;
   sellerId: string;
   seller: { fullName: string };
-  customer: { fullName: string; customerType?: string };
+  customer: {
+    id?: string;
+    fullName: string;
+    phone?: string | null;
+    customerType?: CustomerType | string;
+    loyaltyCategory?: CustomerLoyaltyCategory | null;
+  };
   items: Array<{
     productId: string | null;
+    productName?: string;
+    productSku?: string | null;
     quantity: number;
     unitPrice: Prisma.Decimal;
   }>;
@@ -91,6 +105,8 @@ export class SaleInstallmentApprovalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    @Inject(forwardRef(() => SalesService))
+    private readonly salesService: SalesService,
   ) {}
 
   saleRequiresInstallmentApproval(sale: {
@@ -390,6 +406,28 @@ export class SaleInstallmentApprovalService {
         });
         throw err;
       }
+
+      const customerType =
+        (sale.customer.customerType as CustomerType | undefined) ?? CustomerType.RETAIL;
+      const pricingChannel = resolvePricingChannelFromCustomerType(customerType);
+      const priceItems = sale.items.map((item) => ({
+        productId: item.productId ?? undefined,
+        productName: item.productName,
+        productSku: item.productSku ?? undefined,
+        unitPrice: Number(item.unitPrice),
+        pricingChannel,
+      }));
+      await this.salesService.assertSaleItemPricesWithinAuthoritativeRange(
+        user,
+        sale.branchId,
+        {
+          id: sale.customer.id ?? sale.customerId,
+          customerType,
+          loyaltyCategory: sale.customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD,
+        },
+        priceItems,
+        sale.id,
+      );
 
       const downPayment = this.roundMoney(Number(approval.initialPayment));
       const remainingDebt = this.roundMoney(Number(approval.financedAmount));
@@ -1030,9 +1068,25 @@ export class SaleInstallmentApprovalService {
         ...(user.branchId ? { branchId: user.branchId } : {}),
       },
       include: {
-        customer: { select: { id: true, fullName: true, phone: true } },
+        customer: {
+          select: {
+            id: true,
+            fullName: true,
+            phone: true,
+            customerType: true,
+            loyaltyCategory: true,
+          },
+        },
         seller: { select: { id: true, fullName: true } },
-        items: { select: { productId: true, quantity: true, unitPrice: true } },
+        items: {
+          select: {
+            productId: true,
+            productName: true,
+            productSku: true,
+            quantity: true,
+            unitPrice: true,
+          },
+        },
         installments: { orderBy: { dueDate: 'asc' } },
         installmentApproval: true,
       },

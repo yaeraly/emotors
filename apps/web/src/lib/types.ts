@@ -578,6 +578,16 @@ export type SaleItem = {
   totalPrice: number;
   totalCost: number;
   profitAmount: number;
+  pricingPolicyVersionId?: string | null;
+  resolvedPriceKgs?: number | null;
+  minimumPriceSnapshot?: number | null;
+  recommendedPriceSnapshot?: number | null;
+  maximumPriceSnapshot?: number | null;
+  customerTypeSnapshot?: string | null;
+  customerCategorySnapshot?: string | null;
+  priceChangedManually?: boolean;
+  priceChangedBy?: string | null;
+  priceChangedAt?: string | null;
   createdAt: string;
 };
 
@@ -1224,6 +1234,7 @@ export type Sale = {
   customer: Customer;
   sellerId: string;
   seller?: Pick<User, 'id' | 'fullName' | 'email' | 'role'>;
+  pricingPolicyVersionId?: string | null;
   receiptNumber: string;
   saleDate: string;
   totalAmount: number;

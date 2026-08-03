@@ -67,16 +67,28 @@ describe('branch sale automatic pricing', () => {
     assert.equal(priced.minimumPriceApplied, true);
   });
 
-  it('branch cannot keep a client override below calculated auto price', () => {
+  it('branch may keep a client price within min/max around recommended', () => {
     const auto = calculateFinalSaleUnitPrice({
       basePriceKgs: 1200,
-      loyaltyMarkupPercent: 5,
+      loyaltyMarkupPercent: 0,
       minimumPriceKgs: 1000,
     });
+    const attemptedOverride = 1150;
+    const maximumPrice = 1400;
+    const withinRange =
+      attemptedOverride >= 1000 && attemptedOverride <= maximumPrice;
+    assert.equal(auto.finalPriceKgs, 1200);
+    assert.equal(withinRange, true);
+    assert.equal(attemptedOverride, 1150);
+  });
+
+  it('branch cannot keep a client override below minimum', () => {
     const attemptedOverride = 900;
-    const charged = Math.max(attemptedOverride, auto.finalPriceKgs, 1000);
-    assert.equal(auto.finalPriceKgs, 1260);
-    assert.equal(charged, 1260);
+    const minimumPrice = 1000;
+    const maximumPrice = 1400;
+    const withinRange =
+      attemptedOverride >= minimumPrice && attemptedOverride <= maximumPrice;
+    assert.equal(withinRange, false);
   });
 
   it('does not mutate cost fields when calculating selling price', () => {

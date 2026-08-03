@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import {
   AlertType,
@@ -47,16 +49,39 @@ import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sal
 import {
   assertBranchSaleCustomerTypeAllowed,
   assertSalePricingChannelMatchesCustomer,
+  maximumPriceTypeForChannel,
   minimumPriceTypeForChannel,
   missingSalePricingPolicyMessage,
   recommendedPriceTypeForChannel,
   resolvePricingChannelFromCustomerType,
   type SalePricingChannel,
 } from './sale-customer-pricing.util';
+import {
+  multiplyMoney,
+  pricesDiffer,
+  PRICING_POLICY_CHANGED_MESSAGE,
+  SALE_PRICE_OUT_OF_RANGE_REGISTER_MESSAGE,
+  sumMoney,
+  validateSalePriceRange,
+} from './sale-price-range.util';
 import { assertBranchSalesManagerCanCancelSale } from './branch-sales-workflow.util';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
+import { CreateSaleItemDto } from './dto/create-sale.dto';
 
 type PrismaTx = Prisma.TransactionClient;
+
+type SaleItemPricingSnapshot = {
+  minimumPriceSnapshot?: number | null;
+  recommendedPriceSnapshot?: number | null;
+  maximumPriceSnapshot?: number | null;
+  customerTypeSnapshot?: CustomerType | null;
+  customerCategorySnapshot?: CustomerLoyaltyCategory | null;
+  priceChangedManually?: boolean;
+  priceChangedBy?: string | null;
+  priceChangedAt?: Date | null;
+};
+
+type PricedSaleItemDto = CreateSaleItemDto & SaleItemPricingSnapshot;
 
 @Injectable()
 export class SalesService {
@@ -67,6 +92,7 @@ export class SalesService {
     private readonly pricingService: PricingService,
     private readonly pricingCatalogService: PricingCatalogService,
     private readonly pricingResolution: PricingResolutionService,
+    @Inject(forwardRef(() => SaleInstallmentApprovalService))
     private readonly saleInstallmentApprovalService: SaleInstallmentApprovalService,
     private readonly notificationsService: NotificationsService,
     private readonly loyaltyProgramSettingsService: LoyaltyProgramSettingsService,
@@ -418,12 +444,11 @@ export class SalesService {
           balance.product.id,
           pricingChannel,
         );
-        const maximumPriceKgs =
-          pricingChannel === 'WHOLESALE'
-            ? await this.resolveWholesaleMaximumPrice(branchId, balance.product.id)
-            : pricingChannel === 'MASTER'
-              ? null
-              : await this.resolveRetailMaximumPrice(branchId, balance.product.id);
+        const maximumPriceKgs = await this.resolveChannelMaximumPrice(
+          branchId,
+          balance.product.id,
+          pricingChannel,
+        );
         const sellingPriceKgs = recommendedPriceKgs ?? 0;
 
         return {
@@ -483,6 +508,22 @@ export class SalesService {
     try {
       const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
         priceType: minimumPriceTypeForChannel(channel),
+      });
+      const price = roundDisplayMoney(Number(freeze.resolvedPriceKgs ?? 0));
+      return price > 0 ? price : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolveChannelMaximumPrice(
+    branchId: string,
+    productId: string,
+    channel: SalePricingChannel,
+  ) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: maximumPriceTypeForChannel(channel),
       });
       const price = roundDisplayMoney(Number(freeze.resolvedPriceKgs ?? 0));
       return price > 0 ? price : null;
@@ -1023,24 +1064,61 @@ export class SalesService {
         if (Number(refreshedSale.paidAmount) + 0.009 < Number(refreshedSale.totalAmount)) {
           throw new BadRequestException('Недостаточная сумма оплаты для завершения продажи');
         }
+      }
 
-        const finalizeItems = refreshedSale.items.map((item) => ({
-          productId: item.productId ?? undefined,
-          productName: item.productName,
-          productSku: item.productSku ?? undefined,
-          quantity: item.quantity,
-          unitPrice: Number(item.unitPrice),
-          unitCost: Number(item.unitCost),
-          priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? undefined,
-          priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? undefined,
-          pricingChannel: this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
-        }));
+      const finalizeItems = refreshedSale.items.map((item) => ({
+        productId: item.productId ?? undefined,
+        productName: item.productName,
+        productSku: item.productSku ?? undefined,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        unitCost: Number(item.unitCost),
+        priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? undefined,
+        priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? undefined,
+        pricingChannel: this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
+      }));
 
-        await this.validateSaleStock(user, refreshedSale.branchId, finalizeItems);
-        await this.assertSaleItemsResolvablePricing(user, refreshedSale.branchId, finalizeItems);
-        await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems, {
-          automaticCustomerPricing: true,
-        });
+      await this.validateSaleStock(user, refreshedSale.branchId, finalizeItems);
+      await this.assertSaleItemsResolvablePricing(user, refreshedSale.branchId, finalizeItems);
+      await this.assertSaleItemPricesWithinAuthoritativeRange(
+        user,
+        refreshedSale.branchId,
+        refreshedSale.customer,
+        finalizeItems,
+        refreshedSale.id,
+      );
+      await this.pricingService.validateSaleItems(user, refreshedSale.branchId, finalizeItems, {
+        automaticCustomerPricing: true,
+      });
+
+      if (
+        refreshedSale.pricingPolicyVersionId &&
+        finalizeItems.some((item) => item.productId)
+      ) {
+        const currentVersionId = await this.resolveCurrentPricingPolicyVersionId(
+          refreshedSale.branchId,
+          finalizeItems.find((item) => item.productId)?.productId as string,
+          this.resolvePricingChannelFromCustomer(refreshedSale.customer.customerType),
+        );
+        if (
+          currentVersionId &&
+          currentVersionId !== refreshedSale.pricingPolicyVersionId
+        ) {
+          await this.auditInTx(
+            tx,
+            user,
+            refreshedSale.branchId,
+            'BRANCH_SALE_PRICE_VALIDATED',
+            'Sale',
+            refreshedSale.id,
+            {
+              reason: 'PRICING_POLICY_CHANGED',
+              oldPricingPolicyVersionId: refreshedSale.pricingPolicyVersionId,
+              newPricingPolicyVersionId: currentVersionId,
+              message: PRICING_POLICY_CHANGED_MESSAGE,
+            },
+          );
+        }
       }
 
       const refreshed = await tx.sale.findUniqueOrThrow({
@@ -1262,10 +1340,12 @@ export class SalesService {
     const items = [];
     let pricingPolicyVersionId: string | null = null;
 
-    for (const item of dto.items) {
-      const totalPrice = this.roundMoney(item.quantity * item.unitPrice);
-      const totalCost = this.roundMoney(item.quantity * item.unitCost);
-      const profitAmount = this.roundMoney(totalPrice - totalCost);
+    for (const item of dto.items as PricedSaleItemDto[]) {
+      const totalPrice = multiplyMoney(item.unitPrice, item.quantity);
+      const totalCost = multiplyMoney(item.unitCost, item.quantity);
+      const profitAmount = roundDisplayMoney(
+        new Prisma.Decimal(totalPrice).minus(new Prisma.Decimal(totalCost)),
+      );
 
       let freezeFields: Record<string, unknown> = {};
       if (item.productId) {
@@ -1280,7 +1360,8 @@ export class SalesService {
           freezeFields = {
             pricingPolicyVersionId: freeze.pricingPolicyVersionId,
             pricingProfileId: freeze.pricingProfileId,
-            resolvedPriceKgs: freeze.resolvedPriceKgs,
+            resolvedPriceKgs:
+              item.recommendedPriceSnapshot ?? freeze.resolvedPriceKgs,
             baseCostKgs: freeze.baseCostKgs,
             baseBranchPriceKgs: freeze.baseBranchPriceKgs,
             appliedRuleType: freeze.appliedRuleType,
@@ -1304,29 +1385,42 @@ export class SalesService {
         totalPrice,
         totalCost,
         profitAmount,
+        minimumPriceSnapshot: item.minimumPriceSnapshot ?? null,
+        recommendedPriceSnapshot: item.recommendedPriceSnapshot ?? null,
+        maximumPriceSnapshot: item.maximumPriceSnapshot ?? null,
+        customerTypeSnapshot: item.customerTypeSnapshot ?? null,
+        customerCategorySnapshot: item.customerCategorySnapshot ?? null,
+        priceChangedManually: Boolean(item.priceChangedManually),
+        priceChangedBy: item.priceChangedBy ?? null,
+        priceChangedAt: item.priceChangedAt ?? null,
         priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? null,
         priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? null,
         ...freezeFields,
       });
     }
 
-    const totalAmount = this.roundMoney(items.reduce((sum, item) => sum + item.totalPrice, 0));
-    const totalCost = this.roundMoney(items.reduce((sum, item) => sum + item.totalCost, 0));
+    const totalAmount = sumMoney(items.map((item) => item.totalPrice));
+    const totalCost = sumMoney(items.map((item) => item.totalCost));
 
     return {
       items,
       totalAmount,
       totalCost,
-      profitAmount: this.roundMoney(totalAmount - totalCost),
+      profitAmount: roundDisplayMoney(
+        new Prisma.Decimal(totalAmount).minus(new Prisma.Decimal(totalCost)),
+      ),
       pricingPolicyVersionId,
     };
   }
 
   private calculateSale(dto: CreateSaleDto) {
     const items = dto.items.map((item) => {
-      const totalPrice = this.roundMoney(item.quantity * item.unitPrice);
-      const totalCost = this.roundMoney(item.quantity * item.unitCost);
-      const profitAmount = this.roundMoney(totalPrice - totalCost);
+      const priced = item as PricedSaleItemDto;
+      const totalPrice = multiplyMoney(item.unitPrice, item.quantity);
+      const totalCost = multiplyMoney(item.unitCost, item.quantity);
+      const profitAmount = roundDisplayMoney(
+        new Prisma.Decimal(totalPrice).minus(new Prisma.Decimal(totalCost)),
+      );
 
       return {
         productId: item.productId,
@@ -1338,22 +1432,28 @@ export class SalesService {
         totalPrice,
         totalCost,
         profitAmount,
+        minimumPriceSnapshot: priced.minimumPriceSnapshot ?? null,
+        recommendedPriceSnapshot: priced.recommendedPriceSnapshot ?? null,
+        maximumPriceSnapshot: priced.maximumPriceSnapshot ?? null,
+        customerTypeSnapshot: priced.customerTypeSnapshot ?? null,
+        customerCategorySnapshot: priced.customerCategorySnapshot ?? null,
+        priceChangedManually: Boolean(priced.priceChangedManually),
+        priceChangedBy: priced.priceChangedBy ?? null,
+        priceChangedAt: priced.priceChangedAt ?? null,
         priceAboveRecommendedReasonCode: item.priceAboveRecommendedReasonCode ?? null,
         priceAboveRecommendedComment: item.priceAboveRecommendedComment ?? null,
       };
     });
-    const totalAmount = this.roundMoney(
-      items.reduce((sum, item) => sum + item.totalPrice, 0),
-    );
-    const totalCost = this.roundMoney(
-      items.reduce((sum, item) => sum + item.totalCost, 0),
-    );
+    const totalAmount = sumMoney(items.map((item) => item.totalPrice));
+    const totalCost = sumMoney(items.map((item) => item.totalCost));
 
     return {
       items,
       totalAmount,
       totalCost,
-      profitAmount: this.roundMoney(totalAmount - totalCost),
+      profitAmount: roundDisplayMoney(
+        new Prisma.Decimal(totalAmount).minus(new Prisma.Decimal(totalCost)),
+      ),
     };
   }
 
@@ -1462,9 +1562,9 @@ export class SalesService {
 
   /**
    * Backend is the single source of truth for Branch Sale unit prices:
-   * HQ Customer Type price → Branch loyalty additional markup → minimum price floor.
-   * Never modifies себестоимость / FIFO / inventory valuation.
-   * Branch users cannot override the calculated selling price.
+   * HQ Customer Type price → Branch loyalty additional markup → recommended default.
+   * Branch Sales Manager may keep a manual sale price only within authoritative min/max.
+   * Never modifies себестоимость / FIFO / inventory valuation / Pricing Policy formulas.
    */
   private async applyAutomaticSalePricing(
     user: AuthUser,
@@ -1493,9 +1593,9 @@ export class SalesService {
         error instanceof Error ? error.message : 'Markup rule is missing',
       );
     }
-    const allowManualOverride = hasAnyFullAccessRole(resolveUserRoles(user));
+    const allowCeoOverride = hasAnyFullAccessRole(resolveUserRoles(user));
 
-    for (const item of dto.items) {
+    for (const item of dto.items as PricedSaleItemDto[]) {
       if (!item.productId) continue;
       item.pricingChannel = channel;
 
@@ -1510,36 +1610,90 @@ export class SalesService {
 
       const minimumPrice =
         (await this.resolveChannelMinimumPrice(customer.branchId, item.productId, channel)) ?? 0;
+      const maximumPrice = await this.resolveChannelMaximumPrice(
+        customer.branchId,
+        item.productId,
+        channel,
+      );
 
       const priced = calculateFinalSaleUnitPrice({
         basePriceKgs: basePrice,
         loyaltyMarkupPercent,
         minimumPriceKgs: minimumPrice,
       });
-
-      const clientPrice = roundDisplayMoney(Number(item.unitPrice || 0));
-      if (!allowManualOverride && Math.abs(clientPrice - priced.finalPriceKgs) > 0.01) {
-        await this.prisma.auditLog.create({
-          data: {
-            userId: user.id,
-            role: user.role,
-            action: 'PRICE_OVERRIDE_REJECTED',
-            entity: 'Customer',
-            entityId: customer.id,
-            metadata: {
-              customerId: customer.id,
-              productId: item.productId,
-              oldValue: clientPrice,
-              newValue: priced.finalPriceKgs,
-              userId: user.id,
-              branchId: customer.branchId,
-              timestamp: new Date().toISOString(),
-            },
-          },
-        });
+      let recommendedPrice = priced.finalPriceKgs;
+      if (maximumPrice != null && recommendedPrice > maximumPrice + 0.01) {
+        recommendedPrice = maximumPrice;
       }
 
-      item.unitPrice = priced.finalPriceKgs;
+      const requestedRaw = item.unitPrice;
+      const hasClientPrice =
+        requestedRaw !== null &&
+        requestedRaw !== undefined &&
+        !(typeof requestedRaw === 'number' && Number.isNaN(requestedRaw)) &&
+        Number(requestedRaw) > 0;
+
+      let acceptedPrice = recommendedPrice;
+      let changedManually = false;
+
+      if (hasClientPrice && pricesDiffer(Number(requestedRaw), recommendedPrice)) {
+        const range = validateSalePriceRange({
+          requestedSalePrice: requestedRaw,
+          authoritativeMinimumPrice: minimumPrice,
+          authoritativeMaximumPrice: maximumPrice,
+          allowZeroPrice: false,
+        });
+
+        if (!range.ok) {
+          // Branch Sales Manager cannot leave the authoritative range.
+          // HQ/CEO override permissions remain for full-access roles.
+          if (!allowCeoOverride) {
+            await this.prisma.auditLog.create({
+              data: {
+                userId: user.id,
+                role: user.role,
+                action: 'BRANCH_SALE_PRICE_REJECTED',
+                entity: 'SaleItem',
+                entityId: item.productId,
+                metadata: {
+                  saleId: null,
+                  saleItemId: null,
+                  productId: item.productId,
+                  branchId: customer.branchId,
+                  customerId: customer.id,
+                  minimumPrice,
+                  recommendedPrice,
+                  maximumPrice,
+                  oldSalePrice: recommendedPrice,
+                  newSalePrice: range.salePrice,
+                  pricingPolicyVersionId: null,
+                  changedBy: user.id,
+                  changedAt: new Date().toISOString(),
+                  reason: range.reason,
+                  message: range.message,
+                },
+              },
+            });
+            throw new BadRequestException(range.message);
+          }
+          acceptedPrice = roundDisplayMoney(Number(requestedRaw));
+          changedManually = true;
+        } else {
+          acceptedPrice = range.salePrice;
+          changedManually = true;
+        }
+      }
+
+      const oldSalePrice = roundDisplayMoney(Number(item.unitPrice || recommendedPrice));
+      item.unitPrice = acceptedPrice;
+      item.minimumPriceSnapshot = minimumPrice > 0 ? minimumPrice : null;
+      item.recommendedPriceSnapshot = recommendedPrice;
+      item.maximumPriceSnapshot = maximumPrice;
+      item.customerTypeSnapshot = customer.customerType;
+      item.customerCategorySnapshot = loyaltyCategory;
+      item.priceChangedManually = changedManually;
+      item.priceChangedBy = changedManually ? user.id : null;
+      item.priceChangedAt = changedManually ? new Date() : null;
 
       await this.prisma.auditLog.create({
         data: {
@@ -1555,13 +1709,67 @@ export class SalesService {
             loyaltyCategory,
             pricingChannel: channel,
             oldValue: priced.basePriceKgs,
-            newValue: priced.finalPriceKgs,
+            newValue: recommendedPrice,
             markupPercent: priced.markupPercent,
             markupAmountKgs: priced.markupAmountKgs,
             minimumPriceApplied: priced.minimumPriceApplied,
             userId: user.id,
             branchId: customer.branchId,
             timestamp: new Date().toISOString(),
+          },
+        },
+      });
+
+      if (changedManually) {
+        await this.prisma.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'BRANCH_SALE_PRICE_CHANGED',
+            entity: 'SaleItem',
+            entityId: item.productId,
+            metadata: {
+              saleId: null,
+              saleItemId: null,
+              productId: item.productId,
+              branchId: customer.branchId,
+              customerId: customer.id,
+              minimumPrice,
+              recommendedPrice,
+              maximumPrice,
+              oldSalePrice,
+              newSalePrice: acceptedPrice,
+              pricingPolicyVersionId: null,
+              changedBy: user.id,
+              changedAt: new Date().toISOString(),
+              reason: 'MANUAL_WITHIN_RANGE',
+            },
+          },
+        });
+      }
+
+      await this.prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          role: user.role,
+          action: 'BRANCH_SALE_PRICE_VALIDATED',
+          entity: 'SaleItem',
+          entityId: item.productId,
+          metadata: {
+            saleId: null,
+            saleItemId: null,
+            productId: item.productId,
+            branchId: customer.branchId,
+            customerId: customer.id,
+            minimumPrice,
+            recommendedPrice,
+            maximumPrice,
+            oldSalePrice,
+            newSalePrice: acceptedPrice,
+            pricingPolicyVersionId: null,
+            changedBy: user.id,
+            changedAt: new Date().toISOString(),
+            reason: changedManually ? 'MANUAL_WITHIN_RANGE' : 'RECOMMENDED_DEFAULT',
           },
         },
       });
@@ -1611,6 +1819,146 @@ export class SalesService {
         await this.notifyMissingSalePricingPolicy(user, branchId, item.productId, channel);
         throw new BadRequestException(missingSalePricingPolicyMessage(channel));
       }
+    }
+  }
+
+  /**
+   * Recalculate authoritative min/max independently of any frontend-supplied limits
+   * and reject sale item prices outside the allowed range.
+   */
+  async assertSaleItemPricesWithinAuthoritativeRange(
+    user: AuthUser,
+    branchId: string,
+    customer: {
+      id: string;
+      customerType: CustomerType;
+      loyaltyCategory?: CustomerLoyaltyCategory | null;
+    },
+    items: Array<{
+      productId?: string;
+      productName?: string;
+      productSku?: string;
+      unitPrice: number;
+      pricingChannel?: SalePricingChannel;
+    }>,
+    saleId?: string,
+  ) {
+    if (hasAnyFullAccessRole(resolveUserRoles(user))) {
+      return;
+    }
+
+    const channel = this.resolvePricingChannelFromCustomer(customer.customerType);
+    const branchPolicy = await this.branchPricingPolicyService.getEffectivePolicy(branchId);
+    const loyaltyCategory = customer.loyaltyCategory ?? CustomerLoyaltyCategory.STANDARD;
+    let loyaltyMarkupPercent = 0;
+    try {
+      loyaltyMarkupPercent = getLoyaltyMarkupPercent(
+        loyaltyCategory,
+        branchPolicy,
+        customer.customerType,
+      );
+    } catch {
+      loyaltyMarkupPercent = 0;
+    }
+
+    const violations: Array<{
+      productId: string;
+      SKU: string;
+      productName: string;
+      requestedPrice: number;
+      minimumPrice: number;
+      maximumPrice: number | null;
+    }> = [];
+
+    for (const item of items) {
+      if (!item.productId) continue;
+
+      const basePrice = await this.resolveRecommendedChannelPrice(
+        branchId,
+        item.productId,
+        channel,
+      );
+      const minimumPrice =
+        (await this.resolveChannelMinimumPrice(branchId, item.productId, channel)) ?? 0;
+      const maximumPrice = await this.resolveChannelMaximumPrice(
+        branchId,
+        item.productId,
+        channel,
+      );
+
+      if (basePrice == null || basePrice <= 0) {
+        continue;
+      }
+
+      const priced = calculateFinalSaleUnitPrice({
+        basePriceKgs: basePrice,
+        loyaltyMarkupPercent,
+        minimumPriceKgs: minimumPrice,
+      });
+
+      const range = validateSalePriceRange({
+        requestedSalePrice: item.unitPrice,
+        authoritativeMinimumPrice: minimumPrice,
+        authoritativeMaximumPrice: maximumPrice,
+        allowZeroPrice: false,
+      });
+
+      if (!range.ok) {
+        await this.prisma.auditLog.create({
+          data: {
+            userId: user.id,
+            role: user.role,
+            action: 'BRANCH_SALE_PRICE_REJECTED',
+            entity: 'Sale',
+            entityId: saleId ?? item.productId,
+            metadata: {
+              saleId: saleId ?? null,
+              productId: item.productId,
+              branchId,
+              customerId: customer.id,
+              minimumPrice,
+              recommendedPrice: priced.finalPriceKgs,
+              maximumPrice,
+              oldSalePrice: null,
+              newSalePrice: item.unitPrice,
+              changedBy: user.id,
+              changedAt: new Date().toISOString(),
+              reason: range.reason,
+            },
+          },
+        });
+        violations.push({
+          productId: item.productId,
+          SKU: item.productSku ?? '',
+          productName: item.productName ?? '',
+          requestedPrice: item.unitPrice,
+          minimumPrice,
+          maximumPrice,
+        });
+      }
+    }
+
+    if (violations.length > 0) {
+      throw new BadRequestException({
+        message: SALE_PRICE_OUT_OF_RANGE_REGISTER_MESSAGE,
+        code: 'SALE_PRICE_OUT_OF_RANGE',
+        items: violations,
+      });
+    }
+  }
+
+  private async resolveCurrentPricingPolicyVersionId(
+    branchId: string,
+    productId: string,
+    channel: SalePricingChannel,
+  ) {
+    try {
+      const freeze = await this.pricingResolution.resolveWithFreeze(branchId, productId, {
+        priceType: recommendedPriceTypeForChannel(channel),
+      });
+      return freeze.pricingPolicyVersionId ?? null;
+    } catch {
+      return null;
     }
   }
 
@@ -1992,6 +2340,22 @@ export class SalesService {
         totalPrice: Number(item.totalPrice),
         totalCost: Number(item.totalCost),
         profitAmount: Number(item.profitAmount),
+        resolvedPriceKgs:
+          item.resolvedPriceKgs != null ? Number(item.resolvedPriceKgs) : null,
+        minimumPriceSnapshot:
+          item.minimumPriceSnapshot != null ? Number(item.minimumPriceSnapshot) : null,
+        recommendedPriceSnapshot:
+          item.recommendedPriceSnapshot != null
+            ? Number(item.recommendedPriceSnapshot)
+            : null,
+        maximumPriceSnapshot:
+          item.maximumPriceSnapshot != null ? Number(item.maximumPriceSnapshot) : null,
+        priceChangedManually: Boolean(item.priceChangedManually),
+        priceChangedBy: item.priceChangedBy ?? null,
+        priceChangedAt: item.priceChangedAt ?? null,
+        customerTypeSnapshot: item.customerTypeSnapshot ?? null,
+        customerCategorySnapshot: item.customerCategorySnapshot ?? null,
+        pricingPolicyVersionId: item.pricingPolicyVersionId ?? null,
       })),
       payments: sale.payments?.map((payment: any) => ({
         ...payment,

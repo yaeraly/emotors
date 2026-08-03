@@ -1961,6 +1961,14 @@ model SaleItem {
   pricingPolicyVersionId          String?
   pricingProfileId                String?
   resolvedPriceKgs                Decimal?                         @db.Decimal(14, 2)
+  minimumPriceSnapshot            Decimal?                         @db.Decimal(14, 2)
+  recommendedPriceSnapshot        Decimal?                         @db.Decimal(14, 2)
+  maximumPriceSnapshot            Decimal?                         @db.Decimal(14, 2)
+  customerTypeSnapshot            CustomerType?
+  customerCategorySnapshot        CustomerLoyaltyCategory?
+  priceChangedManually            Boolean                          @default(false)
+  priceChangedBy                  String?
+  priceChangedAt                  DateTime?
   baseCostKgs                     Decimal?                         @db.Decimal(14, 2)
   baseBranchPriceKgs              Decimal?                         @db.Decimal(14, 2)
   appliedRuleType                 PricingAppliedRuleType?

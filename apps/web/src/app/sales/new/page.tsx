@@ -11,11 +11,13 @@ import { canApproveSale, canCreateCustomer, canSubmitSaleInstallmentRequest, isB
 import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
   appliedPriceLabelKey,
+  applyLoyaltyMarkupToRecommendedPrice,
   customerTypeLabelKey,
   loyaltyCategoryLabelKey,
   preserveSaleLineQuantity,
   resolvePricingChannelFromCustomerType,
 } from '@/lib/sale-customer-pricing';
+import { formatKgsLocalized } from '@/lib/money';
 import {
   computeRemainingDebt,
   draftLooksLikeInstallment,
@@ -102,8 +104,10 @@ export default function NewSalePage() {
   const [submittingInstallment, setSubmittingInstallment] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [pricingPolicyWarning, setPricingPolicyWarning] = useState('');
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
+  const canEditSalePrice = Boolean(user);
   const canApprove = canApproveSale(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
   const canCreateCustomerAction = canCreateCustomer(user);
@@ -166,7 +170,8 @@ export default function NewSalePage() {
     () =>
       items.map((item) =>
         evaluateSaleLinePrice({
-          unitPrice: Number(item.unitPrice || 0),
+          unitPrice: item.unitPrice,
+          rawUnitPrice: item.unitPrice,
           minimumPrice: item.minimumPrice,
           recommendedPrice: item.recommendedPrice,
           maximumPrice: item.maximumPrice,
@@ -235,11 +240,29 @@ export default function NewSalePage() {
   function buildSaleItemFromProduct(
     product: SaleProductOption,
     quantity = '1',
+    customer: SaleCustomerOption | null = selectedCustomer,
   ): SaleItemForm {
-    const recommendedPrice = product.recommendedRetailPriceKgs ?? product.sellingPriceKgs;
+    const baseRecommended = product.recommendedRetailPriceKgs ?? product.sellingPriceKgs;
     const minimumPrice =
-      product.minimumRetailPriceKgs ?? product.minimumSellingPriceKgs ?? recommendedPrice;
+      product.minimumRetailPriceKgs ?? product.minimumSellingPriceKgs ?? baseRecommended;
     const maximumPrice = product.maximumRetailPriceKgs ?? null;
+    const loyaltyMarkupPercent = Number(
+      customer?.currentMarkupPercent ??
+        customer?.currentAdditionalMarkup ??
+        customer?.currentDiscountPercent ??
+        0,
+    );
+    const recommendedPrice = applyLoyaltyMarkupToRecommendedPrice({
+      basePriceKgs: baseRecommended,
+      loyaltyMarkupPercent,
+      minimumPriceKgs: minimumPrice,
+      maximumPriceKgs: maximumPrice,
+    });
+    const hasPricingPolicy =
+      product.hasRecommendedPrice !== false &&
+      baseRecommended > 0 &&
+      recommendedPrice > 0 &&
+      minimumPrice > 0;
 
     return {
       productId: product.id,
@@ -251,20 +274,21 @@ export default function NewSalePage() {
       minimumPrice,
       recommendedPrice,
       maximumPrice,
-      hasMaximumPrice: Boolean(product.hasMaximumRetailPrice && maximumPrice),
+      hasMaximumPrice: Boolean(product.hasMaximumRetailPrice && maximumPrice && maximumPrice > 0),
       discountPercent: '0',
       unitPrice: formatPriceInput(recommendedPrice),
       unitPriceManuallyEdited: false,
       unitCost: '0',
       availableQty: product.availableQty,
       maxDiscountPercent: product.maximumDiscountPercent,
-      hasPricingPolicy: product.hasRecommendedPrice !== false && recommendedPrice > 0,
+      hasPricingPolicy,
     };
   }
 
   async function recalculateDraftPricesForCustomer(customer: SaleCustomerOption) {
     if (items.length === 0) return;
 
+    const hadManualPrices = items.some((item) => item.unitPriceManuallyEdited);
     const channel = resolvePricingChannelFromCustomerType(customer.customerType);
     const refreshedItems = await Promise.all(
       items.map(async (item) => {
@@ -280,7 +304,10 @@ export default function NewSalePage() {
           if (!product) {
             return { ...item, hasPricingPolicy: false };
           }
-          return preserveSaleLineQuantity(item, buildSaleItemFromProduct(product, item.quantity));
+          return preserveSaleLineQuantity(
+            item,
+            buildSaleItemFromProduct(product, item.quantity, customer),
+          );
         } catch {
           return { ...item, hasPricingPolicy: false };
         }
@@ -289,7 +316,9 @@ export default function NewSalePage() {
 
     setItems(refreshedItems);
     if (refreshedItems.some((item) => !item.hasPricingPolicy)) {
-      setError(t('sales.noPricingPolicy'));
+      setError(t('sales.priceNotConfigured'));
+    } else if (hadManualPrices) {
+      setSuccess(t('sales.manualPriceResetOnCustomerChange'));
     }
   }
 
@@ -327,7 +356,7 @@ export default function NewSalePage() {
   function handleProductSelect(product: SaleProductOption) {
     const recommendedPrice = product.recommendedRetailPriceKgs ?? product.sellingPriceKgs;
     if (branchSalesManagerView && (product.hasRecommendedPrice === false || recommendedPrice <= 0)) {
-      setError(t('sales.noRecommendedPrice'));
+      setError(t('sales.priceNotConfigured'));
       return;
     }
 
@@ -558,6 +587,16 @@ export default function NewSalePage() {
         setPaymentsSynced(true);
       }
 
+      if (
+        draftSale?.pricingPolicyVersionId &&
+        sale.pricingPolicyVersionId &&
+        draftSale.pricingPolicyVersionId !== sale.pricingPolicyVersionId
+      ) {
+        setPricingPolicyWarning(t('sales.pricingPolicyChangedWarning'));
+      } else {
+        setPricingPolicyWarning('');
+      }
+      restoreItemsFromDraft(sale);
       setDraftSale(sale);
       return sale;
     } catch (err) {
@@ -681,8 +720,19 @@ export default function NewSalePage() {
     }
   }
 
+  function formatBoundPrice(value: number) {
+    return formatKgsLocalized(value);
+  }
+
   function priceWarningMessage(state: ReturnType<typeof evaluateSaleLinePrice>) {
     if (state.level === 'ok') return null;
+    if (state.kind === 'empty') return t('sales.priceEmptyError');
+    if (state.kind === 'invalid') return t('sales.priceInvalidError');
+    if (state.kind === 'negative') return t('sales.priceNegativeError');
+    if (state.kind === 'zero') return t('sales.priceZeroError');
+    if (state.kind === 'changed-manually') {
+      return t('sales.priceChangedByManager');
+    }
     if (state.kind === 'below-recommended') {
       return t('sales.priceBelowRecommendedWarning').replace(
         '{difference}',
@@ -698,13 +748,64 @@ export default function NewSalePage() {
     if (state.kind === 'below-minimum') {
       return t('sales.priceBelowMinimumError').replace(
         '{minimumPrice}',
-        state.boundary.toLocaleString('ru-RU'),
+        formatBoundPrice(state.boundary),
       );
     }
     return t('sales.priceAboveMaximumError').replace(
       '{maximumPrice}',
-      state.boundary.toLocaleString('ru-RU'),
+      formatBoundPrice(state.boundary),
     );
+  }
+
+  function restoreItemsFromDraft(sale: Sale) {
+    if (!sale.items?.length) return;
+    setItems((current) => {
+      if (current.length === 0) {
+        return sale.items!.map((item) => {
+          const recommended =
+            item.recommendedPriceSnapshot ?? item.resolvedPriceKgs ?? item.unitPrice;
+          const minimum = item.minimumPriceSnapshot ?? recommended;
+          const maximum = item.maximumPriceSnapshot ?? null;
+          return {
+            productId: item.productId ?? '',
+            productName: item.productName,
+            productSku: item.productSku ?? '',
+            unit: '',
+            quantity: String(item.quantity),
+            listPrice: recommended,
+            minimumPrice: minimum,
+            recommendedPrice: recommended,
+            maximumPrice: maximum,
+            hasMaximumPrice: maximum != null && maximum > 0,
+            discountPercent: '0',
+            unitPrice: formatPriceInput(item.unitPrice),
+            unitPriceManuallyEdited: Boolean(item.priceChangedManually),
+            unitCost: '0',
+            availableQty: item.quantity,
+            maxDiscountPercent: 0,
+            hasPricingPolicy: recommended > 0,
+          } satisfies SaleItemForm;
+        });
+      }
+      return current.map((line) => {
+        const draftItem = sale.items?.find((item) => item.productId === line.productId);
+        if (!draftItem) return line;
+        return {
+          ...line,
+          unitPrice: formatPriceInput(draftItem.unitPrice),
+          unitPriceManuallyEdited: Boolean(draftItem.priceChangedManually),
+          minimumPrice: draftItem.minimumPriceSnapshot ?? line.minimumPrice,
+          recommendedPrice:
+            draftItem.recommendedPriceSnapshot ??
+            draftItem.resolvedPriceKgs ??
+            line.recommendedPrice,
+          maximumPrice: draftItem.maximumPriceSnapshot ?? line.maximumPrice,
+          hasMaximumPrice:
+            (draftItem.maximumPriceSnapshot ?? line.maximumPrice) != null &&
+            Number(draftItem.maximumPriceSnapshot ?? line.maximumPrice) > 0,
+        };
+      });
+    });
   }
 
   async function finalizeSale() {
@@ -813,8 +914,13 @@ export default function NewSalePage() {
         </div>
 
         {error ? (
-          <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700 whitespace-pre-line">
             {error}
+          </p>
+        ) : null}
+        {pricingPolicyWarning ? (
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+            {pricingPolicyWarning}
           </p>
         ) : null}
         {success ? (
@@ -1029,11 +1135,11 @@ export default function NewSalePage() {
                 return (
                   <div
                     key={`${item.productId}-${index}`}
-                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,0.75fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-start"
+                    className="grid min-w-0 gap-3 rounded-2xl border border-slate-200 p-4 lg:grid-cols-[minmax(0,1.8fr)_minmax(0,0.6fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.1fr)_minmax(0,0.9fr)_auto] lg:items-start"
                   >
                     <div className="min-w-0">
                       <p className="text-xs font-semibold uppercase text-slate-400">{t('sales.product')}</p>
-                      <p className="mt-1 truncate font-semibold text-slate-950">{item.productName}</p>
+                      <p className="mt-1 break-words font-semibold text-slate-950">{item.productName}</p>
                       <p className="mt-1 text-xs text-slate-500">
                         {t('sales.sku')}: {item.productSku} • {item.unit}
                       </p>
@@ -1054,15 +1160,45 @@ export default function NewSalePage() {
                       }
                     />
                     <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {t('pricing.tooltip.minPrice')}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">
+                        {item.hasPricingPolicy && item.minimumPrice > 0
+                          ? formatKgs(item.minimumPrice)
+                          : t('sales.priceNotConfigured')}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {t('sales.recommendedPrice')}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">
+                        {item.hasPricingPolicy && item.recommendedPrice > 0
+                          ? formatKgs(item.recommendedPrice)
+                          : t('sales.priceNotConfigured')}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase text-slate-400">
+                        {t('sales.maximumPrice')}
+                      </p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">
+                        {item.hasPricingPolicy && item.hasMaximumPrice && item.maximumPrice
+                          ? formatKgs(item.maximumPrice)
+                          : t('sales.priceNotConfigured')}
+                      </p>
+                    </div>
+                    <div className="min-w-0">
                       <SaleInput
                         label={t('sales.sellingPrice')}
                         type="number"
                         value={item.unitPrice}
-                        onChange={() => undefined}
+                        onChange={(value) => updateItem(index, { unitPrice: value })}
                         required
-                        step="1"
+                        step="0.01"
                         min={0}
-                        readOnly
+                        readOnly={!canEditSalePrice}
                         labelAccessory={
                           <SaleLinePricingTooltip
                             minimumPrice={item.minimumPrice}
@@ -1074,16 +1210,24 @@ export default function NewSalePage() {
                         }
                         error={
                           !item.hasPricingPolicy
-                            ? t('sales.noPricingPolicy')
+                            ? t('sales.priceNotConfigured')
                             : priceState?.level === 'error'
                               ? priceWarningMessage(priceState) ?? undefined
                               : undefined
                         }
                       />
-                      <p className="mt-1 text-xs text-slate-500">{t('sales.autoPriceLocked')}</p>
-                      {item.hasPricingPolicy && priceState?.level === 'warning' ? (
+                      {item.hasPricingPolicy &&
+                      (item.unitPriceManuallyEdited || priceState?.kind === 'changed-manually') ? (
                         <p className="mt-1 text-xs font-semibold text-amber-700">
-                          {priceWarningMessage(priceState)}
+                          {t('sales.priceChangedByManager')}
+                        </p>
+                      ) : null}
+                      {item.hasPricingPolicy &&
+                      (item.unitPriceManuallyEdited || priceState?.kind === 'changed-manually') ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          {t('sales.recommendedPrice')}: {formatKgs(item.recommendedPrice)}
+                          {' · '}
+                          {t('sales.sellingPrice')}: {formatKgs(Number(item.unitPrice || 0))}
                         </p>
                       ) : null}
                     </div>
