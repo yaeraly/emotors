@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
+import { computeFullPaymentChange } from '@/lib/sale-full-payment';
 import { translateStatus } from '@/lib/translate-status';
 import type { BranchAccountantInvoice, BranchPaymentMethod } from '@/lib/types';
 
@@ -26,7 +27,11 @@ export default function BranchCashierInvoiceDetailPage() {
     try {
       const data = await apiFetch<BranchAccountantInvoice>(`/branch-cashier/invoices/${id}`);
       setInvoice(data);
-      setAmount(String(data.requiredPaymentAmount ?? data.remainingAmount));
+      const initialAmount =
+        data.receivedAmountEnteredBySales != null
+          ? data.receivedAmountEnteredBySales
+          : data.requiredPaymentAmount ?? data.remainingAmount;
+      setAmount(String(initialAmount));
     } catch (err) {
       setError(err instanceof Error ? err.message : t('common.error'));
     }
@@ -61,6 +66,11 @@ export default function BranchCashierInvoiceDetailPage() {
 
   const early = invoice?.activeEarlyPaymentRequest ?? null;
   const amountLocked = Boolean(early);
+  const isRetailFullPayment =
+    invoice?.invoiceCategory === 'RETAIL_SALE' && invoice.paymentType === 'FULL_PAYMENT';
+  const cashierChange = invoice
+    ? computeFullPaymentChange(invoice.totalAmount, Number(amount || 0))
+    : null;
 
   return (
     <ProtectedShell>
@@ -82,7 +92,22 @@ export default function BranchCashierInvoiceDetailPage() {
               <Info label={t('branchAccountant.orderNo')} value={invoice.orderNumber ?? '—'} />
               <Info label={t('distribution.totalAmount')} value={formatKgs(invoice.totalAmount)} />
               <Info label={t('branchCashier.requiredPayment')} value={formatKgs(invoice.requiredPaymentAmount)} />
-              <Info label={t('distribution.debtAmount')} value={formatKgs(invoice.remainingAmount)} />
+              {isRetailFullPayment && invoice.receivedAmountEnteredBySales != null ? (
+                <>
+                  <Info
+                    label={t('sales.paidAmount')}
+                    value={formatKgs(invoice.receivedAmountEnteredBySales)}
+                  />
+                  {invoice.expectedChangeAmount != null && Number(invoice.expectedChangeAmount) > 0 ? (
+                    <Info
+                      label={t('sales.changeAmount')}
+                      value={formatKgs(invoice.expectedChangeAmount)}
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <Info label={t('distribution.debtAmount')} value={formatKgs(invoice.remainingAmount)} />
+              )}
               <Info label={t('distribution.dueDate')} value={new Date(invoice.dueDate).toLocaleDateString()} />
               <Info label={t('distribution.status')} value={translateStatus(t, invoice.workflowStatus, 'branchAccountant')} />
             </section>
@@ -132,6 +157,12 @@ export default function BranchCashierInvoiceDetailPage() {
                     required
                   />
                 </label>
+                {isRetailFullPayment && cashierChange && cashierChange.changeAmount > 0.009 ? (
+                  <div className="rounded-2xl bg-green-50 p-4 md:col-span-2">
+                    <p className="text-xs font-semibold uppercase text-green-700">{t('sales.changeAmount')}</p>
+                    <p className="font-bold text-green-900">{formatKgs(cashierChange.changeAmount)}</p>
+                  </div>
+                ) : null}
                 <label className="block">
                   <span className="text-sm font-semibold">{t('distribution.paymentMethod')}</span>
                   <select value={method} onChange={(e) => setMethod(e.target.value as BranchPaymentMethod)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2">

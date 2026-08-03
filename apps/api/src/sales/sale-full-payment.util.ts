@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { PaymentStatus, SalePaymentType, SaleStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { canAcceptSalePayment } from './branch-sales-workflow.util';
 import { isBranchSalesManagerUser } from '../rbac/rbac';
 
@@ -9,6 +10,63 @@ export const FULL_PAYMENT_INSTALLMENT_WARNING =
 
 export const SALE_REGISTERED_SENT_TO_CASHIER_MESSAGE =
   'Продажа зарегистрирована. Счет отправлен кассиру для принятия оплаты.';
+
+export const FULL_PAYMENT_UNDERPAYMENT_MESSAGE =
+  'Для полной оплаты полученная сумма не может быть меньше общей суммы продажи.';
+
+export const FULL_PAYMENT_INVALID_RECEIVED_AMOUNT_MESSAGE =
+  'Укажите корректную сумму, полученную от клиента.';
+
+export type FullPaymentChangeResult = {
+  saleTotal: number;
+  receivedAmount: number;
+  changeAmount: number;
+  isUnderpayment: boolean;
+};
+
+export function roundFullPaymentMoney(value: number) {
+  return roundDisplayMoney(value);
+}
+
+export function computeFullPaymentChange(
+  saleTotal: number,
+  receivedAmount: number,
+): FullPaymentChangeResult {
+  const total = roundFullPaymentMoney(saleTotal);
+  const received = roundFullPaymentMoney(receivedAmount);
+  return {
+    saleTotal: total,
+    receivedAmount: received,
+    changeAmount: roundFullPaymentMoney(Math.max(received - total, 0)),
+    isUnderpayment: received + 0.009 < total,
+  };
+}
+
+export function parseFullPaymentReceivedAmount(value: unknown) {
+  if (value == null || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+  return roundFullPaymentMoney(parsed);
+}
+
+export function assertFullPaymentReceivedAmount(
+  saleTotal: number,
+  receivedAmount: number,
+) {
+  const parsed = parseFullPaymentReceivedAmount(receivedAmount);
+  if (parsed == null) {
+    throw new BadRequestException(FULL_PAYMENT_INVALID_RECEIVED_AMOUNT_MESSAGE);
+  }
+  const result = computeFullPaymentChange(saleTotal, parsed);
+  if (result.isUnderpayment) {
+    throw new BadRequestException(FULL_PAYMENT_UNDERPAYMENT_MESSAGE);
+  }
+  return result;
+}
 
 export function shouldRegisterFullPaymentForCashier(
   user: Pick<AuthUser, 'role' | 'roles' | 'permissions' | 'branchId'>,
@@ -56,7 +114,7 @@ export function assertFullPaymentRegistrationAllowed(sale: {
 }
 
 export function buildExpectedPaymentState(totalAmount: number) {
-  const roundedTotal = Math.round((totalAmount + Number.EPSILON) * 100) / 100;
+  const roundedTotal = roundFullPaymentMoney(totalAmount);
   return {
     expectedPaymentAmount: roundedTotal,
     paidAmount: 0,

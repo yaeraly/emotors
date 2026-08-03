@@ -110,4 +110,10 @@ export class CreateSaleDto {
   @IsNumber()
   @Min(0)
   downPayment?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  receivedAmount?: number;
 }

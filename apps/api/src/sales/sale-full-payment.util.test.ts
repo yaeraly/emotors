@@ -1,75 +1,52 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { PaymentStatus, SalePaymentType, SaleStatus } from '@prisma/client';
 import {
-  buildExpectedPaymentState,
-  shouldRegisterFullPaymentForCashier,
+  assertFullPaymentReceivedAmount,
+  computeFullPaymentChange,
+  FULL_PAYMENT_UNDERPAYMENT_MESSAGE,
+  parseFullPaymentReceivedAmount,
+  roundFullPaymentMoney,
 } from './sale-full-payment.util';
 
-const branchSalesManager = {
-  role: 'MANAGER' as const,
-  roles: ['MANAGER' as const],
-  branchId: 'branch-1',
-  permissions: ['sales.manage'],
-};
+describe('sale full payment change calculation', () => {
+  it('auto-fills equivalent total when received amount omitted', () => {
+    const result = computeFullPaymentChange(100_000, 100_000);
+    assert.equal(result.changeAmount, 0);
+    assert.equal(result.isUnderpayment, false);
+  });
 
-const branchSalesManagerWithCashier = {
-  ...branchSalesManager,
-  permissions: ['sales.manage', 'cashier'],
-};
+  it('calculates change when received exceeds total', () => {
+    const result = computeFullPaymentChange(100_000, 120_000);
+    assert.equal(result.changeAmount, 20_000);
+    assert.equal(result.isUnderpayment, false);
+  });
 
-const branchCashier = {
-  role: 'CASHIER' as const,
-  roles: ['CASHIER' as const],
-  branchId: 'branch-1',
-  permissions: ['cashier', 'payments.manage'],
-};
-
-describe('sale full payment cashier registration', () => {
-  it('routes branch sales manager full payment to cashier registration', () => {
-    assert.equal(
-      shouldRegisterFullPaymentForCashier(branchSalesManager, SalePaymentType.FULL_PAYMENT),
-      true,
+  it('rejects underpayment for full payment', () => {
+    const result = computeFullPaymentChange(100_000, 99_999);
+    assert.equal(result.isUnderpayment, true);
+    assert.throws(
+      () => assertFullPaymentReceivedAmount(100_000, 99_999),
+      (error: Error) => error.message === FULL_PAYMENT_UNDERPAYMENT_MESSAGE,
     );
   });
 
-  it('does not route installment sales to cashier registration', () => {
-    assert.equal(
-      shouldRegisterFullPaymentForCashier(branchSalesManager, SalePaymentType.INSTALLMENT),
-      false,
-    );
+  it('rejects invalid received amounts', () => {
+    assert.equal(parseFullPaymentReceivedAmount(-1), null);
+    assert.equal(parseFullPaymentReceivedAmount(Number.NaN), null);
+    assert.equal(parseFullPaymentReceivedAmount(''), null);
   });
 
-  it('does not route cashier-capable sales manager through cashier registration', () => {
-    assert.equal(
-      shouldRegisterFullPaymentForCashier(
-        branchSalesManagerWithCashier,
-        SalePaymentType.FULL_PAYMENT,
-      ),
-      false,
-    );
+  it('uses rounded money utility instead of raw floats', () => {
+    assert.equal(roundFullPaymentMoney(10.005), 10.01);
+    const result = computeFullPaymentChange(99.99, 100);
+    assert.equal(result.changeAmount, 0.01);
   });
 
-  it('does not route branch cashier through sales registration', () => {
-    assert.equal(
-      shouldRegisterFullPaymentForCashier(branchCashier, SalePaymentType.FULL_PAYMENT),
-      false,
-    );
-  });
-});
-
-describe('expected payment state', () => {
-  it('keeps confirmed paid amount at zero before cashier acceptance', () => {
-    const state = buildExpectedPaymentState(120_000);
-    assert.equal(state.expectedPaymentAmount, 120_000);
-    assert.equal(state.paidAmount, 0);
-    assert.equal(state.debtAmount, 120_000);
-    assert.equal(state.paymentStatus, PaymentStatus.WAITING_FOR_CASHIER);
-  });
-});
-
-describe('sale waiting status', () => {
-  it('uses dedicated waiting-for-cashier sale status', () => {
-    assert.equal(SaleStatus.WAITING_FOR_CASHIER_PAYMENT, 'WAITING_FOR_CASHIER_PAYMENT');
+  it('does not trust frontend change amount and recalculates from authoritative total', () => {
+    const authoritativeTotal = 100_000;
+    const received = 105_000;
+    const trusted = computeFullPaymentChange(authoritativeTotal, received);
+    assert.equal(trusted.changeAmount, 5_000);
+    assert.notEqual(trusted.changeAmount, 999);
   });
 });

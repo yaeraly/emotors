@@ -73,9 +73,13 @@ import { assertBranchSalesManagerCanCancelSale } from './branch-sales-workflow.u
 import { BranchSaleInvoiceService } from './branch-sale-invoice.service';
 import {
   assertFullPaymentRegistrationAllowed,
+  assertFullPaymentReceivedAmount,
   buildExpectedPaymentState,
+  computeFullPaymentChange,
   FULL_PAYMENT_INSTALLMENT_WARNING,
+  FULL_PAYMENT_INVALID_RECEIVED_AMOUNT_MESSAGE,
   mapBranchPaymentMethodToSalePaymentMethod,
+  parseFullPaymentReceivedAmount,
   resolveSalePaymentType,
   shouldRegisterFullPaymentForCashier,
 } from './sale-full-payment.util';
@@ -152,6 +156,11 @@ export class SalesService {
         paymentType === SalePaymentType.FULL_PAYMENT
           ? buildExpectedPaymentState(totals.totalAmount)
           : null;
+      const fullPaymentEntered = this.resolveStoredFullPaymentAmount(
+        paymentType,
+        totals.totalAmount,
+        dto.receivedAmount,
+      );
       const draftReceiptText = this.buildReceiptText({
         receiptNumber,
         customerName: customer.fullName,
@@ -182,6 +191,8 @@ export class SalesService {
           paymentStatus: expectedPaymentState?.paymentStatus ?? PaymentStatus.DEBT,
           paymentType,
           expectedPaymentAmount: expectedPaymentState?.expectedPaymentAmount ?? null,
+          receivedAmountEnteredBySales: fullPaymentEntered?.receivedAmount ?? null,
+          expectedChangeAmount: fullPaymentEntered?.changeAmount ?? null,
           status: SaleStatus.DRAFT,
           draftReceiptText,
           notes: dto.notes,
@@ -236,6 +247,16 @@ export class SalesService {
           expectedPaymentAmount: sale.expectedPaymentAmount ?? sale.totalAmount,
           paymentType: SalePaymentType.FULL_PAYMENT,
         });
+        if (sale.receivedAmountEnteredBySales != null) {
+          const entered = computeFullPaymentChange(
+            sale.totalAmount,
+            Number(sale.receivedAmountEnteredBySales),
+          );
+          await this.auditFullPaymentAmountEntered(user, sale.branchId, sale.id, entered, {
+            paymentType: SalePaymentType.FULL_PAYMENT,
+            source: 'create_draft',
+          });
+        }
       }
       return sale;
     });
@@ -683,6 +704,11 @@ export class SalesService {
         paymentType === SalePaymentType.FULL_PAYMENT
           ? buildExpectedPaymentState(totals.totalAmount)
           : null;
+      const fullPaymentEntered = this.resolveStoredFullPaymentAmount(
+        paymentType,
+        totals.totalAmount,
+        dto.receivedAmount,
+      );
       const paymentAggregate = await tx.payment.aggregate({
         where: { saleId: sale.id, status: PaymentRecordStatus.ACTIVE },
         _sum: { amount: true },
@@ -760,6 +786,8 @@ export class SalesService {
           paymentStatus,
           paymentType,
           expectedPaymentAmount: expectedPaymentState?.expectedPaymentAmount ?? null,
+          receivedAmountEnteredBySales: fullPaymentEntered?.receivedAmount ?? null,
+          expectedChangeAmount: fullPaymentEntered?.changeAmount ?? null,
           draftReceiptText,
           notes: dto.notes,
           items: { create: totals.items },
@@ -886,6 +914,13 @@ export class SalesService {
         paymentType: dto.paymentType ?? 'FULL_PAYMENT',
         status: sale.status,
       });
+      if ((dto.paymentType ?? 'FULL_PAYMENT') === 'FULL_PAYMENT' && dto.receivedAmount != null) {
+        const entered = computeFullPaymentChange(sale.totalAmount, dto.receivedAmount);
+        await this.auditFullPaymentAmountEntered(user, sale.branchId, sale.id, entered, {
+          paymentType: SalePaymentType.FULL_PAYMENT,
+          source: 'update_draft',
+        });
+      }
       return sale;
     });
   }
@@ -1269,6 +1304,24 @@ export class SalesService {
         paymentType: 'FULL_PAYMENT',
       });
       const expectedState = buildExpectedPaymentState(totals.totalAmount);
+      let fullPaymentEntered;
+      try {
+        fullPaymentEntered = assertFullPaymentReceivedAmount(
+          totals.totalAmount,
+          Number(existing.receivedAmountEnteredBySales ?? totals.totalAmount),
+        );
+      } catch (error) {
+        await this.auditInTx(tx, user, existing.branchId, 'BRANCH_FULL_PAYMENT_UNDERPAYMENT_REJECTED', 'Sale', existing.id, {
+          saleId: existing.id,
+          branchId: existing.branchId,
+          saleTotal: totals.totalAmount,
+          receivedAmount: Number(existing.receivedAmountEnteredBySales ?? 0),
+          paymentType: SalePaymentType.FULL_PAYMENT,
+          actorUserId: user.id,
+          reason: error instanceof Error ? error.message : 'underpayment',
+        });
+        throw error;
+      }
       const invoice = await this.branchSaleInvoiceService.ensureRetailSaleInvoiceInTx(tx, user, {
         id: existing.id,
         branchId: existing.branchId,
@@ -1286,6 +1339,8 @@ export class SalesService {
           profitAmount: totals.profitAmount,
           paymentType: SalePaymentType.FULL_PAYMENT,
           expectedPaymentAmount: expectedState.expectedPaymentAmount,
+          receivedAmountEnteredBySales: fullPaymentEntered.receivedAmount,
+          expectedChangeAmount: fullPaymentEntered.changeAmount,
           paidAmount: expectedState.paidAmount,
           debtAmount: expectedState.debtAmount,
           paymentStatus: expectedState.paymentStatus,
@@ -1303,6 +1358,8 @@ export class SalesService {
         customerId: existing.customerId,
         saleTotal: totals.totalAmount,
         expectedPaymentAmount: expectedState.expectedPaymentAmount,
+        receivedAmount: fullPaymentEntered.receivedAmount,
+        expectedChange: fullPaymentEntered.changeAmount,
         confirmedPaidAmount: 0,
         remainingAmount: expectedState.debtAmount,
         paymentType: SalePaymentType.FULL_PAYMENT,
@@ -1312,6 +1369,11 @@ export class SalesService {
         actorRole: user.role,
       });
 
+      await this.auditFullPaymentAmountEnteredInTx(tx, user, existing.branchId, existing.id, fullPaymentEntered, {
+        paymentType: SalePaymentType.FULL_PAYMENT,
+        source: 'register_for_cashier',
+      });
+
       await this.branchSaleInvoiceService.notifyCashierInTx(tx, user, {
         branchId: existing.branchId,
         saleId: existing.id,
@@ -1319,6 +1381,8 @@ export class SalesService {
         invoiceNumber: invoice.invoiceNumber,
         customerId: existing.customerId,
         saleTotal: totals.totalAmount,
+        receivedAmount: fullPaymentEntered.receivedAmount,
+        expectedChange: fullPaymentEntered.changeAmount,
       });
 
       return updated;
@@ -2987,6 +3051,12 @@ export class SalesService {
       debtAmount: Number(sale.debtAmount),
       expectedPaymentAmount:
         sale.expectedPaymentAmount != null ? Number(sale.expectedPaymentAmount) : null,
+      receivedAmountEnteredBySales:
+        sale.receivedAmountEnteredBySales != null
+          ? Number(sale.receivedAmountEnteredBySales)
+          : null,
+      expectedChangeAmount:
+        sale.expectedChangeAmount != null ? Number(sale.expectedChangeAmount) : null,
       paymentType: sale.paymentType ?? null,
       sentToCashierAt: sale.sentToCashierAt ?? null,
       items: sale.items?.map((item: any) => ({
@@ -3194,6 +3264,65 @@ export class SalesService {
         .filter((payment) => methods.includes(payment.method))
         .map((payment) => payment.amount),
     );
+  }
+
+  private resolveStoredFullPaymentAmount(
+    paymentType: SalePaymentType | null,
+    authoritativeTotal: number,
+    receivedAmount?: number | null,
+  ) {
+    if (paymentType !== SalePaymentType.FULL_PAYMENT) {
+      return null;
+    }
+    const parsed =
+      receivedAmount != null
+        ? parseFullPaymentReceivedAmount(receivedAmount)
+        : parseFullPaymentReceivedAmount(authoritativeTotal);
+    if (parsed == null) {
+      return computeFullPaymentChange(authoritativeTotal, authoritativeTotal);
+    }
+    return assertFullPaymentReceivedAmount(authoritativeTotal, parsed);
+  }
+
+  private async auditFullPaymentAmountEntered(
+    user: AuthUser,
+    branchId: string,
+    saleId: string,
+    entered: ReturnType<typeof computeFullPaymentChange>,
+    metadata: Record<string, unknown> = {},
+  ) {
+    const base = {
+      saleId,
+      branchId,
+      saleTotal: entered.saleTotal,
+      receivedAmount: entered.receivedAmount,
+      changeAmount: entered.changeAmount,
+      actorUserId: user.id,
+      ...metadata,
+    };
+    await this.audit(user, branchId, 'BRANCH_FULL_PAYMENT_AMOUNT_ENTERED', 'Sale', saleId, base);
+    await this.audit(user, branchId, 'BRANCH_FULL_PAYMENT_CHANGE_CALCULATED', 'Sale', saleId, base);
+  }
+
+  private async auditFullPaymentAmountEnteredInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    branchId: string,
+    saleId: string,
+    entered: ReturnType<typeof computeFullPaymentChange>,
+    metadata: Record<string, unknown> = {},
+  ) {
+    const base = {
+      saleId,
+      branchId,
+      saleTotal: entered.saleTotal,
+      receivedAmount: entered.receivedAmount,
+      changeAmount: entered.changeAmount,
+      actorUserId: user.id,
+      ...metadata,
+    };
+    await this.auditInTx(tx, user, branchId, 'BRANCH_FULL_PAYMENT_AMOUNT_ENTERED', 'Sale', saleId, base);
+    await this.auditInTx(tx, user, branchId, 'BRANCH_FULL_PAYMENT_CHANGE_CALCULATED', 'Sale', saleId, base);
   }
 
   private roundMoney(value: number) {

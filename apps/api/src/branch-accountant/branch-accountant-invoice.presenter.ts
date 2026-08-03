@@ -198,6 +198,12 @@ export function sanitizeAccountantInvoice(invoice: any) {
     customerName: sale?.customer?.fullName ?? null,
     customerPhone: sale?.customer?.phone ?? null,
     saleReceiptNumber: sale?.receiptNumber ?? null,
+    receivedAmountEnteredBySales:
+      sale?.receivedAmountEnteredBySales != null
+        ? Number(sale.receivedAmountEnteredBySales)
+        : null,
+    expectedChangeAmount:
+      sale?.expectedChangeAmount != null ? Number(sale.expectedChangeAmount) : null,
     workflowStatus,
     paymentType: invoice.paymentType ?? null,
     status: invoice.status,

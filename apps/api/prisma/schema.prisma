@@ -1928,6 +1928,8 @@ model Sale {
   paymentStatus          PaymentStatus            @default(DEBT)
   paymentType            SalePaymentType?
   expectedPaymentAmount  Decimal?                 @db.Decimal(14, 2)
+  receivedAmountEnteredBySales Decimal?           @db.Decimal(14, 2)
+  expectedChangeAmount   Decimal?                 @db.Decimal(14, 2)
   sentToCashierAt        DateTime?
   sentToCashierById      String?
   sentToCashierBy        User?                    @relation("SaleCashierSender", fields: [sentToCashierById], references: [id])

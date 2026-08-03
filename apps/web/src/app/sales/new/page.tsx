@@ -38,7 +38,12 @@ import {
 import {
   buildFullPaymentRows,
   canFinalizeFullPaymentSale,
+  computeFullPaymentChange,
   formatFullPaymentAmount,
+  resolveFullPaymentReceivedAmount,
+  syncFullPaymentRowsOnTotalChange,
+  validateFullPaymentReceivedAmount,
+  FULL_PAYMENT_UNDERPAYMENT_MESSAGE_KEY,
   shouldUseBranchCashierFullPaymentFlow,
 } from '@/lib/sale-full-payment';
 import type { Customer, PaymentMethod, Sale, User, WhatsAppDraftResponse } from '@/lib/types';
@@ -117,6 +122,7 @@ function NewSalePageContent() {
   const [paymentRows, setPaymentRows] = useState<PaymentPartRow[]>([
     createPaymentPartRow({ method: 'CASH' }),
   ]);
+  const [isReceivedAmountManuallyEdited, setIsReceivedAmountManuallyEdited] = useState(false);
   const [showCreateCustomer, setShowCreateCustomer] = useState(false);
   const [createCustomerForm, setCreateCustomerForm] = useState({
     fullName: '',
@@ -237,12 +243,23 @@ function NewSalePageContent() {
     };
   }, [items, paymentRows]);
 
+  const fullPaymentReceivedAmount = useMemo(
+    () => resolveFullPaymentReceivedAmount(paymentRows),
+    [paymentRows],
+  );
+  const fullPaymentChange = useMemo(
+    () => computeFullPaymentChange(totals.totalAmount, fullPaymentReceivedAmount),
+    [totals.totalAmount, fullPaymentReceivedAmount],
+  );
+
   useEffect(() => {
     if (paymentType !== 'FULL_PAYMENT') return;
-    setPaymentRows(buildFullPaymentRows(totals.totalAmount, paymentRows[0]?.method || 'CASH'));
+    setPaymentRows((current) =>
+      syncFullPaymentRowsOnTotalChange(current, totals.totalAmount, isReceivedAmountManuallyEdited),
+    );
     setPaymentsSynced(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paymentType, totals.totalAmount]);
+  }, [paymentType, totals.totalAmount, isReceivedAmountManuallyEdited]);
 
   useEffect(() => {
     if (paymentType !== 'INSTALLMENT') return;
@@ -284,6 +301,19 @@ function NewSalePageContent() {
 
   const hasBlockingPriceError = linePriceStates.some((state) => state.level === 'error');
   const hasMissingPricing = items.some((item) => !item.hasPricingPolicy);
+  const fullPaymentValidation = useMemo(
+    () =>
+      paymentType === 'FULL_PAYMENT' && branchCashierHandoffFlow
+        ? validateFullPaymentReceivedAmount(totals.totalAmount, fullPaymentReceivedAmount)
+        : { ok: true as const, change: fullPaymentChange },
+    [
+      paymentType,
+      branchCashierHandoffFlow,
+      totals.totalAmount,
+      fullPaymentReceivedAmount,
+      fullPaymentChange,
+    ],
+  );
   const paymentValidation = useMemo(
     () =>
       paymentType === 'FULL_PAYMENT'
@@ -331,6 +361,7 @@ function NewSalePageContent() {
           user,
           paymentType,
           totalAmount: totals.totalAmount,
+          receivedAmount: fullPaymentReceivedAmount,
           hasBlockingPriceError,
           hasMissingPricing,
           paymentValidationOk: paymentValidation.ok,
@@ -617,11 +648,12 @@ function NewSalePageContent() {
     }
 
     if (paymentType === 'FULL_PAYMENT') {
-      if (!paymentValidation.ok) {
-        setError(formatPaymentError(paymentValidation));
-        return null;
-      }
-      if (!paymentComplete) {
+      if (branchCashierHandoffFlow) {
+        if (!fullPaymentValidation.ok) {
+          setError(t(fullPaymentValidation.messageKey));
+          return null;
+        }
+      } else if (!paymentValidation.ok || !paymentComplete) {
         setError(formatPaymentError(paymentValidation));
         return null;
       }
@@ -651,7 +683,10 @@ function NewSalePageContent() {
             downPayment: Number(downPayment || 0),
             dueDate: new Date(finalPaymentDate).toISOString(),
           }
-        : { paymentType: 'FULL_PAYMENT' as const }),
+        : {
+            paymentType: 'FULL_PAYMENT' as const,
+            receivedAmount: fullPaymentReceivedAmount,
+          }),
       notes: notes.trim() || undefined,
     };
   }
@@ -935,6 +970,11 @@ function NewSalePageContent() {
       (!paymentValidation.ok || !paymentComplete)
     ) {
       setError(formatPaymentError(paymentValidation));
+      return;
+    }
+
+    if (paymentType === 'FULL_PAYMENT' && branchCashierHandoffFlow && !fullPaymentValidation.ok) {
+      setError(t(fullPaymentValidation.messageKey));
       return;
     }
 
@@ -1362,6 +1402,11 @@ function NewSalePageContent() {
                   setPaymentType(next);
                   setPaymentsSynced(false);
                   if (next === 'FULL_PAYMENT') {
+                    setIsReceivedAmountManuallyEdited(false);
+                    setPaymentRows(buildFullPaymentRows(totals.totalAmount));
+                  } else {
+                    setIsReceivedAmountManuallyEdited(false);
+                    setDownPayment('');
                     setPaymentRows([createPaymentPartRow({ method: 'CASH' })]);
                   }
                 }}
@@ -1431,21 +1476,38 @@ function NewSalePageContent() {
             <div className="mt-6 space-y-4">
               {branchCashierHandoffFlow ? (
                 <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                  <Summary label={t('sales.paymentSummaryTotal')} value={formatKgs(totals.totalAmount)} />
                   <SaleInput
                     label={t('sales.paidAmount')}
                     type="number"
-                    value={formatFullPaymentAmount(totals.totalAmount)}
-                    onChange={() => undefined}
-                    readOnly
+                    value={paymentRows[0]?.amount ?? formatFullPaymentAmount(totals.totalAmount)}
+                    onChange={(value) => {
+                      setIsReceivedAmountManuallyEdited(true);
+                      const amount = value;
+                      setPaymentRows([
+                        {
+                          ...(paymentRows[0] ?? createPaymentPartRow({ method: 'CASH' })),
+                          method: 'CASH',
+                          amount,
+                          cashReceived: amount,
+                        },
+                      ]);
+                      setPaymentsSynced(false);
+                    }}
+                    min={0}
+                    step="0.01"
+                    required
                   />
-                  <div className="min-w-0 rounded-xl bg-slate-50 p-3 text-sm">
-                    <p className="text-xs font-semibold uppercase text-slate-400">
-                      {t('sales.debtAmount')}
-                    </p>
-                    <p className="mt-1 text-lg font-bold text-slate-900">
-                      {formatKgs(totals.totalAmount)}
-                    </p>
-                  </div>
+                  {fullPaymentChange.changeAmount > 0.009 ? (
+                    <div className="min-w-0 rounded-xl bg-green-50 p-3 text-sm sm:col-span-2">
+                      <p className="text-xs font-semibold uppercase text-green-700">
+                        {t('sales.changeAmount')}
+                      </p>
+                      <p className="mt-1 text-lg font-bold text-green-900">
+                        {formatKgs(fullPaymentChange.changeAmount)}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               ) : paymentRows.length === 1 ? (
                 <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -1565,13 +1627,13 @@ function NewSalePageContent() {
                   <span className="font-semibold">{t('sales.paymentSummaryTotal')}:</span>{' '}
                   {formatKgs(totals.totalAmount)}
                 </p>
-                {totals.paidTotal > 0.009 ? (
+                {totals.paidTotal > 0.009 && !branchCashierHandoffFlow ? (
                   <p className="mt-1">
                     <span className="font-semibold">{t('sales.paymentSummaryPaid')}:</span>{' '}
                     {formatKgs(totals.paidTotal)}
                   </p>
                 ) : null}
-                {totals.remainingAmount > 0.009 ? (
+                {!branchCashierHandoffFlow && totals.remainingAmount > 0.009 ? (
                   <p className="mt-1 font-semibold text-amber-800">
                     {t('sales.paymentSummaryRemaining')}: {formatKgs(totals.remainingAmount)}
                   </p>
@@ -1614,6 +1676,14 @@ function NewSalePageContent() {
           !paymentValidation.ok ? (
             <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
               {formatPaymentError(paymentValidation)}
+            </p>
+          ) : null}
+
+          {paymentType === 'FULL_PAYMENT' &&
+          branchCashierHandoffFlow &&
+          !fullPaymentValidation.ok ? (
+            <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {t(fullPaymentValidation.messageKey)}
             </p>
           ) : null}
 
@@ -1717,7 +1787,9 @@ function NewSalePageContent() {
           <h3 className="text-lg font-bold text-slate-950">{t('sales.draftReceipt')}</h3>
           <pre className="mt-3 whitespace-pre-wrap rounded-2xl bg-slate-100 p-4 text-sm text-slate-700">
             {draftSale?.draftReceiptText ??
-              `EMOTORS DRAFT RECEIPT\n${t('sales.totalAmount')}: ${formatKgs(totals.totalAmount)}\n${t('sales.paidAmount')}: ${formatKgs(totals.paidTotal)}\n${t('sales.debtAmount')}: ${formatKgs(totals.remainingAmount)}`}
+              (paymentType === 'FULL_PAYMENT'
+                ? `EMOTORS DRAFT RECEIPT\n${t('sales.totalAmount')}: ${formatKgs(totals.totalAmount)}\n${t('sales.paidAmount')}: ${formatKgs(fullPaymentReceivedAmount)}${fullPaymentChange.changeAmount > 0.009 ? `\n${t('sales.changeAmount')}: ${formatKgs(fullPaymentChange.changeAmount)}` : ''}`
+                : `EMOTORS DRAFT RECEIPT\n${t('sales.totalAmount')}: ${formatKgs(totals.totalAmount)}\n${t('sales.paidAmount')}: ${formatKgs(totals.paidTotal)}\n${t('sales.debtAmount')}: ${formatKgs(totals.remainingAmount)}`)}
           </pre>
           {draftSale ? (
             <p className="mt-3 inline-flex rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700">

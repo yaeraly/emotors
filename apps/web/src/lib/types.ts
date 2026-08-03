@@ -935,6 +935,7 @@ export type AccountantInvoiceWorkflowStatus =
 export type BranchAccountantInvoice = {
   id: string;
   invoiceNumber: string;
+  invoiceCategory?: string | null;
   branchId: string;
   branch?: Pick<Branch, 'id' | 'name' | 'code'> | null;
   distributionOrderId: string;
@@ -977,6 +978,8 @@ export type BranchAccountantInvoice = {
     zeroInitialPayment?: boolean;
   } | null;
   customerName?: string | null;
+  receivedAmountEnteredBySales?: number | null;
+  expectedChangeAmount?: number | null;
   nextPaymentDate?: string | null;
   installmentSchedule?: Array<{ installmentNumber: number; dueDate?: string | null; amount: number }>;
   installmentEarlyPaymentRequests?: Array<{
@@ -1260,6 +1263,8 @@ export type Sale = {
   paymentStatus: PaymentStatus;
   paymentType?: 'FULL_PAYMENT' | 'INSTALLMENT' | null;
   expectedPaymentAmount?: number | null;
+  receivedAmountEnteredBySales?: number | null;
+  expectedChangeAmount?: number | null;
   sentToCashierAt?: string | null;
   status: SaleStatus;
   draftReceiptText?: string | null;

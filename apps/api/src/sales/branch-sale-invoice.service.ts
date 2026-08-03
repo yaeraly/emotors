@@ -275,6 +275,8 @@ export class BranchSaleInvoiceService {
       invoiceNumber: string;
       customerId: string;
       saleTotal: number;
+      receivedAmount?: number;
+      expectedChange?: number;
     },
   ) {
     await tx.auditLog.create({
@@ -290,6 +292,8 @@ export class BranchSaleInvoiceService {
           branchId: input.branchId,
           customerId: input.customerId,
           saleTotal: input.saleTotal,
+          receivedAmount: input.receivedAmount ?? input.saleTotal,
+          expectedChange: input.expectedChange ?? 0,
           paymentType: SalePaymentType.FULL_PAYMENT,
           roles: user.roles ?? [user.role],
         },
@@ -300,7 +304,7 @@ export class BranchSaleInvoiceService {
       branchId: input.branchId,
       type: AlertType.BRANCH_INVOICE_CREATED,
       title: 'Счёт передан кассиру',
-      message: `Счёт ${input.invoiceNumber} по продаже передан кассиру на оплату`,
+      message: `Счёт ${input.invoiceNumber} по продаже передан кассиру на оплату. Сумма: ${input.saleTotal.toFixed(2)} сом. Получено: ${(input.receivedAmount ?? input.saleTotal).toFixed(2)} сом.${(input.expectedChange ?? 0) > 0 ? ` Сдача: ${input.expectedChange!.toFixed(2)} сом.` : ''}`,
       entityType: 'BranchInvoice',
       entityId: input.invoiceId,
       recipientRoles: [Role.CASHIER],
