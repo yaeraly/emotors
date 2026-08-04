@@ -76,6 +76,10 @@ import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-
 import { deriveDisplayUnitCost, roundDisplayMoney } from '../pricing/product-cost-precision.util';
 import { mapProductCatalogFifoCost } from './product-catalog-fifo-cost.util';
 import { resolveCurrentProductCatalogUnitCost } from './product-catalog-current-cost.util';
+import {
+  mergeProductCatalogSearchWhere,
+  uniqueProductsById,
+} from './product-catalog-search-where.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -541,27 +545,16 @@ export class InventoryService {
     this.assertCanViewProductCatalog(user);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 25;
-    const where: Prisma.ProductWhereInput = {
-      deletedAt: null,
-      ...this.buildProductCatalogWhere(user, query.branchId),
-      ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
-      ...(query.categoryId ? { categoryId: query.categoryId } : {}),
-      ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
-    };
-
-    if (query.search) {
-      const search = query.search.trim();
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { sku: { contains: search, mode: 'insensitive' } },
-        { barcode: { contains: search, mode: 'insensitive' } },
-        { category: { contains: search, mode: 'insensitive' } },
-        { productCategory: { nameKy: { contains: search, mode: 'insensitive' } } },
-        { productCategory: { nameRu: { contains: search, mode: 'insensitive' } } },
-        { productCategory: { nameEn: { contains: search, mode: 'insensitive' } } },
-        { codeMigrations: { some: { oldCode: { contains: search, mode: 'insensitive' } } } },
-      ];
-    }
+    const where = mergeProductCatalogSearchWhere(
+      {
+        deletedAt: null,
+        ...this.buildProductCatalogWhere(user, query.branchId),
+        ...(query.warehouseId ? { warehouseId: query.warehouseId } : {}),
+        ...(query.categoryId ? { categoryId: query.categoryId } : {}),
+        ...(query.isActive !== undefined ? { isActive: query.isActive } : {}),
+      },
+      query.search,
+    );
 
     const [items, total] = await Promise.all([
       this.prisma.product.findMany({
@@ -577,8 +570,12 @@ export class InventoryService {
     // Shared HQ FIFO unit-cost resolver — sync once for the page, never per-row sync.
     await this.pricingFifoService.syncFifoBatchesFromHqStockMovements();
 
+    const uniqueItems = uniqueProductsById(items);
+
     return {
-      items: await Promise.all(items.map((product) => this.toProductResponseWithFifoCost(product, user))),
+      items: await Promise.all(
+        uniqueItems.map((product) => this.toProductResponseWithFifoCost(product, user)),
+      ),
       total,
       page,
       pageSize,

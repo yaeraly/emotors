@@ -275,13 +275,30 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
     cacheProduct(product);
     const masterPrice = String(product.purchasePriceYuan ?? 0);
     const defaultFactory = product.defaultFactoryId ?? form.factoryId;
-    setLines((current) => [...current, {
-      ...emptyLine(),
-      productId: product.id,
-      factoryId: defaultFactory,
-      purchasePriceYuan: masterPrice,
-      masterPriceYuan: masterPrice,
-    }]);
+    setLines((current) => {
+      const existingIndex = current.findIndex((line) => line.productId === product.id);
+      if (existingIndex >= 0) {
+        const existing = current[existingIndex];
+        const nextQty = Math.max(1, Number(existing.quantity || 0) + 1);
+        const next = [...current];
+        next[existingIndex] = {
+          ...existing,
+          quantity: String(nextQty),
+          factoryId: existing.factoryId || defaultFactory,
+        };
+        return next;
+      }
+      return [
+        ...current,
+        {
+          ...emptyLine(),
+          productId: product.id,
+          factoryId: defaultFactory,
+          purchasePriceYuan: masterPrice,
+          masterPriceYuan: masterPrice,
+        },
+      ];
+    });
   }
 
   function focusProductSearch() {

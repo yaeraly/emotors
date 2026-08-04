@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/api';
-import { formatProductUnit } from '@/lib/product-unit';
 import { rankProducts } from '@/lib/product-fuzzy-search';
 import type { Product, ProductListResponse } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -15,8 +14,19 @@ type Props = {
 
 const DEBOUNCE_MS = 200;
 
+function uniqueByProductId(items: Product[]) {
+  const seen = new Set<string>();
+  const unique: Product[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    unique.push(item);
+  }
+  return unique;
+}
+
 export function ProcurementProductSearch({ disabled = false, onSelect, inputRef }: Props) {
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const listboxId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const internalInputRef = useRef<HTMLInputElement>(null);
@@ -44,7 +54,7 @@ export function ProcurementProductSearch({ disabled = false, onSelect, inputRef 
         `/inventory/products?search=${encodeURIComponent(search)}&pageSize=40&isActive=true`,
       )
         .then((response) => {
-          const ranked = rankProducts(response.items, search, 20);
+          const ranked = uniqueByProductId(rankProducts(response.items, search, 20));
           setResults(ranked);
           setOpen(true);
           setHighlightedIndex(0);
@@ -162,13 +172,6 @@ export function ProcurementProductSearch({ disabled = false, onSelect, inputRef 
                 <p className="font-semibold text-slate-950">{product.name}</p>
                 <p className="mt-1 text-xs text-slate-500">
                   {t('procurement.orders.productSearch.sku')}: {product.sku}
-                </p>
-                <p className="mt-1 text-xs text-slate-600">
-                  {product.warehouse?.name ?? t('procurement.orders.productSearch.warehouse')}: {product.quantity} {formatProductUnit(product.unit, language, t)}
-                  {' · '}
-                  {t('procurement.orders.netWeightKg')}: {Number(product.weightKg || 0).toFixed(1)} {language === 'en' ? 'kg' : 'кг'}
-                  {' · '}
-                  {t('procurement.orders.productSearch.lastPrice')}: ¥{Number(product.purchasePriceYuan || 0).toFixed(2)}
                 </p>
               </button>
             </li>
