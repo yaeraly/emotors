@@ -545,6 +545,34 @@ const BRANCH_WAREHOUSE_OPERATOR_FORBIDDEN_PREFIXES = [
   '/service/parts-requests',
 ];
 
+const BRANCH_MASTER_ALLOWED_PREFIXES = [
+  '/change-password',
+  '/service',
+  '/customers',
+  '/alerts',
+  '/notifications',
+];
+
+const BRANCH_MASTER_FORBIDDEN_PREFIXES = [
+  '/dashboard',
+  '/branch-dashboard',
+  '/inventory',
+  '/warehouses',
+  '/stock-movements',
+  '/warehouse-release',
+  '/products',
+  '/branch-warehouses',
+  '/hq-warehouses',
+  '/procurement',
+  '/distribution',
+  '/sales',
+  '/finance',
+  '/payments',
+  '/users',
+  '/branches',
+  '/settings',
+];
+
 const BRANCH_CASHIER_ALLOWED_PREFIXES = [
   '/change-password',
   '/branch-cashier',
@@ -711,6 +739,7 @@ export function getDefaultRouteForUser(user: Pick<User, 'role' | 'roles' | 'perm
   if (hasRole(user, 'FRANCHISE_OWNER')) return '/dashboard';
   if (isBranchCashierUser(user)) return '/branch-cashier/invoices';
   if (isBranchAccountantUser(user)) return '/finance/dashboard';
+  if (isBranchMasterUser(user)) return '/service';
   if (hasPermission(user, 'payments.manage')) return '/payments';
   if (hasPermission(user, 'finance.view') && !isBranchAccountantUser(user)) return '/finance/dashboard';
   if (hasPermission(user, 'users.manage') && !user.branchId) return '/users';
@@ -756,6 +785,9 @@ export function canAccessPath(user: User, pathname: string) {
   }
   if (isBranchAccountantUser(user)) {
     return canBranchAccountantAccessPath(pathname);
+  }
+  if (isBranchMasterUser(user)) {
+    return canBranchMasterAccessPath(pathname);
   }
   if (pathname === '/dashboard') return true;
   if (pathname === '/branch-dashboard') {
@@ -1328,6 +1360,29 @@ export function canCancelSaleInstallmentRequest(
 
 export function isBranchCashierForbiddenPath(pathname: string) {
   return BRANCH_CASHIER_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+export function isBranchMasterForbiddenPath(pathname: string) {
+  return BRANCH_MASTER_FORBIDDEN_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+export function isBranchMasterInventoryForbiddenPath(pathname: string) {
+  return (
+    pathname === '/inventory' ||
+    pathname.startsWith('/inventory/') ||
+    pathname === '/warehouses' ||
+    pathname.startsWith('/warehouses/')
+  );
+}
+
+function canBranchMasterAccessPath(pathname: string) {
+  if (pathname === '/') return false;
+  if (isBranchMasterForbiddenPath(pathname)) return false;
+  return BRANCH_MASTER_ALLOWED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
 }
