@@ -11,6 +11,7 @@ import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import { installmentStatusLabelKey } from '@/lib/sale-installment';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
+import { formatKgsTableWhole } from '@/lib/money';
 import { getStatusLabel } from '@/lib/translate-status';
 
 const paymentStatuses: PaymentStatus[] = ['PAID', 'PARTIAL', 'DEBT'];
@@ -206,13 +207,13 @@ export default function SalesPage() {
                         {formatDate(sale.saleDate)}
                       </td>
                       <td className="px-4 py-3 font-semibold">
-                        {formatKgs(sale.totalAmount)}
+                        {formatKgsTableWhole(sale.totalAmount)}
                       </td>
                       <td className="px-4 py-3 font-semibold text-emerald-700">
-                        {formatKgs(sale.paidAmount)}
+                        {formatKgsTableWhole(sale.paidAmount)}
                       </td>
                       <td className="px-4 py-3 font-semibold text-red-700">
-                        {formatKgs(sale.debtAmount)}
+                        {formatKgsTableWhole(sale.debtAmount)}
                       </td>
                       {!hideProfitColumn ? (
                         <td className="px-4 py-3 font-semibold text-slate-900">

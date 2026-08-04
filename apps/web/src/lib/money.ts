@@ -26,3 +26,10 @@ export function formatKgsLocalized(value: number | null | undefined): string {
 export function formatKgsWithSuffix(value: number | null | undefined, suffix = 'KGS'): string {
   return `${formatKgs(value)} ${suffix}`;
 }
+
+/** Whole-number KGS label for compact sales tables (keeps thousands separators). */
+export function formatKgsTableWhole(value: number | string | null | undefined, suffix = 'KGS'): string {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return `0 ${suffix}`;
+  return `${Math.round(numeric).toLocaleString('en-US', { maximumFractionDigits: 0 })} ${suffix}`;
+}
