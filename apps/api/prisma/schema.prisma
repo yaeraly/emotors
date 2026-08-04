@@ -4398,6 +4398,8 @@ model Repair {
   masterId       String
   master         User         @relation("RepairMaster", fields: [masterId], references: [id])
   description    String
+  quantity       Int          @default(1)
+  unitPrice      Decimal?     @db.Decimal(14, 2)
   laborCost      Decimal      @default(0) @db.Decimal(14, 2)
   status         RepairStatus @default(PENDING)
   startedAt      DateTime?
@@ -4433,6 +4435,7 @@ model PartsConsumption {
   appliedAdjustmentMode  PricingAdjustmentMode?
   appliedAdjustmentValue Decimal?                @db.Decimal(14, 2)
   priceResolvedAt        DateTime?
+  stockDeducted          Boolean                 @default(true)
   createdById            String
   createdBy              User                    @relation("PartsConsumptionCreator", fields: [createdById], references: [id])
   createdAt              DateTime                @default(now())
@@ -4443,6 +4446,7 @@ model PartsConsumption {
   @@index([warehouseId])
   @@index([createdById])
   @@index([pricingPolicyVersionId])
+  @@index([stockDeducted])
 }
 
 model Warranty {

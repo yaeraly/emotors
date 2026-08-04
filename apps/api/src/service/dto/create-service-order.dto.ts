@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, Min, MinLength, ValidateNested } from 'class-validator';
+import { ServiceProductItemDto } from './service-product-item.dto';
+import { ServiceWorkItemDto } from './service-work-item.dto';
 
 export class CreateServiceOrderDto {
   @IsString()
@@ -57,4 +59,16 @@ export class CreateServiceOrderDto {
   @IsOptional()
   @IsString()
   branchId?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ServiceWorkItemDto)
+  workItems?: ServiceWorkItemDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ServiceProductItemDto)
+  productItems?: ServiceProductItemDto[];
 }

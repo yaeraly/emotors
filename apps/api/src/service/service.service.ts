@@ -18,8 +18,10 @@ import {
   WarrantyStatus,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { BranchPricingPolicyService } from '../customers/branch-pricing-policy.service';
 import { CommissionsService } from '../commissions/commissions.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { PricingFifoService } from '../pricing/pricing-fifo.service';
 import { PricingResolutionService } from '../pricing/pricing-resolution.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole } from '../rbac/rbac';
@@ -31,10 +33,18 @@ import { CompleteServiceOrderDto } from './dto/complete-service-order.dto';
 import { CreatePartsRequestDto, IssuePartsRequestDto } from './dto/create-parts-request.dto';
 import { CreateServiceOrderDto } from './dto/create-service-order.dto';
 import { ReceiveServicePaymentDto } from './dto/receive-payment.dto';
+import { ServiceProductItemDto } from './dto/service-product-item.dto';
 import { ServiceCustomerSearchDto, ServiceProductSearchDto } from './dto/service-search.dto';
+import { ServiceWorkItemDto } from './dto/service-work-item.dto';
 import { SetLaborCostDto } from './dto/set-labor-cost.dto';
 import { UpdateChecklistDto } from './dto/update-checklist.dto';
 import { UploadServicePhotoDto } from './dto/upload-photo.dto';
+import { resolveServiceProductUnitPrice } from './service-product-pricing.util';
+import {
+  calculateServiceOrderTotals,
+  calculateServiceProductLineTotal,
+  calculateServiceWorkLineTotal,
+} from './service-order-totals.util';
 
 type PrismaTx = Prisma.TransactionClient;
 
@@ -45,6 +55,8 @@ export class ServiceService {
     private readonly inventoryService: InventoryService,
     private readonly commissionsService: CommissionsService,
     private readonly pricingResolution: PricingResolutionService,
+    private readonly branchPricingPolicyService: BranchPricingPolicyService,
+    private readonly pricingFifoService: PricingFifoService,
   ) {}
 
   async create(user: AuthUser, dto: CreateServiceOrderDto) {
@@ -70,10 +82,40 @@ export class ServiceService {
         },
       });
       if (!master) throw new NotFoundException('Master not found');
-      const laborCost = this.roundMoney(dto.laborCost ?? 0);
-      const warrantyUntil = dto.warrantyDays
-        ? this.addDays(new Date(), dto.warrantyDays)
-        : undefined;
+
+      if (dto.warrantyDays != null && dto.warrantyDays < 0) {
+        throw new BadRequestException('Warranty days cannot be negative');
+      }
+
+      const workItems = dto.workItems ?? [];
+      const mergedProductItems = this.mergeServiceProductItems(dto.productItems ?? []);
+      const workLines = workItems.map((item) => ({
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+      }));
+      const productLines: Array<{ quantity: number; unitPrice: number }> = [];
+
+      for (const item of mergedProductItems) {
+        const priced = await this.resolveAndValidateServiceProductItem(
+          tx,
+          user,
+          branchId,
+          customer,
+          item,
+          mergedProductItems,
+        );
+        productLines.push({ quantity: item.quantity, unitPrice: priced.unitPrice });
+      }
+
+      const totals = calculateServiceOrderTotals({ workLines, productLines });
+      const laborCost = totals.workTotal;
+      const partsPrice = totals.productTotal;
+      const totalAmount = totals.grandTotal;
+      const warrantyUntil =
+        dto.warrantyDays != null && dto.warrantyDays > 0
+          ? this.addDays(new Date(), dto.warrantyDays)
+          : null;
+
       const order = await tx.serviceOrder.create({
         data: {
           orderNumber: await this.generateOrderNumber(tx),
@@ -88,8 +130,8 @@ export class ServiceService {
           diagnosisResult: dto.diagnosisResult,
           repairDescription: dto.repairDescription,
           laborCost,
-          totalAmount: laborCost,
-          debtAmount: laborCost,
+          totalAmount,
+          debtAmount: totalAmount,
           warrantyDays: dto.warrantyDays,
           warrantyUntil,
           notes: dto.notes,
@@ -98,8 +140,89 @@ export class ServiceService {
         },
         include: this.include(),
       });
+
+      for (const item of workItems) {
+        const lineTotal = calculateServiceWorkLineTotal(item);
+        await tx.repair.create({
+          data: {
+            serviceOrderId: order.id,
+            masterId: master.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            laborCost: lineTotal,
+            status: RepairStatus.PENDING,
+          },
+        });
+      }
+
+      if (mergedProductItems.length) {
+        const warehouse = await this.resolveBranchWarehouse(tx, branchId);
+        for (const item of mergedProductItems) {
+          const priced = await this.resolveAndValidateServiceProductItem(
+            tx,
+            user,
+            branchId,
+            customer,
+            item,
+            mergedProductItems,
+          );
+          const unitCost = Number(priced.product.finalCostKgs);
+          const unitPrice = priced.unitPrice;
+          const totalCost = calculateServiceProductLineTotal({ quantity: item.quantity, unitPrice: unitCost });
+          const totalPrice = calculateServiceProductLineTotal({ quantity: item.quantity, unitPrice });
+          await tx.partsConsumption.create({
+            data: {
+              serviceOrderId: order.id,
+              productId: priced.product.id,
+              warehouseId: warehouse.id,
+              quantity: item.quantity,
+              unitCost,
+              unitPrice,
+              totalCost,
+              totalPrice,
+              stockDeducted: false,
+              createdById: user.id,
+              pricingPolicyVersionId: priced.freeze.pricingPolicyVersionId,
+              pricingProfileId: priced.freeze.pricingProfileId,
+              resolvedPriceKgs: priced.freeze.resolvedPriceKgs,
+              baseCostKgs: priced.freeze.baseCostKgs,
+              baseBranchPriceKgs: priced.freeze.baseBranchPriceKgs,
+              appliedRuleType: priced.freeze.appliedRuleType,
+              appliedRuleId: priced.freeze.appliedRuleId,
+              appliedAdjustmentMode: priced.freeze.appliedAdjustmentMode,
+              appliedAdjustmentValue: priced.freeze.appliedAdjustmentValue,
+              priceResolvedAt: priced.freeze.priceResolvedAt,
+            },
+          });
+          await this.auditInTx(tx, user, branchId, 'SERVICE_PRODUCT_ADDED', 'ServiceOrder', order.id, {
+            serviceOrderId: order.id,
+            branchId,
+            customerId: customer.id,
+            productId: priced.product.id,
+            quantity: item.quantity,
+            unitPrice,
+            productTotal: partsPrice,
+            workTotal: laborCost,
+            grandTotal: totalAmount,
+            warrantyDays: dto.warrantyDays ?? null,
+          });
+        }
+      }
+
+      const recalculated = await this.recalculateTotalsInTx(tx, order.id);
       await this.auditInTx(tx, user, branchId, 'SERVICE_ORDER_CREATED', 'ServiceOrder', order.id);
-      return this.toResponse(order);
+      if (dto.warrantyDays != null) {
+        await this.auditInTx(tx, user, branchId, 'SERVICE_WARRANTY_SET', 'ServiceOrder', order.id, {
+          warrantyDays: dto.warrantyDays,
+        });
+      }
+      await this.auditInTx(tx, user, branchId, 'SERVICE_ORDER_TOTAL_CALCULATED', 'ServiceOrder', order.id, {
+        workTotal: laborCost,
+        productTotal: partsPrice,
+        grandTotal: totalAmount,
+      });
+      return this.toResponse(recalculated);
     });
   }
 
@@ -162,7 +285,10 @@ export class ServiceService {
       warrantyDays: dto.warrantyDays,
     };
     if (dto.warrantyDays !== undefined) {
-      data.warrantyUntil = dto.warrantyDays ? this.addDays(new Date(), dto.warrantyDays) : null;
+      if (dto.warrantyDays < 0) {
+        throw new BadRequestException('Warranty days cannot be negative');
+      }
+      data.warrantyUntil = dto.warrantyDays > 0 ? this.addDays(new Date(), dto.warrantyDays) : null;
     }
     if (dto.masterId) {
       const master = await this.prisma.user.findFirst({
@@ -246,6 +372,15 @@ export class ServiceService {
       orderBy: { createdAt: 'asc' },
     });
     if (!warehouse) return [];
+
+    let customer = null;
+    if (query.customerId) {
+      customer = await this.prisma.customer.findFirst({
+        where: { id: query.customerId, branchId, deletedAt: null },
+      });
+      if (!customer) throw new NotFoundException('Customer not found');
+    }
+
     const search = query.search?.trim();
     const productFilter: Prisma.ProductWhereInput = {
       branchId,
@@ -260,31 +395,80 @@ export class ServiceService {
         { barcode: { contains: search, mode: 'insensitive' } },
         { category: { contains: search, mode: 'insensitive' } },
         { productCategory: { nameRu: { contains: search, mode: 'insensitive' } } },
+        { productCategory: { code: { contains: search, mode: 'insensitive' } } },
       ];
     }
-    const products = await this.prisma.product.findMany({
-      where: productFilter,
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        barcode: true,
-        category: true,
-        sellingPriceKgs: true,
-        unit: true,
+
+    const balances = await this.prisma.inventoryBalance.findMany({
+      where: {
+        warehouseId: warehouse.id,
+        branchId,
+        product: productFilter,
       },
-      orderBy: { name: 'asc' },
-      take: 20,
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            barcode: true,
+            category: true,
+            unit: true,
+            productCategory: { select: { code: true, nameRu: true } },
+          },
+        },
+      },
+      orderBy: { product: { name: 'asc' } },
+      take: 40,
     });
-    return products.map((product) => ({
-      id: product.id,
-      name: product.name,
-      sku: product.sku,
-      barcode: product.barcode,
-      category: product.category,
-      unitPrice: Number(product.sellingPriceKgs),
-      unit: product.unit,
-    }));
+
+    const results = [];
+    for (const balance of balances) {
+      const availableQty = Math.max(balance.quantity - (balance.reservedQuantity ?? 0), 0);
+      if (availableQty <= 0) continue;
+
+      let unitPrice = 0;
+      if (customer) {
+        try {
+          const priced = await resolveServiceProductUnitPrice(
+            {
+              pricingResolution: this.pricingResolution,
+              branchPricingPolicyService: this.branchPricingPolicyService,
+            },
+            customer,
+            balance.product.id,
+          );
+          unitPrice = priced.unitPrice;
+        } catch {
+          continue;
+        }
+      } else {
+        try {
+          const freeze = await this.pricingResolution.resolveWithFreeze(branchId, balance.product.id, {
+            priceType: PricingEnginePriceType.RETAIL_RECOMMENDED,
+          });
+          unitPrice = Number(freeze.resolvedPriceKgs ?? 0);
+        } catch {
+          continue;
+        }
+        if (unitPrice <= 0) continue;
+      }
+
+      results.push({
+        id: balance.product.id,
+        name: balance.product.name,
+        sku: balance.product.sku,
+        barcode: balance.product.barcode,
+        category: balance.product.category ?? balance.product.productCategory?.nameRu ?? null,
+        unit: balance.product.unit,
+        availableQty,
+        unitPrice,
+        lineTotal: calculateServiceProductLineTotal({ quantity: 1, unitPrice }),
+      });
+      if (results.length >= 20) break;
+    }
+
+    return results;
   }
 
   setLaborCost(user: AuthUser, id: string, dto: SetLaborCostDto) {
@@ -433,6 +617,7 @@ export class ServiceService {
           unitPrice,
           totalCost,
           totalPrice,
+          stockDeducted: true,
           createdById: user.id,
           ...freezeFields,
         },
@@ -619,6 +804,7 @@ export class ServiceService {
             unitPrice,
             totalCost: this.roundMoney(unitCost * toIssue),
             totalPrice: this.roundMoney(unitPrice * toIssue),
+            stockDeducted: true,
             createdById: user.id,
             ...freezeFields,
           },
@@ -732,6 +918,7 @@ export class ServiceService {
       const order = await this.getOrderInTx(tx, user, id, true);
       this.assertMasterCanEditOrder(user, order);
       await this.assertPartsIssuedIfRequested(tx, order);
+      await this.deductPendingProductStockInTx(tx, user, order);
       const recalculated = await this.recalculateTotalsInTx(tx, order.id);
       const updated = await tx.serviceOrder.update({
         where: { id: order.id },
@@ -814,7 +1001,9 @@ export class ServiceService {
       this.assertChecklistComplete(order);
       const warrantyUntil =
         order.warrantyUntil ??
-        (order.warrantyDays ? this.addDays(new Date(), order.warrantyDays) : undefined);
+        (order.warrantyDays != null && order.warrantyDays > 0
+          ? this.addDays(new Date(), order.warrantyDays)
+          : undefined);
       const updated = await tx.serviceOrder.update({
         where: { id: order.id },
         data: {
@@ -1227,13 +1416,15 @@ export class ServiceService {
     return [
       `Service Order ${orderNumber}`,
       '----------------------------',
-      'Repair Work',
+      'Работы',
       laborSection || pad('Labor', 0),
+      `Работы: ${laborLines.reduce((sum, line) => sum + line.amount, 0).toFixed(0)}`,
       '----------------------------',
-      'Spare Parts',
+      'Товары',
       partsSection || pad('Parts', 0),
+      `Товары: ${partsLines.reduce((sum, line) => sum + line.amount, 0).toFixed(0)}`,
       '----------------------------',
-      'TOTAL',
+      'Общая сумма',
       total.toFixed(0),
     ].join('\n');
   }
@@ -1280,6 +1471,7 @@ export class ServiceService {
     action: string,
     entity: string,
     entityId: string,
+    metadata?: Record<string, unknown>,
   ) {
     return tx.auditLog.create({
       data: {
@@ -1291,6 +1483,9 @@ export class ServiceService {
         metadata: {
           branchId,
           roles: user.roles ?? [user.role],
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+          ...metadata,
         },
       },
     });
@@ -1317,6 +1512,127 @@ export class ServiceService {
     return result;
   }
 
+  private mergeServiceProductItems(items: ServiceProductItemDto[]) {
+    const merged = new Map<string, ServiceProductItemDto>();
+    for (const item of items) {
+      const existing = merged.get(item.productId);
+      if (existing) {
+        existing.quantity += item.quantity;
+        if (item.unitPrice != null) existing.unitPrice = item.unitPrice;
+      } else {
+        merged.set(item.productId, { ...item });
+      }
+    }
+    return Array.from(merged.values());
+  }
+
+  private async resolveAndValidateServiceProductItem(
+    tx: PrismaTx,
+    user: AuthUser,
+    branchId: string,
+    customer: {
+      id: string;
+      branchId: string;
+      customerType: import('@prisma/client').CustomerType;
+      loyaltyCategory?: import('@prisma/client').CustomerLoyaltyCategory | null;
+    },
+    item: ServiceProductItemDto,
+    allItems: ServiceProductItemDto[],
+  ) {
+    const product = await tx.product.findFirst({
+      where: { id: item.productId, branchId, deletedAt: null, isActive: true },
+    });
+    if (!product) throw new NotFoundException(`Product ${item.productId} not found`);
+
+    const warehouse = await this.resolveBranchWarehouse(tx, branchId);
+    const balance = await tx.inventoryBalance.findFirst({
+      where: { warehouseId: warehouse.id, branchId, productId: product.id },
+    });
+    const availableQty = Math.max((balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0), 0);
+    const requestedQty = allItems
+      .filter((row) => row.productId === item.productId)
+      .reduce((sum, row) => sum + row.quantity, 0);
+    if (requestedQty > availableQty) {
+      throw new BadRequestException(
+        `Insufficient stock for ${product.name}. Available: ${availableQty}`,
+      );
+    }
+
+    let priced;
+    try {
+      priced = await resolveServiceProductUnitPrice(
+        {
+          pricingResolution: this.pricingResolution,
+          branchPricingPolicyService: this.branchPricingPolicyService,
+        },
+        customer,
+        product.id,
+        item.unitPrice,
+      );
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : 'Unable to resolve product price',
+      );
+    }
+
+    return { product, unitPrice: priced.unitPrice, freeze: priced.freeze };
+  }
+
+  private async deductPendingProductStockInTx(
+    tx: PrismaTx,
+    user: AuthUser,
+    order: { id: string; branchId: string; parts: Array<{ id: string; productId: string; warehouseId: string; quantity: number; stockDeducted: boolean; unitCost: Prisma.Decimal }> },
+  ) {
+    const pendingParts = order.parts.filter((part) => !part.stockDeducted);
+    for (const part of pendingParts) {
+      const balance = await tx.inventoryBalance.findFirst({
+        where: {
+          warehouseId: part.warehouseId,
+          branchId: order.branchId,
+          productId: part.productId,
+        },
+      });
+      const availableQty = Math.max((balance?.quantity ?? 0) - (balance?.reservedQuantity ?? 0), 0);
+      if (part.quantity > availableQty) {
+        const product = await tx.product.findUnique({ where: { id: part.productId } });
+        throw new BadRequestException(
+          `Insufficient stock for ${product?.name ?? part.productId}. Available: ${availableQty}`,
+        );
+      }
+
+      const fifo = await this.pricingFifoService.consumeFifo(tx, {
+        productId: part.productId,
+        warehouseId: part.warehouseId,
+        quantity: part.quantity,
+        userId: user.id,
+      });
+      const unitCost =
+        fifo.consumedQty > 0
+          ? fifo.unitCost
+          : Number(part.unitCost);
+
+      await this.inventoryService.createStockMovementInTx(tx, user, {
+        productId: part.productId,
+        warehouseId: part.warehouseId,
+        type: StockMovementType.SERVICE_USE,
+        quantity: part.quantity,
+        unitCostKgs: unitCost,
+        referenceType: 'SERVICE_ORDER',
+        referenceId: order.id,
+        note: `Service order stock deduction`,
+      });
+
+      await tx.partsConsumption.update({
+        where: { id: part.id },
+        data: {
+          stockDeducted: true,
+          unitCost,
+          totalCost: calculateServiceProductLineTotal({ quantity: part.quantity, unitPrice: unitCost }),
+        },
+      });
+    }
+  }
+
   private toResponse(order: any) {
     return {
       ...order,
@@ -1325,16 +1641,23 @@ export class ServiceService {
       totalAmount: Number(order.totalAmount),
       paidAmount: Number(order.paidAmount),
       debtAmount: Number(order.debtAmount),
+      workTotal: Number(order.laborCost),
+      productTotal: this.roundMoney(
+        (order.parts ?? []).reduce((sum: number, part: { totalPrice: Prisma.Decimal }) => sum + Number(part.totalPrice), 0),
+      ),
       diagnoses: order.diagnoses?.map((diagnosis: any) => ({
         ...diagnosis,
         diagnosisFee: Number(diagnosis.diagnosisFee),
       })),
       repairs: order.repairs?.map((repair: any) => ({
         ...repair,
+        quantity: repair.quantity ?? 1,
+        unitPrice: repair.unitPrice != null ? Number(repair.unitPrice) : null,
         laborCost: Number(repair.laborCost),
       })),
       parts: order.parts?.map((part: any) => ({
         ...part,
+        stockDeducted: part.stockDeducted ?? true,
         unitCost: Number(part.unitCost),
         unitPrice: Number(part.unitPrice),
         totalCost: Number(part.totalCost),

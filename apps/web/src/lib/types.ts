@@ -325,6 +325,8 @@ export type ServiceOrder = {
   laborCost: number;
   partsCost: number;
   totalAmount: number;
+  workTotal?: number;
+  productTotal?: number;
   paidAmount: number;
   debtAmount: number;
   warrantyDays?: number | null;
@@ -436,6 +438,8 @@ export type ServiceProductOption = {
   category?: string | null;
   unitPrice: number;
   unit: string;
+  availableQty: number;
+  lineTotal?: number;
 };
 
 export type ServiceHistoryEntry = {

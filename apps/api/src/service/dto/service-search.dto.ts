@@ -10,4 +10,8 @@ export class ServiceProductSearchDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsString()
+  customerId?: string;
 }

@@ -7,12 +7,13 @@ import { useTranslation } from '@/i18n/useTranslation';
 
 type Props = {
   disabled?: boolean;
+  customerId?: string;
   onSelect: (product: ServiceProductOption) => void;
 };
 
 const DEBOUNCE_MS = 200;
 
-export function ServiceProductSearch({ disabled = false, onSelect }: Props) {
+export function ServiceProductSearch({ disabled = false, customerId, onSelect }: Props) {
   const { t } = useTranslation();
   const listboxId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,21 +24,21 @@ export function ServiceProductSearch({ disabled = false, onSelect }: Props) {
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   useEffect(() => {
-    if (!query.trim()) {
+    if (!query.trim() || !customerId) {
       setResults([]);
       setOpen(false);
       return;
     }
     setLoading(true);
     const timer = window.setTimeout(() => {
-      const params = new URLSearchParams({ search: query.trim() });
+      const params = new URLSearchParams({ search: query.trim(), customerId });
       void apiFetch<ServiceProductOption[]>(`/service-orders/product-search?${params}`)
         .then((items) => { setResults(items); setOpen(true); setHighlightedIndex(0); })
         .catch(() => setResults([]))
         .finally(() => setLoading(false));
     }, DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [customerId, query]);
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {
@@ -59,11 +60,12 @@ export function ServiceProductSearch({ disabled = false, onSelect }: Props) {
       <label className="block">
         <span className="text-sm font-semibold text-slate-700">{t('sales.product')}</span>
         <input
+          id="service-product-search"
           type="search"
-          disabled={disabled}
+          disabled={disabled || !customerId}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={t('inventory.searchProduct')}
+          placeholder={customerId ? t('inventory.searchProduct') : 'Сначала выберите клиента'}
           className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm"
         />
       </label>
@@ -77,8 +79,10 @@ export function ServiceProductSearch({ disabled = false, onSelect }: Props) {
                 onClick={() => selectProduct(product)}
                 className={`w-full px-4 py-3 text-left ${index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
               >
-                <p className="font-semibold">{product.sku} · {product.name}</p>
-                <p className="text-sm text-slate-600">{product.category ?? '-'} · {product.unitPrice.toLocaleString('ru-RU')} KGS</p>
+                <p className="font-semibold">{product.name}</p>
+                <p className="text-sm text-slate-600">
+                  {product.sku} · {product.category ?? '-'} · {t('inventory.available')}: {product.availableQty} · {product.unitPrice.toLocaleString('ru-RU')} KGS
+                </p>
               </button>
             </li>
           ))}
