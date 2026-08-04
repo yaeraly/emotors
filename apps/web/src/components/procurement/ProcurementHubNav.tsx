@@ -21,6 +21,7 @@ export type ProcurementHubTab =
   | 'factories'
   | 'transport'
   | 'orders'
+  | 'purchase-assistant'
   | 'difference-acts';
 
 type Props = {
@@ -49,14 +50,17 @@ export function ProcurementHubNav({ activeTab }: Props) {
       items.push({ id: 'transport', label: t('procurement.transportCompanies.title') });
     }
     items.push({ id: 'orders', label: t('procurement.orders.title') });
+    if (isSupplyChainManagerUser(user) || hasFullAccess(user)) {
+      items.push({ id: 'purchase-assistant', label: t('procurement.purchaseAssistant.title') });
+    }
     if (canViewDifferenceActs) {
       items.push({ id: 'difference-acts', label: t('chinaReceiving.differenceActs') });
     }
     return items;
-  }, [canViewDifferenceActs, canViewTransport, t]);
+  }, [canViewDifferenceActs, canViewTransport, t, user]);
 
   const createAction = useProcurementCreateAction(
-    activeTab === 'difference-acts' ? 'orders' : activeTab,
+    activeTab === 'difference-acts' || activeTab === 'purchase-assistant' ? 'orders' : activeTab,
     user,
     t,
   );
@@ -64,6 +68,10 @@ export function ProcurementHubNav({ activeTab }: Props) {
   function setTab(tabId: string) {
     if (tabId === 'difference-acts') {
       router.push('/procurement/difference-acts');
+      return;
+    }
+    if (tabId === 'purchase-assistant') {
+      router.push('/procurement/purchase-assistant');
       return;
     }
     router.push(`/procurement?tab=${tabId}`);
@@ -79,7 +87,7 @@ export function ProcurementHubNav({ activeTab }: Props) {
       activeTab={activeTab}
       onTabChange={setTab}
       action={
-        createAction && activeTab !== 'difference-acts' ? (
+        createAction && activeTab !== 'difference-acts' && activeTab !== 'purchase-assistant' ? (
           <Link href={createAction.href} className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white">
             {createAction.label}
           </Link>

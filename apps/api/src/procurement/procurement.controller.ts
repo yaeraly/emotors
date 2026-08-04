@@ -35,6 +35,12 @@ import type { AccountantBillSource } from './accountant-bills.util';
 import { CashierBillsService, type CashierBillsQuery } from './cashier-bills.service';
 import type { CashierBillSource } from './cashier-bills.util';
 import { PaymentInfoService } from './payment-info.service';
+import {
+  PurchaseAssistantAcceptDto,
+  PurchaseAssistantModifyDto,
+  PurchaseAssistantQueryDto,
+} from './dto/purchase-assistant.dto';
+import { PurchaseAssistantService } from './purchase-assistant.service';
 import { ProcurementService } from './procurement.service';
 import { TransportExpenseService } from './transport-expense.service';
 
@@ -45,11 +51,39 @@ const PROCUREMENT_VIEW_PERMISSIONS = ['procurement.manage', 'procurement.view'] 
 export class ProcurementController {
   constructor(
     private readonly service: ProcurementService,
+    private readonly purchaseAssistantService: PurchaseAssistantService,
     private readonly paymentInfoService: PaymentInfoService,
     private readonly transportExpenseService: TransportExpenseService,
     private readonly accountantBillsService: AccountantBillsService,
     private readonly cashierBillsService: CashierBillsService,
   ) {}
+
+  @Get('purchase-assistant')
+  @RequirePermissions('procurement.manage')
+  purchaseAssistantRecommendations(
+    @CurrentUser() user: AuthUser,
+    @Query() query: PurchaseAssistantQueryDto,
+  ) {
+    return this.purchaseAssistantService.recommendations(user, query);
+  }
+
+  @Post('purchase-assistant/accept')
+  @RequirePermissions('procurement.manage')
+  acceptPurchaseAssistantRecommendations(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: PurchaseAssistantAcceptDto,
+  ) {
+    return this.purchaseAssistantService.acceptRecommendations(user, dto);
+  }
+
+  @Post('purchase-assistant/modify')
+  @RequirePermissions('procurement.manage')
+  modifyPurchaseAssistantRecommendation(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: PurchaseAssistantModifyDto,
+  ) {
+    return this.purchaseAssistantService.modifyRecommendation(user, dto);
+  }
 
   @Post('suppliers')
   @RequirePermissions('procurement.manage')

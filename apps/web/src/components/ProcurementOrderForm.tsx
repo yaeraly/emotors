@@ -8,6 +8,7 @@ import { calculateLandedCosts } from '@/lib/landed-cost';
 import { resolveChinaDomesticTransportKgs } from '@/lib/transport-logistics';
 import { ProcurementProductSearch } from '@/components/ProcurementProductSearch';
 import { canEditChinaDomesticTransport } from '@/lib/china-domestic-transport-lock';
+import { consumePurchaseAssistantDraft } from '@/lib/purchase-assistant-draft';
 import { canEditProcurementOrderItemsInWindow } from '@/lib/rbac';
 import type { Product, User, Warehouse } from '@/lib/types';
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
@@ -176,6 +177,27 @@ export function ProcurementOrderForm({ mode, orderId, backHref, title }: Props) 
             factoryId: factoryResult[0]?.id ?? '',
             hqWarehouseId: warehouseResult[0]?.id ?? '',
           }));
+          const draft = consumePurchaseAssistantDraft();
+          if (draft?.items?.length) {
+            const draftProducts = draft.items.map((item) => ({
+              id: item.productId,
+              name: item.name ?? item.sku ?? item.productId,
+              sku: item.sku ?? '',
+              purchasePriceYuan: item.purchasePriceYuan ?? 0,
+              defaultFactoryId: item.factoryId ?? undefined,
+            })) as Product[];
+            setProducts(draftProducts);
+            setLines(
+              draft.items.map((item) => ({
+                ...emptyLine(),
+                productId: item.productId,
+                factoryId: item.factoryId || factoryResult[0]?.id || '',
+                quantity: String(Math.max(1, Number(item.quantity) || 1)),
+                purchasePriceYuan: String(item.purchasePriceYuan ?? 0),
+                masterPriceYuan: String(item.purchasePriceYuan ?? 0),
+              })),
+            );
+          }
         }
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')))

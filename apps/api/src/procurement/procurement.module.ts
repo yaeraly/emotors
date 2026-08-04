@@ -7,6 +7,7 @@ import { LandedCostModule } from './landed-cost.module';
 import { PaymentInfoService } from './payment-info.service';
 import { ProcurementController } from './procurement.controller';
 import { ProcurementService } from './procurement.service';
+import { PurchaseAssistantService } from './purchase-assistant.service';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
 
@@ -15,6 +16,7 @@ import { TransportExpenseService } from './transport-expense.service';
   controllers: [ProcurementController],
   providers: [
     ProcurementService,
+    PurchaseAssistantService,
     SupplierPaymentWorkflowService,
     PaymentInfoService,
     TransportExpenseService,
@@ -23,6 +25,7 @@ import { TransportExpenseService } from './transport-expense.service';
   ],
   exports: [
     ProcurementService,
+    PurchaseAssistantService,
     LandedCostModule,
     SupplierPaymentWorkflowService,
     PaymentInfoService,
