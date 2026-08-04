@@ -16,6 +16,7 @@ import {
   canReverseFinanceTransfer,
 } from '@/lib/finance-rbac';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
+import { usesCompactFinanceTransferTable } from '@/lib/finance-transfer-table';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { FinanceAccount, FinanceTransfer, User } from '@/lib/types';
 
@@ -55,6 +56,7 @@ function FinanceTransfersPageContent() {
   const canPrepare = canPrepareFinanceTransfer(user);
   const canConfirm = canConfirmFinanceTransfer(user);
   const canReverse = canReverseFinanceTransfer(user);
+  const compactTable = usesCompactFinanceTransferTable(user);
 
   const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
   const [transfers, setTransfers] = useState<FinanceTransfer[]>([]);
@@ -427,18 +429,32 @@ function FinanceTransfersPageContent() {
           <table className="min-w-full text-sm">
             <thead className="bg-slate-50 text-left">
               <tr>
-                <th className="px-4 py-3">{t('finance.transferNumber')}</th>
-                <th className="px-4 py-3">{t('finance.transferDate')}</th>
-                <th className="px-4 py-3">{t('finance.sourceAccount')}</th>
-                <th className="px-4 py-3">{t('finance.destinationAccount')}</th>
-                <th className="px-4 py-3">{t('finance.amount')}</th>
-                <th className="px-4 py-3">{t('distribution.status')}</th>
-                <th className="px-4 py-3">{t('finance.transferAccountant')}</th>
-                <th className="px-4 py-3">{t('finance.transferCashier')}</th>
-                <th className="px-4 py-3">{t('finance.transferReceipt')}</th>
-                <th className="px-4 py-3">{t('finance.transactionNumber')}</th>
-                <th className="px-4 py-3">{t('finance.comment')}</th>
-                <th className="px-4 py-3">{t('common.actions')}</th>
+                {compactTable ? (
+                  <>
+                    <th className="px-4 py-3">{t('finance.transferDate')}</th>
+                    <th className="px-4 py-3">{t('finance.transferNumber')}</th>
+                    <th className="px-4 py-3">{t('finance.sourceAccount')}</th>
+                    <th className="px-4 py-3">{t('finance.destinationAccount')}</th>
+                    <th className="px-4 py-3">{t('finance.amount')}</th>
+                    <th className="px-4 py-3">{t('distribution.status')}</th>
+                    <th className="px-4 py-3">{t('common.actions')}</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="px-4 py-3">{t('finance.transferNumber')}</th>
+                    <th className="px-4 py-3">{t('finance.transferDate')}</th>
+                    <th className="px-4 py-3">{t('finance.sourceAccount')}</th>
+                    <th className="px-4 py-3">{t('finance.destinationAccount')}</th>
+                    <th className="px-4 py-3">{t('finance.amount')}</th>
+                    <th className="px-4 py-3">{t('distribution.status')}</th>
+                    <th className="px-4 py-3">{t('finance.transferAccountant')}</th>
+                    <th className="px-4 py-3">{t('finance.transferCashier')}</th>
+                    <th className="px-4 py-3">{t('finance.transferReceipt')}</th>
+                    <th className="px-4 py-3">{t('finance.transactionNumber')}</th>
+                    <th className="px-4 py-3">{t('finance.comment')}</th>
+                    <th className="px-4 py-3">{t('common.actions')}</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -448,6 +464,31 @@ function FinanceTransfersPageContent() {
                   transfer.status === 'PENDING_CASHIER' || transfer.status === 'PENDING';
                 return (
                   <tr key={transfer.id} className="border-t border-slate-100 align-top">
+                    {compactTable ? (
+                      <>
+                        <td className="px-4 py-3">{new Date(transfer.transferDate).toLocaleDateString()}</td>
+                        <td className="px-4 py-3 font-semibold">{transfer.transferNumber}</td>
+                        <td className="max-w-[12rem] truncate px-4 py-3" title={transfer.sourceAccount.name}>
+                          {transfer.sourceAccount.name}
+                        </td>
+                        <td className="max-w-[12rem] truncate px-4 py-3" title={transfer.destinationAccount.name}>
+                          {transfer.destinationAccount.name}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <FinanceMoney amount={Number(transfer.amount)} currency={transfer.currency} />
+                        </td>
+                        <td className="px-4 py-3">{t(`finance.transferStatus.${transfer.status}`)}</td>
+                        <td className="px-4 py-3">
+                          <Link
+                            href={`/finance/transfers/${transfer.id}`}
+                            className="inline-flex rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                          >
+                            {t('common.open')}
+                          </Link>
+                        </td>
+                      </>
+                    ) : (
+                      <>
                     <td className="px-4 py-3 font-semibold">{transfer.transferNumber}</td>
                     <td className="px-4 py-3">{new Date(transfer.transferDate).toLocaleDateString()}</td>
                     <td className="px-4 py-3">{transfer.sourceAccount.name}</td>
@@ -572,8 +613,16 @@ function FinanceTransfersPageContent() {
                             {t('finance.reverseTransfer')}
                           </button>
                         ) : null}
+                        <Link
+                          href={`/finance/transfers/${transfer.id}`}
+                          className="inline-flex rounded-lg border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                        >
+                          {t('common.open')}
+                        </Link>
                       </div>
                     </td>
+                      </>
+                    )}
                   </tr>
                 );
               })}

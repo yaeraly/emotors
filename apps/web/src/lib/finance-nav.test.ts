@@ -104,4 +104,21 @@ assertEqual(canAccessFinancePath(branchCashier, '/finance/shifts'), false, 'bran
 assertEqual(canAccessFinancePath(branchCashier, '/finance/dashboard'), false, 'cashier cannot access dashboard');
 assertEqual(canAccessFinancePath(branchAccountant, '/finance/dashboard'), true, 'accountant can access dashboard');
 
+const branchOwner = {
+  id: 'ceo-1',
+  email: 'ceo@test.com',
+  fullName: 'Branch CEO',
+  role: 'FRANCHISE_OWNER' as const,
+  roles: ['FRANCHISE_OWNER' as const],
+  branchId: 'branch-1',
+  permissions: ['finance.view', 'finance.manage', 'crm.manage', 'sales.manage'],
+} satisfies User;
+
+assertEqual(
+  visibleFinanceNavSections(branchOwner).some((s) => s.href === '/finance/cash-flow'),
+  false,
+  'branch ceo finance nav hides cash flow',
+);
+assertEqual(canAccessFinancePath(branchOwner, '/finance/cash-flow'), false, 'branch ceo cannot access cash flow');
+
 console.log('finance-nav.test.ts passed');

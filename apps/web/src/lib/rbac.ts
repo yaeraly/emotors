@@ -1369,8 +1369,13 @@ function canBranchCashierAccessPath(pathname: string) {
   );
 }
 
+function isBranchFinanceCashFlowForbiddenPath(pathname: string) {
+  return pathname === '/finance/cash-flow' || pathname.startsWith('/finance/cash-flow/');
+}
+
 function canBranchAccountantAccessPath(pathname: string) {
   if (pathname === '/') return false;
+  if (isBranchFinanceCashFlowForbiddenPath(pathname)) return false;
   if (isBranchAccountantForbiddenPath(pathname)) return false;
   return BRANCH_ACCOUNTANT_ALLOWED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),

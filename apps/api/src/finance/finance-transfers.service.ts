@@ -25,6 +25,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import {
   assertCanAccessAccountScope,
+  assertBranchTransferIsolation,
   canCancelFinanceTransfer,
   canConfirmFinanceTransfer,
   canPrepareFinanceTransfer,
@@ -189,6 +190,7 @@ export class FinanceTransfersService {
     });
     if (!transfer) throw new NotFoundException('Transfer not found');
     const assignedAccountIds = await getActiveAssignmentAccountIds(this.prisma, user.id);
+    assertBranchTransferIsolation(user, transfer);
     assertCanAccessAccountScope(user, transfer.sourceAccount, assignedAccountIds);
     assertCanAccessAccountScope(user, transfer.destinationAccount, assignedAccountIds);
     return this.toTransferResponse(transfer);

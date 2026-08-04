@@ -12,8 +12,9 @@ import {
   canReverseFinanceTransfer,
   isHqFinanceUser,
   resolveFinanceScopeFilter,
+  assertBranchTransferIsolation,
 } from './finance-access.util';
-import { Role } from '@prisma/client';
+import { FinanceAccountScope, Role } from '@prisma/client';
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
   if (actual !== expected) {
@@ -146,5 +147,31 @@ assertEqual(canApproveFinanceAccountLifecycle(hqCeo), true, 'CEO approves archiv
 assertEqual(canApproveFinanceAccountLifecycle(hqOwner), true, 'Owner approves archive lifecycle');
 assertEqual(canApproveFinanceAccountLifecycle(hqAccountant), false, 'HQ Accountant cannot approve archive');
 assertEqual(canApproveFinanceAccountLifecycle(hqCashier), false, 'HQ Cashier cannot approve archive');
+
+const branchTransfer = {
+  branchId: 'branch-1',
+  sourceAccount: { id: 'a1', branchId: 'branch-1', scope: FinanceAccountScope.BRANCH },
+  destinationAccount: { id: 'a2', branchId: 'branch-1', scope: FinanceAccountScope.BRANCH },
+};
+const otherBranchTransfer = {
+  branchId: 'branch-2',
+  sourceAccount: { id: 'a3', branchId: 'branch-2', scope: FinanceAccountScope.BRANCH },
+  destinationAccount: { id: 'a4', branchId: 'branch-2', scope: FinanceAccountScope.BRANCH },
+};
+
+try {
+  assertBranchTransferIsolation(branchAccountant as never, branchTransfer);
+} catch {
+  throw new Error('branch accountant should access own branch transfer');
+}
+
+let blockedOtherBranch = false;
+try {
+  assertBranchTransferIsolation(branchAccountant as never, otherBranchTransfer);
+} catch (error) {
+  blockedOtherBranch =
+    error instanceof Error && error.message.includes('Branch isolation violation');
+}
+assertEqual(blockedOtherBranch, true, 'branch accountant cannot access other branch transfer');
 
 console.log('finance-access.util.test.ts passed');

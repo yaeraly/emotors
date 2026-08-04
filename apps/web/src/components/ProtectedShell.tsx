@@ -31,6 +31,13 @@ function resolvePathAccess(currentUser: User, pathname: string): {
     return { forbidden: false, forbiddenReason: null, redirectTo: '/change-password', auditForbidden: false };
   }
 
+  if (
+    (isBranchAccountantUser(currentUser) || isBranchOwnerUser(currentUser)) &&
+    (pathname === '/finance/cash-flow' || pathname.startsWith('/finance/cash-flow/'))
+  ) {
+    return { forbidden: false, forbiddenReason: null, redirectTo: '/finance/transfers', auditForbidden: false };
+  }
+
   if (canAccessPath(currentUser, pathname)) {
     return { forbidden: false, forbiddenReason: null, redirectTo: null, auditForbidden: false };
   }

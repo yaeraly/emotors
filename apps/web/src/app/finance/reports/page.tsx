@@ -1,24 +1,32 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FinanceEmptyState,
   FinanceErrorState,
   FinanceLayout,
   FinanceMoney,
 } from '@/components/finance/FinanceLayout';
-import { FINANCE_REPORT_LINKS } from '@/lib/finance-nav';
+import { visibleFinanceReportLinks } from '@/lib/finance-nav';
 import { ModuleSectionNav } from '@/components/ModuleSectionNav';
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
-import type { FinanceAccount, FinanceLedgerEntry, FinanceSummaryReport } from '@/lib/types';
+import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
+import type { FinanceLedgerEntry, FinanceSummaryReport, User } from '@/lib/types';
 
 export default function FinanceReportsPage() {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(() => getCachedUser());
   const [report, setReport] = useState<FinanceSummaryReport | null>(null);
   const [investments, setInvestments] = useState<FinanceLedgerEntry[]>([]);
   const [error, setError] = useState('');
+  const reportLinks = visibleFinanceReportLinks(user);
+  const showCashFlowLink = reportLinks.some((link) => link.href === '/finance/cash-flow');
+
+  useEffect(() => {
+    void fetchCurrentUser().then(setUser).catch(() => setUser(null));
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -35,7 +43,7 @@ export default function FinanceReportsPage() {
   return (
     <FinanceLayout titleKey="finance.reports" breadcrumbs={[{ labelKey: 'finance.reports' }]}>
       {error ? <FinanceErrorState message={error} /> : null}
-      <ModuleSectionNav sections={FINANCE_REPORT_LINKS} variant="cards" />
+      <ModuleSectionNav sections={reportLinks} variant="cards" />
       {report ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.totalBalance')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={report.totals.balance} /></p></div>
@@ -50,7 +58,9 @@ export default function FinanceReportsPage() {
           <p className="mt-2 text-sm text-slate-600">{investments.length} {t('finance.investments')}</p>
         </div>
       ) : <FinanceEmptyState messageKey="finance.noReports" />}
-      <Link href="/finance/cash-flow" className="inline-flex rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">{t('finance.reportCashFlow')}</Link>
+      {showCashFlowLink ? (
+        <Link href="/finance/cash-flow" className="inline-flex rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">{t('finance.reportCashFlow')}</Link>
+      ) : null}
     </FinanceLayout>
   );
 }

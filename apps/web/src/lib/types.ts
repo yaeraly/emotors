@@ -1411,11 +1411,17 @@ export type FinanceTransfer = {
   returnReason?: string | null;
   sentToCashierAt?: string | null;
   completedAt?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  approvedAt?: string | null;
+  returnedAt?: string | null;
+  branchId?: string | null;
   sourceAccount: FinanceAccount;
   destinationAccount: FinanceAccount;
   accountant?: { id: string; fullName: string; role?: Role } | null;
   cashier?: { id: string; fullName: string; role?: Role } | null;
   createdBy?: { id: string; fullName: string; role?: Role } | null;
+  approvedBy?: { id: string; fullName: string; role?: Role } | null;
   receipts?: FinanceTransferAttachment[];
   supportDocuments?: FinanceTransferAttachment[];
   attachments?: FinanceTransferAttachment[];

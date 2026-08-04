@@ -184,6 +184,32 @@ export function assertBranchIsolation(
   }
 }
 
+export function assertBranchTransferIsolation(
+  user: AuthUser,
+  transfer: {
+    branchId?: string | null;
+    sourceAccount: FinanceAccountAccess;
+    destinationAccount: FinanceAccountAccess;
+  },
+) {
+  if (!user.branchId) return;
+  if (!isBranchAccountantUser(user) && !isBranchOwnerUser(user)) return;
+
+  if (transfer.branchId) {
+    assertBranchIsolation(user, transfer.branchId);
+    return;
+  }
+
+  if (
+    transfer.sourceAccount.scope !== FinanceAccountScope.BRANCH ||
+    transfer.destinationAccount.scope !== FinanceAccountScope.BRANCH ||
+    transfer.sourceAccount.branchId !== user.branchId ||
+    transfer.destinationAccount.branchId !== user.branchId
+  ) {
+    throw new ForbiddenException('Branch isolation violation');
+  }
+}
+
 export function assertCanAccessAccountScope(
   user: AuthUser,
   account: FinanceAccountAccess,

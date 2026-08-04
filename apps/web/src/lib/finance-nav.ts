@@ -2,7 +2,19 @@ import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import type { User } from './types';
 import { hasCashierCapability } from './cashier-capability';
 import { canManageFinanceAccounts, isHqFinanceUser } from './finance-rbac';
-import { isHqAccountantUser, isHqCashierUser, isBranchCashierUser } from './rbac';
+import {
+  isBranchAccountantUser,
+  isBranchOwnerUser,
+  isHqAccountantUser,
+  isHqCashierUser,
+  isBranchCashierUser,
+} from './rbac';
+
+const BRANCH_FINANCE_CASH_FLOW_PATH = '/finance/cash-flow';
+
+function hidesBranchFinanceCashFlow(user: User | null | undefined) {
+  return isBranchAccountantUser(user) || isBranchOwnerUser(user);
+}
 
 export type FinanceNavSection = ModuleSectionLink & {
   roles: Array<'cashier' | 'manage' | 'view' | 'owner' | 'hq'>;
@@ -110,13 +122,23 @@ export function visibleFinanceNavSections(user: User | null) {
   }
   return FINANCE_MAIN_NAV
     .filter((section) => matchesFinanceRole(user, section.roles))
-    .filter((section) => !(isHqAccountantUser(user) && section.href === '/finance/transfers'));
+    .filter((section) => !(isHqAccountantUser(user) && section.href === '/finance/transfers'))
+    .filter((section) => !(hidesBranchFinanceCashFlow(user) && section.href === BRANCH_FINANCE_CASH_FLOW_PATH));
+}
+
+export function visibleFinanceReportLinks(user: User | null) {
+  if (!user) return [];
+  if (!hidesBranchFinanceCashFlow(user)) return FINANCE_REPORT_LINKS;
+  return FINANCE_REPORT_LINKS.filter((link) => link.href !== BRANCH_FINANCE_CASH_FLOW_PATH);
 }
 
 const CASHIER_FINANCE_PATH_PREFIXES = ['/finance/accounts', '/finance/payments', '/finance/shifts'];
 
 export function canAccessFinancePath(user: User, pathname: string) {
   if (!pathname.startsWith('/finance')) return true;
+  if (hidesBranchFinanceCashFlow(user) && pathname.startsWith(BRANCH_FINANCE_CASH_FLOW_PATH)) {
+    return false;
+  }
   // HQ Cashier: assigned accounts + cashier bills/transfers only (path allowlist owned by rbac).
   if (isHqCashierUser(user)) {
     if (pathname === '/finance' || pathname === '/finance/') return true;
