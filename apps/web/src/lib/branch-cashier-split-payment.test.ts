@@ -123,4 +123,11 @@ describe('branch cashier invoices table and multi-method payment form', () => {
     assert.match(detailSource, /\/branch-cashier\/accounts\/resolve/);
     assert.doesNotMatch(detailSource, /<select[^>]*financeAccountId/);
   });
+
+  it('shows close invoice label only when payment closes the invoice', () => {
+    assert.match(detailSource, /branchCashier\.closeInvoice/);
+    assert.match(detailSource, /branchCashier\.acceptPayment/);
+    assert.match(detailSource, /closesInvoice \? 'branchCashier\.closeInvoice' : 'branchCashier\.acceptPayment'/);
+    assert.doesNotMatch(detailSource, /distribution\.submitPaymentCashier/);
+  });
 });

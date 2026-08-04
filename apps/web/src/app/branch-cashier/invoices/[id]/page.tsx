@@ -67,6 +67,7 @@ export default function BranchCashierInvoiceDetailPage() {
   const remainingPreview = isFullPayment
     ? computePaymentRemaining(remainingAmount, totalEntered)
     : preview?.remainingAfterPayment ?? computePaymentRemaining(remainingAmount, totalEntered);
+  const closesInvoice = remainingPreview <= 0.009;
 
   const accountIds = useMemo(() => {
     const map: Partial<Record<BranchPaymentMethod, string>> = {};
@@ -385,7 +386,7 @@ export default function BranchCashierInvoiceDetailPage() {
                   disabled={!canSubmit}
                   className="w-full rounded-xl bg-blue-600 px-4 py-3 font-semibold text-white disabled:opacity-60"
                 >
-                  {t('distribution.submitPaymentCashier')}
+                  {t(closesInvoice ? 'branchCashier.closeInvoice' : 'branchCashier.acceptPayment')}
                 </button>
               </form>
             ) : null}
