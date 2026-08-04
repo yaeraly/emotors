@@ -16,7 +16,10 @@ import {
 import { AuthUser } from '../auth/auth.types';
 import { BranchInstallmentEarlyPaymentService } from '../distribution/branch-installment-early-payment.service';
 import { CASHIER_VISIBLE_EARLY_PAYMENT_STATUSES } from '../distribution/branch-installment-early-payment.util';
-import { isBranchCashierInvoiceVisible } from '../distribution/branch-cashier-invoice-visibility.util';
+import {
+  isBranchCashierInvoiceDetailAccessible,
+  isBranchCashierInvoiceVisible,
+} from '../distribution/branch-cashier-invoice-visibility.util';
 import { isRetailInstallmentInCashierScope, isRetailInstallmentInvoice } from '../sales/sale-installment-invoice.util';
 import {
   assertRetailSaleFinanceAllowed,
@@ -514,12 +517,27 @@ export class BranchAccountantService {
         id,
         deletedAt: null,
         branchId: user.branchId!,
-        sentToCashierAt: { not: null },
       },
       include: this.invoiceInclude(),
     });
-    if (!invoice || !isBranchCashierInvoiceVisible(invoice)) {
-      throw new NotFoundException('Счёт не найден');
+    if (!invoice) {
+      throw new NotFoundException('Счет не найден.');
+    }
+    if (invoice.branchId !== user.branchId) {
+      throw new ForbiddenException('Счет не принадлежит вашему филиалу.');
+    }
+    if (!invoice.sentToCashierAt) {
+      throw new NotFoundException('Счет не найден.');
+    }
+    if (invoice.status === BranchInvoiceStatus.CANCELLED) {
+      throw new BadRequestException('Этот счет аннулирован и не может быть оплачен.');
+    }
+    if (invoice.status === BranchInvoiceStatus.PAID) {
+      const enriched = await this.attachLinkedRequest(invoice);
+      return sanitizeBranchCashierInvoice(enriched);
+    }
+    if (!isBranchCashierInvoiceDetailAccessible(invoice)) {
+      throw new NotFoundException('Счет не найден.');
     }
     const enriched = await this.attachLinkedRequest(invoice);
     return sanitizeBranchCashierInvoice(enriched);
@@ -533,12 +551,12 @@ export class BranchAccountantService {
   async resolveCashierReceivingAccount(
     user: AuthUser,
     paymentMethod: string,
-    installmentId?: string,
+    options: { installmentId?: string; invoiceId?: string } = {},
   ) {
     this.assertBranchCashier(user);
     return this.branchCashierPaymentService.resolveReceivingAccount(user, paymentMethod, {
-      installmentId,
-      invoiceId: installmentId,
+      installmentId: options.installmentId,
+      invoiceId: options.invoiceId,
       audit: true,
     });
   }
@@ -549,7 +567,16 @@ export class BranchAccountantService {
       where: { id, deletedAt: null, branchId: user.branchId! },
       include: { sale: { include: { installmentApproval: true } } },
     });
-    if (!invoice) throw new NotFoundException('Счёт не найден');
+    if (!invoice) throw new NotFoundException('Счет не найден.');
+    if (invoice.status === BranchInvoiceStatus.PAID) {
+      throw new BadRequestException('Этот счет уже оплачен.');
+    }
+    if (invoice.status === BranchInvoiceStatus.CANCELLED) {
+      throw new BadRequestException('Этот счет аннулирован и не может быть оплачен.');
+    }
+    if (!invoice.sentToCashierAt) {
+      throw new BadRequestException('Счёт ещё не передан кассиру бухгалтером');
+    }
     assertRetailSaleFinanceAllowed({
       invoiceStatus: invoice.status,
       installmentApproval: invoice.sale?.installmentApproval,

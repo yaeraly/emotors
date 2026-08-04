@@ -25,8 +25,15 @@ describe('branch cashier receiving account ui', () => {
 
   it('builds resolve query with installment id', () => {
     assert.equal(
-      buildReceivingAccountResolveQuery('QR', 'inv-1'),
-      '?paymentMethod=QR&installmentId=inv-1',
+      buildReceivingAccountResolveQuery('QR', 'inst-1'),
+      '?paymentMethod=QR&installmentId=inst-1',
+    );
+  });
+
+  it('builds resolve query with invoice id for invoice payments', () => {
+    assert.equal(
+      buildReceivingAccountResolveQuery('CASH', 'inv-1', { invoiceId: 'inv-1' }),
+      '?paymentMethod=CASH&invoiceId=inv-1',
     );
   });
 

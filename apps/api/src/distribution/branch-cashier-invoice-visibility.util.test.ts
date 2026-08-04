@@ -6,7 +6,10 @@ import {
   BranchInvoiceStatus,
   BranchOrderInstallmentStatus,
 } from '@prisma/client';
-import { isBranchCashierInvoiceVisible } from './branch-cashier-invoice-visibility.util';
+import {
+  isBranchCashierInvoiceDetailAccessible,
+  isBranchCashierInvoiceVisible,
+} from './branch-cashier-invoice-visibility.util';
 
 describe('isBranchCashierInvoiceVisible', () => {
   it('hides invoice when not sent to cashier', () => {
@@ -195,6 +198,51 @@ describe('isBranchCashierInvoiceVisible', () => {
         },
       }),
       false,
+    );
+  });
+});
+
+describe('isBranchCashierInvoiceDetailAccessible', () => {
+  it('allows paid invoices for detail view after closing', () => {
+    assert.equal(
+      isBranchCashierInvoiceDetailAccessible({
+        sentToCashierAt: new Date(),
+        status: BranchInvoiceStatus.PAID,
+        paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+      }),
+      true,
+    );
+  });
+
+  it('hides paid invoices from payable queue but keeps detail access', () => {
+    const invoice = {
+      sentToCashierAt: new Date(),
+      status: BranchInvoiceStatus.PAID,
+      paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+    };
+    assert.equal(isBranchCashierInvoiceVisible(invoice), false);
+    assert.equal(isBranchCashierInvoiceDetailAccessible(invoice), true);
+  });
+
+  it('requires sentToCashierAt for detail access', () => {
+    assert.equal(
+      isBranchCashierInvoiceDetailAccessible({
+        sentToCashierAt: null,
+        status: BranchInvoiceStatus.ISSUED,
+        paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+      }),
+      false,
+    );
+  });
+
+  it('delegates unpaid invoices to queue visibility rules', () => {
+    assert.equal(
+      isBranchCashierInvoiceDetailAccessible({
+        sentToCashierAt: new Date(),
+        status: BranchInvoiceStatus.ISSUED,
+        paymentType: BranchInvoicePaymentType.FULL_PAYMENT,
+      }),
+      true,
     );
   });
 });

@@ -45,6 +45,23 @@ export type CashierVisibilityInvoiceLike = {
 };
 
 /**
+ * Direct invoice detail access (Открыть / post-payment response).
+ * Paid invoices remain readable after closing; the payable queue hides them.
+ */
+export function isBranchCashierInvoiceDetailAccessible(
+  invoice: CashierVisibilityInvoiceLike,
+): boolean {
+  if (!invoice.sentToCashierAt) return false;
+  if (
+    invoice.status === BranchInvoiceStatus.PAID ||
+    invoice.status === 'PAID'
+  ) {
+    return true;
+  }
+  return isBranchCashierInvoiceVisible(invoice);
+}
+
+/**
  * Backend rule for Branch Cashier → Счета к оплате visibility.
  * CEO approval alone is never enough; Accountant must send explicitly.
  */

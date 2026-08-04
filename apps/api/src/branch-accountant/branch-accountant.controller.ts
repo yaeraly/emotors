@@ -150,8 +150,12 @@ export class BranchCashierController {
     @CurrentUser() user: AuthUser,
     @Query('paymentMethod') paymentMethod: string,
     @Query('installmentId') installmentId?: string,
+    @Query('invoiceId') invoiceId?: string,
   ) {
-    return this.service.resolveCashierReceivingAccount(user, paymentMethod, installmentId);
+    return this.service.resolveCashierReceivingAccount(user, paymentMethod, {
+      installmentId,
+      invoiceId,
+    });
   }
 
   @Get('invoices')

@@ -53,7 +53,7 @@ export function buildReceivingAccountResolveQuery(
   const params = new URLSearchParams();
   params.set('paymentMethod', paymentMethod);
   if (options?.invoiceId) {
-    params.set('installmentId', options.invoiceId);
+    params.set('invoiceId', options.invoiceId);
   } else if (contextId) {
     params.set('installmentId', contextId);
   }

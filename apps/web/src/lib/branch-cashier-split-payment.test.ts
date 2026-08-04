@@ -124,10 +124,17 @@ describe('branch cashier invoices table and multi-method payment form', () => {
     assert.doesNotMatch(detailSource, /<select[^>]*financeAccountId/);
   });
 
-  it('shows close invoice label only when payment closes the invoice', () => {
-    assert.match(detailSource, /branchCashier\.closeInvoice/);
-    assert.match(detailSource, /branchCashier\.acceptPayment/);
-    assert.match(detailSource, /closesInvoice \? 'branchCashier\.closeInvoice' : 'branchCashier\.acceptPayment'/);
-    assert.doesNotMatch(detailSource, /distribution\.submitPaymentCashier/);
+  it('posts payment to invoice id from route param, not sale id', () => {
+    assert.match(detailSource, /useParams<\{ id: string \}>\(\)/);
+    assert.match(detailSource, /\/branch-cashier\/invoices\/\$\{id\}\/payments/);
+    assert.match(detailSource, /\/branch-cashier\/invoices\/\$\{id\}`/);
+    assert.doesNotMatch(detailSource, /saleId/);
+    assert.doesNotMatch(detailSource, /receiptNumber/);
+  });
+
+  it('disables submit while payment is in flight', () => {
+    assert.match(detailSource, /disabled=\{!canSubmit\}/);
+    assert.match(detailSource, /setSubmitting\(true\)/);
+    assert.match(detailSource, /idempotencyKey/);
   });
 });
