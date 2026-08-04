@@ -6,6 +6,17 @@ import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { User } from '@/lib/types';
 import { canCreateProcurementOrder, canCreateSupplierPayment, hasFullAccess } from '@/lib/rbac';
+import {
+  EMPTY_SUPPLIER_ACCOUNT_FORM,
+  controlledString,
+  formForPaymentMethod,
+  formFromPaymentInfoApi,
+  normalizeSupplierAccountForm,
+  type PaymentInfoMethod,
+  type SupplierAccountFormValue,
+} from '@/lib/procurement-payment-info-form';
+
+export type { SupplierAccountFormValue };
 
 type QrCode = {
   id: string;
@@ -17,19 +28,12 @@ type QrCode = {
 type PaymentInfoVersion = {
   id: string;
   versionNumber: number;
-  paymentMethod: 'BANK_ACCOUNT' | 'QR_CODE';
+  paymentMethod: PaymentInfoMethod;
   bankName?: string | null;
   accountHolder?: string | null;
   accountNumber?: string | null;
   isActive: boolean;
   qrCodes?: QrCode[];
-};
-
-export type SupplierAccountFormValue = {
-  paymentMethod: 'BANK_ACCOUNT' | 'QR_CODE';
-  bankName: string;
-  accountHolder: string;
-  accountNumber: string;
 };
 
 type Props = {
@@ -41,34 +45,6 @@ type Props = {
   onQrChanged?: () => void;
   onValidityChange?: (valid: boolean) => void;
 };
-
-const EMPTY_FORM: SupplierAccountFormValue = {
-  paymentMethod: 'BANK_ACCOUNT',
-  bankName: '',
-  accountHolder: '',
-  accountNumber: '',
-};
-
-function normalizeForm(
-  next: Partial<SupplierAccountFormValue> | null | undefined,
-  previous?: SupplierAccountFormValue,
-): SupplierAccountFormValue {
-  const base = previous ?? EMPTY_FORM;
-  return {
-    paymentMethod:
-      next?.paymentMethod === 'QR_CODE'
-        ? 'QR_CODE'
-        : next?.paymentMethod === 'BANK_ACCOUNT'
-          ? 'BANK_ACCOUNT'
-          : base.paymentMethod === 'QR_CODE'
-            ? 'QR_CODE'
-            : 'BANK_ACCOUNT',
-    bankName: next?.bankName ?? base.bankName ?? '',
-    accountHolder: next?.accountHolder ?? base.accountHolder ?? '',
-    // Always a string for the full lifecycle — never undefined/null.
-    accountNumber: next?.accountNumber ?? base.accountNumber ?? '',
-  };
-}
 
 /** Compact supplier account fields — no Save button; parent submits via send. */
 export function ProcurementPaymentInfo({
@@ -91,20 +67,29 @@ export function ProcurementPaymentInfo({
     images: Array<{ src: string; alt?: string; label?: string }>;
     initialIndex: number;
   } | null>(null);
-  const [form, setForm] = useState<SupplierAccountFormValue>(() => normalizeForm(value));
+  const [form, setForm] = useState<SupplierAccountFormValue>(() =>
+    normalizeSupplierAccountForm(value, EMPTY_SUPPLIER_ACCOUNT_FORM),
+  );
   const formRef = useRef(form);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const draftRequestIdRef = useRef(0);
 
-  const accountNumber = form.accountNumber ?? '';
+  function applyForm(next: SupplierAccountFormValue) {
+    // Every field is a defined string/enum before it touches React state or inputs.
+    const controlled = normalizeSupplierAccountForm(next, EMPTY_SUPPLIER_ACCOUNT_FORM);
+    formRef.current = controlled;
+    setForm({
+      paymentMethod: controlled.paymentMethod,
+      bankName: controlled.bankName ?? '',
+      accountHolder: controlled.accountHolder ?? '',
+      accountNumber: controlled.accountNumber ?? '',
+    });
+    onChangeRef.current(controlled);
+  }
 
-  function commitForm(
-    updater: (previous: SupplierAccountFormValue) => Partial<SupplierAccountFormValue>,
-  ) {
-    // Compute outside setState so parent onChange is never called during render.
-    const previous = formRef.current;
-    const next = normalizeForm(updater(previous), previous);
-    formRef.current = next;
-    setForm(next);
-    onChange(next);
+  function patchForm(patch: Partial<SupplierAccountFormValue>) {
+    applyForm(normalizeSupplierAccountForm(patch, formRef.current));
   }
 
   function openQrPreview(index: number) {
@@ -125,22 +110,20 @@ export function ProcurementPaymentInfo({
       .then((rows) => {
         const current = rows.find((v) => v.isActive) ?? rows[0] ?? null;
         setActive(current);
-        if (current) {
-          commitForm((previous) => ({
-            paymentMethod: current.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
-            bankName: current.bankName ?? previous.bankName ?? '',
-            accountHolder: current.accountHolder ?? previous.accountHolder ?? '',
-            accountNumber: current.accountNumber ?? previous.accountNumber ?? '',
-          }));
-        }
+        if (!current) return;
+        applyForm(formFromPaymentInfoApi(current, formRef.current));
       })
       .catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
   }
 
   useEffect(() => {
-    const initial = normalizeForm(value);
+    const initial = normalizeSupplierAccountForm(value, EMPTY_SUPPLIER_ACCOUNT_FORM);
     formRef.current = initial;
     setForm(initial);
+    setActive(null);
+    setError('');
+    if (pendingQr?.previewUrl) URL.revokeObjectURL(pendingQr.previewUrl);
+    setPendingQr(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
@@ -157,21 +140,15 @@ export function ProcurementPaymentInfo({
 
   useEffect(() => {
     if (!onValidityChange) return;
-    const method = form.paymentMethod;
-    if (method === 'BANK_ACCOUNT') {
-      onValidityChange(Boolean(accountNumber.trim()));
+    if (form.paymentMethod === 'BANK_ACCOUNT') {
+      onValidityChange(Boolean((form.accountNumber ?? '').trim()));
       return;
     }
-    const hasStoredQr = Boolean(active?.qrCodes?.length);
-    onValidityChange(hasStoredQr);
-  }, [
-    accountNumber,
-    active?.qrCodes?.length,
-    form.paymentMethod,
-    onValidityChange,
-  ]);
+    onValidityChange(Boolean(active?.qrCodes?.length));
+  }, [active?.qrCodes?.length, form.accountNumber, form.paymentMethod, onValidityChange]);
 
-  async function ensureDraft(method: 'BANK_ACCOUNT' | 'QR_CODE') {
+  async function ensureDraft(method: PaymentInfoMethod) {
+    const requestId = ++draftRequestIdRef.current;
     const snapshot = formRef.current;
     const saved = await apiFetch<PaymentInfoVersion>(`/procurement/orders/${orderId}/payment-info`, {
       method: 'PUT',
@@ -182,28 +159,28 @@ export function ProcurementPaymentInfo({
         accountNumber: method === 'BANK_ACCOUNT' ? snapshot.accountNumber || undefined : undefined,
       }),
     });
+    if (requestId !== draftRequestIdRef.current) return saved;
     setActive(saved);
-    commitForm((previous) => ({
-      paymentMethod: saved.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
-      // Preserve locally entered bank fields when server clears them for QR mode.
-      bankName: saved.bankName ?? previous.bankName ?? '',
-      accountHolder: saved.accountHolder ?? previous.accountHolder ?? '',
-      accountNumber: saved.accountNumber ?? previous.accountNumber ?? '',
-    }));
+    // Prefer local controlled strings when API returns null for the inactive method.
+    applyForm(
+      normalizeSupplierAccountForm(
+        {
+          paymentMethod: saved.paymentMethod,
+          bankName: controlledString(saved.bankName ?? snapshot.bankName),
+          accountHolder: controlledString(saved.accountHolder ?? snapshot.accountHolder),
+          accountNumber: controlledString(saved.accountNumber ?? snapshot.accountNumber),
+        },
+        snapshot,
+      ),
+    );
     return saved;
   }
 
-  async function onPaymentMethodChange(nextMethod: 'BANK_ACCOUNT' | 'QR_CODE') {
-    // Update only the method — preserve all other fields including accountNumber.
-    commitForm((previous) => ({
-      paymentMethod: nextMethod,
-      bankName: previous.bankName ?? '',
-      accountHolder: previous.accountHolder ?? '',
-      accountNumber: previous.accountNumber ?? '',
-    }));
+  async function onPaymentMethodChange(nextMethod: PaymentInfoMethod) {
+    // Reset fields that do not belong to the new method; keep valid bank fields as strings.
+    applyForm(formForPaymentMethod(formRef.current, nextMethod));
     if (!canEdit) return;
     // Persist QR method immediately so subsequent QR uploads succeed.
-    // Bank method is persisted on invoice send (account number may still be empty here).
     if (nextMethod !== 'QR_CODE') return;
     setBusy(true);
     setError('');
@@ -276,13 +253,18 @@ export function ProcurementPaymentInfo({
 
   if (!canView) return null;
 
+  const paymentMethod = form.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT';
+  const bankName = form.bankName ?? '';
+  const accountHolder = form.accountHolder ?? '';
+  const accountNumber = form.accountNumber ?? '';
+
   return (
     <div className="space-y-3">
       {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
       <label className="block">
         <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.paymentMethod')}</span>
         <select
-          value={form.paymentMethod || 'BANK_ACCOUNT'}
+          value={paymentMethod}
           disabled={!canEdit || busy}
           onChange={(e) =>
             void onPaymentMethodChange(e.target.value === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT')
@@ -294,7 +276,7 @@ export function ProcurementPaymentInfo({
         </select>
       </label>
 
-      {form.paymentMethod === 'BANK_ACCOUNT' ? (
+      {paymentMethod === 'BANK_ACCOUNT' ? (
         <div className="grid gap-2 md:grid-cols-3">
           <label className="block md:col-span-1">
             <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.accountNumber')}</span>
@@ -302,11 +284,7 @@ export function ProcurementPaymentInfo({
               required
               disabled={!canEdit}
               value={accountNumber}
-              onChange={(e) =>
-                commitForm(() => ({
-                  accountNumber: e.target.value ?? '',
-                }))
-              }
+              onChange={(e) => patchForm({ accountNumber: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -316,12 +294,8 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={form.bankName ?? ''}
-              onChange={(e) =>
-                commitForm(() => ({
-                  bankName: e.target.value ?? '',
-                }))
-              }
+              value={bankName}
+              onChange={(e) => patchForm({ bankName: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>
@@ -331,12 +305,8 @@ export function ProcurementPaymentInfo({
             </span>
             <input
               disabled={!canEdit}
-              value={form.accountHolder ?? ''}
-              onChange={(e) =>
-                commitForm(() => ({
-                  accountHolder: e.target.value ?? '',
-                }))
-              }
+              value={accountHolder}
+              onChange={(e) => patchForm({ accountHolder: e.target.value ?? '' })}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
             />
           </label>

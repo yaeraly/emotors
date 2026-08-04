@@ -2,7 +2,13 @@
 
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
-import { ProcurementPaymentInfo, type SupplierAccountFormValue } from '@/components/ProcurementPaymentInfo';
+import { ProcurementPaymentInfo } from '@/components/ProcurementPaymentInfo';
+import {
+  EMPTY_SUPPLIER_ACCOUNT_FORM,
+  controlledString,
+  normalizeSupplierAccountForm,
+  type SupplierAccountFormValue,
+} from '@/lib/procurement-payment-info-form';
 import {
   canConfirmSupplierPayment,
   canCreateSupplierPayment,
@@ -148,25 +154,6 @@ const emptyForm = (): PaymentForm => ({
   notes: '',
 });
 
-const EMPTY_ACCOUNT_FORM: SupplierAccountFormValue = {
-  paymentMethod: 'BANK_ACCOUNT',
-  bankName: '',
-  accountHolder: '',
-  accountNumber: '',
-};
-
-function normalizeAccountForm(
-  next: Partial<SupplierAccountFormValue> | null | undefined,
-  previous: SupplierAccountFormValue = EMPTY_ACCOUNT_FORM,
-): SupplierAccountFormValue {
-  return {
-    paymentMethod: next?.paymentMethod === 'QR_CODE' ? 'QR_CODE' : 'BANK_ACCOUNT',
-    bankName: next?.bankName ?? previous.bankName ?? '',
-    accountHolder: next?.accountHolder ?? previous.accountHolder ?? '',
-    accountNumber: next?.accountNumber ?? previous.accountNumber ?? '',
-  };
-}
-
 export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const { t } = useTranslation();
   const [form, setForm] = useState<PaymentForm>(emptyForm);
@@ -175,7 +162,7 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   const [accounts, setAccounts] = useState<FinanceAccountOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [accountForm, setAccountForm] = useState<SupplierAccountFormValue>(EMPTY_ACCOUNT_FORM);
+  const [accountForm, setAccountForm] = useState<SupplierAccountFormValue>(EMPTY_SUPPLIER_ACCOUNT_FORM);
   const [confirmTarget, setConfirmTarget] = useState<SupplierPayment | null>(null);
   const [confirmForm, setConfirmForm] = useState({
     actualPaidKgs: '',
@@ -219,9 +206,40 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
 
   useEffect(() => {
     // Reset supplier-account modal state when opening another procurement order.
-    setAccountForm(EMPTY_ACCOUNT_FORM);
+    setAccountForm(EMPTY_SUPPLIER_ACCOUNT_FORM);
     setError('');
   }, [order.id]);
+
+  function setPaymentMethod(nextMethod: PaymentForm['paymentMethod']) {
+    setForm((current) => {
+      const next: PaymentForm = {
+        ...current,
+        paymentMethod: nextMethod,
+        // Keep inputs controlled: clear fields that do not belong to the new method.
+        bankName: '',
+        beneficiaryName: '',
+        accountNumber: '',
+        swiftCode: '',
+        cardholderName: '',
+        cardNumber: '',
+        paymentInstructions: '',
+      };
+
+      if (nextMethod === 'BANK_ACCOUNT' || nextMethod === 'BANK' || nextMethod === 'TRANSFER') {
+        next.bankName = controlledString(current.bankName);
+        next.beneficiaryName = controlledString(current.beneficiaryName);
+        next.accountNumber = controlledString(current.accountNumber);
+        next.swiftCode = controlledString(current.swiftCode);
+      } else if (nextMethod === 'BANK_CARD') {
+        next.cardholderName = controlledString(current.cardholderName);
+        next.cardNumber = controlledString(current.cardNumber);
+      } else if (nextMethod === 'QR_CODE' || nextMethod === 'OTHER') {
+        next.paymentInstructions = controlledString(current.paymentInstructions);
+      }
+
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (!form.approvedAmountKgs && calculatedKgs > 0) {
@@ -264,25 +282,25 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
   function openEditForm(payment: SupplierPayment) {
     setEditingPaymentId(payment.id);
     setForm({
-      amountYuan: String(payment.amountYuan ?? ''),
-      exchangeRate: String(payment.exchangeRate ?? ''),
-      approvedAmountKgs: String(payment.approvedAmountKgs ?? payment.amountKgs ?? ''),
+      amountYuan: controlledString(payment.amountYuan),
+      exchangeRate: controlledString(payment.exchangeRate),
+      approvedAmountKgs: controlledString(payment.approvedAmountKgs ?? payment.amountKgs),
       kgsAdjustmentReason: '',
       kgsAdjustmentComment: '',
       paymentMethod: (payment.paymentMethod as PaymentForm['paymentMethod']) || 'BANK_ACCOUNT',
-      recipientName: payment.recipientName ?? '',
-      recipientCompany: payment.recipientCompany ?? '',
-      bankName: payment.bankName ?? '',
-      beneficiaryName: payment.beneficiaryName ?? '',
-      accountNumber: payment.accountNumber ?? '',
-      swiftCode: payment.swiftCode ?? '',
-      cardholderName: payment.cardholderName ?? '',
+      recipientName: controlledString(payment.recipientName),
+      recipientCompany: controlledString(payment.recipientCompany),
+      bankName: controlledString(payment.bankName),
+      beneficiaryName: controlledString(payment.beneficiaryName),
+      accountNumber: controlledString(payment.accountNumber),
+      swiftCode: controlledString(payment.swiftCode),
+      cardholderName: controlledString(payment.cardholderName),
       cardNumber: '',
-      paymentInstructions: payment.paymentInstructions ?? '',
+      paymentInstructions: controlledString(payment.paymentInstructions),
       paymentDeadline: payment.paymentDeadline ? String(payment.paymentDeadline).slice(0, 10) : '',
-      intendedFinanceAccountId: payment.intendedFinanceAccountId ?? '',
-      accountantComment: payment.accountantComment ?? '',
-      notes: payment.notes ?? '',
+      intendedFinanceAccountId: controlledString(payment.intendedFinanceAccountId),
+      accountantComment: controlledString(payment.accountantComment),
+      notes: controlledString(payment.notes),
     });
     setShowForm(true);
   }
@@ -534,13 +552,12 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
             <ProcurementPaymentInfo
               orderId={order.id}
               user={user}
-              value={normalizeAccountForm(accountForm)}
+              value={normalizeSupplierAccountForm(accountForm)}
               onChange={(next) =>
                 setAccountForm((prev) =>
-                  normalizeAccountForm(
+                  normalizeSupplierAccountForm(
                     {
-                      ...prev,
-                      paymentMethod: next.paymentMethod ?? 'BANK_ACCOUNT',
+                      paymentMethod: next.paymentMethod,
                       bankName: next.bankName ?? '',
                       accountHolder: next.accountHolder ?? '',
                       accountNumber: next.accountNumber ?? '',
@@ -576,17 +593,17 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               <p className="mt-1 text-sm text-slate-600">{t('procurement.payments.editPaymentHelp')}</p>
             ) : null}
           </div>
-          <Field label={t('procurement.payments.amountYuan')} type="number" value={form.amountYuan} onChange={(value) => setForm({ ...form, amountYuan: value, approvedAmountKgs: '' })} />
-          <Field label={t('procurement.payments.exchangeRate')} type="number" value={form.exchangeRate} onChange={(value) => setForm({ ...form, exchangeRate: value, approvedAmountKgs: '' })} />
+          <Field label={t('procurement.payments.amountYuan')} type="number" value={form.amountYuan ?? ''} onChange={(value) => setForm({ ...form, amountYuan: value ?? '', approvedAmountKgs: '' })} />
+          <Field label={t('procurement.payments.exchangeRate')} type="number" value={form.exchangeRate ?? ''} onChange={(value) => setForm({ ...form, exchangeRate: value ?? '', approvedAmountKgs: '' })} />
           <Field label={t('procurement.payments.calculatedKgs')} type="number" value={String(calculatedKgs || '')} onChange={() => undefined} />
-          <Field label={t('procurement.payments.approvedKgs')} type="number" value={form.approvedAmountKgs} onChange={(value) => setForm({ ...form, approvedAmountKgs: value })} />
+          <Field label={t('procurement.payments.approvedKgs')} type="number" value={form.approvedAmountKgs ?? ''} onChange={(value) => setForm({ ...form, approvedAmountKgs: value ?? '' })} />
           {Math.abs(approvedPreview - calculatedKgs) > 0.009 ? (
             <>
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.adjustmentReason')}</span>
                 <select
-                  value={form.kgsAdjustmentReason}
-                  onChange={(e) => setForm({ ...form, kgsAdjustmentReason: e.target.value })}
+                  value={form.kgsAdjustmentReason ?? ''}
+                  onChange={(e) => setForm({ ...form, kgsAdjustmentReason: e.target.value ?? '' })}
                   className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                 >
                   <option value="">{t('common.select')}</option>
@@ -595,14 +612,14 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                   ))}
                 </select>
               </label>
-              <Field label={t('procurement.payments.adjustmentComment')} value={form.kgsAdjustmentComment} onChange={(value) => setForm({ ...form, kgsAdjustmentComment: value })} />
+              <Field label={t('procurement.payments.adjustmentComment')} value={form.kgsAdjustmentComment ?? ''} onChange={(value) => setForm({ ...form, kgsAdjustmentComment: value ?? '' })} />
             </>
           ) : null}
           <label className="block">
             <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.paymentMethod')}</span>
-            <select
-              value={form.paymentMethod}
-              onChange={(e) => setForm({ ...form, paymentMethod: e.target.value as PaymentForm['paymentMethod'] })}
+              <select
+              value={form.paymentMethod || 'BANK_ACCOUNT'}
+              onChange={(e) => setPaymentMethod(e.target.value as PaymentForm['paymentMethod'])}
               className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
             >
               {paymentMethods.map((method) => (
@@ -610,30 +627,30 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               ))}
             </select>
           </label>
-          <Field label={t('procurement.payments.recipientName')} value={form.recipientName} onChange={(value) => setForm({ ...form, recipientName: value })} />
-          <Field label={t('procurement.payments.recipientCompany')} value={form.recipientCompany} onChange={(value) => setForm({ ...form, recipientCompany: value })} />
+          <Field label={t('procurement.payments.recipientName')} value={form.recipientName ?? ''} onChange={(value) => setForm({ ...form, recipientName: value ?? '' })} />
+          <Field label={t('procurement.payments.recipientCompany')} value={form.recipientCompany ?? ''} onChange={(value) => setForm({ ...form, recipientCompany: value ?? '' })} />
           {(form.paymentMethod === 'BANK_ACCOUNT' || form.paymentMethod === 'BANK' || form.paymentMethod === 'TRANSFER') ? (
             <>
-              <Field label={t('procurement.payments.bankName')} value={form.bankName} onChange={(value) => setForm({ ...form, bankName: value })} />
-              <Field label={t('procurement.payments.beneficiaryName')} value={form.beneficiaryName} onChange={(value) => setForm({ ...form, beneficiaryName: value })} />
-              <Field label={t('procurement.payments.accountNumber')} value={form.accountNumber} onChange={(value) => setForm({ ...form, accountNumber: value })} />
-              <Field label={t('procurement.payments.swiftCode')} value={form.swiftCode} onChange={(value) => setForm({ ...form, swiftCode: value })} />
+              <Field label={t('procurement.payments.bankName')} value={form.bankName ?? ''} onChange={(value) => setForm({ ...form, bankName: value ?? '' })} />
+              <Field label={t('procurement.payments.beneficiaryName')} value={form.beneficiaryName ?? ''} onChange={(value) => setForm({ ...form, beneficiaryName: value ?? '' })} />
+              <Field label={t('procurement.payments.accountNumber')} value={form.accountNumber ?? ''} onChange={(value) => setForm({ ...form, accountNumber: value ?? '' })} />
+              <Field label={t('procurement.payments.swiftCode')} value={form.swiftCode ?? ''} onChange={(value) => setForm({ ...form, swiftCode: value ?? '' })} />
             </>
           ) : null}
           {form.paymentMethod === 'BANK_CARD' ? (
             <>
-              <Field label={t('procurement.payments.cardholderName')} value={form.cardholderName} onChange={(value) => setForm({ ...form, cardholderName: value })} />
-              <Field label={t('procurement.payments.cardNumber')} value={form.cardNumber} onChange={(value) => setForm({ ...form, cardNumber: value })} />
+              <Field label={t('procurement.payments.cardholderName')} value={form.cardholderName ?? ''} onChange={(value) => setForm({ ...form, cardholderName: value ?? '' })} />
+              <Field label={t('procurement.payments.cardNumber')} value={form.cardNumber ?? ''} onChange={(value) => setForm({ ...form, cardNumber: value ?? '' })} />
             </>
           ) : null}
           {(form.paymentMethod === 'OTHER' || form.paymentMethod === 'QR_CODE') ? (
-            <Field label={t('procurement.payments.paymentInstructions')} value={form.paymentInstructions} onChange={(value) => setForm({ ...form, paymentInstructions: value })} />
+            <Field label={t('procurement.payments.paymentInstructions')} value={form.paymentInstructions ?? ''} onChange={(value) => setForm({ ...form, paymentInstructions: value ?? '' })} />
           ) : null}
           <label className="block md:col-span-2">
             <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.financeAccount')}</span>
             <select
-              value={form.intendedFinanceAccountId}
-              onChange={(e) => setForm({ ...form, intendedFinanceAccountId: e.target.value })}
+              value={form.intendedFinanceAccountId ?? ''}
+              onChange={(e) => setForm({ ...form, intendedFinanceAccountId: e.target.value ?? '' })}
               className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
             >
               <option value="">{t('common.select')}</option>
@@ -644,9 +661,9 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               ))}
             </select>
           </label>
-          <Field label={t('procurement.payments.paymentDeadline')} type="date" value={form.paymentDeadline} onChange={(value) => setForm({ ...form, paymentDeadline: value })} />
-          <Field label={t('procurement.payments.accountantComment')} value={form.accountantComment} onChange={(value) => setForm({ ...form, accountantComment: value })} />
-          <Field label={t('procurement.payments.notes')} value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} />
+          <Field label={t('procurement.payments.paymentDeadline')} type="date" value={form.paymentDeadline ?? ''} onChange={(value) => setForm({ ...form, paymentDeadline: value ?? '' })} />
+          <Field label={t('procurement.payments.accountantComment')} value={form.accountantComment ?? ''} onChange={(value) => setForm({ ...form, accountantComment: value ?? '' })} />
+          <Field label={t('procurement.payments.notes')} value={form.notes ?? ''} onChange={(value) => setForm({ ...form, notes: value ?? '' })} />
           {balanceWarning ? <p className="md:col-span-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{balanceWarning}</p> : null}
           <div className="md:col-span-3 flex flex-wrap gap-3">
             <button
@@ -770,13 +787,13 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
               #{confirmTarget.sequenceNumber} · ¥{Number(confirmTarget.amountYuan).toFixed(2)} · {t('procurement.payments.exchangeRate')}: {Number(confirmTarget.exchangeRate).toFixed(4)}
             </p>
             <div className="mt-5 space-y-4">
-              <Field label={t('procurement.payments.actualPaidKgs')} type="number" value={confirmForm.actualPaidKgs} onChange={(value) => setConfirmForm({ ...confirmForm, actualPaidKgs: value })} />
-              <Field label={t('procurement.payments.paymentDate')} type="date" value={confirmForm.paymentDate} onChange={(value) => setConfirmForm({ ...confirmForm, paymentDate: value })} />
+              <Field label={t('procurement.payments.actualPaidKgs')} type="number" value={confirmForm.actualPaidKgs ?? ''} onChange={(value) => setConfirmForm({ ...confirmForm, actualPaidKgs: value ?? '' })} />
+              <Field label={t('procurement.payments.paymentDate')} type="date" value={confirmForm.paymentDate ?? ''} onChange={(value) => setConfirmForm({ ...confirmForm, paymentDate: value ?? '' })} />
               <label className="block">
                 <span className="text-sm font-semibold text-slate-700">{t('procurement.payments.financeAccount')}</span>
                 <select
-                  value={confirmForm.financeAccountId}
-                  onChange={(e) => setConfirmForm({ ...confirmForm, financeAccountId: e.target.value })}
+                  value={confirmForm.financeAccountId ?? ''}
+                  onChange={(e) => setConfirmForm({ ...confirmForm, financeAccountId: e.target.value ?? '' })}
                   className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                 >
                   <option value="">{t('common.select')}</option>
@@ -788,13 +805,13 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
                 </select>
               </label>
               {confirmForm.financeAccountId && confirmForm.financeAccountId !== confirmTarget.intendedFinanceAccountId ? (
-                <Field label={t('procurement.payments.accountChangeReason')} value={confirmForm.accountChangeReason} onChange={(value) => setConfirmForm({ ...confirmForm, accountChangeReason: value })} />
+                <Field label={t('procurement.payments.accountChangeReason')} value={confirmForm.accountChangeReason ?? ''} onChange={(value) => setConfirmForm({ ...confirmForm, accountChangeReason: value ?? '' })} />
               ) : null}
               {Math.abs(Number(confirmForm.actualPaidKgs || 0) - Number(confirmTarget.approvedAmountKgs ?? confirmTarget.amountKgs)) > 0.009 ? (
-                <Field label={t('procurement.payments.differenceReason')} value={confirmForm.actualPaidDifferenceReason} onChange={(value) => setConfirmForm({ ...confirmForm, actualPaidDifferenceReason: value })} />
+                <Field label={t('procurement.payments.differenceReason')} value={confirmForm.actualPaidDifferenceReason ?? ''} onChange={(value) => setConfirmForm({ ...confirmForm, actualPaidDifferenceReason: value ?? '' })} />
               ) : null}
-              <Field label={t('procurement.payments.transactionNumber')} value={confirmForm.transactionNumber} onChange={(value) => setConfirmForm({ ...confirmForm, transactionNumber: value })} />
-              <Field label={t('procurement.payments.notes')} value={confirmForm.cashierComment} onChange={(value) => setConfirmForm({ ...confirmForm, cashierComment: value })} />
+              <Field label={t('procurement.payments.transactionNumber')} value={confirmForm.transactionNumber ?? ''} onChange={(value) => setConfirmForm({ ...confirmForm, transactionNumber: value ?? '' })} />
+              <Field label={t('procurement.payments.notes')} value={confirmForm.cashierComment ?? ''} onChange={(value) => setConfirmForm({ ...confirmForm, cashierComment: value ?? '' })} />
               <p className="text-sm text-amber-800">{t('procurement.payments.receiptRequiredHint')}</p>
               <div className="flex justify-end gap-3">
                 <button type="button" onClick={() => setConfirmTarget(null)} className="rounded-xl border border-slate-300 px-4 py-2 font-semibold">{t('common.cancel')}</button>
