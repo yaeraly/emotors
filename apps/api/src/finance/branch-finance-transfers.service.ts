@@ -329,7 +329,7 @@ export class BranchFinanceTransfersService {
       throw new BadRequestException('Сумма должна быть больше нуля');
     }
     if (sourceAccountId === destinationAccountId) {
-      throw new BadRequestException('Источник и получатель не могут быть одним счётом');
+      throw new BadRequestException('Счёт списания и счёт зачисления не могут совпадать.');
     }
 
     const [sourceAccount, destinationAccount] = await Promise.all([

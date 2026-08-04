@@ -16,7 +16,7 @@ import { FINANCE_ACCOUNT_TYPE_TABS, isCashierOnlyFinanceUser } from '@/lib/finan
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts } from '@/lib/finance-rbac';
-import { isHqCashierUser } from '@/lib/rbac';
+import { isHqCashierUser, isBranchCashierUser } from '@/lib/rbac';
 import type { FinanceAccount, User } from '@/lib/types';
 
 type CashierAccountRow = FinanceAccount & {
@@ -87,6 +87,7 @@ function FinanceAccountsPageContent() {
   const canManage = user && canManageFinanceAccounts(user);
   const cashierOnly = isCashierOnlyFinanceUser(user);
   const hqCashierView = isHqCashierUser(user);
+  const branchCashierView = Boolean(user && isBranchCashierUser(user));
 
   function openReconciliation(account: CashierAccountRow) {
     setReconTarget(account);
@@ -233,7 +234,9 @@ function FinanceAccountsPageContent() {
                   <th className="px-4 py-3">{t('finance.balance')}</th>
                   <th className="px-4 py-3">{t('finance.availableBalance')}</th>
                   <th className="px-4 py-3">{t('finance.pendingBalance')}</th>
-                  <th className="px-4 py-3">{t('finance.assignedEmployee')}</th>
+                  {branchCashierView ? null : (
+                    <th className="px-4 py-3">{t('finance.assignedEmployee')}</th>
+                  )}
                   <th className="px-4 py-3">{t('distribution.status')}</th>
                   <th className="px-4 py-3">{t('common.actions')}</th>
                 </tr>
@@ -249,7 +252,9 @@ function FinanceAccountsPageContent() {
                     <td className="px-4 py-3 text-right"><FinanceMoney amount={Number(account.currentBalance)} currency={account.currency} /></td>
                     <td className="px-4 py-3 text-right"><FinanceMoney amount={Number(account.availableBalance)} currency={account.currency} /></td>
                     <td className="px-4 py-3 text-right"><FinanceMoney amount={Number(account.pendingBalance)} currency={account.currency} /></td>
-                    <td className="px-4 py-3">{account.assignments?.map((a) => a.user.fullName).join(', ') || '—'}</td>
+                    {branchCashierView ? null : (
+                      <td className="px-4 py-3">{account.assignments?.map((a) => a.user.fullName).join(', ') || '—'}</td>
+                    )}
                     <td className="px-4 py-3"><FinanceStatusBadge status={account.status} /></td>
                     <td className="px-4 py-3">
                       <Link href={`/finance/accounts/${account.id}`} className="font-semibold text-blue-600">{t('common.view')}</Link>

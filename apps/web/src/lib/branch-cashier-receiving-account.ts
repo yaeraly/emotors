@@ -59,3 +59,22 @@ export function buildReceivingAccountResolveQuery(
   }
   return `?${params.toString()}`;
 }
+
+export function formatBranchCashierAccountLabel(account: { name: string }) {
+  return account.name.trim();
+}
+
+export function filterBranchCashierTransferDestinationAccounts<T extends { id: string }>(
+  accounts: T[],
+  sourceAccountId: string,
+) {
+  if (!sourceAccountId) return accounts;
+  return accounts.filter((account) => account.id !== sourceAccountId);
+}
+
+export function resolveBranchCashierTransferDestinationId(
+  currentDestinationAccountId: string,
+  nextSourceAccountId: string,
+) {
+  return currentDestinationAccountId === nextSourceAccountId ? '' : currentDestinationAccountId;
+}

@@ -7,6 +7,9 @@ import {
   BRANCH_CASHIER_INSTALLMENT_PAYMENT_METHODS,
   branchCashierPaymentMethodLabelKey,
   buildReceivingAccountResolveQuery,
+  filterBranchCashierTransferDestinationAccounts,
+  formatBranchCashierAccountLabel,
+  resolveBranchCashierTransferDestinationId,
 } from './branch-cashier-receiving-account';
 
 describe('branch cashier receiving account ui', () => {
@@ -25,6 +28,31 @@ describe('branch cashier receiving account ui', () => {
       buildReceivingAccountResolveQuery('QR', 'inv-1'),
       '?paymentMethod=QR&installmentId=inv-1',
     );
+  });
+
+  it('formats transfer account labels as clean names only', () => {
+    assert.equal(
+      formatBranchCashierAccountLabel({ name: 'Kyzyl-Asker branch Cash account' }),
+      'Kyzyl-Asker branch Cash account',
+    );
+    assert.equal(formatBranchCashierAccountLabel({ name: '  QR MBANK  ' }), 'QR MBANK');
+  });
+
+  it('excludes the selected source account from destination options', () => {
+    const accounts = [
+      { id: 'cash', name: 'Основная касса' },
+      { id: 'qr', name: 'QR MBANK' },
+      { id: 'bank', name: 'Банковский счет' },
+    ];
+    assert.deepEqual(
+      filterBranchCashierTransferDestinationAccounts(accounts, 'cash').map((row) => row.id),
+      ['qr', 'bank'],
+    );
+  });
+
+  it('clears destination when it matches the new source account', () => {
+    assert.equal(resolveBranchCashierTransferDestinationId('cash', 'cash'), '');
+    assert.equal(resolveBranchCashierTransferDestinationId('qr', 'cash'), 'qr');
   });
 });
 

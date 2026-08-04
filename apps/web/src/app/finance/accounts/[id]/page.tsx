@@ -18,7 +18,7 @@ import {
   canApproveFinanceAccountLifecycle,
   canManageFinanceAccounts,
 } from '@/lib/finance-rbac';
-import { isBranchAccountantUser } from '@/lib/rbac';
+import { isBranchAccountantUser, isBranchCashierUser } from '@/lib/rbac';
 import type { FinanceAccount, FinanceLedgerEntry, User } from '@/lib/types';
 
 export default function FinanceAccountDetailsPage() {
@@ -58,6 +58,7 @@ export default function FinanceAccountDetailsPage() {
   const canManage = Boolean(user && canManageFinanceAccounts(user));
   const canApproveLifecycle = Boolean(user && canApproveFinanceAccountLifecycle(user));
   const isBranchAccountant = Boolean(user && isBranchAccountantUser(user));
+  const isBranchCashier = Boolean(user && isBranchCashierUser(user));
   const canRenameAccount =
     Boolean(user && canManageFinanceAccounts(user)) &&
     Boolean(account) &&
@@ -135,6 +136,39 @@ export default function FinanceAccountDetailsPage() {
       {loading ? <FinanceLoadingState /> : null}
       {account ? (
         <>
+          {isBranchCashier ? (
+            <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+              <dl className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <dt className="text-sm text-slate-500">{t('finance.accountName')}</dt>
+                  <dd className="mt-1 font-semibold">{account.name}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-slate-500">{t('finance.accountType')}</dt>
+                  <dd className="font-semibold">{account.typeDefinition?.name ?? account.typeCode}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-slate-500">{t('finance.currency')}</dt>
+                  <dd className="font-semibold">{account.currency}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-slate-500">{t('finance.balance')}</dt>
+                  <dd className="font-semibold">
+                    <FinanceMoney amount={Number(account.currentBalance)} currency={account.currency} />
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-slate-500">{t('distribution.status')}</dt>
+                  <dd className="mt-1"><FinanceStatusBadge status={account.status} /></dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-slate-500">{t('branches.name')}</dt>
+                  <dd className="font-semibold">{account.branch?.name ?? '—'}</dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.balance')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={Number(account.currentBalance)} currency={account.currency} /></p></div>
             <div className="rounded-3xl border border-slate-200 bg-white p-5"><p className="text-sm text-slate-500">{t('finance.availableBalance')}</p><p className="mt-2 text-2xl font-bold"><FinanceMoney amount={Number(account.availableBalance)} currency={account.currency} /></p></div>
@@ -319,6 +353,8 @@ export default function FinanceAccountDetailsPage() {
           <Link href={`/finance/reconciliation?accountId=${account.id}`} className="inline-flex rounded-xl border border-slate-300 px-4 py-2 font-semibold text-slate-700">
             {t('finance.newReconciliation')}
           </Link>
+            </>
+          )}
         </>
       ) : null}
     </FinanceLayout>

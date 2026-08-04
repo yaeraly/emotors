@@ -260,7 +260,7 @@ async function runTests() {
         amount: 100,
         reason: 'Same account',
       }),
-      'одним счётом',
+      'не могут совпадать',
       'create rejects same account',
     );
   }
