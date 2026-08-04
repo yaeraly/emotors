@@ -48,6 +48,7 @@ import { ConfirmSupplierPaymentDto } from './dto/confirm-supplier-payment.dto';
 import { CreateSupplierPaymentDto } from './dto/create-supplier-payment.dto';
 import { ReturnSupplierPaymentDto } from './dto/return-supplier-payment.dto';
 import { ReverseSupplierPaymentDto } from './dto/reverse-supplier-payment.dto';
+import { resolveSupplierPaymentMethodFromAccountType } from './supplier-payment-method-from-account.util';
 import { SendInvoiceToAccountantDto } from './dto/send-invoice-to-accountant.dto';
 import { UpdateSupplierPaymentDto } from './dto/update-supplier-payment.dto';
 import { VoidSupplierPaymentDto } from './dto/void-supplier-payment.dto';
@@ -565,11 +566,24 @@ export class SupplierPaymentWorkflowService {
       const paymentInfo = await tx.procurementPaymentInfoVersion.findFirst({
         where: { procurementOrderId: order.id, isActive: true },
       });
-      const paymentMethod: ProcurementSupplierPaymentMethod =
-        dto.paymentMethod ??
-        (paymentInfo?.paymentMethod === ProcurementPaymentInfoMethod.QR_CODE
-          ? ProcurementSupplierPaymentMethod.QR_CODE
-          : ProcurementSupplierPaymentMethod.BANK_ACCOUNT);
+      const intendedAccount = dto.intendedFinanceAccountId
+        ? await this.assertHqFinanceAccount(tx, dto.intendedFinanceAccountId)
+        : null;
+
+      // When an HQ account is selected, payment method is derived from account type.
+      // Client-provided paymentMethod is ignored (backend is authoritative).
+      let paymentMethod: ProcurementSupplierPaymentMethod;
+      let paymentMethodDerivedFromAccount = false;
+      if (intendedAccount) {
+        paymentMethod = resolveSupplierPaymentMethodFromAccountType(intendedAccount.typeCode);
+        paymentMethodDerivedFromAccount = true;
+      } else {
+        paymentMethod =
+          dto.paymentMethod ??
+          (paymentInfo?.paymentMethod === ProcurementPaymentInfoMethod.QR_CODE
+            ? ProcurementSupplierPaymentMethod.QR_CODE
+            : ProcurementSupplierPaymentMethod.BANK_ACCOUNT);
+      }
 
       const dtoWithPaymentInfo = {
         ...dto,
@@ -586,9 +600,6 @@ export class SupplierPaymentWorkflowService {
       };
 
       const recipientFields = this.validateAndBuildRecipientFields(paymentMethod, dtoWithPaymentInfo);
-      const intendedAccount = dto.intendedFinanceAccountId
-        ? await this.assertHqFinanceAccount(tx, dto.intendedFinanceAccountId)
-        : null;
 
       if (intendedAccount && approvedAmountKgs > Number(intendedAccount.availableBalance)) {
         if (!dto.allowInsufficientBalance) {
@@ -668,6 +679,32 @@ export class SupplierPaymentWorkflowService {
         intendedFinanceAccountId: payment.intendedFinanceAccountId,
       });
 
+      await this.audit(tx, user, 'SUPPLIER_PARTIAL_PAYMENT_CREATED', order.id, null, {
+        invoiceId: order.id,
+        paymentId: payment.id,
+        accountId: intendedAccount?.id ?? null,
+        accountType: intendedAccount?.typeCode ?? null,
+        derivedPaymentMethod: paymentMethod,
+        amount: amountYuan,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (paymentMethodDerivedFromAccount && intendedAccount) {
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_METHOD_DERIVED', order.id, {
+          clientPaymentMethod: dto.paymentMethod ?? null,
+        }, {
+          invoiceId: order.id,
+          paymentId: payment.id,
+          accountId: intendedAccount.id,
+          accountType: intendedAccount.typeCode,
+          derivedPaymentMethod: paymentMethod,
+          amount: amountYuan,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       if (adjustment.reason) {
         await this.audit(tx, user, 'SUPPLIER_PAYMENT_KGS_ADJUSTED', order.id, {
           calculatedAmountKgs,
@@ -734,7 +771,15 @@ export class SupplierPaymentWorkflowService {
         payment.id,
       );
 
-      const paymentMethod = dto.paymentMethod ?? payment.paymentMethod;
+      const intendedFinanceAccountId = dto.intendedFinanceAccountId ?? payment.intendedFinanceAccountId;
+      const intendedAccount = intendedFinanceAccountId
+        ? await this.assertHqFinanceAccount(tx, intendedFinanceAccountId)
+        : null;
+
+      // Account type is authoritative when an HQ account is selected.
+      const paymentMethod = intendedAccount
+        ? resolveSupplierPaymentMethodFromAccountType(intendedAccount.typeCode)
+        : (dto.paymentMethod ?? payment.paymentMethod);
       const recipientFields = this.validateAndBuildRecipientFields(paymentMethod, {
         recipientName: dto.recipientName ?? payment.recipientName ?? undefined,
         recipientCompany: dto.recipientCompany ?? payment.recipientCompany ?? undefined,
@@ -747,26 +792,20 @@ export class SupplierPaymentWorkflowService {
         paymentInstructions: dto.paymentInstructions ?? payment.paymentInstructions ?? undefined,
       }, true);
 
-      let intendedFinanceAccountId = dto.intendedFinanceAccountId ?? payment.intendedFinanceAccountId;
-      if (dto.intendedFinanceAccountId) {
-        await this.assertHqFinanceAccount(tx, dto.intendedFinanceAccountId);
-      }
-
       const sendToCashier = dto.sendToCashier === true;
       if (sendToCashier) {
         if (!canSendSupplierPaymentToCashier(user)) {
           throw new ForbiddenException('You do not have permission to send payments to cashier');
         }
-        if (!intendedFinanceAccountId) {
+        if (!intendedAccount) {
           throw new BadRequestException('Intended HQ Finance Account is required');
         }
         if (!recipientFields.recipientName) {
           throw new BadRequestException('Recipient name is required');
         }
-        const account = await this.assertHqFinanceAccount(tx, intendedFinanceAccountId);
-        if (approvedAmountKgs > Number(account.availableBalance) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+        if (approvedAmountKgs > Number(intendedAccount.availableBalance) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
           throw new BadRequestException(
-            `Approved amount exceeds available balance on account ${account.name}`,
+            `Approved amount exceeds available balance on account ${intendedAccount.name}`,
           );
         }
       }
@@ -790,7 +829,7 @@ export class SupplierPaymentWorkflowService {
           paymentDeadline: dto.paymentDeadline
             ? new Date(dto.paymentDeadline)
             : payment.paymentDeadline,
-          intendedFinanceAccountId,
+          intendedFinanceAccountId: intendedAccount?.id ?? null,
           receiptNumber:
             dto.receiptNumber !== undefined ? dto.receiptNumber?.trim() || null : payment.receiptNumber,
           notes: dto.notes !== undefined ? dto.notes?.trim() || null : payment.notes,
@@ -821,6 +860,21 @@ export class SupplierPaymentWorkflowService {
         ...this.toPaymentResponse(updatedPayment),
         changeReason: dto.changeReason,
       }, dto.changeReason);
+
+      if (intendedAccount) {
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_METHOD_DERIVED', order.id, {
+          clientPaymentMethod: dto.paymentMethod ?? oldValue.paymentMethod ?? null,
+        }, {
+          invoiceId: order.id,
+          paymentId: updatedPayment.id,
+          accountId: intendedAccount.id,
+          accountType: intendedAccount.typeCode,
+          derivedPaymentMethod: paymentMethod,
+          amount: amountYuan,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       if (sendToCashier) {
         await this.audit(tx, user, 'SUPPLIER_PAYMENT_SENT_TO_CASHIER', order.id, { status: oldValue.status }, {
@@ -853,7 +907,10 @@ export class SupplierPaymentWorkflowService {
       if (!payment.recipientName) {
         throw new BadRequestException('Recipient name is required');
       }
-      this.validateAndBuildRecipientFields(payment.paymentMethod, {
+
+      const account = await this.assertHqFinanceAccount(tx, payment.intendedFinanceAccountId);
+      const derivedPaymentMethod = resolveSupplierPaymentMethodFromAccountType(account.typeCode);
+      this.validateAndBuildRecipientFields(derivedPaymentMethod, {
         recipientName: payment.recipientName ?? undefined,
         recipientCompany: payment.recipientCompany ?? undefined,
         bankName: payment.bankName ?? undefined,
@@ -864,7 +921,6 @@ export class SupplierPaymentWorkflowService {
         paymentInstructions: payment.paymentInstructions ?? undefined,
       }, true);
 
-      const account = await this.assertHqFinanceAccount(tx, payment.intendedFinanceAccountId);
       const approvedAmountKgs = Number(payment.approvedAmountKgs);
       if (approvedAmountKgs > Number(account.availableBalance)) {
         throw new BadRequestException(
@@ -875,6 +931,7 @@ export class SupplierPaymentWorkflowService {
       const updatedPayment = await tx.procurementSupplierPayment.update({
         where: { id: payment.id },
         data: {
+          paymentMethod: derivedPaymentMethod,
           status: ProcurementSupplierPaymentStatus.PENDING_CASHIER,
           sentToCashierAt: new Date(),
           executionStatus: 'PENDING_EXECUTION',
@@ -889,6 +946,21 @@ export class SupplierPaymentWorkflowService {
         },
         include: PAYMENT_INCLUDE,
       });
+
+      if (derivedPaymentMethod !== payment.paymentMethod) {
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_METHOD_DERIVED', order.id, {
+          previousPaymentMethod: payment.paymentMethod,
+        }, {
+          invoiceId: order.id,
+          paymentId: payment.id,
+          accountId: account.id,
+          accountType: account.typeCode,
+          derivedPaymentMethod,
+          amount: Number(payment.amountYuan),
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       const synced = await this.syncOrderPaymentState(tx, user, order.id, 'Payment sent to HQ Cashier');
       await this.audit(tx, user, 'SUPPLIER_PAYMENT_SENT_TO_CASHIER', order.id, {

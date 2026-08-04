@@ -13,6 +13,10 @@ import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/co
 import { API_URL, apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canCreateSupplierPayment, canPermanentDeleteBusinessData } from '@/lib/rbac';
+import {
+  deriveSupplierPaymentMethodFromAccountType,
+  derivedSupplierPaymentMethodLabelKey,
+} from '@/lib/supplier-payment-method-from-account';
 import type { User } from '@/lib/types';
 
 type BillSource = 'SUPPLIER_INVOICE' | 'TRANSPORT_EXPENSE' | 'FINANCE_EXPENSE';
@@ -126,12 +130,13 @@ function BillsToPayPageContent() {
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     exchangeRate: '',
-    paymentMethod: 'BANK_ACCOUNT',
     financeAccountId: '',
     recipientName: '',
     accountantComment: '',
   });
-  const [accounts, setAccounts] = useState<Array<{ id: string; name: string; availableBalance: number }>>([]);
+  const [accounts, setAccounts] = useState<
+    Array<{ id: string; name: string; availableBalance: number; typeCode?: string }>
+  >([]);
   const [paymentFormError, setPaymentFormError] = useState('');
   const [qrPreview, setQrPreview] = useState<{
     images: Array<{ src: string; alt?: string; label?: string }>;
@@ -305,14 +310,23 @@ function BillsToPayPageContent() {
 
   async function loadAccounts() {
     try {
-      const list = await apiFetch<Array<{ id: string; name: string; availableBalance: number }>>(
-        '/procurement/supplier-payment-accounts',
-      );
+      const list = await apiFetch<
+        Array<{ id: string; name: string; availableBalance: number; typeCode?: string }>
+      >('/procurement/supplier-payment-accounts');
       setAccounts(list);
     } catch {
       setAccounts([]);
     }
   }
+
+  const selectedPaymentAccount = useMemo(
+    () => accounts.find((account) => account.id === paymentForm.financeAccountId) ?? null,
+    [accounts, paymentForm.financeAccountId],
+  );
+  const derivedPaymentMethod = useMemo(
+    () => deriveSupplierPaymentMethodFromAccountType(selectedPaymentAccount?.typeCode),
+    [selectedPaymentAccount?.typeCode],
+  );
 
   async function openTransportApprove(bill: BillDetail) {
     setTransportApproveModal(bill);
@@ -378,7 +392,6 @@ function BillsToPayPageContent() {
     setPaymentForm({
       amount: row.remainingAmount > 0 ? String(row.remainingAmount) : '',
       exchangeRate: '',
-      paymentMethod: 'BANK_ACCOUNT',
       financeAccountId: '',
       recipientName: row.recipientName ?? '',
       accountantComment: '',
@@ -394,7 +407,6 @@ function BillsToPayPageContent() {
     setPaymentForm({
       amount: String(payment.amountYuan ?? ''),
       exchangeRate: String(payment.exchangeRate ?? ''),
-      paymentMethod: payment.paymentMethod || 'BANK_ACCOUNT',
       financeAccountId: payment.intendedFinanceAccountId || payment.intendedFinanceAccount?.id || '',
       recipientName: payment.recipientName ?? selected.recipientName ?? '',
       accountantComment: payment.accountantComment ?? '',
@@ -428,23 +440,27 @@ function BillsToPayPageContent() {
       setPaymentFormError(t('finance.billsToPay.accountRequired'));
       return null;
     }
+    const account = accounts.find((item) => item.id === paymentForm.financeAccountId);
+    if (!account || !deriveSupplierPaymentMethodFromAccountType(account.typeCode)) {
+      setPaymentFormError(t('finance.billsToPay.paymentMethodUnresolved'));
+      return null;
+    }
     if (!paymentForm.recipientName.trim()) {
       setPaymentFormError(t('finance.billsToPay.recipientRequired'));
       return null;
     }
     const approvedKgs = Math.round(amount * exchangeRate * 100) / 100;
     if (options?.requireBalance) {
-      const account = accounts.find((item) => item.id === paymentForm.financeAccountId);
-      if (!account || approvedKgs > Number(account.availableBalance) + 0.009) {
+      if (approvedKgs > Number(account.availableBalance) + 0.009) {
         setPaymentFormError(t('finance.billsToPay.insufficientBalance'));
         return null;
       }
     }
+    // paymentMethod is intentionally omitted — backend derives it from account type.
     return {
       amountYuan: amount,
       exchangeRate,
       approvedAmountKgs: approvedKgs,
-      paymentMethod: paymentForm.paymentMethod,
       intendedFinanceAccountId: paymentForm.financeAccountId,
       recipientName: paymentForm.recipientName.trim(),
       accountantComment: paymentForm.accountantComment.trim() || undefined,
@@ -808,23 +824,6 @@ function BillsToPayPageContent() {
             />
           </label>
           <label className="mt-2 block text-xs font-semibold">
-            {t('finance.billsToPay.paymentMethod')}
-            <select
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-              value={paymentForm.paymentMethod ?? 'BANK_ACCOUNT'}
-              onChange={(e) =>
-                setPaymentForm((prev) => ({
-                  ...prev,
-                  paymentMethod: e.target.value ?? 'BANK_ACCOUNT',
-                }))
-              }
-            >
-              <option value="BANK_ACCOUNT">{t('procurement.payments.method.BANK_ACCOUNT')}</option>
-              <option value="QR_CODE">{t('procurement.payments.method.QR_CODE')}</option>
-              <option value="CASH">{t('procurement.payments.method.CASH')}</option>
-            </select>
-          </label>
-          <label className="mt-2 block text-xs font-semibold">
             {t('finance.billsToPay.accountOrCashbox')}
             <select
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
@@ -841,6 +840,12 @@ function BillsToPayPageContent() {
               ))}
             </select>
           </label>
+          <p className="mt-2 text-xs text-slate-600">
+            {t('finance.billsToPay.paymentMethod')}:{' '}
+            <span className="font-semibold text-slate-900">
+              {t(derivedSupplierPaymentMethodLabelKey(derivedPaymentMethod))}
+            </span>
+          </p>
           <label className="mt-2 block text-xs font-semibold">
             {t('finance.billsToPay.recipient')}
             <input
