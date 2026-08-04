@@ -6,7 +6,7 @@ import { ReactNode, useEffect, useState } from 'react';
 import { apiFetch, clearToken, getToken } from '@/lib/api';
 import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
 import type { User } from '@/lib/types';
-import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isFranchiseDirectorUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchMasterUser, isBranchMasterInventoryForbiddenPath, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser, isSysAdminUser } from '@/lib/rbac';
+import { canAccessPath, canViewProcurement, canViewChinaReceivingMenu, canViewDistributionMenu, canViewHqWarehouse, canViewBranchWarehouses, canViewProductMaster, canViewPricing, canManageProductCatalog, canViewProductCatalog, canManageBranchPurchaseRequests, canManageOwnBranchProductRequest, canCreateServiceOrder, canViewBranchProductShortages, canViewBranchPurchaseRequests, getDefaultRouteForUser, hasFullAccess, hasPermission, isSupplyChainManagerUser, isWarehouseManagerUser, isHqSalesManagerUser, isHqCashierUser, isHqAccountantUser, isCeoUser, isFranchiseDirectorUser, isWarehouseManagerForbiddenPath, isBranchSalesManagerUser, isBranchSalesManagerForbiddenPath, isBranchWarehouseOperator, isBranchWarehouseOperatorForbiddenPath, isBranchWarehouseOperatorRequestsForbiddenPath, BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT, isBranchMasterUser, isBranchMasterInventoryForbiddenPath, isBranchCashierUser, isBranchCashierForbiddenPath, isBranchAccountantUser, isBranchAccountantForbiddenPath, isBranchOwnerUser, isBranchOwnerForbiddenPath, isBranchOwnerProcurementForbiddenPath, roleCodesForUser, isSysAdminUser } from '@/lib/rbac';
 import { SYSADMIN_NAV_SECTIONS } from '@/lib/sysadmin-nav';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { isUnifiedNavModuleActive, sidebarHrefForModule, usesUnifiedNav, visibleUnifiedSidebarModules } from '@/lib/unified-nav';
@@ -40,6 +40,15 @@ function resolvePathAccess(currentUser: User, pathname: string): {
 
   if (isBranchMasterUser(currentUser) && isBranchMasterInventoryForbiddenPath(pathname)) {
     return { forbidden: false, forbiddenReason: null, redirectTo: '/service', auditForbidden: false };
+  }
+
+  if (isBranchWarehouseOperator(currentUser) && isBranchWarehouseOperatorRequestsForbiddenPath(pathname)) {
+    return {
+      forbidden: false,
+      forbiddenReason: null,
+      redirectTo: BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT,
+      auditForbidden: false,
+    };
   }
 
   if (canAccessPath(currentUser, pathname)) {
@@ -436,7 +445,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
             ) : branchWarehouseOperatorView ? (
               <>
                 <Link href="/branch-warehouse/warehouse" className={sidebarNavClass(pathname, '/branch-warehouse/warehouse')}>{t('branchWarehouseOperator.warehouse')}</Link>
-                <Link href="/branch-warehouse/requests" className={sidebarNavClass(pathname, '/branch-warehouse/requests')}>{t('branchWarehouseOperator.requests')}</Link>
                 <Link href="/distribution/orders?status=SHIPPED" className={sidebarNavClass(pathname, '/distribution/orders')}>{t('distribution.receiveGoods')}</Link>
                 <Link href="/distribution/shortage-reports" className={sidebarNavClass(pathname, '/distribution/shortage-reports')}>{t('distribution.shortageReports')}</Link>
               </>

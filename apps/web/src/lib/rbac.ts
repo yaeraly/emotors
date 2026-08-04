@@ -676,9 +676,16 @@ export function isBranchWarehouseOperatorForbiddenPath(pathname: string) {
   );
 }
 
+export function isBranchWarehouseOperatorRequestsForbiddenPath(pathname: string) {
+  return pathname === '/branch-warehouse/requests' || pathname.startsWith('/branch-warehouse/requests/');
+}
+
+export const BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT = '/distribution/orders?status=SHIPPED';
+
 function canBranchWarehouseOperatorAccessPath(pathname: string) {
   if (pathname === '/') return false;
   if (isBranchWarehouseOperatorForbiddenPath(pathname)) return false;
+  if (isBranchWarehouseOperatorRequestsForbiddenPath(pathname)) return false;
   return BRANCH_WAREHOUSE_OPERATOR_ALLOWED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );

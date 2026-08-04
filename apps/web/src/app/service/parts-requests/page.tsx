@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
-import { isBranchWarehouseOperator } from '@/lib/rbac';
+import { isBranchWarehouseOperator, BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT } from '@/lib/rbac';
 import type { PartsRequest, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -20,7 +20,7 @@ export default function PartsRequestsPage() {
     apiFetch<User>('/auth/me')
       .then((user) => {
         if (isBranchWarehouseOperator(user)) {
-          router.replace('/branch-warehouse/requests');
+          router.replace(BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT);
         }
       })
       .catch(() => null);
