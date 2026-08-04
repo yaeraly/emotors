@@ -6,29 +6,21 @@ import {
 } from './product-catalog-search-where.util';
 
 describe('mergeProductCatalogSearchWhere', () => {
-  it('preserves HQ catalog OR when search OR is applied', () => {
+  it('preserves HQ catalog branch scope when search OR is applied', () => {
     const merged = mergeProductCatalogSearchWhere(
       {
         deletedAt: null,
-        OR: [
-          { branch: { code: 'EMOTORS-HQ', deletedAt: null } },
-          { warehouse: { warehouseType: 'HQ', branchId: null } },
-        ],
+        branch: { code: 'EMOTORS-HQ', deletedAt: null },
       },
       'Желмаян Контроллер',
     );
 
     assert.ok(Array.isArray(merged.AND));
     assert.equal(merged.OR, undefined);
+    assert.equal((merged as { branch: { code: string } }).branch.code, 'EMOTORS-HQ');
     const and = merged.AND as Array<Record<string, unknown>>;
-    assert.equal(and.length, 2);
-    assert.deepEqual(and[0], {
-      OR: [
-        { branch: { code: 'EMOTORS-HQ', deletedAt: null } },
-        { warehouse: { warehouseType: 'HQ', branchId: null } },
-      ],
-    });
-    const searchOr = (and[1] as { OR: Array<{ name?: { contains: string } }> }).OR;
+    assert.equal(and.length, 1);
+    const searchOr = (and[0] as { OR: Array<{ name?: { contains: string } }> }).OR;
     assert.equal(searchOr[0].name?.contains, 'Желмаян Контроллер');
   });
 

@@ -172,11 +172,9 @@ export function ProductsListContent() {
                 <th className="px-3 py-2">{t('inventory.name')}</th>
                 <th className="hidden px-3 py-2 md:table-cell">{t('inventory.category')}</th>
                 <th className="hidden px-3 py-2 lg:table-cell">{t('inventory.unit')}</th>
-                <th className="px-3 py-2">{t('inventory.quantity')}</th>
                 {!hideConfidentialCommercial ? (
                   <th className="hidden px-3 py-2 lg:table-cell">{t('inventory.finalCost')}</th>
                 ) : null}
-                <th className="px-3 py-2">{t('inventory.lowStock')}</th>
                 <th className="px-3 py-2 text-right">{t('common.actions')}</th>
               </tr>
             </thead>
@@ -210,7 +208,6 @@ export function ProductsListContent() {
                       : product.category}
                   </td>
                   <td className="hidden px-3 py-2 lg:table-cell">{formatProductUnit(product.unit, language, t)}</td>
-                  <td className="px-3 py-2">{product.quantity}</td>
                   {!hideConfidentialCommercial ? (
                     <td className="hidden px-3 py-2 lg:table-cell">
                       {isProductCostAvailable(product)
@@ -218,9 +215,6 @@ export function ProductsListContent() {
                         : t('inventory.costNotCalculated')}
                     </td>
                   ) : null}
-                  <td className="px-3 py-2">
-                    <StockBadge quantity={product.quantity} lowStock={product.lowStock} />
-                  </td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-2">
                       <Link
@@ -264,23 +258,6 @@ export function ProductsListContent() {
       />
     </div>
   );
-}
-
-function StockBadge({ quantity, lowStock }: { quantity: number; lowStock: boolean }) {
-  const { t } = useTranslation();
-  const label =
-    quantity <= 0
-      ? t('inventory.outOfStock')
-      : lowStock
-        ? t('inventory.lowStockAlert')
-        : t('inventory.inStock');
-  const tone =
-    quantity <= 0
-      ? 'bg-red-100 text-red-700'
-      : lowStock
-        ? 'bg-amber-100 text-amber-800'
-        : 'bg-emerald-100 text-emerald-700';
-  return <span className={`rounded-full px-3 py-1 text-xs font-bold ${tone}`}>{label}</span>;
 }
 
 function formatKgs(value: number | string | null | undefined) {

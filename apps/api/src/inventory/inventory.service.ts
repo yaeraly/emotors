@@ -2062,12 +2062,7 @@ export class InventoryService {
     if (this.canAccessAllInventory(user)) {
       return requested
         ? { branchId: requested }
-        : {
-            OR: [
-              { branch: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null } },
-              { warehouse: activeHqWarehouseWhere },
-            ],
-          };
+        : { branch: { code: HQ_CATALOG_BRANCH_CODE, deletedAt: null } };
     }
 
     if (canViewProductCatalog(user) && userBranch) {
