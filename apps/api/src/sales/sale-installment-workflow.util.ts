@@ -36,6 +36,16 @@ export function canBranchCeoRejectInstallment(status: SaleInstallmentApprovalSta
   return isPendingBranchCeoInstallmentDecision(status);
 }
 
+export function canBranchCeoReturnInstallmentForRevision(status: SaleInstallmentApprovalStatus) {
+  return isPendingBranchCeoInstallmentDecision(status);
+}
+
+export function assertBranchCeoCanReturnInstallmentForRevision(status: SaleInstallmentApprovalStatus) {
+  if (!canBranchCeoReturnInstallmentForRevision(status)) {
+    throw new ConflictException(INSTALLMENT_DECISION_CONFLICT_MESSAGE);
+  }
+}
+
 export function canBranchCeoCancelInstallment(input: {
   approvalStatus: SaleInstallmentApprovalStatus;
   saleStatus: SaleStatus;

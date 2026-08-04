@@ -12,6 +12,7 @@ import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
 import {
   canBranchCeoCancelInstallmentRequest,
+  canReturnInstallmentForRevision,
   isPendingBranchCeoInstallmentDecision,
 } from '@/lib/sale-installment';
 import type { Sale, SaleInstallmentApproval, SaleInstallmentApprovalStatus, User } from '@/lib/types';
@@ -63,9 +64,10 @@ export default function SaleInstallmentRequestsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [approvalComment, setApprovalComment] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
+  const [revisionComment, setRevisionComment] = useState('');
   const [cancellationReason, setCancellationReason] = useState('');
   const [actingSaleId, setActingSaleId] = useState<string | null>(null);
-  const [actionMode, setActionMode] = useState<'reject' | 'cancel' | null>(null);
+  const [actionMode, setActionMode] = useState<'reject' | 'cancel' | 'revision' | null>(null);
 
   const canReview = canApproveSaleInstallmentRequest(user);
   const canCancel = canCancelSaleInstallmentRequest(user);
@@ -137,6 +139,28 @@ export default function SaleInstallmentRequestsPage() {
       });
       setSuccess(t('sales.installmentRequestRejected'));
       setRejectionReason('');
+      setActionMode(null);
+      await loadRequests();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setActingSaleId(null);
+    }
+  }
+
+  async function returnRequestForRevision(saleId: string) {
+    setActingSaleId(saleId);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/sales/${saleId}/installment-request/return-for-revision`, {
+        method: 'POST',
+        body: JSON.stringify({
+          revisionComment: revisionComment.trim() || undefined,
+        }),
+      });
+      setSuccess(t('sales.installmentReturnedForRevision'));
+      setRevisionComment('');
       setActionMode(null);
       await loadRequests();
     } catch (err) {
@@ -481,6 +505,33 @@ export default function SaleInstallmentRequestsPage() {
                           className="w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                         >
                           {t('sales.confirmRejectInstallment')}
+                        </button>
+                      </div>
+                    ) : null}
+                    {canReturnInstallmentForRevision(selectedRequest) ? (
+                      <button
+                        type="button"
+                        onClick={() => setActionMode(actionMode === 'revision' ? null : 'revision')}
+                        className="w-full rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                      >
+                        {t('sales.returnForRevision')}
+                      </button>
+                    ) : null}
+                    {actionMode === 'revision' ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={revisionComment}
+                          onChange={(event) => setRevisionComment(event.target.value)}
+                          placeholder={t('sales.installmentApprovalComment')}
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                        />
+                        <button
+                          type="button"
+                          disabled={actingSaleId === selectedRequest.sale.id}
+                          onClick={() => void returnRequestForRevision(selectedRequest.sale.id)}
+                          className="w-full rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {t('sales.confirmReturnForRevision')}
                         </button>
                       </div>
                     ) : null}

@@ -7,6 +7,7 @@ import {
   canBranchCeoApproveInstallment,
   canBranchCeoCancelInstallment,
   canBranchCeoRejectInstallment,
+  canBranchCeoReturnInstallmentForRevision,
   canSubmitInstallmentRequest,
   INSTALLMENT_ALREADY_SUBMITTED_MESSAGE,
   INSTALLMENT_CANCELLATION_BLOCKED_MESSAGE,
@@ -45,6 +46,14 @@ describe('sale installment branch CEO workflow', () => {
       canBranchCeoRejectInstallment(SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL),
       true,
     );
+  });
+
+  it('branch CEO can return pending requests for revision', () => {
+    assert.equal(
+      canBranchCeoReturnInstallmentForRevision(SaleInstallmentApprovalStatus.PENDING_BRANCH_CEO_APPROVAL),
+      true,
+    );
+    assert.equal(canBranchCeoReturnInstallmentForRevision(SaleInstallmentApprovalStatus.APPROVED), false);
   });
 
   it('branch CEO can cancel pending request without payment', () => {

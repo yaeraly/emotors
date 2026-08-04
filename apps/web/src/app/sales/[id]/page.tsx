@@ -9,16 +9,18 @@ import {
   canApproveSaleInstallmentRequest,
   canCancelSale,
   canCancelSaleInstallmentRequest,
-  canManageSaleWorkflow,
+  canManageBranchSaleWorkflow,
   canSubmitSaleInstallmentRequest,
   canUpdateBusinessDate,
   canVoidPayment,
+  isBranchOwnerUser,
   shouldHideSaleProfitColumn,
 } from '@/lib/rbac';
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import {
   canBranchCeoCancelInstallmentRequest,
+  canReturnInstallmentForRevision,
   canReturnRejectedSaleToDraft,
   installmentBlocksCompletion,
   installmentStatusLabelKey,
@@ -50,8 +52,10 @@ export default function SaleDetailPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [cancellationReason, setCancellationReason] = useState('');
   const [approvalComment, setApprovalComment] = useState('');
+  const [revisionComment, setRevisionComment] = useState('');
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
+  const [showReturnForRevisionForm, setShowReturnForRevisionForm] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -221,6 +225,28 @@ export default function SaleDetailPage() {
     }
   }
 
+  async function returnInstallmentForRevision() {
+    setSubmittingInstallment(true);
+    setError('');
+    setSuccess('');
+    try {
+      await apiFetch(`/sales/${saleId}/installment-request/return-for-revision`, {
+        method: 'POST',
+        body: JSON.stringify({
+          revisionComment: revisionComment.trim() || undefined,
+        }),
+      });
+      setShowReturnForRevisionForm(false);
+      setRevisionComment('');
+      await loadSale();
+      setSuccess(t('sales.installmentReturnedForRevision'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSubmittingInstallment(false);
+    }
+  }
+
   async function rejectInstallmentRequest() {
     if (!rejectionReason.trim()) {
       setError(t('sales.installmentRejectionReasonRequired'));
@@ -247,6 +273,9 @@ export default function SaleDetailPage() {
 
   const hideCostAndProfit = shouldHideSaleProfitColumn(currentUser);
   const showPageTitle = !usesUnifiedNavPageTitle(currentUser);
+  const isBranchCeo = isBranchOwnerUser(currentUser);
+  const canManageSales = canManageBranchSaleWorkflow(currentUser);
+  const canReviewInstallment = canApproveSaleInstallmentRequest(currentUser);
   const isInstallment = saleIsInstallment(sale);
   const installmentApproval = sale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
@@ -346,16 +375,15 @@ export default function SaleDetailPage() {
               </div>
 
               <div className="mt-6 flex flex-wrap gap-2">
-                  {canEditDraftSale(currentUser, sale) ? (
-                    <Link
-                      href={draftSaleEditHref(sale.id)}
-                      className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                    >
-                      {t('common.edit')}
-                    </Link>
-                  ) : null}
-                  {canManageSaleWorkflow(currentUser) ? (
-                    <>
+                {canManageSales && canEditDraftSale(currentUser, sale) ? (
+                  <Link
+                    href={draftSaleEditHref(sale.id)}
+                    className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                  >
+                    {t('common.edit')}
+                  </Link>
+                ) : null}
+                {(canManageSales || (canReviewInstallment && isInstallment)) ? (
                   <button
                     onClick={() => void runSaleAction('send-whatsapp')}
                     disabled={sale.status === 'FINALIZED' || sale.status === 'CANCELLED'}
@@ -364,95 +392,125 @@ export default function SaleDetailPage() {
                   >
                     {t('sales.sendWhatsApp')}
                   </button>
-                  {canSubmitSaleInstallmentRequest(currentUser) && isInstallment ? (
-                    <button
-                      onClick={() => void submitInstallmentRequest()}
-                      disabled={
-                        submittingInstallment ||
-                        installmentPending ||
-                        installmentApproved ||
-                        installmentRejected ||
-                        installmentCancelled ||
-                        sale.status === 'FINALIZED' ||
-                        sale.status === 'CANCELLED'
-                      }
-                      type="button"
-                      className="rounded-xl border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
-                    >
-                      {submittingInstallment
-                        ? t('common.loading')
-                        : t('sales.submitInstallmentRequest')}
-                    </button>
-                  ) : null}
-                  {canApproveSaleInstallmentRequest(currentUser) &&
-                  isInstallment &&
-                  installmentPending ? (
-                    <>
-                      <input
-                        value={approvalComment}
-                        onChange={(event) => setApprovalComment(event.target.value)}
-                        placeholder={t('sales.installmentApprovalComment')}
-                        className="min-w-[220px] rounded-xl border border-slate-300 px-3 py-2 text-sm"
-                      />
-                      <button
-                        onClick={() => void approveInstallmentRequest()}
-                        disabled={submittingInstallment}
-                        type="button"
-                        className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-                      >
-                        {t('sales.approveInstallment')}
-                      </button>
-                      <button
-                        onClick={() => setShowRejectForm((value) => !value)}
-                        disabled={submittingInstallment}
-                        type="button"
-                        className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        {t('sales.rejectInstallment')}
-                      </button>
-                    </>
-                  ) : null}
-                  {canCancelInstallment ? (
-                    <button
-                      onClick={() => setShowCancelForm((value) => !value)}
-                      disabled={submittingInstallment}
-                      type="button"
-                      className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                    >
-                      {t('sales.cancelInstallment')}
-                    </button>
-                  ) : null}
-                  {canReturnToDraft ? (
-                    <button
-                      onClick={() => void returnRejectedSaleToDraft()}
-                      disabled={submittingInstallment}
-                      type="button"
-                      className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
-                    >
-                      {t('sales.returnToDraft')}
-                    </button>
-                  ) : null}
+                ) : null}
+                {canManageSales && canSubmitSaleInstallmentRequest(currentUser) && isInstallment ? (
                   <button
-                    onClick={() => void runSaleAction('finalize')}
-                    disabled={!canFinalize}
-                    className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    onClick={() => void submitInstallmentRequest()}
+                    disabled={
+                      submittingInstallment ||
+                      installmentPending ||
+                      installmentApproved ||
+                      installmentRejected ||
+                      installmentCancelled ||
+                      sale.status === 'FINALIZED' ||
+                      sale.status === 'CANCELLED'
+                    }
                     type="button"
+                    className="rounded-xl border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50"
                   >
-                    {t('sales.finalizeSale')}
+                    {submittingInstallment
+                      ? t('common.loading')
+                      : t('sales.submitInstallmentRequest')}
                   </button>
-                  {canCancelSale(currentUser) ? (
+                ) : null}
+                {canManageSales ? (
+                  <>
                     <button
-                      onClick={() => void runSaleAction('cancel')}
-                      disabled={sale.status === 'CANCELLED'}
-                      className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                      onClick={() => void runSaleAction('finalize')}
+                      disabled={!canFinalize}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                       type="button"
                     >
-                      Cancel
+                      {t('sales.finalizeSale')}
                     </button>
-                  ) : null}
-                    </>
-                  ) : null}
+                    {canCancelSale(currentUser) && !isBranchCeo ? (
+                      <button
+                        onClick={() => void runSaleAction('cancel')}
+                        disabled={sale.status === 'CANCELLED'}
+                        className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+                {canReturnToDraft ? (
+                  <button
+                    onClick={() => void returnRejectedSaleToDraft()}
+                    disabled={submittingInstallment}
+                    type="button"
+                    className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                  >
+                    {t('sales.returnToDraft')}
+                  </button>
+                ) : null}
               </div>
+
+              {canReviewInstallment && isInstallment && installmentPending ? (
+                <div className="mt-6 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="block">
+                    <span className="text-sm font-semibold text-slate-700">
+                      {t('sales.installmentApprovalComment')}
+                    </span>
+                    <textarea
+                      value={approvalComment}
+                      onChange={(event) => setApprovalComment(event.target.value)}
+                      className="mt-2 min-h-20 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => void approveInstallmentRequest()}
+                      disabled={submittingInstallment}
+                      type="button"
+                      className="rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {t('sales.approveInstallment')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowRejectForm((value) => !value);
+                        setShowReturnForRevisionForm(false);
+                        setShowCancelForm(false);
+                      }}
+                      disabled={submittingInstallment}
+                      type="button"
+                      className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {t('sales.rejectInstallment')}
+                    </button>
+                    {canReturnInstallmentForRevision(installmentApproval) ? (
+                      <button
+                        onClick={() => {
+                          setShowReturnForRevisionForm((value) => !value);
+                          setShowRejectForm(false);
+                          setShowCancelForm(false);
+                        }}
+                        disabled={submittingInstallment}
+                        type="button"
+                        className="rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                      >
+                        {t('sales.returnForRevision')}
+                      </button>
+                    ) : null}
+                    {canCancelInstallment ? (
+                      <button
+                        onClick={() => {
+                          setShowCancelForm((value) => !value);
+                          setShowRejectForm(false);
+                          setShowReturnForRevisionForm(false);
+                        }}
+                        disabled={submittingInstallment}
+                        type="button"
+                        className="rounded-xl border border-amber-200 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                      >
+                        {t('sales.cancelInstallment')}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
             </article>
 
             {canVoidPayment(currentUser) ? (
@@ -677,6 +735,26 @@ export default function SaleDetailPage() {
                       className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
                     >
                       {t('sales.confirmRejectInstallment')}
+                    </button>
+                  </div>
+                ) : null}
+                {showReturnForRevisionForm ? (
+                  <div className="mb-4 space-y-2 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                    <label className="block text-sm font-semibold text-blue-900">
+                      {t('sales.installmentApprovalComment')}
+                      <textarea
+                        value={revisionComment}
+                        onChange={(event) => setRevisionComment(event.target.value)}
+                        className="mt-2 w-full rounded-xl border border-blue-200 px-3 py-2 text-sm text-slate-900"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      disabled={submittingInstallment}
+                      onClick={() => void returnInstallmentForRevision()}
+                      className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {t('sales.confirmReturnForRevision')}
                     </button>
                   </div>
                 ) : null}

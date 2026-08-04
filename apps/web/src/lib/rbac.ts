@@ -1205,8 +1205,11 @@ export function canCancelSale(user: Pick<User, 'role' | 'roles'> | null | undefi
   return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER');
 }
 
-export function canVoidPayment(user: Pick<User, 'role' | 'roles'> | null | undefined) {
-  return hasFullAccess(user) || hasRole(user, 'FRANCHISE_OWNER') || hasRole(user, 'CASHIER');
+export function canVoidPayment(user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined) {
+  if (!user) return false;
+  if (hasFullAccess(user)) return true;
+  if (isBranchOwnerUser(user)) return false;
+  return isBranchCashierUser(user) || hasPermission(user, 'cashier');
 }
 
 export function canViewHqWarehouse(user: Pick<User, 'role' | 'roles'> | null | undefined) {
@@ -1331,8 +1334,14 @@ export function canAcceptSalePayment(
 ) {
   if (!user) return false;
   if (hasFullAccess(user)) return true;
-  if (isBranchOwnerUser(user)) return true;
+  if (isBranchOwnerUser(user)) return false;
   return isBranchCashierUser(user) || hasPermission(user, 'cashier');
+}
+
+export function canManageBranchSaleWorkflow(
+  user: Pick<User, 'role' | 'roles' | 'permissions' | 'branchId'> | null | undefined,
+) {
+  return canManageSaleWorkflow(user) && !isBranchOwnerUser(user);
 }
 
 export function shouldSyncSalePaymentsOnDraftSave(

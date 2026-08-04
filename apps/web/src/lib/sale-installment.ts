@@ -76,6 +76,12 @@ export function canBranchCeoCancelInstallmentRequest(
   );
 }
 
+export function canReturnInstallmentForRevision(
+  approval: Pick<SaleInstallmentApproval, 'status'> | null | undefined,
+) {
+  return isPendingBranchCeoInstallmentDecision(approval?.status);
+}
+
 export function canReturnRejectedSaleToDraft(
   approval: Pick<SaleInstallmentApproval, 'status'> | null | undefined,
 ) {

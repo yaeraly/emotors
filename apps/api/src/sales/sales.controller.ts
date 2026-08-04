@@ -23,6 +23,7 @@ import { SaleInstallmentRequestQueryDto } from './dto/sale-installment-request-q
 import { SaleQueryDto } from './dto/sale-query.dto';
 import { SaleCustomerSearchQueryDto, SaleProductSearchQueryDto } from './dto/sale-search-query.dto';
 import { RejectSaleInstallmentDto } from './dto/reject-sale-installment.dto';
+import { ReturnSaleInstallmentForRevisionDto } from './dto/return-sale-installment-for-revision.dto';
 import { ReceiveInstallmentPaymentDto } from './dto/receive-installment-payment.dto';
 import { SaleInstallmentApprovalService } from './sale-installment-approval.service';
 import { SalesService } from './sales.service';
@@ -127,6 +128,16 @@ export class SalesController {
     @Body() dto: RejectSaleInstallmentDto,
   ) {
     return this.saleInstallmentApprovalService.rejectInstallmentRequest(user, id, dto);
+  }
+
+  @Post(':id/installment-request/return-for-revision')
+  @Roles(Role.FRANCHISE_OWNER)
+  returnInstallmentRequestForRevision(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: ReturnSaleInstallmentForRevisionDto,
+  ) {
+    return this.saleInstallmentApprovalService.returnInstallmentRequestForRevision(user, id, dto);
   }
 
   @Post(':id/installment-request/cancel')

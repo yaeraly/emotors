@@ -95,6 +95,11 @@ describe('branch installment decision endpoints do not require cashier permissio
     assert.doesNotMatch(block, /Role\.CASHIER/);
   });
 
+  it('return-for-revision endpoint is not gated by CASHIER role', () => {
+    const block = extractHandler('installment-request/return-for-revision', 'returnInstallmentRequestForRevision');
+    assert.doesNotMatch(block, /Role\.CASHIER/);
+  });
+
   it('real payment endpoint remains protected with CASHIER role', () => {
     const block = extractHandler("Post(':id/payments')", 'addPayment');
     assert.match(block, /Role\.CASHIER/);
@@ -123,6 +128,7 @@ describe('branch installment decisions never create payment or cashbox side effe
     'submitInstallmentRequest',
     'approveInstallmentRequest',
     'rejectInstallmentRequest',
+    'returnInstallmentRequestForRevision',
     'cancelInstallmentRequest',
   ]) {
     it(`${methodName} does not create a payment, cashbox, or bank transaction`, () => {
