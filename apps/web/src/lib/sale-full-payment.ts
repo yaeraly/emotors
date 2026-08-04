@@ -126,7 +126,7 @@ export function canFinalizeFullPaymentSale(input: {
     return false;
   }
   if (shouldUseBranchCashierFullPaymentFlow(input.user)) {
-    return validateFullPaymentReceivedAmount(input.totalAmount, input.receivedAmount).ok;
+    return true;
   }
   return input.paymentValidationOk && input.paymentComplete;
 }

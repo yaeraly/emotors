@@ -64,32 +64,19 @@ describe('sale full payment helpers', () => {
     assert.equal(shouldUseBranchCashierFullPaymentFlow(branchSalesManager), true);
   });
 
-  it('requires valid received amount for cashier handoff finalize', () => {
+  it('allows cashier handoff finalize without sales-side payment entry', () => {
     assert.equal(
       canFinalizeFullPaymentSale({
         user: branchSalesManager,
         paymentType: 'FULL_PAYMENT',
         totalAmount: 120_000,
-        receivedAmount: 120_000,
+        receivedAmount: 0,
         hasBlockingPriceError: false,
         hasMissingPricing: false,
         paymentValidationOk: false,
         paymentComplete: false,
       }),
       true,
-    );
-    assert.equal(
-      canFinalizeFullPaymentSale({
-        user: branchSalesManager,
-        paymentType: 'FULL_PAYMENT',
-        totalAmount: 120_000,
-        receivedAmount: 100_000,
-        hasBlockingPriceError: false,
-        hasMissingPricing: false,
-        paymentValidationOk: false,
-        paymentComplete: false,
-      }),
-      false,
     );
   });
 });

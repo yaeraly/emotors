@@ -10,7 +10,6 @@ import { apiFetch } from '@/lib/api';
 import { canCreateCustomer, canSubmitSaleInstallmentRequest, isBranchSalesManagerUser, shouldSyncSalePaymentsOnDraftSave } from '@/lib/rbac';
 import { evaluateSaleLinePrice } from '@/lib/sale-pricing';
 import {
-  appliedPriceLabelKey,
   applyLoyaltyMarkupToRecommendedPrice,
   customerTypeLabelKey,
   loyaltyCategoryLabelKey,
@@ -56,6 +55,7 @@ import {
   resolvePaymentTypeFromSale,
 } from '@/lib/sale-draft-edit';
 import { useTranslation } from '@/i18n/useTranslation';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { getStatusLabel } from '@/lib/translate-status';
 
 type SaleItemForm = {
@@ -145,6 +145,7 @@ function NewSalePageContent() {
 
   const branchSalesManagerView = isBranchSalesManagerUser(user);
   const branchCashierHandoffFlow = shouldUseBranchCashierFullPaymentFlow(user);
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
   const canEditSalePrice = Boolean(user);
   const canSubmitInstallment = canSubmitSaleInstallmentRequest(user);
   const canCreateCustomerAction = canCreateCustomer(user);
@@ -300,19 +301,6 @@ function NewSalePageContent() {
 
   const hasBlockingPriceError = linePriceStates.some((state) => state.level === 'error');
   const hasMissingPricing = items.some((item) => !item.hasPricingPolicy);
-  const fullPaymentValidation = useMemo(
-    () =>
-      paymentType === 'FULL_PAYMENT' && branchCashierHandoffFlow
-        ? validateFullPaymentReceivedAmount(totals.totalAmount, fullPaymentReceivedAmount)
-        : { ok: true as const, change: fullPaymentChange },
-    [
-      paymentType,
-      branchCashierHandoffFlow,
-      totals.totalAmount,
-      fullPaymentReceivedAmount,
-      fullPaymentChange,
-    ],
-  );
   const paymentValidation = useMemo(
     () =>
       paymentType === 'FULL_PAYMENT'
@@ -347,14 +335,14 @@ function NewSalePageContent() {
   const installmentRejected = installmentApproval?.status === 'REJECTED';
   const installmentCancelled = installmentApproval?.status === 'CANCELLED';
   const canFinalize =
-    Boolean(draftSale) &&
     Boolean(selectedCustomer) &&
     items.length > 0 &&
     !hasBlockingPriceError &&
     !hasMissingPricing &&
-    draftSale?.status !== 'FINALIZED' &&
-    draftSale?.status !== 'CANCELLED' &&
-    draftSale?.status !== 'WAITING_FOR_CASHIER_PAYMENT' &&
+    (!draftSale ||
+      (draftSale.status !== 'FINALIZED' &&
+        draftSale.status !== 'CANCELLED' &&
+        draftSale.status !== 'WAITING_FOR_CASHIER_PAYMENT')) &&
     (paymentType === 'FULL_PAYMENT'
       ? canFinalizeFullPaymentSale({
           user,
@@ -366,7 +354,8 @@ function NewSalePageContent() {
           paymentValidationOk: paymentValidation.ok,
           paymentComplete,
         })
-      : installmentApproved || installmentApproval?.status === 'ACTIVE');
+      : Boolean(draftSale) &&
+        (installmentApproved || installmentApproval?.status === 'ACTIVE'));
 
   const appliedPricingChannel = useMemo(
     () => resolvePricingChannelFromCustomerType(selectedCustomer?.customerType),
@@ -647,18 +636,13 @@ function NewSalePageContent() {
     }
 
     if (paymentType === 'FULL_PAYMENT') {
-      if (branchCashierHandoffFlow) {
-        if (!fullPaymentValidation.ok) {
-          setError(t(fullPaymentValidation.messageKey));
-          return null;
-        }
-      } else if (!paymentValidation.ok || !paymentComplete) {
+      if (!branchCashierHandoffFlow && (!paymentValidation.ok || !paymentComplete)) {
         setError(formatPaymentError(paymentValidation));
         return null;
       }
     }
 
-    if (paymentType === 'FULL_PAYMENT' && !paymentRows[0]?.method) {
+    if (paymentType === 'FULL_PAYMENT' && !branchCashierHandoffFlow && !paymentRows[0]?.method) {
       setError(t('sales.paymentMethodRequired'));
       return null;
     }
@@ -684,7 +668,7 @@ function NewSalePageContent() {
           }
         : {
             paymentType: 'FULL_PAYMENT' as const,
-            receivedAmount: fullPaymentReceivedAmount,
+            receivedAmount: branchCashierHandoffFlow ? totals.totalAmount : fullPaymentReceivedAmount,
           }),
       notes: notes.trim() || undefined,
     };
@@ -935,15 +919,11 @@ function NewSalePageContent() {
   }
 
   async function finalizeSale() {
-    if (!draftSale) {
-      setError(t('sales.saveDraftFirst'));
-      return;
-    }
-
     if (
-      draftSale.status === 'FINALIZED' ||
-      draftSale.status === 'CANCELLED' ||
-      draftSale.status === 'WAITING_FOR_CASHIER_PAYMENT'
+      draftSale &&
+      (draftSale.status === 'FINALIZED' ||
+        draftSale.status === 'CANCELLED' ||
+        draftSale.status === 'WAITING_FOR_CASHIER_PAYMENT')
     ) {
       setError(t('sales.saleAlreadyCompleted'));
       return;
@@ -955,11 +935,6 @@ function NewSalePageContent() {
       (!paymentValidation.ok || !paymentComplete)
     ) {
       setError(formatPaymentError(paymentValidation));
-      return;
-    }
-
-    if (paymentType === 'FULL_PAYMENT' && branchCashierHandoffFlow && !fullPaymentValidation.ok) {
-      setError(t(fullPaymentValidation.messageKey));
       return;
     }
 
@@ -1041,23 +1016,29 @@ function NewSalePageContent() {
       <form onSubmit={saveSale} className="space-y-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t('sales.registerSale')}
-            </p>
-            <h2 className="text-3xl font-bold text-slate-950">
+            {showPageTitle ? (
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                {t('sales.registerSale')}
+              </p>
+            ) : null}
+            <h2 className={`text-3xl font-bold text-slate-950 ${showPageTitle ? '' : 'mt-0'}`}>
               {draftSale ? `${t('sales.editDraft')} ${draftSale.receiptNumber}` : t('sales.registerSale')}
             </h2>
-            <p className="mt-2 text-slate-500">
-              {t('sales.registerSaleHint')}
-            </p>
+            {showPageTitle ? (
+              <p className="mt-2 text-slate-500">
+                {t('sales.registerSaleHint')}
+              </p>
+            ) : null}
           </div>
-          <button
-            disabled={saving}
-            className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-            type="submit"
-          >
-            {saving ? t('common.loading') : t('sales.saveDraft')}
-          </button>
+          {!branchSalesManagerView ? (
+            <button
+              disabled={saving}
+              className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+              type="submit"
+            >
+              {saving ? t('common.loading') : t('sales.saveDraft')}
+            </button>
+          ) : null}
         </div>
 
         {loadingDraft ? (
@@ -1119,10 +1100,7 @@ function NewSalePageContent() {
               <div className="min-w-72 rounded-2xl border border-blue-100 bg-blue-50 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
-                      {t('sales.customerSelected')}
-                    </p>
-                    <p className="mt-2 text-lg font-bold text-slate-950">{selectedCustomer.fullName}</p>
+                    <p className="text-lg font-bold text-slate-950">{selectedCustomer.fullName}</p>
                     <p className="mt-1 text-sm text-slate-700">{selectedCustomer.phone}</p>
                     <p className="mt-2 text-sm text-slate-600">
                       {t('customers.customerType')}:{' '}
@@ -1135,20 +1113,6 @@ function NewSalePageContent() {
                           selectedCustomer.loyaltyCategory ?? selectedCustomer.customerCategory,
                         ),
                       )}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {t('customers.currentAdditionalMarkup')}:{' '}
-                      {Number(
-                        selectedCustomer.currentMarkupPercent ??
-                          selectedCustomer.currentAdditionalMarkup ??
-                          selectedCustomer.currentDiscountPercent ??
-                          0,
-                      )}
-                      %
-                    </p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {t('sales.appliedPriceType')}:{' '}
-                      {t(appliedPriceLabelKey(appliedPricingChannel))}
                     </p>
                     <p className="mt-2 text-sm text-slate-600">
                       {t(`status.${selectedCustomer.status}`)}
@@ -1427,24 +1391,26 @@ function NewSalePageContent() {
                   value={finalPaymentDate}
                   onChange={setFinalPaymentDate}
                 />
-                <label className="block min-w-0">
-                  <span className="text-sm font-semibold text-slate-700">{t('sales.downPaymentMethod')}</span>
-                  <select
-                    value={paymentRows[0]?.method ?? ''}
-                    onChange={(event) =>
-                      updatePayment(0, { method: event.target.value as PaymentMethod })
-                    }
-                    required
-                    className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
-                  >
-                    <option value="">{t('sales.paymentMethodRequired')}</option>
-                    {SALE_PAYMENT_METHODS.map((method) => (
-                      <option key={method} value={method}>
-                        {formatPaymentMethodLabel(method, t)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {!branchSalesManagerView ? (
+                  <label className="block min-w-0">
+                    <span className="text-sm font-semibold text-slate-700">{t('sales.downPaymentMethod')}</span>
+                    <select
+                      value={paymentRows[0]?.method ?? ''}
+                      onChange={(event) =>
+                        updatePayment(0, { method: event.target.value as PaymentMethod })
+                      }
+                      required
+                      className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 outline-none ring-blue-500 focus:ring-2"
+                    >
+                      <option value="">{t('sales.paymentMethodRequired')}</option>
+                      {SALE_PAYMENT_METHODS.map((method) => (
+                        <option key={method} value={method}>
+                          {formatPaymentMethodLabel(method, t)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="block min-w-0 sm:col-span-2 lg:col-span-4">
                   <span className="text-sm font-semibold text-slate-700">{t('sales.installmentComment')}</span>
                   <textarea
@@ -1462,37 +1428,6 @@ function NewSalePageContent() {
               {branchCashierHandoffFlow ? (
                 <div className="grid min-w-0 gap-4 sm:grid-cols-2">
                   <Summary label={t('sales.paymentSummaryTotal')} value={formatKgs(totals.totalAmount)} />
-                  <SaleInput
-                    label={t('sales.paidAmount')}
-                    type="number"
-                    value={paymentRows[0]?.amount ?? formatFullPaymentAmount(totals.totalAmount)}
-                    onChange={(value) => {
-                      setIsReceivedAmountManuallyEdited(true);
-                      const amount = value;
-                      setPaymentRows([
-                        {
-                          ...(paymentRows[0] ?? createPaymentPartRow({ method: 'CASH' })),
-                          method: 'CASH',
-                          amount,
-                          cashReceived: amount,
-                        },
-                      ]);
-                      setPaymentsSynced(false);
-                    }}
-                    min={0}
-                    step="0.01"
-                    required
-                  />
-                  {fullPaymentChange.changeAmount > 0.009 ? (
-                    <div className="min-w-0 rounded-xl bg-green-50 p-3 text-sm sm:col-span-2">
-                      <p className="text-xs font-semibold uppercase text-green-700">
-                        {t('sales.changeAmount')}
-                      </p>
-                      <p className="mt-1 text-lg font-bold text-green-900">
-                        {formatKgs(fullPaymentChange.changeAmount)}
-                      </p>
-                    </div>
-                  ) : null}
                 </div>
               ) : paymentRows.length === 1 ? (
                 <div className="grid min-w-0 gap-4 sm:grid-cols-2">
@@ -1644,7 +1579,7 @@ function NewSalePageContent() {
                 ) : null}
               </div>
 
-              {paymentRows.length < SALE_PAYMENT_METHODS.length ? (
+              {paymentRows.length < SALE_PAYMENT_METHODS.length && !branchCashierHandoffFlow ? (
                 <button
                   type="button"
                   onClick={addPaymentRow}
@@ -1664,13 +1599,6 @@ function NewSalePageContent() {
             </p>
           ) : null}
 
-          {paymentType === 'FULL_PAYMENT' &&
-          branchCashierHandoffFlow &&
-          !fullPaymentValidation.ok ? (
-            <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-              {t(fullPaymentValidation.messageKey)}
-            </p>
-          ) : null}
 
           {paymentType === 'INSTALLMENT' && isInstallmentSale && installmentStatusKey ? (
             <p
@@ -1701,13 +1629,15 @@ function NewSalePageContent() {
           ) : null}
 
           <div className="mt-6 flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
-            <button
-              onClick={() => void saveDraft()}
-              type="button"
-              className="w-full rounded-xl border border-blue-200 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
-            >
-              {t('sales.saveDraft')}
-            </button>
+            {!branchSalesManagerView ? (
+              <button
+                onClick={() => void saveDraft()}
+                type="button"
+                className="w-full rounded-xl border border-blue-200 px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50 sm:w-auto"
+              >
+                {t('sales.saveDraft')}
+              </button>
+            ) : null}
             {!branchSalesManagerView ? (
               <button
                 onClick={() => void sendWhatsApp()}
