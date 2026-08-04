@@ -496,9 +496,11 @@ function CustomersPageContent() {
                 <h2 className="text-3xl font-bold text-slate-950">{t('crm.title')}</h2>
               </>
             ) : null}
-            <p className={`text-slate-500 ${showPageTitle ? 'mt-2' : ''}`}>
-              {t('crm.customerHistory')}
-            </p>
+            {!branchOwnerView ? (
+              <p className={`text-slate-500 ${showPageTitle ? 'mt-2' : ''}`}>
+                {t('crm.customerHistory')}
+              </p>
+            ) : null}
           </div>
 
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">

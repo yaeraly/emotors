@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { isBranchWarehouseOperator, BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT } from '@/lib/rbac';
+import { shouldHideBranchCeoDuplicateNavTitle } from '@/lib/unified-nav-page-title';
 import type { PartsRequest, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
@@ -13,13 +14,16 @@ import { translateStatus } from '@/lib/translate-status';
 export default function PartsRequestsPage() {
   const router = useRouter();
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [requests, setRequests] = useState<PartsRequest[]>([]);
   const [error, setError] = useState('');
+  const hideDuplicateTitle = shouldHideBranchCeoDuplicateNavTitle(user);
 
   useEffect(() => {
     apiFetch<User>('/auth/me')
-      .then((user) => {
-        if (isBranchWarehouseOperator(user)) {
+      .then((currentUser) => {
+        setUser(currentUser);
+        if (isBranchWarehouseOperator(currentUser)) {
           router.replace(BRANCH_WAREHOUSE_OPERATOR_REQUESTS_REDIRECT);
         }
       })
@@ -57,10 +61,12 @@ export default function PartsRequestsPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('service.title')}</p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('operations.partsRequests')}</h2>
-        </div>
+        {!hideDuplicateTitle ? (
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('service.title')}</p>
+            <h2 className="text-3xl font-bold text-slate-950">{t('operations.partsRequests')}</h2>
+          </div>
+        ) : null}
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         <div className="space-y-4">
           {requests.map((request) => (

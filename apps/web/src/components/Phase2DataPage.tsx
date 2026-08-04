@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { shouldHideBranchCeoDuplicateNavTitle } from '@/lib/unified-nav-page-title';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
 type Phase2DataPageProps = {
@@ -28,6 +30,7 @@ export function Phase2DataPage({
   embedded = false,
 }: Phase2DataPageProps) {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,9 +58,12 @@ export function Phase2DataPage({
   }
 
   useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endpoint]);
+
+  const hideDuplicateTitle = shouldHideBranchCeoDuplicateNavTitle(user);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,7 +82,7 @@ export function Phase2DataPage({
 
   const content = (
     <>
-        {embedded ? null : (
+        {embedded || hideDuplicateTitle ? null : (
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">

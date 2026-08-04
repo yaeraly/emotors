@@ -64,10 +64,6 @@ export default function BranchCeoProductDirectoryDetailPage() {
                 <Detail label={t('inventory.unit')} value={formatProductUnit(product.unit, language, t)} />
                 <Detail label={t('inventory.barcode')} value={product.barcode ?? '—'} />
                 <Detail label={t('inventory.weight')} value={product.weightKg ? `${product.weightKg} kg` : '—'} />
-                <Detail
-                  label={t('inventory.status')}
-                  value={product.isActive ? t('inventory.active') : t('inventory.inactive')}
-                />
                 <Detail label={t('inventory.quantity')} value={String(product.quantity)} />
               </div>
               {product.description ? (

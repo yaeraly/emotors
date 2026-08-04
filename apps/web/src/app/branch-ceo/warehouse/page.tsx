@@ -8,7 +8,7 @@ export default function BranchCeoWarehousePage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <BranchCeoWarehouseSection />
+        <BranchCeoWarehouseSection showHeading={false} />
         <BranchCeoWarehousePanel showHeader={false} />
       </section>
     </ProtectedShell>

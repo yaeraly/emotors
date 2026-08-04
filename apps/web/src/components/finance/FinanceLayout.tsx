@@ -8,6 +8,7 @@ import type { ModuleSectionLink } from '@/components/ModuleSectionNav';
 import { useTranslation } from '@/i18n/useTranslation';
 import { financeRootHrefForUser, visibleFinanceNavSections } from '@/lib/finance-nav';
 import { fetchCurrentUser, getCachedUser } from '@/lib/current-user';
+import { isBranchOwnerUser } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useEffect, useState } from 'react';
 
@@ -43,38 +44,45 @@ export function FinanceLayout({
   const mainNav = visibleFinanceNavSections(user);
   const financeRootHref = financeRootHrefForUser(user);
   const actions = headerActions ?? primaryAction;
+  const hideFinanceDuplicateNav = isBranchOwnerUser(user);
 
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <nav className="text-sm text-slate-500" aria-label="Breadcrumb">
-          <ol className="flex flex-wrap items-center gap-1">
-            <li>
-              <Link href={financeRootHref} className="font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded">
-                {t('nav.finance')}
-              </Link>
-            </li>
-            {breadcrumbs.map((crumb) => (
-              <li key={crumb.labelKey} className="flex items-center gap-1">
-                <span>/</span>
-                {crumb.href ? (
-                  <Link href={crumb.href} className="font-semibold text-blue-600 hover:text-blue-700">
-                    {t(crumb.labelKey)}
-                  </Link>
-                ) : (
-                  <span className="font-semibold text-slate-700">{t(crumb.labelKey)}</span>
-                )}
+        {!hideFinanceDuplicateNav ? (
+          <nav className="text-sm text-slate-500" aria-label="Breadcrumb">
+            <ol className="flex flex-wrap items-center gap-1">
+              <li>
+                <Link href={financeRootHref} className="font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded">
+                  {t('nav.finance')}
+                </Link>
               </li>
-            ))}
-          </ol>
-        </nav>
+              {breadcrumbs.map((crumb) => (
+                <li key={crumb.labelKey} className="flex items-center gap-1">
+                  <span>/</span>
+                  {crumb.href ? (
+                    <Link href={crumb.href} className="font-semibold text-blue-600 hover:text-blue-700">
+                      {t(crumb.labelKey)}
+                    </Link>
+                  ) : (
+                    <span className="font-semibold text-slate-700">{t(crumb.labelKey)}</span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </nav>
+        ) : null}
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <h2 className="text-3xl font-bold text-slate-950">{t(titleKey)}</h2>
-          {actions ? <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div> : null}
-        </div>
+        {!hideFinanceDuplicateNav ? (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <h2 className="text-3xl font-bold text-slate-950">{t(titleKey)}</h2>
+            {actions ? <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div> : null}
+          </div>
+        ) : actions ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>
+        ) : null}
 
-        {mainNav.length > 0 ? (
+        {!hideFinanceDuplicateNav && mainNav.length > 0 ? (
           <ModuleSectionNav sections={mainNav} variant="tabs" />
         ) : null}
 

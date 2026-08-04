@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
-import { canCreateSale, canDeleteInstallmentDraft, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
+import { canCreateSale, canDeleteInstallmentDraft, isBranchOwnerUser, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
 import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import { installmentStatusLabelKey } from '@/lib/sale-installment';
@@ -32,6 +32,7 @@ export default function SalesPage() {
   const hideProfitColumn = shouldHideSaleProfitColumn(user);
   const showSaleStatusColumn = shouldShowSaleStatusColumn(user);
   const showPageTitle = !usesUnifiedNavPageTitle(user);
+  const hideSalesDuplicateTitles = isBranchOwnerUser(user);
   const tableColumnCount = (hideProfitColumn ? 9 : 10) + (showSaleStatusColumn ? 1 : 0);
 
   const query = useMemo(() => {
@@ -102,12 +103,16 @@ export default function SalesPage() {
                 {t('sales.title')}
               </p>
             ) : null}
-            <h2 className="text-3xl font-bold text-slate-950">
-              {t('sales.salesAndPayments')}
-            </h2>
-            <p className="mt-2 text-slate-500">
-              {t('sales.payments')}
-            </p>
+            {!hideSalesDuplicateTitles ? (
+              <>
+                <h2 className="text-3xl font-bold text-slate-950">
+                  {t('sales.salesAndPayments')}
+                </h2>
+                <p className="mt-2 text-slate-500">
+                  {t('sales.payments')}
+                </p>
+              </>
+            ) : null}
           </div>
           {canCreateSale(user) ? (
             <Link

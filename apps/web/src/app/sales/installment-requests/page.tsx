@@ -8,7 +8,7 @@ import {
   canApproveSaleInstallmentRequest,
   canCancelSaleInstallmentRequest,
 } from '@/lib/rbac';
-import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
+import { shouldHideBranchCeoDuplicateNavTitle, usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
 import {
   canBranchCeoCancelInstallmentRequest,
@@ -202,6 +202,7 @@ export default function SaleInstallmentRequestsPage() {
     ? canBranchCeoCancelInstallmentRequest(selectedRequest, selectedRequest.sale)
     : false;
   const showPageTitle = !usesUnifiedNavPageTitle(user);
+  const hideInstallmentDetailHeading = shouldHideBranchCeoDuplicateNavTitle(user);
 
   return (
     <ProtectedShell>
@@ -380,11 +381,15 @@ export default function SaleInstallmentRequestsPage() {
           </div>
 
           <aside className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-950">{t('sales.installmentRequestDetails')}</h3>
+            {!hideInstallmentDetailHeading ? (
+              <h3 className="text-lg font-bold text-slate-950">{t('sales.installmentRequestDetails')}</h3>
+            ) : null}
             {!selectedRequest ? (
-              <p className="mt-4 text-sm text-slate-500">{t('sales.noInstallmentRequests')}</p>
+              <p className={`text-sm text-slate-500 ${hideInstallmentDetailHeading ? '' : 'mt-4'}`}>
+                {t('sales.noInstallmentRequests')}
+              </p>
             ) : (
-              <div className="mt-4 space-y-3 text-sm">
+              <div className={`space-y-3 text-sm ${hideInstallmentDetailHeading ? '' : 'mt-4'}`}>
                 <Detail label={t('crm.branch')} value={selectedRequest.sale.branch?.name ?? '—'} />
                 <Detail label={t('sales.receiptNumber')} value={selectedRequest.sale.receiptNumber} />
                 <Detail label={t('sales.customer')} value={selectedRequest.sale.customer.fullName} />
