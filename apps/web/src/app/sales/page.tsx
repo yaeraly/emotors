@@ -6,6 +6,7 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { apiFetch } from '@/lib/api';
 import { canCreateSale, canDeleteInstallmentDraft, shouldHideSaleProfitColumn, shouldShowSaleStatusColumn } from '@/lib/rbac';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
 import { installmentStatusLabelKey } from '@/lib/sale-installment';
 import type { DailySalesReport, PaymentStatus, Sale, SaleStatus, User } from '@/lib/types';
@@ -29,6 +30,7 @@ export default function SalesPage() {
 
   const hideProfitColumn = shouldHideSaleProfitColumn(user);
   const showSaleStatusColumn = shouldShowSaleStatusColumn(user);
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
   const tableColumnCount = (hideProfitColumn ? 9 : 10) + (showSaleStatusColumn ? 1 : 0);
 
   const query = useMemo(() => {
@@ -94,9 +96,11 @@ export default function SalesPage() {
       <section className="space-y-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t('sales.title')}
-            </p>
+            {showPageTitle ? (
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                {t('sales.title')}
+              </p>
+            ) : null}
             <h2 className="text-3xl font-bold text-slate-950">
               {t('sales.salesAndPayments')}
             </h2>

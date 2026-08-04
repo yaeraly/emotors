@@ -93,7 +93,7 @@ export default function BranchManagerShipmentsPage() {
   return (
     <ProtectedShell>
       {branchSalesManagerView ? (
-        <BranchProductOrdersSection user={user} titleKey="branchManager.incomingShipments">
+        <BranchProductOrdersSection user={user}>
           {table}
         </BranchProductOrdersSection>
       ) : (

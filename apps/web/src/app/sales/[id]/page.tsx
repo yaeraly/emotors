@@ -16,6 +16,7 @@ import {
   shouldHideSaleProfitColumn,
 } from '@/lib/rbac';
 import { canEditDraftSale, draftSaleEditHref } from '@/lib/sale-draft-edit';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import {
   canBranchCeoCancelInstallmentRequest,
   canReturnRejectedSaleToDraft,
@@ -245,6 +246,7 @@ export default function SaleDetailPage() {
   }
 
   const hideCostAndProfit = shouldHideSaleProfitColumn(currentUser);
+  const showPageTitle = !usesUnifiedNavPageTitle(currentUser);
   const isInstallment = saleIsInstallment(sale);
   const installmentApproval = sale?.installmentApproval;
   const installmentStatusKey = installmentStatusLabelKey(installmentApproval?.status);
@@ -296,10 +298,12 @@ export default function SaleDetailPage() {
             <article className="w-full min-w-0 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-col justify-between gap-4 md:flex-row">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-                    {t('sales.title')}
-                  </p>
-                  <h2 className="mt-2 text-3xl font-bold text-slate-950">
+                  {showPageTitle ? (
+                    <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                      {t('sales.title')}
+                    </p>
+                  ) : null}
+                  <h2 className={`text-3xl font-bold text-slate-950 ${showPageTitle ? 'mt-2' : ''}`}>
                     {sale.receiptNumber}
                   </h2>
                   <p className="mt-2">

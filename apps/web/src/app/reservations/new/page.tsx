@@ -15,6 +15,7 @@ import {
 } from '@/components/sales/SaleFormPrimitives';
 import { SaleSelectedCustomerCard } from '@/components/sales/SaleSelectedCustomerCard';
 import { apiFetch } from '@/lib/api';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { canCreateCustomer } from '@/lib/rbac';
 import type { Customer, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -52,6 +53,7 @@ export default function NewReservationPage() {
   const [error, setError] = useState('');
 
   const canCreateCustomerAction = canCreateCustomer(user);
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
 
   useEffect(() => {
     apiFetch<User>('/auth/me').then(setUser).catch(() => null);
@@ -187,9 +189,11 @@ export default function NewReservationPage() {
       <form onSubmit={submitReservation} className="space-y-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t('operations.reservations')}
-            </p>
+            {showPageTitle ? (
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                {t('operations.reservations')}
+              </p>
+            ) : null}
             <h2 className="text-3xl font-bold text-slate-950">{t('operations.createReservation')}</h2>
           </div>
           <Link

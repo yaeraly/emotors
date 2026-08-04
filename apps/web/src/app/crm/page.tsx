@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
 import { usesUnifiedNav } from '@/lib/unified-nav';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import type { DailySalesReport, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -22,14 +23,21 @@ export default function CrmPage() {
   }, [t]);
 
   const hideQuickLinks = usesUnifiedNav(user);
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
 
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('nav.crm')}</p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('crm.intelligenceTitle')}</h2>
-        </div>
+        {showPageTitle ? (
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('nav.crm')}</p>
+            <h2 className="text-3xl font-bold text-slate-950">{t('crm.intelligenceTitle')}</h2>
+          </div>
+        ) : (
+          <div>
+            <h2 className="text-3xl font-bold text-slate-950">{t('crm.intelligenceTitle')}</h2>
+          </div>
+        )}
 
         {error ? (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>

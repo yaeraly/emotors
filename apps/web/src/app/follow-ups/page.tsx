@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { apiFetch } from '@/lib/api';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
+import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { translateStatus } from '@/lib/translate-status';
 
@@ -19,9 +21,15 @@ type FollowUpRow = {
 
 export default function FollowUpsPage() {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [followUps, setFollowUps] = useState<FollowUpRow[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
+
+  useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
+  }, []);
 
   useEffect(() => {
     void apiFetch<FollowUpRow[]>('/customers/follow-ups')
@@ -34,7 +42,9 @@ export default function FollowUpsPage() {
     <ProtectedShell>
       <section className="space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('nav.followUps')}</p>
+          {showPageTitle ? (
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('nav.followUps')}</p>
+          ) : null}
           <h2 className="text-3xl font-bold text-slate-950">{t('crm.followUps')}</h2>
         </div>
 

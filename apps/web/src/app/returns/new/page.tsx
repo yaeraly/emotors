@@ -13,7 +13,8 @@ import {
 } from '@/components/sales/SaleFormPrimitives';
 import { SALE_PAYMENT_METHODS, formatPaymentMethodLabel } from '@/lib/sale-payment-methods';
 import { apiFetch } from '@/lib/api';
-import type { PaymentMethod, Sale, SaleItem } from '@/lib/types';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
+import type { PaymentMethod, Sale, SaleItem, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import type { SaleCustomerOption } from '@/components/SaleCustomerSearch';
 
@@ -61,6 +62,7 @@ function roundMoney(value: number) {
 export default function NewReturnPage() {
   const router = useRouter();
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [saleSearch, setSaleSearch] = useState('');
   const [saleResults, setSaleResults] = useState<Sale[]>([]);
   const [searchingSales, setSearchingSales] = useState(false);
@@ -72,6 +74,11 @@ export default function NewReturnPage() {
   const [refundMethod, setRefundMethod] = useState<PaymentMethod>('CASH');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
+
+  useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
+  }, []);
 
   useEffect(() => {
     apiFetch<ReturnOrderListItem[]>('/returns')
@@ -239,9 +246,11 @@ export default function NewReturnPage() {
       <form onSubmit={submitReturn} className="space-y-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t('operations.returns')}
-            </p>
+            {showPageTitle ? (
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                {t('operations.returns')}
+              </p>
+            ) : null}
             <h2 className="text-3xl font-bold text-slate-950">{t('operations.createReturn')}</h2>
           </div>
           <Link

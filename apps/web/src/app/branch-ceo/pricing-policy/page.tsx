@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { useTranslation } from '@/i18n/useTranslation';
 import { apiFetch } from '@/lib/api';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
+import type { User } from '@/lib/types';
 import { customerTypeLabelKey, loyaltyCategoryLabelKey } from '@/lib/sale-customer-pricing';
 
 type MarkupMatrix = {
@@ -128,6 +130,7 @@ function toDraft(policy: BranchPricingPolicy): Draft {
 
 export default function BranchCeoPricingPolicyPage() {
   const { t } = useTranslation();
+  const [user, setUser] = useState<User | null>(null);
   const [policy, setPolicy] = useState<BranchPricingPolicy | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState('');
@@ -142,12 +145,17 @@ export default function BranchCeoPricingPolicyPage() {
   const [previewBasePrice, setPreviewBasePrice] = useState('1100');
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
 
   async function load() {
     const data = await apiFetch<BranchPricingPolicy>('/branch-ceo/pricing-policy');
     setPolicy(data);
     setDraft(toDraft(data));
   }
+
+  useEffect(() => {
+    void apiFetch<User>('/auth/me').then(setUser).catch(() => setUser(null));
+  }, []);
 
   useEffect(() => {
     void load().catch((err) => setError(err instanceof Error ? err.message : t('common.error')));
@@ -212,13 +220,17 @@ export default function BranchCeoPricingPolicyPage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-            Branch CEO
-          </p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('branchCeo.pricingPolicyTitle')}</h2>
-          <p className="mt-2 text-slate-500">{t('branchCeo.pricingPolicySubtitle')}</p>
-        </div>
+        {showPageTitle ? (
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+              Branch CEO
+            </p>
+            <h2 className="text-3xl font-bold text-slate-950">{t('branchCeo.pricingPolicyTitle')}</h2>
+            <p className="mt-2 text-slate-500">{t('branchCeo.pricingPolicySubtitle')}</p>
+          </div>
+        ) : (
+          <p className="text-slate-500">{t('branchCeo.pricingPolicySubtitle')}</p>
+        )}
 
         {error ? <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p> : null}
         {success ? (

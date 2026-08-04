@@ -8,6 +8,7 @@ import {
   canApproveSaleInstallmentRequest,
   canCancelSaleInstallmentRequest,
 } from '@/lib/rbac';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { customerTypeLabelKey } from '@/lib/sale-customer-pricing';
 import {
   canBranchCeoCancelInstallmentRequest,
@@ -176,16 +177,21 @@ export default function SaleInstallmentRequestsPage() {
   const selectedCancellable = selectedRequest
     ? canBranchCeoCancelInstallmentRequest(selectedRequest, selectedRequest.sale)
     : false;
+  const showPageTitle = !usesUnifiedNavPageTitle(user);
 
   return (
     <ProtectedShell>
       <section className="space-y-6">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-            {t('nav.sales')}
-          </p>
-          <h2 className="text-3xl font-bold text-slate-950">{t('sales.installmentRequestsTitle')}</h2>
-          <p className="mt-2 text-slate-500">{t('sales.installmentRequestsHint')}</p>
+          {showPageTitle ? (
+            <>
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                {t('nav.sales')}
+              </p>
+              <h2 className="text-3xl font-bold text-slate-950">{t('sales.installmentRequestsTitle')}</h2>
+            </>
+          ) : null}
+          <p className={`text-slate-500 ${showPageTitle ? 'mt-2' : ''}`}>{t('sales.installmentRequestsHint')}</p>
         </div>
 
         <div className="grid gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">

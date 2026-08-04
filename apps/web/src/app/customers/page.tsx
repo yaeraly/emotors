@@ -19,6 +19,7 @@ import type { Branch, Customer, CustomerStatus, CustomerType, User } from '@/lib
 import { SendPriceListModal } from '@/components/customers/SendPriceListModal';
 import { PermanentDeleteConfirmModal } from '@/components/PermanentDeleteConfirmModal';
 import { ProtectedShell } from '@/components/ProtectedShell';
+import { usesUnifiedNavPageTitle } from '@/lib/unified-nav-page-title';
 import { useTranslation } from '@/i18n/useTranslation';
 
 const TOKEN_KEY = 'emotors_access_token';
@@ -137,6 +138,7 @@ function CustomersPageContent() {
   const showListEditButton = shouldShowCustomerListEditButton(currentUser) && !archiveView;
   const canCreate = canCreateCustomer(currentUser) && !archiveView;
   const canEditType = canEditCustomerType(currentUser) && !archiveView;
+  const showPageTitle = !usesUnifiedNavPageTitle(currentUser);
   const columnVisible = (key: CustomerListColumnKey) => visibleColumns.includes(key);
   const statusFilterOptions = archiveView
     ? (['ARCHIVED'] as CustomerStatus[])
@@ -486,11 +488,15 @@ function CustomersPageContent() {
       <section className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t('crm.intelligenceTitle')}
-            </p>
-            <h2 className="text-3xl font-bold text-slate-950">{t('crm.title')}</h2>
-            <p className="mt-2 text-slate-500">
+            {showPageTitle ? (
+              <>
+                <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                  {t('crm.intelligenceTitle')}
+                </p>
+                <h2 className="text-3xl font-bold text-slate-950">{t('crm.title')}</h2>
+              </>
+            ) : null}
+            <p className={`text-slate-500 ${showPageTitle ? 'mt-2' : ''}`}>
               {t('crm.customerHistory')}
             </p>
           </div>
