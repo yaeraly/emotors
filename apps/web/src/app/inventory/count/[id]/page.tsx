@@ -7,12 +7,19 @@ import { ProtectedShell } from '@/components/ProtectedShell';
 import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { WarehouseTopNav } from '@/components/WarehouseTopNav';
 import { apiFetch } from '@/lib/api';
-import { canApproveInventoryCountForWarehouse, canDeleteInventoryCount, canManageInventoryCountForWarehouse, isBranchOwnerUser, isBranchWarehouseOperator } from '@/lib/rbac';
+import {
+  canApproveInventoryCountForWarehouse,
+  canDeleteInventoryCount,
+  canManageInventoryCountForWarehouse,
+  isBranchOwnerUser,
+  isBranchWarehouseOperator,
+} from '@/lib/rbac';
 import type { InventoryCountItem, InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 import { getStatusLabel } from '@/lib/translate-status';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
 import {
+  shouldHideInventoryCountFinancials,
   shouldShowInventoryCountDiscrepancyTotal,
   shouldShowInventoryCountItemCostColumns,
 } from '@/lib/inventory-count-discrepancy';
@@ -59,7 +66,7 @@ export default function InventoryCountDetailPage() {
   const branchScopedView =
     currentUser &&
     (isBranchWarehouseOperator(currentUser) || isBranchOwnerUser(currentUser));
-  const hideItemFinancials = Boolean(currentUser && isBranchWarehouseOperator(currentUser));
+  const hideItemFinancials = shouldHideInventoryCountFinancials(currentUser);
   const showDiscrepancyTotal = shouldShowInventoryCountDiscrepancyTotal({ hideItemFinancials });
   const showItemCostColumns = shouldShowInventoryCountItemCostColumns({ hideItemFinancials });
   const inventoryListHref = isBranchWarehouseOperator(currentUser)

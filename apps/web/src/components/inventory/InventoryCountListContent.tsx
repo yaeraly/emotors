@@ -6,6 +6,7 @@ import { DeleteConfirmModal } from '@/components/DeleteConfirmModal';
 import { inventoryTypeLabel } from '@/lib/inventory-count';
 import { apiFetch } from '@/lib/api';
 import { canDeleteInventoryCount, isBranchOwnerUser } from '@/lib/rbac';
+import { shouldHideInventoryCountFinancials } from '@/lib/inventory-count-discrepancy';
 import { getStatusLabel } from '@/lib/translate-status';
 import type { InventoryCountSession, User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -53,6 +54,7 @@ export function InventoryCountListContent({
 
   const activeSessions = sessions.filter((session) => activeStatuses.has(session.status));
   const historySessions = sessions.filter((session) => historyStatuses.has(session.status));
+  const hideMonetaryFinancials = hideFinancials || shouldHideInventoryCountFinancials(user);
   const branchOwnerView = isBranchOwnerUser(user) && !hideFinancials;
 
   async function confirmDelete(reason?: string) {
@@ -115,6 +117,7 @@ export function InventoryCountListContent({
                 t={t}
                 basePath={basePath}
                 branchOwnerView={branchOwnerView}
+                hideMonetaryFinancials={hideMonetaryFinancials}
               />
             ))}
           </div>
@@ -170,11 +173,13 @@ function ActiveInventoryCard({
   t,
   basePath,
   branchOwnerView,
+  hideMonetaryFinancials,
 }: {
   session: InventoryCountSession;
   t: (key: string) => string;
   basePath: string;
   branchOwnerView: boolean;
+  hideMonetaryFinancials: boolean;
 }) {
   const summary = session.summary;
   const progress = completionPercentage(session);
@@ -206,16 +211,22 @@ function ActiveInventoryCard({
         </Link>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+      <div
+        className={`mt-4 grid gap-3 sm:grid-cols-2 ${
+          hideMonetaryFinancials ? 'lg:grid-cols-4 xl:grid-cols-5' : 'lg:grid-cols-4 xl:grid-cols-6'
+        }`}
+      >
         <Metric label={t('inventoryCount.totalProducts')} value={String(summary?.totalProducts ?? 0)} />
         <Metric label={t('inventoryCount.countedProducts')} value={String(summary?.countedProducts ?? 0)} />
         <Metric label={t('inventoryCount.remainingProducts')} value={String(summary?.remainingProducts ?? 0)} />
         <Metric label={t('inventoryCount.differencePositions')} value={String(differencePositions)} />
         <Metric label={t('inventoryCount.completionPercentage')} value={`${progress}%`} />
-        <Metric
-          label={t('inventoryCount.totalDifferenceValue')}
-          value={Number(summary?.totalDifferenceValueKgs ?? 0).toFixed(2)}
-        />
+        {!hideMonetaryFinancials ? (
+          <Metric
+            label={t('inventoryCount.totalDifferenceValue')}
+            value={Number(summary?.totalDifferenceValueKgs ?? 0).toFixed(2)}
+          />
+        ) : null}
       </div>
 
       <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">

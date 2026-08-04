@@ -19,7 +19,7 @@ export function WarehouseTopNav() {
 
   if (pathname.includes('/new')) return null;
 
-  const tabs = visibleWarehouseTabs(user);
+  const tabs = visibleWarehouseTabs(user, pathname);
   if (!tabs.length) return null;
 
   return (

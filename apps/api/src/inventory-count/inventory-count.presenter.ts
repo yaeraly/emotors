@@ -5,7 +5,7 @@ import { hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 export function shouldStripBranchWarehouseInventoryFinancials(user: AuthUser) {
   const roles = resolveUserRoles(user);
   if (hasAnyFullAccessRole(roles)) return false;
-  return roles.includes(Role.WAREHOUSE_OPERATOR);
+  return roles.includes(Role.WAREHOUSE_OPERATOR) || roles.includes(Role.WAREHOUSE_MANAGER);
 }
 
 export function sanitizeInventoryCountSummaryForUser(
@@ -25,17 +25,15 @@ export function sanitizeInventoryCountSummaryForUser(
   if (!shouldStripBranchWarehouseInventoryFinancials(user)) {
     return summary;
   }
-  // Branch Warehouse may see the aggregate discrepancy total only.
-  // Do not expose surplus/shortage monetary breakdowns or any item-level cost fields.
+  // Warehouse roles may see quantity discrepancies only.
+  // Do not expose monetary totals, breakdowns, or item-level cost fields.
   const {
     surplusValueKgs: _surplusValueKgs,
     shortageValueKgs: _shortageValueKgs,
+    totalDifferenceValueKgs: _totalDifferenceValueKgs,
     ...safeSummary
   } = summary;
-  return {
-    ...safeSummary,
-    totalDifferenceValueKgs: Number(summary.totalDifferenceValueKgs ?? 0),
-  };
+  return safeSummary;
 }
 
 export function sanitizeInventoryCountItemForUser(user: AuthUser, item: any) {

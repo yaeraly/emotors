@@ -1,12 +1,14 @@
-import type { User } from '@/lib/types';
+import type { User } from './types';
 import {
   canViewBranchWarehouses,
   canViewHqWarehouse,
   canViewInventoryCount,
   canViewProductMaster,
+  hasFullAccess,
   hasPermission,
   isBranchWarehouseOperator,
-} from '@/lib/rbac';
+  isWarehouseManagerUser,
+} from './rbac';
 
 export type WarehouseNavTab = {
   href: string;
@@ -36,8 +38,25 @@ export function canAccessWarehouseTab(user: User | null | undefined, href: strin
   return false;
 }
 
-export function visibleWarehouseTabs(user: User | null | undefined): WarehouseNavTab[] {
-  return warehouseNavTabs.filter((tab) => canAccessWarehouseTab(user, tab.href));
+export function shouldHideWarehouseMovementNavOnPath(
+  user: User | null | undefined,
+  pathname: string,
+): boolean {
+  if (!user || hasFullAccess(user) || !isWarehouseManagerUser(user)) return false;
+  return /^\/inventory\/count\/[^/]+$/.test(pathname);
+}
+
+export function visibleWarehouseTabs(
+  user: User | null | undefined,
+  pathname?: string,
+): WarehouseNavTab[] {
+  return warehouseNavTabs.filter((tab) => {
+    if (!canAccessWarehouseTab(user, tab.href)) return false;
+    if (tab.href === '/stock-movements' && pathname && shouldHideWarehouseMovementNavOnPath(user, pathname)) {
+      return false;
+    }
+    return true;
+  });
 }
 
 export function isWarehouseTabActive(pathname: string, href: string): boolean {

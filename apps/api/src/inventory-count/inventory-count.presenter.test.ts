@@ -29,14 +29,14 @@ const hqManager = {
   branchId: null,
 };
 
-describe('inventory-count.presenter — Branch Warehouse discrepancy summary', () => {
-  it('strips item-level financials for Branch Warehouse Manager', () => {
+describe('inventory-count.presenter — warehouse role financial privacy', () => {
+  it('strips financials for Branch and HQ Warehouse managers', () => {
     assert.equal(shouldStripBranchWarehouseInventoryFinancials(branchOperator as any), true);
+    assert.equal(shouldStripBranchWarehouseInventoryFinancials(hqManager as any), true);
     assert.equal(shouldStripBranchWarehouseInventoryFinancials(franchiseOwner as any), false);
-    assert.equal(shouldStripBranchWarehouseInventoryFinancials(hqManager as any), false);
   });
 
-  it('exposes aggregate Сумма расхождений to Branch Warehouse Manager', () => {
+  it('hides aggregate Сумма расхождений from Branch Warehouse Manager', () => {
     const summary = sanitizeInventoryCountSummaryForUser(branchOperator as any, {
       totalProducts: 5,
       countedProducts: 3,
@@ -48,15 +48,33 @@ describe('inventory-count.presenter — Branch Warehouse discrepancy summary', (
       surplusValueKgs: 200,
       shortageValueKgs: -350.5,
     });
-    assert.equal(summary.totalDifferenceValueKgs, -150.5);
+    assert.equal('totalDifferenceValueKgs' in summary, false);
     assert.equal('surplusValueKgs' in summary, false);
     assert.equal('shortageValueKgs' in summary, false);
     assert.equal(summary.shortages, 1);
     assert.equal(summary.overages, 1);
   });
 
-  it('keeps full monetary summary for HQ Warehouse Manager', () => {
+  it('hides monetary summary from HQ Warehouse Manager', () => {
     const summary = sanitizeInventoryCountSummaryForUser(hqManager as any, {
+      totalProducts: 5,
+      countedProducts: 3,
+      remainingProducts: 2,
+      shortages: 1,
+      overages: 0,
+      matched: 2,
+      totalDifferenceValueKgs: 150,
+      surplusValueKgs: 150,
+      shortageValueKgs: 0,
+    });
+    assert.equal('totalDifferenceValueKgs' in summary, false);
+    assert.equal('surplusValueKgs' in summary, false);
+    assert.equal('shortageValueKgs' in summary, false);
+    assert.equal(summary.shortages, 1);
+  });
+
+  it('keeps full monetary summary for Branch CEO', () => {
+    const summary = sanitizeInventoryCountSummaryForUser(franchiseOwner as any, {
       totalProducts: 5,
       countedProducts: 3,
       remainingProducts: 2,
@@ -71,7 +89,7 @@ describe('inventory-count.presenter — Branch Warehouse discrepancy summary', (
     assert.equal(summary.surplusValueKgs, 150);
   });
 
-  it('hides per-item unit cost and discrepancy value from Branch Warehouse', () => {
+  it('hides per-item unit cost and discrepancy value from warehouse roles', () => {
     const item = sanitizeInventoryCountItemForUser(branchOperator as any, {
       id: 'item-1',
       sku: 'SKU-1',
@@ -87,7 +105,7 @@ describe('inventory-count.presenter — Branch Warehouse discrepancy summary', (
     assert.equal(item.systemQuantity, 10);
   });
 
-  it('session sanitize keeps total and strips item costs for Branch Warehouse', () => {
+  it('session sanitize strips monetary fields for warehouse roles', () => {
     const session = sanitizeInventoryCountSessionForUser(branchOperator as any, {
       id: 'session-1',
       sessionNumber: 'IC-001',
@@ -119,16 +137,17 @@ describe('inventory-count.presenter — Branch Warehouse discrepancy summary', (
         },
       ],
     });
-    assert.equal(session.summary.totalDifferenceValueKgs, 50);
+    assert.equal('totalDifferenceValueKgs' in session.summary, false);
     assert.equal('surplusValueKgs' in session.summary, false);
     assert.equal('unitCostKgs' in session.items[0], false);
     assert.equal('differenceValueKgs' in session.items[0], false);
     assert.equal('unitCostKgs' in session.items[1], false);
     assert.equal('differenceValueKgs' in session.items[1], false);
+    assert.equal(session.items[0].differenceQuantity, 1);
   });
 
-  it('zero discrepancy total remains visible as 0', () => {
-    const summary = sanitizeInventoryCountSummaryForUser(branchOperator as any, {
+  it('does not expose zero monetary total to warehouse roles', () => {
+    const summary = sanitizeInventoryCountSummaryForUser(hqManager as any, {
       totalProducts: 1,
       countedProducts: 1,
       remainingProducts: 0,
@@ -137,6 +156,6 @@ describe('inventory-count.presenter — Branch Warehouse discrepancy summary', (
       matched: 1,
       totalDifferenceValueKgs: 0,
     });
-    assert.equal(summary.totalDifferenceValueKgs, 0);
+    assert.equal('totalDifferenceValueKgs' in summary, false);
   });
 });
