@@ -1077,6 +1077,39 @@ enum BonusType {
   PERCENT
 }
 
+enum SalesMotivationBonusType {
+  FIXED
+  PERCENT
+}
+
+enum FullPaymentBonusTrigger {
+  AFTER_CASHIER_PAYMENT_CONFIRMATION
+  AFTER_INVOICE_CLOSED
+}
+
+enum InstallmentBonusTrigger {
+  AFTER_BRANCH_CEO_APPROVAL
+  AFTER_FIRST_PAYMENT
+  AFTER_FULL_REPAYMENT
+}
+
+enum SalesBonusStatus {
+  ACCRUED
+  PENDING
+  APPROVED
+  PAID
+  CANCELLED
+}
+
+enum SalesBonusKind {
+  FULL_PAYMENT_COMMISSION
+  INSTALLMENT_APPROVAL_COMMISSION
+  INSTALLMENT_REPAYMENT_COMMISSION
+  MONTHLY_PLAN
+  AVERAGE_RECEIPT
+  RETURNING_CUSTOMER
+}
+
 enum PayrollStatus {
   DRAFT
   APPROVED
@@ -1131,6 +1164,8 @@ model Branch {
   warranties                Warranty[]
   employeeCompensationRules EmployeeCompensationRule[]
   bonusRules                BonusRule[]
+  salesMotivationVersions   SalesMotivationSettingsVersion[]
+  salesBonusAccruals        SalesBonusAccrual[]
   payrollRecords            PayrollRecord[]
   repairCommissions         RepairCommission[]
   stockRequests             BranchStockRequest[]
@@ -1587,6 +1622,8 @@ model User {
   partsConsumptions                               PartsConsumption[]                  @relation("PartsConsumptionCreator")
   compensationRules                               EmployeeCompensationRule[]          @relation("EmployeeCompensationRuleEmployee")
   salesCommissions                                SalesCommission[]                   @relation("SalesCommissionEmployee")
+  salesMotivationVersionsCreated                  SalesMotivationSettingsVersion[]    @relation("SalesMotivationVersionCreator")
+  salesBonusAccruals                              SalesBonusAccrual[]                 @relation("SalesBonusAccrualEmployee")
   saleInstallmentRequestsSubmitted                SaleInstallmentApproval[]           @relation("SaleInstallmentSubmittedBy")
   saleInstallmentRequestsApproved                 SaleInstallmentApproval[]           @relation("SaleInstallmentApprovedBy")
   saleInstallmentRequestsRejected                 SaleInstallmentApproval[]           @relation("SaleInstallmentRejectedBy")
@@ -4553,6 +4590,98 @@ model BonusRule {
 
   @@index([branchId])
   @@index([role])
+}
+
+model SalesMotivationSettingsVersion {
+  id                                    String                   @id @default(cuid())
+  branchId                              String
+  branch                                Branch                   @relation(fields: [branchId], references: [id])
+  version                               Int
+  isActive                              Boolean                  @default(false)
+  comment                               String?
+  createdById                           String
+  createdBy                             User                     @relation("SalesMotivationVersionCreator", fields: [createdById], references: [id])
+  fullPaymentCommissionPercent          Decimal                  @db.Decimal(8, 4)
+  fullPaymentMinCommission              Decimal                  @default(0) @db.Decimal(14, 2)
+  fullPaymentMaxCommission              Decimal?                 @db.Decimal(14, 2)
+  fullPaymentEffectiveFrom              DateTime                 @default(now())
+  fullPaymentTrigger                    FullPaymentBonusTrigger  @default(AFTER_CASHIER_PAYMENT_CONFIRMATION)
+  installmentApprovalCommissionPercent  Decimal                  @db.Decimal(8, 4)
+  installmentRepaymentCommissionPercent Decimal                  @db.Decimal(8, 4)
+  installmentEffectiveFrom              DateTime                 @default(now())
+  installmentTrigger                    InstallmentBonusTrigger  @default(AFTER_FULL_REPAYMENT)
+  returningCustomerDays                 Int                      @default(30)
+  returningCustomerBonusType            SalesMotivationBonusType @default(FIXED)
+  returningCustomerFixedAmount          Decimal?                 @db.Decimal(14, 2)
+  returningCustomerPercent              Decimal?                 @db.Decimal(8, 4)
+  averageReceiptMinCount                Int                      @default(30)
+  recommendationSource                  String?
+  createdAt                             DateTime                 @default(now())
+  updatedAt                             DateTime                 @updatedAt
+  planLevels                            SalesMotivationPlanLevel[]
+  averageReceiptLevels                  SalesMotivationAverageReceiptLevel[]
+  bonuses                               SalesBonusAccrual[]
+
+  @@unique([branchId, version])
+  @@index([branchId, isActive])
+  @@index([createdById])
+}
+
+model SalesMotivationPlanLevel {
+  id             String                         @id @default(cuid())
+  versionId      String
+  version        SalesMotivationSettingsVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  salesThreshold Decimal                        @db.Decimal(14, 2)
+  bonusAmount    Decimal                        @db.Decimal(14, 2)
+  sortOrder      Int                            @default(0)
+
+  @@index([versionId])
+}
+
+model SalesMotivationAverageReceiptLevel {
+  id                       String                         @id @default(cuid())
+  versionId                String
+  version                  SalesMotivationSettingsVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  averageReceiptThreshold  Decimal                        @db.Decimal(14, 2)
+  bonusAmount              Decimal                        @db.Decimal(14, 2)
+  sortOrder                Int                            @default(0)
+
+  @@index([versionId])
+}
+
+model SalesBonusAccrual {
+  id                 String                         @id @default(cuid())
+  branchId           String
+  branch             Branch                         @relation(fields: [branchId], references: [id])
+  versionId          String
+  version            SalesMotivationSettingsVersion @relation(fields: [versionId], references: [id])
+  employeeId         String
+  employee           User                           @relation("SalesBonusAccrualEmployee", fields: [employeeId], references: [id])
+  saleId             String?
+  kind               SalesBonusKind
+  saleAmount         Decimal                        @default(0) @db.Decimal(14, 2)
+  commissionPercent  Decimal?                       @db.Decimal(8, 4)
+  commissionAmount   Decimal                        @default(0) @db.Decimal(14, 2)
+  status             SalesBonusStatus               @default(ACCRUED)
+  comment            String?
+  saleDate           DateTime?
+  paymentType        String?
+  customerId         String?
+  customerName       String?
+  receiptNumber      String?
+  calculatedAt       DateTime                       @default(now())
+  approvedAt         DateTime?
+  paidAt             DateTime?
+  createdAt          DateTime                       @default(now())
+  updatedAt          DateTime                       @updatedAt
+
+  @@index([branchId])
+  @@index([versionId])
+  @@index([employeeId])
+  @@index([saleId])
+  @@index([status])
+  @@index([kind])
+  @@index([calculatedAt])
 }
 
 model PayrollRecord {

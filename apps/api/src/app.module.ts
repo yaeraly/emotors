@@ -27,6 +27,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { RoyaltyModule } from './royalty/royalty.module';
 import { SalesModule } from './sales/sales.module';
+import { SalesMotivationModule } from './sales-motivation/sales-motivation.module';
 import { ServiceModule } from './service/service.module';
 import { SupplyChainModule } from './supply-chain/supply-chain.module';
 import { FinanceModule } from './finance/finance.module';
@@ -59,6 +60,7 @@ import { BusinessDateModule } from './business-date/business-date.module';
     HqB2bSalesModule,
     BranchAccountantModule,
     SalesModule,
+    SalesMotivationModule,
     ServiceModule,
     KpiModule,
     PayrollModule,

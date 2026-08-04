@@ -232,6 +232,25 @@ export const branchOwnerNavModules: UnifiedNavModule[] = [
     sidebarVisible: canManageUsers,
     pages: [{ href: '/users', labelKey: 'nav.usersEmployees', isVisible: canManageUsers }],
   },
+  {
+    id: 'settings',
+    labelKey: 'nav.settings',
+    defaultHref: '/branch-ceo/settings/motivation',
+    pathPrefixes: ['/branch-ceo/settings'],
+    sidebarVisible: isBranchOwnerUser,
+    pages: [
+      {
+        href: '/branch-ceo/settings/motivation',
+        labelKey: 'nav.salesMotivation',
+        isVisible: isBranchOwnerUser,
+      },
+      {
+        href: '/branch-ceo/settings/motivation/sellers',
+        labelKey: 'nav.salesMotivationSellers',
+        isVisible: isBranchOwnerUser,
+      },
+    ],
+  },
 ];
 
 export const branchSalesManagerNavModules: UnifiedNavModule[] = [
@@ -268,6 +287,7 @@ export const branchSalesManagerNavModules: UnifiedNavModule[] = [
       { href: '/installments', labelKey: 'nav.installments', isVisible: salesVisible },
       { href: '/reservations', labelKey: 'operations.reservations', isVisible: salesVisible },
       { href: '/returns', labelKey: 'operations.returns', isVisible: salesVisible },
+      { href: '/sales/my-bonuses', labelKey: 'nav.myBonuses', isVisible: isBranchSalesManagerUser },
     ],
   },
   {
