@@ -47,7 +47,7 @@ import {
   assertCargoTotalsMatchServer,
   calculateCargoPaymentAmounts,
 } from './cargo-payment-calc.util';
-import { estimateSectionExpenseCostKgs, sumConfirmedExpenseAmountKgs } from './procurement-cost.util';
+import { estimateSectionExpenseCostKgs, sumConfirmedExpenseAmountKgs, isExpenseApprovedForLandedCost, resolveTransportExpensePaymentStatus } from './procurement-cost.util';
 import {
   blocksNewSectionRequest,
   hasActiveSectionRequest,
@@ -682,6 +682,35 @@ export class TransportExpenseService {
         exchangeRate,
       });
 
+      if (isExpenseApprovedForLandedCost(updated.status)) {
+        await this.syncOrderSectionCostFromApprovedExpenses(tx, user, updated);
+        await this.audit(tx, user, 'PROCUREMENT_APPROVED_EXPENSE_INCLUDED_IN_COST', id, null, {
+          procurementOrderId: updated.procurementOrderId,
+          expenseId: updated.id,
+          expenseType: updated.expenseType,
+          approvedAmount: amountKgs,
+          approvalStatus: 'APPROVED',
+          paymentStatus: resolveTransportExpensePaymentStatus({
+            status: updated.status,
+            paidAmountKgs: Number(updated.paidAmountKgs ?? 0),
+            approvedAmountKgs: amountKgs,
+          }),
+          includedInLandedCost: true,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+        if (updated.expenseType === TransportExpenseType.LOCAL_DELIVERY) {
+          await this.audit(tx, user, 'KYRGYZSTAN_TRANSPORT_ALLOCATED', updated.procurementOrderId ?? id, null, {
+            procurementOrderId: updated.procurementOrderId,
+            expenseId: updated.id,
+            approvedAmount: amountKgs,
+            expenseType: updated.expenseType,
+            actorUserId: user.id,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
       if (send) {
         if (!updated.financeAccountId) {
           throw new BadRequestException('Finance account is required before sending to cashier');
@@ -862,7 +891,7 @@ export class TransportExpenseService {
           timestamp: new Date().toISOString(),
         });
       }
-      await this.syncOrderSectionCostFromPaidExpenses(tx, user, updated);
+      await this.syncOrderSectionCostFromApprovedExpenses(tx, user, updated);
       await this.notifications.notifyInTx(tx, user, {
         type: AlertType.TRANSPORT_EXPENSE_PAID,
         entityType: 'ProcurementTransportExpense',
@@ -1275,7 +1304,29 @@ export class TransportExpenseService {
     }
   }
 
-  private async syncOrderSectionCostFromPaidExpenses(
+  syncApprovedSectionCostsInTx(
+    tx: Tx,
+    user: AuthUser,
+    expense: {
+      id: string;
+      procurementOrderId: string | null;
+      expenseType: TransportExpenseType;
+      amountKgs: unknown;
+    },
+  ) {
+    return this.syncOrderSectionCostFromApprovedExpenses(tx, user, expense);
+  }
+
+  async syncApprovedSectionCostsForExpense(user: AuthUser, expenseId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.procurementTransportExpense.findUnique({ where: { id: expenseId } });
+      if (!expense?.procurementOrderId) return { synced: false };
+      await this.syncOrderSectionCostFromApprovedExpenses(tx, user, expense);
+      return { synced: true, procurementOrderId: expense.procurementOrderId };
+    });
+  }
+
+  private async syncOrderSectionCostFromApprovedExpenses(
     tx: Tx,
     user: AuthUser,
     expense: {
@@ -1407,8 +1458,21 @@ export class TransportExpenseService {
         confirmedSectionCostKgs: confirmedKgs,
         paidSectionAmount: section.paidAmount,
         expenseType: expense.expenseType,
-        note: 'Confirmed paid expenses included in inventory landed cost',
+        note: 'HQ Accountant-approved expenses included in inventory landed cost',
       });
+      if (expense.expenseType === TransportExpenseType.LOCAL_DELIVERY && confirmedKgs > 0) {
+        await this.audit(tx, user, 'KYRGYZSTAN_TRANSPORT_ALLOCATED', order.id, {
+          localTransportKgs: Number(order.localTransportKgs),
+        }, {
+          procurementOrderId: order.id,
+          expenseId: expense.id,
+          approvedAmount: confirmedKgs,
+          expenseType: expense.expenseType,
+          allocationStatus: 'READY_TO_CALCULATE',
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
 
     try {
@@ -1481,7 +1545,7 @@ export class TransportExpenseService {
           where: { procurementOrderId: orderId, expenseType },
         });
         if (anchor) {
-          await this.syncOrderSectionCostFromPaidExpenses(tx, user, anchor);
+          await this.syncOrderSectionCostFromApprovedExpenses(tx, user, anchor);
         }
       }
 

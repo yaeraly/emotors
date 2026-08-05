@@ -27,6 +27,7 @@ import {
   expensesFullySettled,
   resolveProcurementCostConfirmationStatus,
   sumConfirmedExpenseAmountKgs,
+  buildProcurementImportExpenseLines,
 } from './procurement-cost.util';
 import { resolveProcurementLogisticsInput } from './transport-logistics.util';
 import { summarizeSupplierPayments } from './supplier-payment.util';
@@ -507,6 +508,18 @@ export class LandedCostService {
       include: {
         items: { where: { status: ProcurementOrderItemStatus.ACTIVE }, orderBy: { createdAt: 'asc' } },
         landedCostSnapshots: { orderBy: { calculatedAt: 'desc' } },
+        transportExpenses: {
+          select: {
+            expenseType: true,
+            amount: true,
+            currency: true,
+            exchangeRate: true,
+            amountKgs: true,
+            calculatedAmountKgs: true,
+            paidAmountKgs: true,
+            status: true,
+          },
+        },
       },
     });
     if (!order) throw new NotFoundException('Procurement order not found');
@@ -514,6 +527,29 @@ export class LandedCostService {
     const missingWeightItems = order.items.filter(
       (item) => item.weightStatus !== ProcurementItemWeightStatus.CONFIRMED,
     );
+
+    const estimatedRate = Number(order.weightedAverageYuanRate ?? order.defaultYuanRate ?? 0);
+    const importExpenseLines = buildProcurementImportExpenseLines({
+      estimatedYuanRate: estimatedRate,
+      supplier: {
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        supplierInvoiceNumber: order.supplierInvoiceNumber,
+        invoiceReviewStatus: order.invoiceReviewStatus,
+        supplierPaymentStatus: order.supplierPaymentStatus,
+        totalYuan: Number(order.totalYuan ?? 0),
+        totalPaidYuan: Number(order.totalPaidYuan ?? 0),
+        estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
+      },
+      transportExpenses: (order.transportExpenses ?? []).map((row) => ({
+        expenseType: row.expenseType,
+        amount: Number(row.amount),
+        currency: row.currency,
+        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+        amountKgs: Number(row.amountKgs ?? row.calculatedAmountKgs ?? 0),
+        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
+        status: row.status,
+      })),
+    });
 
     return {
       procurementOrderId: order.id,
@@ -538,6 +574,7 @@ export class LandedCostService {
         unitWeightKg: item.unitWeightKg,
       })),
       allocationMethods: DEFAULT_EXPENSE_ALLOCATION,
+      importExpenseLines,
       totalConfirmedExpenses: {
         chinaDomesticTransportKgs: Number(order.chinaDomesticTransportKgs ?? 0),
         cargoKgs: Number(order.totalCargoCostKgs ?? 0),

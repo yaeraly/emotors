@@ -536,6 +536,7 @@ export class AccountantBillsService {
           recipientRoles: [Role.HQ_ACCOUNTANT, Role.CEO, Role.FINANCE_MANAGER],
         });
         if (expense.procurementOrderId) {
+          await this.transportExpenses.syncApprovedSectionCostsInTx(tx, user, updated);
           await this.notifyWarehouseWhenExpensesProcessed(
             tx,
             user,

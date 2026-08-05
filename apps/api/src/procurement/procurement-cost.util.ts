@@ -36,10 +36,8 @@ const OPEN_EXPENSE = new Set<string>([
   TransportExpenseStatus.PAID,
 ]);
 
-/** Expense statuses whose approved invoice amount counts toward inventory landed cost. */
-const OBLIGATION_EXPENSE = new Set<string>([
-  TransportExpenseStatus.WAITING_ACCOUNTANT,
-  TransportExpenseStatus.UNDER_REVIEW,
+/** Transport expense statuses approved by HQ Accountant and eligible for landed cost. */
+export const APPROVED_EXPENSE_FOR_LANDED_COST = new Set<string>([
   TransportExpenseStatus.PENDING_CASHIER,
   TransportExpenseStatus.PARTIALLY_PAID,
   TransportExpenseStatus.PAYMENT_POSTPONED,
@@ -47,6 +45,42 @@ const OBLIGATION_EXPENSE = new Set<string>([
   'COMPLETED',
   'CONFIRMED',
 ]);
+
+/** @deprecated Use {@link APPROVED_EXPENSE_FOR_LANDED_COST} */
+const OBLIGATION_EXPENSE = APPROVED_EXPENSE_FOR_LANDED_COST;
+
+export function isExpenseApprovedForLandedCost(status: string | null | undefined): boolean {
+  return APPROVED_EXPENSE_FOR_LANDED_COST.has(String(status ?? '').toUpperCase());
+}
+
+export function resolveTransportExpenseApprovalStatus(
+  status: string | null | undefined,
+): 'DRAFT' | 'WAITING_FOR_ACCOUNTANT' | 'APPROVED' | 'REJECTED' {
+  const normalized = String(status ?? '').toUpperCase();
+  if (normalized === TransportExpenseStatus.REJECTED || normalized === TransportExpenseStatus.CANCELLED) {
+    return 'REJECTED';
+  }
+  if (normalized === TransportExpenseStatus.DRAFT) return 'DRAFT';
+  if (isExpenseApprovedForLandedCost(normalized)) return 'APPROVED';
+  return 'WAITING_FOR_ACCOUNTANT';
+}
+
+export function resolveTransportExpensePaymentStatus(input: {
+  status: string | null | undefined;
+  paidAmountKgs?: number | null;
+  approvedAmountKgs?: number | null;
+}): 'UNPAID' | 'PARTIALLY_PAID' | 'POSTPONED' | 'PAID' {
+  const normalized = String(input.status ?? '').toUpperCase();
+  if (normalized === TransportExpenseStatus.PAYMENT_POSTPONED) return 'POSTPONED';
+  if (normalized === TransportExpenseStatus.PAID || normalized === 'COMPLETED' || normalized === 'CONFIRMED') {
+    return 'PAID';
+  }
+  if (normalized === TransportExpenseStatus.PARTIALLY_PAID) return 'PARTIALLY_PAID';
+  const approved = Math.max(0, Number(input.approvedAmountKgs ?? 0));
+  const paid = Math.max(0, Number(input.paidAmountKgs ?? 0));
+  if (approved > 0 && paid > 0.009 && paid + 0.009 < approved) return 'PARTIALLY_PAID';
+  return 'UNPAID';
+}
 
 function paymentKgs(payment: SupplierPaymentCostInput): number {
   if (payment.actualPaidKgs != null && Number(payment.actualPaidKgs) > 0) {
@@ -173,7 +207,7 @@ function expenseAmountKgs(expense: SectionExpenseCostInput, estimatedYuanRate: n
 /**
  * Sum approved invoice obligation amounts in inventory base currency (KGS).
  * Uses the full approved/requested amount — never the cash already paid.
- * Draft / returned / rejected / cancelled rows are excluded from landed cost.
+ * Only HQ Accountant-approved rows count; draft / waiting / rejected are excluded.
  */
 export function sumConfirmedExpenseAmountKgs(
   expenses: SectionExpenseCostInput[],
@@ -182,7 +216,7 @@ export function sumConfirmedExpenseAmountKgs(
   return roundMoney(
     expenses.reduce((sum, row) => {
       const status = String(row.status ?? '').toUpperCase();
-      if (!OBLIGATION_EXPENSE.has(status)) return sum;
+      if (!isExpenseApprovedForLandedCost(status)) return sum;
       return sum + expenseAmountKgs(row, estimatedYuanRate);
     }, 0),
   );
@@ -306,4 +340,159 @@ export function expensesFullySettled(
   const required = sectionTotals.reduce((sum, total) => sum + Math.max(0, Number(total || 0)), 0);
   if (!(required > 0)) return open.length === 0;
   return paidAmount + 0.009 >= required;
+}
+
+export type ProcurementImportExpenseLine = {
+  requestType:
+    | 'SUPPLIER_PAYMENT'
+    | 'CHINA_DOMESTIC_TRANSPORT'
+    | 'CARGO_PAYMENT'
+    | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  displayName: string;
+  expenseType?: string;
+  currency: string;
+  exchangeRate: number | null;
+  approvedAmountKgs: number;
+  paidAmountKgs: number;
+  remainingAmountKgs: number;
+  approvalStatus: 'DRAFT' | 'WAITING_FOR_ACCOUNTANT' | 'APPROVED' | 'REJECTED' | 'NOT_CREATED';
+  paymentStatus: 'UNPAID' | 'PARTIALLY_PAID' | 'POSTPONED' | 'PAID';
+  includedInLandedCost: boolean;
+};
+
+const IMPORT_EXPENSE_DISPLAY: Record<ProcurementImportExpenseLine['requestType'], string> = {
+  SUPPLIER_PAYMENT: 'Платежи поставщику',
+  CHINA_DOMESTIC_TRANSPORT: 'Внутренний транспорт Китая',
+  CARGO_PAYMENT: 'Оплата карго',
+  KYRGYZSTAN_DOMESTIC_TRANSPORT: 'Внутренний транспорт Кыргызстана',
+};
+
+export function buildProcurementImportExpenseLines(input: {
+  estimatedYuanRate: number;
+  supplier?: {
+    invoiceSentToAccountantAt?: Date | string | null;
+    supplierInvoiceNumber?: string | null;
+    invoiceReviewStatus?: string | null;
+    supplierPaymentStatus?: string | null;
+    totalYuan?: number | null;
+    totalPaidYuan?: number | null;
+    estimatedSupplierCostKgs?: number | null;
+  } | null;
+  transportExpenses?: Array<{
+    expenseType: string;
+    amount: number | string;
+    currency?: string | null;
+    exchangeRate?: number | string | null;
+    amountKgs?: number | string | null;
+    paidAmountKgs?: number | string | null;
+    status: string;
+  }>;
+}): ProcurementImportExpenseLine[] {
+  const rate = Math.max(0, Number(input.estimatedYuanRate || 0));
+  const expenses = input.transportExpenses ?? [];
+
+  const byType = (type: string) =>
+    expenses
+      .filter((row) => String(row.expenseType) === type)
+      .filter((row) => String(row.status).toUpperCase() !== TransportExpenseStatus.CANCELLED)
+      .filter((row) => String(row.status).toUpperCase() !== TransportExpenseStatus.DRAFT)
+      .map((row) => ({
+        amount: Number(row.amount || 0),
+        currency: row.currency,
+        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+        amountKgs: row.amountKgs != null ? Number(row.amountKgs) : null,
+        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
+        status: row.status,
+      }));
+
+  function transportLine(
+    requestType: ProcurementImportExpenseLine['requestType'],
+    expenseType: string,
+    defaultCurrency: string,
+  ): ProcurementImportExpenseLine {
+    const rows = byType(expenseType);
+    const approvedAmountKgs = sumConfirmedExpenseAmountKgs(rows, rate);
+    const dominant = rows.find((row) => isExpenseApprovedForLandedCost(row.status)) ?? rows[0];
+    const approvalStatus: ProcurementImportExpenseLine['approvalStatus'] =
+      rows.length === 0
+        ? 'NOT_CREATED'
+        : rows.every((row) => resolveTransportExpenseApprovalStatus(row.status) === 'REJECTED')
+          ? 'REJECTED'
+          : rows.some((row) => isExpenseApprovedForLandedCost(row.status))
+            ? 'APPROVED'
+            : 'WAITING_FOR_ACCOUNTANT';
+    const paidAmountKgs = roundMoney(
+      rows.reduce((sum, row) => sum + Math.max(0, Number(row.paidAmountKgs ?? 0)), 0),
+    );
+    const paymentStatus = dominant
+      ? resolveTransportExpensePaymentStatus({
+          status: dominant.status,
+          paidAmountKgs,
+          approvedAmountKgs,
+        })
+      : 'UNPAID';
+    return {
+      requestType,
+      displayName: IMPORT_EXPENSE_DISPLAY[requestType],
+      expenseType,
+      currency: String(dominant?.currency || defaultCurrency).toUpperCase(),
+      exchangeRate: dominant?.exchangeRate ?? (defaultCurrency === 'CNY' ? rate : null),
+      approvedAmountKgs,
+      paidAmountKgs,
+      remainingAmountKgs: roundMoney(Math.max(approvedAmountKgs - paidAmountKgs, 0)),
+      approvalStatus,
+      paymentStatus,
+      includedInLandedCost: approvalStatus === 'APPROVED' && approvedAmountKgs > 0,
+    };
+  }
+
+  const supplier = input.supplier;
+  const supplierPresent = Boolean(
+    supplier?.invoiceSentToAccountantAt || supplier?.supplierInvoiceNumber?.trim(),
+  );
+  const supplierReview = String(supplier?.invoiceReviewStatus ?? '').toUpperCase();
+  const supplierLedger = String(supplier?.supplierPaymentStatus ?? '').toUpperCase();
+  const supplierApproved =
+    supplierPresent &&
+    supplierReview !== 'REJECTED' &&
+    (supplierReview === 'APPROVED' ||
+      ['AWAITING_CASHIER', 'PARTIALLY_PAID', 'PAYMENT_POSTPONED', 'PAID', 'OVERPAID'].includes(
+        supplierLedger,
+      ));
+  const supplierApprovedKgs = roundMoney(
+    Math.max(0, Number(supplier?.estimatedSupplierCostKgs ?? 0) || Number(supplier?.totalYuan ?? 0) * rate),
+  );
+  const supplierPaidKgs = roundMoney(Math.max(0, Number(supplier?.totalPaidYuan ?? 0) * rate));
+  const supplierLine: ProcurementImportExpenseLine = {
+    requestType: 'SUPPLIER_PAYMENT',
+    displayName: IMPORT_EXPENSE_DISPLAY.SUPPLIER_PAYMENT,
+    currency: 'CNY',
+    exchangeRate: rate > 0 ? rate : null,
+    approvedAmountKgs: supplierApproved ? supplierApprovedKgs : 0,
+    paidAmountKgs: supplierPaidKgs,
+    remainingAmountKgs: roundMoney(Math.max(supplierApprovedKgs - supplierPaidKgs, 0)),
+    approvalStatus: !supplierPresent
+      ? 'NOT_CREATED'
+      : supplierReview === 'REJECTED'
+        ? 'REJECTED'
+        : supplierApproved
+          ? 'APPROVED'
+          : 'WAITING_FOR_ACCOUNTANT',
+    paymentStatus:
+      supplierLedger === 'PAYMENT_POSTPONED'
+        ? 'POSTPONED'
+        : supplierLedger === 'PAID' || supplierLedger === 'OVERPAID'
+          ? 'PAID'
+          : supplierLedger === 'PARTIALLY_PAID'
+            ? 'PARTIALLY_PAID'
+            : 'UNPAID',
+    includedInLandedCost: supplierApproved && supplierApprovedKgs > 0,
+  };
+
+  return [
+    supplierLine,
+    transportLine('CHINA_DOMESTIC_TRANSPORT', 'DOMESTIC_CHINA_TRANSPORT', 'CNY'),
+    transportLine('CARGO_PAYMENT', 'INTERNATIONAL_FREIGHT', 'KGS'),
+    transportLine('KYRGYZSTAN_DOMESTIC_TRANSPORT', 'LOCAL_DELIVERY', 'KGS'),
+  ];
 }

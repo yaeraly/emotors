@@ -72,7 +72,7 @@ export type HqReceivingInvoiceGateResult = {
 };
 
 export const HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE =
-  'Невозможно принять товар на HQ склад.\n\nНе все закупочные и импортные расходы обработаны HQ Accountant.';
+  'Невозможно принять товар на HQ склад.\n\nНе все импортные расходы одобрены HQ Accountant.';
 
 export const CARGO_RECEIPT_INCOMPLETE_MESSAGE =
   'Fill cargo receipt before receiving to HQ warehouse';
@@ -317,6 +317,18 @@ export function evaluateSupplierInvoiceSection(
     };
   }
 
+  if (review === 'APPROVED') {
+    return {
+      requestType,
+      displayName,
+      state: ledger === 'UNPAID' || !ledger ? 'approved' : 'open',
+      status: ledger || 'APPROVED',
+      closed: false,
+      exists: true,
+      accountantProcessed: true,
+    };
+  }
+
   return {
     requestType,
     displayName,
@@ -492,9 +504,9 @@ export function buildHqReceivingBlockedMessages(
   blockingInvoices: HqReceivingInvoicePrerequisite[],
 ): { ru: string; ky: string; en: string } {
   const list = formatBlockedInvoiceLines(blockingInvoices);
-  const ru = `${HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE}\n\nНе обработано:\n${list || '• —'}`;
-  const ky = `HQ складга товар кабыл алуу мүмкүн эмес.\n\nБардык сатып алуу жана импорт чыгымдары HQ Accountant тарабынан иштелген эмес.\n\nИштелген эмес:\n${list || '• —'}`;
-  const en = `Cannot receive goods into the HQ warehouse.\n\nNot all procurement and import expenses have been processed by HQ Accountant.\n\nNot processed:\n${list || '• —'}`;
+  const ru = `${HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE}\n\nНе одобрено:\n${list || '• —'}`;
+  const ky = `HQ складга товар кабыл алуу мүмкүн эмес.\n\nБардык импорт чыгымдары HQ Accountant тарабынан бекитилген эмес.\n\nБекитилген эмес:\n${list || '• —'}`;
+  const en = `Cannot receive goods into the HQ warehouse.\n\nNot all import expenses have been approved by HQ Accountant.\n\nNot approved:\n${list || '• —'}`;
   return { ru, ky, en };
 }
 

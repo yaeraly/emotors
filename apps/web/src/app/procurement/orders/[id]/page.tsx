@@ -114,6 +114,20 @@ type ProcurementOrder = {
   totalCargoCostUsd?: string | number;
   totalCargoCostKgs?: string | number;
   confirmedCargoPaymentKgs?: number;
+  confirmedLocalTransportKgs?: number;
+  confirmedChinaDomesticKgs?: number;
+  importExpenseLines?: Array<{
+    requestType: string;
+    displayName: string;
+    currency: string;
+    exchangeRate: number | null;
+    approvedAmountKgs: number;
+    paidAmountKgs: number;
+    remainingAmountKgs: number;
+    approvalStatus: string;
+    paymentStatus: string;
+    includedInLandedCost: boolean;
+  }>;
   totalImportLogisticsKgs?: number;
   importLogisticsBreakdown?: {
     chinaDomesticTransportKgs: number;
@@ -423,6 +437,21 @@ function ProcurementOrderDetailPageContent() {
       || svhForm.notes !== (svh.notes ?? '');
   }, [order?.svhToHqTransport, svhForm]);
 
+  const confirmedLocalTransportKgs = useMemo(() => {
+    const fromApi = Math.max(
+      Number(order?.confirmedLocalTransportKgs ?? 0),
+      Number(order?.importLogisticsBreakdown?.localTransportKgs ?? 0),
+      Number(order?.localTransportKgs ?? 0),
+    );
+    if (fromApi > 0) return fromApi;
+    return previewSvhTransportKgs;
+  }, [
+    order?.confirmedLocalTransportKgs,
+    order?.importLogisticsBreakdown?.localTransportKgs,
+    order?.localTransportKgs,
+    previewSvhTransportKgs,
+  ]);
+
   const previewTotals = useMemo(() => {
     try {
       const persistedCargoKgs = Math.max(
@@ -430,13 +459,16 @@ function ProcurementOrderDetailPageContent() {
         Number(order?.totalCargoCostKgs ?? 0),
         Number(order?.chinaExportTransportKgs ?? 0),
       );
+      const persistedChinaKgs = Math.max(
+        Number(order?.confirmedChinaDomesticKgs ?? 0),
+        previewChinaDomesticTransportKgs,
+      );
       return calculateLandedCosts(
         previewItems,
         {
-          chinaDomesticTransportKgs: previewChinaDomesticTransportKgs,
-          // Prefer confirmed/persisted cargo; rate×weight may still raise it via cargo config.
+          chinaDomesticTransportKgs: persistedChinaKgs,
           chinaExportTransportKgs: persistedCargoKgs,
-          localTransportKgs: previewSvhTransportKgs,
+          localTransportKgs: confirmedLocalTransportKgs,
           packagingCostKgs: Number(logisticsForm.packagingCostKgs || 0),
           customsCostKgs: Number(logisticsForm.customsCostKgs || 0),
           insuranceCostKgs: Number(logisticsForm.insuranceCostKgs || 0),
@@ -452,8 +484,9 @@ function ProcurementOrderDetailPageContent() {
     previewItems,
     logisticsForm,
     previewChinaDomesticTransportKgs,
-    previewSvhTransportKgs,
+    confirmedLocalTransportKgs,
     order?.confirmedCargoPaymentKgs,
+    order?.confirmedChinaDomesticKgs,
     order?.totalCargoCostKgs,
     order?.chinaExportTransportKgs,
   ]);
@@ -472,9 +505,12 @@ function ProcurementOrderDetailPageContent() {
   }, [order?.confirmedCargoPaymentKgs, order?.importLogisticsBreakdown?.cargoPaymentKgs]);
 
   const importCostBreakdown = useMemo(() => {
-    const chinaDomestic = previewChinaDomesticTransportKgs;
+    const chinaDomestic = Math.max(
+      Number(order?.confirmedChinaDomesticKgs ?? 0),
+      previewChinaDomesticTransportKgs,
+    );
     const cargoReceipt = confirmedCargoPaymentKgs;
-    const svhTransport = previewSvhTransportKgs;
+    const svhTransport = confirmedLocalTransportKgs;
     const insurance = Number(
       order?.importLogisticsBreakdown?.insuranceCostKgs ?? logisticsForm.insuranceCostKgs ?? 0,
     );
@@ -516,7 +552,8 @@ function ProcurementOrderDetailPageContent() {
   }, [
     previewChinaDomesticTransportKgs,
     confirmedCargoPaymentKgs,
-    previewSvhTransportKgs,
+    confirmedLocalTransportKgs,
+    order?.confirmedChinaDomesticKgs,
     logisticsForm,
     order?.importLogisticsBreakdown,
     order?.totalImportLogisticsKgs,
@@ -1256,6 +1293,41 @@ function ProcurementOrderDetailPageContent() {
                 value={formatKgs(importCostBreakdown.totalImportLogistics)}
                 highlight
               />
+            </div>
+          ) : null}
+          {(order.importExpenseLines ?? []).length > 0 ? (
+            <div className="mt-6 overflow-x-auto">
+              <p className="mb-3 text-sm font-semibold text-slate-700">{t('procurement.orders.importExpenseDetailsTitle')}</p>
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2">{t('procurement.transportExpense.expenseType')}</th>
+                    <th className="px-3 py-2 text-right">{t('procurement.orders.approvedAmountKgs')}</th>
+                    <th className="px-3 py-2 text-right">{t('procurement.orders.paidAmountKgs')}</th>
+                    <th className="px-3 py-2 text-right">{t('procurement.orders.remainingAmountKgs')}</th>
+                    <th className="px-3 py-2">{t('procurement.orders.approvalStatus')}</th>
+                    <th className="px-3 py-2">{t('procurement.orders.paymentStatus')}</th>
+                    <th className="px-3 py-2">{t('procurement.orders.includedInLandedCost')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(order.importExpenseLines ?? []).map((line) => (
+                    <tr key={line.requestType}>
+                      <td className="px-3 py-2">{line.displayName}</td>
+                      <td className="px-3 py-2 text-right">{formatKgs(line.approvedAmountKgs)}</td>
+                      <td className="px-3 py-2 text-right">{formatKgs(line.paidAmountKgs)}</td>
+                      <td className="px-3 py-2 text-right">{formatKgs(line.remainingAmountKgs)}</td>
+                      <td className="px-3 py-2">{t(`procurement.orders.expenseApprovalStatus.${line.approvalStatus}`)}</td>
+                      <td className="px-3 py-2">{t(`procurement.orders.expensePaymentStatus.${line.paymentStatus}`)}</td>
+                      <td className="px-3 py-2">
+                        {line.includedInLandedCost
+                          ? t('procurement.orders.includedInLandedCostYes')
+                          : t('procurement.orders.includedInLandedCostNo')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           ) : null}
           <p className="mt-4 text-sm text-slate-500">{t('procurement.orders.weightAllocationHint')}</p>

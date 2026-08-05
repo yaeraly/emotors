@@ -113,6 +113,7 @@ console.assert(isTransportExpenseAccountantProcessed(TransportExpenseStatus.WAIT
   const result = gate({
     supplier: {
       ...processedSupplier,
+      invoiceReviewStatus: 'UNDER_REVIEW',
       supplierPaymentStatus: 'AWAITING_ACCOUNTANT',
     },
   });
@@ -165,7 +166,7 @@ console.assert(isTransportExpenseAccountantProcessed(TransportExpenseStatus.WAIT
   const messages = buildHqReceivingBlockedMessages(result.blockingInvoices);
   console.assert(messages.ru.includes('Оплата карго'), '5. message lists cargo');
   console.assert(messages.ru.includes('Невозможно принять товар на HQ склад'), '5. blocked header');
-  console.assert(messages.ru.includes('Не обработано'), '5. unprocessed list header');
+  console.assert(messages.ru.includes('Не одобрено'), '5. message lists unapproved header');
 }
 
 // 6. Fully paid counts as processed
@@ -212,7 +213,11 @@ console.assert(isTransportExpenseAccountantProcessed(TransportExpenseStatus.WAIT
 // 9. Waiting-for-accountant does not count as processed
 {
   const result = gate({
-    supplier: { ...processedSupplier, supplierPaymentStatus: 'AWAITING_ACCOUNTANT' },
+    supplier: {
+      ...processedSupplier,
+      invoiceReviewStatus: 'UNDER_REVIEW',
+      supplierPaymentStatus: 'AWAITING_ACCOUNTANT',
+    },
     china: TransportExpenseStatus.WAITING_ACCOUNTANT,
     cargo: TransportExpenseStatus.WAITING_ACCOUNTANT,
     kg: TransportExpenseStatus.WAITING_ACCOUNTANT,
@@ -259,6 +264,18 @@ console.assert(isTransportExpenseAccountantProcessed(TransportExpenseStatus.WAIT
   );
 }
 
+// Supplier invoice approved (unpaid) allows receive
+{
+  const approvedUnpaid = gate({
+    supplier: {
+      ...processedSupplier,
+      supplierPaymentStatus: 'AWAITING_ACCOUNTANT',
+      invoiceReviewStatus: 'APPROVED',
+    },
+  });
+  console.assert(approvedUnpaid.canReceiveToHq === true, 'supplier approved unpaid allows receive');
+}
+
 // Missing supplier blocks
 {
   const result = gate({ supplier: null });
@@ -299,7 +316,7 @@ const blockedReadiness = buildHqReceivingValidationResult({
 console.assert(blockedReadiness.canReceiveToHq === false, 'missing invoices block validation');
 console.assert(hqReceivingBlockedMessage(blockedReadiness) !== null, 'blocked message present');
 console.assert(
-  (hqReceivingBlockedMessage(blockedReadiness) ?? '').includes('Не обработано'),
+  (hqReceivingBlockedMessage(blockedReadiness) ?? '').includes('Не одобрено'),
   'blocked message lists unprocessed',
 );
 

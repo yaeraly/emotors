@@ -504,7 +504,7 @@ function ChinaReceivingEditableView({
     if (row.state === 'partial') return t('chinaReceiving.invoicePartial');
     if (row.state === 'postponed') return t('chinaReceiving.invoicePostponed');
     if (row.state === 'closed') return t('chinaReceiving.invoiceClosed');
-    if (row.accountantProcessed || row.state === 'approved') return t('chinaReceiving.invoiceProcessed');
+    if (row.accountantProcessed || row.state === 'approved') return t('chinaReceiving.invoiceApproved');
     return t('chinaReceiving.invoiceAwaitingAccountant');
   }
 

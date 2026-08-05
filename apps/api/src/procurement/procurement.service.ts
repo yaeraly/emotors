@@ -77,7 +77,10 @@ import {
   isConfirmedSupplierPayment,
   summarizeSupplierPayments,
 } from './supplier-payment.util';
-import { sumConfirmedExpenseAmountKgs } from './procurement-cost.util';
+import {
+  buildProcurementImportExpenseLines,
+  sumConfirmedExpenseAmountKgs,
+} from './procurement-cost.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import {
   canUnlockProcurementOrder,
@@ -2297,7 +2300,11 @@ export class ProcurementService {
           procurementOrderId: true,
           expenseType: true,
           amount: true,
+          currency: true,
+          exchangeRate: true,
           amountKgs: true,
+          calculatedAmountKgs: true,
+          paidAmountKgs: true,
           status: true,
         },
       },
@@ -3735,40 +3742,66 @@ export class ProcurementService {
         ? Number(order.weightedAverageYuanRate)
         : Number(order.defaultYuanRate || 0);
 
-    const cargoExpenseRows = await this.prisma.procurementTransportExpense.findMany({
-      where: {
-        procurementOrderId: order.id,
-        expenseType: TransportExpenseType.INTERNATIONAL_FREIGHT,
-        status: { not: 'CANCELLED' },
-      },
-      select: {
-        amount: true,
-        currency: true,
-        exchangeRate: true,
-        amountKgs: true,
-        paidAmountKgs: true,
-        calculatedAmountKgs: true,
-        status: true,
-      },
+    const cargoExpenseRows = (order.transportExpenses ?? []).filter(
+      (row: { expenseType: string }) => row.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT,
+    );
+    const chinaExpenseRows = (order.transportExpenses ?? []).filter(
+      (row: { expenseType: string }) => row.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT,
+    );
+    const localExpenseRows = (order.transportExpenses ?? []).filter(
+      (row: { expenseType: string }) => row.expenseType === TransportExpenseType.LOCAL_DELIVERY,
+    );
+    const mapExpenseCostRow = (row: {
+      amount: unknown;
+      currency?: string | null;
+      exchangeRate?: unknown;
+      amountKgs?: unknown;
+      calculatedAmountKgs?: unknown;
+      paidAmountKgs?: unknown;
+      status: string;
+    }) => ({
+      amount: Number(row.amount),
+      currency: row.currency,
+      exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+      amountKgs: Number(row.amountKgs || row.calculatedAmountKgs || 0),
+      paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
+      status: row.status,
     });
-    const confirmedCargoFromPayments = sumConfirmedExpenseAmountKgs(
-      cargoExpenseRows.map((row) => ({
-        amount: Number(row.amount),
-        currency: row.currency,
-        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
-        amountKgs: Number(row.amountKgs || row.calculatedAmountKgs || 0),
-        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
-        status: row.status,
-      })),
+    const confirmedCargoFromExpenses = sumConfirmedExpenseAmountKgs(
+      cargoExpenseRows.map(mapExpenseCostRow),
       estimatedRate,
     );
-    // Display/total cargo KGS: confirmed paid cargo payments only (never draft/pending).
-    const confirmedCargoPaymentKgs = confirmedCargoFromPayments;
-    const chinaDomesticKgs = Number(order.chinaDomesticTransportKgs || 0);
+    const confirmedChinaFromExpenses = sumConfirmedExpenseAmountKgs(
+      chinaExpenseRows.map(mapExpenseCostRow),
+      estimatedRate,
+    );
+    const confirmedLocalFromExpenses = sumConfirmedExpenseAmountKgs(
+      localExpenseRows.map(mapExpenseCostRow),
+      estimatedRate,
+    );
+    const confirmedCargoPaymentKgs = confirmedCargoFromExpenses;
+    const chinaDomesticKgs = Math.max(
+      confirmedChinaFromExpenses,
+      Number(order.chinaDomesticTransportKgs || 0),
+    );
     const localTransportKgs = Math.max(
+      confirmedLocalFromExpenses,
       Number(order.localTransportKgs || 0),
       Number(order.svhToHqTransport?.transportCostKgs || 0),
     );
+    const importExpenseLines = buildProcurementImportExpenseLines({
+      estimatedYuanRate: estimatedRate,
+      supplier: {
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        supplierInvoiceNumber: order.supplierInvoiceNumber,
+        invoiceReviewStatus: order.invoiceReviewStatus,
+        supplierPaymentStatus: order.supplierPaymentStatus,
+        totalYuan: Number(order.totalYuan ?? 0),
+        totalPaidYuan: Number(order.totalPaidYuan ?? 0),
+        estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
+      },
+      transportExpenses: order.transportExpenses ?? [],
+    });
     const customsCostKgs = Number(order.customsCostKgs || 0);
     const insuranceCostKgs = Number(order.insuranceCostKgs || 0);
     const bankFeeCostKgs = Number(order.bankFeeCostKgs || 0);
@@ -3809,11 +3842,14 @@ export class ProcurementService {
       chinaDomesticTransportUnlockExpiresAt: order.chinaDomesticTransportUnlockExpiresAt,
       chinaDomesticTransportUnlockReason: order.chinaDomesticTransportUnlockReason,
       chinaDomesticTransportUnlockedBy: order.chinaDomesticTransportUnlockedBy,
-      localTransportKgs: Number(order.localTransportKgs ?? 0),
-      // Keep stored rate-based cargo fields for receiving/edit forms; expose confirmed paid separately.
-      totalCargoCostKgs: Number(order.totalCargoCostKgs ?? 0),
-      chinaExportTransportKgs: Number(order.chinaExportTransportKgs ?? 0),
+      localTransportKgs: Number(localTransportKgs),
+      confirmedLocalTransportKgs: confirmedLocalFromExpenses,
+      confirmedChinaDomesticKgs: confirmedChinaFromExpenses,
+      // Keep stored rate-based cargo fields for receiving/edit forms; expose confirmed approved separately.
+      totalCargoCostKgs: Math.max(Number(order.totalCargoCostKgs ?? 0), confirmedCargoPaymentKgs),
+      chinaExportTransportKgs: Math.max(Number(order.chinaExportTransportKgs ?? 0), confirmedCargoPaymentKgs),
       confirmedCargoPaymentKgs,
+      importExpenseLines,
       totalImportLogisticsKgs,
       importLogisticsBreakdown: {
         chinaDomesticTransportKgs: chinaDomesticKgs,

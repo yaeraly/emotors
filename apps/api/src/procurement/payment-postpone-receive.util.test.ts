@@ -65,6 +65,28 @@ function allFour(statuses: {
   console.assert(unpaid.canReceiveToHq === false, '1 waiting invoices block receive');
 }
 
+// 1b. Supplier approved but unpaid allows receive
+{
+  const supplierApproved = validateHqReceivingInvoicePrerequisites({
+    procurementOrderId: 'po-1',
+    transportExpenses: [
+      expense(TransportExpenseType.DOMESTIC_CHINA_TRANSPORT, TransportExpenseStatus.PENDING_CASHIER, 25000),
+      expense(TransportExpenseType.INTERNATIONAL_FREIGHT, TransportExpenseStatus.PENDING_CASHIER, 120000),
+      expense(TransportExpenseType.LOCAL_DELIVERY, TransportExpenseStatus.PENDING_CASHIER, 15000),
+    ],
+    supplier: {
+      invoiceSentToAccountantAt: new Date(),
+      supplierInvoiceNumber: 'INV-1',
+      invoiceReviewStatus: 'APPROVED',
+      supplierPaymentStatus: 'AWAITING_ACCOUNTANT',
+    },
+    chinaSectionTotal: 25000,
+    cargoSectionTotal: 120000,
+    kyrgyzstanSectionTotal: 15000,
+  });
+  console.assert(supplierApproved.canReceiveToHq === true, '15 approved unpaid allows receive');
+}
+
 // 2–4. Partially paid / postponed / paid allow receive
 {
   const partial = allFour({

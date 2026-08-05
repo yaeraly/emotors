@@ -122,8 +122,7 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   assertClose(kgsSection.estimatedSectionCostKgs, 50000, '10. unpaid KGS section still full amount');
 }
 
-// Inventory cost uses approved obligation amounts (not cash paid).
-// Draft / cancelled / rejected excluded; unpaid / partial / postponed / paid included.
+// Inventory cost uses HQ Accountant-approved obligation amounts (not cash paid).
 {
   const confirmed = sumConfirmedExpenseAmountKgs(
     [
@@ -131,10 +130,11 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
       { amount: 5000, currency: 'KGS', status: 'DRAFT' },
       { amount: 7000, currency: 'KGS', status: 'WAITING_ACCOUNTANT' },
       { amount: 3000, currency: 'KGS', status: 'CANCELLED' },
+      { amount: 15000, currency: 'KGS', status: 'PENDING_CASHIER' },
     ],
     12,
   );
-  assertClose(confirmed, 17000, 'approved unpaid + paid obligation amounts included');
+  assertClose(confirmed, 25000, 'approved unpaid + paid obligation amounts included');
 }
 
 {
