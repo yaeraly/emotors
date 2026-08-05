@@ -11,7 +11,7 @@ import {
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { InvoiceReceiptHistoryPanel } from '@/components/InvoiceReceiptHistoryPanel';
 import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/components/HqPaymentPermanentDeleteModal';
-import { API_URL, apiFetch, getToken } from '@/lib/api';
+import { API_URL, apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canCreateSupplierPayment, canPermanentDeleteBusinessData } from '@/lib/rbac';
 import {
@@ -167,7 +167,6 @@ function BillsToPayPageContent() {
     financeAccountId: '',
     accountantComment: '',
   });
-  const [cargoReceiptFile, setCargoReceiptFile] = useState<File | null>(null);
   const [cargoPaymentError, setCargoPaymentError] = useState('');
 
   const canAccess = canCreateSupplierPayment(user);
@@ -355,32 +354,12 @@ function BillsToPayPageContent() {
     const remaining = Number(bill.remainingAmountKgs ?? bill.remainingAmount ?? 0);
     setCargoPaymentModal({ bill, mode });
     setCargoPaymentError('');
-    setCargoReceiptFile(null);
     setCargoPaymentForm({
       amount: mode === 'full' && remaining > 0 ? String(remaining) : '',
       financeAccountId: bill.detail?.financeAccountId || bill.detail?.financeAccount?.id || '',
       accountantComment: '',
     });
     await loadAccounts();
-  }
-
-  async function uploadCargoReceipt(expenseId: string, file: File) {
-    const token = getToken();
-    if (!token) throw new Error(t('common.error'));
-    const body = new FormData();
-    body.append('file', file);
-    const response = await fetch(
-      `${API_URL}/procurement/transport-expenses/${expenseId}/attachments/receipt`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body,
-      },
-    );
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload.message || t('common.error'));
-    }
   }
 
   function validateCargoPaymentForm(bill: BillDetail) {
@@ -506,7 +485,6 @@ function BillsToPayPageContent() {
       const source = cargoPaymentModal.bill.source;
       const id = cargoPaymentModal.bill.id;
       setCargoPaymentModal(null);
-      setCargoReceiptFile(null);
       await load();
       await refreshSelected(source, id);
     } catch (err) {
@@ -1274,7 +1252,6 @@ function BillsToPayPageContent() {
           }
           onClose={() => {
             setCargoPaymentModal(null);
-            setCargoReceiptFile(null);
             setCargoPaymentError('');
           }}
         >

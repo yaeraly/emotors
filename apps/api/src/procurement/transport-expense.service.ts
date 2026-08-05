@@ -1381,7 +1381,7 @@ export class TransportExpenseService {
           ledgerEntryId: ledger.id,
           cashierId: user.id,
           paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
-          transactionNumber: dto.transactionNumber?.trim() || null,
+          transactionNumber: dto.transactionNumber?.trim() || ledger.entryNumber || null,
           cashierComment: dto.cashierComment?.trim() || null,
           failureReason: null,
           cashierInstructionAmountKgs: null,

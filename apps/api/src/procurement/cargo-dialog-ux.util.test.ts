@@ -16,6 +16,10 @@ const page = readFileSync(
 const dto = readFileSync(join(__dirname, './dto/transport-expense.dto.ts'), 'utf8');
 const service = readFileSync(join(__dirname, './transport-expense.service.ts'), 'utf8');
 const billsService = readFileSync(join(__dirname, './accountant-bills.service.ts'), 'utf8');
+const payBlock = service.slice(
+  service.indexOf('payCargoByAccountant'),
+  service.indexOf('confirmPayment(user: AuthUser'),
+);
 
 // 1-4. No transaction number in dialogs
 assert(!page.includes('cargoPaymentForm.transactionNumber'), '1. no txn in pay form state');
@@ -67,13 +71,18 @@ assert(!payloadBlock.includes('transactionNumber'), '20. payload has no transact
 assert(payDtoBlock.includes('@IsOptional()'), '21. optional validation on DTO');
 assert(payDtoBlock.includes('accountantComment?: string'), '21. optional accountantComment');
 
-// 22. Finance generates internal transaction id from ledger
+// 22. Finance generates internal transaction id from ledger at cashier execution
 const ledgerService = readFileSync(
   join(__dirname, '../finance/finance-ledger.service.ts'),
   'utf8',
 );
+const confirmBlock = service.slice(
+  service.indexOf('confirmPayment(user: AuthUser'),
+  service.indexOf('async uploadQr'),
+);
 assert(ledgerService.includes('entryNumber: buildFinanceDocumentNumber'), '22. ledger entry number generated');
-assert(service.includes('transactionNumber: ledger.entryNumber'), '22. pay uses ledger entry number');
+assert(confirmBlock.includes('transactionNumber: dto.transactionNumber?.trim() || ledger.entryNumber'), '22. cashier uses ledger entry number');
+assert(!payBlock.includes('postLedgerEntry'), '22. accountant pay does not post ledger');
 
 // 23-24. Postpone/return create no ledger in service blocks
 const returnService = service.slice(

@@ -999,6 +999,7 @@ export class CashierBillsService {
       cashierComment?: string;
       financeAccountId?: string;
       paidAmountKgs?: number;
+      actualPaidKgs?: number;
       currency?: string;
       exchangeRate?: number;
       paymentMethod?: string;
@@ -1041,8 +1042,13 @@ export class CashierBillsService {
       expense.cashierInstructionAmountKgs != null
         ? Math.round(Number(expense.cashierInstructionAmountKgs) * 100) / 100
         : remaining;
-    const paidAmountKgs =
-      dto.paidAmountKgs != null ? Math.round(Number(dto.paidAmountKgs) * 100) / 100 : instructionKgs;
+    const resolvedPaidKgs =
+      dto.paidAmountKgs != null
+        ? dto.paidAmountKgs
+        : dto.actualPaidKgs != null
+          ? dto.actualPaidKgs
+          : instructionKgs;
+    const paidAmountKgs = Math.round(Number(resolvedPaidKgs) * 100) / 100;
     if (!(paidAmountKgs > 0)) {
       throw new BadRequestException('Payment amount must be greater than zero');
     }
