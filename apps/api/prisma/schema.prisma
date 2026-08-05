@@ -3588,6 +3588,7 @@ model ProcurementTransportExpense {
   exchangeRate              Decimal?                      @db.Decimal(14, 4)
   amountKgs                 Decimal                       @default(0) @db.Decimal(14, 2)
   paidAmountKgs             Decimal                       @default(0) @db.Decimal(14, 2)
+  cashierInstructionAmountKgs Decimal?                    @db.Decimal(14, 2)
   totalWeightKg             Decimal?                      @db.Decimal(14, 3)
   cargoRateUsdPerKg         Decimal?                      @db.Decimal(14, 4)
   usdExchangeRate           Decimal?                      @db.Decimal(14, 4)

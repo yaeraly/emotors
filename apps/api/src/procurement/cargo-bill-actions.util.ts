@@ -135,7 +135,23 @@ export function getCargoBillActionVisibility(input: {
     };
   }
 
-  // AWAITING_ACCOUNTANT, UNDER_REVIEW, APPROVED (pending cashier / unpaid)
+  if (status === 'APPROVED') {
+    return {
+      showPayFull: false,
+      showPayRemainder: false,
+      showPartial: false,
+      showPostpone: false,
+      showChangePostponeDate: false,
+      showReturnForCorrection: false,
+      showPaidBanner: false,
+      showAwaitingCorrectionBanner: false,
+      showCannotReturnMessage: false,
+      payFullUsesRemainderLabel: false,
+      postponeUsesChangeDateLabel: false,
+    };
+  }
+
+  // AWAITING_ACCOUNTANT, UNDER_REVIEW
   return {
     showPayFull: hasRemaining,
     showPayRemainder: false,

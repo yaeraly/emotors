@@ -1,14 +1,14 @@
 /**
- * Cargo partial payment from HQ Accountant bills-to-pay — contract tests.
+ * Cargo payment routing: HQ Accountant approves → HQ Cashier executes.
  */
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   resolveSupplierPaymentMethodFromAccountType,
-  tryResolveSupplierPaymentMethodFromAccountType,
 } from './supplier-payment-method-from-account.util';
 import { sumConfirmedExpenseAmountKgs } from './procurement-cost.util';
+import { getCargoBillActionVisibility } from './cargo-bill-actions.util';
 
 function assert(condition: unknown, label: string) {
   if (!condition) throw new Error(label);
@@ -27,47 +27,57 @@ const page = readFileSync(
 const service = readFileSync(join(__dirname, './transport-expense.service.ts'), 'utf8');
 const dto = readFileSync(join(__dirname, './dto/transport-expense.dto.ts'), 'utf8');
 const controller = readFileSync(join(__dirname, './procurement.controller.ts'), 'utf8');
+const cashierService = readFileSync(join(__dirname, './cashier-bills.service.ts'), 'utf8');
+const schema = readFileSync(join(__dirname, '../../prisma/schema.prisma'), 'utf8');
 
-// 1. Cargo shows partial payment action
-assert(page.includes("requestType === 'CARGO_PAYMENT'"), '1. cargo partial gated by request type');
-assert(page.includes('openCargoPaymentModal'), '1. cargo payment modal exists');
-assert(page.includes("t('finance.billsToPay.createPartialPayment')"), '1. partial payment label');
+const payBlock = service.slice(
+  service.indexOf('payCargoByAccountant'),
+  service.indexOf('confirmPayment(user: AuthUser'),
+);
+const confirmBlock = service.slice(
+  service.indexOf('confirmPayment(user: AuthUser'),
+  service.indexOf('async uploadQr'),
+);
 
-// 2-4. Validation contracts
-assert(dto.includes('paymentAmountKgs!: number'), '2. payment amount in DTO');
-assert(service.includes('Сумма платежа должна быть больше нуля.'), '3. zero rejected');
-assert(service.includes('Сумма платежа превышает остаток по счету.'), '4. overpayment rejected');
+// 1. Accountant routes to cashier — no direct payment
+assert(payBlock.includes('CARGO_PAYMENT_SENT_TO_HQ_CASHIER'), '1. cashier instruction audit');
+assert(payBlock.includes('TransportExpenseStatus.PENDING_CASHIER'), '1. routes to cashier queue');
+assert(!payBlock.includes('postLedgerEntry'), '2. accountant does not post ledger');
+assert(!payBlock.includes('paidAmountKgs: newPaidTotal'), '2. accountant does not update paid amount');
 
-// 5-6. Full vs partial status
-assert(service.includes('CARGO_PAYMENT_FULLY_PAID'), '5. full settlement audit');
-assert(service.includes('CARGO_PARTIAL_PAYMENT_CREATED'), '6. partial status audit');
-assert(service.includes('TransportExpenseStatus.PARTIALLY_PAID'), '6. partially paid status');
+// 3. Partial instruction without financial posting
+assert(payBlock.includes('CARGO_PARTIAL_PAYMENT_INSTRUCTION_CREATED'), '4. partial instruction audit');
+assert(payBlock.includes('cashierInstructionAmountKgs'), '4. stores planned payment amount');
 
-// 7-8. Paid / remaining tracking
-assert(service.includes('paidAmountKgs: newPaidTotal'), '7. paid amount updates');
-assert(service.includes('newRemainingAmount: roundMoney'), '8. remaining recalculated');
+// 5-6. Postpone / return have no ledger in accountant path
+const postponeBlock = readFileSync(join(__dirname, './accountant-bills.service.ts'), 'utf8');
+const postponeSection = postponeBlock.slice(
+  postponeBlock.indexOf('async postponePayment'),
+  postponeBlock.indexOf('async payCargoPayment'),
+);
+assert(!postponeSection.includes('postLedgerEntry'), '6. postpone has no ledger');
 
-// 9. Ledger decreases account balance
-assert(service.includes('postLedgerEntry'), '9. ledger entry created');
+// 7-8. Cashier queue uses instruction amount
+assert(cashierService.includes('cashierInstructionAmountKgs'), '8. cashier sees instruction amount');
+assert(cashierService.includes('approvedAmountKgs'), '9. cashier detail exposes approved amount');
 
-// 10. Payment method derived from account type
-assertEqual(resolveSupplierPaymentMethodFromAccountType('CASHBOX'), 'CASH', '10. cashbox → cash');
-assertEqual(resolveSupplierPaymentMethodFromAccountType('QR_ACCOUNT'), 'QR_CODE', '10. qr account');
-assertEqual(resolveSupplierPaymentMethodFromAccountType('BANK'), 'BANK_ACCOUNT', '10. bank');
+// 9-12. Cashier executes real payment
+assert(confirmBlock.includes('postLedgerEntry'), '11. cashier posts ledger');
+assert(confirmBlock.includes('CARGO_PAYMENT_EXECUTED_BY_HQ_CASHIER'), '11. cashier execution audit');
+assert(confirmBlock.includes('cashierInstructionAmountKgs: null'), '12. clears instruction after pay');
 
-// 11. Payment history from ledger rows
-assert(service.includes('listPaymentLedgerHistory'), '11. payment history helper');
-assert(page.includes('detail.payments'), '11. payment history in drawer');
+// 13-14. Partial leaves invoice open
+assert(confirmBlock.includes('TransportExpenseStatus.PARTIALLY_PAID'), '13. partial status after cashier');
+assert(confirmBlock.includes('CARGO_PAYMENT_FULLY_PAID'), '14. full close audit');
 
-// 12. Idempotency key support
-assert(dto.includes('idempotencyKey?: string'), '12. idempotency on pay DTO');
-assert(service.includes("action: { in: ['CARGO_PARTIAL_PAYMENT_CREATED', 'CARGO_PAYMENT_FULLY_PAID', 'CARGO_PAYMENT_COMPLETED'] }"), '12. idempotency check');
+// 15. Receipt required at cashier only
+assert(!payBlock.includes('TRANSPORT_EXPENSE_RECEIPT'), '15. accountant does not require receipt');
+assert(confirmBlock.includes('TRANSPORT_EXPENSE_RECEIPT'), '15. cashier requires receipt');
 
-// 13. Approved cargo amount unchanged in audit payload
-assert(service.includes('approvedCargoAmountKgs: requestedKgs'), '13. approved amount preserved in audit');
-assert(service.includes('costBaseKgs'), '13. cost base in audit');
+// 16. Duplicate instruction blocked
+assert(payBlock.includes('Счет уже отправлен HQ Cashier.'), '17. duplicate instruction error');
 
-// 14. Landed cost uses approved amount not paid cash
+// 18-19. Costing uses approved amount
 const approvedCost = sumConfirmedExpenseAmountKgs(
   [
     {
@@ -80,41 +90,27 @@ const approvedCost = sumConfirmedExpenseAmountKgs(
   ],
   12,
 );
-assertEqual(approvedCost, 150000, '14. себестоимость uses approved full amount');
+assertEqual(approvedCost, 150000, '19. costing uses approved full amount');
 
-// 15. FIFO unchanged — pay method does not touch inventory
-const payBlock = service.slice(
-  service.indexOf('payCargoByAccountant'),
-  service.indexOf('confirmPayment(user: AuthUser'),
-);
-assert(!payBlock.includes('fifo'), '15. no FIFO mutation');
-assert(!payBlock.includes('ProcurementGoodsReceiving'), '15. no warehouse receiving');
+// 20. APPROVED status hides accountant pay buttons while at cashier
+const approvedActions = getCargoBillActionVisibility({
+  uiStatus: 'APPROVED',
+  paidAmount: 0,
+  remainingAmount: 1000,
+});
+assert(!approvedActions.showPayFull, '20. no pay while waiting for cashier');
+assert(!approvedActions.showPartial, '20. no partial while waiting for cashier');
 
-// 16. Postpone creates no ledger
-const postponeBlock = readFileSync(join(__dirname, './accountant-bills.service.ts'), 'utf8');
-const postponeSection = postponeBlock.slice(
-  postponeBlock.indexOf('async postponePayment'),
-  postponeBlock.indexOf('async payCargoPayment'),
-);
-assert(!postponeSection.includes('postLedgerEntry'), '16. postpone has no ledger');
-assert(postponeBlock.includes('CARGO_PAYMENT_POSTPONED'), '16. cargo postpone audit');
-
-// Pay endpoint wired
-assert(controller.includes("bills-to-pay/:source/:id/pay"), 'pay endpoint exists');
+// Frontend routes to pay endpoint but sends instruction (not execution)
+assert(controller.includes('bills-to-pay/:source/:id/pay'), 'pay endpoint exists');
 assert(page.includes('/pay'), 'frontend calls pay endpoint');
+assert(page.includes("t('finance.billsToPay.sendToCashier')"), 'frontend sends to cashier label');
+assert(!page.includes('uploadCargoReceipt(cargoPaymentModal'), 'accountant form does not upload receipt');
 
-// Frontend omits editable payment method field in cargo modal
-assert(!page.includes('cargoPaymentForm.paymentMethod'), 'no editable payment method in cargo form');
-assert(page.includes('getCargoBillActionVisibility'), 'cargo action visibility wired');
-assert(page.includes('cargoReturnModal'), 'cargo return modal');
-assert(!page.includes('cargoConfirm'), 'no second confirmation modal state');
-assert(!page.includes('finance.transactionNumber'), 'no transaction number field in cargo dialogs');
-assert(page.includes("t('finance.billsToPay.commentOptional')"), 'optional comment label');
-assert(page.includes('submitCargoPayment'), 'one-click cargo payment submit');
-assert(page.includes('disabled={saving'), 'submit disabled while pending');
-const payDtoBlock = dto.slice(dto.indexOf('export class PayCargoTransportExpenseDto'));
-assert(!payDtoBlock.includes('transactionNumber'), 'pay DTO has no transactionNumber');
-assert(service.includes('transactionNumber: ledger.entryNumber'), 'ledger generates transaction number');
-assert(payDtoBlock.includes('accountantComment?: string'), 'optional accountant comment in DTO');
+// Schema field
+assert(schema.includes('cashierInstructionAmountKgs'), 'schema stores instruction amount');
+
+// Payment method derived from account
+assertEqual(resolveSupplierPaymentMethodFromAccountType('CASHBOX'), 'CASH', 'cashbox → cash');
 
 console.log('cargo-partial-payment.util.test.ts passed');

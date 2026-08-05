@@ -564,6 +564,7 @@ export class AccountantBillsService {
             exchangeRate: expense.usdExchangeRate ?? expense.exchangeRate,
             // Clear cashier queue — postpone must not keep a pending payment task.
             sentToCashierAt: null,
+            cashierInstructionAmountKgs: null,
             executionStatus: null,
             executionStartedAt: null,
             failureReason: null,

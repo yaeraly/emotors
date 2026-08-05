@@ -389,7 +389,13 @@ function CashierBillsPageContent() {
   function remainingPayableKgs(detail: BillDetail | null, row: BillRow) {
     if (!detail) return Number(row.amountKgs || 0);
     if (detail.source === 'TRANSPORT_EXPENSE') {
-      return Number(detail.remainingAmountKgs ?? detail.amountKgs ?? row.amountKgs ?? 0);
+      return Number(
+        detail.approvedAmountKgs ??
+          detail.remainingAmountKgs ??
+          detail.amountKgs ??
+          row.amountKgs ??
+          0,
+      );
     }
     const approved = Number(detail.approvedAmountKgs ?? detail.amountKgs ?? row.amountKgs ?? 0);
     const remainingYuan = Number(detail.procurement?.remainingYuan);

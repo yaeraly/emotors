@@ -104,7 +104,7 @@ assert(
 
 // 15. Status errors are business messages
 assert(
-  transportService.includes('Счет возвращён на исправление и недоступен для оплаты.'),
+  transportService.includes('Счет возвращён на исправление.'),
   '15. returned invoice business error',
 );
 

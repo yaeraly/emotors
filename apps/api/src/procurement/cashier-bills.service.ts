@@ -14,6 +14,7 @@ import {
   ProcurementSupplierPaymentStatus,
   Role,
   TransportExpenseStatus,
+  TransportExpenseType,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -259,9 +260,7 @@ export class CashierBillsService {
         where: {
           OR: [
             {
-              status: {
-                in: [TransportExpenseStatus.PENDING_CASHIER, TransportExpenseStatus.PARTIALLY_PAID],
-              },
+              status: TransportExpenseStatus.PENDING_CASHIER,
             },
             {
               status: TransportExpenseStatus.PAID,
@@ -332,13 +331,11 @@ export class CashierBillsService {
       paidAtById[row.id] = row.paidAt?.toISOString() ?? null;
       const requestType = mapTransportExpenseTypeToCashierRequestType(row.expenseType);
       const remainingKgs = Math.max(0, Number(row.amountKgs) - Number(row.paidAmountKgs || 0));
-      const amountKgs =
-        row.status === TransportExpenseStatus.PARTIALLY_PAID ||
-        row.status === TransportExpenseStatus.PENDING_CASHIER
-          ? remainingKgs > 0
-            ? remainingKgs
-            : Number(row.amountKgs)
-          : Number(row.amountKgs);
+      const instructionKgs =
+        row.cashierInstructionAmountKgs != null
+          ? Number(row.cashierInstructionAmountKgs)
+          : null;
+      const amountKgs = instructionKgs ?? remainingKgs;
       return {
         id: row.id,
         source: 'TRANSPORT_EXPENSE',
@@ -695,6 +692,10 @@ export class CashierBillsService {
       amountKgs: requestedKgs,
       paidAmountKgs,
       remainingAmountKgs: remainingKgs,
+      approvedAmountKgs:
+        expense.cashierInstructionAmountKgs != null
+          ? Number(expense.cashierInstructionAmountKgs)
+          : remainingKgs,
       // Cost base remains full approved/calculated request amount.
       costBaseKgs:
         expense.calculatedAmountKgs != null ? Number(expense.calculatedAmountKgs) : requestedKgs,
@@ -1009,9 +1010,17 @@ export class CashierBillsService {
       throw new BadRequestException('Actual payment date is required');
     }
 
-    const financeAccountId = dto.financeAccountId || expense.financeAccountId || undefined;
+    const financeAccountId = expense.financeAccountId || dto.financeAccountId || undefined;
     if (!financeAccountId) {
       throw new BadRequestException('Debit account is required');
+    }
+    if (
+      expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT &&
+      dto.financeAccountId &&
+      expense.financeAccountId &&
+      dto.financeAccountId !== expense.financeAccountId
+    ) {
+      throw new BadRequestException('Cashier must use the accountant-selected account');
     }
 
     try {
@@ -1028,28 +1037,20 @@ export class CashierBillsService {
     const requestedKgs = Number(expense.amountKgs) > 0 ? Number(expense.amountKgs) : Number(expense.amount);
     const alreadyPaid = Number(expense.paidAmountKgs || 0);
     const remaining = Math.max(0, requestedKgs - alreadyPaid);
+    const instructionKgs =
+      expense.cashierInstructionAmountKgs != null
+        ? Math.round(Number(expense.cashierInstructionAmountKgs) * 100) / 100
+        : remaining;
     const paidAmountKgs =
-      dto.paidAmountKgs != null ? Math.round(Number(dto.paidAmountKgs) * 100) / 100 : remaining;
+      dto.paidAmountKgs != null ? Math.round(Number(dto.paidAmountKgs) * 100) / 100 : instructionKgs;
     if (!(paidAmountKgs > 0)) {
       throw new BadRequestException('Payment amount must be greater than zero');
     }
+    if (Math.abs(paidAmountKgs - instructionKgs) > 0.009) {
+      throw new BadRequestException('Cashier cannot change the accountant-approved payment amount');
+    }
     if (paidAmountKgs > remaining + 0.009) {
       throw new BadRequestException('Cashier cannot change the approved payment amount');
-    }
-
-    const nextPaymentMethod =
-      dto.paymentMethod === 'BANK_ACCOUNT' || dto.paymentMethod === 'QR_CODE'
-        ? (dto.paymentMethod as ProcurementPaymentInfoMethod)
-        : undefined;
-
-    if (nextPaymentMethod || financeAccountId !== expense.financeAccountId) {
-      await this.prisma.procurementTransportExpense.update({
-        where: { id },
-        data: {
-          ...(nextPaymentMethod ? { paymentMethod: nextPaymentMethod } : {}),
-          financeAccountId,
-        },
-      });
     }
 
     const result = await this.transportExpenses.confirmPayment(user, id, {

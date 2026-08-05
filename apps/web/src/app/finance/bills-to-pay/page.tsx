@@ -403,19 +403,6 @@ function BillsToPayPageContent() {
       setCargoPaymentError(t('finance.billsToPay.accountUnavailable'));
       return null;
     }
-    if (amount > Number(account.availableBalance) + 0.009) {
-      setCargoPaymentError(t('finance.billsToPay.insufficientBalance'));
-      return null;
-    }
-    const hasReceipt =
-      Boolean(cargoReceiptFile) ||
-      Boolean(
-        Array.isArray(bill.detail?.receipts) && bill.detail.receipts.length > 0,
-      );
-    if (!hasReceipt) {
-      setCargoPaymentError(t('finance.cashierBills.receiptRequired'));
-      return null;
-    }
     return {
       paymentAmountKgs: amount,
       financeAccountId: cargoPaymentForm.financeAccountId,
@@ -509,9 +496,6 @@ function BillsToPayPageContent() {
     setActionError('');
     setCargoPaymentError('');
     try {
-      if (cargoReceiptFile) {
-        await uploadCargoReceipt(cargoPaymentModal.bill.id, cargoReceiptFile);
-      }
       await apiFetch(
         `/procurement/bills-to-pay/${cargoPaymentModal.bill.source}/${cargoPaymentModal.bill.id}/pay`,
         {
@@ -1333,15 +1317,6 @@ function BillsToPayPageContent() {
             </select>
           </label>
           <label className="mt-2 block text-xs font-semibold">
-            {t('finance.cashierBills.receipt')}
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp"
-              className="mt-1 block w-full text-sm"
-              onChange={(e) => setCargoReceiptFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          <label className="mt-2 block text-xs font-semibold">
             {t('finance.billsToPay.commentOptional')}
             <textarea
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
@@ -1361,9 +1336,7 @@ function BillsToPayPageContent() {
             onClick={() => void submitCargoPayment()}
             className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
           >
-            {cargoPaymentModal.mode === 'full'
-              ? t('finance.billsToPay.payInFull')
-              : t('finance.billsToPay.createPayment')}
+            {t('finance.billsToPay.sendToCashier')}
           </button>
         </Modal>
       ) : null}
