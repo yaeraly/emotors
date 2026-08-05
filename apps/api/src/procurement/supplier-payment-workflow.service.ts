@@ -35,6 +35,7 @@ import {
   canEditSupplierPayment,
   canPermanentDeleteBusinessData,
   canReturnSupplierPaymentToAccountant,
+  canProcessHqCargoPayment,
   canReverseSupplierPayment,
   canSendProcurementInvoiceToAccountant,
   canSendSupplierPaymentToCashier,
@@ -277,7 +278,7 @@ export class SupplierPaymentWorkflowService {
   }
 
   async listHqFinanceAccounts(user: AuthUser) {
-    if (!canCreateSupplierPayment(user) && !canConfirmSupplierPayment(user)) {
+    if (!canProcessHqCargoPayment(user) && !canConfirmSupplierPayment(user)) {
       throw new ForbiddenException('Forbidden');
     }
     const roles = resolveUserRoles(user);

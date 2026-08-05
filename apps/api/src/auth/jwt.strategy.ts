@@ -61,7 +61,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       userRole.role.permissions.map((rolePermission) => rolePermission.permission.code),
     );
     const roles = uniqueRoles(userRoles.map((userRole) => userRole.role.code as AuthUser['role']));
-    const assignedRoles = roles.length ? roles : [user.role];
+    const assignedRoles = uniqueRoles([user.role, ...roles]);
 
     if (anyRoleRequiresBranch(assignedRoles) && !user.branchId) {
       throw new UnauthorizedException('User branch is not assigned');

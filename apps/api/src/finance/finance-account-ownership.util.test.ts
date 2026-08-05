@@ -186,7 +186,7 @@ describe('FinanceAccount access by role', () => {
     );
     assert.throws(
       () => assertCanAccessAccountScope(hqAccountant as never, branchAAccount),
-      /only access HQ/,
+      /не принадлежит HQ/,
     );
     assert.throws(
       () => assertAccountUsableByOwner(hqAccountant as never, branchAAccount),

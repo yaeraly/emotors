@@ -18,7 +18,7 @@ import { AuthUser } from '../auth/auth.types';
 import { FinanceExpensesService } from '../finance/finance-expenses.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { canCreateSupplierPayment, canPermanentDeleteBusinessData, hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
+import { canCreateSupplierPayment, canPermanentDeleteBusinessData, canProcessHqCargoPayment, hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import {
   AccountantBillListItem,
   AccountantBillRequestType,
@@ -680,7 +680,7 @@ export class AccountantBillsService {
   }
 
   private assertAccountant(user: AuthUser) {
-    if (!canCreateSupplierPayment(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
+    if (!canProcessHqCargoPayment(user) && !hasAnyFullAccessRole(resolveUserRoles(user))) {
       throw new ForbiddenException('Only HQ Accountant can access bills to pay');
     }
   }

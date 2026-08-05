@@ -165,7 +165,8 @@ export function permissionsForRoles(roles: Role[]) {
 }
 
 export function resolveUserRoles(user: Pick<AuthUser, 'role' | 'roles'>) {
-  return user.roles?.length ? user.roles : [user.role];
+  const fromArray = user.roles?.length ? user.roles : [];
+  return uniqueRoles([user.role, ...fromArray]);
 }
 
 export function resolveUserPermissions(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
@@ -366,6 +367,11 @@ export function canCreateSupplierPayment(user: Pick<AuthUser, 'role' | 'roles' |
     roles.includes(Role.FINANCE_MANAGER) ||
     roles.includes(Role.HQ_ACCOUNTANT)
   );
+}
+
+/** HQ Accountant / Finance Manager may process Cargo Payment invoices in bills-to-pay. */
+export function canProcessHqCargoPayment(user: Pick<AuthUser, 'role' | 'roles' | 'permissions'>) {
+  return canCreateSupplierPayment(user);
 }
 
 export function canSendProcurementInvoiceToAccountant(

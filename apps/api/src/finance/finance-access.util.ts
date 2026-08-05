@@ -223,9 +223,9 @@ export function assertCanAccessAccountScope(
   }
 
   // HQ Accountant may access only HQ-owned accounts (never Branch accounts).
-  if (roles.includes(Role.HQ_ACCOUNTANT) && !user.branchId) {
+  if (roles.includes(Role.HQ_ACCOUNTANT)) {
     if (account.scope !== FinanceAccountScope.HQ || account.branchId != null) {
-      throw new ForbiddenException('HQ accountants can only access HQ accounts');
+      throw new ForbiddenException('Выбранный счёт не принадлежит HQ.');
     }
     return;
   }

@@ -31,6 +31,7 @@ import {
   canCreateSupplierPayment,
   canCreateProcurementOrder,
   canPermanentDeleteBusinessData,
+  canProcessHqCargoPayment,
   hasAnyFullAccessRole,
   resolveUserRoles,
 } from '../rbac/rbac';
@@ -1124,7 +1125,7 @@ export class TransportExpenseService {
   }
 
   payCargoByAccountant(user: AuthUser, id: string, dto: PayCargoTransportExpenseDto) {
-    if (!canCreateSupplierPayment(user)) {
+    if (!canProcessHqCargoPayment(user)) {
       throw new ForbiddenException('Only HQ Accountant can pay cargo invoices');
     }
     return this.prisma.$transaction(async (tx) => {
@@ -1134,7 +1135,13 @@ export class TransportExpenseService {
         throw new BadRequestException('Only cargo payment invoices support accountant payment');
       }
       if (!CARGO_ACCOUNTANT_PAYABLE.has(expense.status)) {
-        throw new BadRequestException('Этот счёт уже полностью оплачен.');
+        if (expense.status === TransportExpenseStatus.RETURNED) {
+          throw new BadRequestException('Счет возвращён на исправление и недоступен для оплаты.');
+        }
+        if (expense.status === TransportExpenseStatus.PAID) {
+          throw new BadRequestException('Этот счёт уже полностью оплачен.');
+        }
+        throw new BadRequestException('Счет ещё не одобрен для обработки.');
       }
 
       if (dto.idempotencyKey) {
@@ -1633,7 +1640,8 @@ export class TransportExpenseService {
     const roles = resolveUserRoles(user);
     const canUploadInvoice =
       canCreateProcurementOrder(user) || hasAnyFullAccessRole(roles);
-    const canUploadReceipt = canConfirmSupplierPayment(user);
+    const canUploadReceipt =
+      canConfirmSupplierPayment(user) || canProcessHqCargoPayment(user);
     if (
       (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_INVOICE ||
         entityType === FileAttachmentEntityType.PAYMENT_QR ||
@@ -1767,7 +1775,7 @@ export class TransportExpenseService {
       throw new BadRequestException('Выбранный счёт недоступен.');
     }
     if (account.scope !== FinanceAccountScope.HQ) {
-      throw new BadRequestException('Выбранный счёт недоступен.');
+      throw new BadRequestException('Выбранный счёт не принадлежит HQ.');
     }
     if (!tryResolveSupplierPaymentMethodFromAccountType(account.typeCode)) {
       throw new BadRequestException('Выбранный счёт недоступен.');

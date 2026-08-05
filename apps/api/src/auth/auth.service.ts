@@ -292,6 +292,6 @@ export class AuthService {
 
   private roleCodes(user: { role: Role; userRoles?: { role: { code: string } }[] }) {
     const assigned = user.userRoles?.map((userRole) => userRole.role.code as Role) ?? [];
-    return uniqueRoles(assigned.length ? assigned : [user.role]);
+    return uniqueRoles([user.role, ...assigned]);
   }
 }

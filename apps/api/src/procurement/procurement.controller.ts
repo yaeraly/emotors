@@ -43,6 +43,11 @@ import {
 import { PurchaseAssistantService } from './purchase-assistant.service';
 import { ProcurementService } from './procurement.service';
 import { TransportExpenseService } from './transport-expense.service';
+import {
+  PayBillCargoDto,
+  PostponeBillPaymentDto,
+  ReturnBillForCorrectionDto,
+} from './dto/accountant-bill-action.dto';
 
 const PROCUREMENT_VIEW_PERMISSIONS = ['procurement.manage', 'procurement.view'] as const;
 
@@ -311,7 +316,7 @@ export class ProcurementController {
     @CurrentUser() user: AuthUser,
     @Param('source') source: AccountantBillSource,
     @Param('id') id: string,
-    @Body() dto: { reason?: string; comment?: string; idempotencyKey?: string },
+    @Body() dto: ReturnBillForCorrectionDto,
   ) {
     return this.accountantBillsService.returnForCorrection(user, source, id, dto ?? {});
   }
@@ -344,7 +349,7 @@ export class ProcurementController {
     @CurrentUser() user: AuthUser,
     @Param('source') source: AccountantBillSource,
     @Param('id') id: string,
-    @Body() dto: { nextPaymentDate?: string; comment?: string },
+    @Body() dto: PostponeBillPaymentDto,
   ) {
     return this.accountantBillsService.postponePayment(user, source, id, dto);
   }
@@ -355,13 +360,7 @@ export class ProcurementController {
     @CurrentUser() user: AuthUser,
     @Param('source') source: AccountantBillSource,
     @Param('id') id: string,
-    @Body() dto: {
-      paymentAmountKgs?: number;
-      financeAccountId?: string;
-      accountantComment?: string;
-      paidAt?: string;
-      idempotencyKey?: string;
-    },
+    @Body() dto: PayBillCargoDto,
   ) {
     return this.accountantBillsService.payCargoPayment(user, source, id, dto);
   }
