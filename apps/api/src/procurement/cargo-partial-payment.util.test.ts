@@ -39,7 +39,7 @@ assert(service.includes('Сумма платежа должна быть бол�
 assert(service.includes('Сумма платежа превышает остаток по счету.'), '4. overpayment rejected');
 
 // 5-6. Full vs partial status
-assert(service.includes('CARGO_PAYMENT_COMPLETED'), '5. full settlement audit');
+assert(service.includes('CARGO_PAYMENT_FULLY_PAID'), '5. full settlement audit');
 assert(service.includes('CARGO_PARTIAL_PAYMENT_CREATED'), '6. partial status audit');
 assert(service.includes('TransportExpenseStatus.PARTIALLY_PAID'), '6. partially paid status');
 
@@ -61,7 +61,7 @@ assert(page.includes('detail.payments'), '11. payment history in drawer');
 
 // 12. Idempotency key support
 assert(dto.includes('idempotencyKey?: string'), '12. idempotency on pay DTO');
-assert(service.includes("action: { in: ['CARGO_PARTIAL_PAYMENT_CREATED', 'CARGO_PAYMENT_COMPLETED'] }"), '12. idempotency check');
+assert(service.includes("action: { in: ['CARGO_PARTIAL_PAYMENT_CREATED', 'CARGO_PAYMENT_FULLY_PAID', 'CARGO_PAYMENT_COMPLETED'] }"), '12. idempotency check');
 
 // 13. Approved cargo amount unchanged in audit payload
 assert(service.includes('approvedCargoAmountKgs: requestedKgs'), '13. approved amount preserved in audit');
@@ -105,6 +105,9 @@ assert(page.includes('/pay'), 'frontend calls pay endpoint');
 
 // Frontend omits editable payment method field in cargo modal
 assert(!page.includes('cargoPaymentForm.paymentMethod'), 'no editable payment method in cargo form');
+assert(page.includes('getCargoBillActionVisibility'), 'cargo action visibility wired');
+assert(page.includes('cargoReturnModal'), 'cargo return modal');
+assert(page.includes('confirmReturn'), 'return confirmation');
 assert(page.includes('derivedCargoPaymentMethod'), 'derived method shown read-only');
 
 console.log('cargo-partial-payment.util.test.ts passed');

@@ -439,6 +439,18 @@ export function evaluateHqReceivingInvoiceSection(
   }
 
   const dominantStatus = orderExpenses[0]?.status ?? TransportExpenseStatus.WAITING_ACCOUNTANT;
+  const normalizedDominant = normalizeExpenseStatus(dominantStatus);
+  if (normalizedDominant === TransportExpenseStatus.RETURNED) {
+    return {
+      requestType,
+      displayName,
+      state: 'open',
+      status: TransportExpenseStatus.RETURNED,
+      closed: false,
+      exists: true,
+      accountantProcessed: false,
+    };
+  }
   return {
     requestType,
     displayName,

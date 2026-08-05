@@ -966,6 +966,163 @@ export class TransportExpenseService {
     });
   }
 
+  returnCargoForCorrection(user: AuthUser, id: string, dto: ReturnTransportExpenseDto) {
+    if (!canCreateSupplierPayment(user)) {
+      throw new ForbiddenException('Only HQ Accountant can return cargo invoices for correction');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundException('Transport expense not found');
+      if (expense.expenseType !== TransportExpenseType.INTERNATIONAL_FREIGHT) {
+        throw new BadRequestException('Only cargo payment invoices support accountant return for correction');
+      }
+      return this.returnCargoForCorrectionInTx(tx, user, expense, dto);
+    });
+  }
+
+  private async returnCargoForCorrectionInTx(
+    tx: Tx,
+    user: AuthUser,
+    expense: {
+      id: string;
+      expenseNumber: string;
+      expenseType: TransportExpenseType;
+      status: TransportExpenseStatus;
+      procurementOrderId: string | null;
+      executionStatus: string | null;
+      paidAmountKgs: unknown;
+      calculatedAmountUsd: unknown;
+      calculatedAmountKgs: unknown;
+      totalWeightKg: unknown;
+      cargoRateUsdPerKg: unknown;
+      usdExchangeRate: unknown;
+      returnReason: string | null;
+    },
+    dto: ReturnTransportExpenseDto,
+  ) {
+    const paidAmountKgs = Number(expense.paidAmountKgs || 0);
+    if (paidAmountKgs > 0.009) {
+      throw new BadRequestException(
+        'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.',
+      );
+    }
+
+    const ledgerCount = await tx.financeLedgerEntry.count({
+      where: {
+        referenceType: 'ProcurementTransportExpense',
+        referenceId: expense.id,
+        entryType: FinanceLedgerEntryType.EXPENSE,
+      },
+    });
+    if (ledgerCount > 0) {
+      throw new BadRequestException(
+        'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.',
+      );
+    }
+
+    if (dto.idempotencyKey) {
+      const prior = await tx.auditLog.findMany({
+        where: {
+          entity: 'ProcurementTransportExpense',
+          entityId: expense.id,
+          action: 'CARGO_PAYMENT_RETURNED_FOR_CORRECTION',
+        },
+        orderBy: { timestamp: 'desc' },
+        take: 20,
+      });
+      const duplicate = prior.find((row) => {
+        const meta = row.metadata as { idempotencyKey?: string } | null;
+        return meta?.idempotencyKey === dto.idempotencyKey;
+      });
+      if (duplicate) {
+        const current = await tx.procurementTransportExpense.findUnique({
+          where: { id: expense.id },
+          include: INCLUDE,
+        });
+        return this.toResponse(current!, tx);
+      }
+    }
+
+    if (expense.status === TransportExpenseStatus.RETURNED) {
+      const current = await tx.procurementTransportExpense.findUnique({
+        where: { id: expense.id },
+        include: INCLUDE,
+      });
+      return this.toResponse(current!, tx);
+    }
+
+    if (!CARGO_ACCOUNTANT_PAYABLE.has(expense.status) && expense.status !== TransportExpenseStatus.PAYMENT_POSTPONED) {
+      throw new BadRequestException('Expense cannot be returned in current status');
+    }
+
+    const reason = dto.reason.trim();
+    const comment = dto.comment?.trim() || '';
+    const combinedReason = comment ? `${reason}\n${comment}` : reason;
+
+    const updated = await tx.procurementTransportExpense.update({
+      where: { id: expense.id },
+      data: {
+        status: TransportExpenseStatus.RETURNED,
+        executionStatus: null,
+        returnReason: combinedReason,
+        returnedAt: new Date(),
+        returnedById: user.id,
+        sentToCashierAt: null,
+        accountantId: user.id,
+      },
+      include: INCLUDE,
+    });
+
+    await this.audit(tx, user, 'TRANSPORT_EXPENSE_RETURNED', expense.id, { status: expense.status }, {
+      status: updated.status,
+      returnReason: updated.returnReason,
+    });
+
+    const approvedAmount = Number(expense.calculatedAmountKgs ?? updated.amountKgs ?? updated.amount ?? 0);
+    await this.audit(tx, user, 'CARGO_PAYMENT_RETURNED_FOR_CORRECTION', expense.id, {
+      action: 'RETURN',
+      oldStatus: expense.status,
+      approvalStatus: 'RETURNED_FOR_CORRECTION',
+      paymentStatus: 'UNPAID',
+      approvedAmount,
+      paidAmount: paidAmountKgs,
+      remainingAmount: approvedAmount,
+    }, {
+      action: 'RETURN',
+      newStatus: updated.status,
+      approvalStatus: 'RETURNED_FOR_CORRECTION',
+      correctionStatus: 'NEEDS_REVISION',
+      costAllocationStatus: 'EXCLUDED',
+      returnReason: combinedReason,
+      correctionReason: reason,
+      cargoPaymentId: expense.id,
+      invoiceId: expense.id,
+      procurementOrderId: expense.procurementOrderId,
+      totalWeightKg: Number(expense.totalWeightKg ?? 0),
+      cargoRateUsdPerKg: Number(expense.cargoRateUsdPerKg ?? 0),
+      usdExchangeRate: Number(expense.usdExchangeRate ?? 0),
+      actorUserId: user.id,
+      actorRole: user.role,
+      timestamp: new Date().toISOString(),
+      idempotencyKey: dto.idempotencyKey ?? null,
+    });
+
+    if (expense.procurementOrderId) {
+      await this.syncOrderSectionCostFromApprovedExpenses(tx, user, updated);
+    }
+
+    await this.notifications.notifyInTx(tx, user, {
+      type: AlertType.TRANSPORT_EXPENSE_RETURNED,
+      entityType: 'ProcurementTransportExpense',
+      entityId: expense.id,
+      referenceNumber: expense.expenseNumber,
+      message: `Cargo payment ${expense.expenseNumber} returned for correction: ${reason}`,
+      recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
+    });
+
+    return this.toResponse(updated, tx);
+  }
+
   payCargoByAccountant(user: AuthUser, id: string, dto: PayCargoTransportExpenseDto) {
     if (!canCreateSupplierPayment(user)) {
       throw new ForbiddenException('Only HQ Accountant can pay cargo invoices');
@@ -985,7 +1142,7 @@ export class TransportExpenseService {
           where: {
             entity: 'ProcurementTransportExpense',
             entityId: id,
-            action: { in: ['CARGO_PARTIAL_PAYMENT_CREATED', 'CARGO_PAYMENT_COMPLETED'] },
+            action: { in: ['CARGO_PARTIAL_PAYMENT_CREATED', 'CARGO_PAYMENT_FULLY_PAID', 'CARGO_PAYMENT_COMPLETED'] },
           },
           orderBy: { timestamp: 'desc' },
           take: 30,
@@ -1123,7 +1280,7 @@ export class TransportExpenseService {
       await this.audit(
         tx,
         user,
-        fullyPaid ? 'CARGO_PAYMENT_COMPLETED' : 'CARGO_PARTIAL_PAYMENT_CREATED',
+        fullyPaid ? 'CARGO_PAYMENT_FULLY_PAID' : 'CARGO_PARTIAL_PAYMENT_CREATED',
         id,
         {
           status: expense.status,

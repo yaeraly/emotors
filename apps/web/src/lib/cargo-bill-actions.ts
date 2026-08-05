@@ -1,0 +1,106 @@
+export const CARGO_RETURN_BLOCKED_MESSAGE =
+  'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.';
+
+export type CargoBillActionVisibility = {
+  showPayFull: boolean;
+  showPayRemainder: boolean;
+  showPartial: boolean;
+  showPostpone: boolean;
+  showChangePostponeDate: boolean;
+  showReturnForCorrection: boolean;
+  showPaidBanner: boolean;
+  showAwaitingCorrectionBanner: boolean;
+  showCannotReturnMessage: boolean;
+  payFullUsesRemainderLabel: boolean;
+  postponeUsesChangeDateLabel: boolean;
+};
+
+export function getCargoBillActionVisibility(input: {
+  uiStatus: string;
+  paidAmount: number;
+  remainingAmount: number;
+}): CargoBillActionVisibility {
+  const status = String(input.uiStatus || '').toUpperCase();
+  const paidAmount = Math.max(0, Number(input.paidAmount || 0));
+  const remainingAmount = Math.max(0, Number(input.remainingAmount || 0));
+  const hasRemaining = remainingAmount > 0.009;
+  const hasPaid = paidAmount > 0.009;
+
+  if (status === 'FULLY_PAID' || status === 'REJECTED' || status === 'CANCELLED') {
+    return {
+      showPayFull: false,
+      showPayRemainder: false,
+      showPartial: false,
+      showPostpone: false,
+      showChangePostponeDate: false,
+      showReturnForCorrection: false,
+      showPaidBanner: status === 'FULLY_PAID',
+      showAwaitingCorrectionBanner: false,
+      showCannotReturnMessage: false,
+      payFullUsesRemainderLabel: false,
+      postponeUsesChangeDateLabel: false,
+    };
+  }
+
+  if (status === 'RETURNED') {
+    return {
+      showPayFull: false,
+      showPayRemainder: false,
+      showPartial: false,
+      showPostpone: false,
+      showChangePostponeDate: false,
+      showReturnForCorrection: false,
+      showPaidBanner: false,
+      showAwaitingCorrectionBanner: true,
+      showCannotReturnMessage: false,
+      payFullUsesRemainderLabel: false,
+      postponeUsesChangeDateLabel: false,
+    };
+  }
+
+  if (status === 'PARTIALLY_PAID') {
+    return {
+      showPayFull: false,
+      showPayRemainder: hasRemaining,
+      showPartial: hasRemaining,
+      showPostpone: hasRemaining,
+      showChangePostponeDate: false,
+      showReturnForCorrection: false,
+      showPaidBanner: false,
+      showAwaitingCorrectionBanner: false,
+      showCannotReturnMessage: hasPaid,
+      payFullUsesRemainderLabel: true,
+      postponeUsesChangeDateLabel: false,
+    };
+  }
+
+  if (status === 'PAYMENT_POSTPONED') {
+    return {
+      showPayFull: hasRemaining,
+      showPayRemainder: false,
+      showPartial: hasRemaining,
+      showPostpone: false,
+      showChangePostponeDate: hasRemaining,
+      showReturnForCorrection: !hasPaid,
+      showPaidBanner: false,
+      showAwaitingCorrectionBanner: false,
+      showCannotReturnMessage: hasPaid,
+      payFullUsesRemainderLabel: false,
+      postponeUsesChangeDateLabel: true,
+    };
+  }
+
+  return {
+    showPayFull: hasRemaining,
+    showPayRemainder: false,
+    showPartial: hasRemaining,
+    showPostpone: hasRemaining,
+    showChangePostponeDate: false,
+    showReturnForCorrection: !hasPaid,
+    showPaidBanner: false,
+    showAwaitingCorrectionBanner: false,
+    showCannotReturnMessage: hasPaid,
+    payFullUsesRemainderLabel: false,
+    postponeUsesChangeDateLabel: false,
+  };
+}

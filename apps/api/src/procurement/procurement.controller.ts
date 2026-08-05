@@ -311,9 +311,9 @@ export class ProcurementController {
     @CurrentUser() user: AuthUser,
     @Param('source') source: AccountantBillSource,
     @Param('id') id: string,
-    @Body() dto: { reason?: string },
+    @Body() dto: { reason?: string; comment?: string; idempotencyKey?: string },
   ) {
-    return this.accountantBillsService.returnForCorrection(user, source, id, dto?.reason || '');
+    return this.accountantBillsService.returnForCorrection(user, source, id, dto ?? {});
   }
 
   @Post('bills-to-pay/:source/:id/reject')

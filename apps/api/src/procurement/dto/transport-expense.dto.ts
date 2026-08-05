@@ -326,4 +326,12 @@ export class ReturnTransportExpenseDto {
   @IsString()
   @MinLength(3)
   reason!: string;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 }

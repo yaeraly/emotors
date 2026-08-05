@@ -34,6 +34,10 @@ import {
   matchesBillSearch,
   paginateItems,
 } from './accountant-bills.util';
+import {
+  resolveCargoApprovalStatus,
+  resolveCargoPaymentStatusLabel,
+} from './cargo-bill-actions.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
@@ -177,10 +181,10 @@ export class AccountantBillsService {
     user: AuthUser,
     source: AccountantBillSource,
     id: string,
-    reason: string,
+    body: { reason?: string; comment?: string; idempotencyKey?: string } = {},
   ) {
     this.assertAccountant(user);
-    const trimmed = reason?.trim();
+    const trimmed = body.reason?.trim();
     if (!trimmed || trimmed.length < 3) {
       throw new BadRequestException('Return reason is required');
     }
@@ -216,6 +220,17 @@ export class AccountantBillsService {
     }
 
     if (source === 'TRANSPORT_EXPENSE') {
+      const expense = await this.prisma.procurementTransportExpense.findUnique({
+        where: { id },
+        select: { expenseType: true },
+      });
+      if (expense?.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
+        return this.transportExpenses.returnCargoForCorrection(user, id, {
+          reason: trimmed,
+          comment: body.comment?.trim() || undefined,
+          idempotencyKey: body.idempotencyKey,
+        });
+      }
       return this.transportExpenses.returnToCreator(user, id, { reason: trimmed });
     }
 
@@ -417,7 +432,7 @@ export class AccountantBillsService {
     user: AuthUser,
     source: AccountantBillSource,
     id: string,
-    body: { nextPaymentDate?: string; comment?: string } = {},
+    body: { nextPaymentDate?: string; reason?: string; comment?: string } = {},
   ) {
     this.assertAccountant(user);
     const nextPaymentDateRaw = String(body.nextPaymentDate || '').trim();
@@ -428,6 +443,7 @@ export class AccountantBillsService {
     if (Number.isNaN(nextPaymentDate.getTime())) {
       throw new BadRequestException('nextPaymentDate is invalid');
     }
+    const reason = String(body.reason || '').trim();
     const comment = String(body.comment || '').trim();
     if (!comment) {
       throw new BadRequestException('comment is required');
@@ -513,6 +529,9 @@ export class AccountantBillsService {
           include: { procurementOrder: { select: { id: true, orderNumber: true } } },
         });
         if (!expense) throw new NotFoundException('Transport expense not found');
+        if (expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT && reason.length < 2) {
+          throw new BadRequestException('Postpone reason is required');
+        }
         if (
           expense.status === TransportExpenseStatus.PAID ||
           expense.status === TransportExpenseStatus.CANCELLED ||
@@ -521,20 +540,28 @@ export class AccountantBillsService {
           throw new BadRequestException('Transport expense cannot be postponed in current status');
         }
 
-        const amountKgs = Number(expense.amountKgs || expense.amount || 0);
         const paidAmountKgs = Number(expense.paidAmountKgs || 0);
-        const remainingAmountKgs = Math.max(amountKgs - paidAmountKgs, 0);
+        const approvedAmountKgs =
+          Number(expense.amountKgs) > 0
+            ? Number(expense.amountKgs)
+            : Number(expense.calculatedAmountKgs || expense.amount);
+        const remainingAmountKgs = Math.max(approvedAmountKgs - paidAmountKgs, 0);
         if (remainingAmountKgs <= 0.009) {
           throw new BadRequestException('Fully paid transport expense cannot be postponed');
         }
 
+        const amountKgs = approvedAmountKgs;
+        const storedComment = reason ? `${reason}${comment ? `\n${comment}` : ''}` : comment;
         const updated = await tx.procurementTransportExpense.update({
           where: { id },
           data: {
             status: TransportExpenseStatus.PAYMENT_POSTPONED,
             dueDate: nextPaymentDate,
-            accountantComment: comment,
+            accountantComment: storedComment,
             accountantId: user.id,
+            amountKgs,
+            approvedAt: expense.approvedAt ?? new Date(),
+            exchangeRate: expense.usdExchangeRate ?? expense.exchangeRate,
             // Clear cashier queue — postpone must not keep a pending payment task.
             sentToCashierAt: null,
             executionStatus: null,
@@ -554,7 +581,8 @@ export class AccountantBillsService {
         }, {
           status: TransportExpenseStatus.PAYMENT_POSTPONED,
           dueDate: nextPaymentDate.toISOString(),
-          comment,
+          comment: storedComment,
+          postponeReason: reason || null,
           paidAmount: paidAmountKgs,
           remainingAmount: remainingAmountKgs,
           procurementOrderId: expense.procurementOrderId,
@@ -576,6 +604,8 @@ export class AccountantBillsService {
             newPaidAmount: paidAmountKgs,
             oldRemainingAmount: remainingAmountKgs,
             newRemainingAmount: remainingAmountKgs,
+            nextPaymentDate: nextPaymentDate.toISOString(),
+            correctionReason: reason || null,
             actorUserId: user.id,
             timestamp: new Date().toISOString(),
           });
@@ -613,7 +643,8 @@ export class AccountantBillsService {
           source,
           status: 'PAYMENT_POSTPONED',
           nextPaymentDate: nextPaymentDate.toISOString(),
-          comment,
+          comment: storedComment,
+          reason: reason || null,
           remainingAmount: remainingAmountKgs,
           relatedOrderNumber: expense.procurementOrder?.orderNumber ?? null,
         };
@@ -998,14 +1029,26 @@ export class AccountantBillsService {
       orderBy: { timestamp: 'desc' },
       take: 50,
     });
+    const isCargo = detail.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT;
+    const approvedAmountKgs = Number(
+      detail.calculatedAmountKgs ?? detail.amountKgs ?? detail.amount ?? 0,
+    );
     return {
       ...listItem,
       detail: {
         ...detail,
+        approvalStatus: isCargo ? resolveCargoApprovalStatus(detail.status) : undefined,
+        paymentStatus: isCargo
+          ? resolveCargoPaymentStatusLabel(
+              detail.status,
+              detail.paidAmountKgs,
+              approvedAmountKgs,
+            )
+          : undefined,
+        returnReason: detail.returnReason ?? null,
         payments,
         auditHistory: audits,
-        cargo:
-          detail.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
+        cargo: isCargo
             ? {
                 totalWeightKg: detail.totalWeightKg,
                 cargoRateUsdPerKg: detail.cargoRateUsdPerKg,
