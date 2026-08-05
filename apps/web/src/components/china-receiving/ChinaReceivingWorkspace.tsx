@@ -62,16 +62,22 @@ type ReceivingDocuments = {
 };
 
 type HqReceivingInvoicePrerequisite = {
-  requestType: 'CARGO_PAYMENT' | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  requestType:
+    | 'SUPPLIER_PAYMENT'
+    | 'CHINA_DOMESTIC_TRANSPORT'
+    | 'CARGO_PAYMENT'
+    | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
   displayName: string;
-  state: 'closed' | 'missing' | 'open' | 'partial' | 'postponed';
+  state: 'closed' | 'missing' | 'open' | 'partial' | 'postponed' | 'approved' | 'rejected';
   status: string | null;
   closed: boolean;
   exists?: boolean;
+  accountantProcessed?: boolean;
 };
 
 type HqReceivingValidation = {
   canReceiveToHq?: boolean;
+  allExpensesProcessed?: boolean;
   invoicePrerequisites?: HqReceivingInvoicePrerequisite[];
 };
 
@@ -482,11 +488,25 @@ function ChinaReceivingEditableView({
 
   const invoicePrerequisites = task.validation?.invoicePrerequisites ?? [];
   const canReceiveToHq = task.validation?.canReceiveToHq ?? false;
-  // Only missing invoices block receiving — unpaid / partial / postponed must not.
+  const allExpensesProcessed =
+    task.validation?.allExpensesProcessed ??
+    (invoicePrerequisites.length > 0 &&
+      invoicePrerequisites.every((row) => row.accountantProcessed === true));
+  // Backend gate: all four mandatory invoices must be processed by HQ Accountant.
   const receiveBlocked = !canReceiveToHq;
-  const unpaidInvoiceWarnings = invoicePrerequisites.filter(
-    (row) => row.exists !== false && !row.closed,
+  const outstandingDebtWarnings = invoicePrerequisites.filter(
+    (row) => row.accountantProcessed && !row.closed,
   );
+
+  function invoiceStatusLabel(row: HqReceivingInvoicePrerequisite) {
+    if (row.state === 'missing' || row.exists === false) return t('chinaReceiving.invoiceMissing');
+    if (row.state === 'rejected') return t('chinaReceiving.invoiceRejected');
+    if (row.state === 'partial') return t('chinaReceiving.invoicePartial');
+    if (row.state === 'postponed') return t('chinaReceiving.invoicePostponed');
+    if (row.state === 'closed') return t('chinaReceiving.invoiceClosed');
+    if (row.accountantProcessed || row.state === 'approved') return t('chinaReceiving.invoiceProcessed');
+    return t('chinaReceiving.invoiceAwaitingAccountant');
+  }
 
   async function receiveToHq() {
     if (!canEdit || !allSaved) return;
@@ -614,36 +634,47 @@ function ChinaReceivingEditableView({
         </div>
       </div>
 
-      {canEdit && invoicePrerequisites.length > 0 ? (
+      {invoicePrerequisites.length > 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm font-semibold text-slate-800">{t('chinaReceiving.invoicePrerequisitesTitle')}</p>
+          <p className="text-sm font-semibold text-slate-800">{t('chinaReceiving.costReadinessTitle')}</p>
           <ul className="mt-3 space-y-2 text-sm">
             {invoicePrerequisites.map((row) => {
               const missing = row.state === 'missing' || row.exists === false;
-              const statusLabel = row.closed
-                ? t('chinaReceiving.invoiceClosed')
-                : missing
-                  ? t('chinaReceiving.invoiceMissing')
-                  : row.state === 'partial'
-                    ? t('chinaReceiving.invoicePartial')
-                    : row.state === 'postponed'
-                      ? t('chinaReceiving.invoicePostponed')
-                      : t('chinaReceiving.invoiceAwaitingPayment');
+              const rejected = row.state === 'rejected';
+              const waiting = !row.accountantProcessed && !missing && !rejected;
               return (
                 <li
                   key={row.requestType}
-                  className={missing ? 'text-red-700' : row.closed ? 'text-emerald-700' : 'text-amber-800'}
+                  className={
+                    missing || rejected
+                      ? 'text-red-700'
+                      : row.accountantProcessed
+                        ? 'text-emerald-700'
+                        : waiting
+                          ? 'text-amber-800'
+                          : 'text-slate-700'
+                  }
                 >
-                  {row.displayName}: {statusLabel}
+                  {row.displayName} — {invoiceStatusLabel(row)}
                 </li>
               );
             })}
           </ul>
-          {receiveBlocked ? (
-            <p className="mt-3 text-sm text-amber-800">{t('chinaReceiving.invoicePrerequisitesWarning')}</p>
-          ) : unpaidInvoiceWarnings.length > 0 ? (
-            <p className="mt-3 text-sm text-slate-600">{t('chinaReceiving.invoicePaymentNotRequired')}</p>
-          ) : null}
+          {allExpensesProcessed && !receiveBlocked ? (
+            <div className="mt-3 space-y-1 text-sm text-emerald-800">
+              <p>{t('chinaReceiving.costReadinessAllProcessed')}</p>
+              <p>{t('chinaReceiving.costReadinessCostCalculated')}</p>
+              <p className="font-semibold">{t('chinaReceiving.costReadinessReceiveAvailable')}</p>
+              {outstandingDebtWarnings.length > 0 ? (
+                <p className="text-slate-600">{t('chinaReceiving.invoicePaymentNotRequired')}</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-3 space-y-1 text-sm text-amber-800">
+              <p className="font-semibold">{t('chinaReceiving.costReadinessReceiveUnavailable')}</p>
+              <p>{t('chinaReceiving.invoicePrerequisitesWarning')}</p>
+            </div>
+          )}
         </div>
       ) : null}
 

@@ -2292,6 +2292,15 @@ export class ProcurementService {
         orderBy: [{ sequenceNumber: 'asc' as const }, { createdAt: 'asc' as const }],
       },
       costAdjustments: { orderBy: { createdAt: 'desc' as const }, take: 10 },
+      transportExpenses: {
+        select: {
+          procurementOrderId: true,
+          expenseType: true,
+          amount: true,
+          amountKgs: true,
+          status: true,
+        },
+      },
     };
   }
 
@@ -3863,11 +3872,27 @@ export class ProcurementService {
                 transportCompanyStatus: order.svhToHqTransport.transportCompany?.status ?? null,
               }
             : null,
+          procurementOrderId: order.id,
+          transportExpenses: order.transportExpenses ?? [],
+          supplier: {
+            invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+            supplierInvoiceNumber: order.supplierInvoiceNumber,
+            invoiceReviewStatus: order.invoiceReviewStatus,
+            supplierPaymentStatus: order.supplierPaymentStatus,
+          },
+          chinaSectionTotal: Number(order.chinaDomesticTransportKgs ?? 0),
+          cargoSectionTotal: Number(order.totalCargoCostKgs ?? 0),
+          kyrgyzstanSectionTotal: Number(
+            order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
+          ),
         });
         return {
           cargoReceiptCompleted: receivingValidation.cargoReceiptCompleted,
           svhToHqTransportCompleted: receivingValidation.svhToHqTransportCompleted,
           canReceiveToHq: receivingValidation.canReceiveToHq,
+          allExpensesProcessed: receivingValidation.allExpensesProcessed,
+          invoicePrerequisites: receivingValidation.invoicePrerequisites,
+          blockingInvoices: receivingValidation.blockingInvoices,
         };
       })(),
     };

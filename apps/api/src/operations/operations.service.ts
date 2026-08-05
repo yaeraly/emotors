@@ -63,7 +63,6 @@ import {
   buildHqReceivingValidationResult,
   buildHqReceivingBlockedMessages,
   HQ_RECEIVING_BLOCKED,
-  isSupplierInvoicePresent,
   validateHqReceivingInvoicePrerequisites,
 } from '../procurement/hq-receiving-validation.util';
 import {
@@ -2130,33 +2129,16 @@ export class OperationsService {
     });
     if (!precheckOrder) throw new NotFoundException('Procurement order not found');
 
-    if (
-      !isSupplierInvoicePresent({
-        invoiceSentToAccountantAt: precheckOrder.invoiceSentToAccountantAt,
-        supplierInvoiceNumber: precheckOrder.supplierInvoiceNumber,
-      })
-    ) {
-      throw new BadRequestException({
-        message: HQ_RECEIVING_BLOCKED,
-        messages: {
-          ru: 'Невозможно принять товар на склад.\n\nSupply Manager должен создать счет:\n— Оплата поставщику\n\nПолная оплата счетов не требуется.',
-          ky: 'Товарды складга кабыл алуу мүмкүн эмес.\n\nSupply Manager эсеп түзүшү керек:\n— Оплата поставщику\n\nЭсептерди толук төлөө талап кылынбайт.',
-          en: 'Cannot receive goods into the warehouse.\n\nSupply Manager must create the invoice:\n— Supplier payment\n\nFull invoice payment is not required.',
-        },
-        blockingInvoices: [
-          {
-            requestType: 'SUPPLIER_PAYMENT',
-            displayName: 'Оплата поставщику',
-            state: 'missing',
-            status: null,
-          },
-        ],
-      });
-    }
-
     const invoiceGate = validateHqReceivingInvoicePrerequisites({
       procurementOrderId: precheckOrder.id,
       transportExpenses: precheckOrder.transportExpenses,
+      supplier: {
+        invoiceSentToAccountantAt: precheckOrder.invoiceSentToAccountantAt,
+        supplierInvoiceNumber: precheckOrder.supplierInvoiceNumber,
+        invoiceReviewStatus: precheckOrder.invoiceReviewStatus,
+        supplierPaymentStatus: precheckOrder.supplierPaymentStatus,
+      },
+      chinaSectionTotal: Number(precheckOrder.chinaDomesticTransportKgs ?? 0),
       cargoSectionTotal: Number(precheckOrder.totalCargoCostKgs ?? 0),
       kyrgyzstanSectionTotal: Number(
         precheckOrder.localTransportKgs ?? precheckOrder.svhToHqTransport?.transportCostKgs ?? 0,
@@ -2177,6 +2159,7 @@ export class OperationsService {
           displayName: row.displayName,
           state: row.state,
           status: row.status,
+          accountantProcessed: row.accountantProcessed,
         })),
       });
     }
@@ -2209,6 +2192,13 @@ export class OperationsService {
       const txInvoiceGate = validateHqReceivingInvoicePrerequisites({
         procurementOrderId: order.id,
         transportExpenses: order.transportExpenses,
+        supplier: {
+          invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+          supplierInvoiceNumber: order.supplierInvoiceNumber,
+          invoiceReviewStatus: order.invoiceReviewStatus,
+          supplierPaymentStatus: order.supplierPaymentStatus,
+        },
+        chinaSectionTotal: Number(order.chinaDomesticTransportKgs ?? 0),
         cargoSectionTotal: Number(order.totalCargoCostKgs ?? 0),
         kyrgyzstanSectionTotal: Number(
           order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
@@ -2223,6 +2213,7 @@ export class OperationsService {
             displayName: row.displayName,
             state: row.state,
             status: row.status,
+            accountantProcessed: row.accountantProcessed,
           })),
         });
       }
@@ -2280,6 +2271,13 @@ export class OperationsService {
         svh: svhSnapshot,
         procurementOrderId: order.id,
         transportExpenses: order.transportExpenses,
+        supplier: {
+          invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+          supplierInvoiceNumber: order.supplierInvoiceNumber,
+          invoiceReviewStatus: order.invoiceReviewStatus,
+          supplierPaymentStatus: order.supplierPaymentStatus,
+        },
+        chinaSectionTotal: Number(order.chinaDomesticTransportKgs ?? 0),
         cargoSectionTotal: Number(order.totalCargoCostKgs ?? 0),
         kyrgyzstanSectionTotal: Number(
           order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
@@ -2828,6 +2826,19 @@ export class OperationsService {
         newValue: { status: ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE },
         timestamp: new Date().toISOString(),
       });
+      await this.auditInTx(tx, user, 'HQ', 'HQ_WAREHOUSE_RECEIPT_COMPLETED', 'ProcurementOrder', order.id, {
+        userId: user.id,
+        actorUserId: user.id,
+        actorRole: user.role,
+        roles: user.roles ?? [user.role],
+        warehouseId: hqWarehouseId,
+        procurementOrderId: order.id,
+        shipmentId: order.id,
+        receivingId: receiving.id,
+        paymentStatus: order.supplierPaymentStatus,
+        accountantProcessingStatus: 'PROCESSED',
+        timestamp: new Date().toISOString(),
+      });
       await this.auditUnpaidReceiving(tx, user, order, txInvoiceGate);
       await this.auditInTx(tx, user, 'HQ', 'GOODS_RECEIVED_TO_HQ', 'ProcurementOrder', order.id, {
         userId: user.id,
@@ -2981,6 +2992,7 @@ export class OperationsService {
         validation: wmOnlyView
         ? {
             canReceiveToHq: validation.canReceiveToHq,
+            allExpensesProcessed: validation.allExpensesProcessed,
             invoicePrerequisites: validation.invoicePrerequisites,
           }
         : validation,
@@ -3444,6 +3456,7 @@ export class OperationsService {
       validation: wmOnlyView
         ? {
             canReceiveToHq: validation.canReceiveToHq,
+            allExpensesProcessed: validation.allExpensesProcessed,
             invoicePrerequisites: validation.invoicePrerequisites,
           }
         : validation,
@@ -5306,34 +5319,56 @@ export class OperationsService {
     }
   }
 
-  private auditReceivingBlocked(
+  private async auditReceivingBlocked(
     user: AuthUser,
     procurementOrderId: string,
     warehouseId: string | null,
     gate: ReturnType<typeof validateHqReceivingInvoicePrerequisites>,
     tx: PrismaTx | PrismaService = this.prisma,
   ) {
-    return tx.auditLog.create({
+    const metadata = {
+      shipmentId: procurementOrderId,
+      purchaseOrderId: procurementOrderId,
+      warehouseId,
+      action: 'HQ_RECEIVING_BLOCKED_BY_UNPROCESSED_EXPENSE',
+      blockingInvoiceTypes: gate.blockingInvoices.map((row) => row.requestType),
+      blockingInvoiceStatuses: gate.blockingInvoices.map((row) => row.status),
+      blockingInvoiceStates: gate.blockingInvoices.map((row) => row.state),
+      accountantProcessingStatus: gate.prerequisites.map((row) => ({
+        requestType: row.requestType,
+        accountantProcessed: row.accountantProcessed,
+        paymentStatus: row.status,
+        state: row.state,
+      })),
+      attemptedBy: user.id,
+      attemptedAt: new Date().toISOString(),
+      userId: user.id,
+      roles: user.roles ?? [user.role],
+      actorUserId: user.id,
+      actorRole: user.role,
+      procurementOrderId,
+      timestamp: new Date().toISOString(),
+      failureReason: 'UNPROCESSED_PROCUREMENT_OR_IMPORT_EXPENSE',
+    } as Prisma.InputJsonValue;
+
+    await tx.auditLog.create({
       data: {
         userId: user.id,
         role: user.role,
         action: 'HQ_RECEIVING_BLOCKED',
         entity: 'ProcurementOrder',
         entityId: procurementOrderId,
-        metadata: {
-          shipmentId: procurementOrderId,
-          purchaseOrderId: procurementOrderId,
-          warehouseId,
-          action: 'HQ_RECEIVING_BLOCKED',
-          blockingInvoiceTypes: gate.blockingInvoices.map((row) => row.requestType),
-          blockingInvoiceStatuses: gate.blockingInvoices.map((row) => row.status),
-          attemptedBy: user.id,
-          attemptedAt: new Date().toISOString(),
-          userId: user.id,
-          roles: user.roles ?? [user.role],
-          procurementOrderId,
-          timestamp: new Date().toISOString(),
-        } as Prisma.InputJsonValue,
+        metadata,
+      },
+    });
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'HQ_RECEIVING_BLOCKED_BY_UNPROCESSED_EXPENSE',
+        entity: 'ProcurementOrder',
+        entityId: procurementOrderId,
+        metadata,
       },
     });
   }

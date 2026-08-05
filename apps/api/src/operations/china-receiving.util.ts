@@ -48,6 +48,12 @@ type OrderLike = {
   id?: string;
   totalCargoCostKgs?: unknown;
   localTransportKgs?: unknown;
+  chinaDomesticTransportKgs?: unknown;
+  chinaDomesticTransportYuan?: unknown;
+  invoiceSentToAccountantAt?: Date | string | null;
+  supplierInvoiceNumber?: string | null;
+  invoiceReviewStatus?: string | null;
+  supplierPaymentStatus?: string | null;
   transportExpenses?: HqReceivingTransportExpenseSnapshot[];
 };
 
@@ -100,6 +106,14 @@ export function buildChinaReceivingValidation(order: OrderLike) {
       : null,
     procurementOrderId: order.id,
     transportExpenses: order.transportExpenses ?? [],
+    supplier: {
+      invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+      supplierInvoiceNumber: order.supplierInvoiceNumber,
+      invoiceReviewStatus: order.invoiceReviewStatus,
+      supplierPaymentStatus: order.supplierPaymentStatus,
+    },
+    chinaSectionTotal:
+      asNumeric(order.chinaDomesticTransportKgs) ?? asNumeric(order.chinaDomesticTransportYuan),
     cargoSectionTotal: asNumeric(order.totalCargoCostKgs),
     kyrgyzstanSectionTotal:
       asNumeric(order.localTransportKgs) ??

@@ -34,6 +34,7 @@ import {
   matchesBillSearch,
   paginateItems,
 } from './accountant-bills.util';
+import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
 import type { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
@@ -333,12 +334,31 @@ export class AccountantBillsService {
     }
 
     if (source === 'TRANSPORT_EXPENSE') {
-      return this.transportExpenses.approveAndSendToCashier(user, id, {
+      const result = await this.transportExpenses.approveAndSendToCashier(user, id, {
         exchangeRate: body.exchangeRate,
         financeAccountId: body.financeAccountId,
         accountantComment: body.accountantComment,
         sendToCashier: body.sendToCashier !== false,
       });
+      const expense = await this.prisma.procurementTransportExpense.findUnique({
+        where: { id },
+        select: {
+          procurementOrderId: true,
+          expenseNumber: true,
+          procurementOrder: { select: { orderNumber: true } },
+        },
+      });
+      if (expense?.procurementOrderId) {
+        await this.prisma.$transaction(async (tx) => {
+          await this.notifyWarehouseWhenExpensesProcessed(
+            tx,
+            user,
+            expense.procurementOrderId!,
+            expense.procurementOrder?.orderNumber ?? expense.expenseNumber,
+          );
+        });
+      }
+      return result;
     }
 
     throw new BadRequestException('Approve is not supported for this request type');
@@ -428,6 +448,7 @@ export class AccountantBillsService {
             : `Оплата поставщику по заказу ${order.orderNumber} отложена до ${nextPaymentDate.toISOString().slice(0, 10)}.`,
           recipientRoles: [Role.HQ_ACCOUNTANT, Role.CEO, Role.FINANCE_MANAGER],
         });
+        await this.notifyWarehouseWhenExpensesProcessed(tx, user, order.id, order.orderNumber);
 
         return {
           id: updated.id,
@@ -514,6 +535,14 @@ export class AccountantBillsService {
             : `Оплата ${requestLabel} по счёту ${expense.expenseNumber} отложена до ${nextPaymentDate.toISOString().slice(0, 10)}.`,
           recipientRoles: [Role.HQ_ACCOUNTANT, Role.CEO, Role.FINANCE_MANAGER],
         });
+        if (expense.procurementOrderId) {
+          await this.notifyWarehouseWhenExpensesProcessed(
+            tx,
+            user,
+            expense.procurementOrderId,
+            expense.procurementOrder?.orderNumber ?? expense.expenseNumber,
+          );
+        }
 
         return {
           id: updated.id,
@@ -968,6 +997,92 @@ export class AccountantBillsService {
       recipientRoles:
         input.recipientRoles ??
         [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER, Role.FINANCE_MANAGER],
+    });
+  }
+
+  /**
+   * When the last mandatory procurement/import invoice is processed by HQ Accountant,
+   * notify HQ Warehouse that the shipment is ready for receiving after costing.
+   */
+  private async notifyWarehouseWhenExpensesProcessed(
+    tx: any,
+    user: AuthUser,
+    procurementOrderId: string,
+    orderNumber: string,
+  ) {
+    const order = await tx.procurementOrder.findFirst({
+      where: { id: procurementOrderId, deletedAt: null },
+      select: {
+        id: true,
+        orderNumber: true,
+        hqStockMovementCreatedAt: true,
+        invoiceSentToAccountantAt: true,
+        supplierInvoiceNumber: true,
+        invoiceReviewStatus: true,
+        supplierPaymentStatus: true,
+        chinaDomesticTransportKgs: true,
+        totalCargoCostKgs: true,
+        localTransportKgs: true,
+        svhToHqTransport: { select: { transportCostKgs: true } },
+        transportExpenses: {
+          select: {
+            procurementOrderId: true,
+            expenseType: true,
+            amount: true,
+            amountKgs: true,
+            status: true,
+          },
+        },
+      },
+    });
+    if (!order || order.hqStockMovementCreatedAt) return;
+
+    const gate = validateHqReceivingInvoicePrerequisites({
+      procurementOrderId: order.id,
+      transportExpenses: order.transportExpenses,
+      supplier: {
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        supplierInvoiceNumber: order.supplierInvoiceNumber,
+        invoiceReviewStatus: order.invoiceReviewStatus,
+        supplierPaymentStatus: order.supplierPaymentStatus,
+      },
+      chinaSectionTotal: Number(order.chinaDomesticTransportKgs ?? 0),
+      cargoSectionTotal: Number(order.totalCargoCostKgs ?? 0),
+      kyrgyzstanSectionTotal: Number(
+        order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
+      ),
+    });
+    if (!gate.canReceiveToHq) return;
+
+    await tx.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action: 'HQ_RECEIVING_READY_AFTER_COSTING',
+        entity: 'ProcurementOrder',
+        entityId: order.id,
+        metadata: {
+          procurementOrderId: order.id,
+          shipmentId: order.id,
+          actorUserId: user.id,
+          actorRole: user.role,
+          accountantProcessingStatus: 'PROCESSED',
+          oldCostingStatus: 'NOT_READY',
+          newCostingStatus: 'READY_TO_CALCULATE',
+          warehouseReceivingStatus: 'READY',
+          timestamp: new Date().toISOString(),
+        },
+      },
+    });
+
+    await this.notifications.notifyInTx(tx, user, {
+      type: AlertType.PROCUREMENT_STATUS_CHANGED,
+      entityType: 'ProcurementOrder',
+      entityId: order.id,
+      referenceNumber: orderNumber || order.orderNumber,
+      message:
+        'Все обязательные расходы обработаны. Себестоимость рассчитана. Партия готова к приёмке.',
+      recipientRoles: [Role.WAREHOUSE_MANAGER, Role.SUPPLY_CHAIN_MANAGER],
     });
   }
 

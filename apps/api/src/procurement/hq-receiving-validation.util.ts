@@ -7,7 +7,10 @@ import {
 
 export const HQ_RECEIVING_BLOCKED = 'HQ_RECEIVING_BLOCKED';
 
+/** All four mandatory expense groups must be processed by HQ Accountant before receive. */
 export const HQ_RECEIVING_INVOICE_PREREQUISITES = [
+  'SUPPLIER_PAYMENT',
+  'CHINA_DOMESTIC_TRANSPORT',
   'CARGO_PAYMENT',
   'KYRGYZSTAN_DOMESTIC_TRANSPORT',
 ] as const;
@@ -15,6 +18,8 @@ export const HQ_RECEIVING_INVOICE_PREREQUISITES = [
 export type HqReceivingInvoiceRequestType = (typeof HQ_RECEIVING_INVOICE_PREREQUISITES)[number];
 
 export const HQ_RECEIVING_INVOICE_DISPLAY_NAMES: Record<HqReceivingInvoiceRequestType, string> = {
+  SUPPLIER_PAYMENT: 'Платежи поставщику',
+  CHINA_DOMESTIC_TRANSPORT: 'Внутренний транспорт Китая',
   CARGO_PAYMENT: 'Оплата карго',
   KYRGYZSTAN_DOMESTIC_TRANSPORT: 'Внутренний транспорт Кыргызстана',
 };
@@ -24,7 +29,9 @@ export type HqReceivingInvoiceBlockState =
   | 'missing'
   | 'open'
   | 'partial'
-  | 'postponed';
+  | 'postponed'
+  | 'approved'
+  | 'rejected';
 
 export type HqReceivingTransportExpenseSnapshot = {
   procurementOrderId?: string | null;
@@ -34,26 +41,38 @@ export type HqReceivingTransportExpenseSnapshot = {
   status: string;
 };
 
+export type HqReceivingSupplierSnapshot = {
+  invoiceSentToAccountantAt?: string | Date | null;
+  supplierInvoiceNumber?: string | null;
+  invoiceReviewStatus?: string | null;
+  supplierPaymentStatus?: string | null;
+};
+
 export type HqReceivingInvoicePrerequisite = {
   requestType: HqReceivingInvoiceRequestType;
   displayName: string;
   state: HqReceivingInvoiceBlockState;
   status: string | null;
-  /** True when invoice is fully paid (informational; does not gate receiving). */
+  /** True when invoice is fully paid (informational). */
   closed: boolean;
-  /** True when an invoice exists for the section (required for receiving). */
+  /** True when an invoice record exists for the section. */
   exists: boolean;
+  /**
+   * True when HQ Accountant completed a payment decision:
+   * full pay / partial pay / postpone (not merely waiting for review).
+   */
+  accountantProcessed: boolean;
 };
 
 export type HqReceivingInvoiceGateResult = {
   canReceiveToHq: boolean;
   prerequisites: HqReceivingInvoicePrerequisite[];
-  /** Only missing invoices block receiving — payment status never does. */
+  /** Missing, rejected, or unprocessed invoices block receiving. */
   blockingInvoices: HqReceivingInvoicePrerequisite[];
 };
 
 export const HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE =
-  'Перед приемкой товара на склад должны существовать счета «Оплата карго» и «Внутренний транспорт Кыргызстана». Полная оплата не требуется.';
+  'Невозможно принять товар на HQ склад.\n\nНе все закупочные и импортные расходы обработаны HQ Accountant.';
 
 export const CARGO_RECEIPT_INCOMPLETE_MESSAGE =
   'Fill cargo receipt before receiving to HQ warehouse';
@@ -63,6 +82,23 @@ export const CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE =
 
 export const SVH_TRANSPORT_INCOMPLETE_MESSAGE =
   'Complete SVH to HQ transport before receiving';
+
+/** Transport statuses that mean HQ Accountant finished processing (pay or postpone). */
+export const TRANSPORT_ACCOUNTANT_PROCESSED_STATUSES = new Set<string>([
+  TransportExpenseStatus.PENDING_CASHIER,
+  TransportExpenseStatus.PARTIALLY_PAID,
+  TransportExpenseStatus.PAYMENT_POSTPONED,
+  TransportExpenseStatus.PAID,
+]);
+
+/** Supplier ledger statuses that mean HQ Accountant finished processing. */
+export const SUPPLIER_ACCOUNTANT_PROCESSED_STATUSES = new Set<string>([
+  'AWAITING_CASHIER',
+  'PARTIALLY_PAID',
+  'PAYMENT_POSTPONED',
+  'PAID',
+  'OVERPAID',
+]);
 
 export type CargoReceiptSnapshot = {
   cargoTotalWeightKg?: number | string | null;
@@ -111,7 +147,6 @@ export function validateCargoReceiptComplete(snapshot: CargoReceiptSnapshot): Hq
   return { valid: errors.length === 0, errors };
 }
 
-/** Whether a cargo receipt file exists on the order or linked freight payment request. */
 export function hasCargoReceiptAttachment(snapshot: CargoReceiptSnapshot): boolean {
   return (snapshot.cargoAttachmentCount ?? 0) >= 1;
 }
@@ -146,12 +181,10 @@ export function validateSvhToHqTransportComplete(snapshot: SvhTransportSnapshot)
   return { valid: errors.length === 0, errors };
 }
 
-/** Fully paid invoice (informational only — receiving does not require this). */
 export function isTransportExpenseInvoiceClosed(status: string): boolean {
   return String(status ?? '').toUpperCase() === TransportExpenseStatus.PAID;
 }
 
-/** Invoice exists with a confirmed amount; payment may still be open/partial/postponed. */
 export function isTransportExpenseInvoicePresent(status: string): boolean {
   const normalized = String(status ?? '').toUpperCase();
   return (
@@ -159,6 +192,27 @@ export function isTransportExpenseInvoicePresent(status: string): boolean {
     normalized !== TransportExpenseStatus.CANCELLED &&
     normalized !== TransportExpenseStatus.DRAFT
   );
+}
+
+export function isTransportExpenseAccountantProcessed(status: string): boolean {
+  return TRANSPORT_ACCOUNTANT_PROCESSED_STATUSES.has(String(status ?? '').toUpperCase());
+}
+
+export function isSupplierInvoicePresent(order: {
+  invoiceSentToAccountantAt?: string | Date | null;
+  supplierInvoiceNumber?: string | null;
+}): boolean {
+  return Boolean(order.invoiceSentToAccountantAt || order.supplierInvoiceNumber?.trim());
+}
+
+export function isSupplierInvoiceAccountantProcessed(order: {
+  invoiceReviewStatus?: string | null;
+  supplierPaymentStatus?: string | null;
+}): boolean {
+  const review = String(order.invoiceReviewStatus ?? '').toUpperCase();
+  if (review === 'REJECTED') return false;
+  const ledger = String(order.supplierPaymentStatus ?? '').toUpperCase();
+  return SUPPLIER_ACCOUNTANT_PROCESSED_STATUSES.has(ledger);
 }
 
 function normalizeExpenseStatus(status: string): string {
@@ -178,10 +232,106 @@ function expensesForOrderSection(
   });
 }
 
+function emptyPrerequisite(
+  requestType: HqReceivingInvoiceRequestType,
+  state: HqReceivingInvoiceBlockState = 'missing',
+  status: string | null = null,
+): HqReceivingInvoicePrerequisite {
+  return {
+    requestType,
+    displayName: HQ_RECEIVING_INVOICE_DISPLAY_NAMES[requestType],
+    state,
+    status,
+    closed: false,
+    exists: state !== 'missing',
+    accountantProcessed: false,
+  };
+}
+
+export function evaluateSupplierInvoiceSection(
+  supplier?: HqReceivingSupplierSnapshot | null,
+): HqReceivingInvoicePrerequisite {
+  const requestType = 'SUPPLIER_PAYMENT' as const;
+  const displayName = HQ_RECEIVING_INVOICE_DISPLAY_NAMES[requestType];
+  if (!supplier || !isSupplierInvoicePresent(supplier)) {
+    return emptyPrerequisite(requestType, 'missing');
+  }
+
+  const review = String(supplier.invoiceReviewStatus ?? '').toUpperCase();
+  const ledger = String(supplier.supplierPaymentStatus ?? '').toUpperCase();
+
+  if (review === 'REJECTED') {
+    return {
+      requestType,
+      displayName,
+      state: 'rejected',
+      status: 'REJECTED',
+      closed: false,
+      exists: true,
+      accountantProcessed: false,
+    };
+  }
+
+  if (ledger === 'PAID' || ledger === 'OVERPAID') {
+    return {
+      requestType,
+      displayName,
+      state: 'closed',
+      status: ledger,
+      closed: true,
+      exists: true,
+      accountantProcessed: true,
+    };
+  }
+  if (ledger === 'PARTIALLY_PAID') {
+    return {
+      requestType,
+      displayName,
+      state: 'partial',
+      status: ledger,
+      closed: false,
+      exists: true,
+      accountantProcessed: true,
+    };
+  }
+  if (ledger === 'PAYMENT_POSTPONED') {
+    return {
+      requestType,
+      displayName,
+      state: 'postponed',
+      status: ledger,
+      closed: false,
+      exists: true,
+      accountantProcessed: true,
+    };
+  }
+  if (ledger === 'AWAITING_CASHIER') {
+    return {
+      requestType,
+      displayName,
+      state: 'approved',
+      status: ledger,
+      closed: false,
+      exists: true,
+      accountantProcessed: true,
+    };
+  }
+
+  return {
+    requestType,
+    displayName,
+    state: 'open',
+    status: ledger || review || 'AWAITING_ACCOUNTANT',
+    closed: false,
+    exists: true,
+    accountantProcessed: false,
+  };
+}
+
 export function evaluateHqReceivingInvoiceSection(
   expenses: HqReceivingTransportExpenseSnapshot[],
   procurementOrderId: string,
-  requestType: HqReceivingInvoiceRequestType,
+  requestType: Exclude<HqReceivingInvoiceRequestType, 'SUPPLIER_PAYMENT'>,
   sectionTotal?: number | null,
 ): HqReceivingInvoicePrerequisite {
   const expenseType = expenseTypeForRequestType(requestType);
@@ -189,64 +339,90 @@ export function evaluateHqReceivingInvoiceSection(
   const orderExpenses = expensesForOrderSection(expenses, procurementOrderId, expenseType);
 
   if (orderExpenses.length === 0) {
-    return {
-      requestType,
-      displayName,
-      state: 'missing',
-      status: null,
-      closed: false,
-      exists: false,
-    };
+    return emptyPrerequisite(requestType, 'missing');
   }
 
-  const summary = summarizeSectionPayments(
-    orderExpenses.map((row) => ({
-      amount: Number(row.amount),
-      amountKgs: row.amountKgs != null ? Number(row.amountKgs) : null,
-      status: row.status,
-    })),
-    sectionTotal,
+  const hasRejected = orderExpenses.every(
+    (row) => normalizeExpenseStatus(row.status) === TransportExpenseStatus.REJECTED,
   );
-
-  if (summary.status === 'PAID') {
+  if (hasRejected) {
     return {
       requestType,
       displayName,
-      state: 'closed',
-      status: TransportExpenseStatus.PAID,
-      closed: true,
-      exists: true,
-    };
-  }
-
-  const hasPostponed = orderExpenses.some(
-    (row) => normalizeExpenseStatus(row.status) === TransportExpenseStatus.PAYMENT_POSTPONED,
-  );
-  if (hasPostponed) {
-    return {
-      requestType,
-      displayName,
-      state: 'postponed',
-      status: TransportExpenseStatus.PAYMENT_POSTPONED,
+      state: 'rejected',
+      status: TransportExpenseStatus.REJECTED,
       closed: false,
       exists: true,
+      accountantProcessed: false,
     };
   }
 
-  const hasPartial =
-    summary.status === 'PARTIALLY_PAID' ||
-    orderExpenses.some(
-      (row) => normalizeExpenseStatus(row.status) === TransportExpenseStatus.PARTIALLY_PAID,
+  // Prefer any processed row for the section (partial/postpone/paid/pending cashier).
+  const processedRows = orderExpenses.filter((row) =>
+    isTransportExpenseAccountantProcessed(row.status),
+  );
+  if (processedRows.length > 0) {
+    const summary = summarizeSectionPayments(
+      orderExpenses.map((row) => ({
+        amount: Number(row.amount),
+        amountKgs: row.amountKgs != null ? Number(row.amountKgs) : null,
+        status: row.status,
+      })),
+      sectionTotal,
     );
 
-  if (hasPartial) {
+    if (summary.status === 'PAID' || processedRows.some((row) => normalizeExpenseStatus(row.status) === 'PAID')) {
+      const allPaid = orderExpenses.every((row) =>
+        ['PAID', 'CANCELLED', 'REJECTED'].includes(normalizeExpenseStatus(row.status)),
+      );
+      if (allPaid || summary.status === 'PAID') {
+        return {
+          requestType,
+          displayName,
+          state: 'closed',
+          status: TransportExpenseStatus.PAID,
+          closed: true,
+          exists: true,
+          accountantProcessed: true,
+        };
+      }
+    }
+
+    if (processedRows.some((row) => normalizeExpenseStatus(row.status) === 'PAYMENT_POSTPONED')) {
+      return {
+        requestType,
+        displayName,
+        state: 'postponed',
+        status: TransportExpenseStatus.PAYMENT_POSTPONED,
+        closed: false,
+        exists: true,
+        accountantProcessed: true,
+      };
+    }
+
+    if (
+      summary.status === 'PARTIALLY_PAID' ||
+      processedRows.some((row) => normalizeExpenseStatus(row.status) === 'PARTIALLY_PAID')
+    ) {
+      return {
+        requestType,
+        displayName,
+        state: 'partial',
+        status: TransportExpenseStatus.PARTIALLY_PAID,
+        closed: false,
+        exists: true,
+        accountantProcessed: true,
+      };
+    }
+
     return {
       requestType,
       displayName,
-      state: 'partial',
-      status: TransportExpenseStatus.PARTIALLY_PAID,
+      state: 'approved',
+      status: TransportExpenseStatus.PENDING_CASHIER,
       closed: false,
       exists: true,
+      accountantProcessed: true,
     };
   }
 
@@ -258,33 +434,49 @@ export function evaluateHqReceivingInvoiceSection(
     status: dominantStatus,
     closed: false,
     exists: true,
+    accountantProcessed: false,
   };
 }
 
 export function validateHqReceivingInvoicePrerequisites(input: {
   procurementOrderId: string;
   transportExpenses: HqReceivingTransportExpenseSnapshot[];
+  supplier?: HqReceivingSupplierSnapshot | null;
+  chinaSectionTotal?: number | string | null;
   cargoSectionTotal?: number | string | null;
   kyrgyzstanSectionTotal?: number | string | null;
 }): HqReceivingInvoiceGateResult {
-  const prerequisites = HQ_RECEIVING_INVOICE_PREREQUISITES.map((requestType) => {
-    if (requestType === 'CARGO_PAYMENT') {
+  const prerequisites: HqReceivingInvoicePrerequisite[] = HQ_RECEIVING_INVOICE_PREREQUISITES.map(
+    (requestType) => {
+      if (requestType === 'SUPPLIER_PAYMENT') {
+        return evaluateSupplierInvoiceSection(input.supplier);
+      }
+      if (requestType === 'CHINA_DOMESTIC_TRANSPORT') {
+        return evaluateHqReceivingInvoiceSection(
+          input.transportExpenses,
+          input.procurementOrderId,
+          requestType,
+          Number(input.chinaSectionTotal ?? 0),
+        );
+      }
+      if (requestType === 'CARGO_PAYMENT') {
+        return evaluateHqReceivingInvoiceSection(
+          input.transportExpenses,
+          input.procurementOrderId,
+          requestType,
+          Number(input.cargoSectionTotal ?? 0),
+        );
+      }
       return evaluateHqReceivingInvoiceSection(
         input.transportExpenses,
         input.procurementOrderId,
         requestType,
-        Number(input.cargoSectionTotal ?? 0),
+        Number(input.kyrgyzstanSectionTotal ?? 0),
       );
-    }
-    return evaluateHqReceivingInvoiceSection(
-      input.transportExpenses,
-      input.procurementOrderId,
-      requestType,
-      Number(input.kyrgyzstanSectionTotal ?? 0),
-    );
-  });
-  // Receiving requires invoices to exist; unpaid / partial / postponed must NOT block.
-  const blockingInvoices = prerequisites.filter((row) => !row.exists);
+    },
+  );
+
+  const blockingInvoices = prerequisites.filter((row) => !row.accountantProcessed);
   return {
     canReceiveToHq: blockingInvoices.length === 0,
     prerequisites,
@@ -293,38 +485,16 @@ export function validateHqReceivingInvoicePrerequisites(input: {
 }
 
 function formatBlockedInvoiceLines(blocking: HqReceivingInvoicePrerequisite[]): string {
-  return blocking.map((row) => `— ${row.displayName}`).join('\n');
-}
-
-function buildBlockedInvoiceAction(blocking: HqReceivingInvoicePrerequisite[]): string {
-  const missing = blocking.filter((row) => row.state === 'missing');
-  const parts: string[] = [];
-  if (missing.length > 0) {
-    parts.push(
-      missing.length === 1
-        ? 'Supply Manager должен создать счет:'
-        : 'Supply Manager должен создать счета:',
-    );
-    parts.push(formatBlockedInvoiceLines(missing));
-  }
-  return parts.join('\n');
+  return blocking.map((row) => `• ${row.displayName}`).join('\n');
 }
 
 export function buildHqReceivingBlockedMessages(
   blockingInvoices: HqReceivingInvoicePrerequisite[],
 ): { ru: string; ky: string; en: string } {
-  if (blockingInvoices.length === 0) {
-    return {
-      ru: HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE,
-      ky: HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE,
-      en: HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE,
-    };
-  }
-
-  const body = buildBlockedInvoiceAction(blockingInvoices);
-  const ru = `Невозможно принять товар на склад.\n\n${body}\n\nПолная оплата счетов не требуется.`;
-  const ky = `Товарды складга кабыл алуу мүмкүн эмес.\n\n${body}\n\nЭсептерди толук төлөө талап кылынбайт.`;
-  const en = `Cannot receive goods into the warehouse.\n\n${body}\n\nFull invoice payment is not required.`;
+  const list = formatBlockedInvoiceLines(blockingInvoices);
+  const ru = `${HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE}\n\nНе обработано:\n${list || '• —'}`;
+  const ky = `HQ складга товар кабыл алуу мүмкүн эмес.\n\nБардык сатып алуу жана импорт чыгымдары HQ Accountant тарабынан иштелген эмес.\n\nИштелген эмес:\n${list || '• —'}`;
+  const en = `Cannot receive goods into the HQ warehouse.\n\nNot all procurement and import expenses have been processed by HQ Accountant.\n\nNot processed:\n${list || '• —'}`;
   return { ru, ky, en };
 }
 
@@ -333,6 +503,8 @@ export function buildHqReceivingValidationResult(params: {
   svh: SvhTransportSnapshot;
   procurementOrderId?: string;
   transportExpenses?: HqReceivingTransportExpenseSnapshot[];
+  supplier?: HqReceivingSupplierSnapshot | null;
+  chinaSectionTotal?: number | string | null;
   cargoSectionTotal?: number | string | null;
   kyrgyzstanSectionTotal?: number | string | null;
 }) {
@@ -348,20 +520,21 @@ export function buildHqReceivingValidationResult(params: {
       ? validateHqReceivingInvoicePrerequisites({
           procurementOrderId: params.procurementOrderId,
           transportExpenses: params.transportExpenses,
+          supplier: params.supplier,
+          chinaSectionTotal: params.chinaSectionTotal,
           cargoSectionTotal: params.cargoSectionTotal,
           kyrgyzstanSectionTotal: params.kyrgyzstanSectionTotal,
         })
       : null;
 
   return {
-    /** True when a cargo receipt file already exists (payment request / order). */
     cargoReceiptCompleted: receiptAttached,
-    /** Informational only — does not gate HQ warehouse receiving. */
     svhToHqTransportCompleted: svhTransport.valid,
-    /** HQ China receiving requires cargo + domestic invoices to exist; payment status is ignored. */
+    /** True only when all four mandatory invoices are processed by HQ Accountant. */
     canReceiveToHq: invoiceGate?.canReceiveToHq ?? false,
     invoicePrerequisites: invoiceGate?.prerequisites ?? [],
     blockingInvoices: invoiceGate?.blockingInvoices ?? [],
+    allExpensesProcessed: invoiceGate?.canReceiveToHq ?? false,
     cargoReceipt,
     cargoForm,
     svhTransport,
@@ -375,7 +548,7 @@ export function hqReceivingBlockedMessage(
   return buildHqReceivingBlockedMessages(validation.blockingInvoices).ru;
 }
 
-/** Supplier ledger statuses that still allow HQ receiving. */
+/** @deprecated Prefer isSupplierInvoiceAccountantProcessed for the receiving gate. */
 export function isSupplierPaymentStatusReceivable(status: string | null | undefined): boolean {
   const normalized = String(status ?? '').toUpperCase();
   return (
@@ -388,11 +561,4 @@ export function isSupplierPaymentStatusReceivable(status: string | null | undefi
     normalized === 'PAID' ||
     normalized === 'OVERPAID'
   );
-}
-
-export function isSupplierInvoicePresent(order: {
-  invoiceSentToAccountantAt?: string | Date | null;
-  supplierInvoiceNumber?: string | null;
-}): boolean {
-  return Boolean(order.invoiceSentToAccountantAt || order.supplierInvoiceNumber?.trim());
 }

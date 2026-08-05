@@ -23,13 +23,20 @@ export type HqReceivingValidationResult = {
   errors: string[];
 };
 
+export type HqReceivingInvoiceRequestType =
+  | 'SUPPLIER_PAYMENT'
+  | 'CHINA_DOMESTIC_TRANSPORT'
+  | 'CARGO_PAYMENT'
+  | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+
 export type HqReceivingInvoicePrerequisite = {
-  requestType: 'CARGO_PAYMENT' | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  requestType: HqReceivingInvoiceRequestType;
   displayName: string;
-  state: 'closed' | 'missing' | 'open' | 'partial' | 'postponed';
+  state: 'closed' | 'missing' | 'open' | 'partial' | 'postponed' | 'approved' | 'rejected';
   status: string | null;
   closed: boolean;
   exists?: boolean;
+  accountantProcessed?: boolean;
 };
 
 export const CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE =
@@ -97,6 +104,7 @@ export function buildHqReceivingValidationResult(params: {
   cargo: CargoReceiptSnapshot;
   svh: SvhTransportSnapshot;
   canReceiveToHq?: boolean;
+  allExpensesProcessed?: boolean;
   invoicePrerequisites?: HqReceivingInvoicePrerequisite[];
 }) {
   const cargoForm = validateCargoReceiptComplete(params.cargo);
@@ -110,6 +118,7 @@ export function buildHqReceivingValidationResult(params: {
     cargoReceiptCompleted: receiptAttached,
     svhToHqTransportCompleted: svhTransport.valid,
     canReceiveToHq: params.canReceiveToHq ?? false,
+    allExpensesProcessed: params.allExpensesProcessed ?? params.canReceiveToHq ?? false,
     invoicePrerequisites: params.invoicePrerequisites ?? [],
     cargoReceipt,
     cargoForm,
