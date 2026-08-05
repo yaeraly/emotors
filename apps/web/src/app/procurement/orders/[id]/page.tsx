@@ -8,6 +8,7 @@ import { type DomesticTransportForm } from '@/components/DomesticTransportSectio
 import { ProcurementEditWindowPanel } from '@/components/ProcurementEditWindowPanel';
 import { ProcurementStatusButtons } from '@/components/ProcurementStatusButtons';
 import { ProcurementSupplierPayments } from '@/components/ProcurementSupplierPayments';
+import { InvoiceReceiptHistoryPanel } from '@/components/InvoiceReceiptHistoryPanel';
 import { ProcurementSectionPayablePanel } from '@/components/ProcurementSectionPayablePanel';
 import {
   buildPurchaseOrderSupplierPaymentSummary,
@@ -1126,6 +1127,10 @@ function ProcurementOrderDetailPageContent() {
                 } as import('@/components/ProcurementSupplierPayments').ProcurementOrderPayments}
                 user={user}
                 onChanged={load}
+              />
+              <InvoiceReceiptHistoryPanel
+                source="SUPPLIER_PAYMENT"
+                entityId={order.id}
               />
             </div>
           ) : null}

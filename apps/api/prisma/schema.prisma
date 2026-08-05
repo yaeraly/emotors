@@ -755,6 +755,7 @@ enum AlertType {
   FINANCE_RECONCILIATION_DIFFERENCE
   FINANCE_EXPENSE_PENDING
   FINANCE_PAYMENT_ACCEPTED
+  RECEIPT_SENT_TO_CREATOR
   PAYABLE_REQUEST_UNDER_REVIEW
   PAYABLE_REQUEST_REJECTED
   PAYABLE_REQUEST_APPROVED
@@ -5746,6 +5747,7 @@ model Alert {
   type            AlertType
   module          NotificationModule?
   recipientRole   Role?
+  recipientUserId String?
   referenceNumber String?
   title           String
   message         String
@@ -5761,6 +5763,7 @@ model Alert {
   @@index([type])
   @@index([module])
   @@index([recipientRole])
+  @@index([recipientUserId])
   @@index([status])
   @@index([createdAt])
   @@index([entityType, entityId])

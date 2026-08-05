@@ -9,6 +9,7 @@ import {
   FinanceLoadingState,
 } from '@/components/finance/FinanceLayout';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
+import { InvoiceReceiptHistoryPanel } from '@/components/InvoiceReceiptHistoryPanel';
 import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/components/HqPaymentPermanentDeleteModal';
 import { API_URL, apiFetch, getToken } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -1901,6 +1902,15 @@ function DetailDrawer({
               <p className="mt-2 text-xs text-slate-500">{t('finance.billsToPay.noPaymentHistory')}</p>
             )}
           </section>
+
+          {isTransport || bill.source === 'SUPPLIER_INVOICE' ? (
+            <div className="mt-4">
+              <InvoiceReceiptHistoryPanel
+                source={isTransport ? 'TRANSPORT_EXPENSE' : 'SUPPLIER_PAYMENT'}
+                entityId={isTransport ? bill.id : String(detail.procurementOrderId || bill.id)}
+              />
+            </div>
+          ) : null}
 
           {isCargoPayment && auditHistory.length ? (
             <section className="mt-4">

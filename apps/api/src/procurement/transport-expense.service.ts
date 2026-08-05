@@ -10,6 +10,7 @@ import {
   FinanceAccountScope,
   FinanceAccountStatus,
   FinanceLedgerEntryType,
+  NotificationModule,
   Prisma,
   ProcurementPaymentInfoMethod,
   Role,
@@ -26,6 +27,11 @@ import { assertHqCashierAssignedAccount } from '../finance/finance-assignment.ut
 import { buildFinanceDocumentNumber, roundMoney } from '../finance/finance-number.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  auditReceiptEvent,
+  deliverReceiptsToCreatorInTx,
+  resolveInvoiceCreatorUserId,
+} from './receipt-delivery.util';
 import {
   canConfirmSupplierPayment,
   canCreateSupplierPayment,
@@ -1468,6 +1474,24 @@ export class TransportExpenseService {
           : `Transport expense ${expense.expenseNumber} received a partial payment of ${payNow.toFixed(2)} KGS.`,
         recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
       });
+
+      const creatorUserId = resolveInvoiceCreatorUserId({
+        expenseCreatedById: expense.createdById,
+      });
+      if (creatorUserId) {
+        await deliverReceiptsToCreatorInTx(tx, this.notifications, user, {
+          source: 'TRANSPORT_EXPENSE',
+          invoiceId: expense.procurementOrderId ?? expense.id,
+          paymentId: expense.id,
+          invoiceNumber: expense.expenseNumber,
+          invoiceStatus: updated.status,
+          processedAt: updated.paidAt ?? new Date(),
+          creatorUserId,
+          notificationEntityType: 'ProcurementTransportExpense',
+          notificationEntityId: expense.id,
+          module: NotificationModule.SUPPLIER_PAYMENT,
+        });
+      }
       return this.toResponse(updated, tx);
     });
   }
@@ -1746,6 +1770,17 @@ export class TransportExpenseService {
             ? 'Cargo receipt (Supply Manager) — separate from accountant/cashier payment receipt'
             : null,
       });
+      if (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT) {
+        await auditReceiptEvent(tx, user, 'RECEIPT_UPLOADED', id, {
+          invoiceId: expense.procurementOrderId ?? id,
+          paymentId: id,
+          uploadedBy: user.id,
+          creatorUserId: expense.createdById,
+          uploadedAt: created.createdAt.toISOString(),
+          filename: created.fileName,
+          attachmentId: created.id,
+        });
+      }
       return created;
     });
   }

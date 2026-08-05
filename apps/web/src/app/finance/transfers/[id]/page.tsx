@@ -9,6 +9,7 @@ import {
   FinanceLoadingState,
   FinanceMoney,
 } from '@/components/finance/FinanceLayout';
+import { InvoiceReceiptHistoryPanel } from '@/components/InvoiceReceiptHistoryPanel';
 import { API_URL, apiFetch } from '@/lib/api';
 import {
   buildTransferStatusHistory,
@@ -158,6 +159,11 @@ export default function FinanceTransferDetailPage() {
               </ol>
             </section>
           ) : null}
+
+          <InvoiceReceiptHistoryPanel
+            source="FINANCE_TRANSFER"
+            entityId={transfer.id}
+          />
         </div>
       ) : null}
     </FinanceLayout>

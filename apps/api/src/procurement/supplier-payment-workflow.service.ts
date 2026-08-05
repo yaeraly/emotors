@@ -11,6 +11,7 @@ import {
   FinanceAccountStatus,
   FinanceLedgerEntryType,
   FileAttachmentEntityType,
+  NotificationModule,
   Prisma,
   ProcurementKgsAdjustmentReason,
   ProcurementOrderStatus,
@@ -27,6 +28,10 @@ import {
 } from '../finance/finance-assignment.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  deliverReceiptsToCreatorInTx,
+  resolveInvoiceCreatorUserId,
+} from './receipt-delivery.util';
 import {
   canAllowSupplierOverpayment,
   canChangeSupplierPaymentFinanceAccount,
@@ -1204,6 +1209,26 @@ export class SupplierPaymentWorkflowService {
         message: `Payment #${payment.sequenceNumber} for ${synced.orderNumber} completed. Paid ${actualPaidKgs} KGS.`,
         recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER],
       });
+
+      const creatorUserId = resolveInvoiceCreatorUserId({
+        invoiceSentById: order.invoiceSentById,
+        orderCreatedById: order.createdById,
+        paymentCreatedById: payment.createdById,
+      });
+      if (creatorUserId) {
+        await deliverReceiptsToCreatorInTx(tx, this.notificationsService, user, {
+          source: 'SUPPLIER_PAYMENT',
+          invoiceId: order.id,
+          paymentId: payment.id,
+          invoiceNumber: synced.orderNumber,
+          invoiceStatus: updatedPayment.status,
+          processedAt: updatedPayment.paidAt ?? new Date(),
+          creatorUserId,
+          notificationEntityType: 'ProcurementOrder',
+          notificationEntityId: order.id,
+          module: NotificationModule.SUPPLIER_PAYMENT,
+        });
+      }
 
       if (
         previousStatus !== 'PARTIALLY_PAID' &&

@@ -42,7 +42,16 @@ export function notificationHref(alert: NotificationItem): string | null {
     return `/products/${alert.entityId}`;
   }
   if (alert.entityType === 'ProcurementOrder' && alert.entityId) {
+    if (alert.type === 'RECEIPT_SENT_TO_CREATOR') {
+      return `/procurement/orders/${alert.entityId}?invoiceReceipts=1`;
+    }
     return `/procurement/orders/${alert.entityId}`;
+  }
+  if (alert.type === 'RECEIPT_SENT_TO_CREATOR' && alert.entityType === 'ProcurementTransportExpense' && alert.entityId) {
+    return `/finance/bills-to-pay?source=TRANSPORT_EXPENSE&id=${alert.entityId}`;
+  }
+  if (alert.type === 'RECEIPT_SENT_TO_CREATOR' && alert.entityType === 'FinanceTransfer' && alert.entityId) {
+    return `/finance/transfers/${alert.entityId}`;
   }
   if (alert.type === 'BRANCH_REQUEST_NO_PRICING_POLICY') {
     return '/pricing';

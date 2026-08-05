@@ -131,6 +131,10 @@ export const NOTIFICATION_ROUTING: Partial<Record<AlertType, NotificationRouting
   HQ_B2B_INSTALLMENT_CEO_REJECTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER] },
   HQ_B2B_SALE_WAREHOUSE_READY: { module: NotificationModule.WAREHOUSE, roles: [Role.WAREHOUSE_MANAGER] },
   HQ_B2B_PAYMENT_CORRECTION_REQUESTED: { module: NotificationModule.BRANCH_ORDERS, roles: [Role.HQ_SALES_MANAGER] },
+  RECEIPT_SENT_TO_CREATOR: {
+    module: NotificationModule.SUPPLIER_PAYMENT,
+    roles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.HQ_SALES_MANAGER, Role.PROCUREMENT_MANAGER],
+  },
 };
 
 export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: string; message: string }>> = {
@@ -377,6 +381,10 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   FRANCHISE_CRITICAL_SHORTAGE: {
     title: 'Critical franchise shortage',
     message: 'A franchise branch has critical inventory shortages.',
+  },
+  RECEIPT_SENT_TO_CREATOR: {
+    title: 'Квитанция загружена.',
+    message: 'Счет успешно обработан HQ Cashier.',
   },
 };
 

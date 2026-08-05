@@ -10,6 +10,7 @@ import { ProcurementService } from './procurement.service';
 import { PurchaseAssistantService } from './purchase-assistant.service';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
+import { ReceiptDeliveryService } from './receipt-delivery.service';
 
 @Module({
   imports: [InventoryModule, LandedCostModule, FinanceModule],
@@ -22,6 +23,7 @@ import { TransportExpenseService } from './transport-expense.service';
     TransportExpenseService,
     AccountantBillsService,
     CashierBillsService,
+    ReceiptDeliveryService,
   ],
   exports: [
     ProcurementService,
@@ -32,6 +34,7 @@ import { TransportExpenseService } from './transport-expense.service';
     TransportExpenseService,
     AccountantBillsService,
     CashierBillsService,
+    ReceiptDeliveryService,
   ],
 })
 export class ProcurementModule {}

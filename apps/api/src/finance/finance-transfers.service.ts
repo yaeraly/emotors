@@ -12,6 +12,7 @@ import {
   FinanceAccountStatus,
   FinanceLedgerEntryType,
   FinanceTransferStatus,
+  NotificationModule,
   Prisma,
   Role,
 } from '@prisma/client';
@@ -22,6 +23,11 @@ import type { FastifyRequest } from 'fastify';
 import { AuthUser } from '../auth/auth.types';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  auditReceiptEvent,
+  deliverReceiptsToCreatorInTx,
+  resolveInvoiceCreatorUserId,
+} from '../procurement/receipt-delivery.util';
 import { hasAnyFullAccessRole, resolveUserRoles } from '../rbac/rbac';
 import {
   assertCanAccessAccountScope,
@@ -506,6 +512,24 @@ export class FinanceTransfersService {
         recipientRoles: [Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER, Role.CEO, Role.OWNER],
       });
 
+      const creatorUserId = resolveInvoiceCreatorUserId({
+        transferCreatedById: transfer.createdById,
+      });
+      if (creatorUserId) {
+        await deliverReceiptsToCreatorInTx(tx, this.notifications, user, {
+          source: 'FINANCE_TRANSFER',
+          invoiceId: transfer.id,
+          paymentId: transfer.id,
+          invoiceNumber: transfer.transferNumber,
+          invoiceStatus: updated.status,
+          processedAt: updated.completedAt ?? new Date(),
+          creatorUserId,
+          notificationEntityType: 'FinanceTransfer',
+          notificationEntityId: transfer.id,
+          module: NotificationModule.FINANCE,
+        });
+      }
+
       if (amount >= LARGE_TRANSFER_THRESHOLD_KGS) {
         await this.notifications.notifyInTx(tx, user, {
           type: AlertType.FINANCE_TRANSFER_LARGE,
@@ -709,6 +733,17 @@ export class FinanceTransfersService {
         fileName: created.fileName,
         entityType,
       });
+      if (entityType === FileAttachmentEntityType.FINANCE_TRANSFER_RECEIPT) {
+        await auditReceiptEvent(tx, user, 'RECEIPT_UPLOADED', transfer.id, {
+          invoiceId: transfer.id,
+          paymentId: transfer.id,
+          uploadedBy: user.id,
+          creatorUserId: transfer.createdById,
+          uploadedAt: created.createdAt.toISOString(),
+          filename: created.fileName,
+          attachmentId: created.id,
+        });
+      }
       return created;
     });
 

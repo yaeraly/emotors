@@ -43,6 +43,7 @@ import {
 import { PurchaseAssistantService } from './purchase-assistant.service';
 import { ProcurementService } from './procurement.service';
 import { TransportExpenseService } from './transport-expense.service';
+import { ReceiptDeliveryService } from './receipt-delivery.service';
 import {
   PayBillCargoDto,
   PostponeBillPaymentDto,
@@ -61,6 +62,7 @@ export class ProcurementController {
     private readonly transportExpenseService: TransportExpenseService,
     private readonly accountantBillsService: AccountantBillsService,
     private readonly cashierBillsService: CashierBillsService,
+    private readonly receiptDeliveryService: ReceiptDeliveryService,
   ) {}
 
   @Get('purchase-assistant')
@@ -758,6 +760,26 @@ export class ProcurementController {
     @Body() dto: ReverseSupplierPaymentDto,
   ) {
     return this.service.reverseSupplierPayment(user, id, paymentId, dto);
+  }
+
+  @Get('invoice-receipts')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  listInvoiceReceipts(
+    @CurrentUser() user: AuthUser,
+    @Query('source') source: 'SUPPLIER_PAYMENT' | 'TRANSPORT_EXPENSE' | 'FINANCE_TRANSFER',
+    @Query('entityId') entityId: string,
+    @Query('paymentId') paymentId?: string,
+  ) {
+    return this.receiptDeliveryService.listInvoiceReceipts(user, { source, entityId, paymentId });
+  }
+
+  @Post('invoice-receipts/:attachmentId/view')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  recordInvoiceReceiptView(
+    @CurrentUser() user: AuthUser,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.receiptDeliveryService.recordReceiptView(user, attachmentId);
   }
 
   @Get('orders/:id/attachments')

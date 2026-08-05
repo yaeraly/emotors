@@ -35,6 +35,7 @@ export type NotifyInput = {
   message?: string;
   module?: NotificationModule;
   recipientRoles?: Role[];
+  recipientUserId?: string;
 };
 
 @Injectable()
@@ -91,11 +92,39 @@ export class NotificationsService {
   async notifyInTx(tx: PrismaTx, user: AuthUser | null, input: NotifyInput) {
     const copy = DEFAULT_NOTIFICATION_COPY[input.type];
     const module = input.module ?? moduleForAlertType(input.type);
+    const title = input.title ?? copy?.title ?? input.type;
+    const message = input.message ?? copy?.message ?? '';
+
+    if (input.recipientUserId) {
+      const alert = await tx.alert.create({
+        data: {
+          branchId: input.branchId ?? null,
+          type: input.type,
+          module,
+          recipientUserId: input.recipientUserId,
+          referenceNumber: input.referenceNumber,
+          title,
+          message,
+          entityType: input.entityType,
+          entityId: input.entityId,
+        },
+      });
+      if (user) {
+        await this.auditInTx(tx, user, 'NOTIFICATION_CREATED', alert.id, {
+          alertType: input.type,
+          module,
+          recipientUserId: input.recipientUserId,
+          referenceNumber: input.referenceNumber,
+          entityType: input.entityType,
+          entityId: input.entityId,
+        });
+      }
+      return [alert];
+    }
+
     const roles = input.recipientRoles?.length
       ? input.recipientRoles
       : rolesForAlertType(input.type);
-    const title = input.title ?? copy?.title ?? input.type;
-    const message = input.message ?? copy?.message ?? '';
     const targetRoles: Array<Role | null> = roles.length ? roles : [null];
 
     const created = [];
@@ -166,23 +195,39 @@ export class NotificationsService {
             filters,
             {
               OR: [
-                { type: { notIn: INVENTORY_ALERT_TYPES } },
+                { recipientUserId: user.id },
                 {
-                  type: { in: INVENTORY_ALERT_TYPES },
-                  branchId: null,
+                  recipientUserId: null,
+                  OR: [
+                    { type: { notIn: INVENTORY_ALERT_TYPES } },
+                    {
+                      type: { in: INVENTORY_ALERT_TYPES },
+                      branchId: null,
+                    },
+                  ],
                 },
               ],
             },
           ],
         };
       }
-      return filters;
+      return {
+        AND: [
+          filters,
+          {
+            OR: [{ recipientUserId: user.id }, { recipientUserId: null }],
+          },
+        ],
+      };
     }
 
     if (user.branchId) {
       return {
         AND: [
           filters,
+          {
+            OR: [{ recipientUserId: user.id }, { recipientUserId: null }],
+          },
           { branchId: user.branchId },
           {
             OR: [
@@ -200,11 +245,17 @@ export class NotificationsService {
         filters,
         {
           OR: [
-            { recipientRole: { in: roles as Role[] } },
+            { recipientUserId: user.id },
             {
-              recipientRole: null,
-              branchId: null,
-              ...(allowedModules.length ? { module: { in: allowedModules } } : {}),
+              recipientUserId: null,
+              OR: [
+                { recipientRole: { in: roles as Role[] } },
+                {
+                  recipientRole: null,
+                  branchId: null,
+                  ...(allowedModules.length ? { module: { in: allowedModules } } : {}),
+                },
+              ],
             },
           ],
         },

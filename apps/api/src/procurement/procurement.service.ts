@@ -72,6 +72,7 @@ import {
   mapStoredProcurementItemToLandedCostInput,
 } from './landed-cost.util';
 import { LandedCostService } from './landed-cost.service';
+import { auditReceiptEvent } from './receipt-delivery.util';
 import {
   calculateAmountKgs,
   isConfirmedSupplierPayment,
@@ -1404,6 +1405,24 @@ export class ProcurementService {
       fileUrl: attachment.fileUrl,
       supplierPaymentId,
     });
+
+    if (entityType === FileAttachmentEntityType.SUPPLIER_PAYMENT) {
+      const payment = supplierPaymentId
+        ? await this.prisma.procurementSupplierPayment.findFirst({
+            where: { id: supplierPaymentId },
+            select: { createdById: true },
+          })
+        : null;
+      await auditReceiptEvent(this.prisma, user, 'RECEIPT_UPLOADED', order.id, {
+        invoiceId: order.id,
+        paymentId: supplierPaymentId,
+        uploadedBy: user.id,
+        creatorUserId: order.invoiceSentById ?? order.createdById ?? payment?.createdById,
+        uploadedAt: attachment.createdAt.toISOString(),
+        filename: attachment.fileName,
+        attachmentId: attachment.id,
+      });
+    }
 
     return attachment;
   }
