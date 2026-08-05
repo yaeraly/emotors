@@ -393,11 +393,46 @@ export class TransportExpenseService {
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.procurementTransportExpense.findUnique({ where: { id } });
       if (!existing) throw new NotFoundException('Transport expense not found');
+      const isCargo = existing.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT;
       if (!EDITABLE.has(existing.status)) {
+        if (isCargo) {
+          throw new BadRequestException('Этот счет карго недоступен для исправления.');
+        }
         throw new BadRequestException('Only draft or returned transport expenses can be edited');
       }
-      const amount = dto.amount != null ? roundMoney(dto.amount) : Number(existing.amount);
-      const currency = (dto.currency ?? existing.currency).toUpperCase();
+
+      const hasCargoInput =
+        dto.totalWeightKg != null ||
+        dto.cargoRateUsdPerKg != null ||
+        dto.usdExchangeRate != null;
+
+      let cargoCalc: ReturnType<typeof calculateCargoPaymentAmounts> | null = null;
+      let amount = dto.amount != null ? roundMoney(dto.amount) : Number(existing.amount);
+      let currency = (dto.currency ?? existing.currency).toUpperCase();
+
+      if (isCargo && (hasCargoInput || existing.status === TransportExpenseStatus.RETURNED)) {
+        try {
+          cargoCalc = calculateCargoPaymentAmounts({
+            totalWeightKg:
+              dto.totalWeightKg != null
+                ? Number(dto.totalWeightKg)
+                : Number(existing.totalWeightKg),
+            cargoRateUsdPerKg:
+              dto.cargoRateUsdPerKg != null
+                ? Number(dto.cargoRateUsdPerKg)
+                : Number(existing.cargoRateUsdPerKg),
+            usdExchangeRate:
+              dto.usdExchangeRate != null
+                ? Number(dto.usdExchangeRate)
+                : Number(existing.usdExchangeRate),
+          });
+        } catch (err) {
+          throw new BadRequestException(err instanceof Error ? err.message : 'Invalid cargo calculation');
+        }
+        amount = cargoCalc.calculatedAmountKgs;
+        currency = 'KGS';
+      }
+
       const paymentMethod = dto.paymentMethod ?? existing.paymentMethod;
       if (
         paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT &&
@@ -405,6 +440,14 @@ export class TransportExpenseService {
       ) {
         throw new BadRequestException('Account number is required for bank account payment method');
       }
+
+      const carrierName =
+        dto.supplierCarrier?.trim() ||
+        dto.recipientName?.trim() ||
+        existing.supplierCarrier ||
+        existing.recipientName ||
+        '';
+
       const updated = await tx.procurementTransportExpense.update({
         where: { id },
         data: {
@@ -413,7 +456,7 @@ export class TransportExpenseService {
             dto.requestType !== undefined
               ? dto.requestType?.trim() || null
               : existing.requestType,
-          supplierCarrier: dto.supplierCarrier?.trim() || existing.supplierCarrier,
+          supplierCarrier: carrierName || existing.supplierCarrier,
           transportCompanyId:
             dto.transportCompanyId !== undefined ? dto.transportCompanyId : existing.transportCompanyId,
           expenseName:
@@ -455,6 +498,12 @@ export class TransportExpenseService {
           amount,
           currency,
           amountKgs: currency === 'KGS' ? amount : Number(existing.amountKgs),
+          exchangeRate: cargoCalc?.usdExchangeRate ?? existing.exchangeRate,
+          totalWeightKg: cargoCalc?.totalWeightKg ?? existing.totalWeightKg,
+          cargoRateUsdPerKg: cargoCalc?.cargoRateUsdPerKg ?? existing.cargoRateUsdPerKg,
+          usdExchangeRate: cargoCalc?.usdExchangeRate ?? existing.usdExchangeRate,
+          calculatedAmountUsd: cargoCalc?.calculatedAmountUsd ?? existing.calculatedAmountUsd,
+          calculatedAmountKgs: cargoCalc?.calculatedAmountKgs ?? existing.calculatedAmountKgs,
           dueDate:
             dto.dueDate !== undefined
               ? dto.dueDate
@@ -466,6 +515,65 @@ export class TransportExpenseService {
         },
         include: INCLUDE,
       });
+
+      if (isCargo && cargoCalc && existing.procurementOrderId) {
+        const order = await tx.procurementOrder.findFirst({
+          where: { id: existing.procurementOrderId, deletedAt: null },
+        });
+        if (order) {
+          await tx.procurementOrder.update({
+            where: { id: order.id },
+            data: {
+              cargoTotalWeightKg: cargoCalc.totalWeightKg,
+              cargoRateUsdPerKg: cargoCalc.cargoRateUsdPerKg,
+              totalCargoCostUsd: cargoCalc.calculatedAmountUsd,
+              totalCargoCostKgs: cargoCalc.calculatedAmountKgs,
+              chinaExportTransportKgs: cargoCalc.calculatedAmountKgs,
+            },
+          });
+        }
+      }
+
+      const cargoAuditBase = {
+        cargoPaymentId: id,
+        procurementOrderId: existing.procurementOrderId,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (isCargo && existing.status === TransportExpenseStatus.RETURNED) {
+        await this.audit(tx, user, 'CARGO_PAYMENT_CORRECTED', id, {
+          oldTotalWeightKg: Number(existing.totalWeightKg ?? 0),
+          oldCargoRateUsdPerKg: Number(existing.cargoRateUsdPerKg ?? 0),
+          oldUsdExchangeRate: Number(existing.usdExchangeRate ?? 0),
+          oldCalculatedAmountUsd: Number(existing.calculatedAmountUsd ?? 0),
+          oldCalculatedAmountKgs: Number(existing.calculatedAmountKgs ?? 0),
+        }, {
+          newTotalWeightKg: Number(updated.totalWeightKg ?? 0),
+          newCargoRateUsdPerKg: Number(updated.cargoRateUsdPerKg ?? 0),
+          newUsdExchangeRate: Number(updated.usdExchangeRate ?? 0),
+          newCalculatedAmountUsd: Number(updated.calculatedAmountUsd ?? 0),
+          newCalculatedAmountKgs: Number(updated.calculatedAmountKgs ?? 0),
+          ...cargoAuditBase,
+        });
+      }
+
+      if (
+        isCargo &&
+        cargoCalc &&
+        (Number(existing.calculatedAmountUsd ?? 0) !== cargoCalc.calculatedAmountUsd ||
+          Number(existing.calculatedAmountKgs ?? 0) !== cargoCalc.calculatedAmountKgs)
+      ) {
+        await this.audit(tx, user, 'CARGO_PAYMENT_RECALCULATED', id, {
+          oldCalculatedAmountUsd: Number(existing.calculatedAmountUsd ?? 0),
+          oldCalculatedAmountKgs: Number(existing.calculatedAmountKgs ?? 0),
+        }, {
+          newCalculatedAmountUsd: cargoCalc.calculatedAmountUsd,
+          newCalculatedAmountKgs: cargoCalc.calculatedAmountKgs,
+          ...cargoAuditBase,
+        });
+      }
+
       await this.audit(tx, user, 'TRANSPORT_EXPENSE_UPDATED', id, {
         amount: Number(existing.amount),
         status: existing.status,
@@ -594,6 +702,24 @@ export class TransportExpenseService {
           currency: updated.currency,
         },
       );
+      if (
+        expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT &&
+        expense.status === TransportExpenseStatus.RETURNED
+      ) {
+        await this.audit(tx, user, 'CARGO_PAYMENT_RESUBMITTED', id, {
+          status: expense.status,
+          calculatedAmountUsd: Number(expense.calculatedAmountUsd ?? 0),
+          calculatedAmountKgs: Number(expense.calculatedAmountKgs ?? 0),
+        }, {
+          status: updated.status,
+          calculatedAmountUsd: Number(updated.calculatedAmountUsd ?? 0),
+          calculatedAmountKgs: Number(updated.calculatedAmountKgs ?? 0),
+          cargoPaymentId: id,
+          procurementOrderId: updated.procurementOrderId,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
       await this.audit(tx, user, 'REQUEST_SENT_TO_ACCOUNTANT', id, null, {
         procurementOrderId: updated.procurementOrderId,
         transportCompanyId: updated.transportCompanyId,
@@ -767,6 +893,23 @@ export class TransportExpenseService {
         executionStatus: updated.executionStatus,
         returnReason: updated.returnReason,
       });
+      if (expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
+        await this.audit(tx, user, 'CARGO_PAYMENT_RETURNED_FOR_CORRECTION', id, {
+          status: expense.status,
+          calculatedAmountUsd: Number(expense.calculatedAmountUsd ?? 0),
+          calculatedAmountKgs: Number(expense.calculatedAmountKgs ?? 0),
+        }, {
+          status: updated.status,
+          returnReason: updated.returnReason,
+          cargoPaymentId: id,
+          procurementOrderId: expense.procurementOrderId,
+          totalWeightKg: Number(expense.totalWeightKg ?? 0),
+          cargoRateUsdPerKg: Number(expense.cargoRateUsdPerKg ?? 0),
+          usdExchangeRate: Number(expense.usdExchangeRate ?? 0),
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
       await this.notifications.notifyInTx(tx, user, {
         type: AlertType.TRANSPORT_EXPENSE_RETURNED,
         entityType: 'ProcurementTransportExpense',

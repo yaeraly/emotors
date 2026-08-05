@@ -227,6 +227,25 @@ export class UpdateTransportExpenseDto {
   @IsOptional()
   @IsString()
   comment?: string | null;
+
+  /** Cargo payment correction inputs (INTERNATIONAL_FREIGHT only). Totals are recalculated server-side. */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.001)
+  totalWeightKg?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  cargoRateUsdPerKg?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  usdExchangeRate?: number;
 }
 
 export class ApproveTransportExpenseDto {

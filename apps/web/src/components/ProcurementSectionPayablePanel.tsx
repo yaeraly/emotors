@@ -429,8 +429,16 @@ export function ProcurementSectionPayablePanel({
       return;
     }
     if (isCargo) {
-      if (!(Number(form.totalWeightKg) > 0) || !(Number(form.cargoRateUsdPerKg) > 0) || !(Number(form.usdExchangeRate) > 0)) {
-        setError(t('procurement.sectionPayable.cargoInputsRequired'));
+      if (!(Number(form.totalWeightKg) > 0)) {
+        setError(t('procurement.sectionPayable.cargoWeightRequired'));
+        return;
+      }
+      if (!(Number(form.cargoRateUsdPerKg) > 0)) {
+        setError(t('procurement.sectionPayable.cargoRateRequired'));
+        return;
+      }
+      if (!(Number(form.usdExchangeRate) > 0)) {
+        setError(t('procurement.sectionPayable.cargoUsdRateRequired'));
         return;
       }
       const hasCargoReceipt =
@@ -461,46 +469,68 @@ export function ProcurementSectionPayablePanel({
     setSaving(true);
     setError('');
     try {
-      const payload: Record<string, unknown> = {
-        procurementOrderId: orderId,
-        expenseType,
-        requestType,
-        transportCompanyId: selectedCompany?.id,
-        supplierCarrier:
-          selectedCompany?.name || form.expenseName || t('procurement.sectionPayable.defaultCarrier'),
-        expenseName: form.expenseName || undefined,
-        recipientName: selectedCompany?.name || form.expenseName || undefined,
-        currency: isCargo ? 'KGS' : form.currency,
-        paymentMethod: form.paymentMethod,
-        bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
-        accountHolder:
-          form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
-        accountNumber:
-          form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
-      };
-
-      if (isCargo) {
-        payload.totalWeightKg = Number(form.totalWeightKg);
-        payload.cargoRateUsdPerKg = Number(form.cargoRateUsdPerKg);
-        payload.usdExchangeRate = Number(form.usdExchangeRate);
-        payload.calculatedAmountUsd = Number(cargoTotals.calculatedAmountUsd);
-        payload.calculatedAmountKgs = Number(cargoTotals.calculatedAmountKgs);
-        payload.amount = Number(cargoTotals.calculatedAmountKgs);
-        payload.currency = 'KGS';
-      } else {
-        payload.amount = Number(form.amount);
-      }
+      const carrierName =
+        selectedCompany?.name || form.expenseName || t('procurement.sectionPayable.defaultCarrier');
 
       let expenseId = primaryExpense?.id ?? null;
       const editingExisting =
         Boolean(primaryExpense) && EDITABLE_STATUSES.has(primaryExpense!.status);
 
       if (editingExisting && expenseId) {
+        const updatePayload: Record<string, unknown> = {
+          transportCompanyId: selectedCompany?.id,
+          supplierCarrier: carrierName,
+          expenseName: form.expenseName || undefined,
+          recipientName: selectedCompany?.name || form.expenseName || undefined,
+          paymentMethod: form.paymentMethod,
+          bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
+          accountHolder:
+            form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
+          accountNumber:
+            form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
+        };
+        if (isCargo) {
+          updatePayload.totalWeightKg = Number(form.totalWeightKg);
+          updatePayload.cargoRateUsdPerKg = Number(form.cargoRateUsdPerKg);
+          updatePayload.usdExchangeRate = Number(form.usdExchangeRate);
+        } else {
+          updatePayload.amount = Number(form.amount);
+          updatePayload.currency = form.currency;
+        }
         await apiFetch(`/procurement/transport-expenses/${expenseId}`, {
           method: 'PUT',
-          body: JSON.stringify(payload),
+          body: JSON.stringify(updatePayload),
         });
       } else {
+        const payload: Record<string, unknown> = {
+          procurementOrderId: orderId,
+          expenseType,
+          requestType,
+          transportCompanyId: selectedCompany?.id,
+          supplierCarrier: carrierName,
+          expenseName: form.expenseName || undefined,
+          recipientName: selectedCompany?.name || form.expenseName || undefined,
+          currency: isCargo ? 'KGS' : form.currency,
+          paymentMethod: form.paymentMethod,
+          bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
+          accountHolder:
+            form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
+          accountNumber:
+            form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
+        };
+
+        if (isCargo) {
+          payload.totalWeightKg = Number(form.totalWeightKg);
+          payload.cargoRateUsdPerKg = Number(form.cargoRateUsdPerKg);
+          payload.usdExchangeRate = Number(form.usdExchangeRate);
+          payload.calculatedAmountUsd = Number(cargoTotals.calculatedAmountUsd);
+          payload.calculatedAmountKgs = Number(cargoTotals.calculatedAmountKgs);
+          payload.amount = Number(cargoTotals.calculatedAmountKgs);
+          payload.currency = 'KGS';
+        } else {
+          payload.amount = Number(form.amount);
+        }
+
         const created = await apiFetch<SectionExpense>('/procurement/transport-expenses', {
           method: 'POST',
           body: JSON.stringify({

@@ -77,7 +77,9 @@ assert(rejected, '13. manipulated frontend total rejected');
 // 14-16. Cargo receipt + request amount
 assert(panel.includes('cargoReceipt'), '14. cargo receipt field present');
 assert(panel.includes('pendingCargoReceipt'), '14. cargo receipt required before submit');
-assert(panel.includes("payload.amount = Number(cargoTotals.calculatedAmountKgs)"), '16. request amount = calculated KGS');
+assert(panel.includes('payload.calculatedAmountKgs = Number(cargoTotals.calculatedAmountKgs)'), '16. create request amount = calculated KGS');
+assert(panel.includes('updatePayload.totalWeightKg = Number(form.totalWeightKg)'), 'correction update sends cargo source fields only');
+assert(!panel.includes('updatePayload.calculatedAmountKgs'), 'correction update omits calculated KGS');
 assert(panel.includes("payload.currency = 'KGS'"), '16. request currency KGS');
 assert(schema.includes('cargoReceiptAttachmentId'), '14. cargo receipt id stored');
 assert(schema.includes('calculatedAmountKgs'), 'cargo totals stored');
