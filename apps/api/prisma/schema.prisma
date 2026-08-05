@@ -573,6 +573,7 @@ enum ProcurementSupplierPaymentLedgerStatus {
   AWAITING_ACCOUNTANT
   AWAITING_CASHIER
   PARTIALLY_PAID
+  PAYMENT_POSTPONED
   PAID
   OVERPAID
 }
@@ -607,6 +608,7 @@ enum TransportExpenseStatus {
   REJECTED
   PENDING_CASHIER
   PARTIALLY_PAID
+  PAYMENT_POSTPONED
   PAID
   CANCELLED
 }
@@ -3365,6 +3367,8 @@ model ProcurementOrder {
   note                                  String?
   supplierInvoiceNumber                 String?
   expectedPaymentDate                   DateTime?
+  /** Comment stored when HQ Accountant postpones supplier payment (no ledger impact). */
+  paymentPostponeComment                String?
   /** CNY amount SM requests HQ Accountant to pay (may match order total or invoice). */
   requestedPaymentYuan                  Decimal?                               @db.Decimal(14, 2)
   invoiceSentToAccountantAt             DateTime?

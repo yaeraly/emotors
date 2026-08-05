@@ -629,7 +629,8 @@ export class TransportExpenseService {
       if (!expense) throw new NotFoundException('Transport expense not found');
       if (
         expense.status !== TransportExpenseStatus.WAITING_ACCOUNTANT &&
-        expense.status !== TransportExpenseStatus.UNDER_REVIEW
+        expense.status !== TransportExpenseStatus.UNDER_REVIEW &&
+        expense.status !== TransportExpenseStatus.PAYMENT_POSTPONED
       ) {
         throw new BadRequestException('Expense is not waiting for accountant');
       }
@@ -847,6 +848,20 @@ export class TransportExpenseService {
               : requestedKgs,
         },
       );
+      if (!fullyPaid && expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
+        await this.audit(tx, user, 'CARGO_PARTIAL_PAYMENT', id, {
+          status: expense.status,
+          paidAmountKgs: alreadyPaid,
+        }, {
+          procurementOrderId: expense.procurementOrderId,
+          cargoInvoiceId: id,
+          paymentStatus: updated.status,
+          paidAmount: newPaidTotal,
+          remainingAmount: roundMoney(Math.max(requestedKgs - newPaidTotal, 0)),
+          userId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
       await this.syncOrderSectionCostFromPaidExpenses(tx, user, updated);
       await this.notifications.notifyInTx(tx, user, {
         type: AlertType.TRANSPORT_EXPENSE_PAID,

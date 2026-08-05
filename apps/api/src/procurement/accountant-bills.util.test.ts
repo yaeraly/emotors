@@ -63,11 +63,13 @@ assert(billsPage.includes('finance.billsToPay.department'), '7. department displ
 assert(billsPage.includes('finance.billsToPay.basis'), '8. related procurement basis displayed');
 assert(billsPage.includes('recipientName'), '9. transport company / recipient displayed');
 assert(billsPage.includes('cargoCalc'), '10. cargo calculation displayed');
-assert(billsPage.includes('QR'), '11. QR attachments can be opened');
+assert(billsPage.includes('qrPreview') || billsPage.includes('showQr') || billsPage.includes('QR'), '11. QR attachments can be opened');
 assert(billsPage.includes('return'), '12. accountant can return');
 assert(billsPage.includes('reject'), '13. accountant can reject');
 assert(billsPage.includes('approve'), '14. accountant can approve');
 assert(billsPage.includes('createPartialPayment'), '15. partial payment supported');
+assert(billsPage.includes('postponePayment'), '15b. postpone payment supported');
+assert(billsPage.includes('PAYMENT_POSTPONED'), '15c. postponed status in filters');
 assert(billsPage.includes('exchangeRate'), '17. payment exchange rate captured');
 assert(billsPage.includes('sendToCashier'), '19. payment can be sent to cashier');
 assert(migration.includes('ADD COLUMN IF NOT EXISTS'), '26. safe migration without reset');

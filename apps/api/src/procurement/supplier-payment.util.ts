@@ -129,16 +129,27 @@ export function resolvePurchasePaymentLedgerStatus(input: {
   remainingYuan: number;
   pendingCashierCount: number;
   invoiceSentToAccountantAt?: Date | string | null;
+  previousStatus?: string | null;
 }): ProcurementSupplierPaymentLedgerStatus {
   const totalPaidYuan = roundMoney(input.totalPaidYuan);
   const totalOrderYuan = roundMoney(input.totalOrderYuan);
   const remainingYuan = roundMoney(input.remainingYuan);
+  const previous = String(input.previousStatus ?? '').toUpperCase();
 
   if (totalPaidYuan > totalOrderYuan) {
     return ProcurementSupplierPaymentLedgerStatus.OVERPAID;
   }
   if (totalPaidYuan > 0 && remainingYuan <= 0) {
     return ProcurementSupplierPaymentLedgerStatus.PAID;
+  }
+  // Preserve postponed debt when no cashier task is in flight and balance remains
+  // (including after a prior partial payment).
+  if (
+    previous === ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED &&
+    remainingYuan > 0.009 &&
+    input.pendingCashierCount <= 0
+  ) {
+    return ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED;
   }
   if (totalPaidYuan > 0 && remainingYuan > 0) {
     return ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID;
@@ -155,7 +166,10 @@ export function resolvePurchasePaymentLedgerStatus(input: {
 export function summarizeSupplierPayments(
   payments: SupplierPaymentInput[],
   totalOrderYuan: number,
-  options?: { invoiceSentToAccountantAt?: Date | string | null },
+  options?: {
+    invoiceSentToAccountantAt?: Date | string | null;
+    previousStatus?: string | null;
+  },
 ): SupplierPaymentSummary {
   const confirmed = payments.filter((payment) => isConfirmedSupplierPayment(payment.status));
   const pendingCashierCount = payments.filter(
@@ -183,6 +197,7 @@ export function summarizeSupplierPayments(
     remainingYuan,
     pendingCashierCount,
     invoiceSentToAccountantAt: options?.invoiceSentToAccountantAt,
+    previousStatus: options?.previousStatus,
   });
 
   return {

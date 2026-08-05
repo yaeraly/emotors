@@ -25,6 +25,7 @@ const ACTIVE_REQUEST_STATUSES = new Set<string>([
   TransportExpenseStatus.UNDER_REVIEW,
   TransportExpenseStatus.PENDING_CASHIER,
   TransportExpenseStatus.PARTIALLY_PAID,
+  TransportExpenseStatus.PAYMENT_POSTPONED,
 ]);
 
 /** Blocks creating a new section invoice while one is in flight or returned for correction. */
@@ -40,6 +41,7 @@ const COUNTED_FOR_REMAINING = new Set<string>([
   TransportExpenseStatus.RETURNED,
   TransportExpenseStatus.PENDING_CASHIER,
   TransportExpenseStatus.PARTIALLY_PAID,
+  TransportExpenseStatus.PAYMENT_POSTPONED,
   TransportExpenseStatus.PAID,
 ]);
 

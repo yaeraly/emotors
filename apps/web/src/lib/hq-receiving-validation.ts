@@ -26,9 +26,10 @@ export type HqReceivingValidationResult = {
 export type HqReceivingInvoicePrerequisite = {
   requestType: 'CARGO_PAYMENT' | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
   displayName: string;
-  state: 'closed' | 'missing' | 'open' | 'partial';
+  state: 'closed' | 'missing' | 'open' | 'partial' | 'postponed';
   status: string | null;
   closed: boolean;
+  exists?: boolean;
 };
 
 export const CARGO_RECEIPT_ATTACHMENT_REQUIRED_MESSAGE =

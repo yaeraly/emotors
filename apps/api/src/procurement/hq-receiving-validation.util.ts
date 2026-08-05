@@ -19,7 +19,12 @@ export const HQ_RECEIVING_INVOICE_DISPLAY_NAMES: Record<HqReceivingInvoiceReques
   KYRGYZSTAN_DOMESTIC_TRANSPORT: 'Внутренний транспорт Кыргызстана',
 };
 
-export type HqReceivingInvoiceBlockState = 'closed' | 'missing' | 'open' | 'partial';
+export type HqReceivingInvoiceBlockState =
+  | 'closed'
+  | 'missing'
+  | 'open'
+  | 'partial'
+  | 'postponed';
 
 export type HqReceivingTransportExpenseSnapshot = {
   procurementOrderId?: string | null;
@@ -34,17 +39,21 @@ export type HqReceivingInvoicePrerequisite = {
   displayName: string;
   state: HqReceivingInvoiceBlockState;
   status: string | null;
+  /** True when invoice is fully paid (informational; does not gate receiving). */
   closed: boolean;
+  /** True when an invoice exists for the section (required for receiving). */
+  exists: boolean;
 };
 
 export type HqReceivingInvoiceGateResult = {
   canReceiveToHq: boolean;
   prerequisites: HqReceivingInvoicePrerequisite[];
+  /** Only missing invoices block receiving — payment status never does. */
   blockingInvoices: HqReceivingInvoicePrerequisite[];
 };
 
 export const HQ_RECEIVING_INVOICE_PREREQUISITE_MESSAGE =
-  'Перед приемкой товара на склад Supply Manager должен закрыть счета «Оплата карго» и «Внутренний транспорт Кыргызстана».';
+  'Перед приемкой товара на склад должны существовать счета «Оплата карго» и «Внутренний транспорт Кыргызстана». Полная оплата не требуется.';
 
 export const CARGO_RECEIPT_INCOMPLETE_MESSAGE =
   'Fill cargo receipt before receiving to HQ warehouse';
@@ -137,9 +146,19 @@ export function validateSvhToHqTransportComplete(snapshot: SvhTransportSnapshot)
   return { valid: errors.length === 0, errors };
 }
 
-/** Final closed status for section transport invoices (authoritative for HQ receiving). */
+/** Fully paid invoice (informational only — receiving does not require this). */
 export function isTransportExpenseInvoiceClosed(status: string): boolean {
   return String(status ?? '').toUpperCase() === TransportExpenseStatus.PAID;
+}
+
+/** Invoice exists with a confirmed amount; payment may still be open/partial/postponed. */
+export function isTransportExpenseInvoicePresent(status: string): boolean {
+  const normalized = String(status ?? '').toUpperCase();
+  return (
+    normalized.length > 0 &&
+    normalized !== TransportExpenseStatus.CANCELLED &&
+    normalized !== TransportExpenseStatus.DRAFT
+  );
 }
 
 function normalizeExpenseStatus(status: string): string {
@@ -155,7 +174,7 @@ function expensesForOrderSection(
     if (row.procurementOrderId !== procurementOrderId) return false;
     if (row.expenseType !== expenseType) return false;
     const status = normalizeExpenseStatus(row.status);
-    return status !== TransportExpenseStatus.CANCELLED;
+    return status !== TransportExpenseStatus.CANCELLED && status !== TransportExpenseStatus.DRAFT;
   });
 }
 
@@ -176,6 +195,7 @@ export function evaluateHqReceivingInvoiceSection(
       state: 'missing',
       status: null,
       closed: false,
+      exists: false,
     };
   }
 
@@ -195,6 +215,21 @@ export function evaluateHqReceivingInvoiceSection(
       state: 'closed',
       status: TransportExpenseStatus.PAID,
       closed: true,
+      exists: true,
+    };
+  }
+
+  const hasPostponed = orderExpenses.some(
+    (row) => normalizeExpenseStatus(row.status) === TransportExpenseStatus.PAYMENT_POSTPONED,
+  );
+  if (hasPostponed) {
+    return {
+      requestType,
+      displayName,
+      state: 'postponed',
+      status: TransportExpenseStatus.PAYMENT_POSTPONED,
+      closed: false,
+      exists: true,
     };
   }
 
@@ -211,16 +246,18 @@ export function evaluateHqReceivingInvoiceSection(
       state: 'partial',
       status: TransportExpenseStatus.PARTIALLY_PAID,
       closed: false,
+      exists: true,
     };
   }
 
-  const dominantStatus = orderExpenses[0]?.status ?? TransportExpenseStatus.DRAFT;
+  const dominantStatus = orderExpenses[0]?.status ?? TransportExpenseStatus.WAITING_ACCOUNTANT;
   return {
     requestType,
     displayName,
     state: 'open',
     status: dominantStatus,
     closed: false,
+    exists: true,
   };
 }
 
@@ -246,7 +283,8 @@ export function validateHqReceivingInvoicePrerequisites(input: {
       Number(input.kyrgyzstanSectionTotal ?? 0),
     );
   });
-  const blockingInvoices = prerequisites.filter((row) => !row.closed);
+  // Receiving requires invoices to exist; unpaid / partial / postponed must NOT block.
+  const blockingInvoices = prerequisites.filter((row) => !row.exists);
   return {
     canReceiveToHq: blockingInvoices.length === 0,
     prerequisites,
@@ -260,23 +298,14 @@ function formatBlockedInvoiceLines(blocking: HqReceivingInvoicePrerequisite[]): 
 
 function buildBlockedInvoiceAction(blocking: HqReceivingInvoicePrerequisite[]): string {
   const missing = blocking.filter((row) => row.state === 'missing');
-  const needsClose = blocking.filter((row) => row.state !== 'missing');
   const parts: string[] = [];
   if (missing.length > 0) {
     parts.push(
       missing.length === 1
-        ? 'Supply Manager должен создать и закрыть счет:'
-        : 'Supply Manager должен создать и закрыть счета:',
+        ? 'Supply Manager должен создать счет:'
+        : 'Supply Manager должен создать счета:',
     );
     parts.push(formatBlockedInvoiceLines(missing));
-  }
-  if (needsClose.length > 0) {
-    parts.push(
-      needsClose.length === 1
-        ? 'Supply Manager должен закрыть счет:'
-        : 'Supply Manager должен закрыть счета:',
-    );
-    parts.push(formatBlockedInvoiceLines(needsClose));
   }
   return parts.join('\n');
 }
@@ -293,9 +322,9 @@ export function buildHqReceivingBlockedMessages(
   }
 
   const body = buildBlockedInvoiceAction(blockingInvoices);
-  const ru = `Невозможно принять товар на склад.\n\n${body}`;
-  const ky = `Товарды складга кабыл алуу мүмкүн эмес.\n\n${body}`;
-  const en = `Cannot receive goods into the warehouse.\n\n${body.replaceAll('Supply Manager', 'Supply Manager')}`;
+  const ru = `Невозможно принять товар на склад.\n\n${body}\n\nПолная оплата счетов не требуется.`;
+  const ky = `Товарды складга кабыл алуу мүмкүн эмес.\n\n${body}\n\nЭсептерди толук төлөө талап кылынбайт.`;
+  const en = `Cannot receive goods into the warehouse.\n\n${body}\n\nFull invoice payment is not required.`;
   return { ru, ky, en };
 }
 
@@ -329,7 +358,7 @@ export function buildHqReceivingValidationResult(params: {
     cargoReceiptCompleted: receiptAttached,
     /** Informational only — does not gate HQ warehouse receiving. */
     svhToHqTransportCompleted: svhTransport.valid,
-    /** HQ China receiving requires closed cargo payment and Kyrgyzstan transport invoices. */
+    /** HQ China receiving requires cargo + domestic invoices to exist; payment status is ignored. */
     canReceiveToHq: invoiceGate?.canReceiveToHq ?? false,
     invoicePrerequisites: invoiceGate?.prerequisites ?? [],
     blockingInvoices: invoiceGate?.blockingInvoices ?? [],
@@ -344,4 +373,26 @@ export function hqReceivingBlockedMessage(
 ): string | null {
   if (validation.canReceiveToHq) return null;
   return buildHqReceivingBlockedMessages(validation.blockingInvoices).ru;
+}
+
+/** Supplier ledger statuses that still allow HQ receiving. */
+export function isSupplierPaymentStatusReceivable(status: string | null | undefined): boolean {
+  const normalized = String(status ?? '').toUpperCase();
+  return (
+    normalized === '' ||
+    normalized === 'UNPAID' ||
+    normalized === 'AWAITING_ACCOUNTANT' ||
+    normalized === 'AWAITING_CASHIER' ||
+    normalized === 'PARTIALLY_PAID' ||
+    normalized === 'PAYMENT_POSTPONED' ||
+    normalized === 'PAID' ||
+    normalized === 'OVERPAID'
+  );
+}
+
+export function isSupplierInvoicePresent(order: {
+  invoiceSentToAccountantAt?: string | Date | null;
+  supplierInvoiceNumber?: string | null;
+}): boolean {
+  return Boolean(order.invoiceSentToAccountantAt || order.supplierInvoiceNumber?.trim());
 }

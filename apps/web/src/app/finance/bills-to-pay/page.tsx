@@ -40,6 +40,8 @@ type BillRow = {
   remainingAmountKgs: number;
   status: string;
   isOverdue: boolean;
+  nextPaymentDate?: string | null;
+  paymentPostponeComment?: string | null;
   relatedOrderNumber?: string | null;
   href: string;
 };
@@ -53,6 +55,7 @@ type BillsResponse = {
   summary: {
     awaitingCount: number;
     partiallyPaidCount: number;
+    postponedCount?: number;
     overdueCount: number;
     totalPayableKgs: number;
   };
@@ -80,6 +83,7 @@ const STATUS_FILTERS = [
   'RETURNED',
   'APPROVED',
   'PARTIALLY_PAID',
+  'PAYMENT_POSTPONED',
   'FULLY_PAID',
   'REJECTED',
   'CANCELLED',
@@ -146,6 +150,9 @@ function BillsToPayPageContent() {
     bill: BillDetail;
     payment?: Record<string, unknown>;
   } | null>(null);
+  const [postponeModal, setPostponeModal] = useState<BillDetail | null>(null);
+  const [postponeForm, setPostponeForm] = useState({ nextPaymentDate: '', comment: '' });
+  const [postponeError, setPostponeError] = useState('');
 
   const canAccess = canCreateSupplierPayment(user);
   const canPermanentDelete = canPermanentDeleteBusinessData(user);
@@ -757,6 +764,16 @@ function BillsToPayPageContent() {
           onReturn={() => setReasonModal({ mode: 'return', bill: selected })}
           onReject={() => setReasonModal({ mode: 'reject', bill: selected })}
           onCreatePayment={() => void openPaymentModal(selected)}
+          onPostpone={() => {
+            setPostponeError('');
+            setPostponeForm({
+              nextPaymentDate: selected.nextPaymentDate
+                ? selected.nextPaymentDate.slice(0, 10)
+                : '',
+              comment: selected.paymentPostponeComment || '',
+            });
+            setPostponeModal(selected);
+          }}
           onEditPayment={(payment) => void openEditPayment(payment)}
           onPayPayment={(payment) => void payDraftPayment(payment)}
           onPermanentDeletePayment={(payment) =>
@@ -765,6 +782,80 @@ function BillsToPayPageContent() {
           onPermanentDeleteBill={() => setPaymentDeleteContext({ bill: selected })}
           onShowQr={(images, initialIndex) => setQrPreview({ images, initialIndex })}
         />
+      ) : null}
+
+      {postponeModal ? (
+        <Modal
+          title={t('finance.billsToPay.postponePayment')}
+          onClose={() => {
+            setPostponeModal(null);
+            setPostponeError('');
+          }}
+        >
+          <p className="text-xs text-slate-600">
+            {postponeModal.requestNumber} · {t('finance.billsToPay.remaining')}:{' '}
+            {Number(postponeModal.remainingAmount).toFixed(2)} {postponeModal.currency}
+          </p>
+          {postponeError ? (
+            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{postponeError}</p>
+          ) : null}
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.nextPaymentDate')}
+            <input
+              type="date"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              value={postponeForm.nextPaymentDate}
+              onChange={(e) =>
+                setPostponeForm((prev) => ({ ...prev, nextPaymentDate: e.target.value }))
+              }
+            />
+          </label>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.comment')}
+            <textarea
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              rows={3}
+              value={postponeForm.comment}
+              onChange={(e) => setPostponeForm((prev) => ({ ...prev, comment: e.target.value }))}
+            />
+          </label>
+          <p className="mt-2 text-xs text-slate-500">{t('finance.billsToPay.postponeHint')}</p>
+          <button
+            type="button"
+            disabled={
+              saving ||
+              !postponeForm.nextPaymentDate ||
+              postponeForm.comment.trim().length < 2
+            }
+            onClick={async () => {
+              setSaving(true);
+              setPostponeError('');
+              setActionError('');
+              try {
+                await apiFetch(
+                  `/procurement/bills-to-pay/${postponeModal.source}/${postponeModal.id}/postpone`,
+                  {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      nextPaymentDate: postponeForm.nextPaymentDate,
+                      comment: postponeForm.comment.trim(),
+                    }),
+                  },
+                );
+                setPostponeModal(null);
+                await load();
+                await refreshSelected(postponeModal.source, postponeModal.id);
+              } catch (err) {
+                setPostponeError(err instanceof Error ? err.message : t('common.error'));
+              } finally {
+                setSaving(false);
+              }
+            }}
+            className="mt-3 rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {t('finance.billsToPay.postponePayment')}
+          </button>
+        </Modal>
       ) : null}
 
       {reasonModal ? (
@@ -1059,6 +1150,7 @@ function DetailDrawer({
   onReturn,
   onReject,
   onCreatePayment,
+  onPostpone,
   onEditPayment,
   onPayPayment,
   onPermanentDeletePayment,
@@ -1075,6 +1167,7 @@ function DetailDrawer({
   onReturn: () => void;
   onReject: () => void;
   onCreatePayment: () => void;
+  onPostpone: () => void;
   onEditPayment: (payment: any) => void;
   onPayPayment: (payment: any) => void;
   onPermanentDeletePayment: (payment: Record<string, unknown>) => void;
@@ -1101,6 +1194,10 @@ function DetailDrawer({
   const isTerminal = ['FULLY_PAID', 'REJECTED', 'CANCELLED'].includes(bill.status);
   const isFinance = bill.source === 'FINANCE_EXPENSE';
   const isTransport = bill.source === 'TRANSPORT_EXPENSE';
+  const isSupplierOrCargo =
+    bill.source === 'SUPPLIER_INVOICE' ||
+    bill.requestType === 'CARGO_PAYMENT' ||
+    bill.requestType === 'SUPPLIER_PAYMENT';
   const canTakeReview =
     !isFinance &&
     !isTerminal &&
@@ -1109,8 +1206,10 @@ function DetailDrawer({
     !isFinance &&
     !isTerminal &&
     (isTransport
-      ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status)
-      : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED'].includes(bill.status));
+      ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'PAYMENT_POSTPONED'].includes(bill.status)
+      : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'PAYMENT_POSTPONED'].includes(
+          bill.status,
+        ));
   const canReturnOrReject =
     !isFinance &&
     !isTerminal &&
@@ -1119,6 +1218,11 @@ function DetailDrawer({
     bill.source === 'SUPPLIER_INVOICE' &&
     !isTerminal &&
     Number(bill.remainingAmount) > 0.009;
+  const canPostpone =
+    isSupplierOrCargo &&
+    !isTerminal &&
+    Number(bill.remainingAmount) > 0.009 &&
+    bill.status !== 'PAYMENT_POSTPONED';
 
   return (
     <div
@@ -1172,9 +1276,32 @@ function DetailDrawer({
                 value={`${Number(bill.remainingAmount).toFixed(2)} ${bill.currency}`}
               />
               <Field
+                label={t('finance.billsToPay.nextPaymentDate')}
+                value={
+                  bill.nextPaymentDate
+                    ? new Date(bill.nextPaymentDate).toLocaleDateString()
+                    : '—'
+                }
+              />
+              <Field
                 label={t('finance.billsToPay.createdAt')}
                 value={bill.submittedAt ? new Date(bill.submittedAt).toLocaleString() : '—'}
               />
+              {bill.isOverdue ? (
+                <div className="col-span-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {bill.requestType === 'CARGO_PAYMENT'
+                    ? t('finance.billsToPay.overdueCargoWarning')
+                    : bill.requestType === 'SUPPLIER_PAYMENT'
+                      ? t('finance.billsToPay.overdueSupplierWarning')
+                      : t('finance.billsToPay.overdue')}
+                </div>
+              ) : null}
+              {bill.paymentPostponeComment ? (
+                <Field
+                  label={t('finance.billsToPay.postponeComment')}
+                  value={bill.paymentPostponeComment}
+                />
+              ) : null}
               {isTransport ? (
                 <>
                   <Field
@@ -1431,6 +1558,16 @@ function DetailDrawer({
               className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
             >
               {t('finance.billsToPay.createPartialPayment')}
+            </button>
+          ) : null}
+          {canPostpone ? (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onPostpone}
+              className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 disabled:opacity-40"
+            >
+              {t('finance.billsToPay.postponePayment')}
             </button>
           ) : null}
           {canPermanentDelete && bill.source !== 'SUPPLIER_INVOICE' ? (

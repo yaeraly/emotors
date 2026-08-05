@@ -64,9 +64,10 @@ type ReceivingDocuments = {
 type HqReceivingInvoicePrerequisite = {
   requestType: 'CARGO_PAYMENT' | 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
   displayName: string;
-  state: 'closed' | 'missing' | 'open' | 'partial';
+  state: 'closed' | 'missing' | 'open' | 'partial' | 'postponed';
   status: string | null;
   closed: boolean;
+  exists?: boolean;
 };
 
 type HqReceivingValidation = {
@@ -481,7 +482,11 @@ function ChinaReceivingEditableView({
 
   const invoicePrerequisites = task.validation?.invoicePrerequisites ?? [];
   const canReceiveToHq = task.validation?.canReceiveToHq ?? false;
-  const receiveBlocked = invoicePrerequisites.length > 0 && !canReceiveToHq;
+  // Only missing invoices block receiving — unpaid / partial / postponed must not.
+  const receiveBlocked = !canReceiveToHq;
+  const unpaidInvoiceWarnings = invoicePrerequisites.filter(
+    (row) => row.exists !== false && !row.closed,
+  );
 
   async function receiveToHq() {
     if (!canEdit || !allSaved) return;
@@ -613,17 +618,31 @@ function ChinaReceivingEditableView({
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <p className="text-sm font-semibold text-slate-800">{t('chinaReceiving.invoicePrerequisitesTitle')}</p>
           <ul className="mt-3 space-y-2 text-sm">
-            {invoicePrerequisites.map((row) => (
-              <li
-                key={row.requestType}
-                className={row.closed ? 'text-emerald-700' : 'text-red-700'}
-              >
-                {row.displayName}: {row.closed ? t('chinaReceiving.invoiceClosed') : t('chinaReceiving.invoiceNotClosed')}
-              </li>
-            ))}
+            {invoicePrerequisites.map((row) => {
+              const missing = row.state === 'missing' || row.exists === false;
+              const statusLabel = row.closed
+                ? t('chinaReceiving.invoiceClosed')
+                : missing
+                  ? t('chinaReceiving.invoiceMissing')
+                  : row.state === 'partial'
+                    ? t('chinaReceiving.invoicePartial')
+                    : row.state === 'postponed'
+                      ? t('chinaReceiving.invoicePostponed')
+                      : t('chinaReceiving.invoiceAwaitingPayment');
+              return (
+                <li
+                  key={row.requestType}
+                  className={missing ? 'text-red-700' : row.closed ? 'text-emerald-700' : 'text-amber-800'}
+                >
+                  {row.displayName}: {statusLabel}
+                </li>
+              );
+            })}
           </ul>
           {receiveBlocked ? (
             <p className="mt-3 text-sm text-amber-800">{t('chinaReceiving.invoicePrerequisitesWarning')}</p>
+          ) : unpaidInvoiceWarnings.length > 0 ? (
+            <p className="mt-3 text-sm text-slate-600">{t('chinaReceiving.invoicePaymentNotRequired')}</p>
           ) : null}
         </div>
       ) : null}

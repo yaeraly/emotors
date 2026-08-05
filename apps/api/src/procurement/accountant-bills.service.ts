@@ -8,6 +8,7 @@ import {
   AlertType,
   FileAttachmentEntityType,
   FinanceExpenseStatus,
+  ProcurementSupplierPaymentLedgerStatus,
   ProcurementSupplierPaymentStatus,
   Role,
   TransportExpenseStatus,
@@ -343,6 +344,192 @@ export class AccountantBillsService {
     throw new BadRequestException('Approve is not supported for this request type');
   }
 
+  /**
+   * Postpone Supplier / Cargo (transport) payment without creating a ledger transaction.
+   * Remaining debt is unchanged; only next payment date + comment are stored.
+   */
+  async postponePayment(
+    user: AuthUser,
+    source: AccountantBillSource,
+    id: string,
+    body: { nextPaymentDate?: string; comment?: string } = {},
+  ) {
+    this.assertAccountant(user);
+    const nextPaymentDateRaw = String(body.nextPaymentDate || '').trim();
+    if (!nextPaymentDateRaw) {
+      throw new BadRequestException('nextPaymentDate is required');
+    }
+    const nextPaymentDate = new Date(nextPaymentDateRaw);
+    if (Number.isNaN(nextPaymentDate.getTime())) {
+      throw new BadRequestException('nextPaymentDate is invalid');
+    }
+    const comment = String(body.comment || '').trim();
+    if (!comment) {
+      throw new BadRequestException('comment is required');
+    }
+
+    if (source === 'SUPPLIER_INVOICE') {
+      return this.prisma.$transaction(async (tx) => {
+        const order = await tx.procurementOrder.findFirst({
+          where: { id, deletedAt: null },
+          include: {
+            supplierPayments: {
+              select: { amountYuan: true, status: true, actualPaidKgs: true, amountKgs: true },
+            },
+          },
+        });
+        if (!order?.invoiceSentToAccountantAt) {
+          throw new NotFoundException('Supplier invoice request not found');
+        }
+        if (order.invoiceReviewStatus === 'REJECTED') {
+          throw new BadRequestException('Rejected invoice cannot be postponed');
+        }
+        const paidYuan = order.supplierPayments
+          .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
+          .reduce((sum, p) => sum + Number(p.amountYuan || 0), 0);
+        const remainingYuan = Math.max(Number(order.totalYuan) - paidYuan, 0);
+        if (remainingYuan <= 0.009) {
+          throw new BadRequestException('Fully paid supplier invoice cannot be postponed');
+        }
+
+        const updated = await tx.procurementOrder.update({
+          where: { id },
+          data: {
+            supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED,
+            expectedPaymentDate: nextPaymentDate,
+            paymentPostponeComment: comment,
+            invoiceReviewStatus: order.invoiceReviewStatus === 'UNDER_REVIEW' ? 'APPROVED' : order.invoiceReviewStatus,
+            invoiceReviewedAt: order.invoiceReviewedAt ?? new Date(),
+            invoiceReviewedById: order.invoiceReviewedById ?? user.id,
+          },
+        });
+
+        await this.audit(tx, user, 'PAYMENT_POSTPONED', id, {
+          supplierPaymentStatus: order.supplierPaymentStatus,
+          expectedPaymentDate: order.expectedPaymentDate,
+        }, {
+          supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED,
+          expectedPaymentDate: nextPaymentDate.toISOString(),
+          paymentPostponeComment: comment,
+          paidAmount: paidYuan,
+          remainingAmount: remainingYuan,
+          procurementOrderId: order.id,
+          supplierInvoiceId: order.id,
+        });
+
+        const isOverdue = nextPaymentDate.getTime() < Date.now();
+        await this.notifySenderRoles(tx, user, {
+          type: AlertType.SUPPLIER_PAYMENT_DUE,
+          entityType: 'ProcurementOrder',
+          entityId: id,
+          referenceNumber: order.orderNumber,
+          message: isOverdue
+            ? `Просроченная задолженность поставщику по заказу ${order.orderNumber}.`
+            : `Оплата поставщику по заказу ${order.orderNumber} отложена до ${nextPaymentDate.toISOString().slice(0, 10)}.`,
+          recipientRoles: [Role.HQ_ACCOUNTANT, Role.CEO, Role.FINANCE_MANAGER],
+        });
+
+        return {
+          id: updated.id,
+          source,
+          status: 'PAYMENT_POSTPONED',
+          nextPaymentDate: nextPaymentDate.toISOString(),
+          comment,
+          remainingAmount: remainingYuan,
+        };
+      });
+    }
+
+    if (source === 'TRANSPORT_EXPENSE') {
+      return this.prisma.$transaction(async (tx) => {
+        const expense = await tx.procurementTransportExpense.findUnique({
+          where: { id },
+          include: { procurementOrder: { select: { id: true, orderNumber: true } } },
+        });
+        if (!expense) throw new NotFoundException('Transport expense not found');
+        if (
+          expense.status === TransportExpenseStatus.PAID ||
+          expense.status === TransportExpenseStatus.CANCELLED ||
+          expense.status === TransportExpenseStatus.REJECTED
+        ) {
+          throw new BadRequestException('Transport expense cannot be postponed in current status');
+        }
+
+        const amountKgs = Number(expense.amountKgs || expense.amount || 0);
+        const paidAmountKgs = Number(expense.paidAmountKgs || 0);
+        const remainingAmountKgs = Math.max(amountKgs - paidAmountKgs, 0);
+        if (remainingAmountKgs <= 0.009) {
+          throw new BadRequestException('Fully paid transport expense cannot be postponed');
+        }
+
+        const updated = await tx.procurementTransportExpense.update({
+          where: { id },
+          data: {
+            status: TransportExpenseStatus.PAYMENT_POSTPONED,
+            dueDate: nextPaymentDate,
+            accountantComment: comment,
+            accountantId: user.id,
+            // Clear cashier queue — postpone must not keep a pending payment task.
+            sentToCashierAt: null,
+            executionStatus: null,
+            executionStartedAt: null,
+            failureReason: null,
+            cashierId: null,
+          },
+        });
+
+        const auditAction =
+          expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
+            ? 'PAYMENT_POSTPONED'
+            : 'PAYMENT_POSTPONED';
+        await this.audit(tx, user, auditAction, id, {
+          status: expense.status,
+          dueDate: expense.dueDate,
+        }, {
+          status: TransportExpenseStatus.PAYMENT_POSTPONED,
+          dueDate: nextPaymentDate.toISOString(),
+          comment,
+          paidAmount: paidAmountKgs,
+          remainingAmount: remainingAmountKgs,
+          procurementOrderId: expense.procurementOrderId,
+          cargoInvoiceId: expense.id,
+          expenseType: expense.expenseType,
+          requestType: mapTransportExpenseTypeToRequestType(expense.expenseType),
+        });
+
+        const requestLabel =
+          expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
+            ? 'карго'
+            : expense.expenseType === TransportExpenseType.LOCAL_DELIVERY
+              ? 'внутреннему транспорту'
+              : 'транспорту';
+        const isOverdue = nextPaymentDate.getTime() < Date.now();
+        await this.notifySenderRoles(tx, user, {
+          type: AlertType.TRANSPORT_EXPENSE_SUBMITTED,
+          entityType: 'ProcurementTransportExpense',
+          entityId: id,
+          referenceNumber: expense.expenseNumber,
+          message: isOverdue
+            ? `Просроченная задолженность ${requestLabel} по счёту ${expense.expenseNumber}.`
+            : `Оплата ${requestLabel} по счёту ${expense.expenseNumber} отложена до ${nextPaymentDate.toISOString().slice(0, 10)}.`,
+          recipientRoles: [Role.HQ_ACCOUNTANT, Role.CEO, Role.FINANCE_MANAGER],
+        });
+
+        return {
+          id: updated.id,
+          source,
+          status: 'PAYMENT_POSTPONED',
+          nextPaymentDate: nextPaymentDate.toISOString(),
+          comment,
+          remainingAmount: remainingAmountKgs,
+          relatedOrderNumber: expense.procurementOrder?.orderNumber ?? null,
+        };
+      });
+    }
+
+    throw new BadRequestException('Postpone is not supported for this request type');
+  }
+
   async permanentlyDelete(
     user: AuthUser,
     source: AccountantBillSource,
@@ -407,6 +594,7 @@ export class AccountantBillsService {
               TransportExpenseStatus.REJECTED,
               TransportExpenseStatus.PENDING_CASHIER,
               TransportExpenseStatus.PARTIALLY_PAID,
+              TransportExpenseStatus.PAYMENT_POSTPONED,
               TransportExpenseStatus.PAID,
             ],
           },
@@ -491,6 +679,8 @@ export class AccountantBillsService {
         remainingAmountKgs: remainingKgs,
         status,
         isOverdue: Boolean(due && due.getTime() < Date.now() && remainingYuan > 0.009),
+        nextPaymentDate: order.expectedPaymentDate?.toISOString?.() ?? null,
+        paymentPostponeComment: (order as { paymentPostponeComment?: string | null }).paymentPostponeComment ?? null,
         relatedEntityType: 'ProcurementOrder',
         relatedEntityId: order.id,
         relatedOrderNumber: order.orderNumber,
@@ -535,6 +725,8 @@ export class AccountantBillsService {
         remainingAmountKgs: remainingKgs,
         status: mapTransportStatusToUi(row.status),
         isOverdue: Boolean(due && due.getTime() < Date.now() && remainingKgs > 0.009),
+        nextPaymentDate: row.dueDate?.toISOString?.() ?? null,
+        paymentPostponeComment: row.accountantComment ?? row.comment ?? null,
         relatedEntityType: 'ProcurementTransportExpense',
         relatedEntityId: row.id,
         relatedOrderNumber: row.procurementOrder?.orderNumber ?? null,
@@ -764,6 +956,7 @@ export class AccountantBillsService {
       entityId: string;
       referenceNumber?: string;
       message: string;
+      recipientRoles?: Role[];
     },
   ) {
     await this.notifications.notifyInTx(tx, user, {
@@ -772,7 +965,9 @@ export class AccountantBillsService {
       entityId: input.entityId,
       referenceNumber: input.referenceNumber,
       message: input.message,
-      recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER, Role.FINANCE_MANAGER],
+      recipientRoles:
+        input.recipientRoles ??
+        [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER, Role.FINANCE_MANAGER],
     });
   }
 

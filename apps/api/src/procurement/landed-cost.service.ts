@@ -88,6 +88,7 @@ export class LandedCostService {
       }));
       const summary = summarizeSupplierPayments(paymentInputs, Number(order.totalYuan), {
         invoiceSentToAccountantAt: (order as any).invoiceSentToAccountantAt,
+        previousStatus: order.supplierPaymentStatus,
       });
 
       // Cost always values the FULL procurement CNY amount (not only paid CNY).

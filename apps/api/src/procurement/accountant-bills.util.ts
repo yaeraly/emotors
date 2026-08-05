@@ -23,6 +23,7 @@ export const ACCOUNTANT_BILL_UI_STATUSES = [
   'RETURNED',
   'APPROVED',
   'PARTIALLY_PAID',
+  'PAYMENT_POSTPONED',
   'FULLY_PAID',
   'REJECTED',
   'CANCELLED',
@@ -51,6 +52,8 @@ export type AccountantBillListItem = {
   remainingAmountKgs: number;
   status: AccountantBillUiStatus;
   isOverdue: boolean;
+  nextPaymentDate?: string | null;
+  paymentPostponeComment?: string | null;
   relatedEntityType: string;
   relatedEntityId: string;
   relatedOrderNumber?: string | null;
@@ -100,6 +103,8 @@ export function mapTransportStatusToUi(status: string): AccountantBillUiStatus {
       return 'APPROVED';
     case 'PARTIALLY_PAID':
       return 'PARTIALLY_PAID';
+    case 'PAYMENT_POSTPONED':
+      return 'PAYMENT_POSTPONED';
     case 'PAID':
       return 'FULLY_PAID';
     case 'CANCELLED':
@@ -121,6 +126,7 @@ export function mapSupplierInvoiceToUi(input: {
   const ledger = String(input.supplierPaymentStatus || '').toUpperCase();
   if (ledger === 'PAID' || ledger === 'OVERPAID') return 'FULLY_PAID';
   if (ledger === 'PARTIALLY_PAID') return 'PARTIALLY_PAID';
+  if (ledger === 'PAYMENT_POSTPONED') return 'PAYMENT_POSTPONED';
   if (ledger === 'AWAITING_CASHIER') return 'APPROVED';
   if (review === 'APPROVED') return 'APPROVED';
   if (ledger === 'AWAITING_ACCOUNTANT' || review === 'SUBMITTED') return 'AWAITING_ACCOUNTANT';
@@ -156,6 +162,7 @@ export function estimateKgsAmount(amount: number, currency: string, exchangeRate
 export function buildAccountantBillsSummary(items: AccountantBillListItem[]) {
   const awaiting = items.filter((item) => item.status === 'AWAITING_ACCOUNTANT' || item.status === 'UNDER_REVIEW');
   const partial = items.filter((item) => item.status === 'PARTIALLY_PAID');
+  const postponed = items.filter((item) => item.status === 'PAYMENT_POSTPONED');
   const overdue = items.filter((item) => item.isOverdue && item.remainingAmountKgs > 0.009);
   const totalPayableKgs = items
     .filter((item) => !['FULLY_PAID', 'REJECTED', 'CANCELLED'].includes(item.status))
@@ -164,6 +171,7 @@ export function buildAccountantBillsSummary(items: AccountantBillListItem[]) {
   return {
     awaitingCount: awaiting.length,
     partiallyPaidCount: partial.length,
+    postponedCount: postponed.length,
     overdueCount: overdue.length,
     totalPayableKgs: Math.round(totalPayableKgs * 100) / 100,
   };

@@ -32,7 +32,20 @@ const OPEN_EXPENSE = new Set<string>([
   TransportExpenseStatus.RETURNED,
   TransportExpenseStatus.PENDING_CASHIER,
   TransportExpenseStatus.PARTIALLY_PAID,
+  TransportExpenseStatus.PAYMENT_POSTPONED,
   TransportExpenseStatus.PAID,
+]);
+
+/** Expense statuses whose approved invoice amount counts toward inventory landed cost. */
+const OBLIGATION_EXPENSE = new Set<string>([
+  TransportExpenseStatus.WAITING_ACCOUNTANT,
+  TransportExpenseStatus.UNDER_REVIEW,
+  TransportExpenseStatus.PENDING_CASHIER,
+  TransportExpenseStatus.PARTIALLY_PAID,
+  TransportExpenseStatus.PAYMENT_POSTPONED,
+  TransportExpenseStatus.PAID,
+  'COMPLETED',
+  'CONFIRMED',
 ]);
 
 function paymentKgs(payment: SupplierPaymentCostInput): number {
@@ -158,9 +171,9 @@ function expenseAmountKgs(expense: SectionExpenseCostInput, estimatedYuanRate: n
 }
 
 /**
- * Sum confirmed (PAID/COMPLETED/CONFIRMED) expense rows in inventory base currency (KGS).
- * Draft / pending / cancelled / rejected rows are excluded from landed cost.
- * PARTIALLY_PAID contributes only the already paid KGS amount.
+ * Sum approved invoice obligation amounts in inventory base currency (KGS).
+ * Uses the full approved/requested amount — never the cash already paid.
+ * Draft / returned / rejected / cancelled rows are excluded from landed cost.
  */
 export function sumConfirmedExpenseAmountKgs(
   expenses: SectionExpenseCostInput[],
@@ -169,14 +182,8 @@ export function sumConfirmedExpenseAmountKgs(
   return roundMoney(
     expenses.reduce((sum, row) => {
       const status = String(row.status ?? '').toUpperCase();
-      if (status === 'PAID' || status === 'COMPLETED' || status === 'CONFIRMED') {
-        return sum + expenseAmountKgs(row, estimatedYuanRate);
-      }
-      if (status === 'PARTIALLY_PAID') {
-        const paid = Number(row.paidAmountKgs ?? 0);
-        return paid > 0 ? sum + roundMoney(paid) : sum;
-      }
-      return sum;
+      if (!OBLIGATION_EXPENSE.has(status)) return sum;
+      return sum + expenseAmountKgs(row, estimatedYuanRate);
     }, 0),
   );
 }
@@ -285,6 +292,7 @@ export function expensesFullySettled(
     TransportExpenseStatus.WAITING_ACCOUNTANT,
     TransportExpenseStatus.PENDING_CASHIER,
     TransportExpenseStatus.PARTIALLY_PAID,
+    TransportExpenseStatus.PAYMENT_POSTPONED,
     TransportExpenseStatus.RETURNED,
     TransportExpenseStatus.DRAFT,
   ]);

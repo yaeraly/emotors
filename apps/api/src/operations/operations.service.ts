@@ -26,6 +26,7 @@ import {
   ShortageReportStatus,
   StockMovementType,
   SupplierClaimStatus,
+  TransportExpenseType,
   WarehouseReleaseOrderStatus,
   WarehouseType,
   WarrantyClaimStatus,
@@ -62,6 +63,7 @@ import {
   buildHqReceivingValidationResult,
   buildHqReceivingBlockedMessages,
   HQ_RECEIVING_BLOCKED,
+  isSupplierInvoicePresent,
   validateHqReceivingInvoicePrerequisites,
 } from '../procurement/hq-receiving-validation.util';
 import {
@@ -2128,6 +2130,30 @@ export class OperationsService {
     });
     if (!precheckOrder) throw new NotFoundException('Procurement order not found');
 
+    if (
+      !isSupplierInvoicePresent({
+        invoiceSentToAccountantAt: precheckOrder.invoiceSentToAccountantAt,
+        supplierInvoiceNumber: precheckOrder.supplierInvoiceNumber,
+      })
+    ) {
+      throw new BadRequestException({
+        message: HQ_RECEIVING_BLOCKED,
+        messages: {
+          ru: 'Невозможно принять товар на склад.\n\nSupply Manager должен создать счет:\n— Оплата поставщику\n\nПолная оплата счетов не требуется.',
+          ky: 'Товарды складга кабыл алуу мүмкүн эмес.\n\nSupply Manager эсеп түзүшү керек:\n— Оплата поставщику\n\nЭсептерди толук төлөө талап кылынбайт.',
+          en: 'Cannot receive goods into the warehouse.\n\nSupply Manager must create the invoice:\n— Supplier payment\n\nFull invoice payment is not required.',
+        },
+        blockingInvoices: [
+          {
+            requestType: 'SUPPLIER_PAYMENT',
+            displayName: 'Оплата поставщику',
+            state: 'missing',
+            status: null,
+          },
+        ],
+      });
+    }
+
     const invoiceGate = validateHqReceivingInvoicePrerequisites({
       procurementOrderId: precheckOrder.id,
       transportExpenses: precheckOrder.transportExpenses,
@@ -2169,6 +2195,7 @@ export class OperationsService {
               expenseType: true,
               amount: true,
               amountKgs: true,
+              paidAmountKgs: true,
               status: true,
             },
           },
@@ -2801,6 +2828,7 @@ export class OperationsService {
         newValue: { status: ProcurementOrderStatus.RECEIVED_TO_HQ_WAREHOUSE },
         timestamp: new Date().toISOString(),
       });
+      await this.auditUnpaidReceiving(tx, user, order, txInvoiceGate);
       await this.auditInTx(tx, user, 'HQ', 'GOODS_RECEIVED_TO_HQ', 'ProcurementOrder', order.id, {
         userId: user.id,
         procurementOrderId: order.id,
@@ -5201,6 +5229,81 @@ export class OperationsService {
       });
     }
     return resolved;
+  }
+
+  private async auditUnpaidReceiving(
+    tx: PrismaTx,
+    user: AuthUser,
+    order: {
+      id: string;
+      supplierPaymentStatus?: string | null;
+      totalYuan?: unknown;
+      totalPaidYuan?: unknown;
+      remainingYuan?: unknown;
+      transportExpenses?: Array<{
+        expenseType: string;
+        status: string;
+        amount?: unknown;
+        amountKgs?: unknown;
+        paidAmountKgs?: unknown;
+      }>;
+    },
+    gate: ReturnType<typeof validateHqReceivingInvoicePrerequisites>,
+  ) {
+    const supplierStatus = String(order.supplierPaymentStatus ?? 'UNPAID').toUpperCase();
+    const supplierUnpaid =
+      supplierStatus !== 'PAID' && supplierStatus !== 'OVERPAID';
+    if (supplierUnpaid) {
+      await this.auditInTx(tx, user, 'HQ', 'WAREHOUSE_RECEIVED_WITH_UNPAID_SUPPLIER', 'ProcurementOrder', order.id, {
+        procurementOrderId: order.id,
+        supplierInvoiceId: order.id,
+        paymentStatus: supplierStatus,
+        paidAmount: Number(order.totalPaidYuan ?? 0),
+        remainingAmount: Number(order.remainingYuan ?? Math.max(Number(order.totalYuan ?? 0) - Number(order.totalPaidYuan ?? 0), 0)),
+        userId: user.id,
+        timestamp: new Date().toISOString(),
+      });
+      if (supplierStatus === 'PARTIALLY_PAID') {
+        await this.auditInTx(tx, user, 'HQ', 'SUPPLIER_PARTIAL_PAYMENT', 'ProcurementOrder', order.id, {
+          procurementOrderId: order.id,
+          paymentStatus: supplierStatus,
+          paidAmount: Number(order.totalPaidYuan ?? 0),
+          remainingAmount: Number(order.remainingYuan ?? 0),
+          userId: user.id,
+          timestamp: new Date().toISOString(),
+          context: 'WAREHOUSE_RECEIVE',
+        });
+      }
+    }
+
+    const cargoPrereq = gate.prerequisites.find((row) => row.requestType === 'CARGO_PAYMENT');
+    if (cargoPrereq && cargoPrereq.exists && !cargoPrereq.closed) {
+      const cargoExpense = (order.transportExpenses ?? []).find(
+        (row) => row.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT,
+      );
+      const paidAmount = Number(cargoExpense?.paidAmountKgs ?? 0);
+      const totalAmount = Number(cargoExpense?.amountKgs ?? cargoExpense?.amount ?? 0);
+      await this.auditInTx(tx, user, 'HQ', 'WAREHOUSE_RECEIVED_WITH_UNPAID_CARGO', 'ProcurementOrder', order.id, {
+        procurementOrderId: order.id,
+        cargoInvoiceId: cargoExpense ? undefined : null,
+        paymentStatus: cargoPrereq.status,
+        paidAmount,
+        remainingAmount: Math.max(totalAmount - paidAmount, 0),
+        userId: user.id,
+        timestamp: new Date().toISOString(),
+      });
+      if (cargoPrereq.state === 'partial') {
+        await this.auditInTx(tx, user, 'HQ', 'CARGO_PARTIAL_PAYMENT', 'ProcurementOrder', order.id, {
+          procurementOrderId: order.id,
+          paymentStatus: cargoPrereq.status,
+          paidAmount,
+          remainingAmount: Math.max(totalAmount - paidAmount, 0),
+          userId: user.id,
+          timestamp: new Date().toISOString(),
+          context: 'WAREHOUSE_RECEIVE',
+        });
+      }
+    }
   }
 
   private auditReceivingBlocked(

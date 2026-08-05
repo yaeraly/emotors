@@ -187,7 +187,18 @@ export class SupplierPaymentWorkflowService {
       where: {
         deletedAt: null,
         OR: [
-          { invoiceSentToAccountantAt: { not: null }, supplierPaymentStatus: { in: ['AWAITING_ACCOUNTANT', 'AWAITING_CASHIER', 'PARTIALLY_PAID', 'UNPAID'] } },
+          {
+            invoiceSentToAccountantAt: { not: null },
+            supplierPaymentStatus: {
+              in: [
+                'AWAITING_ACCOUNTANT',
+                'AWAITING_CASHIER',
+                'PARTIALLY_PAID',
+                'PAYMENT_POSTPONED',
+                'UNPAID',
+              ],
+            },
+          },
           {
             supplierPayments: {
               some: {
@@ -1209,6 +1220,15 @@ export class SupplierPaymentWorkflowService {
           supplierPaymentStatus: synced.supplierPaymentStatus,
           remainingYuan: synced.remainingYuan,
         });
+        await this.audit(tx, user, 'SUPPLIER_PARTIAL_PAYMENT', order.id, { previousStatus }, {
+          procurementOrderId: order.id,
+          supplierInvoiceId: order.id,
+          paymentStatus: synced.supplierPaymentStatus,
+          paidAmount: synced.totalPaidYuan,
+          remainingAmount: synced.remainingYuan,
+          userId: user.id,
+          timestamp: new Date().toISOString(),
+        });
       }
 
       if (synced.supplierPaymentStatus === 'PAID' || synced.supplierPaymentStatus === 'OVERPAID') {
@@ -1476,7 +1496,10 @@ export class SupplierPaymentWorkflowService {
         status: payment.status,
       })),
       Number(order.totalYuan),
-      { invoiceSentToAccountantAt: order.invoiceSentToAccountantAt },
+      {
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        previousStatus: order.supplierPaymentStatus,
+      },
     );
     return {
       id: order.id,
@@ -1532,7 +1555,10 @@ export class SupplierPaymentWorkflowService {
         status: payment.status,
       })),
       Number(order.totalYuan),
-      { invoiceSentToAccountantAt: order.invoiceSentToAccountantAt },
+      {
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        previousStatus: order.supplierPaymentStatus,
+      },
     );
 
     const fullyPaid =

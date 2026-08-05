@@ -122,7 +122,8 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   assertClose(kgsSection.estimatedSectionCostKgs, 50000, '10. unpaid KGS section still full amount');
 }
 
-// Confirmed-only inventory cost: draft/pending excluded; PAID included
+// Inventory cost uses approved obligation amounts (not cash paid).
+// Draft / cancelled / rejected excluded; unpaid / partial / postponed / paid included.
 {
   const confirmed = sumConfirmedExpenseAmountKgs(
     [
@@ -133,7 +134,7 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
     ],
     12,
   );
-  assertClose(confirmed, 10000, 'confirmed expenses only include PAID rows');
+  assertClose(confirmed, 17000, 'approved unpaid + paid obligation amounts included');
 }
 
 {
@@ -156,7 +157,15 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
     [{ amount: 10000, currency: 'KGS', paidAmountKgs: 4000, status: 'PARTIALLY_PAID' }],
     12,
   );
-  assertClose(partial, 4000, 'partial cargo includes only paid KGS');
+  assertClose(partial, 10000, 'partial cargo uses full approved amount, not paid cash');
+}
+
+{
+  const postponed = sumConfirmedExpenseAmountKgs(
+    [{ amount: 120000, currency: 'KGS', paidAmountKgs: 0, status: 'PAYMENT_POSTPONED' }],
+    12,
+  );
+  assertClose(postponed, 120000, 'postponed cargo uses full approved amount');
 }
 
 {
@@ -168,7 +177,7 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
     ],
     12,
   );
-  assertClose(otherConfirmed, 2000, 'other import expenses sum confirmed rows only');
+  assertClose(otherConfirmed, 2500, 'pending cashier still counts full approved obligation');
 }
 
 // Cost confirmation status

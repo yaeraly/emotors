@@ -3543,7 +3543,10 @@ export class ProcurementService {
         status: payment.status,
       })),
       Number(order.totalYuan),
-      { invoiceSentToAccountantAt: order.invoiceSentToAccountantAt },
+      {
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        previousStatus: order.supplierPaymentStatus,
+      },
     );
     const effectiveRate =
       summary.weightedAverageYuanRate && summary.totalPaidYuan > 0
