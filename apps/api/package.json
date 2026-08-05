@@ -20,6 +20,7 @@
     "db:cleanup:scan": "ts-node prisma/scripts/dev-database-cleanup-scan.ts",
     "product-code:migrate:preview": "ts-node prisma/scripts/product-code-migration.ts preview",
     "product-code:migrate:apply": "ts-node prisma/scripts/product-code-migration.ts apply",
+    "products:import-china": "ts-node prisma/scripts/import-china-product-catalog.ts",
     "test": "node --import tsx --test src/**/*.test.ts",
     "test:receiving": "node --import tsx --test src/distribution/branch-receiving.integration.test.ts",
     "audit:hq-fifo": "tsx scripts/audit-hq-fifo-inventory.ts",
