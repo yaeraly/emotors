@@ -10,7 +10,7 @@ import {
 } from '@/components/finance/FinanceLayout';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/components/HqPaymentPermanentDeleteModal';
-import { API_URL, apiFetch } from '@/lib/api';
+import { API_URL, apiFetch, getToken } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canCreateSupplierPayment, canPermanentDeleteBusinessData } from '@/lib/rbac';
 import {
@@ -153,6 +153,18 @@ function BillsToPayPageContent() {
   const [postponeModal, setPostponeModal] = useState<BillDetail | null>(null);
   const [postponeForm, setPostponeForm] = useState({ nextPaymentDate: '', comment: '' });
   const [postponeError, setPostponeError] = useState('');
+  const [cargoPaymentModal, setCargoPaymentModal] = useState<{
+    bill: BillDetail;
+    mode: 'full' | 'partial';
+  } | null>(null);
+  const [cargoPaymentForm, setCargoPaymentForm] = useState({
+    amount: '',
+    financeAccountId: '',
+    transactionNumber: '',
+    accountantComment: '',
+  });
+  const [cargoReceiptFile, setCargoReceiptFile] = useState<File | null>(null);
+  const [cargoPaymentError, setCargoPaymentError] = useState('');
 
   const canAccess = canCreateSupplierPayment(user);
   const canPermanentDelete = canPermanentDeleteBusinessData(user);
@@ -334,6 +346,121 @@ function BillsToPayPageContent() {
     () => deriveSupplierPaymentMethodFromAccountType(selectedPaymentAccount?.typeCode),
     [selectedPaymentAccount?.typeCode],
   );
+  const selectedCargoAccount = useMemo(
+    () => accounts.find((account) => account.id === cargoPaymentForm.financeAccountId) ?? null,
+    [accounts, cargoPaymentForm.financeAccountId],
+  );
+  const derivedCargoPaymentMethod = useMemo(
+    () => deriveSupplierPaymentMethodFromAccountType(selectedCargoAccount?.typeCode),
+    [selectedCargoAccount?.typeCode],
+  );
+
+  async function openCargoPaymentModal(bill: BillDetail, mode: 'full' | 'partial') {
+    const remaining = Number(bill.remainingAmountKgs ?? bill.remainingAmount ?? 0);
+    setCargoPaymentModal({ bill, mode });
+    setCargoPaymentError('');
+    setCargoReceiptFile(null);
+    setCargoPaymentForm({
+      amount: mode === 'full' && remaining > 0 ? String(remaining) : '',
+      financeAccountId: bill.detail?.financeAccountId || bill.detail?.financeAccount?.id || '',
+      transactionNumber: '',
+      accountantComment: '',
+    });
+    await loadAccounts();
+  }
+
+  async function uploadCargoReceipt(expenseId: string, file: File) {
+    const token = getToken();
+    if (!token) throw new Error(t('common.error'));
+    const body = new FormData();
+    body.append('file', file);
+    const response = await fetch(
+      `${API_URL}/procurement/transport-expenses/${expenseId}/attachments/receipt`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body,
+      },
+    );
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.message || t('common.error'));
+    }
+  }
+
+  function validateCargoPaymentForm(bill: BillDetail) {
+    const remaining = Number(bill.remainingAmountKgs ?? bill.remainingAmount ?? 0);
+    const amount = Number(cargoPaymentForm.amount);
+    if (!(amount > 0)) {
+      setCargoPaymentError(t('finance.billsToPay.amountMustBePositive'));
+      return null;
+    }
+    if (amount > remaining + 0.009) {
+      setCargoPaymentError(t('finance.billsToPay.amountExceedsRemaining'));
+      return null;
+    }
+    if (!cargoPaymentForm.financeAccountId) {
+      setCargoPaymentError(t('finance.billsToPay.accountRequired'));
+      return null;
+    }
+    const account = accounts.find((item) => item.id === cargoPaymentForm.financeAccountId);
+    if (!account || !deriveSupplierPaymentMethodFromAccountType(account.typeCode)) {
+      setCargoPaymentError(t('finance.billsToPay.accountUnavailable'));
+      return null;
+    }
+    if (amount > Number(account.availableBalance) + 0.009) {
+      setCargoPaymentError(t('finance.billsToPay.insufficientBalance'));
+      return null;
+    }
+    const hasReceipt =
+      Boolean(cargoReceiptFile) ||
+      Boolean(
+        Array.isArray(bill.detail?.receipts) && bill.detail.receipts.length > 0,
+      );
+    if (!hasReceipt) {
+      setCargoPaymentError(t('finance.cashierBills.receiptRequired'));
+      return null;
+    }
+    return {
+      paymentAmountKgs: amount,
+      financeAccountId: cargoPaymentForm.financeAccountId,
+      transactionNumber: cargoPaymentForm.transactionNumber.trim() || undefined,
+      accountantComment: cargoPaymentForm.accountantComment.trim() || undefined,
+      idempotencyKey: crypto.randomUUID(),
+    };
+  }
+
+  async function submitCargoPayment() {
+    if (!cargoPaymentModal) return;
+    const payload = validateCargoPaymentForm(cargoPaymentModal.bill);
+    if (!payload) return;
+
+    setSaving(true);
+    setActionError('');
+    setCargoPaymentError('');
+    try {
+      if (cargoReceiptFile) {
+        await uploadCargoReceipt(cargoPaymentModal.bill.id, cargoReceiptFile);
+      }
+      await apiFetch(
+        `/procurement/bills-to-pay/${cargoPaymentModal.bill.source}/${cargoPaymentModal.bill.id}/pay`,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      );
+      const source = cargoPaymentModal.bill.source;
+      const id = cargoPaymentModal.bill.id;
+      setCargoPaymentModal(null);
+      setCargoReceiptFile(null);
+      await load();
+      await refreshSelected(source, id);
+    } catch (err) {
+      setCargoPaymentError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function openTransportApprove(bill: BillDetail) {
     setTransportApproveModal(bill);
@@ -763,7 +890,14 @@ function BillsToPayPageContent() {
           }}
           onReturn={() => setReasonModal({ mode: 'return', bill: selected })}
           onReject={() => setReasonModal({ mode: 'reject', bill: selected })}
-          onCreatePayment={() => void openPaymentModal(selected)}
+          onCreatePayment={() => {
+            if (selected.requestType === 'CARGO_PAYMENT') {
+              void openCargoPaymentModal(selected, 'partial');
+              return;
+            }
+            void openPaymentModal(selected);
+          }}
+          onPayFullCargo={() => void openCargoPaymentModal(selected, 'full')}
           onPostpone={() => {
             setPostponeError('');
             setPostponeForm({
@@ -1027,6 +1161,107 @@ function BillsToPayPageContent() {
         </Modal>
       ) : null}
 
+      {cargoPaymentModal ? (
+        <Modal
+          title={
+            cargoPaymentModal.mode === 'full'
+              ? t('finance.billsToPay.payInFull')
+              : t('finance.billsToPay.createPartialPayment')
+          }
+          onClose={() => {
+            setCargoPaymentModal(null);
+            setCargoReceiptFile(null);
+            setCargoPaymentError('');
+          }}
+        >
+          <p className="text-xs text-slate-600">
+            {cargoPaymentModal.bill.requestNumber} · {t('finance.billsToPay.remaining')}:{' '}
+            {Number(cargoPaymentModal.bill.remainingAmountKgs ?? cargoPaymentModal.bill.remainingAmount).toFixed(2)}{' '}
+            KGS
+          </p>
+          {cargoPaymentError ? (
+            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{cargoPaymentError}</p>
+          ) : null}
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.paymentAmount')} (KGS)
+            <input
+              type="number"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              value={cargoPaymentForm.amount ?? ''}
+              readOnly={cargoPaymentModal.mode === 'full'}
+              onChange={(e) =>
+                setCargoPaymentForm((prev) => ({ ...prev, amount: e.target.value ?? '' }))
+              }
+            />
+          </label>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.accountOrCashbox')}
+            <select
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              value={cargoPaymentForm.financeAccountId ?? ''}
+              onChange={(e) =>
+                setCargoPaymentForm((prev) => ({ ...prev, financeAccountId: e.target.value ?? '' }))
+              }
+            >
+              <option value="">{t('common.select')}</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name} ({Number(account.availableBalance).toFixed(2)} KGS)
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="mt-2 text-xs text-slate-600">
+            {t('finance.billsToPay.paymentMethod')}:{' '}
+            <span className="font-semibold text-slate-900">
+              {t(derivedSupplierPaymentMethodLabelKey(derivedCargoPaymentMethod))}
+            </span>
+          </p>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.transactionNumber')}
+            <input
+              type="text"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              value={cargoPaymentForm.transactionNumber ?? ''}
+              onChange={(e) =>
+                setCargoPaymentForm((prev) => ({ ...prev, transactionNumber: e.target.value ?? '' }))
+              }
+            />
+          </label>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.cashierBills.receipt')}
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              className="mt-1 block w-full text-sm"
+              onChange={(e) => setCargoReceiptFile(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.comment')}
+            <textarea
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              rows={2}
+              value={cargoPaymentForm.accountantComment ?? ''}
+              onChange={(e) =>
+                setCargoPaymentForm((prev) => ({
+                  ...prev,
+                  accountantComment: e.target.value ?? '',
+                }))
+              }
+            />
+          </label>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void submitCargoPayment()}
+            className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            {t('finance.billsToPay.pay')}
+          </button>
+        </Modal>
+      ) : null}
+
       {transportApproveModal ? (
         <Modal
           title={t('finance.billsToPay.approve')}
@@ -1150,6 +1385,7 @@ function DetailDrawer({
   onReturn,
   onReject,
   onCreatePayment,
+  onPayFullCargo,
   onPostpone,
   onEditPayment,
   onPayPayment,
@@ -1167,6 +1403,7 @@ function DetailDrawer({
   onReturn: () => void;
   onReject: () => void;
   onCreatePayment: () => void;
+  onPayFullCargo: () => void;
   onPostpone: () => void;
   onEditPayment: (payment: any) => void;
   onPayPayment: (payment: any) => void;
@@ -1198,6 +1435,7 @@ function DetailDrawer({
     bill.source === 'SUPPLIER_INVOICE' ||
     bill.requestType === 'CARGO_PAYMENT' ||
     bill.requestType === 'SUPPLIER_PAYMENT';
+  const isCargoPayment = bill.requestType === 'CARGO_PAYMENT';
   const canTakeReview =
     !isFinance &&
     !isTerminal &&
@@ -1205,6 +1443,7 @@ function DetailDrawer({
   const canApprove =
     !isFinance &&
     !isTerminal &&
+    !isCargoPayment &&
     (isTransport
       ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'PAYMENT_POSTPONED'].includes(bill.status)
       : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'PAYMENT_POSTPONED'].includes(
@@ -1214,10 +1453,24 @@ function DetailDrawer({
     !isFinance &&
     !isTerminal &&
     ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status);
+  const cargoPayableStatuses = new Set([
+    'AWAITING_ACCOUNTANT',
+    'UNDER_REVIEW',
+    'APPROVED',
+    'PARTIALLY_PAID',
+    'PAYMENT_POSTPONED',
+  ]);
   const canCreatePartial =
-    bill.source === 'SUPPLIER_INVOICE' &&
+    (bill.source === 'SUPPLIER_INVOICE' ||
+      (bill.source === 'TRANSPORT_EXPENSE' && isCargoPayment)) &&
     !isTerminal &&
-    Number(bill.remainingAmount) > 0.009;
+    Number(bill.remainingAmount) > 0.009 &&
+    (bill.source === 'SUPPLIER_INVOICE' || cargoPayableStatuses.has(bill.status));
+  const canPayFull =
+    isCargoPayment &&
+    !isTerminal &&
+    Number(bill.remainingAmount) > 0.009 &&
+    cargoPayableStatuses.has(bill.status);
   const canPostpone =
     isSupplierOrCargo &&
     !isTerminal &&
@@ -1442,7 +1695,9 @@ function DetailDrawer({
                       const dateValue =
                         payment.paidAt || payment.sentToCashierAt || payment.paymentDate || payment.createdAt;
                       const methodKey = payment.paymentMethod
-                        ? `procurement.payments.method.${payment.paymentMethod}`
+                        ? payment.amountYuan != null
+                          ? `procurement.payments.method.${payment.paymentMethod}`
+                          : `finance.billsToPay.methodFromAccount.${payment.paymentMethod}`
                         : '';
                       const statusKey = payment.status
                         ? `finance.billsToPay.paymentStatus.${payment.status}`
@@ -1549,6 +1804,16 @@ function DetailDrawer({
                 {t('finance.billsToPay.reject')}
               </button>
             </>
+          ) : null}
+          {canPayFull ? (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={onPayFullCargo}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {t('finance.billsToPay.payInFull')}
+            </button>
           ) : null}
           {canCreatePartial ? (
             <button

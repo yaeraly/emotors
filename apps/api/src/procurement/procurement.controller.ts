@@ -349,6 +349,24 @@ export class ProcurementController {
     return this.accountantBillsService.postponePayment(user, source, id, dto);
   }
 
+  @Post('bills-to-pay/:source/:id/pay')
+  @RequirePermissions('finance.view', 'payments.manage')
+  payBill(
+    @CurrentUser() user: AuthUser,
+    @Param('source') source: AccountantBillSource,
+    @Param('id') id: string,
+    @Body() dto: {
+      paymentAmountKgs?: number;
+      financeAccountId?: string;
+      transactionNumber?: string;
+      accountantComment?: string;
+      paidAt?: string;
+      idempotencyKey?: string;
+    },
+  ) {
+    return this.accountantBillsService.payCargoPayment(user, source, id, dto);
+  }
+
   @Post('bills-to-pay/:source/:id/permanent-delete')
   permanentDeleteBill(
     @CurrentUser() user: AuthUser,

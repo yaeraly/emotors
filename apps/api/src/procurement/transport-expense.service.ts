@@ -39,6 +39,7 @@ import {
   ApproveTransportExpenseDto,
   ConfirmTransportExpenseDto,
   CreateTransportExpenseDto,
+  PayCargoTransportExpenseDto,
   ReturnTransportExpenseDto,
   UpdateTransportExpenseDto,
 } from './dto/transport-expense.dto';
@@ -56,12 +57,24 @@ import {
   validateSectionPayableSubmit,
 } from './section-payable.util';
 import { LandedCostService } from './landed-cost.service';
+import {
+  resolveSupplierPaymentMethodFromAccountType,
+  tryResolveSupplierPaymentMethodFromAccountType,
+} from './supplier-payment-method-from-account.util';
 
 type Tx = Prisma.TransactionClient;
 
 const EDITABLE = new Set<string>([
   TransportExpenseStatus.DRAFT,
   TransportExpenseStatus.RETURNED,
+]);
+
+const CARGO_ACCOUNTANT_PAYABLE = new Set<string>([
+  TransportExpenseStatus.WAITING_ACCOUNTANT,
+  TransportExpenseStatus.UNDER_REVIEW,
+  TransportExpenseStatus.PENDING_CASHIER,
+  TransportExpenseStatus.PARTIALLY_PAID,
+  TransportExpenseStatus.PAYMENT_POSTPONED,
 ]);
 
 const INCLUDE = {
@@ -147,6 +160,35 @@ export class TransportExpenseService {
         take: 200,
       })
       .then((rows) => Promise.all(rows.map((row) => this.toResponse(row))));
+  }
+
+  listPaymentLedgerHistory(expenseId: string) {
+    return this.prisma.financeLedgerEntry
+      .findMany({
+        where: {
+          referenceType: 'ProcurementTransportExpense',
+          referenceId: expenseId,
+          entryType: FinanceLedgerEntryType.EXPENSE,
+        },
+        include: {
+          account: { select: { id: true, name: true, typeCode: true } },
+          createdBy: { select: { id: true, fullName: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+      .then((rows) =>
+        rows.map((row) => ({
+          id: row.id,
+          amountKgs: Number(row.amount),
+          paidAt: row.createdAt.toISOString(),
+          paymentMethod: tryResolveSupplierPaymentMethodFromAccountType(row.account.typeCode),
+          actualFinanceAccount: row.account,
+          cashier: row.createdBy,
+          status: 'ACTIVE',
+          transactionNumber: row.entryNumber,
+          createdAt: row.createdAt.toISOString(),
+        })),
+      );
   }
 
   getOne(user: AuthUser, id: string) {
@@ -924,6 +966,223 @@ export class TransportExpenseService {
     });
   }
 
+  payCargoByAccountant(user: AuthUser, id: string, dto: PayCargoTransportExpenseDto) {
+    if (!canCreateSupplierPayment(user)) {
+      throw new ForbiddenException('Only HQ Accountant can pay cargo invoices');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      let expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundException('Transport expense not found');
+      if (expense.expenseType !== TransportExpenseType.INTERNATIONAL_FREIGHT) {
+        throw new BadRequestException('Only cargo payment invoices support accountant payment');
+      }
+      if (!CARGO_ACCOUNTANT_PAYABLE.has(expense.status)) {
+        throw new BadRequestException('Этот счёт уже полностью оплачен.');
+      }
+
+      if (dto.idempotencyKey) {
+        const prior = await tx.auditLog.findMany({
+          where: {
+            entity: 'ProcurementTransportExpense',
+            entityId: id,
+            action: { in: ['CARGO_PARTIAL_PAYMENT_CREATED', 'CARGO_PAYMENT_COMPLETED'] },
+          },
+          orderBy: { timestamp: 'desc' },
+          take: 30,
+        });
+        const duplicate = prior.find((row) => {
+          const meta = row.metadata as { idempotencyKey?: string } | null;
+          return meta?.idempotencyKey === dto.idempotencyKey;
+        });
+        if (duplicate) {
+          return this.toResponse(expense, tx);
+        }
+      }
+
+      const receiptCount = await tx.fileAttachment.count({
+        where: {
+          entityType: FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT,
+          entityId: id,
+          deletedAt: null,
+        },
+      });
+      if (receiptCount <= 0) {
+        throw new BadRequestException('Payment receipt is required');
+      }
+
+      if (
+        expense.status === TransportExpenseStatus.WAITING_ACCOUNTANT ||
+        expense.status === TransportExpenseStatus.UNDER_REVIEW
+      ) {
+        const amountKgs =
+          Number(expense.amountKgs) > 0
+            ? Number(expense.amountKgs)
+            : Number(expense.calculatedAmountKgs || expense.amount);
+        expense = await tx.procurementTransportExpense.update({
+          where: { id },
+          data: {
+            amountKgs,
+            exchangeRate: expense.usdExchangeRate ?? expense.exchangeRate,
+            approvedAt: expense.approvedAt ?? new Date(),
+            accountantId: user.id,
+            financeAccountId: dto.financeAccountId,
+            accountantComment: dto.accountantComment?.trim() || expense.accountantComment,
+            status: TransportExpenseStatus.PENDING_CASHIER,
+            sentToCashierAt: null,
+            executionStatus: null,
+            executionStartedAt: null,
+            failureReason: null,
+            cashierId: null,
+          },
+        });
+        await this.syncOrderSectionCostFromApprovedExpenses(tx, user, expense);
+        await this.audit(tx, user, 'TRANSPORT_EXPENSE_APPROVED', id, null, {
+          status: expense.status,
+          amountKgs,
+          approvedByAccountantPay: true,
+        });
+      }
+
+      const account = await this.assertHqAccountForPayment(tx, dto.financeAccountId);
+      const derivedPaymentMethod = resolveSupplierPaymentMethodFromAccountType(account.typeCode);
+      const procurementPaymentMethod =
+        derivedPaymentMethod === 'QR_CODE'
+          ? ProcurementPaymentInfoMethod.QR_CODE
+          : ProcurementPaymentInfoMethod.BANK_ACCOUNT;
+
+      const requestedKgs =
+        Number(expense.amountKgs) > 0 ? Number(expense.amountKgs) : Number(expense.amount);
+      const alreadyPaid = Number(expense.paidAmountKgs || 0);
+      const remaining = roundMoney(Math.max(requestedKgs - alreadyPaid, 0));
+      if (!(remaining > 0)) {
+        throw new BadRequestException('Этот счёт уже полностью оплачен.');
+      }
+
+      const payNow = roundMoney(dto.paymentAmountKgs);
+      if (!(payNow > 0)) {
+        throw new BadRequestException('Сумма платежа должна быть больше нуля.');
+      }
+      if (payNow > remaining + 0.009) {
+        throw new BadRequestException('Сумма платежа превышает остаток по счету.');
+      }
+      if (payNow > Number(account.availableBalance) + 0.009) {
+        throw new BadRequestException('Insufficient balance on finance account');
+      }
+
+      const ledger = await this.ledgerService.postLedgerEntry(tx, user, {
+        accountId: account.id,
+        branchId: null,
+        entryType: FinanceLedgerEntryType.EXPENSE,
+        amount: payNow,
+        currency: 'KGS',
+        referenceType: 'ProcurementTransportExpense',
+        referenceId: id,
+        notes: `Cargo payment ${expense.expenseNumber}${payNow + 0.009 < remaining ? ' (partial)' : ''}`,
+      });
+
+      const newPaidTotal = roundMoney(alreadyPaid + payNow);
+      const fullyPaid = newPaidTotal + 0.009 >= requestedKgs;
+      const updated = await tx.procurementTransportExpense.update({
+        where: { id },
+        data: {
+          status: fullyPaid ? TransportExpenseStatus.PAID : TransportExpenseStatus.PARTIALLY_PAID,
+          executionStatus: fullyPaid ? 'COMPLETED' : null,
+          paidAmountKgs: newPaidTotal,
+          financeAccountId: account.id,
+          ledgerEntryId: ledger.id,
+          paymentMethod: procurementPaymentMethod,
+          accountantId: user.id,
+          paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
+          transactionNumber: dto.transactionNumber?.trim() || expense.transactionNumber,
+          accountantComment: dto.accountantComment?.trim() || expense.accountantComment,
+          sentToCashierAt: null,
+          failureReason: null,
+        },
+        include: INCLUDE,
+      });
+
+      const auditPayload = {
+        cargoPaymentId: id,
+        invoiceId: id,
+        procurementOrderId: expense.procurementOrderId,
+        accountId: account.id,
+        accountType: account.typeCode,
+        derivedPaymentMethod,
+        paymentAmount: payNow,
+        oldPaidAmount: alreadyPaid,
+        newPaidAmount: newPaidTotal,
+        oldRemainingAmount: remaining,
+        newRemainingAmount: roundMoney(Math.max(requestedKgs - newPaidTotal, 0)),
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+        idempotencyKey: dto.idempotencyKey ?? null,
+        ledgerEntryId: ledger.id,
+        approvedCargoAmountKgs: requestedKgs,
+      };
+
+      await this.audit(
+        tx,
+        user,
+        fullyPaid ? 'CARGO_PAYMENT_COMPLETED' : 'CARGO_PARTIAL_PAYMENT_CREATED',
+        id,
+        {
+          status: expense.status,
+          paidAmountKgs: alreadyPaid,
+          calculatedAmountKgs: Number(expense.calculatedAmountKgs ?? requestedKgs),
+        },
+        {
+          status: updated.status,
+          ...auditPayload,
+          costBaseKgs:
+            expense.calculatedAmountKgs != null
+              ? Number(expense.calculatedAmountKgs)
+              : requestedKgs,
+        },
+      );
+
+      if (!fullyPaid) {
+        await this.audit(tx, user, 'CARGO_PARTIAL_PAYMENT', id, {
+          paidAmountKgs: alreadyPaid,
+        }, auditPayload);
+      }
+
+      await this.audit(
+        tx,
+        user,
+        fullyPaid ? 'TRANSPORT_EXPENSE_PAID' : 'TRANSPORT_EXPENSE_PARTIALLY_PAID',
+        id,
+        { status: expense.status, paidAmountKgs: alreadyPaid },
+        {
+          status: updated.status,
+          paidNowKgs: payNow,
+          paidAmountKgs: newPaidTotal,
+          requestedKgs,
+          remainingKgs: roundMoney(Math.max(requestedKgs - newPaidTotal, 0)),
+          financeAccountId: account.id,
+          ledgerEntryId: ledger.id,
+          costBaseKgs:
+            expense.calculatedAmountKgs != null
+              ? Number(expense.calculatedAmountKgs)
+              : requestedKgs,
+        },
+      );
+
+      await this.syncOrderSectionCostFromApprovedExpenses(tx, user, updated);
+      await this.notifications.notifyInTx(tx, user, {
+        type: AlertType.TRANSPORT_EXPENSE_PAID,
+        entityType: 'ProcurementTransportExpense',
+        entityId: id,
+        referenceNumber: expense.expenseNumber,
+        message: fullyPaid
+          ? `Cargo payment ${expense.expenseNumber} was paid in full by HQ Accountant.`
+          : `Cargo payment ${expense.expenseNumber} received a partial payment of ${payNow.toFixed(2)} KGS.`,
+        recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.HQ_ACCOUNTANT, Role.FINANCE_MANAGER],
+      });
+
+      return this.toResponse(updated, tx);
+    });
+  }
+
   confirmPayment(user: AuthUser, id: string, dto: ConfirmTransportExpenseDto) {
     if (!canConfirmSupplierPayment(user)) {
       throw new ForbiddenException('Only HQ Cashier can confirm transport expense payment');
@@ -960,9 +1219,9 @@ export class TransportExpenseService {
       if (!(remaining > 0)) throw new BadRequestException('Expense is already fully paid');
 
       const payNow = dto.paidAmountKgs != null ? roundMoney(dto.paidAmountKgs) : remaining;
-      if (!(payNow > 0)) throw new BadRequestException('Paid amount must be greater than zero');
+      if (!(payNow > 0)) throw new BadRequestException('Сумма платежа должна быть больше нуля.');
       if (payNow > remaining + 0.009) {
-        throw new BadRequestException('Paid amount exceeds remaining unpaid amount');
+        throw new BadRequestException('Сумма платежа превышает остаток по счету.');
       }
       if (payNow > Number(account.availableBalance) + 0.009) {
         throw new BadRequestException('Insufficient balance on finance account');
@@ -1340,15 +1599,21 @@ export class TransportExpenseService {
   }
 
   private async assertHqAccount(tx: Tx, accountId: string) {
+    return this.assertHqAccountForPayment(tx, accountId);
+  }
+
+  private async assertHqAccountForPayment(tx: Tx, accountId: string) {
     const account = await tx.financeAccount.findFirst({
       where: { id: accountId, deletedAt: null },
     });
-    if (!account) throw new NotFoundException('Finance account not found');
-    if (account.scope !== FinanceAccountScope.HQ) {
-      throw new BadRequestException('Only HQ finance accounts are allowed');
+    if (!account || account.status !== FinanceAccountStatus.ACTIVE) {
+      throw new BadRequestException('Выбранный счёт недоступен.');
     }
-    if (account.status !== FinanceAccountStatus.ACTIVE) {
-      throw new BadRequestException('Finance account must be active');
+    if (account.scope !== FinanceAccountScope.HQ) {
+      throw new BadRequestException('Выбранный счёт недоступен.');
+    }
+    if (!tryResolveSupplierPaymentMethodFromAccountType(account.typeCode)) {
+      throw new BadRequestException('Выбранный счёт недоступен.');
     }
     return account;
   }

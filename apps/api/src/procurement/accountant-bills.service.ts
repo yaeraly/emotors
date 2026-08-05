@@ -364,6 +364,51 @@ export class AccountantBillsService {
     throw new BadRequestException('Approve is not supported for this request type');
   }
 
+  async payCargoPayment(
+    user: AuthUser,
+    source: AccountantBillSource,
+    id: string,
+    body: {
+      paymentAmountKgs?: number;
+      financeAccountId?: string;
+      transactionNumber?: string;
+      accountantComment?: string;
+      paidAt?: string;
+      idempotencyKey?: string;
+    },
+  ) {
+    this.assertAccountant(user);
+    if (source !== 'TRANSPORT_EXPENSE') {
+      throw new BadRequestException('Cargo payment is only supported for transport expenses');
+    }
+    const expense = await this.prisma.procurementTransportExpense.findUnique({
+      where: { id },
+      select: { expenseType: true, procurementOrderId: true, expenseNumber: true },
+    });
+    if (!expense || expense.expenseType !== TransportExpenseType.INTERNATIONAL_FREIGHT) {
+      throw new BadRequestException('Only cargo payment invoices can be paid from bills to pay');
+    }
+    const result = await this.transportExpenses.payCargoByAccountant(user, id, {
+      paymentAmountKgs: Number(body.paymentAmountKgs),
+      financeAccountId: String(body.financeAccountId || ''),
+      transactionNumber: body.transactionNumber,
+      accountantComment: body.accountantComment,
+      paidAt: body.paidAt,
+      idempotencyKey: body.idempotencyKey,
+    });
+    if (expense.procurementOrderId) {
+      await this.prisma.$transaction(async (tx) => {
+        await this.notifyWarehouseWhenExpensesProcessed(
+          tx,
+          user,
+          expense.procurementOrderId!,
+          expense.expenseNumber,
+        );
+      });
+    }
+    return result;
+  }
+
   /**
    * Postpone Supplier / Cargo (transport) payment without creating a ledger transaction.
    * Remaining debt is unchanged; only next payment date + comment are stored.
@@ -517,6 +562,24 @@ export class AccountantBillsService {
           expenseType: expense.expenseType,
           requestType: mapTransportExpenseTypeToRequestType(expense.expenseType),
         });
+        if (expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
+          await this.audit(tx, user, 'CARGO_PAYMENT_POSTPONED', id, {
+            status: expense.status,
+            paidAmountKgs,
+            remainingAmount: remainingAmountKgs,
+          }, {
+            cargoPaymentId: id,
+            invoiceId: id,
+            procurementOrderId: expense.procurementOrderId,
+            paymentAmount: 0,
+            oldPaidAmount: paidAmountKgs,
+            newPaidAmount: paidAmountKgs,
+            oldRemainingAmount: remainingAmountKgs,
+            newRemainingAmount: remainingAmountKgs,
+            actorUserId: user.id,
+            timestamp: new Date().toISOString(),
+          });
+        }
 
         const requestLabel =
           expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT
@@ -926,6 +989,7 @@ export class AccountantBillsService {
 
   private async getTransportDetail(user: AuthUser, id: string) {
     const detail = await this.transportExpenses.getOne(user, id);
+    const payments = await this.transportExpenses.listPaymentLedgerHistory(id);
     const listItem = (await this.collectBills(user)).find(
       (item) => item.source === 'TRANSPORT_EXPENSE' && item.id === id,
     );
@@ -938,6 +1002,7 @@ export class AccountantBillsService {
       ...listItem,
       detail: {
         ...detail,
+        payments,
         auditHistory: audits,
         cargo:
           detail.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT

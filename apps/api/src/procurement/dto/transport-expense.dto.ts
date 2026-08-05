@@ -289,6 +289,37 @@ export class ConfirmTransportExpenseDto {
   @IsNumber()
   @Min(0.01)
   paidAmountKgs?: number;
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
+}
+
+/** HQ Accountant direct cargo payment from bills-to-pay (KGS). */
+export class PayCargoTransportExpenseDto {
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.01)
+  paymentAmountKgs!: number;
+
+  @IsString()
+  financeAccountId!: string;
+
+  @IsOptional()
+  @IsString()
+  transactionNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  accountantComment?: string;
+
+  @IsOptional()
+  @IsDateString()
+  paidAt?: string;
+
+  @IsOptional()
+  @IsString()
+  idempotencyKey?: string;
 }
 
 export class ReturnTransportExpenseDto {
