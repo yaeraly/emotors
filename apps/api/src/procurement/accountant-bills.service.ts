@@ -386,7 +386,6 @@ export class AccountantBillsService {
     body: {
       paymentAmountKgs?: number;
       financeAccountId?: string;
-      transactionNumber?: string;
       accountantComment?: string;
       paidAt?: string;
       idempotencyKey?: string;
@@ -406,7 +405,6 @@ export class AccountantBillsService {
     const result = await this.transportExpenses.payCargoByAccountant(user, id, {
       paymentAmountKgs: Number(body.paymentAmountKgs),
       financeAccountId: String(body.financeAccountId || ''),
-      transactionNumber: body.transactionNumber,
       accountantComment: body.accountantComment,
       paidAt: body.paidAt,
       idempotencyKey: body.idempotencyKey,
@@ -445,11 +443,11 @@ export class AccountantBillsService {
     }
     const reason = String(body.reason || '').trim();
     const comment = String(body.comment || '').trim();
-    if (!comment) {
-      throw new BadRequestException('comment is required');
-    }
 
     if (source === 'SUPPLIER_INVOICE') {
+      if (!comment) {
+        throw new BadRequestException('comment is required');
+      }
       return this.prisma.$transaction(async (tx) => {
         const order = await tx.procurementOrder.findFirst({
           where: { id, deletedAt: null },
@@ -551,7 +549,9 @@ export class AccountantBillsService {
         }
 
         const amountKgs = approvedAmountKgs;
-        const storedComment = reason ? `${reason}${comment ? `\n${comment}` : ''}` : comment;
+        const storedComment = reason
+          ? `${reason}${comment ? `\n${comment}` : ''}`
+          : comment || null;
         const updated = await tx.procurementTransportExpense.update({
           where: { id },
           data: {

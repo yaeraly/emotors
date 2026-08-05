@@ -143,9 +143,10 @@ assertEqual(cargoReturnedGate.accountantProcessed, false, '19. returned not proc
 // 20. Processed postponed uses approved amount in landed cost
 assert(isExpenseApprovedForLandedCost(TransportExpenseStatus.PAYMENT_POSTPONED), '20. postponed in cost');
 
-// 21. Frontend uses action visibility helper
+// 21. Frontend uses action visibility helper, no second confirmation
 assert(page.includes('getCargoBillActionVisibility'), '21. frontend visibility helper');
-assert(page.includes('confirmPayFull'), '21. confirmation dialogs');
+assert(!page.includes('cargoConfirm'), '21. no confirmation dialog state');
+assert(!page.includes('confirmPayFull'), '21. no confirmation dialog text');
 
 // 22. Idempotency on return
 assert(returnBlock.includes('idempotencyKey'), '22. return idempotency');

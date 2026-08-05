@@ -1250,7 +1250,7 @@ export class TransportExpenseService {
           paymentMethod: procurementPaymentMethod,
           accountantId: user.id,
           paidAt: dto.paidAt ? new Date(dto.paidAt) : new Date(),
-          transactionNumber: dto.transactionNumber?.trim() || expense.transactionNumber,
+          transactionNumber: ledger.entryNumber,
           accountantComment: dto.accountantComment?.trim() || expense.accountantComment,
           sentToCashierAt: null,
           failureReason: null,

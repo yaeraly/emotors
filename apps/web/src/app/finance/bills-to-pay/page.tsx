@@ -157,12 +157,6 @@ function BillsToPayPageContent() {
   const [cargoReturnModal, setCargoReturnModal] = useState<BillDetail | null>(null);
   const [cargoReturnForm, setCargoReturnForm] = useState({ reason: '', comment: '' });
   const [cargoReturnError, setCargoReturnError] = useState('');
-  const [cargoConfirm, setCargoConfirm] = useState<
-    | { type: 'pay' }
-    | { type: 'postpone' }
-    | { type: 'return'; reason: string }
-    | null
-  >(null);
   const [cargoPaymentModal, setCargoPaymentModal] = useState<{
     bill: BillDetail;
     mode: 'full' | 'partial';
@@ -170,7 +164,6 @@ function BillsToPayPageContent() {
   const [cargoPaymentForm, setCargoPaymentForm] = useState({
     amount: '',
     financeAccountId: '',
-    transactionNumber: '',
     accountantComment: '',
   });
   const [cargoReceiptFile, setCargoReceiptFile] = useState<File | null>(null);
@@ -356,14 +349,6 @@ function BillsToPayPageContent() {
     () => deriveSupplierPaymentMethodFromAccountType(selectedPaymentAccount?.typeCode),
     [selectedPaymentAccount?.typeCode],
   );
-  const selectedCargoAccount = useMemo(
-    () => accounts.find((account) => account.id === cargoPaymentForm.financeAccountId) ?? null,
-    [accounts, cargoPaymentForm.financeAccountId],
-  );
-  const derivedCargoPaymentMethod = useMemo(
-    () => deriveSupplierPaymentMethodFromAccountType(selectedCargoAccount?.typeCode),
-    [selectedCargoAccount?.typeCode],
-  );
 
   async function openCargoPaymentModal(bill: BillDetail, mode: 'full' | 'partial') {
     const remaining = Number(bill.remainingAmountKgs ?? bill.remainingAmount ?? 0);
@@ -373,7 +358,6 @@ function BillsToPayPageContent() {
     setCargoPaymentForm({
       amount: mode === 'full' && remaining > 0 ? String(remaining) : '',
       financeAccountId: bill.detail?.financeAccountId || bill.detail?.financeAccount?.id || '',
-      transactionNumber: '',
       accountantComment: '',
     });
     await loadAccounts();
@@ -413,14 +397,6 @@ function BillsToPayPageContent() {
       setCargoPaymentError(t('finance.billsToPay.accountRequired'));
       return null;
     }
-    if (!cargoPaymentForm.transactionNumber.trim()) {
-      setCargoPaymentError(t('finance.billsToPay.transactionNumberRequired'));
-      return null;
-    }
-    if (!cargoPaymentForm.accountantComment.trim()) {
-      setCargoPaymentError(t('finance.billsToPay.commentRequired'));
-      return null;
-    }
     const account = accounts.find((item) => item.id === cargoPaymentForm.financeAccountId);
     if (!account || !deriveSupplierPaymentMethodFromAccountType(account.typeCode)) {
       setCargoPaymentError(t('finance.billsToPay.accountUnavailable'));
@@ -442,24 +418,18 @@ function BillsToPayPageContent() {
     return {
       paymentAmountKgs: amount,
       financeAccountId: cargoPaymentForm.financeAccountId,
-      transactionNumber: cargoPaymentForm.transactionNumber.trim() || undefined,
       accountantComment: cargoPaymentForm.accountantComment.trim() || undefined,
       idempotencyKey: crypto.randomUUID(),
     };
   }
 
   async function submitCargoReturn() {
-    if (!cargoReturnModal) return;
+    if (!cargoReturnModal || saving) return;
     const trimmedReason = cargoReturnForm.reason.trim();
     if (trimmedReason.length < 3) {
       setCargoReturnError(t('finance.billsToPay.returnReasonRequired'));
       return;
     }
-    setCargoConfirm({ type: 'return', reason: trimmedReason });
-  }
-
-  async function confirmCargoReturn() {
-    if (!cargoReturnModal || cargoConfirm?.type !== 'return') return;
     setSaving(true);
     setActionError('');
     setCargoReturnError('');
@@ -469,7 +439,7 @@ function BillsToPayPageContent() {
         {
           method: 'POST',
           body: JSON.stringify({
-            reason: cargoConfirm.reason,
+            reason: trimmedReason,
             comment: cargoReturnForm.comment.trim() || undefined,
             idempotencyKey: crypto.randomUUID(),
           }),
@@ -478,77 +448,59 @@ function BillsToPayPageContent() {
       const source = cargoReturnModal.source;
       const id = cargoReturnModal.id;
       setCargoReturnModal(null);
-      setCargoConfirm(null);
       setCargoReturnForm({ reason: '', comment: '' });
       await load();
       await refreshSelected(source, id);
     } catch (err) {
       setCargoReturnError(err instanceof Error ? err.message : t('common.error'));
-      setCargoConfirm(null);
     } finally {
       setSaving(false);
     }
   }
 
   async function submitPostponePayment() {
-    if (!postponeModal) return;
+    if (!postponeModal || saving) return;
     const isCargo = postponeModal.requestType === 'CARGO_PAYMENT';
     if (isCargo && postponeForm.reason.trim().length < 2) {
       setPostponeError(t('finance.billsToPay.postponeReasonRequired'));
       return;
     }
-    if (postponeForm.comment.trim().length < 2) {
+    if (!isCargo && postponeForm.comment.trim().length < 2) {
       setPostponeError(t('finance.billsToPay.commentRequired'));
       return;
     }
-    setCargoConfirm({ type: 'postpone' });
-  }
-
-  async function confirmPostponePayment() {
-    if (!postponeModal) return;
     setSaving(true);
     setPostponeError('');
     setActionError('');
     try {
+      const body: Record<string, string | undefined> = {
+        nextPaymentDate: postponeForm.nextPaymentDate,
+        comment: postponeForm.comment.trim() || undefined,
+      };
+      if (isCargo) {
+        body.reason = postponeForm.reason.trim();
+      }
       await apiFetch(
         `/procurement/bills-to-pay/${postponeModal.source}/${postponeModal.id}/postpone`,
         {
           method: 'POST',
-          body: JSON.stringify({
-            nextPaymentDate: postponeForm.nextPaymentDate,
-            reason: postponeForm.reason.trim() || undefined,
-            comment: postponeForm.comment.trim(),
-          }),
+          body: JSON.stringify(body),
         },
       );
       const source = postponeModal.source;
       const id = postponeModal.id;
       setPostponeModal(null);
-      setCargoConfirm(null);
       await load();
       await refreshSelected(source, id);
     } catch (err) {
       setPostponeError(err instanceof Error ? err.message : t('common.error'));
-      setCargoConfirm(null);
     } finally {
       setSaving(false);
     }
   }
 
-  function requestCargoPaymentConfirm() {
-    if (!cargoPaymentModal) return;
-    if (!validateCargoPaymentForm(cargoPaymentModal.bill)) return;
-    setCargoConfirm({ type: 'pay' });
-  }
-
-  async function confirmCargoPayment() {
-    if (cargoConfirm?.type !== 'pay') return;
-    setCargoConfirm(null);
-    await submitCargoPayment();
-  }
-
   async function submitCargoPayment() {
-    if (!cargoPaymentModal) return;
+    if (!cargoPaymentModal || saving) return;
     const payload = validateCargoPaymentForm(cargoPaymentModal.bill);
     if (!payload) return;
 
@@ -1087,7 +1039,7 @@ function BillsToPayPageContent() {
             </label>
           ) : null}
           <label className="mt-2 block text-xs font-semibold">
-            {t('finance.billsToPay.comment')}
+            {t('finance.billsToPay.commentOptional')}
             <textarea
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               rows={3}
@@ -1101,17 +1053,19 @@ function BillsToPayPageContent() {
             disabled={
               saving ||
               !postponeForm.nextPaymentDate ||
-              postponeForm.comment.trim().length < 2 ||
+              (postponeModal.requestType !== 'CARGO_PAYMENT' &&
+                postponeForm.comment.trim().length < 2) ||
               (postponeModal.requestType === 'CARGO_PAYMENT' &&
                 postponeForm.reason.trim().length < 2)
             }
             onClick={() => void submitPostponePayment()}
             className="mt-3 rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
           >
-            {postponeModal.requestType === 'CARGO_PAYMENT' &&
-            postponeModal.status === 'PAYMENT_POSTPONED'
-              ? t('finance.billsToPay.changePostponeDate')
-              : t('finance.billsToPay.postponePayment')}
+            {postponeModal.requestType === 'CARGO_PAYMENT'
+              ? t('finance.billsToPay.postponeShort')
+              : postponeModal.status === 'PAYMENT_POSTPONED'
+                ? t('finance.billsToPay.changePostponeDate')
+                : t('finance.billsToPay.postponePayment')}
           </button>
         </Modal>
       ) : null}
@@ -1138,7 +1092,7 @@ function BillsToPayPageContent() {
             />
           </label>
           <label className="mt-2 block text-xs font-semibold">
-            {t('finance.billsToPay.comment')}
+            {t('finance.billsToPay.commentOptional')}
             <textarea
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               rows={2}
@@ -1154,50 +1108,6 @@ function BillsToPayPageContent() {
           >
             {t('finance.billsToPay.return')}
           </button>
-        </Modal>
-      ) : null}
-
-      {cargoConfirm ? (
-        <Modal
-          title={t('common.confirm')}
-          onClose={() => setCargoConfirm(null)}
-        >
-          <p className="text-sm text-slate-700">
-            {cargoConfirm.type === 'pay'
-              ? cargoPaymentModal?.mode === 'full'
-                ? t('finance.billsToPay.confirmPayFull')
-                : t('finance.billsToPay.confirmPartialPay')
-              : cargoConfirm.type === 'postpone'
-                ? t('finance.billsToPay.confirmPostpone')
-                : t('finance.billsToPay.confirmReturn')}
-          </p>
-          {cargoConfirm.type === 'return' ? (
-            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              {cargoConfirm.reason}
-            </p>
-          ) : null}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => {
-                if (cargoConfirm.type === 'pay') void confirmCargoPayment();
-                else if (cargoConfirm.type === 'postpone') void confirmPostponePayment();
-                else void confirmCargoReturn();
-              }}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
-            >
-              {t('common.confirm')}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => setCargoConfirm(null)}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 disabled:opacity-40"
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
         </Modal>
       ) : null}
 
@@ -1391,18 +1301,19 @@ function BillsToPayPageContent() {
           {cargoPaymentError ? (
             <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{cargoPaymentError}</p>
           ) : null}
-          <label className="mt-2 block text-xs font-semibold">
-            {t('finance.billsToPay.paymentAmount')} (KGS)
-            <input
-              type="number"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-              value={cargoPaymentForm.amount ?? ''}
-              readOnly={cargoPaymentModal.mode === 'full'}
-              onChange={(e) =>
-                setCargoPaymentForm((prev) => ({ ...prev, amount: e.target.value ?? '' }))
-              }
-            />
-          </label>
+          {cargoPaymentModal.mode === 'partial' ? (
+            <label className="mt-2 block text-xs font-semibold">
+              {t('finance.billsToPay.paymentAmount')} (KGS)
+              <input
+                type="number"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                value={cargoPaymentForm.amount ?? ''}
+                onChange={(e) =>
+                  setCargoPaymentForm((prev) => ({ ...prev, amount: e.target.value ?? '' }))
+                }
+              />
+            </label>
+          ) : null}
           <label className="mt-2 block text-xs font-semibold">
             {t('finance.billsToPay.accountOrCashbox')}
             <select
@@ -1420,23 +1331,6 @@ function BillsToPayPageContent() {
               ))}
             </select>
           </label>
-          <p className="mt-2 text-xs text-slate-600">
-            {t('finance.billsToPay.paymentMethod')}:{' '}
-            <span className="font-semibold text-slate-900">
-              {t(derivedSupplierPaymentMethodLabelKey(derivedCargoPaymentMethod))}
-            </span>
-          </p>
-          <label className="mt-2 block text-xs font-semibold">
-            {t('finance.transactionNumber')}
-            <input
-              type="text"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-              value={cargoPaymentForm.transactionNumber ?? ''}
-              onChange={(e) =>
-                setCargoPaymentForm((prev) => ({ ...prev, transactionNumber: e.target.value ?? '' }))
-              }
-            />
-          </label>
           <label className="mt-2 block text-xs font-semibold">
             {t('finance.cashierBills.receipt')}
             <input
@@ -1447,7 +1341,7 @@ function BillsToPayPageContent() {
             />
           </label>
           <label className="mt-2 block text-xs font-semibold">
-            {t('finance.billsToPay.comment')}
+            {t('finance.billsToPay.commentOptional')}
             <textarea
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               rows={2}
@@ -1463,10 +1357,12 @@ function BillsToPayPageContent() {
           <button
             type="button"
             disabled={saving}
-            onClick={() => void requestCargoPaymentConfirm()}
+            onClick={() => void submitCargoPayment()}
             className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
           >
-            {t('finance.billsToPay.pay')}
+            {cargoPaymentModal.mode === 'full'
+              ? t('finance.billsToPay.payInFull')
+              : t('finance.billsToPay.createPayment')}
           </button>
         </Modal>
       ) : null}

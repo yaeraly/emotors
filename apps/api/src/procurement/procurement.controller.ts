@@ -358,7 +358,6 @@ export class ProcurementController {
     @Body() dto: {
       paymentAmountKgs?: number;
       financeAccountId?: string;
-      transactionNumber?: string;
       accountantComment?: string;
       paidAt?: string;
       idempotencyKey?: string;

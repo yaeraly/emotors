@@ -307,10 +307,6 @@ export class PayCargoTransportExpenseDto {
 
   @IsOptional()
   @IsString()
-  transactionNumber?: string;
-
-  @IsOptional()
-  @IsString()
   accountantComment?: string;
 
   @IsOptional()

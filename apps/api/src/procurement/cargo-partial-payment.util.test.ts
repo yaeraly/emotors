@@ -107,7 +107,14 @@ assert(page.includes('/pay'), 'frontend calls pay endpoint');
 assert(!page.includes('cargoPaymentForm.paymentMethod'), 'no editable payment method in cargo form');
 assert(page.includes('getCargoBillActionVisibility'), 'cargo action visibility wired');
 assert(page.includes('cargoReturnModal'), 'cargo return modal');
-assert(page.includes('confirmReturn'), 'return confirmation');
-assert(page.includes('derivedCargoPaymentMethod'), 'derived method shown read-only');
+assert(!page.includes('cargoConfirm'), 'no second confirmation modal state');
+assert(!page.includes('finance.transactionNumber'), 'no transaction number field in cargo dialogs');
+assert(page.includes("t('finance.billsToPay.commentOptional')"), 'optional comment label');
+assert(page.includes('submitCargoPayment'), 'one-click cargo payment submit');
+assert(page.includes('disabled={saving'), 'submit disabled while pending');
+const payDtoBlock = dto.slice(dto.indexOf('export class PayCargoTransportExpenseDto'));
+assert(!payDtoBlock.includes('transactionNumber'), 'pay DTO has no transactionNumber');
+assert(service.includes('transactionNumber: ledger.entryNumber'), 'ledger generates transaction number');
+assert(payDtoBlock.includes('accountantComment?: string'), 'optional accountant comment in DTO');
 
 console.log('cargo-partial-payment.util.test.ts passed');
