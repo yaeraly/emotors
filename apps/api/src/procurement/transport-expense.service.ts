@@ -1413,6 +1413,20 @@ export class TransportExpenseService {
         },
       );
       if (!fullyPaid && expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
+        const newRemaining = roundMoney(Math.max(requestedKgs - newPaidTotal, 0));
+        const partialAudit = {
+          invoiceId: id,
+          cargoPaymentId: id,
+          procurementOrderId: expense.procurementOrderId,
+          oldPaidAmount: alreadyPaid,
+          newPaidAmount: newPaidTotal,
+          oldRemainingAmount: remaining,
+          newRemainingAmount: newRemaining,
+          oldStatus: expense.status,
+          newStatus: updated.status,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        };
         await this.audit(tx, user, 'CARGO_PARTIAL_PAYMENT', id, {
           status: expense.status,
           paidAmountKgs: alreadyPaid,
@@ -1421,10 +1435,18 @@ export class TransportExpenseService {
           cargoInvoiceId: id,
           paymentStatus: updated.status,
           paidAmount: newPaidTotal,
-          remainingAmount: roundMoney(Math.max(requestedKgs - newPaidTotal, 0)),
+          remainingAmount: newRemaining,
           userId: user.id,
           timestamp: new Date().toISOString(),
         });
+        await this.audit(tx, user, 'CARGO_PARTIAL_PAYMENT_CREATED', id, {
+          status: expense.status,
+          paidAmountKgs: alreadyPaid,
+        }, partialAudit);
+        await this.audit(tx, user, 'CARGO_PAYMENT_REMAINING_UPDATED', id, {
+          status: expense.status,
+          paidAmountKgs: alreadyPaid,
+        }, partialAudit);
       }
       if (expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
         await this.audit(tx, user, 'CARGO_PAYMENT_EXECUTED_BY_HQ_CASHIER', id, {
@@ -1448,10 +1470,18 @@ export class TransportExpenseService {
           await this.audit(tx, user, 'CARGO_PAYMENT_FULLY_PAID', id, {
             paidAmountKgs: alreadyPaid,
           }, {
+            invoiceId: id,
             cargoPaymentId: id,
-            paidAmount: newPaidTotal,
-            remainingAmount: 0,
+            procurementOrderId: expense.procurementOrderId,
+            oldPaidAmount: alreadyPaid,
+            newPaidAmount: newPaidTotal,
+            oldRemainingAmount: remaining,
+            newRemainingAmount: 0,
+            oldStatus: expense.status,
+            newStatus: updated.status,
+            actorUserId: user.id,
             cashierUserId: user.id,
+            timestamp: new Date().toISOString(),
           });
         }
       }

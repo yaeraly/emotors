@@ -33,6 +33,8 @@ import {
   matchesCashierBillSearch,
   normalizeCashierExecutionStatus,
   paginateItems,
+  isActiveTransportPayableRow,
+  resolveTransportExpenseAmounts,
   sortCashierBills,
 } from './cashier-bills.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
@@ -258,9 +260,18 @@ export class CashierBillsService {
       }),
       this.prisma.procurementTransportExpense.findMany({
         where: {
+          status: {
+            notIn: [TransportExpenseStatus.CANCELLED, TransportExpenseStatus.REJECTED],
+          },
           OR: [
             {
               status: TransportExpenseStatus.PENDING_CASHIER,
+            },
+            {
+              status: TransportExpenseStatus.PARTIALLY_PAID,
+            },
+            {
+              status: TransportExpenseStatus.PAYMENT_POSTPONED,
             },
             {
               status: TransportExpenseStatus.PAID,
@@ -326,11 +337,21 @@ export class CashierBillsService {
       };
     });
 
-    const transportItems: CashierBillListItem[] = transportRows.map((row) => {
+    const transportItems: CashierBillListItem[] = transportRows
+      .filter((row) => {
+        const { remainingKgs } = resolveTransportExpenseAmounts(row);
+        return isActiveTransportPayableRow({
+          status: row.status,
+          remainingKgs,
+          executionStatus: row.executionStatus,
+          includePaidToday: row.status === TransportExpenseStatus.PAID,
+        });
+      })
+      .map((row) => {
       const executionStatus = normalizeCashierExecutionStatus(row.executionStatus, row.status);
       paidAtById[row.id] = row.paidAt?.toISOString() ?? null;
       const requestType = mapTransportExpenseTypeToCashierRequestType(row.expenseType);
-      const remainingKgs = Math.max(0, Number(row.amountKgs) - Number(row.paidAmountKgs || 0));
+      const { totalKgs, paidKgs, remainingKgs } = resolveTransportExpenseAmounts(row);
       const instructionKgs =
         row.cashierInstructionAmountKgs != null
           ? Number(row.cashierInstructionAmountKgs)
@@ -358,6 +379,10 @@ export class CashierBillsService {
         currency: row.currency || 'KGS',
         exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
         amountKgs,
+        totalAmountKgs: totalKgs,
+        paidAmountKgs: paidKgs,
+        remainingAmountKgs: remainingKgs,
+        nextPaymentDate: row.dueDate?.toISOString() ?? null,
         debitAccountName: row.financeAccount?.name ?? null,
         debitAccountId: row.financeAccount?.id ?? null,
         executionStatus,
@@ -692,10 +717,14 @@ export class CashierBillsService {
       amountKgs: requestedKgs,
       paidAmountKgs,
       remainingAmountKgs: remainingKgs,
+      paymentStatus: expense.status,
+      nextPaymentDate: expense.dueDate?.toISOString() ?? null,
       approvedAmountKgs:
         expense.cashierInstructionAmountKgs != null
           ? Number(expense.cashierInstructionAmountKgs)
-          : remainingKgs,
+          : expense.status === TransportExpenseStatus.PENDING_CASHIER
+            ? remainingKgs
+            : 0,
       // Cost base remains full approved/calculated request amount.
       costBaseKgs:
         expense.calculatedAmountKgs != null ? Number(expense.calculatedAmountKgs) : requestedKgs,

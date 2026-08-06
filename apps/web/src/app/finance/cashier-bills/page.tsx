@@ -27,6 +27,11 @@ type BillRow = {
   amount: number;
   currency: string;
   amountKgs: number;
+  totalAmountKgs?: number | null;
+  paidAmountKgs?: number | null;
+  remainingAmountKgs?: number | null;
+  paymentStatus?: string | null;
+  nextPaymentDate?: string | null;
   debitAccountName: string | null;
   executionStatus: string;
   relatedOrderNumber?: string | null;
@@ -112,6 +117,10 @@ function StatusBadge({ status, t }: { status: string; t: (key: string) => string
   const tone =
     status === 'COMPLETED'
       ? 'bg-emerald-50 text-emerald-700'
+      : status === 'PARTIALLY_PAID'
+        ? 'bg-sky-50 text-sky-800'
+        : status === 'PAYMENT_POSTPONED'
+          ? 'bg-amber-50 text-amber-900'
       : status === 'IN_PROGRESS'
         ? 'bg-amber-50 text-amber-800'
         : status === 'FAILED'
@@ -119,11 +128,20 @@ function StatusBadge({ status, t }: { status: string; t: (key: string) => string
           : status === 'RETURNED_TO_ACCOUNTANT'
             ? 'bg-orange-50 text-orange-800'
             : 'bg-slate-100 text-slate-700';
+  const labelKey = `finance.cashierBills.status.${status}`;
   return (
     <span className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-semibold ${tone}`}>
-      {t(`finance.cashierBills.status.${status}`)}
+      {t(labelKey)}
     </span>
   );
+}
+
+function resolveCashierRowStatus(row: BillRow): string {
+  const paymentStatus = String(row.paymentStatus || '').toUpperCase();
+  if (paymentStatus === 'PARTIALLY_PAID' || paymentStatus === 'PAYMENT_POSTPONED') {
+    return paymentStatus;
+  }
+  return row.executionStatus;
 }
 
 function SummaryChip({ label, value }: { label: string; value: string }) {
@@ -266,6 +284,11 @@ function CashierBillsPageContent() {
       amount: Number(selected.amount || 0),
       currency: selected.currency || 'KGS',
       amountKgs: Number(selected.amountKgs || selected.approvedAmountKgs || 0),
+      totalAmountKgs: selected.totalAmountKgs ?? selected.amountKgs ?? null,
+      paidAmountKgs: selected.paidAmountKgs ?? null,
+      remainingAmountKgs: selected.remainingAmountKgs ?? null,
+      paymentStatus: selected.paymentStatus ?? null,
+      nextPaymentDate: selected.nextPaymentDate ?? null,
       debitAccountName: selected.debitAccount?.name || selected.debitAccountName || null,
       executionStatus: selected.executionStatus || '',
       relatedOrderNumber: selected.relatedOrderNumber || selected.procurement?.orderNumber || null,
@@ -708,7 +731,7 @@ function CashierBillsPageContent() {
                     <td className="px-3 py-2 whitespace-nowrap">{formatMoney(row.amountKgs)}</td>
                     <td className="px-3 py-2">{row.debitAccountName || '—'}</td>
                     <td className="px-3 py-2">
-                      <StatusBadge status={row.executionStatus} t={t} />
+                      <StatusBadge status={resolveCashierRowStatus(row)} t={t} />
                     </td>
                     <td className="px-3 py-2">
                       <button
@@ -759,7 +782,15 @@ function CashierBillsPageContent() {
                 <div>
                   <h2 className="text-lg font-bold text-slate-950">{selected.paymentNumber}</h2>
                   <p className="text-sm text-slate-600">{selected.requestNumber}</p>
-                  <div className="mt-1"><StatusBadge status={selected.executionStatus} t={t} /></div>
+                  <div className="mt-1">
+                    <StatusBadge
+                      status={resolveCashierRowStatus({
+                        executionStatus: selected.executionStatus || '',
+                        paymentStatus: selected.paymentStatus ?? null,
+                      } as BillRow)}
+                      t={t}
+                    />
+                  </div>
                 </div>
                 <button type="button" className="text-sm text-slate-500" onClick={() => setSelected(null)}>✕</button>
               </div>
@@ -776,6 +807,24 @@ function CashierBillsPageContent() {
                 <DetailRow label={t('finance.cashierBills.amount')} value={`${formatMoney(selected.amount)} ${selected.currency}`} />
                 <DetailRow label={t('finance.cashierBills.exchangeRate')} value={selected.exchangeRate != null ? String(selected.exchangeRate) : '—'} />
                 <DetailRow label="KGS" value={formatMoney(selected.amountKgs || selected.approvedAmountKgs)} />
+                {selected.paidAmountKgs != null ? (
+                  <DetailRow
+                    label={t('finance.cashierBills.paidAmount')}
+                    value={`${formatMoney(selected.paidAmountKgs)} KGS`}
+                  />
+                ) : null}
+                {selected.remainingAmountKgs != null ? (
+                  <DetailRow
+                    label={t('finance.cashierBills.remainingDebt')}
+                    value={`${formatMoney(selected.remainingAmountKgs)} KGS`}
+                  />
+                ) : null}
+                {selected.nextPaymentDate ? (
+                  <DetailRow
+                    label={t('finance.billsToPay.nextPaymentDate')}
+                    value={new Date(selected.nextPaymentDate).toLocaleDateString()}
+                  />
+                ) : null}
                 <DetailRow label={t('finance.cashierBills.debitAccount')} value={selected.debitAccount?.name} />
                 {selected.debitAccount?.availableBalance != null ? (
                   <DetailRow
@@ -850,10 +899,13 @@ function CashierBillsPageContent() {
                 const row = selectedAsRow();
                 if (!row || !canAccess) return null;
                 const busy = !canActOnStatus(selected.executionStatus);
-                const canStart = !busy && selected.executionStatus !== 'IN_PROGRESS';
-                const canConfirm = !busy;
-                const canReturn = !busy;
-                const canFail = !busy;
+                const awaitingCashierInstruction =
+                  row.source !== 'TRANSPORT_EXPENSE' ||
+                  String(selected.paymentStatus || '').toUpperCase() === 'PENDING_CASHIER';
+                const canStart = !busy && selected.executionStatus !== 'IN_PROGRESS' && awaitingCashierInstruction;
+                const canConfirm = !busy && awaitingCashierInstruction;
+                const canReturn = !busy && awaitingCashierInstruction;
+                const canFail = !busy && awaitingCashierInstruction;
                 if (!canStart && !canConfirm && !canReturn && !canFail) return null;
                 return (
                   <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-200 pt-4">

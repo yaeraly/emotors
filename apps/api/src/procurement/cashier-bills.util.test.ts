@@ -5,10 +5,12 @@ import {
   assertCashierCannotMutateFx,
   buildCashierBillsSummaryWithPaidAt,
   compareCashierBills,
+  isActiveTransportPayableRow,
   matchesCashierBillSearch,
   normalizeCashierExecutionStatus,
   paginateItems,
   resolveCashierBillPaymentSortGroup,
+  resolveTransportExpenseAmounts,
   sortCashierBills,
   type CashierBillListItem,
 } from './cashier-bills.util';
@@ -67,7 +69,9 @@ assert(rbac.includes("'/finance/cashier-bills'"), '1. HQ cashier path allowlist 
 assert(legacyPage.includes('/finance/cashier-bills'), 'legacy cashier queue redirects to cashier-bills');
 
 assert(service.includes("status: ProcurementSupplierPaymentStatus.PENDING_CASHIER"), '2. only accountant-sent payments');
-assert(service.includes('PENDING_CASHIER'), '2. payment tasks require PENDING_CASHIER');
+assert(service.includes('TransportExpenseStatus.PARTIALLY_PAID'), '2. partial cargo stays in cashier queue');
+assert(service.includes('TransportExpenseStatus.PAYMENT_POSTPONED'), '2. postponed cargo stays in cashier queue');
+assert(service.includes('PENDING_CASHIER'), '2. payment tasks require PENDING_CASHIER or remaining balance');
 assert(!service.includes("WAITING_ACCOUNTANT"), '3. raw employee transport requests excluded from cashier collect');
 assert(!cashierPage.includes('invoiceReviewStatus'), '3. raw employee requests not shown in cashier UI');
 
@@ -115,6 +119,23 @@ assert(migration.includes('ADD COLUMN IF NOT EXISTS'), '27. migration applies wi
 assert(migration.includes('PENDING_EXECUTION'), '27. backfill pending execution');
 
 assertEqual(normalizeCashierExecutionStatus(null, 'PENDING_CASHIER'), 'PENDING_EXECUTION', 'normalize pending');
+assertEqual(normalizeCashierExecutionStatus(null, 'PARTIALLY_PAID'), 'PENDING_EXECUTION', 'normalize partial');
+assertEqual(normalizeCashierExecutionStatus(null, 'PAYMENT_POSTPONED'), 'PENDING_EXECUTION', 'normalize postponed');
+
+assert(
+  isActiveTransportPayableRow({ status: 'PARTIALLY_PAID', remainingKgs: 100 }),
+  'partial transport row stays payable',
+);
+assert(
+  !isActiveTransportPayableRow({ status: 'PARTIALLY_PAID', remainingKgs: 0 }),
+  'zero remaining transport row excluded',
+);
+assertEqual(
+  resolveTransportExpenseAmounts({ amountKgs: 150000, paidAmountKgs: 50000 }).remainingKgs,
+  100000,
+  'remaining balance helper',
+);
+
 assertEqual(normalizeCashierExecutionStatus('IN_PROGRESS', 'PENDING_CASHIER'), 'IN_PROGRESS', 'normalize in progress');
 assertEqual(normalizeCashierExecutionStatus(null, 'ACTIVE'), 'COMPLETED', 'normalize completed');
 

@@ -23,7 +23,8 @@ assert(payBlock.includes('AlertType.TRANSPORT_EXPENSE_SENT_TO_CASHIER'), 'uses e
 assert(!payBlock.includes('AlertType.TRANSPORT_EXPENSE_PAID'), 'accountant does not emit paid alert');
 
 assert(cashier.includes('Cashier must use the accountant-selected account'), 'cashier account lock');
-assert(cashier.includes('TransportExpenseStatus.PENDING_CASHIER'), 'cashier queue is pending only');
+assert(cashier.includes('TransportExpenseStatus.PENDING_CASHIER'), 'cashier queue includes pending cashier');
+assert(cashier.includes('TransportExpenseStatus.PARTIALLY_PAID'), 'cashier queue includes partially paid');
 
 assert(actions.includes("status === 'APPROVED'"), 'approved hides accountant actions');
 

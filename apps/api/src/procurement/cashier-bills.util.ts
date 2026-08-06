@@ -57,10 +57,49 @@ export type CashierBillListItem = {
   executionStatus: CashierExecutionStatus;
   /** Raw payment row status from supplier payment or transport expense. */
   paymentStatus?: string | null;
+  /** Transport/cargo invoice total in KGS when applicable. */
+  totalAmountKgs?: number | null;
+  paidAmountKgs?: number | null;
+  remainingAmountKgs?: number | null;
+  nextPaymentDate?: string | null;
   relatedOrderNumber?: string | null;
   relatedOrderId?: string | null;
   href: string;
 };
+
+export function resolveTransportExpenseAmounts(expense: {
+  amountKgs?: unknown;
+  amount?: unknown;
+  paidAmountKgs?: unknown;
+  calculatedAmountKgs?: unknown;
+}) {
+  const totalKgs =
+    Number(expense.amountKgs) > 0
+      ? Number(expense.amountKgs)
+      : Number(expense.calculatedAmountKgs || expense.amount || 0);
+  const paidKgs = Math.max(0, Number(expense.paidAmountKgs || 0));
+  const remainingKgs = Math.max(0, Math.round((totalKgs - paidKgs) * 100) / 100);
+  return { totalKgs, paidKgs, remainingKgs };
+}
+
+/** Whether a transport expense row belongs in the active HQ Cashier payable queue. */
+export function isActiveTransportPayableRow(input: {
+  status: string;
+  remainingKgs: number;
+  executionStatus?: string | null;
+  includePaidToday?: boolean;
+}): boolean {
+  const status = String(input.status || '').toUpperCase();
+  const exec = String(input.executionStatus || '').toUpperCase();
+  if (status === 'CANCELLED' || status === 'REJECTED') return false;
+  if (status === 'RETURNED') {
+    return exec === 'FAILED' || exec === 'RETURNED_TO_ACCOUNTANT';
+  }
+  if (status === 'PAID') {
+    return Boolean(input.includePaidToday);
+  }
+  return input.remainingKgs > 0.009;
+}
 
 export function mapTransportExpenseTypeToCashierRequestType(expenseType: string): CashierBillRequestType {
   switch (expenseType) {
@@ -89,7 +128,9 @@ export function normalizeCashierExecutionStatus(
   if (status === 'ACTIVE' || status === 'PAID') return 'COMPLETED';
   if (status === 'RETURNED') return 'RETURNED_TO_ACCOUNTANT';
   if (status === 'CANCELLED') return 'CANCELLED';
-  if (status === 'PENDING_CASHIER' || status === 'PARTIALLY_PAID') return 'PENDING_EXECUTION';
+  if (status === 'PENDING_CASHIER' || status === 'PARTIALLY_PAID' || status === 'PAYMENT_POSTPONED') {
+    return 'PENDING_EXECUTION';
+  }
   return 'PENDING_EXECUTION';
 }
 
