@@ -1,4 +1,8 @@
 import { TransportExpenseStatus } from '@prisma/client';
+import {
+  isSupplierInvoiceAccountantProcessed,
+  isSupplierInvoicePresent,
+} from './hq-receiving-validation.util';
 import { roundMoney } from './supplier-payment.util';
 
 export type ProcurementCostConfirmationStatus =
@@ -51,6 +55,82 @@ const OBLIGATION_EXPENSE = APPROVED_EXPENSE_FOR_LANDED_COST;
 
 export function isExpenseApprovedForLandedCost(status: string | null | undefined): boolean {
   return APPROVED_EXPENSE_FOR_LANDED_COST.has(String(status ?? '').toUpperCase());
+}
+
+export type SupplierCostInclusionStatus = 'INCLUDED' | 'EXCLUDED';
+
+/** HQ Accountant-approved supplier invoice eligible for procurement cost (not cash-paid). */
+export function isSupplierPaymentApprovedForLandedCost(input: {
+  invoiceSentToAccountantAt?: Date | string | null;
+  supplierInvoiceNumber?: string | null;
+  invoiceReviewStatus?: string | null;
+  supplierPaymentStatus?: string | null;
+}): boolean {
+  if (!isSupplierInvoicePresent(input)) return false;
+  const review = String(input.invoiceReviewStatus ?? '').toUpperCase();
+  if (
+    !review ||
+    review === 'REJECTED' ||
+    review === 'UNDER_REVIEW' ||
+    review === 'RETURNED' ||
+    review === 'SUBMITTED'
+  ) {
+    return false;
+  }
+  if (isSupplierInvoiceAccountantProcessed(input)) return true;
+  return review === 'APPROVED';
+}
+
+export function resolveSupplierCostInclusionStatus(input: {
+  invoiceSentToAccountantAt?: Date | string | null;
+  supplierInvoiceNumber?: string | null;
+  invoiceReviewStatus?: string | null;
+  supplierPaymentStatus?: string | null;
+}): SupplierCostInclusionStatus {
+  return isSupplierPaymentApprovedForLandedCost(input) ? 'INCLUDED' : 'EXCLUDED';
+}
+
+/** Authoritative CNY base for supplier cost — full accountant-approved obligation, not paid cash. */
+export function resolveApprovedSupplierCostBaseYuan(input: {
+  totalYuan: number;
+  requestedPaymentYuan?: number | null;
+}): number {
+  const total = Math.max(0, Number(input.totalYuan || 0));
+  const requested = Math.max(0, Number(input.requestedPaymentYuan ?? 0));
+  if (requested > 0) return roundMoney(Math.min(requested, total));
+  return roundMoney(total);
+}
+
+export function resolveApprovedSupplierAmountKgs(input: {
+  totalYuan: number;
+  requestedPaymentYuan?: number | null;
+  estimatedYuanRate: number;
+  estimatedSupplierCostKgs?: number | null;
+}): number {
+  const rate = Math.max(0, Number(input.estimatedYuanRate || 0));
+  const baseYuan = resolveApprovedSupplierCostBaseYuan(input);
+  const computed = roundMoney(baseYuan * rate);
+  const stored = Number(input.estimatedSupplierCostKgs ?? 0);
+  if (stored > 0 && Math.abs(stored - computed) <= 0.05) return roundMoney(stored);
+  return computed;
+}
+
+export function resolveSupplierInvoicePaymentStatusForCost(
+  ledger: string | null | undefined,
+): ProcurementImportExpenseLine['paymentStatus'] {
+  const normalized = String(ledger ?? '').toUpperCase();
+  if (normalized === 'PAYMENT_POSTPONED') return 'POSTPONED';
+  if (normalized === 'PAID' || normalized === 'OVERPAID') return 'PAID';
+  if (normalized === 'PARTIALLY_PAID') return 'PARTIALLY_PAID';
+  return 'UNPAID';
+}
+
+export function reconcileSupplierLineCostTotals(input: {
+  lineCostKgs: number;
+  approvedSupplierAmountKgs: number;
+}): { ok: boolean; differenceKgs: number } {
+  const differenceKgs = roundMoney(input.lineCostKgs - input.approvedSupplierAmountKgs);
+  return { ok: Math.abs(differenceKgs) <= 0.05, differenceKgs };
 }
 
 export function resolveTransportExpenseApprovalStatus(
@@ -375,6 +455,7 @@ export function buildProcurementImportExpenseLines(input: {
     invoiceReviewStatus?: string | null;
     supplierPaymentStatus?: string | null;
     totalYuan?: number | null;
+    requestedPaymentYuan?: number | null;
     totalPaidYuan?: number | null;
     estimatedSupplierCostKgs?: number | null;
   } | null;
@@ -447,28 +528,34 @@ export function buildProcurementImportExpenseLines(input: {
   }
 
   const supplier = input.supplier;
-  const supplierPresent = Boolean(
-    supplier?.invoiceSentToAccountantAt || supplier?.supplierInvoiceNumber?.trim(),
-  );
+  const supplierPresent = isSupplierInvoicePresent({
+    invoiceSentToAccountantAt: supplier?.invoiceSentToAccountantAt,
+    supplierInvoiceNumber: supplier?.supplierInvoiceNumber,
+  });
   const supplierReview = String(supplier?.invoiceReviewStatus ?? '').toUpperCase();
   const supplierLedger = String(supplier?.supplierPaymentStatus ?? '').toUpperCase();
-  const supplierApproved =
-    supplierPresent &&
-    supplierReview !== 'REJECTED' &&
-    (supplierReview === 'APPROVED' ||
-      ['AWAITING_CASHIER', 'PARTIALLY_PAID', 'PAYMENT_POSTPONED', 'PAID', 'OVERPAID'].includes(
-        supplierLedger,
-      ));
-  const supplierApprovedKgs = roundMoney(
-    Math.max(0, Number(supplier?.estimatedSupplierCostKgs ?? 0) || Number(supplier?.totalYuan ?? 0) * rate),
-  );
+  const supplierApproved = isSupplierPaymentApprovedForLandedCost({
+    invoiceSentToAccountantAt: supplier?.invoiceSentToAccountantAt,
+    supplierInvoiceNumber: supplier?.supplierInvoiceNumber,
+    invoiceReviewStatus: supplier?.invoiceReviewStatus,
+    supplierPaymentStatus: supplier?.supplierPaymentStatus,
+  });
+  const supplierApprovedKgs = supplierApproved
+    ? resolveApprovedSupplierAmountKgs({
+        totalYuan: Number(supplier?.totalYuan ?? 0),
+        requestedPaymentYuan:
+          supplier?.requestedPaymentYuan != null ? Number(supplier.requestedPaymentYuan) : null,
+        estimatedYuanRate: rate,
+        estimatedSupplierCostKgs: supplier?.estimatedSupplierCostKgs,
+      })
+    : 0;
   const supplierPaidKgs = roundMoney(Math.max(0, Number(supplier?.totalPaidYuan ?? 0) * rate));
   const supplierLine: ProcurementImportExpenseLine = {
     requestType: 'SUPPLIER_PAYMENT',
     displayName: IMPORT_EXPENSE_DISPLAY.SUPPLIER_PAYMENT,
     currency: 'CNY',
     exchangeRate: rate > 0 ? rate : null,
-    approvedAmountKgs: supplierApproved ? supplierApprovedKgs : 0,
+    approvedAmountKgs: supplierApprovedKgs,
     paidAmountKgs: supplierPaidKgs,
     remainingAmountKgs: roundMoney(Math.max(supplierApprovedKgs - supplierPaidKgs, 0)),
     approvalStatus: !supplierPresent
@@ -478,14 +565,7 @@ export function buildProcurementImportExpenseLines(input: {
         : supplierApproved
           ? 'APPROVED'
           : 'WAITING_FOR_ACCOUNTANT',
-    paymentStatus:
-      supplierLedger === 'PAYMENT_POSTPONED'
-        ? 'POSTPONED'
-        : supplierLedger === 'PAID' || supplierLedger === 'OVERPAID'
-          ? 'PAID'
-          : supplierLedger === 'PARTIALLY_PAID'
-            ? 'PARTIALLY_PAID'
-            : 'UNPAID',
+    paymentStatus: resolveSupplierInvoicePaymentStatusForCost(supplierLedger),
     includedInLandedCost: supplierApproved && supplierApprovedKgs > 0,
   };
 

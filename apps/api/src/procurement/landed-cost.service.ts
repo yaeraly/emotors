@@ -25,12 +25,16 @@ import {
   estimateSectionExpenseCostKgs,
   estimateSupplierCostKgs,
   expensesFullySettled,
+  isSupplierPaymentApprovedForLandedCost,
+  reconcileSupplierLineCostTotals,
+  resolveApprovedSupplierCostBaseYuan,
+  resolveApprovedSupplierAmountKgs,
   resolveProcurementCostConfirmationStatus,
   sumConfirmedExpenseAmountKgs,
   buildProcurementImportExpenseLines,
 } from './procurement-cost.util';
 import { resolveProcurementLogisticsInput } from './transport-logistics.util';
-import { summarizeSupplierPayments } from './supplier-payment.util';
+import { summarizeSupplierPayments, roundMoney } from './supplier-payment.util';
 import { resolveMovementCostUpdates } from './landed-cost-sync-movements.util';
 import { resolveUnitCostFromInventoryLayer } from '../pricing/pricing-fifo-unit-cost.util';
 
@@ -92,13 +96,30 @@ export class LandedCostService {
         previousStatus: order.supplierPaymentStatus,
       });
 
-      // Cost always values the FULL procurement CNY amount (not only paid CNY).
+      const supplierCostEligible = isSupplierPaymentApprovedForLandedCost({
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        supplierInvoiceNumber: order.supplierInvoiceNumber,
+        invoiceReviewStatus: order.invoiceReviewStatus,
+        supplierPaymentStatus: order.supplierPaymentStatus,
+      });
+      const approvedSupplierBaseYuan = resolveApprovedSupplierCostBaseYuan({
+        totalYuan: Number(order.totalYuan),
+        requestedPaymentYuan:
+          order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
+      });
+
+      // Cost always values the FULL accountant-approved CNY amount (not only paid CNY).
       const supplierCost = estimateSupplierCostKgs({
-        totalProcurementYuan: Number(order.totalYuan),
+        totalProcurementYuan: supplierCostEligible
+          ? approvedSupplierBaseYuan
+          : Number(order.totalYuan),
         payments: paymentInputs,
         estimatedYuanRate: Number(order.defaultYuanRate),
       });
       const effectiveRate = supplierCost.costYuanRate;
+      const persistedSupplierCostKgs = supplierCostEligible
+        ? supplierCost.estimatedSupplierCostKgs
+        : 0;
 
       const expenseRows = (order.transportExpenses ?? []).map((expense) => ({
         amount: Number(expense.amount),
@@ -281,6 +302,18 @@ export class LandedCostService {
         throw error;
       }
 
+      const lineSupplierCostKgs = roundMoney(
+        calculated.items.reduce(
+          (sum, item) => sum + item.costKgs * item.effectiveQuantity,
+          0,
+        ),
+      );
+      const supplierLineReconciliation = supplierCostEligible
+        ? reconcileSupplierLineCostTotals({
+            lineCostKgs: lineSupplierCostKgs,
+            approvedSupplierAmountKgs: persistedSupplierCostKgs,
+          })
+        : { ok: true, differenceKgs: 0 };
       const cargoTotalWeightKg = Number(cargo.cargoTotalWeightKg ?? 0);
       const { logistics: resolvedLogistics } = buildLogisticsWithCargo(logistics, cargoTotalWeightKg, cargo);
       const { localTransportKgs: _local, ...logisticsTotals } = resolvedLogistics;
@@ -349,7 +382,7 @@ export class LandedCostService {
           localTransportKgs: transportResolved.localTransportKgs,
           landedCostStatus,
           costConfirmationStatus,
-          estimatedSupplierCostKgs: supplierCost.estimatedSupplierCostKgs,
+          estimatedSupplierCostKgs: persistedSupplierCostKgs,
           landedCostCalculationVersion: nextVersion,
           landedCostCalculatedAt: new Date(),
           totalPaidYuan: summary.totalPaidYuan,
@@ -446,8 +479,10 @@ export class LandedCostService {
           remainingYuan: supplierCost.remainingYuan,
           costYuanRate: supplierCost.costYuanRate,
           rateSource: supplierCost.rateSource,
-          estimatedSupplierCostKgs: supplierCost.estimatedSupplierCostKgs,
-          estimatedYuanRate: Number(order.defaultYuanRate),
+          estimatedSupplierCostKgs: persistedSupplierCostKgs,
+          supplierCostIncluded: supplierCostEligible,
+          supplierLineReconciliationOk: supplierLineReconciliation.ok,
+          supplierLineCostDifferenceKgs: supplierLineReconciliation.differenceKgs,
           timestamp: new Date().toISOString(),
         };
         await client.auditLog.create({
@@ -474,6 +509,66 @@ export class LandedCostService {
             },
           },
         });
+        if (
+          options.triggerReason === 'POSTPONED_SUPPLIER_PAYMENT_INCLUDED_IN_COST' ||
+          options.triggerReason === 'SUPPLIER_INVOICE_APPROVED_FOR_COST'
+        ) {
+          await client.auditLog.create({
+            data: {
+              userId: options.user.id,
+              role: options.user.role,
+              action:
+                options.triggerReason === 'POSTPONED_SUPPLIER_PAYMENT_INCLUDED_IN_COST'
+                  ? 'POSTPONED_SUPPLIER_PAYMENT_INCLUDED_IN_COST'
+                  : 'SUPPLIER_COST_RECALCULATED',
+              entity: 'ProcurementOrder',
+              entityId: order.id,
+              metadata: {
+                procurementOrderId: order.id,
+                supplierInvoiceId: order.id,
+                approvedAmount: persistedSupplierCostKgs,
+                paidAmount: summary.totalPaidYuan,
+                remainingAmount: summary.remainingYuan,
+                paymentStatus: summary.supplierPaymentStatus,
+                oldSupplierCost: Number(order.estimatedSupplierCostKgs ?? 0),
+                newSupplierCost: persistedSupplierCostKgs,
+                actorUserId: options.user.id,
+                timestamp: new Date().toISOString(),
+              },
+            },
+          });
+        }
+        const remainingPayableKgs = roundMoney(
+          persistedSupplierCostKgs - roundMoney(summary.totalPaidYuan * effectiveRate),
+        );
+        const paymentLedger = String(summary.supplierPaymentStatus ?? '').toUpperCase();
+        if (
+          supplierCostEligible &&
+          remainingPayableKgs > 0.009 &&
+          (paymentLedger === 'PAYMENT_POSTPONED' ||
+            paymentLedger === 'PARTIALLY_PAID' ||
+            paymentLedger === 'AWAITING_CASHIER' ||
+            paymentLedger === 'AWAITING_ACCOUNTANT')
+        ) {
+          await client.auditLog.create({
+            data: {
+              userId: options.user.id,
+              role: options.user.role,
+              action: 'SUPPLIER_PAYABLE_PRESERVED',
+              entity: 'ProcurementOrder',
+              entityId: order.id,
+              metadata: {
+                procurementOrderId: order.id,
+                supplierInvoiceId: order.id,
+                approvedAmount: persistedSupplierCostKgs,
+                paidAmount: summary.totalPaidYuan,
+                remainingAmount: summary.remainingYuan,
+                paymentStatus: summary.supplierPaymentStatus,
+                timestamp: new Date().toISOString(),
+              },
+            },
+          });
+        }
         if (options.triggerReason) {
           await client.auditLog.create({
             data: {
@@ -537,6 +632,8 @@ export class LandedCostService {
         invoiceReviewStatus: order.invoiceReviewStatus,
         supplierPaymentStatus: order.supplierPaymentStatus,
         totalYuan: Number(order.totalYuan ?? 0),
+        requestedPaymentYuan:
+          order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
         totalPaidYuan: Number(order.totalPaidYuan ?? 0),
         estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
       },

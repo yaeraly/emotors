@@ -39,6 +39,7 @@ import {
   resolveCargoPaymentStatusLabel,
 } from './cargo-bill-actions.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
+import { LandedCostService } from './landed-cost.service';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
 import type { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
@@ -65,6 +66,7 @@ export class AccountantBillsService {
     private readonly supplierPayments: SupplierPaymentWorkflowService,
     private readonly transportExpenses: TransportExpenseService,
     private readonly financeExpenses: FinanceExpensesService,
+    private readonly landedCostService: LandedCostService,
   ) {}
 
   async list(user: AuthUser, query: AccountantBillsQuery = {}) {
@@ -344,6 +346,19 @@ export class AccountantBillsService {
           referenceNumber: order.orderNumber,
           message: `Supplier invoice for ${order.orderNumber} was approved by HQ Accountant.`,
         });
+        try {
+          await this.landedCostService.recalculateProcurementOrder(
+            id,
+            {
+              user,
+              reason: 'supplier-invoice-approved',
+              triggerReason: 'SUPPLIER_INVOICE_APPROVED_FOR_COST',
+            },
+            tx,
+          );
+        } catch {
+          // Weight/finalized gates may block recalculation; approval remains source of truth.
+        }
         return { id: updated.id, source, status: 'APPROVED' };
       });
     }
@@ -508,6 +523,20 @@ export class AccountantBillsService {
           recipientRoles: [Role.HQ_ACCOUNTANT, Role.CEO, Role.FINANCE_MANAGER],
         });
         await this.notifyWarehouseWhenExpensesProcessed(tx, user, order.id, order.orderNumber);
+
+        try {
+          await this.landedCostService.recalculateProcurementOrder(
+            order.id,
+            {
+              user,
+              reason: 'supplier-payment-postponed',
+              triggerReason: 'POSTPONED_SUPPLIER_PAYMENT_INCLUDED_IN_COST',
+            },
+            tx,
+          );
+        } catch {
+          // Weight/finalized gates may block recalculation; postpone + debt remain source of truth.
+        }
 
         return {
           id: updated.id,

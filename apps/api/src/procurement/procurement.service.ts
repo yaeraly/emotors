@@ -3821,6 +3821,8 @@ export class ProcurementService {
         invoiceReviewStatus: order.invoiceReviewStatus,
         supplierPaymentStatus: order.supplierPaymentStatus,
         totalYuan: Number(order.totalYuan ?? 0),
+        requestedPaymentYuan:
+          order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
         totalPaidYuan: Number(order.totalPaidYuan ?? 0),
         estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
       },
