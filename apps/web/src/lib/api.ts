@@ -1,6 +1,8 @@
 import { clearCachedUser } from '@/lib/current-user-cache';
+import { mapFetchError } from '@/lib/fetch-errors.util';
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+export const UPLOAD_TIMEOUT_MS = 120_000;
 const TOKEN_KEY = 'emotors_access_token';
 
 export function getToken() {
@@ -43,10 +45,15 @@ export async function apiFetch<T>(
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch (error) {
+    throw new Error(mapFetchError(error));
+  }
 
   if (response.status === 401) {
     clearToken();
@@ -93,6 +100,58 @@ export async function apiFetch<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function apiUpload<T = unknown>(
+  path: string,
+  formData: FormData,
+  options: Omit<RequestInit, 'body' | 'method'> & { timeoutMs?: number } = {},
+): Promise<T> {
+  const token = getToken();
+  const headers = new Headers(options.headers);
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const timeoutMs = options.timeoutMs ?? UPLOAD_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      method: 'POST',
+      headers,
+      body: formData,
+      signal: controller.signal,
+    });
+
+    if (response.status === 401) {
+      clearToken();
+      throw new Error('Unauthorized');
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => null);
+      const rawMessage = errorBody?.message ?? `Request failed with status ${response.status}`;
+      const message = Array.isArray(rawMessage) ? rawMessage.join(', ') : String(rawMessage);
+      throw new Error(message);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Превышено время ожидания загрузки. Повторите попытку.');
+    }
+    throw new Error(mapFetchError(error));
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 export async function login(email: string, password: string) {

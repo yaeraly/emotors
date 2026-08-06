@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { ProtectedShell } from '@/components/ProtectedShell';
 import { ImagePreviewModal } from '@/components/ImagePreviewModal';
 import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/components/HqPaymentPermanentDeleteModal';
-import { API_URL, apiFetch, getToken } from '@/lib/api';
+import { API_URL, apiFetch, apiUpload } from '@/lib/api';
+import { mapFetchError, mapReceiptUploadError } from '@/lib/fetch-errors.util';
 import { canConfirmSupplierPayment, canPermanentDeleteBusinessData } from '@/lib/rbac';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -368,33 +369,38 @@ function CashierBillsPageContent() {
     }
   }
 
-  async function uploadReceipt(row: BillRow, file: File) {
-    const token = getToken();
-    if (!token) {
-      throw new Error('Unauthorized');
+  async function resolveSupplierOrderId(row: BillRow): Promise<string> {
+    const fromRow = row.relatedOrderId;
+    if (fromRow) return fromRow;
+
+    const fromSelected =
+      selected?.id === row.id ? selected?.relatedOrderId || selected?.procurement?.id : null;
+    if (fromSelected) return fromSelected;
+
+    const detail = await apiFetch<BillDetail>(`/procurement/cashier-bills/${row.source}/${row.id}`);
+    const orderId = detail.relatedOrderId || detail.procurement?.id;
+    if (!orderId) {
+      throw new Error('Related order is missing');
     }
+    return orderId;
+  }
+
+  async function uploadReceipt(row: BillRow, file: File) {
     const form = new FormData();
     form.append('file', file);
 
-    let url = '';
-    if (row.source === 'SUPPLIER_PAYMENT') {
-      const orderId = selected?.relatedOrderId || selected?.procurement?.id || row.relatedOrderId;
-      if (!orderId) throw new Error('Related order is missing');
-      url = `${API_URL}/procurement/orders/${orderId}/supplier-payments/${row.id}/attachments`;
-    } else {
-      url = `${API_URL}/procurement/transport-expenses/${row.id}/attachments/receipt`;
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: form,
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({} as { message?: string | string[] }));
-      const rawMessage = payload?.message || t('common.error');
-      const message = Array.isArray(rawMessage) ? rawMessage.join(', ') : String(rawMessage);
-      throw new Error(message);
+    try {
+      if (row.source === 'SUPPLIER_PAYMENT') {
+        const orderId = await resolveSupplierOrderId(row);
+        await apiUpload(
+          `/procurement/orders/${orderId}/supplier-payments/${row.id}/attachments`,
+          form,
+        );
+      } else {
+        await apiUpload(`/procurement/transport-expenses/${row.id}/attachments/receipt`, form);
+      }
+    } catch (error) {
+      throw new Error(mapReceiptUploadError(error));
     }
   }
 
@@ -542,7 +548,10 @@ function CashierBillsPageContent() {
       await refreshAfterAction(row);
       setPinNotice(t('finance.cashierBills.pinned'));
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('common.error');
+      const message = mapFetchError(err, {
+        fallback: t('finance.cashierBills.closeFailed'),
+        alreadyProcessedMessage: t('finance.cashierBills.alreadyProcessed'),
+      });
       setConfirmError(message);
       setActionError(message);
     } finally {
@@ -593,7 +602,10 @@ function CashierBillsPageContent() {
       resetConfirmFormFields();
       await refreshAfterAction(row);
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('common.error');
+      const message = mapFetchError(err, {
+        fallback: t('finance.cashierBills.closeFailed'),
+        alreadyProcessedMessage: t('finance.cashierBills.alreadyProcessed'),
+      });
       setConfirmError(message);
       setActionError(message);
     } finally {

@@ -327,4 +327,10 @@ assert(transport.includes("executionStatus: send ? 'PENDING_EXECUTION'"), 'send 
 assert(workflow.includes("executionStatus: 'PENDING_EXECUTION'"), 'supplier send sets execution');
 assert(service.includes('existing payment records') || schema.includes('ProcurementSupplierPayment'), '26. existing payment records remain accessible');
 
+assert(service.includes('HQ_CASHIER_INVOICE_CLOSE_STARTED'), '29. close started audit');
+assert(service.includes('serializeCashierBillCloseResponse'), '29. serialized close response');
+assert(cashierPage.includes('apiUpload'), '29. cashier receipt upload uses apiUpload');
+assert(cashierPage.includes("form.append('file', file)"), '29. receipt field name file');
+assert(!cashierPage.includes('fetch(url'), '29. no raw fetch upload in cashier page');
+
 console.log('cashier-bills.util.test.ts: all assertions passed');

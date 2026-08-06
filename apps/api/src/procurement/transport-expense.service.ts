@@ -1530,7 +1530,7 @@ export class TransportExpenseService {
         isFullyPaid: fullyPaid,
       });
       return {
-        ...this.toResponse(updated, tx),
+        ...(await this.toResponse(updated, tx)),
         receiptAttachment: receiptDelivery.receiptAttachments[0] ?? null,
         receiptAttachments: receiptDelivery.receiptAttachments,
         creatorNotification: receiptDelivery.creatorNotification,

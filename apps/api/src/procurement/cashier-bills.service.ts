@@ -40,6 +40,7 @@ import {
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import { TransportExpenseService } from './transport-expense.service';
 import type { PermanentDeleteHqPaymentDto } from './dto/permanent-delete-hq-payment.dto';
+import { serializeCashierBillCloseResponse } from './cashier-bills-close.util';
 
 export type CashierBillsQuery = {
   requestType?: string;
@@ -125,13 +126,49 @@ export class CashierBillsService {
       exchangeRate?: number;
       financeAccountId?: string;
       paidAmountKgs?: number;
+      paymentMethod?: string;
+      accountChangeReason?: string;
+      actualPaidDifferenceReason?: string;
     },
   ) {
     this.assertCashier(user);
-    if (source === 'SUPPLIER_PAYMENT') {
-      return this.confirmSupplierPayment(user, id, dto);
+    await this.logInvoiceCloseAudit(user, 'HQ_CASHIER_INVOICE_CLOSE_STARTED', id, source, {
+      invoiceId: id,
+      accountId: dto.financeAccountId ?? null,
+      amount: dto.actualPaidKgs ?? dto.paidAmountKgs ?? null,
+      actorUserId: user.id,
+      timestamp: new Date().toISOString(),
+    });
+
+    try {
+      const raw =
+        source === 'SUPPLIER_PAYMENT'
+          ? await this.confirmSupplierPayment(user, id, dto)
+          : await this.confirmTransportExpense(user, id, dto);
+      const response = serializeCashierBillCloseResponse(raw);
+      await this.logInvoiceCloseAudit(user, 'HQ_CASHIER_INVOICE_CLOSED', id, source, {
+        invoiceId: id,
+        paymentId: id,
+        accountId: dto.financeAccountId ?? null,
+        amount: dto.actualPaidKgs ?? dto.paidAmountKgs ?? null,
+        receiptAttachmentId: response.receiptAttachment?.id ?? null,
+        oldStatus: raw.payment?.status ?? null,
+        newStatus: response.paymentStatus,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+      });
+      return response;
+    } catch (error) {
+      await this.logInvoiceCloseAudit(user, 'HQ_CASHIER_INVOICE_CLOSE_FAILED', id, source, {
+        invoiceId: id,
+        accountId: dto.financeAccountId ?? null,
+        amount: dto.actualPaidKgs ?? dto.paidAmountKgs ?? null,
+        actorUserId: user.id,
+        failureReason: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+      throw error;
     }
-    return this.confirmTransportExpense(user, id, dto);
   }
 
   async returnToAccountant(
@@ -1021,7 +1058,6 @@ export class CashierBillsService {
       receiptAttachment: result.receiptAttachment ?? null,
       receiptAttachments: result.receiptAttachments ?? [],
       creatorNotification: result.creatorNotification ?? null,
-      result,
     };
   }
 
@@ -1117,7 +1153,6 @@ export class CashierBillsService {
       receiptAttachment: result.receiptAttachment ?? null,
       receiptAttachments: result.receiptAttachments ?? [],
       creatorNotification: result.creatorNotification ?? null,
-      result,
     };
   }
 
@@ -1242,6 +1277,30 @@ export class CashierBillsService {
           cashierId: user.id,
           timestamp: new Date().toISOString(),
         },
+      },
+    });
+  }
+
+  private async logInvoiceCloseAudit(
+    user: AuthUser,
+    action: string,
+    entityId: string,
+    source: CashierBillSource,
+    metadata: Record<string, unknown>,
+  ) {
+    await this.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        role: user.role,
+        action,
+        entity: 'ProcurementCashierPayment',
+        entityId,
+        metadata: {
+          actorId: user.id,
+          actorName: user.fullName ?? user.email ?? user.id,
+          source,
+          ...metadata,
+        } as Prisma.InputJsonValue,
       },
     });
   }
