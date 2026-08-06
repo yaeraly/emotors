@@ -85,10 +85,11 @@ function kgExpense(status: string, amount = 15000, paid = 0) {
     supplier: {
       invoiceSentToAccountantAt: new Date(),
       invoiceReviewStatus: 'APPROVED',
-      supplierPaymentStatus: 'AWAITING_ACCOUNTANT',
-      totalYuan: 800000 / 12,
-      totalPaidYuan: 0,
-      estimatedSupplierCostKgs: 800000,
+      supplierPaymentStatus: 'PARTIALLY_PAID',
+      totalYuan: 66666.67,
+      totalPaidYuan: 25000,
+      totalPaidKgs: 300000,
+      estimatedSupplierCostKgs: 800000.04,
     },
     transportExpenses: [
       kgExpense(TransportExpenseStatus.PENDING_CASHIER, 15000, 0),
@@ -114,7 +115,7 @@ function kgExpense(status: string, amount = 15000, paid = 0) {
 
   const totalApproved =
     lines.filter((row) => row.includedInLandedCost).reduce((sum, row) => sum + row.approvedAmountKgs, 0);
-  assertClose(totalApproved, 800000 + 15000 + 120000, '18. total approved import expenses');
+  assertClose(totalApproved, 800000.04 + 15000 + 120000, '18. total approved import expenses');
 }
 
 console.log('approved-unpaid-import-expense-cost.util.test.ts passed');

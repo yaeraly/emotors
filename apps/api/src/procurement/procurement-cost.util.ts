@@ -68,16 +68,10 @@ export function isSupplierPaymentApprovedForLandedCost(input: {
 }): boolean {
   if (!isSupplierInvoicePresent(input)) return false;
   const review = String(input.invoiceReviewStatus ?? '').toUpperCase();
-  if (
-    !review ||
-    review === 'REJECTED' ||
-    review === 'UNDER_REVIEW' ||
-    review === 'RETURNED' ||
-    review === 'SUBMITTED'
-  ) {
-    return false;
-  }
+  if (review === 'REJECTED' || review === 'RETURNED') return false;
+  // Accountant-processed ledger (partial / postponed / paid) is eligible even if review lagged.
   if (isSupplierInvoiceAccountantProcessed(input)) return true;
+  if (!review || review === 'UNDER_REVIEW' || review === 'SUBMITTED') return false;
   return review === 'APPROVED';
 }
 
@@ -457,6 +451,7 @@ export function buildProcurementImportExpenseLines(input: {
     totalYuan?: number | null;
     requestedPaymentYuan?: number | null;
     totalPaidYuan?: number | null;
+    totalPaidKgs?: number | null;
     estimatedSupplierCostKgs?: number | null;
   } | null;
   transportExpenses?: Array<{
@@ -549,7 +544,10 @@ export function buildProcurementImportExpenseLines(input: {
         estimatedSupplierCostKgs: supplier?.estimatedSupplierCostKgs,
       })
     : 0;
-  const supplierPaidKgs = roundMoney(Math.max(0, Number(supplier?.totalPaidYuan ?? 0) * rate));
+  const supplierPaidKgs =
+    supplier?.totalPaidKgs != null && Number(supplier.totalPaidKgs) > 0
+      ? roundMoney(Number(supplier.totalPaidKgs))
+      : roundMoney(Math.max(0, Number(supplier?.totalPaidYuan ?? 0) * rate));
   const supplierLine: ProcurementImportExpenseLine = {
     requestType: 'SUPPLIER_PAYMENT',
     displayName: IMPORT_EXPENSE_DISPLAY.SUPPLIER_PAYMENT,

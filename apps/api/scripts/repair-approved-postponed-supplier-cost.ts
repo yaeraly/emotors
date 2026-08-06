@@ -22,6 +22,7 @@ async function main() {
       invoiceSentToAccountantAt: { not: null },
       OR: [
         { supplierPaymentStatus: 'PAYMENT_POSTPONED' },
+        { supplierPaymentStatus: 'PARTIALLY_PAID' },
         { invoiceReviewStatus: 'APPROVED' },
       ],
     },

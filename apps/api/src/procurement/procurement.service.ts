@@ -3824,6 +3824,7 @@ export class ProcurementService {
         requestedPaymentYuan:
           order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
         totalPaidYuan: Number(order.totalPaidYuan ?? 0),
+        totalPaidKgs: Number(order.totalPaidKgs ?? 0),
         estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
       },
       transportExpenses: order.transportExpenses ?? [],

@@ -511,6 +511,7 @@ export class LandedCostService {
         });
         if (
           options.triggerReason === 'POSTPONED_SUPPLIER_PAYMENT_INCLUDED_IN_COST' ||
+          options.triggerReason === 'PARTIALLY_PAID_SUPPLIER_INCLUDED_IN_COST' ||
           options.triggerReason === 'SUPPLIER_INVOICE_APPROVED_FOR_COST'
         ) {
           await client.auditLog.create({
@@ -520,7 +521,9 @@ export class LandedCostService {
               action:
                 options.triggerReason === 'POSTPONED_SUPPLIER_PAYMENT_INCLUDED_IN_COST'
                   ? 'POSTPONED_SUPPLIER_PAYMENT_INCLUDED_IN_COST'
-                  : 'SUPPLIER_COST_RECALCULATED',
+                  : options.triggerReason === 'PARTIALLY_PAID_SUPPLIER_INCLUDED_IN_COST'
+                    ? 'PARTIALLY_PAID_SUPPLIER_INCLUDED_IN_COST'
+                    : 'SUPPLIER_COST_RECALCULATED',
               entity: 'ProcurementOrder',
               entityId: order.id,
               metadata: {
@@ -539,7 +542,7 @@ export class LandedCostService {
           });
         }
         const remainingPayableKgs = roundMoney(
-          persistedSupplierCostKgs - roundMoney(summary.totalPaidYuan * effectiveRate),
+          persistedSupplierCostKgs - roundMoney(summary.totalPaidKgs),
         );
         const paymentLedger = String(summary.supplierPaymentStatus ?? '').toUpperCase();
         if (
@@ -635,6 +638,7 @@ export class LandedCostService {
         requestedPaymentYuan:
           order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
         totalPaidYuan: Number(order.totalPaidYuan ?? 0),
+        totalPaidKgs: Number(order.totalPaidKgs ?? 0),
         estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
       },
       transportExpenses: (order.transportExpenses ?? []).map((row) => ({

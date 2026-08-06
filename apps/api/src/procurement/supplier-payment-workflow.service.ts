@@ -677,6 +677,10 @@ export class SupplierPaymentWorkflowService {
         include: PAYMENT_INCLUDE,
       });
 
+      if (sendToCashier) {
+        await this.ensureSupplierInvoiceApprovedForCosting(tx, user, order.id);
+      }
+
       const synced = await this.syncOrderPaymentState(
         tx,
         user,
@@ -978,6 +982,8 @@ export class SupplierPaymentWorkflowService {
           timestamp: new Date().toISOString(),
         });
       }
+
+      await this.ensureSupplierInvoiceApprovedForCosting(tx, user, order.id);
 
       const synced = await this.syncOrderPaymentState(tx, user, order.id, 'Payment sent to HQ Cashier');
       await this.audit(tx, user, 'SUPPLIER_PAYMENT_SENT_TO_CASHIER', order.id, {
@@ -1573,6 +1579,29 @@ export class SupplierPaymentWorkflowService {
     return this.toOrderPaymentSummary(order);
   }
 
+  private async ensureSupplierInvoiceApprovedForCosting(tx: Tx, user: AuthUser, orderId: string) {
+    const order = await tx.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+      select: { id: true, invoiceReviewStatus: true },
+    });
+    if (!order) return;
+    const review = String(order.invoiceReviewStatus ?? '').toUpperCase();
+    if (review === 'APPROVED' || review === 'REJECTED') return;
+    await tx.procurementOrder.update({
+      where: { id: orderId },
+      data: {
+        invoiceReviewStatus: 'APPROVED',
+        invoiceReviewedAt: new Date(),
+        invoiceReviewedById: user.id,
+        invoiceReturnReason: null,
+        invoiceRejectReason: null,
+      },
+    });
+    await this.audit(tx, user, 'PAYABLE_REQUEST_APPROVED', orderId, {
+      invoiceReviewStatus: order.invoiceReviewStatus,
+    }, { invoiceReviewStatus: 'APPROVED', reason: 'Auto-approved when accountant processed supplier payment' });
+  }
+
   private async syncOrderPaymentState(tx: Tx, user: AuthUser, orderId: string, reason: string) {
     const order = await tx.procurementOrder.findFirst({
       where: { id: orderId, deletedAt: null },
@@ -1651,10 +1680,14 @@ export class SupplierPaymentWorkflowService {
 
     // Recalculate product/landed cost from the FULL procurement CNY amount
     // (estimated rate before payments; weighted paid rate thereafter).
+    const triggerReason =
+      summary.supplierPaymentStatus === 'PARTIALLY_PAID'
+        ? 'PARTIALLY_PAID_SUPPLIER_INCLUDED_IN_COST'
+        : 'supplier-payment-sync';
     try {
       await this.landedCostService.recalculateProcurementOrder(
         order.id,
-        { user, reason, triggerReason: 'supplier-payment-sync' },
+        { user, reason, triggerReason },
         tx,
       );
     } catch {

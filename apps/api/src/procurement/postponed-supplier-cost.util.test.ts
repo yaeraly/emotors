@@ -167,4 +167,44 @@ const approvedPostponedSupplier = {
   );
 }
 
+// 14. Partially paid approved supplier uses full approved amount, not paid cash
+{
+  const partialLines = buildProcurementImportExpenseLines({
+    estimatedYuanRate: 12,
+    supplier: {
+      invoiceSentToAccountantAt: new Date(),
+      supplierInvoiceNumber: 'INV-PARTIAL',
+      invoiceReviewStatus: 'APPROVED',
+      supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID,
+      totalYuan: 66666.67,
+      totalPaidYuan: 25000,
+      totalPaidKgs: 300000,
+      estimatedSupplierCostKgs: 800000.04,
+    },
+    transportExpenses: [],
+  });
+  const partialLine = partialLines.find((row) => row.requestType === 'SUPPLIER_PAYMENT');
+  if (!partialLine) throw new Error('14. partial supplier line missing');
+  assertClose(partialLine.approvedAmountKgs, 800000.04, '14. full approved in cost');
+  assertClose(partialLine.paidAmountKgs, 300000, '14. paid amount tracked separately');
+  assertClose(partialLine.remainingAmountKgs, 500000.04, '14. remaining debt preserved');
+  assertEqual(partialLine.paymentStatus, 'PARTIALLY_PAID', '5. payment status partial');
+  assertEqual(partialLine.includedInLandedCost, true, '1. partial included in landed cost');
+  assertEqual(partialLine.approvedAmountKgs === partialLine.paidAmountKgs, false, '3. cost not paid-only');
+}
+
+// 15. Accountant-processed partial counts even if review field lagged
+{
+  assertEqual(
+    isSupplierPaymentApprovedForLandedCost({
+      invoiceSentToAccountantAt: new Date(),
+      supplierInvoiceNumber: 'INV-LAG',
+      invoiceReviewStatus: 'UNDER_REVIEW',
+      supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID,
+    }),
+    true,
+    '11. partial processed despite under review flag',
+  );
+}
+
 console.log('postponed-supplier-cost.util.test.ts passed');
