@@ -515,20 +515,23 @@ export class FinanceTransfersService {
       const creatorUserId = resolveInvoiceCreatorUserId({
         transferCreatedById: transfer.createdById,
       });
-      if (creatorUserId) {
-        await deliverReceiptsToCreatorInTx(tx, this.notifications, user, {
-          source: 'FINANCE_TRANSFER',
-          invoiceId: transfer.id,
-          paymentId: transfer.id,
-          invoiceNumber: transfer.transferNumber,
-          invoiceStatus: updated.status,
-          processedAt: updated.completedAt ?? new Date(),
-          creatorUserId,
-          notificationEntityType: 'FinanceTransfer',
-          notificationEntityId: transfer.id,
-          module: NotificationModule.FINANCE,
-        });
-      }
+      const receiptDelivery = await deliverReceiptsToCreatorInTx(tx, this.notifications, user, {
+        source: 'FINANCE_TRANSFER',
+        invoiceId: transfer.id,
+        paymentId: transfer.id,
+        invoiceNumber: transfer.transferNumber,
+        invoiceStatus: updated.status,
+        processedAt: updated.completedAt ?? new Date(),
+        creatorUserId,
+        notificationEntityType: 'FinanceTransfer',
+        notificationEntityId: transfer.id,
+        module: NotificationModule.FINANCE,
+        paymentAmount: amount,
+        paymentCurrency: transfer.currency,
+        paymentMethod: null,
+        isPartialPayment: false,
+        isFullyPaid: true,
+      });
 
       if (amount >= LARGE_TRANSFER_THRESHOLD_KGS) {
         await this.notifications.notifyInTx(tx, user, {
@@ -541,7 +544,12 @@ export class FinanceTransfersService {
         });
       }
 
-      return this.toTransferResponse(updated);
+      return {
+        ...this.toTransferResponse(updated),
+        receiptAttachment: receiptDelivery.receiptAttachments[0] ?? null,
+        receiptAttachments: receiptDelivery.receiptAttachments,
+        creatorNotification: receiptDelivery.creatorNotification,
+      };
     });
   }
 
@@ -734,7 +742,7 @@ export class FinanceTransfersService {
         entityType,
       });
       if (entityType === FileAttachmentEntityType.FINANCE_TRANSFER_RECEIPT) {
-        await auditReceiptEvent(tx, user, 'RECEIPT_UPLOADED', transfer.id, {
+        await auditReceiptEvent(tx, user, 'PAYMENT_RECEIPT_UPLOADED', transfer.id, {
           invoiceId: transfer.id,
           paymentId: transfer.id,
           uploadedBy: user.id,

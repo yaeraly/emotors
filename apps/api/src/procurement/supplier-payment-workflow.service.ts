@@ -1211,24 +1211,30 @@ export class SupplierPaymentWorkflowService {
       });
 
       const creatorUserId = resolveInvoiceCreatorUserId({
-        invoiceSentById: order.invoiceSentById,
         orderCreatedById: order.createdById,
+        invoiceSentById: order.invoiceSentById,
         paymentCreatedById: payment.createdById,
       });
-      if (creatorUserId) {
-        await deliverReceiptsToCreatorInTx(tx, this.notificationsService, user, {
-          source: 'SUPPLIER_PAYMENT',
-          invoiceId: order.id,
-          paymentId: payment.id,
-          invoiceNumber: synced.orderNumber,
-          invoiceStatus: updatedPayment.status,
-          processedAt: updatedPayment.paidAt ?? new Date(),
-          creatorUserId,
-          notificationEntityType: 'ProcurementOrder',
-          notificationEntityId: order.id,
-          module: NotificationModule.SUPPLIER_PAYMENT,
-        });
-      }
+      const receiptDelivery = await deliverReceiptsToCreatorInTx(tx, this.notificationsService, user, {
+        source: 'SUPPLIER_PAYMENT',
+        invoiceId: order.id,
+        paymentId: payment.id,
+        invoiceNumber: synced.orderNumber,
+        invoiceStatus: updatedPayment.status,
+        processedAt: updatedPayment.paidAt ?? new Date(),
+        creatorUserId,
+        notificationEntityType: 'ProcurementOrder',
+        notificationEntityId: order.id,
+        module: NotificationModule.SUPPLIER_PAYMENT,
+        paymentAmount: actualPaidKgs,
+        paymentCurrency: 'KGS',
+        paymentMethod: updatedPayment.paymentMethod,
+        isPartialPayment:
+          synced.supplierPaymentStatus === 'PARTIALLY_PAID' ||
+          previousStatus === 'PARTIALLY_PAID',
+        isFullyPaid:
+          synced.supplierPaymentStatus === 'PAID' || synced.supplierPaymentStatus === 'OVERPAID',
+      });
 
       if (
         previousStatus !== 'PARTIALLY_PAID' &&
@@ -1268,6 +1274,9 @@ export class SupplierPaymentWorkflowService {
       return {
         payment: this.toPaymentResponse(updatedPayment),
         order: synced,
+        receiptAttachment: receiptDelivery.receiptAttachments[0] ?? null,
+        receiptAttachments: receiptDelivery.receiptAttachments,
+        creatorNotification: receiptDelivery.creatorNotification,
       };
     });
   }

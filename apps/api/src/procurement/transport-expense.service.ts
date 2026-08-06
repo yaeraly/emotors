@@ -1302,7 +1302,14 @@ export class TransportExpenseService {
       throw new ForbiddenException('Only HQ Cashier can confirm transport expense payment');
     }
     return this.prisma.$transaction(async (tx) => {
-      const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      const expense = await tx.procurementTransportExpense.findUnique({
+        where: { id },
+        include: {
+          procurementOrder: {
+            select: { id: true, orderNumber: true, createdById: true, invoiceSentById: true },
+          },
+        },
+      });
       if (!expense) throw new NotFoundException('Transport expense not found');
       if (expense.status === TransportExpenseStatus.PAID) {
         throw new BadRequestException('Transport expense is already paid');
@@ -1501,23 +1508,33 @@ export class TransportExpenseService {
       });
 
       const creatorUserId = resolveInvoiceCreatorUserId({
+        orderCreatedById: expense.procurementOrder?.createdById,
         expenseCreatedById: expense.createdById,
+        invoiceSentById: expense.procurementOrder?.invoiceSentById,
       });
-      if (creatorUserId) {
-        await deliverReceiptsToCreatorInTx(tx, this.notifications, user, {
-          source: 'TRANSPORT_EXPENSE',
-          invoiceId: expense.procurementOrderId ?? expense.id,
-          paymentId: expense.id,
-          invoiceNumber: expense.expenseNumber,
-          invoiceStatus: updated.status,
-          processedAt: updated.paidAt ?? new Date(),
-          creatorUserId,
-          notificationEntityType: 'ProcurementTransportExpense',
-          notificationEntityId: expense.id,
-          module: NotificationModule.SUPPLIER_PAYMENT,
-        });
-      }
-      return this.toResponse(updated, tx);
+      const receiptDelivery = await deliverReceiptsToCreatorInTx(tx, this.notifications, user, {
+        source: 'TRANSPORT_EXPENSE',
+        invoiceId: expense.procurementOrderId ?? expense.id,
+        paymentId: expense.id,
+        invoiceNumber: expense.expenseNumber,
+        invoiceStatus: updated.status,
+        processedAt: updated.paidAt ?? new Date(),
+        creatorUserId,
+        notificationEntityType: 'ProcurementTransportExpense',
+        notificationEntityId: expense.id,
+        module: NotificationModule.SUPPLIER_PAYMENT,
+        paymentAmount: payNow,
+        paymentCurrency: 'KGS',
+        paymentMethod: expense.paymentMethod,
+        isPartialPayment: !fullyPaid,
+        isFullyPaid: fullyPaid,
+      });
+      return {
+        ...this.toResponse(updated, tx),
+        receiptAttachment: receiptDelivery.receiptAttachments[0] ?? null,
+        receiptAttachments: receiptDelivery.receiptAttachments,
+        creatorNotification: receiptDelivery.creatorNotification,
+      };
     });
   }
 
@@ -1751,6 +1768,12 @@ export class TransportExpenseService {
     const fileUrl = `/uploads/procurement/${stored}`;
 
     return this.prisma.$transaction(async (tx) => {
+      const linkedOrder = expense.procurementOrderId
+        ? await tx.procurementOrder.findUnique({
+            where: { id: expense.procurementOrderId },
+            select: { createdById: true, invoiceSentById: true },
+          })
+        : null;
       if (entityType === FileAttachmentEntityType.CARGO_RECEIPT) {
         await tx.fileAttachment.updateMany({
           where: {
@@ -1796,14 +1819,19 @@ export class TransportExpenseService {
             : null,
       });
       if (entityType === FileAttachmentEntityType.TRANSPORT_EXPENSE_RECEIPT) {
-        await auditReceiptEvent(tx, user, 'RECEIPT_UPLOADED', id, {
+        await auditReceiptEvent(tx, user, 'PAYMENT_RECEIPT_UPLOADED', id, {
           invoiceId: expense.procurementOrderId ?? id,
           paymentId: id,
-          uploadedBy: user.id,
-          creatorUserId: expense.createdById,
+          uploadedByUserId: user.id,
+          creatorUserId: resolveInvoiceCreatorUserId({
+            expenseCreatedById: expense.createdById,
+            orderCreatedById: linkedOrder?.createdById,
+            invoiceSentById: linkedOrder?.invoiceSentById,
+          }),
           uploadedAt: created.createdAt.toISOString(),
           filename: created.fileName,
           attachmentId: created.id,
+          timestamp: new Date().toISOString(),
         });
       }
       return created;

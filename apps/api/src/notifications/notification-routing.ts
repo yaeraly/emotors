@@ -384,7 +384,7 @@ export const DEFAULT_NOTIFICATION_COPY: Partial<Record<AlertType, { title: strin
   },
   RECEIPT_SENT_TO_CREATOR: {
     title: 'Квитанция загружена.',
-    message: 'Счет успешно обработан HQ Cashier.',
+    message: 'Квитанция по счёту загружена HQ Cashier.',
   },
 };
 

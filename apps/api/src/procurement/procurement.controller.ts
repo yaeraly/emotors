@@ -782,6 +782,15 @@ export class ProcurementController {
     return this.receiptDeliveryService.recordReceiptView(user, attachmentId);
   }
 
+  @Post('invoice-receipts/:attachmentId/download')
+  @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
+  recordInvoiceReceiptDownload(
+    @CurrentUser() user: AuthUser,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    return this.receiptDeliveryService.recordReceiptDownload(user, attachmentId);
+  }
+
   @Get('orders/:id/attachments')
   @RequirePermissions(...PROCUREMENT_VIEW_PERMISSIONS, 'finance.view')
   procurementAttachments(

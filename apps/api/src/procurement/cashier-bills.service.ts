@@ -1016,6 +1016,11 @@ export class CashierBillsService {
       id,
       source: 'SUPPLIER_PAYMENT' as const,
       executionStatus: 'COMPLETED' as const,
+      payment: result.payment,
+      invoice: result.order,
+      receiptAttachment: result.receiptAttachment ?? null,
+      receiptAttachments: result.receiptAttachments ?? [],
+      creatorNotification: result.creatorNotification ?? null,
       result,
     };
   }
@@ -1107,6 +1112,11 @@ export class CashierBillsService {
       id,
       source: 'TRANSPORT_EXPENSE' as const,
       executionStatus,
+      payment: result,
+      invoice: result,
+      receiptAttachment: result.receiptAttachment ?? null,
+      receiptAttachments: result.receiptAttachments ?? [],
+      creatorNotification: result.creatorNotification ?? null,
       result,
     };
   }

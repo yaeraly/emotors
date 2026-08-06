@@ -310,6 +310,12 @@ function ProcurementOrderDetailPageContent() {
     if (tab && ORDER_DETAIL_TABS.some((item) => item.id === tab)) {
       setActiveTab(tab);
     }
+    if (searchParams.get('invoiceReceipts') === '1') {
+      setActiveTab('payments');
+      requestAnimationFrame(() => {
+        document.getElementById('invoice-receipts')?.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
   }, [searchParams]);
 
   const canEditOrder = canCreateProcurementOrder(user);

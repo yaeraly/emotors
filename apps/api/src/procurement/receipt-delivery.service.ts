@@ -6,6 +6,7 @@ import {
   auditReceiptEvent,
   canViewInvoiceReceipts,
   findReceiptAttachmentsForContext,
+  InvoiceReceiptRow,
   InvoiceReceiptSource,
   mapReceiptRows,
   resolveInvoiceCreatorUserId,
@@ -36,6 +37,7 @@ export class ReceiptDeliveryService {
       query.source,
       context.paymentId,
     );
+    const deliveryMeta = await this.loadDeliveryMetadata(context.invoiceId);
 
     return {
       source: query.source,
@@ -45,11 +47,15 @@ export class ReceiptDeliveryService {
       invoiceStatus: context.invoiceStatus,
       processedAt: context.processedAt?.toISOString() ?? null,
       creatorUserId: context.creatorUserId,
-      receipts: mapReceiptRows(
+      receipts: this.mapReceiptsWithMetadata(
         receipts,
         context.paymentId,
         context.processedAt,
         context.invoiceStatus,
+        context.paymentAmount,
+        context.paymentCurrency,
+        context.paymentMethod,
+        deliveryMeta,
       ),
     };
   }
@@ -81,9 +87,17 @@ export class ReceiptDeliveryService {
         status: 'ACTIVE',
       },
       orderBy: [{ sequenceNumber: 'asc' }, { createdAt: 'asc' }],
-      select: { id: true, status: true, paidAt: true, sequenceNumber: true },
+      select: {
+        id: true,
+        status: true,
+        paidAt: true,
+        sequenceNumber: true,
+        approvedAmountKgs: true,
+        paymentMethod: true,
+      },
     });
 
+    const deliveryMeta = await this.loadDeliveryMetadata(order.id);
     const receiptGroups = await Promise.all(
       payments.map(async (payment) => {
         const receipts = await findReceiptAttachmentsForContext(
@@ -91,7 +105,16 @@ export class ReceiptDeliveryService {
           'SUPPLIER_PAYMENT',
           payment.id,
         );
-        return mapReceiptRows(receipts, payment.id, payment.paidAt, payment.status);
+        return this.mapReceiptsWithMetadata(
+          receipts,
+          payment.id,
+          payment.paidAt,
+          payment.status,
+          Number(payment.approvedAmountKgs),
+          'KGS',
+          payment.paymentMethod,
+          deliveryMeta,
+        );
       }),
     );
 
@@ -103,13 +126,25 @@ export class ReceiptDeliveryService {
       invoiceStatus: order.supplierPaymentStatus,
       processedAt: null,
       creatorUserId,
-      receipts: receiptGroups.flat().sort(
-        (a, b) => new Date(a.uploadedAt).getTime() - new Date(b.uploadedAt).getTime(),
-      ),
+      receipts: receiptGroups
+        .flat()
+        .sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()),
     };
   }
 
   async recordReceiptView(user: AuthUser, attachmentId: string) {
+    return this.recordReceiptAccess(user, attachmentId, 'PAYMENT_RECEIPT_VIEWED');
+  }
+
+  async recordReceiptDownload(user: AuthUser, attachmentId: string) {
+    return this.recordReceiptAccess(user, attachmentId, 'PAYMENT_RECEIPT_DOWNLOADED');
+  }
+
+  private async recordReceiptAccess(
+    user: AuthUser,
+    attachmentId: string,
+    action: 'PAYMENT_RECEIPT_VIEWED' | 'PAYMENT_RECEIPT_DOWNLOADED',
+  ) {
     const attachment = await this.prisma.fileAttachment.findFirst({
       where: { id: attachmentId, deletedAt: null },
     });
@@ -120,7 +155,7 @@ export class ReceiptDeliveryService {
       throw new ForbiddenException('You do not have permission to view this receipt');
     }
 
-    await auditReceiptEvent(this.prisma, user, 'RECEIPT_VIEWED', context.invoiceId, {
+    await auditReceiptEvent(this.prisma, user, action, context.invoiceId, {
       invoiceId: context.invoiceId,
       paymentId: context.paymentId,
       uploadedBy: attachment.uploadedById,
@@ -128,9 +163,69 @@ export class ReceiptDeliveryService {
       uploadedAt: attachment.createdAt.toISOString(),
       filename: attachment.fileName,
       attachmentId: attachment.id,
+      timestamp: new Date().toISOString(),
     });
 
-    return { ok: true };
+    return { ok: true, fileUrl: attachment.fileUrl };
+  }
+
+  private async loadDeliveryMetadata(invoiceId: string) {
+    const logs = await this.prisma.auditLog.findMany({
+      where: {
+        entity: 'InvoiceReceipt',
+        entityId: invoiceId,
+        action: { in: ['PAYMENT_RECEIPT_SENT_TO_CREATOR', 'RECEIPT_SENT_TO_CREATOR'] },
+      },
+      select: { metadata: true },
+    });
+    const byAttachment = new Map<
+      string,
+      { paymentAmount?: number; paymentCurrency?: string; paymentMethod?: string | null }
+    >();
+    for (const log of logs) {
+      const metadata = log.metadata as Record<string, unknown> | null;
+      const attachmentId = metadata?.attachmentId;
+      if (typeof attachmentId !== 'string') continue;
+      byAttachment.set(attachmentId, {
+        paymentAmount:
+          typeof metadata?.paymentAmount === 'number' ? metadata.paymentAmount : undefined,
+        paymentCurrency:
+          typeof metadata?.paymentCurrency === 'string' ? metadata.paymentCurrency : undefined,
+        paymentMethod:
+          typeof metadata?.paymentMethod === 'string' ? metadata.paymentMethod : null,
+      });
+    }
+    return byAttachment;
+  }
+
+  private mapReceiptsWithMetadata(
+    receipts: Array<{
+      id: string;
+      fileName: string;
+      fileUrl: string;
+      mimeType: string;
+      createdAt: Date;
+      uploadedBy: { id: string; fullName: string } | null;
+    }>,
+    paymentId: string,
+    processedAt: Date | null,
+    invoiceStatus: string,
+    paymentAmount: number | null | undefined,
+    paymentCurrency: string | null | undefined,
+    paymentMethod: string | null | undefined,
+    deliveryMeta: Map<
+      string,
+      { paymentAmount?: number; paymentCurrency?: string; paymentMethod?: string | null }
+    >,
+  ): InvoiceReceiptRow[] {
+    return receipts.map((receipt) => {
+      const meta = deliveryMeta.get(receipt.id);
+      return mapReceiptRows([receipt], paymentId, processedAt, invoiceStatus, {
+        paymentAmount: meta?.paymentAmount ?? paymentAmount ?? null,
+        paymentCurrency: meta?.paymentCurrency ?? paymentCurrency ?? null,
+        paymentMethod: meta?.paymentMethod ?? paymentMethod ?? null,
+      })[0];
+    });
   }
 
   private async resolveContext(query: ListReceiptsQuery) {
@@ -163,6 +258,9 @@ export class ReceiptDeliveryService {
         invoiceNumber: order.orderNumber,
         invoiceStatus: payment.status,
         processedAt: payment.paidAt,
+        paymentAmount: Number(payment.approvedAmountKgs),
+        paymentCurrency: 'KGS',
+        paymentMethod: payment.paymentMethod,
         creatorUserId: resolveInvoiceCreatorUserId({
           invoiceSentById: order.invoiceSentById,
           orderCreatedById: order.createdById,
@@ -180,6 +278,8 @@ export class ReceiptDeliveryService {
           status: true,
           paidAt: true,
           createdById: true,
+          paidAmountKgs: true,
+          paymentMethod: true,
           procurementOrder: {
             select: { id: true, orderNumber: true, createdById: true, invoiceSentById: true },
           },
@@ -192,6 +292,9 @@ export class ReceiptDeliveryService {
         invoiceNumber: expense.expenseNumber,
         invoiceStatus: expense.status,
         processedAt: expense.paidAt,
+        paymentAmount: expense.paidAmountKgs != null ? Number(expense.paidAmountKgs) : null,
+        paymentCurrency: 'KGS',
+        paymentMethod: expense.paymentMethod,
         creatorUserId: resolveInvoiceCreatorUserId({
           expenseCreatedById: expense.createdById,
           orderCreatedById: expense.procurementOrder?.createdById,
@@ -208,6 +311,8 @@ export class ReceiptDeliveryService {
         status: true,
         completedAt: true,
         createdById: true,
+        amount: true,
+        currency: true,
       },
     });
     if (!transfer) throw new NotFoundException('Finance transfer not found');
@@ -217,6 +322,9 @@ export class ReceiptDeliveryService {
       invoiceNumber: transfer.transferNumber,
       invoiceStatus: transfer.status,
       processedAt: transfer.completedAt,
+      paymentAmount: Number(transfer.amount),
+      paymentCurrency: transfer.currency,
+      paymentMethod: null,
       creatorUserId: resolveInvoiceCreatorUserId({ transferCreatedById: transfer.createdById }),
     };
   }
