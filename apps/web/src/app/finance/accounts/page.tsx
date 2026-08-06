@@ -16,6 +16,12 @@ import { FINANCE_ACCOUNT_TYPE_TABS, isCashierOnlyFinanceUser } from '@/lib/finan
 import { apiFetch } from '@/lib/api';
 import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts } from '@/lib/finance-rbac';
+import {
+  calculateReconciliationDifference,
+  formatEditableDecimal,
+  parseEditableDecimal,
+  sanitizeEditableDecimalInput,
+} from '@/lib/finance-decimal-input.util';
 import { isHqCashierUser, isBranchCashierUser } from '@/lib/rbac';
 import type { FinanceAccount, User } from '@/lib/types';
 
@@ -45,9 +51,10 @@ function FinanceAccountsPageContent() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [reconTarget, setReconTarget] = useState<CashierAccountRow | null>(null);
-  const [actualBalance, setActualBalance] = useState('');
+  const [actualBalanceInput, setActualBalanceInput] = useState('');
   const [reconComment, setReconComment] = useState('');
   const [reconError, setReconError] = useState('');
+  const [reconSuccess, setReconSuccess] = useState('');
   const [reconSaving, setReconSaving] = useState(false);
 
   const load = () => {
@@ -91,27 +98,51 @@ function FinanceAccountsPageContent() {
 
   function openReconciliation(account: CashierAccountRow) {
     setReconTarget(account);
-    setActualBalance(String(Number(account.expectedClosingBalance ?? account.availableBalance ?? 0)));
     setReconComment('');
     setReconError('');
+    setReconSuccess('');
   }
+
+  useEffect(() => {
+    if (!reconTarget) {
+      setActualBalanceInput('');
+      return;
+    }
+    const systemBalance = Number(
+      reconTarget.expectedClosingBalance ?? reconTarget.availableBalance ?? 0,
+    );
+    setActualBalanceInput(formatEditableDecimal(systemBalance));
+    setReconComment('');
+    setReconError('');
+  }, [reconTarget?.id]);
 
   async function submitReconciliation(event: FormEvent) {
     event.preventDefault();
     if (!reconTarget || reconSaving) return;
-    const expected = Number(reconTarget.expectedClosingBalance ?? reconTarget.availableBalance ?? 0);
-    const actual = Number(actualBalance);
-    if (!Number.isFinite(actual)) {
-      setReconError(t('finance.statementBalance'));
+
+    const trimmed = actualBalanceInput.trim();
+    if (!trimmed) {
+      setReconError(t('finance.reconciliationActualBalanceRequired'));
       return;
     }
-    const difference = Math.round((actual - expected) * 100) / 100;
+    const actual = parseEditableDecimal(trimmed);
+    if (actual == null) {
+      setReconError(t('finance.reconciliationActualBalanceInvalid'));
+      return;
+    }
+
+    const systemBalance = Number(
+      reconTarget.expectedClosingBalance ?? reconTarget.availableBalance ?? 0,
+    );
+    const difference = calculateReconciliationDifference(actual, systemBalance);
     if (Math.abs(difference) > 0.009 && reconComment.trim().length < 3) {
       setReconError(t('finance.reconciliationCommentRequired'));
       return;
     }
+
     setReconSaving(true);
     setReconError('');
+    setReconSuccess('');
     try {
       await apiFetch('/finance/reconciliations', {
         method: 'POST',
@@ -119,12 +150,12 @@ function FinanceAccountsPageContent() {
           accountId: reconTarget.id,
           actualBalance: actual,
           notes: reconComment.trim() || undefined,
-          statementDate: new Date().toISOString(),
         }),
       });
       setReconTarget(null);
-      setActualBalance('');
+      setActualBalanceInput('');
       setReconComment('');
+      setReconSuccess(t('finance.reconciliationSaved'));
       load();
     } catch (err) {
       setReconError(err instanceof Error ? err.message : t('common.error'));
@@ -133,9 +164,14 @@ function FinanceAccountsPageContent() {
     }
   }
 
-  const expectedForModal = Number(reconTarget?.expectedClosingBalance ?? reconTarget?.availableBalance ?? 0);
-  const actualForModal = Number(actualBalance || 0);
-  const differenceForModal = Math.round((actualForModal - expectedForModal) * 100) / 100;
+  const systemBalanceForModal = Number(
+    reconTarget?.expectedClosingBalance ?? reconTarget?.availableBalance ?? 0,
+  );
+  const parsedActualForModal = parseEditableDecimal(actualBalanceInput);
+  const differenceForModal =
+    parsedActualForModal == null
+      ? 0
+      : calculateReconciliationDifference(parsedActualForModal, systemBalanceForModal);
 
   return (
     <FinanceLayout
@@ -151,6 +187,9 @@ function FinanceAccountsPageContent() {
       }
     >
       {error ? <FinanceErrorState message={error} /> : null}
+      {reconSuccess ? (
+        <p className="mb-3 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{reconSuccess}</p>
+      ) : null}
       {!hqCashierView ? (
         <input
           value={search}
@@ -298,26 +337,29 @@ function FinanceAccountsPageContent() {
                 {new Date().toLocaleString()}
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div>{t('finance.openingBalance')}: <FinanceMoney amount={Number(reconTarget.openingBalance)} currency={reconTarget.currency} /></div>
-              <div>{t('finance.totalIncoming')}: <FinanceMoney amount={Number(reconTarget.totalIncoming ?? 0)} currency={reconTarget.currency} /></div>
-              <div>{t('finance.totalOutgoing')}: <FinanceMoney amount={Number(reconTarget.totalOutgoing ?? 0)} currency={reconTarget.currency} /></div>
-              <div>{t('finance.expectedBalance')}: <FinanceMoney amount={expectedForModal} currency={reconTarget.currency} /></div>
-              <div>{t('finance.difference')}: <FinanceMoney amount={differenceForModal} currency={reconTarget.currency} /></div>
+            <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold">{t('finance.systemBalance')}:</span>{' '}
+                <FinanceMoney amount={systemBalanceForModal} currency={reconTarget.currency} />
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="font-semibold">{t('finance.difference')}:</span>{' '}
+                <FinanceMoney amount={differenceForModal} currency={reconTarget.currency} />
+              </div>
             </div>
             <label className="block text-sm">
-              <span className="mb-1 block font-semibold">{t('finance.statementBalance')}</span>
+              <span className="mb-1 block font-semibold">{t('finance.actualBalance')}</span>
               <input
-                type="number"
-                step="0.01"
-                required
-                value={actualBalance}
-                onChange={(e) => setActualBalance(e.target.value)}
+                type="text"
+                inputMode="decimal"
+                autoComplete="off"
+                value={actualBalanceInput}
+                onChange={(e) => setActualBalanceInput(sanitizeEditableDecimalInput(e.target.value))}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block font-semibold">{t('finance.notes')}</span>
+              <span className="mb-1 block font-semibold">{t('finance.commentOptional')}</span>
               <textarea
                 rows={3}
                 value={reconComment}
