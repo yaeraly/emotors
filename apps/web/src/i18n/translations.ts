@@ -6875,7 +6875,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'finance.reconciliationDate': 'Дата и время сверки',
     'finance.reconciliationCommentRequired': 'Комментарий обязателен, если разница не равна нулю',
     'finance.reconciliationActualBalanceRequired': 'Введите фактический баланс.',
-    'finance.reconciliationActualBalanceInvalid': 'Фактический баланс указан неверно.',
+    'finance.reconciliationActualBalanceInvalid': 'Введите корректную сумму.',
     'finance.reconciliationSaved': 'Сверка сохранена.',
     'finance.commentOptional': 'Комментарий (необязательно)',
     'finance.actualBalance': 'Фактический баланс',

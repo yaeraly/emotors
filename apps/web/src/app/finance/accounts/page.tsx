@@ -18,9 +18,10 @@ import { useTranslation } from '@/i18n/useTranslation';
 import { canManageFinanceAccounts } from '@/lib/finance-rbac';
 import {
   calculateReconciliationDifference,
-  formatEditableDecimal,
-  parseEditableDecimal,
-  sanitizeEditableDecimalInput,
+  normalizeMoneyInput,
+  parseMoneyDecimal,
+  previewReconciliationDifference,
+  toEditableMoney,
 } from '@/lib/finance-decimal-input.util';
 import { isHqCashierUser, isBranchCashierUser } from '@/lib/rbac';
 import type { FinanceAccount, User } from '@/lib/types';
@@ -103,18 +104,23 @@ function FinanceAccountsPageContent() {
     setReconSuccess('');
   }
 
+  const reconOpen = Boolean(reconTarget);
+  const reconAccountId = reconTarget?.id;
+
   useEffect(() => {
-    if (!reconTarget) {
-      setActualBalanceInput('');
+    if (!reconOpen || !reconAccountId || !reconTarget) {
+      if (!reconOpen) {
+        setActualBalanceInput('');
+      }
       return;
     }
     const systemBalance = Number(
       reconTarget.expectedClosingBalance ?? reconTarget.availableBalance ?? 0,
     );
-    setActualBalanceInput(formatEditableDecimal(systemBalance));
+    setActualBalanceInput(toEditableMoney(systemBalance));
     setReconComment('');
     setReconError('');
-  }, [reconTarget?.id]);
+  }, [reconOpen, reconAccountId]);
 
   async function submitReconciliation(event: FormEvent) {
     event.preventDefault();
@@ -125,7 +131,7 @@ function FinanceAccountsPageContent() {
       setReconError(t('finance.reconciliationActualBalanceRequired'));
       return;
     }
-    const actual = parseEditableDecimal(trimmed);
+    const actual = parseMoneyDecimal(trimmed);
     if (actual == null) {
       setReconError(t('finance.reconciliationActualBalanceInvalid'));
       return;
@@ -167,11 +173,10 @@ function FinanceAccountsPageContent() {
   const systemBalanceForModal = Number(
     reconTarget?.expectedClosingBalance ?? reconTarget?.availableBalance ?? 0,
   );
-  const parsedActualForModal = parseEditableDecimal(actualBalanceInput);
-  const differenceForModal =
-    parsedActualForModal == null
-      ? 0
-      : calculateReconciliationDifference(parsedActualForModal, systemBalanceForModal);
+  const differenceForModal = previewReconciliationDifference(
+    actualBalanceInput,
+    systemBalanceForModal,
+  );
 
   return (
     <FinanceLayout
@@ -344,7 +349,11 @@ function FinanceAccountsPageContent() {
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <span className="font-semibold">{t('finance.difference')}:</span>{' '}
-                <FinanceMoney amount={differenceForModal} currency={reconTarget.currency} />
+                {differenceForModal == null ? (
+                  '—'
+                ) : (
+                  <FinanceMoney amount={differenceForModal} currency={reconTarget.currency} />
+                )}
               </div>
             </div>
             <label className="block text-sm">
@@ -354,7 +363,7 @@ function FinanceAccountsPageContent() {
                 inputMode="decimal"
                 autoComplete="off"
                 value={actualBalanceInput}
-                onChange={(e) => setActualBalanceInput(sanitizeEditableDecimalInput(e.target.value))}
+                onChange={(e) => setActualBalanceInput(normalizeMoneyInput(e.target.value))}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2"
               />
             </label>
