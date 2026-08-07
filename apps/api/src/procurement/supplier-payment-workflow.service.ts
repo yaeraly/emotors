@@ -91,6 +91,12 @@ import {
   SUPPLIER_CORRECTED_TOTAL_BELOW_PAID_MESSAGE,
   SUPPLIER_PAYMENT_EXCEEDS_REMAINING_MESSAGE,
 } from './supplier-payment-correction.util';
+import {
+  assertSupplierPaymentHasRemainingBalance,
+  resolveReconciledSupplierPaymentLedgerStatus,
+  resolveSupplierPaymentMonetaryBalance,
+  SUPPLIER_ALREADY_FULLY_PAID_MESSAGE,
+} from './supplier-payment-balance.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -1144,32 +1150,14 @@ export class SupplierPaymentWorkflowService {
           status: true,
         },
       });
-      const summary = summarizeSupplierPayments(
-        payments.map((payment) => ({
-          amountYuan: Number(payment.amountYuan),
-          exchangeRate: Number(payment.exchangeRate),
-          amountKgs: Number(payment.amountKgs),
-          actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
-          approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
-          status: payment.status,
-        })),
-        Number(refreshedOrder.totalYuan),
-        {
-          invoiceSentToAccountantAt: refreshedOrder.invoiceSentToAccountantAt,
-          previousStatus: refreshedOrder.supplierPaymentStatus,
-        },
-      );
-
-      const ledgerStatus = String(summary.supplierPaymentStatus).toUpperCase();
-      if (ledgerStatus === 'PAID' || ledgerStatus === 'OVERPAID') {
-        throw new BadRequestException('Этот счёт уже полностью оплачен.');
-      }
-      if (
-        !SUPPLIER_ACCOUNTANT_PAYABLE.has(ledgerStatus) &&
-        ledgerStatus !== ProcurementSupplierPaymentLedgerStatus.AWAITING_CASHIER
-      ) {
-        throw new BadRequestException('Счет ещё не одобрен для обработки.');
-      }
+      const paymentInputs = payments.map((payment) => ({
+        amountYuan: Number(payment.amountYuan),
+        exchangeRate: Number(payment.exchangeRate),
+        amountKgs: Number(payment.amountKgs),
+        actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+        approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+        status: payment.status,
+      }));
 
       const rateRevisionAudits = await tx.auditLog.findMany({
         where: {
@@ -1221,19 +1209,38 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException(SUPPLIER_CNY_RATE_REQUIRED_MESSAGE);
       }
 
-      const approvedYuan = resolveApprovedSupplierCostBaseYuan({
+      const monetaryBalance = resolveSupplierPaymentMonetaryBalance({
         totalYuan: Number(refreshedOrder.totalYuan),
-        requestedPaymentYuan:
-          refreshedOrder.requestedPaymentYuan != null
-            ? Number(refreshedOrder.requestedPaymentYuan)
-            : null,
+        exchangeRate: authoritativeRate,
+        payments: paymentInputs,
       });
-      const approvedAmountKgs = calculateApprovedSupplierKgsFromRate(approvedYuan, authoritativeRate);
-      const alreadyPaidKgs = summary.totalPaidKgs;
-      const remainingKgs = roundMoney(Math.max(approvedAmountKgs - alreadyPaidKgs, 0));
-      if (!(remainingKgs > 0)) {
-        throw new BadRequestException('Этот счёт уже полностью оплачен.');
+      try {
+        assertSupplierPaymentHasRemainingBalance(monetaryBalance);
+      } catch (error) {
+        throw new BadRequestException(
+          error instanceof Error ? error.message : SUPPLIER_ALREADY_FULLY_PAID_MESSAGE,
+        );
       }
+
+      const ledgerStatus = resolveReconciledSupplierPaymentLedgerStatus({
+        totalYuan: Number(refreshedOrder.totalYuan),
+        exchangeRate: authoritativeRate,
+        payments: paymentInputs,
+        invoiceSentToAccountantAt: refreshedOrder.invoiceSentToAccountantAt,
+        previousStatus: refreshedOrder.supplierPaymentStatus,
+      });
+      const ledgerStatusKey = String(ledgerStatus).toUpperCase();
+      if (
+        !SUPPLIER_ACCOUNTANT_PAYABLE.has(ledgerStatusKey) &&
+        ledgerStatusKey !== ProcurementSupplierPaymentLedgerStatus.AWAITING_CASHIER
+      ) {
+        throw new BadRequestException('Счет ещё не одобрен для обработки.');
+      }
+
+      const approvedYuan = monetaryBalance.obligationYuan;
+      const approvedAmountKgs = monetaryBalance.obligationKgs;
+      const alreadyPaidKgs = monetaryBalance.confirmedPaidKgs;
+      const remainingKgs = monetaryBalance.remainingKgs;
 
       const instructionAmountKgs = roundMoney(dto.paymentAmountKgs);
       if (!(instructionAmountKgs > 0)) {
@@ -1295,12 +1302,12 @@ export class SupplierPaymentWorkflowService {
       }
 
       const isFirstApproval =
-        ledgerStatus === ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT ||
-        ledgerStatus === ProcurementSupplierPaymentLedgerStatus.UNPAID ||
+        ledgerStatusKey === ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT ||
+        ledgerStatusKey === ProcurementSupplierPaymentLedgerStatus.UNPAID ||
         review === 'UNDER_REVIEW' ||
         review === 'SUBMITTED' ||
         review === 'APPROVED' ||
-        ledgerStatus === ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED;
+        ledgerStatusKey === ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED;
 
       if (isFirstApproval) {
         await this.ensureSupplierInvoiceApprovedForCosting(tx, user, order.id);
@@ -2182,24 +2189,45 @@ export class SupplierPaymentWorkflowService {
     });
     if (!order) throw new NotFoundException('Procurement order not found');
 
+    const paymentInputs = order.supplierPayments.map((payment) => ({
+      amountYuan: Number(payment.amountYuan),
+      exchangeRate: Number(payment.exchangeRate),
+      amountKgs: Number(payment.amountKgs),
+      actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+      approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+      status: payment.status,
+    }));
+    const exchangeRate =
+      Number(order.defaultYuanRate || 0) > 0
+        ? Number(order.defaultYuanRate)
+        : paymentInputs
+            .map((payment) => Number(payment.exchangeRate || 0))
+            .filter((rate) => rate > 0)
+            .at(-1) ?? 0;
+    const monetaryBalance = resolveSupplierPaymentMonetaryBalance({
+      totalYuan: Number(order.totalYuan),
+      exchangeRate,
+      payments: paymentInputs,
+    });
     const summary = summarizeSupplierPayments(
-      order.supplierPayments.map((payment) => ({
-        amountYuan: Number(payment.amountYuan),
-        exchangeRate: Number(payment.exchangeRate),
-        amountKgs: Number(payment.amountKgs),
-        actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
-        approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
-        status: payment.status,
-      })),
+      paymentInputs,
       Number(order.totalYuan),
       {
         invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
         previousStatus: order.supplierPaymentStatus,
       },
     );
+    const supplierPaymentStatus = resolveReconciledSupplierPaymentLedgerStatus({
+      totalYuan: Number(order.totalYuan),
+      exchangeRate,
+      payments: paymentInputs,
+      invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+      previousStatus: order.supplierPaymentStatus,
+    });
 
     const fullyPaid =
-      summary.supplierPaymentStatus === 'PAID' || summary.supplierPaymentStatus === 'OVERPAID';
+      supplierPaymentStatus === ProcurementSupplierPaymentLedgerStatus.PAID ||
+      supplierPaymentStatus === ProcurementSupplierPaymentLedgerStatus.OVERPAID;
     const canAdvanceOrderStatusToPaid = (
       [
         ProcurementOrderStatus.DRAFT,
@@ -2212,11 +2240,11 @@ export class SupplierPaymentWorkflowService {
     const updated = await tx.procurementOrder.update({
       where: { id: order.id },
       data: {
-        totalPaidYuan: summary.totalPaidYuan,
-        totalPaidKgs: summary.totalPaidKgs,
-        remainingYuan: summary.remainingYuan,
+        totalPaidYuan: monetaryBalance.confirmedPaidCny,
+        totalPaidKgs: monetaryBalance.confirmedPaidKgs,
+        remainingYuan: monetaryBalance.remainingCny,
         weightedAverageYuanRate: summary.weightedAverageYuanRate,
-        supplierPaymentStatus: summary.supplierPaymentStatus,
+        supplierPaymentStatus,
         ...(fullyPaid && canAdvanceOrderStatusToPaid
           ? { status: ProcurementOrderStatus.PAID }
           : {}),
@@ -2243,11 +2271,12 @@ export class SupplierPaymentWorkflowService {
       remainingYuan: Number(order.remainingYuan ?? 0),
       supplierPaymentStatus: order.supplierPaymentStatus,
     }, {
-      totalPaidYuan: summary.totalPaidYuan,
-      totalPaidKgs: summary.totalPaidKgs,
-      remainingYuan: summary.remainingYuan,
+      totalPaidYuan: monetaryBalance.confirmedPaidCny,
+      totalPaidKgs: monetaryBalance.confirmedPaidKgs,
+      remainingYuan: monetaryBalance.remainingCny,
+      remainingKgs: monetaryBalance.remainingKgs,
       weightedAverageYuanRate: summary.weightedAverageYuanRate,
-      supplierPaymentStatus: summary.supplierPaymentStatus,
+      supplierPaymentStatus,
       reason,
     }, reason);
 

@@ -125,12 +125,19 @@ export function mapSupplierInvoiceToUi(input: {
   invoiceReviewStatus?: string | null;
   supplierPaymentStatus?: string | null;
   remainingYuan?: number;
+  remainingKgs?: number;
 }): AccountantBillUiStatus {
   const review = String(input.invoiceReviewStatus || '').toUpperCase();
   if (review === 'UNDER_REVIEW') return 'UNDER_REVIEW';
   if (review === 'RETURNED') return 'RETURNED';
   if (review === 'REJECTED') return 'REJECTED';
+  const remainingYuan = Math.max(0, Number(input.remainingYuan ?? 0));
+  const remainingKgs = Math.max(0, Number(input.remainingKgs ?? 0));
+  const hasRemaining = remainingYuan > 0.009 || remainingKgs > 0.009;
   const ledger = String(input.supplierPaymentStatus || '').toUpperCase();
+  if ((ledger === 'PAID' || ledger === 'OVERPAID') && hasRemaining) {
+    return 'PARTIALLY_PAID';
+  }
   if (ledger === 'PAID' || ledger === 'OVERPAID') return 'FULLY_PAID';
   if (ledger === 'PARTIALLY_PAID') return 'PARTIALLY_PAID';
   if (ledger === 'PAYMENT_POSTPONED') return 'PAYMENT_POSTPONED';

@@ -49,6 +49,7 @@ import {
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import { roundMoney } from './supplier-payment.util';
 import { isSupplierPaymentExchangeRateRevisionAllowed } from './supplier-payment-exchange-rate.util';
+import { resolveSupplierPaymentMonetaryBalance } from './supplier-payment-balance.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { LandedCostService } from './landed-cost.service';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
@@ -833,6 +834,7 @@ export class AccountantBillsService {
               amountYuan: true,
               amountKgs: true,
               actualPaidKgs: true,
+              approvedAmountKgs: true,
               status: true,
               exchangeRate: true,
               executionStatus: true,
@@ -901,19 +903,40 @@ export class AccountantBillsService {
           0,
         );
       const requested = Number(order.requestedPaymentYuan ?? order.remainingYuan ?? order.totalYuan ?? 0);
-      const remainingYuan = Math.max(Number(order.totalYuan) - paidYuan, 0);
       const latestRate =
         order.supplierPayments
           .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
           .map((p) => Number(p.exchangeRate || 0))
           .filter((rate) => rate > 0)
           .at(-1) ?? Number(order.weightedAverageYuanRate || order.defaultYuanRate || 0);
-      const estimatedKgs = estimateKgsAmount(requested, 'CNY', latestRate);
-      const remainingKgs = estimateKgsAmount(remainingYuan, 'CNY', latestRate);
+      const paymentInputs = order.supplierPayments.map((payment) => ({
+        amountYuan: Number(payment.amountYuan),
+        exchangeRate: Number(payment.exchangeRate),
+        amountKgs: Number(payment.amountKgs),
+        actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+        approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+        status: payment.status,
+      }));
+      const monetaryBalance =
+        latestRate > 0
+          ? resolveSupplierPaymentMonetaryBalance({
+              totalYuan: Number(order.totalYuan),
+              exchangeRate: latestRate,
+              payments: paymentInputs,
+            })
+          : null;
+      const remainingYuan = monetaryBalance?.remainingCny ?? Math.max(Number(order.totalYuan) - paidYuan, 0);
+      const remainingKgs =
+        monetaryBalance?.remainingKgs ??
+        estimateKgsAmount(remainingYuan, 'CNY', latestRate);
+      const estimatedKgs =
+        monetaryBalance?.obligationKgs ??
+        estimateKgsAmount(requested, 'CNY', latestRate);
       const status = mapSupplierInvoiceToUi({
         invoiceReviewStatus: order.invoiceReviewStatus,
         supplierPaymentStatus: order.supplierPaymentStatus,
         remainingYuan,
+        remainingKgs,
       });
       const due = order.expectedPaymentDate ? new Date(order.expectedPaymentDate) : null;
       const requestType = 'SUPPLIER_PAYMENT' as AccountantBillRequestType;
@@ -1146,11 +1169,6 @@ export class AccountantBillsService {
         (sum, p) => sum + Number(p.actualPaidKgs != null ? p.actualPaidKgs : p.amountKgs || 0),
         0,
       );
-    const approvedYuan = resolveApprovedSupplierCostBaseYuan({
-      totalYuan: Number(order.totalYuan),
-      requestedPaymentYuan:
-        order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
-    });
     const exchangeRate =
       Number(order.weightedAverageYuanRate || order.defaultYuanRate || 0) > 0
         ? Number(order.weightedAverageYuanRate || order.defaultYuanRate)
@@ -1158,24 +1176,40 @@ export class AccountantBillsService {
             .map((p) => Number(p.exchangeRate || 0))
             .filter((rate) => rate > 0)
             .at(-1) ?? 0;
+    const paymentInputs = order.supplierPayments.map((payment) => ({
+      amountYuan: Number(payment.amountYuan),
+      exchangeRate: Number(payment.exchangeRate),
+      amountKgs: Number(payment.amountKgs),
+      actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+      approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+      status: payment.status,
+    }));
     const exchangeRateEditable = isSupplierPaymentExchangeRateRevisionAllowed(
       audits.map((row) => ({ action: row.action, timestamp: row.timestamp })),
     );
-    const approvedAmountKgs = exchangeRate > 0 ? roundMoney(approvedYuan * exchangeRate) : 0;
+    const monetaryBalance =
+      exchangeRate > 0
+        ? resolveSupplierPaymentMonetaryBalance({
+            totalYuan: Number(order.totalYuan),
+            exchangeRate,
+            payments: paymentInputs,
+          })
+        : null;
+    const supplierAmountCny = monetaryBalance?.obligationYuan ?? Number(order.totalYuan);
+    const approvedAmountKgs = monetaryBalance?.obligationKgs ?? (exchangeRate > 0 ? roundMoney(supplierAmountCny * exchangeRate) : 0);
     const requested = Number(order.requestedPaymentYuan ?? order.remainingYuan ?? order.totalYuan ?? 0);
-    const remainingYuan = Math.max(Number(order.totalYuan) - paidYuan, 0);
+    const remainingYuan = monetaryBalance?.remainingCny ?? Math.max(Number(order.totalYuan) - paidYuan, 0);
     const remainingKgs =
-      approvedAmountKgs > 0
+      monetaryBalance?.remainingKgs ??
+      (approvedAmountKgs > 0
         ? roundMoney(Math.max(approvedAmountKgs - paidKgs, 0))
-        : estimateKgsAmount(remainingYuan, 'CNY', exchangeRate);
-    const estimatedKgs =
-      approvedAmountKgs > 0
-        ? approvedAmountKgs
-        : estimateKgsAmount(requested, 'CNY', exchangeRate);
+        : estimateKgsAmount(remainingYuan, 'CNY', exchangeRate));
+    const estimatedKgs = approvedAmountKgs > 0 ? approvedAmountKgs : estimateKgsAmount(requested, 'CNY', exchangeRate);
     const status = mapSupplierInvoiceToUi({
       invoiceReviewStatus: order.invoiceReviewStatus,
       supplierPaymentStatus: order.supplierPaymentStatus,
       remainingYuan,
+      remainingKgs,
     });
     const due = order.expectedPaymentDate ? new Date(order.expectedPaymentDate) : null;
 
@@ -1232,7 +1266,7 @@ export class AccountantBillsService {
         exchangeRate,
         exchangeRateEditable,
         approvedAmountKgs,
-        supplierAmountCny: approvedYuan,
+        supplierAmountCny,
         paidAmountKgs: paidKgs,
         remainingAmountKgs: remainingKgs,
         paymentMethod: activeInfo?.paymentMethod ?? null,
@@ -1248,8 +1282,8 @@ export class AccountantBillsService {
           supplierPaymentStatus: order.supplierPaymentStatus,
         }),
         paymentStatus: resolveSupplierPaymentStatusLabel(
-          order.supplierPaymentStatus,
-          paidKgs,
+          status === 'FULLY_PAID' ? 'PAID' : order.supplierPaymentStatus,
+          monetaryBalance?.confirmedPaidKgs ?? paidKgs,
           approvedAmountKgs,
         ),
         returnReason: order.invoiceReturnReason ?? null,

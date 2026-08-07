@@ -416,7 +416,9 @@ function BillsToPayPageContent() {
   async function openSupplierPaymentModal(bill: BillDetail, mode: 'full' | 'partial') {
     const detail = bill.detail || {};
     const savedRate = Number(detail.exchangeRate || 0);
-    const remainingKgs = resolveBillRemainingForActions(bill);
+    const remainingKgs = Number(
+      detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? resolveBillRemainingForActions(bill),
+    );
     setSupplierPaymentModal({ bill, mode });
     setSupplierPaymentError('');
     setSupplierPaymentForm({
@@ -432,11 +434,13 @@ function BillsToPayPageContent() {
   function validateSupplierPaymentForm(bill: BillDetail) {
     const detail = bill.detail || {};
     const isCny = String(bill.currency || 'CNY').toUpperCase() === 'CNY';
-    const remainingKgs = resolveBillRemainingForActions(bill);
     const supplierAmountCny = Number(
       detail.supplierAmountCny ?? detail.totalYuan ?? bill.amount ?? 0,
     );
     const paidKgs = Number(detail.paidAmountKgs ?? bill.paidAmountKgs ?? 0);
+    const authoritativeRemainingKgs = Number(
+      detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? resolveBillRemainingForActions(bill),
+    );
 
     let exchangeRate: number | undefined;
     if (isCny) {
@@ -450,10 +454,14 @@ function BillsToPayPageContent() {
     const approvedKgs =
       isCny && exchangeRate != null
         ? previewCnyToKgs(supplierAmountCny, String(exchangeRate)) ?? 0
-        : remainingKgs;
-    const debtRemainingKgs = Math.max(approvedKgs - paidKgs, 0);
+        : authoritativeRemainingKgs;
+    const debtRemainingKgs = Math.max(
+      authoritativeRemainingKgs,
+      approvedKgs - paidKgs,
+      0,
+    );
 
-    let paymentAmountKgs = isCny ? debtRemainingKgs : remainingKgs;
+    let paymentAmountKgs = isCny ? debtRemainingKgs : authoritativeRemainingKgs;
     if (supplierPaymentModal?.mode === 'partial') {
       paymentAmountKgs = Number(supplierPaymentForm.paymentAmountKgs);
       if (!(paymentAmountKgs > 0)) {

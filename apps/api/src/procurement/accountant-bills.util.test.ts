@@ -112,6 +112,26 @@ assertEqual(
   'AWAITING_ACCOUNTANT',
   'supplier submitted unpaid awaits accountant',
 );
+assertEqual(
+  mapSupplierInvoiceToUi({
+    invoiceReviewStatus: 'APPROVED',
+    supplierPaymentStatus: 'PAID',
+    remainingYuan: 60000,
+    remainingKgs: 780000,
+  }),
+  'PARTIALLY_PAID',
+  'stale paid status with remaining maps to partially paid',
+);
+assertEqual(
+  mapSupplierInvoiceToUi({
+    invoiceReviewStatus: 'APPROVED',
+    supplierPaymentStatus: 'PAID',
+    remainingYuan: 0,
+    remainingKgs: 0,
+  }),
+  'FULLY_PAID',
+  'paid status with zero remaining stays fully paid',
+);
 assert(
   billsPage.includes('isCargoOrSupplierAccountantBill') ||
     billsPage.includes("source === 'SUPPLIER_INVOICE'"),
