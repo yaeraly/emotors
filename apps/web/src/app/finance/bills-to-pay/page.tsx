@@ -1883,7 +1883,7 @@ function DetailDrawer({
                         : '—'
                     }
                   />
-                  {!isChinaDomesticTransport ? (
+                  {!isChinaDomesticTransport && !isCargoPayment && !isKyrgyzstanTransport ? (
                     <Field
                       label={t('finance.billsToPay.comment')}
                       value={detail.comment || detail.expenseName || '—'}
