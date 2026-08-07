@@ -48,7 +48,7 @@ import {
 } from './accountant-bill-correction-routing.util';
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import { roundMoney } from './supplier-payment.util';
-import { isSupplierPaymentExchangeRateRevisionAllowed } from './supplier-payment-exchange-rate.util';
+import { isSupplierPaymentExchangeRateRevisionAllowed, resolveSupplierPaymentDialogDefaultExchangeRate } from './supplier-payment-exchange-rate.util';
 import { resolveSupplierPaymentMonetaryBalance } from './supplier-payment-balance.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { LandedCostService } from './landed-cost.service';
@@ -1191,6 +1191,19 @@ export class AccountantBillsService {
     const exchangeRateEditable = isSupplierPaymentExchangeRateRevisionAllowed(
       audits.map((row) => ({ action: row.action, timestamp: row.timestamp })),
     );
+    const exchangeRateDefaults = resolveSupplierPaymentDialogDefaultExchangeRate({
+      payments: order.supplierPayments.map((payment) => ({
+        exchangeRate: Number(payment.exchangeRate),
+        status: payment.status,
+        paidAt: payment.paidAt,
+        paymentDate: payment.paymentDate,
+        createdAt: payment.createdAt,
+        sentToCashierAt: payment.sentToCashierAt,
+      })),
+      defaultYuanRate: Number(order.defaultYuanRate || 0) || null,
+      weightedAverageYuanRate:
+        order.weightedAverageYuanRate != null ? Number(order.weightedAverageYuanRate) : null,
+    });
     const monetaryBalance =
       exchangeRate > 0
         ? resolveSupplierPaymentMonetaryBalance({
@@ -1269,6 +1282,8 @@ export class AccountantBillsService {
         remainingYuan,
         exchangeRate,
         exchangeRateEditable,
+        lastPaidExchangeRateCnyKgs: exchangeRateDefaults.lastPaidExchangeRateCnyKgs,
+        defaultExchangeRateCnyKgs: exchangeRateDefaults.defaultExchangeRateCnyKgs,
         approvedAmountKgs,
         supplierAmountCny,
         paidAmountKgs: paidKgs,

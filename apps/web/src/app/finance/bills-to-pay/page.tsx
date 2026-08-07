@@ -416,7 +416,10 @@ function BillsToPayPageContent() {
 
   async function openSupplierPaymentModal(bill: BillDetail, mode: 'full' | 'partial') {
     const detail = bill.detail || {};
-    const savedRate = Number(detail.exchangeRate || 0);
+    const defaultRate =
+      (typeof detail.defaultExchangeRateCnyKgs === 'string' &&
+        detail.defaultExchangeRateCnyKgs.trim()) ||
+      (Number(detail.exchangeRate || 0) > 0 ? String(detail.exchangeRate) : '');
     const remainingCny = Number(detail.remainingYuan ?? bill.remainingAmount ?? 0);
     const billActions = getCargoBillActionVisibility({
       uiStatus: bill.status,
@@ -429,15 +432,15 @@ function BillsToPayPageContent() {
       detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? resolveBillRemainingForActions(bill),
     );
     const initialPaymentKgs =
-      mode === 'full' && remainingCny > 0 && savedRate > 0
-        ? previewCnyToKgs(remainingCny, String(savedRate))
+      mode === 'full' && remainingCny > 0 && defaultRate
+        ? previewCnyToKgs(remainingCny, defaultRate)
         : mode === 'full' && remainingKgs > 0
           ? remainingKgs
           : null;
     setSupplierPaymentModal({ bill, mode, payRemainder });
     setSupplierPaymentError('');
     setSupplierPaymentForm({
-      exchangeRateCnyKgs: savedRate > 0 ? String(savedRate) : '',
+      exchangeRateCnyKgs: defaultRate,
       paymentAmountKgs:
         initialPaymentKgs != null && initialPaymentKgs > 0 ? String(initialPaymentKgs) : '',
       financeAccountId: detail.financeAccountId || detail.financeAccount?.id || '',

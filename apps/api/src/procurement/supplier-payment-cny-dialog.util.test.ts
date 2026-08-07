@@ -41,6 +41,10 @@ assert(service.includes('SUPPLIER_EXCHANGE_RATE_REVISED'), '12b. workflow writes
 assert(service.includes('allowRateRevision'), 'backend accepts revised rate after correction');
 assert(exchangeUtil.includes('calculateApprovedSupplierKgsFromRate'), '15. decimal backend calc');
 assert(service.includes('SUPPLIER_CNY_RATE_REQUIRED_MESSAGE'), '12c. backend Russian rate message');
+assert(accountantBills.includes('lastPaidExchangeRateCnyKgs'), 'last paid rate exposed in detail');
+assert(accountantBills.includes('defaultExchangeRateCnyKgs'), 'default dialog rate exposed in detail');
+assert(page.includes('defaultExchangeRateCnyKgs'), 'frontend prefills dialog rate on open');
+assert(exchangeUtil.includes('resolveLatestConfirmedSupplierPaymentExchangeRate'), 'latest paid rate resolver');
 assert(service.includes('resolveSupplierPayRemainderInstruction'), 'pay remainder uses remaining cny × rate');
 assert(service.includes('assertSupplierPartialPaymentWithinRemainingCny'), 'partial validates cny against cny');
 assert(page.includes('payRemainder'), 'frontend sends pay remainder flag');

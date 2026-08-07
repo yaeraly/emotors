@@ -2,7 +2,9 @@ import {
   calculateApprovedSupplierKgsFromRate,
   countSupplierExchangeRateRevisions,
   isSupplierPaymentExchangeRateRevisionAllowed,
+  resolveLatestConfirmedSupplierPaymentExchangeRate,
   resolveLockedSupplierExchangeRate,
+  resolveSupplierPaymentDialogDefaultExchangeRate,
   resolveSupplierPaymentExchangeRate,
   SUPPLIER_CNY_RATE_REQUIRED_MESSAGE,
 } from './supplier-payment-exchange-rate.util';
@@ -86,5 +88,55 @@ try {
   threw = error instanceof Error && error.message === SUPPLIER_CNY_RATE_REQUIRED_MESSAGE;
 }
 if (!threw) throw new Error('12. missing rate throws Russian message');
+
+assertEqual(
+  resolveLatestConfirmedSupplierPaymentExchangeRate([
+    { exchangeRate: 12.9, status: 'ACTIVE', paidAt: '2026-01-01T10:00:00Z' },
+  ]),
+  12.9,
+  '16. single confirmed payment prefills 12.90',
+);
+
+assertEqual(
+  resolveLatestConfirmedSupplierPaymentExchangeRate([
+    { exchangeRate: 12.9, status: 'ACTIVE', paidAt: '2026-01-01T10:00:00Z' },
+    { exchangeRate: 13.05, status: 'ACTIVE', paidAt: '2026-02-01T10:00:00Z' },
+  ]),
+  13.05,
+  '17. latest confirmed payment wins by paidAt',
+);
+
+assertEqual(
+  resolveLatestConfirmedSupplierPaymentExchangeRate([
+    { exchangeRate: 99, status: 'CANCELLED', paidAt: '2026-03-01T10:00:00Z' },
+    { exchangeRate: 12.9, status: 'ACTIVE', paidAt: '2026-01-01T10:00:00Z' },
+  ]),
+  12.9,
+  '18. cancelled payment rate ignored',
+);
+
+const noPayments = resolveSupplierPaymentDialogDefaultExchangeRate({
+  payments: [],
+  defaultYuanRate: 13,
+});
+assertEqual(noPayments.lastPaidExchangeRateCnyKgs, null, '19. no payments -> no last paid rate');
+assertEqual(noPayments.defaultExchangeRateCnyKgs, '13', '20. approved invoice rate used when unpaid');
+
+const twoPayments = resolveSupplierPaymentDialogDefaultExchangeRate({
+  payments: [
+    { exchangeRate: 12.9, status: 'ACTIVE', paidAt: '2026-01-01T10:00:00Z' },
+    { exchangeRate: 13.05, status: 'ACTIVE', paidAt: '2026-02-01T10:00:00Z' },
+  ],
+  defaultYuanRate: 13,
+});
+assertEqual(twoPayments.lastPaidExchangeRateCnyKgs, '13.05', '21. dialog exposes last paid rate');
+assertEqual(twoPayments.defaultExchangeRateCnyKgs, '13.05', '22. dialog default uses last paid rate');
+
+const inFlightOnly = resolveSupplierPaymentDialogDefaultExchangeRate({
+  payments: [{ exchangeRate: 12.8, status: 'PENDING_CASHIER', sentToCashierAt: '2026-01-01T10:00:00Z' }],
+  defaultYuanRate: 13,
+});
+assertEqual(inFlightOnly.lastPaidExchangeRateCnyKgs, null, '23. in-flight is not last paid');
+assertEqual(inFlightOnly.defaultExchangeRateCnyKgs, '12.8', '24. in-flight rate used before invoice rate');
 
 console.log('supplier-payment-exchange-rate.util.test.ts passed');

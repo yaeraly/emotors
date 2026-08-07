@@ -1,5 +1,5 @@
 import { roundMoneyDecimal, toMoneyDecimal } from './landed-cost-money.util';
-import { roundMoney } from './supplier-payment.util';
+import { isConfirmedSupplierPayment, roundMoney } from './supplier-payment.util';
 
 export const SUPPLIER_CNY_RATE_REQUIRED_MESSAGE = 'Укажите курс CNY → KGS.';
 
@@ -116,4 +116,110 @@ export function countSupplierExchangeRateRevisions(
 ): number {
   return audits.filter((row) => String(row.action ?? '').toUpperCase() === 'SUPPLIER_EXCHANGE_RATE_REVISED')
     .length;
+}
+
+const IN_FLIGHT_SUPPLIER_PAYMENT_STATUSES = new Set(['PENDING_CASHIER', 'DRAFT']);
+
+export type SupplierPaymentExchangeRateHistoryInput = {
+  exchangeRate?: number | string | null;
+  status?: string | null;
+  paidAt?: Date | string | null;
+  paymentDate?: Date | string | null;
+  createdAt?: Date | string | null;
+  sentToCashierAt?: Date | string | null;
+};
+
+function toExchangeRateTimestamp(value?: Date | string | null): number {
+  if (!value) return 0;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+export function formatSupplierExchangeRateString(rate: number): string | null {
+  if (!(rate > 0)) return null;
+  const rounded = roundMoney(rate, 4);
+  if (Number.isInteger(rounded)) return String(rounded);
+  return rounded.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function compareConfirmedPaymentRateRecency(
+  left: SupplierPaymentExchangeRateHistoryInput,
+  right: SupplierPaymentExchangeRateHistoryInput,
+): number {
+  const leftTime = Math.max(
+    toExchangeRateTimestamp(left.paidAt),
+    toExchangeRateTimestamp(left.paymentDate),
+    toExchangeRateTimestamp(left.createdAt),
+  );
+  const rightTime = Math.max(
+    toExchangeRateTimestamp(right.paidAt),
+    toExchangeRateTimestamp(right.paymentDate),
+    toExchangeRateTimestamp(right.createdAt),
+  );
+  return rightTime - leftTime;
+}
+
+/** Latest confirmed/paid payment rate for the same invoice, ordered by paidAt/paymentDate/createdAt. */
+export function resolveLatestConfirmedSupplierPaymentExchangeRate(
+  payments: SupplierPaymentExchangeRateHistoryInput[],
+): number | null {
+  const latest = payments
+    .filter((payment) => isConfirmedSupplierPayment(payment.status))
+    .filter((payment) => Number(payment.exchangeRate || 0) > 0)
+    .sort(compareConfirmedPaymentRateRecency);
+  const rate = latest[0] ? Number(latest[0].exchangeRate) : 0;
+  return rate > 0 ? roundMoney(rate, 4) : null;
+}
+
+export function resolveInFlightSupplierPaymentExchangeRate(
+  payments: SupplierPaymentExchangeRateHistoryInput[],
+): number | null {
+  const latest = payments
+    .filter((payment) =>
+      IN_FLIGHT_SUPPLIER_PAYMENT_STATUSES.has(String(payment.status ?? '').toUpperCase()),
+    )
+    .filter((payment) => Number(payment.exchangeRate || 0) > 0)
+    .sort((left, right) => {
+      const leftTime = Math.max(
+        toExchangeRateTimestamp(left.sentToCashierAt),
+        toExchangeRateTimestamp(left.createdAt),
+      );
+      const rightTime = Math.max(
+        toExchangeRateTimestamp(right.sentToCashierAt),
+        toExchangeRateTimestamp(right.createdAt),
+      );
+      return rightTime - leftTime;
+    });
+  const rate = latest[0] ? Number(latest[0].exchangeRate) : 0;
+  return rate > 0 ? roundMoney(rate, 4) : null;
+}
+
+export function resolveApprovedSupplierInvoiceExchangeRate(input: {
+  defaultYuanRate?: number | string | null;
+  weightedAverageYuanRate?: number | string | null;
+}): number | null {
+  const rate = Number(input.defaultYuanRate || input.weightedAverageYuanRate || 0);
+  return rate > 0 ? roundMoney(rate, 4) : null;
+}
+
+export function resolveSupplierPaymentDialogDefaultExchangeRate(input: {
+  payments: SupplierPaymentExchangeRateHistoryInput[];
+  defaultYuanRate?: number | string | null;
+  weightedAverageYuanRate?: number | string | null;
+}): {
+  lastPaidExchangeRateCnyKgs: string | null;
+  defaultExchangeRateCnyKgs: string | null;
+} {
+  const lastPaidRate = resolveLatestConfirmedSupplierPaymentExchangeRate(input.payments);
+  const fallbackRate =
+    lastPaidRate ??
+    resolveInFlightSupplierPaymentExchangeRate(input.payments) ??
+    resolveApprovedSupplierInvoiceExchangeRate(input);
+
+  return {
+    lastPaidExchangeRateCnyKgs:
+      lastPaidRate != null ? formatSupplierExchangeRateString(lastPaidRate) : null,
+    defaultExchangeRateCnyKgs:
+      fallbackRate != null ? formatSupplierExchangeRateString(fallbackRate) : null,
+  };
 }
