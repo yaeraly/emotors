@@ -92,10 +92,11 @@ import {
   SUPPLIER_PAYMENT_EXCEEDS_REMAINING_MESSAGE,
 } from './supplier-payment-correction.util';
 import {
+  assertSupplierPartialPaymentWithinRemainingCny,
   assertSupplierPaymentHasRemainingBalance,
-  deriveSupplierPaymentYuanFromKgs,
   resolveReconciledSupplierPaymentLedgerStatus,
-  resolveSupplierPaymentInstructionAmountKgs,
+  resolveSupplierPartialPaymentInstruction,
+  resolveSupplierPayRemainderInstruction,
   resolveSupplierPaymentMonetaryBalance,
   SUPPLIER_ALREADY_FULLY_PAID_MESSAGE,
 } from './supplier-payment-balance.util';
@@ -1066,6 +1067,8 @@ export class SupplierPaymentWorkflowService {
       accountantComment?: string;
       exchangeRateCnyKgs?: number;
       idempotencyKey?: string;
+      payRemainder?: boolean;
+      partialPayment?: boolean;
     },
   ) {
     if (!canProcessHqCargoPayment(user)) {
@@ -1242,25 +1245,40 @@ export class SupplierPaymentWorkflowService {
       const approvedYuan = monetaryBalance.obligationYuan;
       const approvedAmountKgs = monetaryBalance.obligationKgs;
       const alreadyPaidKgs = monetaryBalance.confirmedPaidKgs;
+      const remainingCny = monetaryBalance.remainingCny;
       const remainingKgs = monetaryBalance.remainingKgs;
+      const isPartialPayment = dto.partialPayment === true;
 
-      const instructionAmountKgs = resolveSupplierPaymentInstructionAmountKgs({
-        requestedAmountKgs: dto.paymentAmountKgs,
-        remainingAmountKgs: remainingKgs,
-      });
-      if (!(instructionAmountKgs > 0)) {
-        throw new BadRequestException('Сумма платежа должна быть больше нуля.');
-      }
-      if (instructionAmountKgs > remainingKgs + 0.009) {
-        throw new BadRequestException('Сумма частичного платежа превышает остаток.');
-      }
-
-      const amountYuan = deriveSupplierPaymentYuanFromKgs({
-        amountKgs: instructionAmountKgs,
-        exchangeRate: authoritativeRate,
-      });
-      if (!(amountYuan > 0)) {
-        throw new BadRequestException('Payment CNY amount must be greater than zero');
+      let amountYuan: number;
+      let instructionAmountKgs: number;
+      if (isPartialPayment) {
+        const partialInstruction = resolveSupplierPartialPaymentInstruction({
+          requestedAmountKgs: dto.paymentAmountKgs,
+          remainingCny,
+          exchangeRate: authoritativeRate,
+        });
+        amountYuan = partialInstruction.amountYuan;
+        instructionAmountKgs = partialInstruction.amountKgs;
+        if (!(instructionAmountKgs > 0) || !(amountYuan > 0)) {
+          throw new BadRequestException('Сумма платежа должна быть больше нуля.');
+        }
+        try {
+          assertSupplierPartialPaymentWithinRemainingCny({ amountYuan, remainingCny });
+        } catch (error) {
+          throw new BadRequestException(
+            error instanceof Error ? error.message : 'Сумма частичного платежа превышает остаток.',
+          );
+        }
+      } else {
+        const remainderInstruction = resolveSupplierPayRemainderInstruction({
+          remainingCny,
+          exchangeRate: authoritativeRate,
+        });
+        amountYuan = remainderInstruction.amountYuan;
+        instructionAmountKgs = remainderInstruction.amountKgs;
+        if (!(instructionAmountKgs > 0) || !(amountYuan > 0)) {
+          throw new BadRequestException('Сумма платежа должна быть больше нуля.');
+        }
       }
 
       const account = await this.assertHqFinanceAccount(tx, dto.financeAccountId);
@@ -1389,7 +1407,7 @@ export class SupplierPaymentWorkflowService {
       });
 
       const synced = await this.syncOrderPaymentState(tx, user, order.id, 'Supplier payment sent to HQ Cashier');
-      const isPartialInstruction = instructionAmountKgs + 0.009 < remainingKgs;
+      const isPartialInstruction = amountYuan + 0.009 < remainingCny;
       const auditPayload = {
         supplierPaymentId: payment.id,
         invoiceId: order.id,
@@ -1397,8 +1415,12 @@ export class SupplierPaymentWorkflowService {
         action: isPartialInstruction ? 'PARTIAL' : 'FULL',
         approvedAmount: approvedAmountKgs,
         paymentAmount: instructionAmountKgs,
+        paymentAmountCny: amountYuan,
         paidAmount: alreadyPaidKgs,
+        paidAmountCny: monetaryBalance.confirmedPaidCny,
         remainingAmount: remainingKgs,
+        remainingAmountCny: remainingCny,
+        payRemainder: dto.payRemainder === true,
         previousStatus: order.supplierPaymentStatus,
         newStatus: synced.supplierPaymentStatus,
         accountId: account.id,

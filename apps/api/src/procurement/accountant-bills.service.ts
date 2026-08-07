@@ -410,6 +410,8 @@ export class AccountantBillsService {
       exchangeRateCnyKgs?: number;
       paidAt?: string;
       idempotencyKey?: string;
+      payRemainder?: boolean;
+      partialPayment?: boolean;
     },
   ) {
     this.assertAccountant(user);
@@ -424,6 +426,8 @@ export class AccountantBillsService {
         exchangeRateCnyKgs:
           body.exchangeRateCnyKgs != null ? Number(body.exchangeRateCnyKgs) : undefined,
         idempotencyKey: body.idempotencyKey,
+        payRemainder: body.payRemainder === true,
+        partialPayment: body.partialPayment === true,
       });
       await this.prisma.$transaction(async (tx) => {
         const order = await tx.procurementOrder.findFirst({

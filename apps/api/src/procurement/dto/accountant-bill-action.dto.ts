@@ -1,4 +1,4 @@
-import { IsDateString, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsDateString, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class PostponeBillPaymentDto {
@@ -40,6 +40,14 @@ export class PayBillCargoDto {
   @IsOptional()
   @IsString()
   idempotencyKey?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  payRemainder?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  partialPayment?: boolean;
 }
 
 export class ReturnBillForCorrectionDto {

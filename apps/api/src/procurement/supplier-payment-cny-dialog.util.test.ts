@@ -41,6 +41,10 @@ assert(service.includes('SUPPLIER_EXCHANGE_RATE_REVISED'), '12b. workflow writes
 assert(service.includes('allowRateRevision'), 'backend accepts revised rate after correction');
 assert(exchangeUtil.includes('calculateApprovedSupplierKgsFromRate'), '15. decimal backend calc');
 assert(service.includes('SUPPLIER_CNY_RATE_REQUIRED_MESSAGE'), '12c. backend Russian rate message');
-assert(service.includes('defaultYuanRate: authoritativeRate'), '13. rate persisted on order');
+assert(service.includes('resolveSupplierPayRemainderInstruction'), 'pay remainder uses remaining cny × rate');
+assert(service.includes('assertSupplierPartialPaymentWithinRemainingCny'), 'partial validates cny against cny');
+assert(page.includes('payRemainder'), 'frontend sends pay remainder flag');
+assert(page.includes('remainingCny'), 'pay remainder dialog shows remaining cny');
+assert(page.includes('finance.billsToPay.payRemainder'), 'pay remainder dialog title');
 
 console.log('supplier-payment-cny-dialog.util.test.ts passed');

@@ -115,6 +115,56 @@ export function deriveSupplierPaymentYuanFromKgs(input: {
   );
 }
 
+export type SupplierPayRemainderInstruction = {
+  amountYuan: number;
+  amountKgs: number;
+};
+
+/** Full payment or pay-remainder: CNY balance is authoritative, KGS = remaining CNY × rate. */
+export function resolveSupplierPayRemainderInstruction(input: {
+  remainingCny: number;
+  exchangeRate: number;
+}): SupplierPayRemainderInstruction {
+  const remainingCny = roundMoneyDecimal(Math.max(0, Number(input.remainingCny || 0)));
+  const rate = Number(input.exchangeRate || 0);
+  if (!(remainingCny > 0) || !(rate > 0)) {
+    return { amountYuan: 0, amountKgs: 0 };
+  }
+  const amountKgs = roundMoneyDecimal(
+    toMoneyDecimal(remainingCny).times(toMoneyDecimal(rate)),
+  );
+  return { amountYuan: remainingCny, amountKgs };
+}
+
+export function resolveSupplierPartialPaymentInstruction(input: {
+  requestedAmountKgs: number;
+  remainingCny: number;
+  exchangeRate: number;
+}): SupplierPayRemainderInstruction {
+  const requestedKgs = roundMoneyDecimal(Number(input.requestedAmountKgs || 0));
+  const remainingCny = roundMoneyDecimal(Math.max(0, Number(input.remainingCny || 0)));
+  const rate = Number(input.exchangeRate || 0);
+  if (!(requestedKgs > 0) || !(rate > 0)) {
+    return { amountYuan: 0, amountKgs: 0 };
+  }
+  const amountYuan = deriveSupplierPaymentYuanFromKgs({
+    amountKgs: requestedKgs,
+    exchangeRate: rate,
+  });
+  return { amountYuan, amountKgs: requestedKgs };
+}
+
+export function assertSupplierPartialPaymentWithinRemainingCny(input: {
+  amountYuan: number;
+  remainingCny: number;
+}): void {
+  const amountYuan = roundMoneyDecimal(Number(input.amountYuan || 0));
+  const remainingCny = roundMoneyDecimal(Math.max(0, Number(input.remainingCny || 0)));
+  if (amountYuan > remainingCny + 0.009) {
+    throw new Error('Сумма частичного платежа превышает остаток.');
+  }
+}
+
 export function assertSupplierPaymentHasRemainingBalance(
   balance: SupplierPaymentMonetaryBalance,
 ): void {

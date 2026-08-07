@@ -1,9 +1,12 @@
 import { ProcurementSupplierPaymentLedgerStatus } from '@prisma/client';
 import {
+  assertSupplierPartialPaymentWithinRemainingCny,
   assertSupplierPaymentHasRemainingBalance,
   deriveSupplierPaymentYuanFromKgs,
   isSupplierCashierRequestKgsPrecisionDrift,
   resolveReconciledSupplierPaymentLedgerStatus,
+  resolveSupplierPartialPaymentInstruction,
+  resolveSupplierPayRemainderInstruction,
   resolveSupplierPaymentInstructionAmountKgs,
   resolveSupplierPaymentMonetaryBalance,
   SUPPLIER_ALREADY_FULLY_PAID_MESSAGE,
@@ -155,5 +158,50 @@ const afterPartial = resolveSupplierPaymentMonetaryBalance({
   payments: [{ amountYuan: 100000, exchangeRate: 1, amountKgs: 100000, status: 'ACTIVE' }],
 });
 assertClose(afterPartial.remainingKgs, 400000, '5. partial payment remaining uses decimal subtraction');
+
+const payRemainderInstruction = resolveSupplierPayRemainderInstruction({
+  remainingCny: 13393.06,
+  exchangeRate: 13,
+});
+assertClose(payRemainderInstruction.amountYuan, 13393.06, '13. pay remainder uses remaining cny');
+assertClose(payRemainderInstruction.amountKgs, 174109.78, '14. pay remainder kgs = remaining cny × rate');
+assertClose(60000 * 13, 780000, '14b. total cny × rate is not used for pay remainder');
+if (Math.abs(payRemainderInstruction.amountKgs - 60000 * 13) < 1) {
+  throw new Error('14c. pay remainder must not equal total cny × rate');
+}
+
+const partialPayRemainderBalance = resolveSupplierPaymentMonetaryBalance({
+  totalYuan: 60000,
+  exchangeRate: 13,
+  payments: [
+    { amountYuan: 20000, exchangeRate: 12.9, amountKgs: 258000, status: 'ACTIVE' },
+    { amountYuan: 26606.94, exchangeRate: 13.05, amountKgs: 347220.57, status: 'ACTIVE' },
+  ],
+});
+assertClose(partialPayRemainderBalance.confirmedPaidCny, 46606.94, '15. confirmed paid cny');
+assertClose(partialPayRemainderBalance.remainingCny, 13393.06, '16. remaining cny');
+const closingInstruction = resolveSupplierPayRemainderInstruction({
+  remainingCny: partialPayRemainderBalance.remainingCny,
+  exchangeRate: 13,
+});
+assertClose(closingInstruction.amountKgs, 174109.78, '17. closing payment kgs from remaining cny × rate');
+
+const partialInstruction = resolveSupplierPartialPaymentInstruction({
+  requestedAmountKgs: 100000,
+  remainingCny: partialPayRemainderBalance.remainingCny,
+  exchangeRate: 13,
+});
+assertClose(partialInstruction.amountYuan, 7692.31, '18. partial derives cny from kgs');
+let threwPartialOverLimit = false;
+try {
+  assertSupplierPartialPaymentWithinRemainingCny({
+    amountYuan: partialInstruction.amountYuan,
+    remainingCny: 5000,
+  });
+} catch (error) {
+  threwPartialOverLimit =
+    error instanceof Error && error.message === 'Сумма частичного платежа превышает остаток.';
+}
+if (!threwPartialOverLimit) throw new Error('19. partial over-limit uses cny validation');
 
 console.log('supplier-payment-balance.util.test.ts passed');
