@@ -67,6 +67,17 @@ export type CashierBillListItem = {
   href: string;
 };
 
+export const CASHIER_PROCUREMENT_IMPORT_REQUEST_TYPES = new Set<CashierBillRequestType>([
+  'SUPPLIER_PAYMENT',
+  'CHINA_DOMESTIC_TRANSPORT',
+  'CARGO_PAYMENT',
+  'KYRGYZSTAN_DOMESTIC_TRANSPORT',
+]);
+
+export function canCashierReportPaymentFailure(requestType: string): boolean {
+  return !CASHIER_PROCUREMENT_IMPORT_REQUEST_TYPES.has(requestType as CashierBillRequestType);
+}
+
 export function resolveTransportExpenseAmounts(expense: {
   amountKgs?: unknown;
   amount?: unknown;

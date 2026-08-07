@@ -8,6 +8,7 @@ import { HqPaymentPermanentDeleteModal, type HqPaymentDeleteSummary } from '@/co
 import { API_URL, apiFetch, apiUpload } from '@/lib/api';
 import { mapFetchError, mapReceiptUploadError } from '@/lib/fetch-errors.util';
 import { canConfirmSupplierPayment, canPermanentDeleteBusinessData } from '@/lib/rbac';
+import { canCashierReportPaymentFailure } from '@/lib/cashier-bill-actions';
 import type { User } from '@/lib/types';
 import { useTranslation } from '@/i18n/useTranslation';
 
@@ -920,7 +921,7 @@ function CashierBillsPageContent() {
                 const canFail =
                   !busy &&
                   awaitingCashierInstruction &&
-                  row.requestType !== 'CHINA_DOMESTIC_TRANSPORT';
+                  canCashierReportPaymentFailure(row.requestType);
                 if (!canStart && !canConfirm && !canReturn && !canFail) return null;
                 return (
                   <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-200 pt-4">

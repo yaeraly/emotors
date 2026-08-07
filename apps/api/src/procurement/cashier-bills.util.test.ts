@@ -46,6 +46,11 @@ const cashierPage = readFileSync(
   join(__dirname, '../../../web/src/app/finance/cashier-bills/page.tsx'),
   'utf8',
 );
+const cashierBillActions = readFileSync(
+  join(__dirname, '../../../web/src/lib/cashier-bill-actions.ts'),
+  'utf8',
+);
+const cashierBillsUtil = readFileSync(join(__dirname, './cashier-bills.util.ts'), 'utf8');
 const legacyPage = readFileSync(
   join(__dirname, '../../../web/src/app/procurement/cashier-payments/page.tsx'),
   'utf8',
@@ -104,9 +109,21 @@ assert(controller.includes("cashier-bills/:source/:id/return"), '19. return to a
 assert(service.includes('RETURNED_TO_ACCOUNTANT'), '19. returned execution status');
 assert(controller.includes("cashier-bills/:source/:id/fail"), '21. fail endpoint');
 assert(
-  cashierPage.includes("row.requestType !== 'CHINA_DOMESTIC_TRANSPORT'"),
-  'china domestic transport hides report-failure action in cashier detail',
+  cashierPage.includes('canCashierReportPaymentFailure'),
+  'procurement/import types hide report-failure action in cashier detail',
 );
+assert(
+  cashierPage.includes("canCashierReportPaymentFailure(row.requestType)"),
+  'shared helper gates report-failure button',
+);
+assert(
+  cashierBillActions.includes('SUPPLIER_PAYMENT') &&
+    cashierBillActions.includes('CHINA_DOMESTIC_TRANSPORT') &&
+    cashierBillActions.includes('CARGO_PAYMENT') &&
+    cashierBillActions.includes('KYRGYZSTAN_DOMESTIC_TRANSPORT'),
+  'all four procurement/import types excluded from fail action',
+);
+assert(cashierPage.includes("finance.cashierBills.return"), '5. return action remains');
 assert(service.includes('CASHIER_PAYMENT_FAILED'), '21. failed payment notifies accountant, no ledger in fail path');
 assert(!service.includes("postLedgerEntry"), '21. fail path does not create finance transaction in cashier service');
 
