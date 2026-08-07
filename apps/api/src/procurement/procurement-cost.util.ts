@@ -316,6 +316,41 @@ function expenseAmountKgs(expense: SectionExpenseCostInput, estimatedYuanRate: n
   return roundMoneyDecimal(amount.mul(rate));
 }
 
+/** Convert a procurement section budget scalar to KGS for landed-cost caps. */
+export function resolveSectionBudgetCapKgs(input: {
+  sectionTotalAmount?: number | null;
+  sectionCurrency?: string | null;
+  estimatedYuanRate: number;
+}): number | null {
+  const amount = Number(input.sectionTotalAmount || 0);
+  if (!(amount > 0)) return null;
+  const currency = String(input.sectionCurrency || 'KGS').toUpperCase();
+  if (currency === 'CNY') {
+    return roundMoneyDecimal(
+      toMoneyDecimal(amount).mul(toMoneyDecimal(Math.max(0, input.estimatedYuanRate))),
+    );
+  }
+  return roundMoneyDecimal(amount);
+}
+
+function sumApprovedExpenseRowsAmountKgs(
+  expenses: SectionExpenseCostInput[],
+  estimatedYuanRate: number,
+): { summed: number; amounts: number[]; approvedCount: number } {
+  const deduped = dedupeSectionExpensesById(expenses);
+  const amounts: number[] = [];
+  for (const row of deduped) {
+    const status = String(row.status ?? '').toUpperCase();
+    if (!isExpenseApprovedForLandedCost(status)) continue;
+    amounts.push(expenseAmountKgs(row, estimatedYuanRate));
+  }
+  return {
+    summed: roundMoneyDecimal(amounts.reduce((sum, value) => sum + value, 0)),
+    amounts,
+    approvedCount: amounts.length,
+  };
+}
+
 /**
  * Sum approved invoice obligation amounts in inventory base currency (KGS).
  * Uses the full approved/requested amount — never the cash already paid.
@@ -326,13 +361,39 @@ export function sumConfirmedExpenseAmountKgs(
   expenses: SectionExpenseCostInput[],
   estimatedYuanRate: number,
 ): number {
-  return roundMoneyDecimal(
-    dedupeSectionExpensesById(expenses).reduce((sum, row) => {
-      const status = String(row.status ?? '').toUpperCase();
-      if (!isExpenseApprovedForLandedCost(status)) return sum;
-      return sum + expenseAmountKgs(row, estimatedYuanRate);
-    }, 0),
-  );
+  return sumApprovedExpenseRowsAmountKgs(expenses, estimatedYuanRate).summed;
+}
+
+/**
+ * Sum approved section expenses for landed cost, capped at the section budget.
+ * Prevents duplicate full-section invoices (e.g. 3× 600 CNY china transport) from
+ * inflating inventory cost while still allowing intentional partial payments.
+ */
+export function sumSectionConfirmedExpenseAmountKgs(
+  expenses: SectionExpenseCostInput[],
+  estimatedYuanRate: number,
+  options?: {
+    sectionTotalAmount?: number | null;
+    sectionCurrency?: string | null;
+  },
+): number {
+  const { summed, amounts } = sumApprovedExpenseRowsAmountKgs(expenses, estimatedYuanRate);
+  const cap = resolveSectionBudgetCapKgs({
+    sectionTotalAmount: options?.sectionTotalAmount,
+    sectionCurrency: options?.sectionCurrency,
+    estimatedYuanRate,
+  });
+  if (cap == null || !(cap > 0)) return summed;
+  if (summed <= cap + 0.009) return summed;
+
+  if (amounts.length > 1) {
+    const first = amounts[0] ?? 0;
+    const identicalFullSectionDuplicates =
+      amounts.every((value) => Math.abs(value - first) <= 0.05) && Math.abs(first - cap) <= 0.05;
+    if (identicalFullSectionDuplicates) return cap;
+  }
+
+  return Math.min(summed, cap);
 }
 
 /**
@@ -503,6 +564,9 @@ export function buildProcurementImportExpenseLines(input: {
     paidAmountKgs?: number | string | null;
     status: string;
   }>;
+  sectionBudgets?: Partial<
+    Record<string, { totalAmount?: number | null; currency?: string | null }>
+  >;
 }): ProcurementImportExpenseLine[] {
   const rate = Math.max(0, Number(input.estimatedYuanRate || 0));
   const expenses = input.transportExpenses ?? [];
@@ -530,7 +594,11 @@ export function buildProcurementImportExpenseLines(input: {
     defaultCurrency: string,
   ): ProcurementImportExpenseLine {
     const rows = byType(expenseType);
-    const approvedAmountKgs = sumConfirmedExpenseAmountKgs(rows, rate);
+    const sectionBudget = input.sectionBudgets?.[expenseType];
+    const approvedAmountKgs = sumSectionConfirmedExpenseAmountKgs(rows, rate, {
+      sectionTotalAmount: sectionBudget?.totalAmount,
+      sectionCurrency: sectionBudget?.currency ?? defaultCurrency,
+    });
     const dominant = rows.find((row) => isExpenseApprovedForLandedCost(row.status)) ?? rows[0];
     const approvalStatus: ProcurementImportExpenseLine['approvalStatus'] =
       rows.length === 0

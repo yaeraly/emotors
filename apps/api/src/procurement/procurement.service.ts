@@ -81,6 +81,7 @@ import {
 import {
   buildProcurementImportExpenseLines,
   sumConfirmedExpenseAmountKgs,
+  sumSectionConfirmedExpenseAmountKgs,
   hasApprovedSectionExpenses,
   resolveSectionCostKgsFromApprovedExpenses,
 } from './procurement-cost.util';
@@ -3796,17 +3797,31 @@ export class ProcurementService {
       paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
       status: row.status,
     });
-    const confirmedCargoFromExpenses = sumConfirmedExpenseAmountKgs(
+    const confirmedCargoFromExpenses = sumSectionConfirmedExpenseAmountKgs(
       cargoExpenseRows.map(mapExpenseCostRow),
       estimatedRate,
+      {
+        sectionTotalAmount: Number(order.totalCargoCostKgs ?? 0),
+        sectionCurrency: 'KGS',
+      },
     );
-    const confirmedChinaFromExpenses = sumConfirmedExpenseAmountKgs(
+    const confirmedChinaFromExpenses = sumSectionConfirmedExpenseAmountKgs(
       chinaExpenseRows.map(mapExpenseCostRow),
       estimatedRate,
+      {
+        sectionTotalAmount: Number(order.chinaDomesticTransportYuan ?? 0),
+        sectionCurrency: 'CNY',
+      },
     );
-    const confirmedLocalFromExpenses = sumConfirmedExpenseAmountKgs(
+    const confirmedLocalFromExpenses = sumSectionConfirmedExpenseAmountKgs(
       localExpenseRows.map(mapExpenseCostRow),
       estimatedRate,
+      {
+        sectionTotalAmount: Number(
+          order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
+        ),
+        sectionCurrency: 'KGS',
+      },
     );
     const confirmedCargoPaymentKgs = confirmedCargoFromExpenses;
     const chinaDomesticKgs = resolveSectionCostKgsFromApprovedExpenses({
@@ -3837,6 +3852,22 @@ export class ProcurementService {
         estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
       },
       transportExpenses: order.transportExpenses ?? [],
+      sectionBudgets: {
+        DOMESTIC_CHINA_TRANSPORT: {
+          totalAmount: Number(order.chinaDomesticTransportYuan ?? 0),
+          currency: 'CNY',
+        },
+        INTERNATIONAL_FREIGHT: {
+          totalAmount: Number(order.totalCargoCostKgs ?? 0),
+          currency: 'KGS',
+        },
+        LOCAL_DELIVERY: {
+          totalAmount: Number(
+            order.localTransportKgs ?? order.svhToHqTransport?.transportCostKgs ?? 0,
+          ),
+          currency: 'KGS',
+        },
+      },
     });
     const customsCostKgs = Number(order.customsCostKgs || 0);
     const insuranceCostKgs = Number(order.insuranceCostKgs || 0);

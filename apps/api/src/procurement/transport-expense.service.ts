@@ -55,7 +55,7 @@ import {
   assertCargoTotalsMatchServer,
   calculateCargoPaymentAmounts,
 } from './cargo-payment-calc.util';
-import { estimateSectionExpenseCostKgs, sumConfirmedExpenseAmountKgs, hasApprovedSectionExpenses, resolveSectionCostKgsFromApprovedExpenses, isExpenseApprovedForLandedCost, resolveTransportExpensePaymentStatus } from './procurement-cost.util';
+import { estimateSectionExpenseCostKgs, sumConfirmedExpenseAmountKgs, sumSectionConfirmedExpenseAmountKgs, hasApprovedSectionExpenses, resolveSectionCostKgsFromApprovedExpenses, isExpenseApprovedForLandedCost, resolveTransportExpensePaymentStatus } from './procurement-cost.util';
 import {
   blocksNewSectionRequest,
   hasActiveSectionRequest,
@@ -2278,7 +2278,12 @@ export class TransportExpenseService {
       paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
       status: row.status,
     }));
-    const confirmedKgs = sumConfirmedExpenseAmountKgs(siblingCostRows, estimatedRate);
+    const sectionCurrency =
+      expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT ? 'CNY' : 'KGS';
+    const confirmedKgs = sumSectionConfirmedExpenseAmountKgs(siblingCostRows, estimatedRate, {
+      sectionTotalAmount: sectionTotal,
+      sectionCurrency,
+    });
     const hasApprovedRows = hasApprovedSectionExpenses(siblingCostRows);
 
     const data: Prisma.ProcurementOrderUpdateInput = {};

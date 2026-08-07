@@ -7,6 +7,7 @@ import {
   dedupeSectionExpensesById,
   resolveSectionCostKgsFromApprovedExpenses,
   sumConfirmedExpenseAmountKgs,
+  sumSectionConfirmedExpenseAmountKgs,
 } from './procurement-cost.util';
 import { calculateLandedCosts } from './landed-cost.util';
 
@@ -187,18 +188,12 @@ function chinaExpense(
   assertEqual(approved === CHINA_KGS * 2, false, '9. cost not approved+paid');
 }
 
-// 10. Three duplicate expense records must not yield 23,400 KGS
+// 10. Three duplicate expense records must cap at section budget (7,800 KGS)
 {
   const duplicates = [1, 2, 3].map((n) =>
     chinaExpense({ id: `dup-${n}`, status: TransportExpenseStatus.PAID, paidAmountKgs: CHINA_KGS }),
   );
-  const beforeFixSum = duplicates.reduce((sum, row) => {
-    if (row.status !== TransportExpenseStatus.PAID) return sum;
-    return sum + Number(row.amountKgs);
-  }, 0);
-  assertClose(beforeFixSum, 23400, '10. naive sum shows bug');
-
-  const fixed = sumConfirmedExpenseAmountKgs(
+  const rawSum = sumConfirmedExpenseAmountKgs(
     duplicates.map((row) => ({
       id: row.id,
       amount: row.amount,
@@ -210,17 +205,33 @@ function chinaExpense(
     })),
     CHINA_RATE,
   );
-  // Distinct ids still sum — repair cancels duplicate DB rows; authoritative resolver uses approved sum.
-  assertClose(fixed, 23400, '10. distinct duplicate ids still sum until data repair');
+  assertClose(rawSum, 23400, '10. raw sum shows triple expense rows');
+
+  const capped = sumSectionConfirmedExpenseAmountKgs(
+    duplicates.map((row) => ({
+      id: row.id,
+      amount: row.amount,
+      currency: row.currency,
+      exchangeRate: row.exchangeRate,
+      amountKgs: row.amountKgs,
+      paidAmountKgs: row.paidAmountKgs,
+      status: row.status,
+    })),
+    CHINA_RATE,
+    { sectionTotalAmount: CHINA_CNY, sectionCurrency: 'CNY' },
+  );
+  assertClose(capped, CHINA_KGS, '10. section cap returns 7800');
 
   const lines = buildProcurementImportExpenseLines({
     estimatedYuanRate: CHINA_RATE,
     transportExpenses: duplicates,
+    sectionBudgets: {
+      DOMESTIC_CHINA_TRANSPORT: { totalAmount: CHINA_CNY, currency: 'CNY' },
+    },
   });
   const chinaLine = lines.find((row) => row.requestType === 'CHINA_DOMESTIC_TRANSPORT');
   if (!chinaLine) throw new Error('10. china line missing');
-  // With distinct ids the sum is still wrong until duplicates are voided in DB repair.
-  assertClose(chinaLine.approvedAmountKgs, 23400, '10. three distinct expenses sum (needs repair)');
+  assertClose(chinaLine.approvedAmountKgs, CHINA_KGS, '10. UI line shows 7800');
 }
 
 // 10b. Stale inflated order scalar must not override deduped approved expense total

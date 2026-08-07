@@ -14,7 +14,9 @@ import {
   hasApprovedSectionExpenses,
   resolveSectionCostKgsFromApprovedExpenses,
   sumConfirmedExpenseAmountKgs,
+  sumSectionConfirmedExpenseAmountKgs,
 } from '../src/procurement/procurement-cost.util';
+import { buildProcurementLandedCostReconciliation } from '../src/procurement/procurement-landed-cost-reconciliation.util';
 
 const prisma = new PrismaClient();
 const apply = process.argv.includes('--apply');
@@ -117,6 +119,7 @@ async function main() {
         totalPaidYuan: true,
         chinaDomesticTransportYuan: true,
         chinaDomesticTransportKgs: true,
+        totalCostKgs: true,
         hqStockMovementCreatedAt: true,
         landedCostStatus: true,
       },
@@ -130,7 +133,11 @@ async function main() {
 
     const costRows = rows.map(mapRow);
     const approvedRows = costRows.filter((row) => APPROVED.has(row.status));
-    const authoritativeKgs = sumConfirmedExpenseAmountKgs(approvedRows, rate);
+    const authoritativeKgs = sumSectionConfirmedExpenseAmountKgs(approvedRows, rate, {
+      sectionTotalAmount: Number(order.chinaDomesticTransportYuan || 0),
+      sectionCurrency: 'CNY',
+    });
+    const rawSummedKgs = sumConfirmedExpenseAmountKgs(approvedRows, rate);
     const resolvedKgs = resolveSectionCostKgsFromApprovedExpenses({
       confirmedFromExpenses: authoritativeKgs,
       storedOrderKgs: Number(order.chinaDomesticTransportKgs || 0),
@@ -157,9 +164,13 @@ async function main() {
 
     const afterCancelKgs =
       duplicateIdsToCancel.length > 0
-        ? sumConfirmedExpenseAmountKgs(
+        ? sumSectionConfirmedExpenseAmountKgs(
             approvedRows.filter((row) => !duplicateIdsToCancel.includes(row.id)),
             rate,
+            {
+              sectionTotalAmount: Number(order.chinaDomesticTransportYuan || 0),
+              sectionCurrency: 'CNY',
+            },
           )
         : authoritativeKgs;
 
@@ -190,12 +201,27 @@ async function main() {
       duplicateExpenseIdsToCancel: duplicateIdsToCancel,
       before: {
         chinaDomesticTransportKgs: storedKgs,
-        summedApprovedKgs: authoritativeKgs,
+        summedApprovedKgs: rawSummedKgs,
+        authoritativeKgs,
+        orderTotalCostKgs: Number(order.totalCostKgs ?? 0),
       },
       after: {
         chinaDomesticTransportKgs: nextKgs,
         summedApprovedKgs: afterCancelKgs,
       },
+      reconciliation: buildProcurementLandedCostReconciliation({
+        estimatedYuanRate: rate,
+        transportExpenses: approvedRows.filter((row) => !duplicateIdsToCancel.includes(row.id)),
+        sectionBudgets: {
+          DOMESTIC_CHINA_TRANSPORT: {
+            totalAmount: Number(order.chinaDomesticTransportYuan || 0),
+            currency: 'CNY',
+          },
+        },
+        logisticsIncluded: { chinaDomesticTransportKgs: nextKgs },
+        expectedTotalKgs: Number(order.totalCostKgs ?? 0) - (rawSummedKgs - afterCancelKgs),
+        actualTotalKgs: Number(order.totalCostKgs ?? 0) - (storedKgs - nextKgs),
+      }),
       hqReceived: Boolean(order.hqStockMovementCreatedAt),
       apply,
     };
