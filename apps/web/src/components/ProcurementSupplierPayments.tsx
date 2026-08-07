@@ -90,6 +90,7 @@ export type ProcurementOrderPayments = {
   expectedPaymentDate?: string | null;
   invoiceSentToAccountantAt?: string | null;
   invoiceReviewStatus?: string | null;
+  invoiceReturnReason?: string | null;
   note?: string | null;
   supplierPayments?: SupplierPayment[];
   attachments?: Array<{ id: string; fileName: string; fileUrl: string; entityType?: string }>;
@@ -523,6 +524,17 @@ export function ProcurementSupplierPayments({ order, user, onChanged }: Props) {
       </div>
 
       {error ? <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+
+      {canResubmitInvoice ? (
+        <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p className="font-semibold">{t('procurement.payments.requiresCorrection')}</p>
+          {order.invoiceReturnReason ? (
+            <p className="mt-1">
+              {t('procurement.payments.returnReason')}: {order.invoiceReturnReason}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
         <SummaryCard label={t('procurement.payments.totalOrderYuan')} value={`¥${Number(order.totalYuan).toFixed(2)}`} />
