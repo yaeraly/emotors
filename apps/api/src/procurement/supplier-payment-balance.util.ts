@@ -1,10 +1,14 @@
+import { Prisma } from '@prisma/client';
 import { ProcurementSupplierPaymentLedgerStatus } from '@prisma/client';
 import { calculateApprovedSupplierKgsFromRate } from './supplier-payment-exchange-rate.util';
 import {
+  roundMoneyDecimal,
+  sumMoneyDecimals,
+  toMoneyDecimal,
+} from './landed-cost-money.util';
+import {
   isConfirmedSupplierPayment,
   resolvePurchasePaymentLedgerStatus,
-  resolveSupplierPaymentKgs,
-  roundMoney,
   type SupplierPaymentInput,
 } from './supplier-payment.util';
 
@@ -21,8 +25,26 @@ export type SupplierPaymentMonetaryBalance = {
   isPayable: boolean;
 };
 
+function resolvePaymentKgsDecimal(payment: SupplierPaymentInput): Prisma.Decimal {
+  const actual = payment.actualPaidKgs;
+  if (actual != null && Number(actual) >= 0) {
+    return toMoneyDecimal(actual).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  const approved = payment.approvedAmountKgs;
+  if (approved != null && Number(approved) >= 0) {
+    return toMoneyDecimal(approved).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  const stored = payment.amountKgs;
+  if (stored != null && Number(stored) >= 0) {
+    return toMoneyDecimal(stored).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  }
+  return toMoneyDecimal(Number(payment.amountYuan || 0))
+    .times(toMoneyDecimal(Number(payment.exchangeRate || 0)))
+    .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+
 export function resolveSupplierPaymentObligationYuan(totalYuan: number): number {
-  return roundMoney(Math.max(0, Number(totalYuan || 0)));
+  return roundMoneyDecimal(Math.max(0, Number(totalYuan || 0)));
 }
 
 export function resolveSupplierPaymentMonetaryBalance(input: {
@@ -35,15 +57,22 @@ export function resolveSupplierPaymentMonetaryBalance(input: {
   const obligationKgs = rate > 0 ? calculateApprovedSupplierKgsFromRate(obligationYuan, rate) : 0;
 
   const confirmed = input.payments.filter((payment) => isConfirmedSupplierPayment(payment.status));
-  const confirmedPaidCny = roundMoney(
-    confirmed.reduce((sum, payment) => sum + Number(payment.amountYuan || 0), 0),
+  const confirmedPaidCny = roundMoneyDecimal(
+    sumMoneyDecimals(confirmed.map((payment) => Number(payment.amountYuan || 0))),
   );
-  const confirmedPaidKgs = roundMoney(
-    confirmed.reduce((sum, payment) => sum + resolveSupplierPaymentKgs(payment), 0),
+  const confirmedPaidKgs = roundMoneyDecimal(
+    sumMoneyDecimals(confirmed.map((payment) => resolvePaymentKgsDecimal(payment))),
   );
 
-  const remainingCny = roundMoney(Math.max(obligationYuan - confirmedPaidCny, 0));
-  const remainingKgs = roundMoney(Math.max(obligationKgs - confirmedPaidKgs, 0));
+  const remainingCny = roundMoneyDecimal(
+    toMoneyDecimal(obligationYuan).minus(toMoneyDecimal(confirmedPaidCny)),
+  );
+  const remainingKgs = roundMoneyDecimal(
+    Math.max(
+      toMoneyDecimal(obligationKgs).minus(toMoneyDecimal(confirmedPaidKgs)).toNumber(),
+      0,
+    ),
+  );
   const isFullyPaid = remainingCny <= 0.009 && remainingKgs <= 0.009;
   const isPayable = !isFullyPaid && (remainingCny > 0.009 || remainingKgs > 0.009);
 
@@ -52,11 +81,38 @@ export function resolveSupplierPaymentMonetaryBalance(input: {
     obligationKgs,
     confirmedPaidCny,
     confirmedPaidKgs,
-    remainingCny,
-    remainingKgs,
+    remainingCny: Math.max(remainingCny, 0),
+    remainingKgs: Math.max(remainingKgs, 0),
     isFullyPaid,
     isPayable,
   };
+}
+
+export function resolveSupplierPaymentInstructionAmountKgs(input: {
+  requestedAmountKgs: number;
+  remainingAmountKgs: number;
+}): number {
+  const remaining = roundMoneyDecimal(input.remainingAmountKgs);
+  const requested = roundMoneyDecimal(input.requestedAmountKgs);
+  if (requested + 0.009 >= remaining) {
+    return remaining;
+  }
+  const drift = roundMoneyDecimal(remaining - requested);
+  if (drift > 0 && drift <= 0.05) {
+    return remaining;
+  }
+  return requested;
+}
+
+export function deriveSupplierPaymentYuanFromKgs(input: {
+  amountKgs: number;
+  exchangeRate: number;
+}): number {
+  const rate = Number(input.exchangeRate || 0);
+  if (!(rate > 0) || !(input.amountKgs > 0)) return 0;
+  return roundMoneyDecimal(
+    toMoneyDecimal(input.amountKgs).div(toMoneyDecimal(rate)),
+  );
 }
 
 export function assertSupplierPaymentHasRemainingBalance(
@@ -134,11 +190,18 @@ export function isSupplierPaymentStatusInconsistentWithBalance(input: {
   ) {
     return true;
   }
-  if (
-    ledger === 'PARTIALLY_PAID' &&
-    input.balance.isFullyPaid
-  ) {
+  if (ledger === 'PARTIALLY_PAID' && input.balance.isFullyPaid) {
     return true;
   }
   return false;
+}
+
+export function isSupplierCashierRequestKgsPrecisionDrift(input: {
+  approvedAmountKgs: number;
+  authoritativeRemainingKgs: number;
+}): boolean {
+  const approved = roundMoneyDecimal(input.approvedAmountKgs);
+  const remaining = roundMoneyDecimal(input.authoritativeRemainingKgs);
+  if (remaining <= 0.009) return false;
+  return Math.abs(approved - remaining) > 0.009 && Math.abs(approved - remaining) <= 0.05;
 }

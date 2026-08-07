@@ -93,7 +93,9 @@ import {
 } from './supplier-payment-correction.util';
 import {
   assertSupplierPaymentHasRemainingBalance,
+  deriveSupplierPaymentYuanFromKgs,
   resolveReconciledSupplierPaymentLedgerStatus,
+  resolveSupplierPaymentInstructionAmountKgs,
   resolveSupplierPaymentMonetaryBalance,
   SUPPLIER_ALREADY_FULLY_PAID_MESSAGE,
 } from './supplier-payment-balance.util';
@@ -1242,7 +1244,10 @@ export class SupplierPaymentWorkflowService {
       const alreadyPaidKgs = monetaryBalance.confirmedPaidKgs;
       const remainingKgs = monetaryBalance.remainingKgs;
 
-      const instructionAmountKgs = roundMoney(dto.paymentAmountKgs);
+      const instructionAmountKgs = resolveSupplierPaymentInstructionAmountKgs({
+        requestedAmountKgs: dto.paymentAmountKgs,
+        remainingAmountKgs: remainingKgs,
+      });
       if (!(instructionAmountKgs > 0)) {
         throw new BadRequestException('Сумма платежа должна быть больше нуля.');
       }
@@ -1250,7 +1255,10 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Сумма частичного платежа превышает остаток.');
       }
 
-      const amountYuan = roundMoney(instructionAmountKgs / authoritativeRate);
+      const amountYuan = deriveSupplierPaymentYuanFromKgs({
+        amountKgs: instructionAmountKgs,
+        exchangeRate: authoritativeRate,
+      });
       if (!(amountYuan > 0)) {
         throw new BadRequestException('Payment CNY amount must be greater than zero');
       }

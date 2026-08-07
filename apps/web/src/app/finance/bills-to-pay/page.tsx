@@ -451,32 +451,20 @@ function BillsToPayPageContent() {
       }
     }
 
-    const approvedKgs =
-      isCny && exchangeRate != null
-        ? previewCnyToKgs(supplierAmountCny, String(exchangeRate)) ?? 0
-        : authoritativeRemainingKgs;
-    const debtRemainingKgs = Math.max(
-      authoritativeRemainingKgs,
-      approvedKgs - paidKgs,
-      0,
-    );
-
-    let paymentAmountKgs = isCny ? debtRemainingKgs : authoritativeRemainingKgs;
+    let paymentAmountKgs = authoritativeRemainingKgs;
     if (supplierPaymentModal?.mode === 'partial') {
       paymentAmountKgs = Number(supplierPaymentForm.paymentAmountKgs);
       if (!(paymentAmountKgs > 0)) {
         setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
         return null;
       }
-      if (paymentAmountKgs > debtRemainingKgs + 0.009) {
+      if (paymentAmountKgs > authoritativeRemainingKgs + 0.009) {
         setSupplierPaymentError(t('finance.billsToPay.amountExceedsRemaining'));
         return null;
       }
-    } else if (!(debtRemainingKgs > 0)) {
+    } else if (!(authoritativeRemainingKgs > 0)) {
       setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
       return null;
-    } else {
-      paymentAmountKgs = debtRemainingKgs;
     }
 
     if (!supplierPaymentForm.financeAccountId) {

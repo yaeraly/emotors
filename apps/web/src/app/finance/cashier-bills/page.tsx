@@ -427,13 +427,7 @@ function CashierBillsPageContent() {
           0,
       );
     }
-    const approved = Number(detail.approvedAmountKgs ?? detail.amountKgs ?? row.amountKgs ?? 0);
-    const remainingYuan = Number(detail.procurement?.remainingYuan);
-    const rate = Number(detail.exchangeRate || 0);
-    if (Number.isFinite(remainingYuan) && rate > 0) {
-      return Math.min(approved, Math.round(remainingYuan * rate * 100) / 100);
-    }
-    return approved;
+    return Number(detail.approvedAmountKgs ?? detail.amountKgs ?? row.amountKgs ?? 0);
   }
 
   function resetConfirmFormFields() {

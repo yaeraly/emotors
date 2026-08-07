@@ -1,11 +1,13 @@
+import { ProcurementSupplierPaymentLedgerStatus } from '@prisma/client';
 import {
   assertSupplierPaymentHasRemainingBalance,
-  isSupplierPaymentStatusInconsistentWithBalance,
+  deriveSupplierPaymentYuanFromKgs,
+  isSupplierCashierRequestKgsPrecisionDrift,
   resolveReconciledSupplierPaymentLedgerStatus,
+  resolveSupplierPaymentInstructionAmountKgs,
   resolveSupplierPaymentMonetaryBalance,
   SUPPLIER_ALREADY_FULLY_PAID_MESSAGE,
 } from './supplier-payment-balance.util';
-import { ProcurementSupplierPaymentLedgerStatus } from '@prisma/client';
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
   if (actual !== expected) {
@@ -13,7 +15,7 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   }
 }
 
-function assertClose(actual: number, expected: number, label: string, tolerance = 0.01) {
+function assertClose(actual: number, expected: number, label: string, tolerance = 0.001) {
   if (Math.abs(actual - expected) > tolerance) {
     throw new Error(`${label}: expected ${expected}, got ${actual}`);
   }
@@ -41,6 +43,47 @@ assertClose(balance.remainingKgs, 780000, '1. remaining kgs');
 assertEqual(balance.isFullyPaid, false, '1. not fully paid');
 assertEqual(balance.isPayable, true, '1. payable');
 
+const payRemainderBalance = resolveSupplierPaymentMonetaryBalance({
+  totalYuan: 100000,
+  exchangeRate: 5,
+  payments: [{ amountYuan: 65178.04, exchangeRate: 5, amountKgs: 325890.2, status: 'ACTIVE' }],
+});
+assertClose(payRemainderBalance.obligationKgs, 500000, '1b. approved total kgs');
+assertClose(payRemainderBalance.confirmedPaidKgs, 325890.2, '1c. confirmed paid kgs');
+assertClose(payRemainderBalance.remainingKgs, 174109.8, '1d. remaining 174109.80');
+
+assertEqual(
+  resolveSupplierPaymentInstructionAmountKgs({
+    requestedAmountKgs: 174109.78,
+    remainingAmountKgs: 174109.8,
+  }),
+  174109.8,
+  '2. pay remainder snaps to authoritative remaining',
+);
+
+assertEqual(
+  resolveSupplierPaymentInstructionAmountKgs({
+    requestedAmountKgs: 174109.8,
+    remainingAmountKgs: 174109.8,
+  }),
+  174109.8,
+  '3. exact pay remainder stays 174109.80',
+);
+
+const derivedYuan = deriveSupplierPaymentYuanFromKgs({
+  amountKgs: 174109.8,
+  exchangeRate: 5,
+});
+assertClose(derivedYuan, 34821.96, '4. cny derived one-way from kgs');
+assertEqual(
+  resolveSupplierPaymentInstructionAmountKgs({
+    requestedAmountKgs: 174109.78,
+    remainingAmountKgs: 174109.8,
+  }),
+  174109.8,
+  '4b. no kgs round trip drift for pay remainder',
+);
+
 assertEqual(
   resolveReconciledSupplierPaymentLedgerStatus({
     totalYuan: 100000,
@@ -67,35 +110,12 @@ try {
 if (!threwFullyPaid) throw new Error('9. fully paid guard throws Russian message');
 
 assertEqual(
-  isSupplierPaymentStatusInconsistentWithBalance({
-    supplierPaymentStatus: 'PAID',
-    balance,
+  isSupplierCashierRequestKgsPrecisionDrift({
+    approvedAmountKgs: 174109.78,
+    authoritativeRemainingKgs: 174109.8,
   }),
   true,
-  '10. stale paid status detected',
-);
-
-const cnyPaidKgsRemaining = resolveSupplierPaymentMonetaryBalance({
-  totalYuan: 100000,
-  exchangeRate: 13.2,
-  payments: [
-    { amountYuan: 40000, exchangeRate: 13, amountKgs: 520000, status: 'ACTIVE' },
-    { amountYuan: 60000, exchangeRate: 13, amountKgs: 780000, status: 'ACTIVE' },
-  ],
-});
-assertClose(cnyPaidKgsRemaining.remainingCny, 0, '12. cny fully paid');
-assertClose(cnyPaidKgsRemaining.remainingKgs, 20000, '12. kgs still remaining after rate change');
-assertEqual(
-  resolveReconciledSupplierPaymentLedgerStatus({
-    totalYuan: 100000,
-    exchangeRate: 13.2,
-    payments: [
-      { amountYuan: 40000, exchangeRate: 13, amountKgs: 520000, status: 'ACTIVE' },
-      { amountYuan: 60000, exchangeRate: 13, amountKgs: 780000, status: 'ACTIVE' },
-    ],
-  }),
-  ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID,
-  '12b. kgs remaining keeps partial status',
+  '10. drift detection for stale cashier request',
 );
 
 const closingPayment = resolveSupplierPaymentMonetaryBalance({
@@ -119,5 +139,21 @@ assertEqual(
   ProcurementSupplierPaymentLedgerStatus.PAID,
   '6b. final status paid',
 );
+
+assertEqual(
+  resolveSupplierPaymentInstructionAmountKgs({
+    requestedAmountKgs: 174000,
+    remainingAmountKgs: 174109.8,
+  }),
+  174000,
+  '5b. smaller partial payment is not snapped to remainder',
+);
+
+const afterPartial = resolveSupplierPaymentMonetaryBalance({
+  totalYuan: 500000,
+  exchangeRate: 1,
+  payments: [{ amountYuan: 100000, exchangeRate: 1, amountKgs: 100000, status: 'ACTIVE' }],
+});
+assertClose(afterPartial.remainingKgs, 400000, '5. partial payment remaining uses decimal subtraction');
 
 console.log('supplier-payment-balance.util.test.ts passed');
