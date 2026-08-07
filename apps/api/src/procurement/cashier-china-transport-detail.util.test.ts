@@ -12,8 +12,9 @@ const page = readFileSync(
 
 assert(
   page.includes("selected.requestType !== 'CHINA_DOMESTIC_TRANSPORT'") &&
+    page.includes("selected.requestType !== 'SUPPLIER_PAYMENT'") &&
     page.includes('procurement.sectionPayable.expenseName'),
-  '1. expense name hidden for china domestic transport',
+  '1. expense name hidden for china domestic transport and supplier payment',
 );
 assert(
   page.includes("selected.requestType !== 'CHINA_DOMESTIC_TRANSPORT'") &&
