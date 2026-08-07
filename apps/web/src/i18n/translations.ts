@@ -4497,7 +4497,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'procurement.sectionPayable.lastUpdated': 'Последнее обновление',
     'procurement.sectionPayable.invoiceStatus.DRAFT': 'Черновик',
     'procurement.sectionPayable.invoiceStatus.SENT_TO_ACCOUNTANT': 'Отправлено бухгалтеру',
-    'procurement.sectionPayable.invoiceStatus.RETURNED_FOR_CORRECTION': 'На исправление',
+    'procurement.sectionPayable.invoiceStatus.RETURNED_FOR_CORRECTION': 'Требует исправления',
     'procurement.sectionPayable.invoiceStatus.SENT_TO_CASHIER': 'Передано кассиру',
     'procurement.sectionPayable.invoiceStatus.PARTIALLY_PAID': 'Частично оплачено',
     'procurement.sectionPayable.invoiceStatus.PAID': 'Оплачено',

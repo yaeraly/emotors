@@ -224,6 +224,13 @@ export class AccountantBillsService {
           idempotencyKey: body.idempotencyKey,
         });
       }
+      if (expense?.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT) {
+        return this.transportExpenses.returnChinaDomesticTransportToSupplyManager(user, id, {
+          reason: trimmed,
+          comment: body.comment?.trim() || undefined,
+          idempotencyKey: body.idempotencyKey,
+        });
+      }
       return this.transportExpenses.returnToCreator(user, id, { reason: trimmed });
     }
 

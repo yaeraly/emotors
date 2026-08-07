@@ -69,6 +69,12 @@ import {
   tryResolveSupplierPaymentMethodFromAccountType,
 } from './supplier-payment-method-from-account.util';
 import {
+  buildChinaDomesticTransportReturnError,
+  canAccountantReturnChinaDomesticTransportToSupplyManager,
+  isChinaDomesticTransport,
+  isChinaDomesticTransportAwaitingSupplyManagerCorrection,
+} from './china-domestic-transport-correction.util';
+import {
   buildKyrgyzstanTransportReturnError,
   canAccountantReturnKyrgyzstanTransportToSupplyManager,
   isKyrgyzstanDomesticTransport,
@@ -452,6 +458,7 @@ export class TransportExpenseService {
         }
         throw new BadRequestException('Only draft or returned transport expenses can be edited');
       }
+      this.assertSupplyManagerMayEditReturned(existing);
 
       const hasCargoInput =
         dto.totalWeightKg != null ||
@@ -630,6 +637,25 @@ export class TransportExpenseService {
       }
 
       if (
+        existing.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT &&
+        existing.status === TransportExpenseStatus.RETURNED
+      ) {
+        await this.audit(tx, user, 'CHINA_TRANSPORT_CORRECTED', id, {
+          amount: Number(existing.amount),
+          status: existing.status,
+        }, {
+          expenseId: id,
+          procurementOrderId: existing.procurementOrderId,
+          previousStatus: existing.status,
+          newStatus: updated.status,
+          amount: Number(updated.amount),
+          actorUserId: user.id,
+          actorRole: user.role,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      if (
         isCargo &&
         cargoCalc &&
         (Number(existing.calculatedAmountUsd ?? 0) !== cargoCalc.calculatedAmountUsd ||
@@ -666,6 +692,7 @@ export class TransportExpenseService {
       if (!EDITABLE.has(expense.status)) {
         throw new BadRequestException('Only draft or returned expenses can be submitted');
       }
+      this.assertSupplyManagerMayEditReturned(expense);
       if (!expense.procurementOrderId) {
         throw new BadRequestException('Procurement Order must exist');
       }
@@ -797,6 +824,22 @@ export class TransportExpenseService {
         expense.status === TransportExpenseStatus.RETURNED
       ) {
         await this.audit(tx, user, 'KYRGYZSTAN_TRANSPORT_RESUBMITTED', id, {
+          status: expense.status,
+        }, {
+          expenseId: id,
+          procurementOrderId: updated.procurementOrderId,
+          previousStatus: expense.status,
+          newStatus: updated.status,
+          actorUserId: user.id,
+          actorRole: user.role,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      if (
+        expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT &&
+        expense.status === TransportExpenseStatus.RETURNED
+      ) {
+        await this.audit(tx, user, 'CHINA_TRANSPORT_RESUBMITTED', id, {
           status: expense.status,
         }, {
           expenseId: id,
@@ -1007,6 +1050,23 @@ export class TransportExpenseService {
           procurementOrderId: expense.procurementOrderId,
           previousStatus: expense.status,
           newStatus: updated.status,
+          cashierReturnReason: updated.returnReason,
+          returnReason: updated.returnReason,
+          actorUserId: user.id,
+          actorRole: user.role,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      if (fromCashier && expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT) {
+        await this.audit(tx, user, 'CHINA_TRANSPORT_RETURNED_BY_CASHIER', id, {
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+        }, {
+          expenseId: id,
+          procurementOrderId: expense.procurementOrderId,
+          previousStatus: expense.status,
+          newStatus: updated.status,
+          cashierReturnReason: updated.returnReason,
           returnReason: updated.returnReason,
           actorUserId: user.id,
           actorRole: user.role,
@@ -1182,6 +1242,159 @@ export class TransportExpenseService {
       entityId: expense.id,
       referenceNumber: expense.expenseNumber,
       message: `Внутренний транспорт Кыргызстана ${expense.expenseNumber} возвращён на исправление: ${reason}`,
+      recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
+    });
+
+    return this.toResponse(updated, tx);
+  }
+
+  returnChinaDomesticTransportToSupplyManager(user: AuthUser, id: string, dto: ReturnTransportExpenseDto) {
+    if (!canCreateSupplierPayment(user)) {
+      throw new ForbiddenException('Only HQ Accountant can return China domestic transport expenses for correction');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundException('Transport expense not found');
+      if (!isChinaDomesticTransport(expense.expenseType)) {
+        throw new BadRequestException('Only China domestic transport expenses support this return flow');
+      }
+      if (!expense.procurementOrderId) {
+        throw new BadRequestException('Procurement order link is required');
+      }
+      return this.returnChinaDomesticTransportToSupplyManagerInTx(tx, user, expense, dto);
+    });
+  }
+
+  private async returnChinaDomesticTransportToSupplyManagerInTx(
+    tx: Tx,
+    user: AuthUser,
+    expense: {
+      id: string;
+      expenseNumber: string;
+      expenseType: TransportExpenseType;
+      status: TransportExpenseStatus;
+      procurementOrderId: string | null;
+      executionStatus: string | null;
+      paidAmountKgs: unknown;
+      returnReason: string | null;
+    },
+    dto: ReturnTransportExpenseDto,
+  ) {
+    const paidAmountKgs = Number(expense.paidAmountKgs || 0);
+    const reason = dto.reason.trim();
+    const comment = dto.comment?.trim() || '';
+    const accountantReturnReason = comment ? `${reason}\n${comment}` : reason;
+    const cashierReturnReason =
+      expense.executionStatus === 'RETURNED_TO_ACCOUNTANT' ? expense.returnReason : null;
+
+    if (dto.idempotencyKey) {
+      const prior = await tx.auditLog.findMany({
+        where: {
+          entity: 'ProcurementTransportExpense',
+          entityId: expense.id,
+          action: 'CHINA_TRANSPORT_RETURNED_TO_SUPPLY_MANAGER',
+        },
+        orderBy: { timestamp: 'desc' },
+        take: 20,
+      });
+      const duplicate = prior.find((row) => {
+        const meta = row.metadata as { idempotencyKey?: string } | null;
+        return meta?.idempotencyKey === dto.idempotencyKey;
+      });
+      if (duplicate) {
+        const current = await tx.procurementTransportExpense.findUnique({
+          where: { id: expense.id },
+          include: INCLUDE,
+        });
+        return this.toResponse(current!, tx);
+      }
+    }
+
+    if (isChinaDomesticTransportAwaitingSupplyManagerCorrection(expense)) {
+      const current = await tx.procurementTransportExpense.findUnique({
+        where: { id: expense.id },
+        include: INCLUDE,
+      });
+      return this.toResponse(current!, tx);
+    }
+
+    if (
+      !canAccountantReturnChinaDomesticTransportToSupplyManager({
+        status: expense.status,
+        executionStatus: expense.executionStatus,
+        paidAmountKgs,
+      })
+    ) {
+      throw new BadRequestException(
+        buildChinaDomesticTransportReturnError({
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+          paidAmountKgs,
+        }),
+      );
+    }
+
+    const ledgerCount = await tx.financeLedgerEntry.count({
+      where: {
+        referenceType: 'ProcurementTransportExpense',
+        referenceId: expense.id,
+        entryType: FinanceLedgerEntryType.EXPENSE,
+      },
+    });
+    if (ledgerCount > 0 || paidAmountKgs > 0.009) {
+      throw new BadRequestException(
+        'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.',
+      );
+    }
+
+    const previousStatus = expense.status;
+    const updated = await tx.procurementTransportExpense.update({
+      where: { id: expense.id },
+      data: {
+        status: TransportExpenseStatus.RETURNED,
+        executionStatus: null,
+        returnReason: accountantReturnReason,
+        returnedAt: new Date(),
+        returnedById: user.id,
+        sentToCashierAt: null,
+        cashierInstructionAmountKgs: null,
+        accountantId: user.id,
+      },
+      include: INCLUDE,
+    });
+
+    await this.audit(tx, user, 'TRANSPORT_EXPENSE_RETURNED', expense.id, {
+      status: previousStatus,
+      executionStatus: expense.executionStatus,
+    }, {
+      status: updated.status,
+      executionStatus: updated.executionStatus,
+      returnReason: updated.returnReason,
+    });
+
+    await this.audit(tx, user, 'CHINA_TRANSPORT_RETURNED_TO_SUPPLY_MANAGER', expense.id, {
+      status: previousStatus,
+      executionStatus: expense.executionStatus,
+    }, {
+      expenseId: expense.id,
+      procurementOrderId: expense.procurementOrderId,
+      previousStatus,
+      newStatus: updated.status,
+      cashierReturnReason,
+      accountantReturnReason,
+      returnReason: accountantReturnReason,
+      actorUserId: user.id,
+      actorRole: user.role,
+      timestamp: new Date().toISOString(),
+      idempotencyKey: dto.idempotencyKey ?? null,
+    });
+
+    await this.notifications.notifyInTx(tx, user, {
+      type: AlertType.TRANSPORT_EXPENSE_RETURNED,
+      entityType: 'ProcurementTransportExpense',
+      entityId: expense.id,
+      referenceNumber: expense.expenseNumber,
+      message: `Внутренний транспорт Китая ${expense.expenseNumber} возвращён на исправление: ${reason}`,
       recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
     });
 
@@ -2073,6 +2286,20 @@ export class TransportExpenseService {
       throw new BadRequestException('Выбранный счёт недоступен.');
     }
     return account;
+  }
+
+  private assertSupplyManagerMayEditReturned(expense: {
+    status: TransportExpenseStatus | string;
+    executionStatus?: string | null;
+  }) {
+    if (
+      expense.status === TransportExpenseStatus.RETURNED &&
+      expense.executionStatus === 'RETURNED_TO_ACCOUNTANT'
+    ) {
+      throw new BadRequestException(
+        'Счёт ожидает обработки бухгалтером после возврата из кассы.',
+      );
+    }
   }
 
   private async toResponse(expense: any, tx?: Tx) {

@@ -1530,9 +1530,14 @@ function DetailDrawer({
           bill.status,
         ));
   const isKyrgyzstanTransport = bill.requestType === 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  const isChinaDomesticTransport = bill.requestType === 'CHINA_DOMESTIC_TRANSPORT';
   const executionStatus = String(detail.executionStatus || '');
   const canReturnKyrgyzstanTransport =
     isKyrgyzstanTransport &&
+    (['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status) ||
+      (bill.status === 'RETURNED' && executionStatus === 'RETURNED_TO_ACCOUNTANT'));
+  const canReturnChinaDomesticTransport =
+    isChinaDomesticTransport &&
     (['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status) ||
       (bill.status === 'RETURNED' && executionStatus === 'RETURNED_TO_ACCOUNTANT'));
   const canReturnOrReject =
@@ -1541,7 +1546,9 @@ function DetailDrawer({
     !usesAccountantPaymentFlow &&
     (isKyrgyzstanTransport
       ? canReturnKyrgyzstanTransport
-      : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status));
+      : isChinaDomesticTransport
+        ? canReturnChinaDomesticTransport
+        : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status));
   const canPayFull =
     usesAccountantPaymentFlow &&
     billActions &&
@@ -1611,6 +1618,14 @@ function DetailDrawer({
                 />
               ) : null}
               {usesAccountantPaymentFlow && returnReason ? (
+                <Field
+                  label={t('finance.billsToPay.returnReason')}
+                  value={returnReason}
+                />
+              ) : null}
+              {isTransport &&
+              executionStatus === 'RETURNED_TO_ACCOUNTANT' &&
+              returnReason ? (
                 <Field
                   label={t('finance.billsToPay.returnReason')}
                   value={returnReason}

@@ -58,6 +58,7 @@ type SectionExpense = {
   calculatedAmountUsd?: number | null;
   calculatedAmountKgs?: number | null;
   status: string;
+  executionStatus?: string | null;
   returnReason?: string | null;
   accountantComment?: string | null;
   comment?: string | null;
@@ -213,10 +214,16 @@ export function ProcurementSectionPayablePanel({
       ranked[0]
     );
   }, [sectionRows]);
+  const isAwaitingSupplyManagerCorrection =
+    primaryExpense?.status === 'RETURNED' &&
+    primaryExpense.executionStatus !== 'RETURNED_TO_ACCOUNTANT';
   const isFormEditable =
-    canCreate && (!primaryExpense || EDITABLE_STATUSES.has(primaryExpense.status));
+    canCreate &&
+    (!primaryExpense ||
+      primaryExpense.status === 'DRAFT' ||
+      (primaryExpense.status === 'RETURNED' && isAwaitingSupplyManagerCorrection));
   const isFormLocked = Boolean(primaryExpense && LOCKED_STATUSES.has(primaryExpense.status));
-  const isReturned = primaryExpense?.status === 'RETURNED';
+  const isReturned = isAwaitingSupplyManagerCorrection;
   /** Accountant/cashier keep actionable expense rows; SM uses Sent Invoice summary only. */
   const showExpenseList = canApprove || canConfirm;
   const showSubmissionSummary = Boolean(
@@ -700,9 +707,12 @@ export function ProcurementSectionPayablePanel({
       {error ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
 
       {isReturned && primaryExpense?.returnReason ? (
-        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {t('procurement.sectionPayable.returnedForCorrection')}: {primaryExpense.returnReason}
-        </p>
+        <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p className="font-semibold">{t('procurement.payments.requiresCorrection')}</p>
+          <p className="mt-1">
+            {t('procurement.payments.returnReason')}: {primaryExpense.returnReason}
+          </p>
+        </div>
       ) : null}
 
       {isFormEditable ? (
