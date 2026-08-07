@@ -31,7 +31,7 @@ assert(service.includes('KYRGYZSTAN_TRANSPORT_RETURNED_TO_SUPPLY_MANAGER'), '5. 
 assert(service.includes('KYRGYZSTAN_TRANSPORT_RESUBMITTED'), '10. resubmit audit');
 assert(service.includes('KYRGYZSTAN_TRANSPORT_CORRECTED'), '9. correction audit');
 assert(accountantService.includes('returnKyrgyzstanTransportToSupplyManager'), '5. accountant routes LOCAL_DELIVERY');
-assert(billsPage.includes('canReturnKyrgyzstanTransport'), '5. frontend return visibility for cashier-returned state');
+assert(billsPage.includes('canTakeTransportForAccountantReview'), '3. frontend take review visibility');
 
 assert(
   isKyrgyzstanTransportCashierReturned({
@@ -41,12 +41,20 @@ assert(
   '4. cashier-returned state detected',
 );
 assert(
-  canAccountantReturnKyrgyzstanTransportToSupplyManager({
+  !canAccountantReturnKyrgyzstanTransportToSupplyManager({
     status: TransportExpenseStatus.RETURNED,
     executionStatus: 'RETURNED_TO_ACCOUNTANT',
     paidAmountKgs: 0,
   }),
-  '5. accountant may return cashier-returned expense',
+  '5. accountant cannot return cashier-returned expense before take review',
+);
+assert(
+  canAccountantReturnKyrgyzstanTransportToSupplyManager({
+    status: TransportExpenseStatus.UNDER_REVIEW,
+    executionStatus: 'RETURNED_TO_ACCOUNTANT',
+    paidAmountKgs: 0,
+  }),
+  '5c. accountant may return after take review',
 );
 assert(
   !canAccountantReturnKyrgyzstanTransportToSupplyManager({

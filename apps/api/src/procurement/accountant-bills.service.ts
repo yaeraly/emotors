@@ -8,6 +8,7 @@ import {
   AlertType,
   FileAttachmentEntityType,
   FinanceExpenseStatus,
+  FinanceLedgerEntryType,
   ProcurementSupplierPaymentLedgerStatus,
   ProcurementSupplierPaymentStatus,
   Role,
@@ -46,6 +47,15 @@ import {
   resolveSupplierInvoiceCorrectionRouting,
   resolveTransportExpenseCorrectionRouting,
 } from './accountant-bill-correction-routing.util';
+import {
+  buildTransportReviewAssignmentError,
+  canAccountantRejectDomesticTransportDuringReview,
+  canTakeTransportForAccountantReview,
+  isDomesticTransportExpenseType,
+  isTransportAccountantReviewAfterCashierReturn,
+  isTransportCashierReturnedToAccountant,
+  resolveTransportCashierReturnReason,
+} from './transport-accountant-review.util';
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import { roundMoney } from './supplier-payment.util';
 import { isSupplierPaymentExchangeRateRevisionAllowed, resolveSupplierPaymentDialogDefaultExchangeRate, resolveSupplierPaymentDetailDisplayExchangeRate } from './supplier-payment-exchange-rate.util';
@@ -166,11 +176,40 @@ export class AccountantBillsService {
         });
         if (!expense) throw new NotFoundException('Transport expense not found');
         if (
-          expense.status !== TransportExpenseStatus.WAITING_ACCOUNTANT &&
-          expense.status !== TransportExpenseStatus.UNDER_REVIEW
+          expense.status === TransportExpenseStatus.UNDER_REVIEW &&
+          expense.accountantId &&
+          expense.accountantId !== user.id
+        ) {
+          throw new BadRequestException(
+            buildTransportReviewAssignmentError({
+              status: expense.status,
+              accountantId: expense.accountantId,
+              actorUserId: user.id,
+            }),
+          );
+        }
+        if (
+          !canTakeTransportForAccountantReview({
+            expenseType: expense.expenseType,
+            status: expense.status,
+            executionStatus: expense.executionStatus,
+            accountantId: expense.accountantId,
+            actorUserId: user.id,
+          })
         ) {
           throw new BadRequestException('Expense cannot be taken for review in current status');
         }
+        if (
+          expense.status === TransportExpenseStatus.UNDER_REVIEW &&
+          expense.accountantId === user.id
+        ) {
+          return { id: expense.id, source, status: 'UNDER_REVIEW' };
+        }
+        const cashierReturnReason = resolveTransportCashierReturnReason({
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+          returnReason: expense.returnReason,
+        });
         const updated = await tx.procurementTransportExpense.update({
           where: { id },
           data: {
@@ -178,9 +217,26 @@ export class AccountantBillsService {
             accountantId: user.id,
           },
         });
-        await this.audit(tx, user, 'PAYABLE_REQUEST_UNDER_REVIEW', id, {
+        const reviewAuditAction =
+          isDomesticTransportExpenseType(expense.expenseType) &&
+          (isTransportCashierReturnedToAccountant(expense) ||
+            isTransportAccountantReviewAfterCashierReturn(expense))
+            ? 'TRANSPORT_TAKEN_FOR_ACCOUNTANT_REVIEW'
+            : 'PAYABLE_REQUEST_UNDER_REVIEW';
+        await this.audit(tx, user, reviewAuditAction, id, {
           status: expense.status,
-        }, { status: updated.status });
+          executionStatus: expense.executionStatus,
+        }, {
+          expenseId: id,
+          procurementOrderId: expense.procurementOrderId,
+          expenseType: expense.expenseType,
+          previousStatus: expense.status,
+          newStatus: updated.status,
+          cashierReturnReason,
+          reviewerUserId: user.id,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
         await this.notifySenderRoles(tx, user, {
           type: AlertType.PAYABLE_REQUEST_UNDER_REVIEW,
           entityType: 'ProcurementTransportExpense',
@@ -287,15 +343,64 @@ export class AccountantBillsService {
       return this.prisma.$transaction(async (tx) => {
         const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
         if (!expense) throw new NotFoundException('Transport expense not found');
-        if (
-          ![
-            TransportExpenseStatus.WAITING_ACCOUNTANT,
-            TransportExpenseStatus.UNDER_REVIEW,
-            TransportExpenseStatus.RETURNED,
-          ].includes(expense.status as any)
+        const paidAmountKgs = Number(expense.paidAmountKgs || 0);
+        if (isDomesticTransportExpenseType(expense.expenseType)) {
+          if (isTransportCashierReturnedToAccountant(expense)) {
+            throw new BadRequestException('Сначала возьмите счёт на проверку.');
+          }
+          if (
+            !canAccountantRejectDomesticTransportDuringReview({
+              expenseType: expense.expenseType,
+              status: expense.status,
+              executionStatus: expense.executionStatus,
+              accountantId: expense.accountantId,
+              actorUserId: user.id,
+              paidAmountKgs,
+            })
+          ) {
+            if (
+              expense.status === TransportExpenseStatus.UNDER_REVIEW &&
+              expense.accountantId &&
+              expense.accountantId !== user.id
+            ) {
+              throw new BadRequestException(
+                buildTransportReviewAssignmentError({
+                  status: expense.status,
+                  accountantId: expense.accountantId,
+                  actorUserId: user.id,
+                }),
+              );
+            }
+            throw new BadRequestException('Expense cannot be rejected in current status');
+          }
+          const ledgerCount = await tx.financeLedgerEntry.count({
+            where: {
+              referenceType: 'ProcurementTransportExpense',
+              referenceId: expense.id,
+              entryType: FinanceLedgerEntryType.EXPENSE,
+            },
+          });
+          if (ledgerCount > 0 || paidAmountKgs > 0.009) {
+            throw new BadRequestException(
+              'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.',
+            );
+          }
+        } else if (
+          !(
+            [
+              TransportExpenseStatus.WAITING_ACCOUNTANT,
+              TransportExpenseStatus.UNDER_REVIEW,
+              TransportExpenseStatus.RETURNED,
+            ] as string[]
+          ).includes(expense.status)
         ) {
           throw new BadRequestException('Expense cannot be rejected in current status');
         }
+        const cashierReturnReason = resolveTransportCashierReturnReason({
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+          returnReason: expense.returnReason,
+        });
         const updated = await tx.procurementTransportExpense.update({
           where: { id },
           data: {
@@ -306,9 +411,25 @@ export class AccountantBillsService {
             returnedById: user.id,
           },
         });
-        await this.audit(tx, user, 'PAYABLE_REQUEST_REJECTED', id, {
+        const rejectAuditAction = isDomesticTransportExpenseType(expense.expenseType)
+          ? 'TRANSPORT_REJECTED_BY_ACCOUNTANT'
+          : 'PAYABLE_REQUEST_REJECTED';
+        await this.audit(tx, user, rejectAuditAction, id, {
           status: expense.status,
-        }, { status: updated.status, reason: trimmed });
+          executionStatus: expense.executionStatus,
+        }, {
+          expenseId: id,
+          procurementOrderId: expense.procurementOrderId,
+          expenseType: expense.expenseType,
+          previousStatus: expense.status,
+          newStatus: updated.status,
+          cashierReturnReason,
+          accountantReason: trimmed,
+          reviewerUserId: user.id,
+          actorUserId: user.id,
+          reason: trimmed,
+          timestamp: new Date().toISOString(),
+        });
         await this.notifySenderRoles(tx, user, {
           type: AlertType.PAYABLE_REQUEST_REJECTED,
           entityType: 'ProcurementTransportExpense',
@@ -1353,6 +1474,19 @@ export class AccountantBillsService {
     );
     const isChinaDomestic = detail.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT;
     const isKyrgyzstanDomestic = detail.expenseType === TransportExpenseType.LOCAL_DELIVERY;
+    const requestType = mapTransportExpenseTypeToRequestType(detail.expenseType);
+    const correctionRouting = resolveTransportExpenseCorrectionRouting({
+      requestType,
+      status: detail.status,
+      executionStatus: detail.executionStatus,
+      returnedBy: detail.returnedBy,
+      supplyManager: detail.createdBy,
+    });
+    const cashierReturnReason = resolveTransportCashierReturnReason({
+      status: detail.status,
+      executionStatus: detail.executionStatus,
+      returnReason: detail.returnReason,
+    });
     const audits = isChinaDomestic || isKyrgyzstanDomestic
       ? []
       : await this.prisma.auditLog.findMany({
@@ -1378,6 +1512,9 @@ export class AccountantBillsService {
       detail: {
         ...detail,
         cashierReturnedPaymentRequest,
+        cashierReturnReason,
+        correctionRouting,
+        accountantId: detail.accountantId ?? null,
         approvalStatus: isCargo ? resolveCargoApprovalStatus(detail.status) : undefined,
         paymentStatus: isCargo
           ? resolveCargoPaymentStatusLabel(

@@ -51,9 +51,6 @@ export function canAccountantReturnChinaDomesticTransportToSupplyManager(input: 
   if (ACCOUNTANT_RETURNABLE_STATUSES.has(input.status)) {
     return true;
   }
-  if (isChinaDomesticTransportCashierReturned(input)) {
-    return true;
-  }
   return false;
 }
 

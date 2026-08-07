@@ -3025,6 +3025,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'finance.billsToPay.fullyPaidBanner': 'Эсеп толук төлөндү',
     'finance.billsToPay.awaitingCorrectionBanner': 'Supply Manager тарабынан оңдоо күтүлүүдө',
     'finance.billsToPay.cashierReturnedBanner': 'HQ Cashier тарабынан оңдоого кайтарылды',
+    'finance.billsToPay.sentToCashierBanner': 'HQ Cashierге жөнөтүлдү',
     'finance.billsToPay.previousRequestedAmount': 'Мурунку суралган сумма',
     'finance.billsToPay.cannotReturnWithPayments':
       'Эсеп боюнча төлөмдөр бар. Сумманы өзгөртүү үчүн каржы документинин корректировкасын колдонуңуз.',
@@ -6724,6 +6725,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'finance.billsToPay.fullyPaidBanner': 'Счет полностью оплачен',
     'finance.billsToPay.awaitingCorrectionBanner': 'Ожидается исправление от Supply Manager',
     'finance.billsToPay.cashierReturnedBanner': 'Пришло на исправление от HQ Cashier',
+    'finance.billsToPay.sentToCashierBanner': 'Отправлено HQ Cashier',
     'finance.billsToPay.previousRequestedAmount': 'Предыдущая запрошенная сумма',
     'finance.billsToPay.cannotReturnWithPayments':
       'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.',
@@ -10355,6 +10357,7 @@ export const translations: Record<Language, Record<string, string>> = {
     'finance.billsToPay.fullyPaidBanner': 'Invoice fully paid',
     'finance.billsToPay.awaitingCorrectionBanner': 'Awaiting correction from Supply Manager',
     'finance.billsToPay.cashierReturnedBanner': 'Returned for correction by HQ Cashier',
+    'finance.billsToPay.sentToCashierBanner': 'Sent to HQ Cashier',
     'finance.billsToPay.previousRequestedAmount': 'Previously requested amount',
     'finance.billsToPay.cannotReturnWithPayments':
       'Payments already exist on this invoice. Use a financial document correction to change the amount.',

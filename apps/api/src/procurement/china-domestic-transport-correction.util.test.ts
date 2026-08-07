@@ -34,7 +34,10 @@ assert(
   accountantService.includes('returnChinaDomesticTransportToSupplyManager'),
   '5. accountant routes DOMESTIC_CHINA_TRANSPORT',
 );
-assert(billsPage.includes('canReturnChinaDomesticTransport'), '5. frontend return visibility for cashier-returned state');
+assert(service.includes('TRANSPORT_REAPPROVED_FOR_CASHIER'), '8. reapprove audit');
+assert(accountantService.includes('TRANSPORT_TAKEN_FOR_ACCOUNTANT_REVIEW'), '4. take review audit');
+assert(accountantService.includes('TRANSPORT_TAKEN_FOR_ACCOUNTANT_REVIEW'), '4. accountant take review audit');
+assert(billsPage.includes('canTakeTransportForAccountantReview'), '3. frontend take review visibility');
 
 assert(
   isChinaDomesticTransportCashierReturned({
@@ -44,12 +47,20 @@ assert(
   '4. cashier-returned state detected',
 );
 assert(
-  canAccountantReturnChinaDomesticTransportToSupplyManager({
+  !canAccountantReturnChinaDomesticTransportToSupplyManager({
     status: TransportExpenseStatus.RETURNED,
     executionStatus: 'RETURNED_TO_ACCOUNTANT',
     paidAmountKgs: 0,
   }),
-  '5. accountant may return cashier-returned expense',
+  '5. accountant cannot return cashier-returned expense before take review',
+);
+assert(
+  canAccountantReturnChinaDomesticTransportToSupplyManager({
+    status: TransportExpenseStatus.UNDER_REVIEW,
+    executionStatus: 'RETURNED_TO_ACCOUNTANT',
+    paidAmountKgs: 0,
+  }),
+  '5b. accountant may return after take review',
 );
 assert(
   !canAccountantReturnChinaDomesticTransportToSupplyManager({

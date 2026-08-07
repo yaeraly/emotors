@@ -27,6 +27,14 @@ import {
   type BillCorrectionRouting,
 } from '@/lib/bill-correction-routing';
 import {
+  canApproveDomesticTransportBill,
+  canReturnOrRejectDomesticTransportBill,
+  canTakeTransportForAccountantReview,
+  isDomesticTransportRequestType,
+  isTransportAccountantReviewAfterCashierReturn,
+  isTransportCashierReturnedToAccountant,
+} from '@/lib/transport-accountant-review';
+import {
   formatKgsPreview,
   formatSupplierDetailExchangeRate,
   normalizeExchangeRateInput,
@@ -1131,6 +1139,7 @@ function BillsToPayPageContent() {
           t={t}
           bill={selected}
           saving={saving}
+          currentUserId={user?.id ?? null}
           canPermanentDelete={canPermanentDelete}
           onClose={() => setSelected(null)}
           onTakeReview={() => void runAction('take-review')}
@@ -1622,6 +1631,7 @@ function DetailDrawer({
   t,
   bill,
   saving,
+  currentUserId,
   canPermanentDelete,
   onClose,
   onTakeReview,
@@ -1640,6 +1650,7 @@ function DetailDrawer({
   t: (key: string) => string;
   bill: BillDetail;
   saving: boolean;
+  currentUserId: string | null;
   canPermanentDelete: boolean;
   onClose: () => void;
   onTakeReview: () => void;
@@ -1696,40 +1707,76 @@ function DetailDrawer({
         hasCashierReturnedRequest,
       })
     : null;
+  const isKyrgyzstanTransport = requestType === 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  const isChinaDomesticTransport = requestType === 'CHINA_DOMESTIC_TRANSPORT';
+  const isDomesticTransport = isDomesticTransportRequestType(requestType);
+  const executionStatus = String(detail.executionStatus || '');
+  const accountantId = String(detail.accountantId || '');
+  const correctionRouting =
+    bill.correctionRouting || (detail.correctionRouting as BillCorrectionRouting | undefined);
+  const cashierReturnReason =
+    detail.cashierReturnReason ||
+    (isTransportCashierReturnedToAccountant({
+      uiStatus: bill.status,
+      executionStatus,
+    }) ||
+    isTransportAccountantReviewAfterCashierReturn({
+      uiStatus: bill.status,
+      executionStatus,
+    })
+      ? detail.returnReason
+      : null);
+  const showCashierReturnedBanner = Boolean(
+    isDomesticTransport &&
+      correctionRouting?.direction === 'FROM_HQ_CASHIER' &&
+      (cashierReturnReason || correctionRouting),
+  );
+  const showReturnedToSupplyManagerBanner =
+    isDomesticTransport && correctionRouting?.direction === 'TO_SUPPLY_MANAGER';
+  const showSentToCashierBanner = isDomesticTransport && bill.status === 'APPROVED';
+  const transportReviewInput = {
+    requestType,
+    uiStatus: bill.status,
+    executionStatus,
+    accountantId: accountantId || null,
+    actorUserId: currentUserId,
+  };
   const canTakeReview =
     !isFinance &&
     !isTerminal &&
     !usesAccountantPaymentFlow &&
-    (bill.status === 'AWAITING_ACCOUNTANT' || bill.status === 'UNDER_REVIEW');
+    (isDomesticTransport
+      ? canTakeTransportForAccountantReview(transportReviewInput) &&
+        !(
+          bill.status === 'UNDER_REVIEW' &&
+          accountantId &&
+          currentUserId &&
+          accountantId === currentUserId
+        )
+      : bill.status === 'AWAITING_ACCOUNTANT' || bill.status === 'UNDER_REVIEW');
   const canApprove =
     !isFinance &&
     !isTerminal &&
     !usesAccountantPaymentFlow &&
     (isTransport
-      ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'PAYMENT_POSTPONED'].includes(bill.status)
+      ? isDomesticTransport
+        ? canApproveDomesticTransportBill(transportReviewInput)
+        : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'PAYMENT_POSTPONED'].includes(bill.status)
       : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'PAYMENT_POSTPONED'].includes(
           bill.status,
         ));
-  const isKyrgyzstanTransport = requestType === 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
-  const isChinaDomesticTransport = requestType === 'CHINA_DOMESTIC_TRANSPORT';
-  const executionStatus = String(detail.executionStatus || '');
-  const canReturnKyrgyzstanTransport =
-    isKyrgyzstanTransport &&
-    (['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status) ||
-      (bill.status === 'RETURNED' && executionStatus === 'RETURNED_TO_ACCOUNTANT'));
-  const canReturnChinaDomesticTransport =
-    isChinaDomesticTransport &&
-    (['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status) ||
-      (bill.status === 'RETURNED' && executionStatus === 'RETURNED_TO_ACCOUNTANT'));
   const canReturnOrReject =
     !isFinance &&
     !isTerminal &&
     !usesAccountantPaymentFlow &&
-    (isKyrgyzstanTransport
-      ? canReturnKyrgyzstanTransport
-      : isChinaDomesticTransport
-        ? canReturnChinaDomesticTransport
-        : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status));
+    !showReturnedToSupplyManagerBanner &&
+    (isDomesticTransport
+      ? canReturnOrRejectDomesticTransportBill(transportReviewInput)
+      : isKyrgyzstanTransport
+        ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status)
+        : isChinaDomesticTransport
+          ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status)
+          : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status));
   const canPayFull =
     usesAccountantPaymentFlow &&
     billActions &&
@@ -1746,7 +1793,8 @@ function DetailDrawer({
     !isTerminal &&
     Number(bill.remainingAmount) > 0.009 &&
     bill.status !== 'PAYMENT_POSTPONED';
-  const returnReason = detail.returnReason || null;
+  const returnReason =
+    showCashierReturnedBanner || showReturnedToSupplyManagerBanner ? null : detail.returnReason || null;
   const approvalStatus = detail.approvalStatus as string | undefined;
   const paymentStatus = detail.paymentStatus as string | undefined;
 
@@ -2161,6 +2209,35 @@ function DetailDrawer({
               {detail.cashierReturnReason || detail.cashierReturnedPaymentRequest?.returnReason
                 ? `: ${detail.cashierReturnReason || detail.cashierReturnedPaymentRequest?.returnReason}`
                 : ''}
+            </p>
+          ) : null}
+          {showCashierReturnedBanner ? (
+            <div className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <p className="font-semibold">
+                {t('finance.billsToPay.correctionRouting.fromCashier')}{' '}
+                {formatBillCorrectionRoutingAssignee(
+                  correctionRouting!,
+                  t('finance.billsToPay.correctionRouting.roleHqCashier'),
+                )}
+              </p>
+              {cashierReturnReason ? (
+                <p className="mt-1">
+                  {t('finance.billsToPay.returnReason')}: {cashierReturnReason}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {showReturnedToSupplyManagerBanner ? (
+            <p className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+              {formatBillCorrectionRoutingAssignee(
+                correctionRouting!,
+                t('finance.billsToPay.correctionRouting.toSupplyManager'),
+              )}
+            </p>
+          ) : null}
+          {showSentToCashierBanner ? (
+            <p className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
+              {t('finance.billsToPay.sentToCashierBanner')}
             </p>
           ) : null}
           {billActions?.showAwaitingCorrectionBanner ? (

@@ -86,6 +86,13 @@ import {
   isKyrgyzstanTransportAwaitingSupplyManagerCorrection,
 } from './kyrgyzstan-transport-correction.util';
 import {
+  buildTransportReviewAssignmentError,
+  canApproveTransportInAccountantReview,
+  isTransportAccountantReviewAfterCashierReturn,
+  isTransportCashierReturnedToAccountant,
+  resolveTransportCashierReturnReason,
+} from './transport-accountant-review.util';
+import {
   buildCargoPaymentReturnError,
   canAccountantReturnCargoToSupplyManager,
   isCargoPaymentAwaitingSupplyManagerCorrection,
@@ -932,12 +939,50 @@ export class TransportExpenseService {
       const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
       if (!expense) throw new NotFoundException('Transport expense not found');
       if (
-        expense.status !== TransportExpenseStatus.WAITING_ACCOUNTANT &&
-        expense.status !== TransportExpenseStatus.UNDER_REVIEW &&
-        expense.status !== TransportExpenseStatus.PAYMENT_POSTPONED
+        !canApproveTransportInAccountantReview({
+          expenseType: expense.expenseType,
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+          accountantId: expense.accountantId,
+          actorUserId: user.id,
+        })
       ) {
+        if (isTransportCashierReturnedToAccountant(expense)) {
+          throw new BadRequestException('Сначала возьмите счёт на проверку.');
+        }
+        if (
+          expense.status === TransportExpenseStatus.UNDER_REVIEW &&
+          expense.accountantId &&
+          expense.accountantId !== user.id
+        ) {
+          throw new BadRequestException(
+            buildTransportReviewAssignmentError({
+              status: expense.status,
+              accountantId: expense.accountantId,
+              actorUserId: user.id,
+            }),
+          );
+        }
         throw new BadRequestException('Expense is not waiting for accountant');
       }
+      const send = dto.sendToCashier !== false;
+      if (
+        send &&
+        expense.status === TransportExpenseStatus.PENDING_CASHIER &&
+        expense.executionStatus === 'PENDING_EXECUTION'
+      ) {
+        const current = await tx.procurementTransportExpense.findUnique({
+          where: { id },
+          include: INCLUDE,
+        });
+        return this.toResponse(current!, tx);
+      }
+      const reapproveAfterCashierReturn = isTransportAccountantReviewAfterCashierReturn(expense);
+      const cashierReturnReason = resolveTransportCashierReturnReason({
+        status: expense.status,
+        executionStatus: expense.executionStatus,
+        returnReason: expense.returnReason,
+      });
 
       const currency = expense.currency.toUpperCase();
       let amountKgs = Number(expense.amountKgs);
@@ -963,7 +1008,6 @@ export class TransportExpenseService {
         await this.assertHqAccount(tx, dto.financeAccountId);
       }
 
-      const send = dto.sendToCashier !== false;
       if (send && !dto.financeAccountId && !expense.financeAccountId) {
         throw new BadRequestException('Finance account is required before sending to cashier');
       }
@@ -1038,6 +1082,24 @@ export class TransportExpenseService {
           message: `Transport expense ${expense.expenseNumber} awaits HQ Cashier payment.`,
           recipientRoles: [Role.HQ_CASHIER, Role.FINANCE_MANAGER],
         });
+        if (reapproveAfterCashierReturn) {
+          await this.audit(tx, user, 'TRANSPORT_REAPPROVED_FOR_CASHIER', id, {
+            status: expense.status,
+            executionStatus: expense.executionStatus,
+          }, {
+            expenseId: id,
+            procurementOrderId: expense.procurementOrderId,
+            expenseType: expense.expenseType,
+            previousStatus: expense.status,
+            newStatus: updated.status,
+            cashierReturnReason,
+            reviewerUserId: user.id,
+            actorUserId: user.id,
+            amountKgs,
+            exchangeRate,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
 
       return this.toResponse(updated, tx);
@@ -1184,11 +1246,31 @@ export class TransportExpenseService {
       executionStatus: string | null;
       paidAmountKgs: unknown;
       returnReason: string | null;
+      accountantId: string | null;
     },
     dto: ReturnTransportExpenseDto,
   ) {
     const paidAmountKgs = Number(expense.paidAmountKgs || 0);
     const reason = dto.reason.trim();
+    const cashierReturnReason =
+      expense.executionStatus === 'RETURNED_TO_ACCOUNTANT' ? expense.returnReason : null;
+
+    if (isTransportCashierReturnedToAccountant(expense)) {
+      throw new BadRequestException('Сначала возьмите счёт на проверку.');
+    }
+    if (
+      isTransportAccountantReviewAfterCashierReturn(expense) &&
+      expense.accountantId &&
+      expense.accountantId !== user.id
+    ) {
+      throw new BadRequestException(
+        buildTransportReviewAssignmentError({
+          status: expense.status,
+          accountantId: expense.accountantId,
+          actorUserId: user.id,
+        }),
+      );
+    }
 
     if (dto.idempotencyKey) {
       const prior = await tx.auditLog.findMany({
@@ -1283,11 +1365,29 @@ export class TransportExpenseService {
       procurementOrderId: expense.procurementOrderId,
       previousStatus,
       newStatus: updated.status,
+      cashierReturnReason,
+      accountantReturnReason: reason,
       returnReason: reason,
       actorUserId: user.id,
       actorRole: user.role,
       timestamp: new Date().toISOString(),
       idempotencyKey: dto.idempotencyKey ?? null,
+    });
+
+    await this.audit(tx, user, 'TRANSPORT_RETURNED_TO_SUPPLY_MANAGER', expense.id, {
+      status: previousStatus,
+      executionStatus: expense.executionStatus,
+    }, {
+      expenseId: expense.id,
+      procurementOrderId: expense.procurementOrderId,
+      expenseType: expense.expenseType,
+      previousStatus,
+      newStatus: updated.status,
+      cashierReturnReason,
+      accountantReason: reason,
+      reviewerUserId: user.id,
+      actorUserId: user.id,
+      timestamp: new Date().toISOString(),
     });
 
     await this.notifications.notifyInTx(tx, user, {
@@ -1331,6 +1431,7 @@ export class TransportExpenseService {
       executionStatus: string | null;
       paidAmountKgs: unknown;
       returnReason: string | null;
+      accountantId: string | null;
     },
     dto: ReturnTransportExpenseDto,
   ) {
@@ -1340,6 +1441,23 @@ export class TransportExpenseService {
     const accountantReturnReason = comment ? `${reason}\n${comment}` : reason;
     const cashierReturnReason =
       expense.executionStatus === 'RETURNED_TO_ACCOUNTANT' ? expense.returnReason : null;
+
+    if (isTransportCashierReturnedToAccountant(expense)) {
+      throw new BadRequestException('Сначала возьмите счёт на проверку.');
+    }
+    if (
+      isTransportAccountantReviewAfterCashierReturn(expense) &&
+      expense.accountantId &&
+      expense.accountantId !== user.id
+    ) {
+      throw new BadRequestException(
+        buildTransportReviewAssignmentError({
+          status: expense.status,
+          accountantId: expense.accountantId,
+          actorUserId: user.id,
+        }),
+      );
+    }
 
     if (dto.idempotencyKey) {
       const prior = await tx.auditLog.findMany({
@@ -1441,6 +1559,22 @@ export class TransportExpenseService {
       actorRole: user.role,
       timestamp: new Date().toISOString(),
       idempotencyKey: dto.idempotencyKey ?? null,
+    });
+
+    await this.audit(tx, user, 'TRANSPORT_RETURNED_TO_SUPPLY_MANAGER', expense.id, {
+      status: previousStatus,
+      executionStatus: expense.executionStatus,
+    }, {
+      expenseId: expense.id,
+      procurementOrderId: expense.procurementOrderId,
+      expenseType: expense.expenseType,
+      previousStatus,
+      newStatus: updated.status,
+      cashierReturnReason,
+      accountantReason: accountantReturnReason,
+      reviewerUserId: user.id,
+      actorUserId: user.id,
+      timestamp: new Date().toISOString(),
     });
 
     await this.notifications.notifyInTx(tx, user, {

@@ -51,9 +51,6 @@ export function canAccountantReturnKyrgyzstanTransportToSupplyManager(input: {
   if (ACCOUNTANT_RETURNABLE_STATUSES.has(input.status)) {
     return true;
   }
-  if (isKyrgyzstanTransportCashierReturned(input)) {
-    return true;
-  }
   return false;
 }
 
