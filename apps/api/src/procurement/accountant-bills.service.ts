@@ -42,6 +42,10 @@ import {
   resolveSupplierApprovalStatus,
   resolveSupplierPaymentStatusLabel,
 } from './supplier-bill-actions.util';
+import {
+  resolveSupplierInvoiceCorrectionRouting,
+  resolveTransportExpenseCorrectionRouting,
+} from './accountant-bill-correction-routing.util';
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import { roundMoney } from './supplier-payment.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
@@ -801,6 +805,14 @@ export class AccountantBillsService {
     }
   }
 
+  private static readonly CORRECTION_USER_SELECT = {
+    id: true,
+    fullName: true,
+    username: true,
+    email: true,
+    role: true,
+  } as const;
+
   private async collectBills(user: AuthUser): Promise<AccountantBillListItem[]> {
     const [supplierOrders, transportRows, financeRows] = await Promise.all([
       this.prisma.procurementOrder.findMany({
@@ -810,7 +822,7 @@ export class AccountantBillsService {
         },
         include: {
           supplier: { select: { id: true, name: true } },
-          invoiceSentBy: { select: { id: true, fullName: true, role: true } },
+          invoiceSentBy: { select: AccountantBillsService.CORRECTION_USER_SELECT },
           supplierPayments: {
             select: {
               amountYuan: true,
@@ -818,6 +830,10 @@ export class AccountantBillsService {
               actualPaidKgs: true,
               status: true,
               exchangeRate: true,
+              executionStatus: true,
+              returnedAt: true,
+              sequenceNumber: true,
+              returnedBy: { select: AccountantBillsService.CORRECTION_USER_SELECT },
             },
           },
         },
@@ -840,7 +856,8 @@ export class AccountantBillsService {
           },
         },
         include: {
-          createdBy: { select: { id: true, fullName: true, role: true } },
+          createdBy: { select: AccountantBillsService.CORRECTION_USER_SELECT },
+          returnedBy: { select: AccountantBillsService.CORRECTION_USER_SELECT },
           transportCompany: { select: { id: true, name: true } },
           procurementOrder: { select: { id: true, orderNumber: true } },
         },
@@ -894,11 +911,17 @@ export class AccountantBillsService {
         remainingYuan,
       });
       const due = order.expectedPaymentDate ? new Date(order.expectedPaymentDate) : null;
+      const requestType = 'SUPPLIER_PAYMENT' as AccountantBillRequestType;
+      const correctionRouting = resolveSupplierInvoiceCorrectionRouting({
+        invoiceReviewStatus: order.invoiceReviewStatus,
+        invoiceSentBy: order.invoiceSentBy,
+        supplierPayments: order.supplierPayments,
+      });
       return {
         id: order.id,
         source: 'SUPPLIER_INVOICE',
         requestNumber: order.orderNumber,
-        requestType: 'SUPPLIER_PAYMENT',
+        requestType,
         submittedAt: order.invoiceSentToAccountantAt?.toISOString() ?? null,
         sender: order.invoiceSentBy
           ? {
@@ -925,6 +948,7 @@ export class AccountantBillsService {
         relatedEntityId: order.id,
         relatedOrderNumber: order.orderNumber,
         href: `/procurement/orders/${order.id}?tab=payments`,
+        correctionRouting,
       };
     });
 
@@ -942,11 +966,19 @@ export class AccountantBillsService {
           ? remainingKgs
           : Math.max(amount - (amountKgs > 0 ? (paid / amountKgs) * amount : 0), 0);
       const due = row.dueDate ? new Date(row.dueDate) : null;
+      const requestType = mapTransportExpenseTypeToRequestType(row.expenseType);
+      const correctionRouting = resolveTransportExpenseCorrectionRouting({
+        requestType,
+        status: row.status,
+        executionStatus: row.executionStatus,
+        returnedBy: row.returnedBy,
+        supplyManager: row.createdBy,
+      });
       return {
         id: row.id,
         source: 'TRANSPORT_EXPENSE',
         requestNumber: row.expenseNumber,
-        requestType: mapTransportExpenseTypeToRequestType(row.expenseType),
+        requestType,
         submittedAt: (row.submittedAt ?? row.createdAt)?.toISOString?.() ?? null,
         sender: row.createdBy
           ? { id: row.createdBy.id, fullName: row.createdBy.fullName, role: row.createdBy.role }
@@ -973,6 +1005,7 @@ export class AccountantBillsService {
         href: row.procurementOrderId
           ? `/procurement/orders/${row.procurementOrderId}?tab=transport`
           : `/finance/bills-to-pay?source=TRANSPORT_EXPENSE&id=${row.id}`,
+        correctionRouting,
       };
     });
 

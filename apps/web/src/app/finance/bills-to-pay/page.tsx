@@ -22,6 +22,10 @@ import {
   getCargoBillActionVisibility,
   resolveBillRemainingForActions,
 } from '@/lib/cargo-bill-actions';
+import {
+  formatBillCorrectionRoutingAssignee,
+  type BillCorrectionRouting,
+} from '@/lib/bill-correction-routing';
 import type { User } from '@/lib/types';
 
 type BillSource = 'SUPPLIER_INVOICE' | 'TRANSPORT_EXPENSE' | 'FINANCE_EXPENSE';
@@ -49,6 +53,7 @@ type BillRow = {
   paymentPostponeComment?: string | null;
   relatedOrderNumber?: string | null;
   href: string;
+  correctionRouting?: BillCorrectionRouting;
 };
 
 type BillsResponse = {
@@ -877,17 +882,37 @@ function BillsToPayPageContent() {
                     {Number(row.remainingAmount).toFixed(2)} {row.currency}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex flex-wrap items-center gap-1">
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
-                        {t(`finance.billsToPay.status.${row.status}`)}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => void openDetail(row)}
-                        className="rounded border border-blue-200 px-2 py-0.5 text-xs font-semibold text-blue-700"
-                      >
-                        {t('common.open')}
-                      </button>
+                    <div className="flex max-w-[11rem] flex-col gap-1">
+                      {row.correctionRouting ? (
+                        <p className="text-[10px] leading-snug text-amber-800">
+                          {t(
+                            row.correctionRouting.direction === 'FROM_CASHIER'
+                              ? 'finance.billsToPay.correctionRouting.fromCashier'
+                              : 'finance.billsToPay.correctionRouting.toSupplyManager',
+                          )}
+                          <br />
+                          {formatBillCorrectionRoutingAssignee(
+                            row.correctionRouting,
+                            t(
+                              row.correctionRouting.direction === 'FROM_CASHIER'
+                                ? 'finance.billsToPay.correctionRouting.roleHqCashier'
+                                : 'finance.billsToPay.correctionRouting.roleSupplyManager',
+                            ),
+                          )}
+                        </p>
+                      ) : null}
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                          {t(`finance.billsToPay.status.${row.status}`)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void openDetail(row)}
+                          className="rounded border border-blue-200 px-2 py-0.5 text-xs font-semibold text-blue-700"
+                        >
+                          {t('common.open')}
+                        </button>
+                      </div>
                     </div>
                   </td>
                 </tr>

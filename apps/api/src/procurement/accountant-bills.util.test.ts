@@ -122,6 +122,21 @@ assert(
   billsPage.includes('usesAccountantPaymentFlow = isCargoPayment || isSupplierPayment'),
   'supplier shares cargo accountant action flow',
 );
+assert(billsPage.includes('correctionRouting'), 'correction routing shown in actions column');
+assert(billsPage.includes('finance.billsToPay.correctionRouting.fromCashier'), 'cashier correction label');
+assert(billsPage.includes('finance.billsToPay.correctionRouting.toSupplyManager'), 'supply manager correction label');
+assert(billsPage.includes('formatBillCorrectionRoutingAssignee'), 'correction routing assignee formatter');
+
+const correctionRoutingUtil = readFileSync(
+  join(__dirname, './accountant-bill-correction-routing.util.ts'),
+  'utf8',
+);
+const correctionService = readFileSync(join(__dirname, './accountant-bills.service.ts'), 'utf8');
+assert(correctionRoutingUtil.includes('resolveSupplierInvoiceCorrectionRouting'), 'supplier routing resolver');
+assert(correctionRoutingUtil.includes('resolveTransportExpenseCorrectionRouting'), 'transport routing resolver');
+assert(correctionService.includes('correctionRouting'), 'collectBills emits correctionRouting');
+assert(correctionService.includes('returnedBy: { select: AccountantBillsService.CORRECTION_USER_SELECT }'), '13. batch user include');
+assert(!correctionService.includes('findMany({\n        where: { id:'), '13. no per-row user findMany');
 
 const sample: AccountantBillListItem[] = [
   {

@@ -33,6 +33,13 @@ export type AccountantBillUiStatus = (typeof ACCOUNTANT_BILL_UI_STATUSES)[number
 
 export type AccountantBillSource = 'SUPPLIER_INVOICE' | 'TRANSPORT_EXPENSE' | 'FINANCE_EXPENSE';
 
+export type AccountantBillCorrectionRouting = {
+  direction: 'FROM_CASHIER' | 'TO_SUPPLY_MANAGER';
+  userId?: string;
+  userName?: string;
+  userLogin?: string;
+};
+
 export type AccountantBillListItem = {
   id: string;
   source: AccountantBillSource;
@@ -58,6 +65,7 @@ export type AccountantBillListItem = {
   relatedEntityId: string;
   relatedOrderNumber?: string | null;
   href: string;
+  correctionRouting?: AccountantBillCorrectionRouting;
 };
 
 export function mapTransportExpenseTypeToRequestType(expenseType: string): AccountantBillRequestType {
