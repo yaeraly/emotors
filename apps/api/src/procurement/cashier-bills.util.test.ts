@@ -103,6 +103,10 @@ assert(cashierPage.includes('previousPayments') || service.includes('previousPay
 assert(controller.includes("cashier-bills/:source/:id/return"), '19. return to accountant');
 assert(service.includes('RETURNED_TO_ACCOUNTANT'), '19. returned execution status');
 assert(controller.includes("cashier-bills/:source/:id/fail"), '21. fail endpoint');
+assert(
+  cashierPage.includes("row.requestType !== 'CHINA_DOMESTIC_TRANSPORT'"),
+  'china domestic transport hides report-failure action in cashier detail',
+);
 assert(service.includes('CASHIER_PAYMENT_FAILED'), '21. failed payment notifies accountant, no ledger in fail path');
 assert(!service.includes("postLedgerEntry"), '21. fail path does not create finance transaction in cashier service');
 

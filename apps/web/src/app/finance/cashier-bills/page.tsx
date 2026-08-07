@@ -917,7 +917,10 @@ function CashierBillsPageContent() {
                 const canStart = !busy && selected.executionStatus !== 'IN_PROGRESS' && awaitingCashierInstruction;
                 const canConfirm = !busy && awaitingCashierInstruction;
                 const canReturn = !busy && awaitingCashierInstruction;
-                const canFail = !busy && awaitingCashierInstruction;
+                const canFail =
+                  !busy &&
+                  awaitingCashierInstruction &&
+                  row.requestType !== 'CHINA_DOMESTIC_TRANSPORT';
                 if (!canStart && !canConfirm && !canReturn && !canFail) return null;
                 return (
                   <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-200 pt-4">
