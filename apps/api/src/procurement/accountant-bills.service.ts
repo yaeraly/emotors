@@ -368,6 +368,7 @@ export class AccountantBillsService {
     if (source === 'TRANSPORT_EXPENSE') {
       const result = await this.transportExpenses.approveAndSendToCashier(user, id, {
         exchangeRate: body.exchangeRate,
+        exchangeRateCnyKgs: body.exchangeRateCnyKgs,
         financeAccountId: body.financeAccountId,
         accountantComment: body.accountantComment,
         sendToCashier: body.sendToCashier !== false,
@@ -1262,11 +1263,14 @@ export class AccountantBillsService {
     const listItem = (await this.collectBills(user)).find(
       (item) => item.source === 'TRANSPORT_EXPENSE' && item.id === id,
     );
-    const audits = await this.prisma.auditLog.findMany({
-      where: { entity: 'ProcurementTransportExpense', entityId: id },
-      orderBy: { timestamp: 'desc' },
-      take: 50,
-    });
+    const isChinaDomestic = detail.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT;
+    const audits = isChinaDomestic
+      ? []
+      : await this.prisma.auditLog.findMany({
+          where: { entity: 'ProcurementTransportExpense', entityId: id },
+          orderBy: { timestamp: 'desc' },
+          take: 50,
+        });
     const isCargo = detail.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT;
     const approvedAmountKgs = Number(
       detail.calculatedAmountKgs ?? detail.amountKgs ?? detail.amount ?? 0,

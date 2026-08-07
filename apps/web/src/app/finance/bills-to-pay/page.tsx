@@ -166,7 +166,7 @@ function BillsToPayPageContent() {
   const [transportApproveModal, setTransportApproveModal] = useState<BillDetail | null>(null);
   const [transportApproveForm, setTransportApproveForm] = useState({
     financeAccountId: '',
-    exchangeRate: '',
+    exchangeRateCnyKgs: '',
     accountantComment: '',
   });
   const [paymentForm, setPaymentForm] = useState({
@@ -667,7 +667,7 @@ function BillsToPayPageContent() {
     setTransportApproveModal(bill);
     setTransportApproveForm({
       financeAccountId: bill.detail?.financeAccountId || bill.detail?.financeAccount?.id || '',
-      exchangeRate:
+      exchangeRateCnyKgs:
         bill.currency.toUpperCase() === 'KGS'
           ? ''
           : bill.detail?.exchangeRate != null
@@ -686,8 +686,12 @@ function BillsToPayPageContent() {
       return;
     }
     const currency = String(transportApproveModal.currency || 'KGS').toUpperCase();
-    if (currency !== 'KGS' && !(Number(transportApproveForm.exchangeRate) > 0)) {
-      setPaymentFormError(t('finance.billsToPay.exchangeRateRequired'));
+    const exchangeRateCnyKgs =
+      currency !== 'KGS'
+        ? parseExchangeRateInput(transportApproveForm.exchangeRateCnyKgs) ?? undefined
+        : undefined;
+    if (currency !== 'KGS' && exchangeRateCnyKgs == null) {
+      setPaymentFormError(t('finance.billsToPay.cnyRateRequired'));
       return;
     }
     setSaving(true);
@@ -701,9 +705,7 @@ function BillsToPayPageContent() {
           body: JSON.stringify({
             sendToCashier: true,
             financeAccountId: transportApproveForm.financeAccountId,
-            exchangeRate: transportApproveForm.exchangeRate
-              ? Number(transportApproveForm.exchangeRate)
-              : undefined,
+            exchangeRateCnyKgs,
             accountantComment: transportApproveForm.accountantComment || undefined,
           }),
         },
@@ -1525,79 +1527,20 @@ function BillsToPayPageContent() {
       ) : null}
 
       {transportApproveModal ? (
-        <Modal
-          title={t('finance.billsToPay.approve')}
+        <TransportApproveModal
+          t={t}
+          modal={transportApproveModal}
+          form={transportApproveForm}
+          error={paymentFormError}
+          saving={saving}
+          accounts={accounts}
           onClose={() => {
             setTransportApproveModal(null);
             setPaymentFormError('');
           }}
-        >
-          <p className="text-xs text-slate-600">
-            {transportApproveModal.requestNumber} · {Number(transportApproveModal.amount).toFixed(2)}{' '}
-            {transportApproveModal.currency}
-          </p>
-          {paymentFormError ? (
-            <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{paymentFormError}</p>
-          ) : null}
-          <label className="mt-2 block text-xs font-semibold">
-            {t('finance.billsToPay.accountOrCashbox')}
-            <select
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-              value={transportApproveForm.financeAccountId}
-              onChange={(e) =>
-                setTransportApproveForm((prev) => ({
-                  ...prev,
-                  financeAccountId: e.target.value,
-                }))
-              }
-            >
-              <option value="">{t('common.select')}</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name} ({Number(account.availableBalance).toFixed(2)} KGS)
-                </option>
-              ))}
-            </select>
-          </label>
-          {String(transportApproveModal.currency || 'KGS').toUpperCase() !== 'KGS' ? (
-            <label className="mt-2 block text-xs font-semibold">
-              {t('finance.billsToPay.exchangeRate')}
-              <input
-                type="number"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                value={transportApproveForm.exchangeRate}
-                onChange={(e) =>
-                  setTransportApproveForm((prev) => ({
-                    ...prev,
-                    exchangeRate: e.target.value,
-                  }))
-                }
-              />
-            </label>
-          ) : null}
-          <label className="mt-2 block text-xs font-semibold">
-            {t('finance.billsToPay.comment')}
-            <textarea
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-              rows={2}
-              value={transportApproveForm.accountantComment}
-              onChange={(e) =>
-                setTransportApproveForm((prev) => ({
-                  ...prev,
-                  accountantComment: e.target.value,
-                }))
-              }
-            />
-          </label>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => void submitTransportApprove()}
-            className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
-          >
-            {t('finance.billsToPay.sendToCashier')}
-          </button>
-        </Modal>
+          onSubmit={() => void submitTransportApprove()}
+          onFormChange={setTransportApproveForm}
+        />
       ) : null}
 
       {qrPreview ? (
@@ -1791,7 +1734,9 @@ function DetailDrawer({
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <dl className="grid grid-cols-2 gap-3 text-sm">
-              <Field label={t('finance.billsToPay.invoiceNumber')} value={bill.requestNumber || '—'} />
+              {!isChinaDomesticTransport ? (
+                <Field label={t('finance.billsToPay.invoiceNumber')} value={bill.requestNumber || '—'} />
+              ) : null}
               <Field
                 label={t('finance.billsToPay.source')}
                 value={t(`finance.billsToPay.type.${requestType || 'SUPPLIER_PAYMENT'}`)}
@@ -1840,6 +1785,33 @@ function DetailDrawer({
                     value={`${Number(detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? 0).toFixed(2)} KGS`}
                   />
                 </>
+              ) : isChinaDomesticTransport ? (
+                <>
+                  <Field
+                    label={t('finance.billsToPay.amount')}
+                    value={`${Number(bill.amount).toFixed(2)} CNY`}
+                  />
+                  {Number(detail.exchangeRate || 0) > 0 ? (
+                    <Field
+                      label={t('finance.billsToPay.cnyToKgsRate')}
+                      value={Number(detail.exchangeRate).toFixed(2)}
+                    />
+                  ) : null}
+                  {Number(detail.amountKgs || 0) > 0 ? (
+                    <Field
+                      label={t('finance.billsToPay.amountInKgs')}
+                      value={`${Number(detail.amountKgs).toFixed(2)} сом`}
+                    />
+                  ) : null}
+                  <Field
+                    label={t('finance.billsToPay.paid')}
+                    value={`${Number(bill.paidAmountKgs ?? bill.paidAmount ?? 0).toFixed(2)} KGS`}
+                  />
+                  <Field
+                    label={t('finance.billsToPay.remaining')}
+                    value={`${Number(bill.remainingAmountKgs ?? bill.remainingAmount ?? 0).toFixed(2)} KGS`}
+                  />
+                </>
               ) : (
                 <>
                   <Field
@@ -1872,17 +1844,19 @@ function DetailDrawer({
               ) : null}
               <Field label={t('finance.billsToPay.sender')} value={bill.sender?.fullName || '—'} />
               <Field label={t('finance.billsToPay.department')} value={bill.departmentOrBranch || '—'} />
-              {!isSupplierPayment ? (
+              {!isSupplierPayment && !isChinaDomesticTransport ? (
                 <Field label={t('finance.billsToPay.basis')} value={bill.basis || '—'} />
               ) : null}
-              <Field
-                label={t('finance.billsToPay.nextPaymentDate')}
-                value={
-                  bill.nextPaymentDate
-                    ? new Date(bill.nextPaymentDate).toLocaleDateString()
-                    : '—'
-                }
-              />
+              {!isChinaDomesticTransport ? (
+                <Field
+                  label={t('finance.billsToPay.nextPaymentDate')}
+                  value={
+                    bill.nextPaymentDate
+                      ? new Date(bill.nextPaymentDate).toLocaleDateString()
+                      : '—'
+                  }
+                />
+              ) : null}
               <Field
                 label={t('finance.billsToPay.createdAt')}
                 value={bill.submittedAt ? new Date(bill.submittedAt).toLocaleString() : '—'}
@@ -2119,7 +2093,7 @@ function DetailDrawer({
             </div>
           ) : null}
 
-          {!isSupplierPayment && auditHistory.length ? (
+          {!isSupplierPayment && !isChinaDomesticTransport && auditHistory.length ? (
             <section className="mt-4">
               <h4 className="text-sm font-semibold text-slate-900">
                 {t('finance.billsToPay.actionHistory')}
@@ -2266,6 +2240,139 @@ function DetailDrawer({
         </div>
       </div>
     </div>
+  );
+}
+
+function TransportApproveModal({
+  t,
+  modal,
+  form,
+  error,
+  saving,
+  accounts,
+  onClose,
+  onSubmit,
+  onFormChange,
+}: {
+  t: (key: string) => string;
+  modal: BillDetail;
+  form: {
+    financeAccountId: string;
+    exchangeRateCnyKgs: string;
+    accountantComment: string;
+  };
+  error: string;
+  saving: boolean;
+  accounts: Array<{ id: string; name: string; availableBalance: number; typeCode?: string }>;
+  onClose: () => void;
+  onSubmit: () => void;
+  onFormChange: Dispatch<
+    SetStateAction<{
+      financeAccountId: string;
+      exchangeRateCnyKgs: string;
+      accountantComment: string;
+    }>
+  >;
+}) {
+  const currency = String(modal.currency || 'KGS').toUpperCase();
+  const isCny = currency === 'CNY';
+  const amountCny = Number(modal.amount ?? 0);
+  const kgsPreview = isCny ? previewCnyToKgs(amountCny, form.exchangeRateCnyKgs) : null;
+
+  return (
+    <Modal title={t('finance.billsToPay.approve')} onClose={onClose}>
+      {isCny ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+          <p className="text-xs font-semibold text-slate-700">
+            {t('finance.billsToPay.amountCny')}: {amountCny.toFixed(2)} CNY
+          </p>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.cnyToKgsRate')}
+            <input
+              type="text"
+              inputMode="decimal"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+              value={form.exchangeRateCnyKgs}
+              onChange={(e) =>
+                onFormChange((prev) => ({
+                  ...prev,
+                  exchangeRateCnyKgs: normalizeExchangeRateInput(e.target.value),
+                }))
+              }
+            />
+          </label>
+          <p className="mt-2 text-xs text-slate-700">
+            {t('finance.billsToPay.amountInKgs')}: {formatKgsPreview(kgsPreview)}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-600">
+          {modal.requestNumber} · {Number(modal.amount).toFixed(2)} {modal.currency}
+        </p>
+      )}
+      {error ? (
+        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+      <label className="mt-2 block text-xs font-semibold">
+        {t('finance.billsToPay.accountOrCashbox')}
+        <select
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          value={form.financeAccountId}
+          onChange={(e) =>
+            onFormChange((prev) => ({
+              ...prev,
+              financeAccountId: e.target.value,
+            }))
+          }
+        >
+          <option value="">{t('common.select')}</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.name} ({Number(account.availableBalance).toFixed(2)} KGS)
+            </option>
+          ))}
+        </select>
+      </label>
+      {!isCny && currency !== 'KGS' ? (
+        <label className="mt-2 block text-xs font-semibold">
+          {t('finance.billsToPay.exchangeRate')}
+          <input
+            type="text"
+            inputMode="decimal"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            value={form.exchangeRateCnyKgs}
+            onChange={(e) =>
+              onFormChange((prev) => ({
+                ...prev,
+                exchangeRateCnyKgs: normalizeExchangeRateInput(e.target.value),
+              }))
+            }
+          />
+        </label>
+      ) : null}
+      <label className="mt-2 block text-xs font-semibold">
+        {t('finance.billsToPay.comment')}
+        <textarea
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          rows={2}
+          value={form.accountantComment}
+          onChange={(e) =>
+            onFormChange((prev) => ({
+              ...prev,
+              accountantComment: e.target.value,
+            }))
+          }
+        />
+      </label>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={onSubmit}
+        className="mt-3 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+      >
+        {t('finance.billsToPay.sendToCashier')}
+      </button>
+    </Modal>
   );
 }
 

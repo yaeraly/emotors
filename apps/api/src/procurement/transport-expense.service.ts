@@ -25,6 +25,11 @@ import { AuthUser } from '../auth/auth.types';
 import { FinanceLedgerService } from '../finance/finance-ledger.service';
 import { assertHqCashierAssignedAccount } from '../finance/finance-assignment.util';
 import { buildFinanceDocumentNumber, roundMoney } from '../finance/finance-number.util';
+import {
+  calculateApprovedChinaTransportKgsFromRate,
+  CHINA_TRANSPORT_CNY_RATE_REQUIRED_MESSAGE,
+  resolveChinaTransportApprovalExchangeRate,
+} from './china-domestic-transport-approval.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -898,11 +903,18 @@ export class TransportExpenseService {
       if (currency === 'KGS') {
         amountKgs = Number(expense.amount);
       } else {
-        if (!dto.exchangeRate || dto.exchangeRate <= 0) {
-          throw new BadRequestException('Exchange rate is required for non-KGS transport expenses');
+        const submittedRate = dto.exchangeRateCnyKgs ?? dto.exchangeRate;
+        if (!submittedRate || submittedRate <= 0) {
+          throw new BadRequestException(CHINA_TRANSPORT_CNY_RATE_REQUIRED_MESSAGE);
         }
-        exchangeRate = Math.round(Number(dto.exchangeRate) * 10000) / 10000;
-        amountKgs = roundMoney(Number(expense.amount) * exchangeRate);
+        try {
+          exchangeRate = resolveChinaTransportApprovalExchangeRate(submittedRate);
+        } catch (error) {
+          throw new BadRequestException(
+            error instanceof Error ? error.message : CHINA_TRANSPORT_CNY_RATE_REQUIRED_MESSAGE,
+          );
+        }
+        amountKgs = calculateApprovedChinaTransportKgsFromRate(Number(expense.amount), exchangeRate);
       }
 
       if (dto.financeAccountId) {
