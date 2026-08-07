@@ -1514,11 +1514,19 @@ function DetailDrawer({
       : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'PAYMENT_POSTPONED'].includes(
           bill.status,
         ));
+  const isKyrgyzstanTransport = bill.requestType === 'KYRGYZSTAN_DOMESTIC_TRANSPORT';
+  const executionStatus = String(detail.executionStatus || '');
+  const canReturnKyrgyzstanTransport =
+    isKyrgyzstanTransport &&
+    (['AWAITING_ACCOUNTANT', 'UNDER_REVIEW'].includes(bill.status) ||
+      (bill.status === 'RETURNED' && executionStatus === 'RETURNED_TO_ACCOUNTANT'));
   const canReturnOrReject =
     !isFinance &&
     !isTerminal &&
     !isCargoPayment &&
-    ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status);
+    (isKyrgyzstanTransport
+      ? canReturnKyrgyzstanTransport
+      : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status));
   const cargoPayableStatuses = new Set([
     'AWAITING_ACCOUNTANT',
     'UNDER_REVIEW',

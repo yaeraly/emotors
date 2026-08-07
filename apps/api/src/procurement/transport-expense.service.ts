@@ -68,6 +68,12 @@ import {
   resolveSupplierPaymentMethodFromAccountType,
   tryResolveSupplierPaymentMethodFromAccountType,
 } from './supplier-payment-method-from-account.util';
+import {
+  buildKyrgyzstanTransportReturnError,
+  canAccountantReturnKyrgyzstanTransportToSupplyManager,
+  isKyrgyzstanDomesticTransport,
+  isKyrgyzstanTransportAwaitingSupplyManagerCorrection,
+} from './kyrgyzstan-transport-correction.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -605,6 +611,25 @@ export class TransportExpenseService {
       }
 
       if (
+        existing.expenseType === TransportExpenseType.LOCAL_DELIVERY &&
+        existing.status === TransportExpenseStatus.RETURNED
+      ) {
+        await this.audit(tx, user, 'KYRGYZSTAN_TRANSPORT_CORRECTED', id, {
+          amount: Number(existing.amount),
+          status: existing.status,
+        }, {
+          expenseId: id,
+          procurementOrderId: existing.procurementOrderId,
+          previousStatus: existing.status,
+          newStatus: updated.status,
+          amount: Number(updated.amount),
+          actorUserId: user.id,
+          actorRole: user.role,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      if (
         isCargo &&
         cargoCalc &&
         (Number(existing.calculatedAmountUsd ?? 0) !== cargoCalc.calculatedAmountUsd ||
@@ -724,6 +749,7 @@ export class TransportExpenseService {
         where: { id },
         data: {
           status: TransportExpenseStatus.WAITING_ACCOUNTANT,
+          executionStatus: null,
           submittedAt: new Date(),
           returnReason: null,
           returnedAt: null,
@@ -763,6 +789,22 @@ export class TransportExpenseService {
           cargoPaymentId: id,
           procurementOrderId: updated.procurementOrderId,
           actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      if (
+        expense.expenseType === TransportExpenseType.LOCAL_DELIVERY &&
+        expense.status === TransportExpenseStatus.RETURNED
+      ) {
+        await this.audit(tx, user, 'KYRGYZSTAN_TRANSPORT_RESUBMITTED', id, {
+          status: expense.status,
+        }, {
+          expenseId: id,
+          procurementOrderId: updated.procurementOrderId,
+          previousStatus: expense.status,
+          newStatus: updated.status,
+          actorUserId: user.id,
+          actorRole: user.role,
           timestamp: new Date().toISOString(),
         });
       }
@@ -956,6 +998,21 @@ export class TransportExpenseService {
           timestamp: new Date().toISOString(),
         });
       }
+      if (fromCashier && expense.expenseType === TransportExpenseType.LOCAL_DELIVERY) {
+        await this.audit(tx, user, 'KYRGYZSTAN_TRANSPORT_RETURNED_BY_CASHIER', id, {
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+        }, {
+          expenseId: id,
+          procurementOrderId: expense.procurementOrderId,
+          previousStatus: expense.status,
+          newStatus: updated.status,
+          returnReason: updated.returnReason,
+          actorUserId: user.id,
+          actorRole: user.role,
+          timestamp: new Date().toISOString(),
+        });
+      }
       await this.notifications.notifyInTx(tx, user, {
         type: AlertType.TRANSPORT_EXPENSE_RETURNED,
         entityType: 'ProcurementTransportExpense',
@@ -982,6 +1039,153 @@ export class TransportExpenseService {
       }
       return this.returnCargoForCorrectionInTx(tx, user, expense, dto);
     });
+  }
+
+  returnKyrgyzstanTransportToSupplyManager(user: AuthUser, id: string, dto: ReturnTransportExpenseDto) {
+    if (!canCreateSupplierPayment(user)) {
+      throw new ForbiddenException('Only HQ Accountant can return Kyrgyzstan transport expenses for correction');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const expense = await tx.procurementTransportExpense.findUnique({ where: { id } });
+      if (!expense) throw new NotFoundException('Transport expense not found');
+      if (!isKyrgyzstanDomesticTransport(expense.expenseType)) {
+        throw new BadRequestException('Only Kyrgyzstan domestic transport expenses support this return flow');
+      }
+      if (!expense.procurementOrderId) {
+        throw new BadRequestException('Procurement order link is required');
+      }
+      return this.returnKyrgyzstanTransportToSupplyManagerInTx(tx, user, expense, dto);
+    });
+  }
+
+  private async returnKyrgyzstanTransportToSupplyManagerInTx(
+    tx: Tx,
+    user: AuthUser,
+    expense: {
+      id: string;
+      expenseNumber: string;
+      expenseType: TransportExpenseType;
+      status: TransportExpenseStatus;
+      procurementOrderId: string | null;
+      executionStatus: string | null;
+      paidAmountKgs: unknown;
+      returnReason: string | null;
+    },
+    dto: ReturnTransportExpenseDto,
+  ) {
+    const paidAmountKgs = Number(expense.paidAmountKgs || 0);
+    const reason = dto.reason.trim();
+
+    if (dto.idempotencyKey) {
+      const prior = await tx.auditLog.findMany({
+        where: {
+          entity: 'ProcurementTransportExpense',
+          entityId: expense.id,
+          action: 'KYRGYZSTAN_TRANSPORT_RETURNED_TO_SUPPLY_MANAGER',
+        },
+        orderBy: { timestamp: 'desc' },
+        take: 20,
+      });
+      const duplicate = prior.find((row) => {
+        const meta = row.metadata as { idempotencyKey?: string } | null;
+        return meta?.idempotencyKey === dto.idempotencyKey;
+      });
+      if (duplicate) {
+        const current = await tx.procurementTransportExpense.findUnique({
+          where: { id: expense.id },
+          include: INCLUDE,
+        });
+        return this.toResponse(current!, tx);
+      }
+    }
+
+    if (isKyrgyzstanTransportAwaitingSupplyManagerCorrection(expense)) {
+      const current = await tx.procurementTransportExpense.findUnique({
+        where: { id: expense.id },
+        include: INCLUDE,
+      });
+      return this.toResponse(current!, tx);
+    }
+
+    if (
+      !canAccountantReturnKyrgyzstanTransportToSupplyManager({
+        status: expense.status,
+        executionStatus: expense.executionStatus,
+        paidAmountKgs,
+      })
+    ) {
+      throw new BadRequestException(
+        buildKyrgyzstanTransportReturnError({
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+          paidAmountKgs,
+        }),
+      );
+    }
+
+    const ledgerCount = await tx.financeLedgerEntry.count({
+      where: {
+        referenceType: 'ProcurementTransportExpense',
+        referenceId: expense.id,
+        entryType: FinanceLedgerEntryType.EXPENSE,
+      },
+    });
+    if (ledgerCount > 0 || paidAmountKgs > 0.009) {
+      throw new BadRequestException(
+        'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.',
+      );
+    }
+
+    const previousStatus = expense.status;
+    const updated = await tx.procurementTransportExpense.update({
+      where: { id: expense.id },
+      data: {
+        status: TransportExpenseStatus.RETURNED,
+        executionStatus: null,
+        returnReason: reason,
+        returnedAt: new Date(),
+        returnedById: user.id,
+        sentToCashierAt: null,
+        cashierInstructionAmountKgs: null,
+        accountantId: user.id,
+      },
+      include: INCLUDE,
+    });
+
+    await this.audit(tx, user, 'TRANSPORT_EXPENSE_RETURNED', expense.id, {
+      status: previousStatus,
+      executionStatus: expense.executionStatus,
+    }, {
+      status: updated.status,
+      executionStatus: updated.executionStatus,
+      returnReason: updated.returnReason,
+    });
+
+    await this.audit(tx, user, 'KYRGYZSTAN_TRANSPORT_RETURNED_TO_SUPPLY_MANAGER', expense.id, {
+      status: previousStatus,
+      executionStatus: expense.executionStatus,
+    }, {
+      expenseId: expense.id,
+      procurementOrderId: expense.procurementOrderId,
+      previousStatus,
+      newStatus: updated.status,
+      returnReason: reason,
+      actorUserId: user.id,
+      actorRole: user.role,
+      timestamp: new Date().toISOString(),
+      idempotencyKey: dto.idempotencyKey ?? null,
+    });
+
+    await this.notifications.notifyInTx(tx, user, {
+      type: AlertType.TRANSPORT_EXPENSE_RETURNED,
+      entityType: 'ProcurementTransportExpense',
+      entityId: expense.id,
+      referenceNumber: expense.expenseNumber,
+      message: `Внутренний транспорт Кыргызстана ${expense.expenseNumber} возвращён на исправление: ${reason}`,
+      recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
+    });
+
+    return this.toResponse(updated, tx);
   }
 
   private async returnCargoForCorrectionInTx(

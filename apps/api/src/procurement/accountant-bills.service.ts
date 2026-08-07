@@ -233,6 +233,13 @@ export class AccountantBillsService {
           idempotencyKey: body.idempotencyKey,
         });
       }
+      if (expense?.expenseType === TransportExpenseType.LOCAL_DELIVERY) {
+        return this.transportExpenses.returnKyrgyzstanTransportToSupplyManager(user, id, {
+          reason: trimmed,
+          comment: body.comment?.trim() || undefined,
+          idempotencyKey: body.idempotencyKey,
+        });
+      }
       return this.transportExpenses.returnToCreator(user, id, { reason: trimmed });
     }
 
