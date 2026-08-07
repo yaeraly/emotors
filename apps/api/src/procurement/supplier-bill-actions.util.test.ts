@@ -60,9 +60,10 @@ const payBlock = supplierService.slice(
 assert(payBlock.includes('PENDING_CASHIER'), '6. creates cashier instruction');
 assert(!payBlock.includes('postLedgerEntry'), '7. no ledger at accountant');
 
-// 9. Return blocks paid invoices
+// 9. Return allows confirmed payments; ledger still blocks irreversible finance
 assert(supplierService.includes('returnForCorrectionByAccountant'), '9. dedicated return');
-assert(supplierService.includes('paidKgs > 0.009'), '9. paid blocks return');
+assert(supplierService.includes('invalidateStaleSupplierPaymentRequestsInTx'), '9. stale requests invalidated');
+assert(!supplierService.includes('paidKgs > 0.009'), '9. partial paid return allowed');
 
 // 10. Postpone no ledger
 const postponeSection = billsService.slice(

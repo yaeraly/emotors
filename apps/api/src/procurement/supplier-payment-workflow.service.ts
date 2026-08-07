@@ -80,6 +80,15 @@ import {
   resolveSupplierPaymentExchangeRate,
   SUPPLIER_CNY_RATE_REQUIRED_MESSAGE,
 } from './supplier-payment-exchange-rate.util';
+import {
+  assertCorrectedSupplierTotalCoversPaid,
+  assertSupplierPaymentWithinRemaining,
+  resolveSupplierInvoiceBalanceSnapshot,
+  STALE_SUPPLIER_PAYMENT_REQUEST_STATUSES,
+  sumSupplierLineTotalYuan,
+  SUPPLIER_CORRECTED_TOTAL_BELOW_PAID_MESSAGE,
+  SUPPLIER_PAYMENT_EXCEEDS_REMAINING_MESSAGE,
+} from './supplier-payment-correction.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -393,11 +402,34 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Rejected supplier invoice cannot be resubmitted');
       }
 
-      const remainingOrTotal = roundMoney(
-        Number(order.remainingYuan ?? 0) > 0
-          ? Number(order.remainingYuan)
-          : Number(order.totalYuan ?? 0),
+      const refreshed = await this.refreshSupplierInvoiceTotalsInTx(
+        tx,
+        user,
+        order.id,
+        canResubmitAfterReturn ? 'Supplier invoice resubmitted after correction' : 'Invoice sent to HQ Accountant',
+        { invalidateStaleRequests: canResubmitAfterReturn },
       );
+      if (canResubmitAfterReturn) {
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_RESUBMITTED', order.id, {
+          invoiceReviewStatus: order.invoiceReviewStatus,
+          totalYuan: Number(order.totalYuan),
+          remainingYuan: Number(order.remainingYuan),
+        }, {
+          supplierPaymentId: null,
+          procurementOrderId: order.id,
+          oldTotalCny: Number(order.totalYuan),
+          newTotalCny: refreshed.totalYuan,
+          confirmedPaidCny: refreshed.confirmedPaidCny,
+          oldRemainingCny: Number(order.remainingYuan),
+          newRemainingCny: refreshed.remainingCny,
+          oldStatus: order.supplierPaymentStatus,
+          newStatus: order.supplierPaymentStatus,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      const remainingOrTotal = roundMoney(refreshed.remainingCny);
       const requestedPaymentYuan = roundMoney(
         dto.requestedPaymentYuan != null ? Number(dto.requestedPaymentYuan) : remainingOrTotal,
       );
@@ -526,7 +558,7 @@ export class SupplierPaymentWorkflowService {
         requestedPaymentYuan,
         paymentInfoVersionId: activePaymentInfo.id,
         paymentMethod: activePaymentInfo.paymentMethod,
-        totalProcurementYuan: Number(order.totalYuan),
+        totalProcurementYuan: refreshed.totalYuan,
       });
 
       await this.notificationsService.notifyInTx(tx, user, {
@@ -1043,6 +1075,18 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Rejected supplier invoice cannot be paid');
       }
 
+      await this.refreshSupplierInvoiceTotalsInTx(
+        tx,
+        user,
+        order.id,
+        'Accountant supplier payment instruction',
+        { invalidateStaleRequests: true },
+      );
+      const refreshedOrder = await tx.procurementOrder.findFirst({
+        where: { id: order.id, deletedAt: null },
+      });
+      if (!refreshedOrder) throw new NotFoundException('Procurement order not found');
+
       const pendingCashier = await tx.procurementSupplierPayment.findFirst({
         where: {
           procurementOrderId: order.id,
@@ -1107,10 +1151,10 @@ export class SupplierPaymentWorkflowService {
           approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
           status: payment.status,
         })),
-        Number(order.totalYuan),
+        Number(refreshedOrder.totalYuan),
         {
-          invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
-          previousStatus: order.supplierPaymentStatus,
+          invoiceSentToAccountantAt: refreshedOrder.invoiceSentToAccountantAt,
+          previousStatus: refreshedOrder.supplierPaymentStatus,
         },
       );
 
@@ -1143,9 +1187,11 @@ export class SupplierPaymentWorkflowService {
       }
 
       const approvedYuan = resolveApprovedSupplierCostBaseYuan({
-        totalYuan: Number(order.totalYuan),
+        totalYuan: Number(refreshedOrder.totalYuan),
         requestedPaymentYuan:
-          order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
+          refreshedOrder.requestedPaymentYuan != null
+            ? Number(refreshedOrder.requestedPaymentYuan)
+            : null,
       });
       const approvedAmountKgs = calculateApprovedSupplierKgsFromRate(approvedYuan, authoritativeRate);
       const alreadyPaidKgs = summary.totalPaidKgs;
@@ -1193,7 +1239,25 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Recipient name is required before sending to cashier');
       }
 
-      await this.assertYuanAllocationAllowed(tx, user, order, amountYuan, false);
+      try {
+        assertSupplierPaymentWithinRemaining({
+          totalYuan: Number(refreshedOrder.totalYuan),
+          payments: payments.map((payment) => ({
+            id: payment.id,
+            amountYuan: Number(payment.amountYuan),
+            exchangeRate: Number(payment.exchangeRate),
+            amountKgs: Number(payment.amountKgs),
+            actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+            approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+            status: payment.status,
+          })),
+          amountYuan,
+        });
+      } catch (error) {
+        throw new BadRequestException(
+          error instanceof Error ? error.message : SUPPLIER_PAYMENT_EXCEEDS_REMAINING_MESSAGE,
+        );
+      }
 
       const isFirstApproval =
         ledgerStatus === ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT ||
@@ -1337,25 +1401,6 @@ export class SupplierPaymentWorkflowService {
         where: { procurementOrderId: order.id },
         select: { id: true, status: true, amountKgs: true, actualPaidKgs: true, approvedAmountKgs: true },
       });
-      const paidKgs = roundMoney(
-        payments
-          .filter((payment) => isConfirmedSupplierPayment(payment.status))
-          .reduce(
-            (sum, payment) =>
-              sum +
-              resolveSupplierPaymentKgs({
-                amountKgs: Number(payment.amountKgs),
-                actualPaidKgs:
-                  payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
-                approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
-              }),
-            0,
-          ),
-      );
-      if (paidKgs > 0.009) {
-        throw new BadRequestException(SUPPLIER_RETURN_BLOCKED_MESSAGE);
-      }
-
       const ledgerCount = await tx.financeLedgerEntry.count({
         where: {
           referenceType: 'ProcurementSupplierPayment',
@@ -1395,22 +1440,12 @@ export class SupplierPaymentWorkflowService {
       const comment = dto.comment?.trim() || '';
       const combinedReason = comment ? `${reason}\n${comment}` : reason;
 
-      await tx.procurementSupplierPayment.updateMany({
-        where: {
-          procurementOrderId: order.id,
-          status: {
-            in: [
-              ProcurementSupplierPaymentStatus.PENDING_CASHIER,
-              ProcurementSupplierPaymentStatus.DRAFT,
-            ],
-          },
-        },
-        data: {
-          status: ProcurementSupplierPaymentStatus.CANCELLED,
-          executionStatus: null,
-          sentToCashierAt: null,
-        },
-      });
+      const superseded = await this.invalidateStaleSupplierPaymentRequestsInTx(
+        tx,
+        user,
+        order.id,
+        combinedReason,
+      );
 
       const updated = await tx.procurementOrder.update({
         where: { id: order.id },
@@ -1445,14 +1480,25 @@ export class SupplierPaymentWorkflowService {
         action: 'RETURN',
         approvedAmount: approvedYuan,
         paymentAmount: 0,
-        paidAmount: paidKgs,
-        remainingAmount: approvedYuan,
+        paidAmount: Number(order.totalPaidYuan ?? 0),
+        remainingAmount: Number(order.remainingYuan ?? 0),
         previousStatus: order.supplierPaymentStatus,
         newStatus: ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT,
         correctionReason: reason,
+        supersededPaymentIds: superseded.map((payment) => payment.id),
         actorUserId: user.id,
         timestamp: new Date().toISOString(),
         idempotencyKey: dto.idempotencyKey ?? null,
+      });
+
+      await this.audit(tx, user, 'SUPPLIER_PAYMENT_RETURNED_TO_SUPPLY_MANAGER', order.id, {
+        invoiceReviewStatus: order.invoiceReviewStatus,
+      }, {
+        supplierPaymentId: null,
+        procurementOrderId: order.id,
+        reason: combinedReason,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
       });
 
       try {
@@ -2352,6 +2398,181 @@ export class SupplierPaymentWorkflowService {
     return account;
   }
 
+  async refreshSupplierInvoiceAfterLineChangesInTx(
+    tx: Tx,
+    user: AuthUser,
+    orderId: string,
+    reason: string,
+  ) {
+    await this.refreshSupplierInvoiceTotalsInTx(tx, user, orderId, reason, {
+      invalidateStaleRequests: true,
+    });
+    return this.syncOrderPaymentState(tx, user, orderId, reason);
+  }
+
+  private async invalidateStaleSupplierPaymentRequestsInTx(
+    tx: Tx,
+    user: AuthUser,
+    orderId: string,
+    reason: string,
+  ) {
+    const stale = await tx.procurementSupplierPayment.findMany({
+      where: {
+        procurementOrderId: orderId,
+        status: { in: STALE_SUPPLIER_PAYMENT_REQUEST_STATUSES },
+      },
+      select: { id: true, status: true, amountYuan: true, sequenceNumber: true },
+    });
+    if (!stale.length) return stale;
+
+    await tx.procurementSupplierPayment.updateMany({
+      where: { id: { in: stale.map((payment) => payment.id) } },
+      data: {
+        status: ProcurementSupplierPaymentStatus.CANCELLED,
+        executionStatus: null,
+        sentToCashierAt: null,
+        failureReason: null,
+        cashierId: null,
+      },
+    });
+
+    for (const payment of stale) {
+      await this.audit(tx, user, 'SUPPLIER_PAYMENT_CASHIER_REQUEST_SUPERSEDED', orderId, {
+        paymentId: payment.id,
+        status: payment.status,
+        amountYuan: Number(payment.amountYuan),
+        sequenceNumber: payment.sequenceNumber,
+      }, {
+        supplierPaymentId: payment.id,
+        procurementOrderId: orderId,
+        reason,
+        previousStatus: payment.status,
+        newStatus: ProcurementSupplierPaymentStatus.CANCELLED,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return stale;
+  }
+
+  private async refreshSupplierInvoiceTotalsInTx(
+    tx: Tx,
+    user: AuthUser,
+    orderId: string,
+    reason: string,
+    options?: { invalidateStaleRequests?: boolean },
+  ) {
+    const order = await tx.procurementOrder.findFirst({
+      where: { id: orderId, deletedAt: null },
+      include: {
+        items: {
+          select: {
+            quantity: true,
+            purchasePriceYuan: true,
+            status: true,
+          },
+        },
+        supplierPayments: {
+          select: {
+            id: true,
+            amountYuan: true,
+            exchangeRate: true,
+            amountKgs: true,
+            actualPaidKgs: true,
+            approvedAmountKgs: true,
+            status: true,
+          },
+        },
+      },
+    });
+    if (!order) throw new NotFoundException('Procurement order not found');
+
+    if (options?.invalidateStaleRequests) {
+      await this.invalidateStaleSupplierPaymentRequestsInTx(tx, user, orderId, reason);
+    }
+
+    const payments = await tx.procurementSupplierPayment.findMany({
+      where: { procurementOrderId: orderId },
+      select: {
+        id: true,
+        amountYuan: true,
+        exchangeRate: true,
+        amountKgs: true,
+        actualPaidKgs: true,
+        approvedAmountKgs: true,
+        status: true,
+      },
+    });
+
+    const lineTotal = sumSupplierLineTotalYuan(
+      order.items.map((item) => ({
+        quantity: Number(item.quantity ?? 0),
+        purchasePriceYuan: Number(item.purchasePriceYuan ?? 0),
+        status: item.status,
+      })),
+    );
+    const totalYuan = lineTotal > 0 ? lineTotal : Number(order.totalYuan ?? 0);
+    const oldTotalCny = Number(order.totalYuan ?? 0);
+    const oldRemainingCny = Number(order.remainingYuan ?? 0);
+
+    const snapshot = resolveSupplierInvoiceBalanceSnapshot(
+      totalYuan,
+      payments.map((payment) => ({
+        id: payment.id,
+        amountYuan: Number(payment.amountYuan),
+        exchangeRate: Number(payment.exchangeRate),
+        amountKgs: Number(payment.amountKgs),
+        actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+        approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+        status: payment.status,
+      })),
+      {
+        invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+        previousStatus: order.supplierPaymentStatus,
+      },
+    );
+
+    try {
+      assertCorrectedSupplierTotalCoversPaid(snapshot.totalYuan, snapshot.confirmedPaidCny);
+    } catch (error) {
+      throw new BadRequestException(
+        error instanceof Error ? error.message : SUPPLIER_CORRECTED_TOTAL_BELOW_PAID_MESSAGE,
+      );
+    }
+
+    await tx.procurementOrder.update({
+      where: { id: orderId },
+      data: {
+        totalYuan: snapshot.totalYuan,
+        totalPaidYuan: snapshot.confirmedPaidCny,
+        remainingYuan: snapshot.remainingCny,
+        requestedPaymentYuan: snapshot.remainingCny > 0.009 ? snapshot.remainingCny : null,
+      },
+    });
+
+    await this.audit(tx, user, 'SUPPLIER_PAYMENT_TOTAL_RECALCULATED', orderId, {
+      totalYuan: oldTotalCny,
+      remainingYuan: oldRemainingCny,
+      supplierPaymentStatus: order.supplierPaymentStatus,
+    }, {
+      supplierPaymentId: null,
+      procurementOrderId: orderId,
+      oldTotalCny,
+      newTotalCny: snapshot.totalYuan,
+      confirmedPaidCny: snapshot.confirmedPaidCny,
+      oldRemainingCny,
+      newRemainingCny: snapshot.remainingCny,
+      oldStatus: order.supplierPaymentStatus,
+      newStatus: order.supplierPaymentStatus,
+      actorUserId: user.id,
+      timestamp: new Date().toISOString(),
+      reason,
+    }, reason);
+
+    return snapshot;
+  }
+
   private async assertYuanAllocationAllowed(
     tx: Tx,
     user: AuthUser,
@@ -2362,18 +2583,30 @@ export class SupplierPaymentWorkflowService {
   ) {
     const payments = await tx.procurementSupplierPayment.findMany({
       where: { procurementOrderId: order.id },
-      select: { id: true, amountYuan: true, status: true },
+      select: { id: true, amountYuan: true, exchangeRate: true, amountKgs: true, actualPaidKgs: true, approvedAmountKgs: true, status: true },
     });
-    const allocated = payments
-      .filter((payment) => payment.id !== excludePaymentId && isAllocatedSupplierPayment(payment.status))
-      .reduce((sum, payment) => sum + Number(payment.amountYuan), 0);
-    const projected = roundMoney(allocated + amountYuan);
-    if (projected > Number(order.totalYuan) + 0.009) {
-      if (!allowOverpayment || !canAllowSupplierOverpayment(user)) {
-        throw new BadRequestException(
-          `Payment CNY amount exceeds remaining unpaid amount. Remaining: ${roundMoney(Math.max(Number(order.totalYuan) - allocated, 0))} CNY`,
-        );
+    try {
+      assertSupplierPaymentWithinRemaining({
+        totalYuan: Number(order.totalYuan),
+        payments: payments.map((payment) => ({
+          id: payment.id,
+          amountYuan: Number(payment.amountYuan),
+          exchangeRate: Number(payment.exchangeRate),
+          amountKgs: Number(payment.amountKgs),
+          actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+          approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+          status: payment.status,
+        })),
+        amountYuan,
+        excludePaymentId,
+      });
+    } catch (error) {
+      if (allowOverpayment && canAllowSupplierOverpayment(user)) {
+        return;
       }
+      throw new BadRequestException(
+        error instanceof Error ? error.message : SUPPLIER_PAYMENT_EXCEEDS_REMAINING_MESSAGE,
+      );
     }
   }
 

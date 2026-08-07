@@ -1830,11 +1830,13 @@ export class ProcurementService {
           items: priceSyncItems,
         });
       }
-      const paymentCount = await tx.procurementSupplierPayment.count({
-        where: { procurementOrderId: id, status: ProcurementSupplierPaymentStatus.ACTIVE },
-      });
-      if (paymentCount > 0) {
-        return this.syncSupplierPaymentSummaryAndRecalculate(tx, user, id, dto.reason ?? 'Procurement order updated');
+      if (existing.invoiceSentToAccountantAt) {
+        return this.supplierPaymentWorkflow.refreshSupplierInvoiceAfterLineChangesInTx(
+          tx,
+          user,
+          id,
+          dto.reason ?? 'Procurement order updated',
+        );
       }
       return this.toProcurementOrderResponse(updated);
     });
