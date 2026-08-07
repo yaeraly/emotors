@@ -1882,10 +1882,12 @@ function DetailDrawer({
                         : '—'
                     }
                   />
-                  <Field
-                    label={t('finance.billsToPay.comment')}
-                    value={detail.comment || detail.expenseName || '—'}
-                  />
+                  {!isChinaDomesticTransport ? (
+                    <Field
+                      label={t('finance.billsToPay.comment')}
+                      value={detail.comment || detail.expenseName || '—'}
+                    />
+                  ) : null}
                 </>
               ) : null}
             </dl>
