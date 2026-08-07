@@ -55,7 +55,7 @@ import {
   assertCargoTotalsMatchServer,
   calculateCargoPaymentAmounts,
 } from './cargo-payment-calc.util';
-import { estimateSectionExpenseCostKgs, sumConfirmedExpenseAmountKgs, isExpenseApprovedForLandedCost, resolveTransportExpensePaymentStatus } from './procurement-cost.util';
+import { estimateSectionExpenseCostKgs, sumConfirmedExpenseAmountKgs, hasApprovedSectionExpenses, resolveSectionCostKgsFromApprovedExpenses, isExpenseApprovedForLandedCost, resolveTransportExpensePaymentStatus } from './procurement-cost.util';
 import {
   blocksNewSectionRequest,
   hasActiveSectionRequest,
@@ -2218,6 +2218,7 @@ export class TransportExpenseService {
         status: { not: TransportExpenseStatus.CANCELLED },
       },
       select: {
+        id: true,
         amount: true,
         currency: true,
         exchangeRate: true,
@@ -2254,6 +2255,7 @@ export class TransportExpenseService {
 
     const section = estimateSectionExpenseCostKgs({
       expenses: siblings.map((row) => ({
+        id: row.id,
         amount: Number(row.amount),
         currency: row.currency,
         exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
@@ -2267,41 +2269,57 @@ export class TransportExpenseService {
         expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT ? 'CNY' : 'KGS',
     });
 
-    const confirmedKgs = sumConfirmedExpenseAmountKgs(
-      siblings.map((row) => ({
-        amount: Number(row.amount),
-        currency: row.currency,
-        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
-        amountKgs: Number(row.amountKgs || row.calculatedAmountKgs || 0),
-        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
-        status: row.status,
-      })),
-      estimatedRate,
-    );
+    const siblingCostRows = siblings.map((row) => ({
+      id: row.id,
+      amount: Number(row.amount),
+      currency: row.currency,
+      exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+      amountKgs: Number(row.amountKgs || row.calculatedAmountKgs || 0),
+      paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
+      status: row.status,
+    }));
+    const confirmedKgs = sumConfirmedExpenseAmountKgs(siblingCostRows, estimatedRate);
+    const hasApprovedRows = hasApprovedSectionExpenses(siblingCostRows);
 
     const data: Prisma.ProcurementOrderUpdateInput = {};
     if (expense.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT) {
-      data.chinaDomesticTransportKgs = Math.max(
-        confirmedKgs,
-        Number(order.chinaDomesticTransportKgs || 0),
-      );
+      data.chinaDomesticTransportKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedKgs,
+        storedOrderKgs: Number(order.chinaDomesticTransportKgs || 0),
+        hasApprovedExpenseRows: hasApprovedRows,
+      });
     } else if (expense.expenseType === TransportExpenseType.LOCAL_DELIVERY) {
-      data.localTransportKgs = Math.max(confirmedKgs, Number(order.localTransportKgs || 0));
+      data.localTransportKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedKgs,
+        storedOrderKgs: Number(order.localTransportKgs || 0),
+        hasApprovedExpenseRows: hasApprovedRows,
+      });
     } else if (
       expense.expenseType === TransportExpenseType.OTHER_LOGISTICS ||
       expense.expenseType === TransportExpenseType.CHINA_WAREHOUSE
     ) {
-      data.otherExpenseKgs = Math.max(confirmedKgs, Number(order.otherExpenseKgs || 0));
+      data.otherExpenseKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedKgs,
+        storedOrderKgs: Number(order.otherExpenseKgs || 0),
+        hasApprovedExpenseRows: hasApprovedRows,
+      });
     } else if (expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT) {
       const cargoKgs = Math.max(
-        confirmedKgs,
-        Number(order.totalCargoCostKgs || 0),
+        resolveSectionCostKgsFromApprovedExpenses({
+          confirmedFromExpenses: confirmedKgs,
+          storedOrderKgs: Number(order.totalCargoCostKgs || 0),
+          hasApprovedExpenseRows: hasApprovedRows,
+        }),
         maxCargoCalculated,
       );
       data.chinaExportTransportKgs = cargoKgs;
       data.totalCargoCostKgs = cargoKgs;
     } else if (expense.expenseType === TransportExpenseType.CUSTOMS_BROKER) {
-      data.customsCostKgs = Math.max(confirmedKgs, Number(order.customsCostKgs || 0));
+      data.customsCostKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedKgs,
+        storedOrderKgs: Number(order.customsCostKgs || 0),
+        hasApprovedExpenseRows: hasApprovedRows,
+      });
     }
 
     if (Object.keys(data).length > 0) {

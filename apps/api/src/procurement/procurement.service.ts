@@ -81,6 +81,8 @@ import {
 import {
   buildProcurementImportExpenseLines,
   sumConfirmedExpenseAmountKgs,
+  hasApprovedSectionExpenses,
+  resolveSectionCostKgsFromApprovedExpenses,
 } from './procurement-cost.util';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
 import {
@@ -2321,6 +2323,7 @@ export class ProcurementService {
       costAdjustments: { orderBy: { createdAt: 'desc' as const }, take: 10 },
       transportExpenses: {
         select: {
+          id: true,
           procurementOrderId: true,
           expenseType: true,
           amount: true,
@@ -3776,6 +3779,7 @@ export class ProcurementService {
       (row: { expenseType: string }) => row.expenseType === TransportExpenseType.LOCAL_DELIVERY,
     );
     const mapExpenseCostRow = (row: {
+      id?: string;
       amount: unknown;
       currency?: string | null;
       exchangeRate?: unknown;
@@ -3784,6 +3788,7 @@ export class ProcurementService {
       paidAmountKgs?: unknown;
       status: string;
     }) => ({
+      id: row.id,
       amount: Number(row.amount),
       currency: row.currency,
       exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
@@ -3804,13 +3809,17 @@ export class ProcurementService {
       estimatedRate,
     );
     const confirmedCargoPaymentKgs = confirmedCargoFromExpenses;
-    const chinaDomesticKgs = Math.max(
-      confirmedChinaFromExpenses,
-      Number(order.chinaDomesticTransportKgs || 0),
-    );
+    const chinaDomesticKgs = resolveSectionCostKgsFromApprovedExpenses({
+      confirmedFromExpenses: confirmedChinaFromExpenses,
+      storedOrderKgs: Number(order.chinaDomesticTransportKgs || 0),
+      hasApprovedExpenseRows: hasApprovedSectionExpenses(chinaExpenseRows.map(mapExpenseCostRow)),
+    });
     const localTransportKgs = Math.max(
-      confirmedLocalFromExpenses,
-      Number(order.localTransportKgs || 0),
+      resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedLocalFromExpenses,
+        storedOrderKgs: Number(order.localTransportKgs || 0),
+        hasApprovedExpenseRows: hasApprovedSectionExpenses(localExpenseRows.map(mapExpenseCostRow)),
+      }),
       Number(order.svhToHqTransport?.transportCostKgs || 0),
     );
     const importExpenseLines = buildProcurementImportExpenseLines({

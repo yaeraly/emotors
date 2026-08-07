@@ -31,6 +31,8 @@ import {
   resolveApprovedSupplierAmountKgs,
   resolveProcurementCostConfirmationStatus,
   sumConfirmedExpenseAmountKgs,
+  hasApprovedSectionExpenses,
+  resolveSectionCostKgsFromApprovedExpenses,
   buildProcurementImportExpenseLines,
 } from './procurement-cost.util';
 import { resolveProcurementLogisticsInput } from './transport-logistics.util';
@@ -122,6 +124,7 @@ export class LandedCostService {
         : 0;
 
       const expenseRows = (order.transportExpenses ?? []).map((expense) => ({
+        id: expense.id,
         amount: Number(expense.amount),
         currency: expense.currency,
         exchangeRate: expense.exchangeRate != null ? Number(expense.exchangeRate) : null,
@@ -189,24 +192,34 @@ export class LandedCostService {
 
       const orderForLogistics = {
         ...order,
-        chinaDomesticTransportKgs: Math.max(
-          confirmedChinaKgs,
-          Number(order.chinaDomesticTransportKgs || 0),
-        ),
+        chinaDomesticTransportKgs: resolveSectionCostKgsFromApprovedExpenses({
+          confirmedFromExpenses: confirmedChinaKgs,
+          storedOrderKgs: Number(order.chinaDomesticTransportKgs || 0),
+          hasApprovedExpenseRows: hasApprovedSectionExpenses(chinaExpenses),
+        }),
         chinaExportTransportKgs: Math.max(
-          confirmedCargoKgs,
-          Number(order.chinaExportTransportKgs || 0),
+          resolveSectionCostKgsFromApprovedExpenses({
+            confirmedFromExpenses: confirmedCargoKgs,
+            storedOrderKgs: Number(order.chinaExportTransportKgs || 0),
+            hasApprovedExpenseRows: hasApprovedSectionExpenses(cargoExpenses),
+          }),
           Number(order.totalCargoCostKgs || 0),
         ),
-        localTransportKgs: Math.max(
-          confirmedLocalKgs,
-          Number(order.localTransportKgs || 0),
-        ),
-        otherExpenseKgs: Math.max(confirmedOtherKgs, Number(order.otherExpenseKgs || 0)),
-        customsCostKgs: Math.max(
-          confirmedCustomsBrokerKgs,
-          Number(order.customsCostKgs || 0),
-        ),
+        localTransportKgs: resolveSectionCostKgsFromApprovedExpenses({
+          confirmedFromExpenses: confirmedLocalKgs,
+          storedOrderKgs: Number(order.localTransportKgs || 0),
+          hasApprovedExpenseRows: hasApprovedSectionExpenses(kgExpenses),
+        }),
+        otherExpenseKgs: resolveSectionCostKgsFromApprovedExpenses({
+          confirmedFromExpenses: confirmedOtherKgs,
+          storedOrderKgs: Number(order.otherExpenseKgs || 0),
+          hasApprovedExpenseRows: hasApprovedSectionExpenses(otherExpenses),
+        }),
+        customsCostKgs: resolveSectionCostKgsFromApprovedExpenses({
+          confirmedFromExpenses: confirmedCustomsBrokerKgs,
+          storedOrderKgs: Number(order.customsCostKgs || 0),
+          hasApprovedExpenseRows: hasApprovedSectionExpenses(customsBrokerExpenses),
+        }),
       };
 
       const expensesHaveCompletedPayments = expenseRows.some(
@@ -231,27 +244,34 @@ export class LandedCostService {
       const resolved = resolveProcurementLogisticsInput(orderForLogistics, orderForLogistics, effectiveRate);
       // Re-apply confirmed expense floors after yuan→KGS resolution so CNY order fields cannot
       // wipe a higher confirmed paid expense amount.
-      resolved.logistics.chinaDomesticTransportKgs = Math.max(
-        Number(resolved.logistics.chinaDomesticTransportKgs || 0),
-        confirmedChinaKgs,
-      );
+      resolved.logistics.chinaDomesticTransportKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedChinaKgs,
+        storedOrderKgs: Number(resolved.logistics.chinaDomesticTransportKgs || 0),
+        hasApprovedExpenseRows: hasApprovedSectionExpenses(chinaExpenses),
+      });
       resolved.logistics.chinaExportTransportKgs = Math.max(
-        Number(resolved.logistics.chinaExportTransportKgs || 0),
-        confirmedCargoKgs,
+        resolveSectionCostKgsFromApprovedExpenses({
+          confirmedFromExpenses: confirmedCargoKgs,
+          storedOrderKgs: Number(resolved.logistics.chinaExportTransportKgs || 0),
+          hasApprovedExpenseRows: hasApprovedSectionExpenses(cargoExpenses),
+        }),
         Number(order.totalCargoCostKgs || 0),
       );
-      resolved.logistics.localTransportKgs = Math.max(
-        Number(resolved.logistics.localTransportKgs || 0),
-        confirmedLocalKgs,
-      );
-      resolved.logistics.otherExpenseKgs = Math.max(
-        Number(resolved.logistics.otherExpenseKgs || 0),
-        confirmedOtherKgs,
-      );
-      resolved.logistics.customsCostKgs = Math.max(
-        Number(resolved.logistics.customsCostKgs || 0),
-        confirmedCustomsBrokerKgs,
-      );
+      resolved.logistics.localTransportKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedLocalKgs,
+        storedOrderKgs: Number(resolved.logistics.localTransportKgs || 0),
+        hasApprovedExpenseRows: hasApprovedSectionExpenses(kgExpenses),
+      });
+      resolved.logistics.otherExpenseKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedOtherKgs,
+        storedOrderKgs: Number(resolved.logistics.otherExpenseKgs || 0),
+        hasApprovedExpenseRows: hasApprovedSectionExpenses(otherExpenses),
+      });
+      resolved.logistics.customsCostKgs = resolveSectionCostKgsFromApprovedExpenses({
+        confirmedFromExpenses: confirmedCustomsBrokerKgs,
+        storedOrderKgs: Number(resolved.logistics.customsCostKgs || 0),
+        hasApprovedExpenseRows: hasApprovedSectionExpenses(customsBrokerExpenses),
+      });
       const { logistics, cargo, ...transportResolved } = resolved;
 
       const draftMap = new Map(
@@ -608,6 +628,7 @@ export class LandedCostService {
         landedCostSnapshots: { orderBy: { calculatedAt: 'desc' } },
         transportExpenses: {
           select: {
+            id: true,
             expenseType: true,
             amount: true,
             currency: true,
@@ -642,6 +663,7 @@ export class LandedCostService {
         estimatedSupplierCostKgs: Number(order.estimatedSupplierCostKgs ?? 0),
       },
       transportExpenses: (order.transportExpenses ?? []).map((row) => ({
+        id: row.id,
         expenseType: row.expenseType,
         amount: Number(row.amount),
         currency: row.currency,

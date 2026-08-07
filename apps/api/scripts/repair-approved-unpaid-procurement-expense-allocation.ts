@@ -7,7 +7,7 @@
  *   npx tsx apps/api/scripts/repair-approved-unpaid-procurement-expense-allocation.ts --apply
  */
 import { PrismaClient, TransportExpenseStatus, TransportExpenseType } from '@prisma/client';
-import { sumConfirmedExpenseAmountKgs } from '../src/procurement/procurement-cost.util';
+import { sumConfirmedExpenseAmountKgs, hasApprovedSectionExpenses, resolveSectionCostKgsFromApprovedExpenses } from '../src/procurement/procurement-cost.util';
 
 const prisma = new PrismaClient();
 const apply = process.argv.includes('--apply');
@@ -71,6 +71,7 @@ async function main() {
         : Number(order.defaultYuanRate || 0);
 
     const mapRow = (row: (typeof rows)[number]) => ({
+      id: row.id,
       amount: Number(row.amount),
       currency: row.currency,
       exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
@@ -79,10 +80,10 @@ async function main() {
       status: row.status,
     });
 
-    const china = sumConfirmedExpenseAmountKgs(
-      rows.filter((r) => r.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT).map(mapRow),
-      rate,
-    );
+    const chinaRows = rows
+      .filter((r) => r.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT)
+      .map(mapRow);
+    const china = sumConfirmedExpenseAmountKgs(chinaRows, rate);
     const cargo = sumConfirmedExpenseAmountKgs(
       rows.filter((r) => r.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT).map(mapRow),
       rate,
@@ -92,7 +93,11 @@ async function main() {
       rate,
     );
 
-    const nextChina = Math.max(china, Number(order.chinaDomesticTransportKgs || 0));
+    const nextChina = resolveSectionCostKgsFromApprovedExpenses({
+      confirmedFromExpenses: china,
+      storedOrderKgs: Number(order.chinaDomesticTransportKgs || 0),
+      hasApprovedExpenseRows: hasApprovedSectionExpenses(chinaRows),
+    });
     const nextCargo = Math.max(cargo, Number(order.totalCargoCostKgs || 0), Number(order.chinaExportTransportKgs || 0));
     const nextLocal = Math.max(local, Number(order.localTransportKgs || 0));
 

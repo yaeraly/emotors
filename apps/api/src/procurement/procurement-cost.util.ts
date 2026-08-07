@@ -3,6 +3,7 @@ import {
   isSupplierInvoiceAccountantProcessed,
   isSupplierInvoicePresent,
 } from './hq-receiving-validation.util';
+import { roundMoneyDecimal, toMoneyDecimal } from './landed-cost-money.util';
 import { roundMoney } from './supplier-payment.util';
 
 export type ProcurementCostConfirmationStatus =
@@ -20,6 +21,7 @@ export type SupplierPaymentCostInput = {
 };
 
 export type SectionExpenseCostInput = {
+  id?: string;
   amount: number;
   currency?: string | null;
   exchangeRate?: number | null;
@@ -263,32 +265,69 @@ export function estimateSupplierCostKgs(input: {
   };
 }
 
+/** Deduplicate section expenses by authoritative expense id (guards join multiplication). */
+export function dedupeSectionExpensesById<T extends SectionExpenseCostInput>(expenses: T[]): T[] {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+  for (const row of expenses) {
+    const id = row.id?.trim();
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    deduped.push(row);
+  }
+  return deduped;
+}
+
+export function hasApprovedSectionExpenses(expenses: SectionExpenseCostInput[]): boolean {
+  return dedupeSectionExpensesById(expenses).some((row) =>
+    isExpenseApprovedForLandedCost(row.status),
+  );
+}
+
+/**
+ * When HQ Accountant-approved section expenses exist, their deduped sum is authoritative.
+ * Otherwise fall back to the stored order scalar (pre-invoice planning values).
+ */
+export function resolveSectionCostKgsFromApprovedExpenses(input: {
+  confirmedFromExpenses: number;
+  storedOrderKgs: number;
+  hasApprovedExpenseRows: boolean;
+}): number {
+  if (input.hasApprovedExpenseRows && input.confirmedFromExpenses > 0) {
+    return input.confirmedFromExpenses;
+  }
+  return Math.max(input.confirmedFromExpenses, input.storedOrderKgs);
+}
+
 function expenseAmountKgs(expense: SectionExpenseCostInput, estimatedYuanRate: number): number {
   const currency = String(expense.currency || 'KGS').toUpperCase();
-  const amount = Number(expense.amount || 0);
-  if (!(amount > 0)) return 0;
-  if (currency === 'KGS') return roundMoney(amount);
+  const amount = toMoneyDecimal(expense.amount || 0);
+  if (amount.lte(0)) return 0;
+  if (currency === 'KGS') return roundMoneyDecimal(amount);
   if (expense.amountKgs != null && Number(expense.amountKgs) > 0) {
-    return roundMoney(Number(expense.amountKgs));
+    return roundMoneyDecimal(expense.amountKgs);
   }
   const rate =
     expense.exchangeRate != null && Number(expense.exchangeRate) > 0
-      ? Number(expense.exchangeRate)
-      : estimatedYuanRate;
-  return roundMoney(amount * Math.max(0, rate));
+      ? toMoneyDecimal(expense.exchangeRate)
+      : toMoneyDecimal(Math.max(0, estimatedYuanRate));
+  return roundMoneyDecimal(amount.mul(rate));
 }
 
 /**
  * Sum approved invoice obligation amounts in inventory base currency (KGS).
  * Uses the full approved/requested amount — never the cash already paid.
  * Only HQ Accountant-approved rows count; draft / waiting / rejected are excluded.
+ * Each expense id is counted at most once.
  */
 export function sumConfirmedExpenseAmountKgs(
   expenses: SectionExpenseCostInput[],
   estimatedYuanRate: number,
 ): number {
-  return roundMoney(
-    expenses.reduce((sum, row) => {
+  return roundMoneyDecimal(
+    dedupeSectionExpensesById(expenses).reduce((sum, row) => {
       const status = String(row.status ?? '').toUpperCase();
       if (!isExpenseApprovedForLandedCost(status)) return sum;
       return sum + expenseAmountKgs(row, estimatedYuanRate);
@@ -314,7 +353,7 @@ export function estimateSectionExpenseCostKgs(input: {
   estimatedSectionCostKgs: number;
   usesWeightedPaidRate: boolean;
 } {
-  const rows = input.expenses.filter((row) => OPEN_EXPENSE.has(String(row.status)));
+  const rows = dedupeSectionExpensesById(input.expenses.filter((row) => OPEN_EXPENSE.has(String(row.status))));
   const paidRows = rows.filter((row) => {
     const status = String(row.status ?? '').toUpperCase();
     return status === TransportExpenseStatus.PAID || status === 'COMPLETED' || status === 'CONFIRMED';
@@ -455,6 +494,7 @@ export function buildProcurementImportExpenseLines(input: {
     estimatedSupplierCostKgs?: number | null;
   } | null;
   transportExpenses?: Array<{
+    id?: string;
     expenseType: string;
     amount: number | string;
     currency?: string | null;
@@ -468,18 +508,21 @@ export function buildProcurementImportExpenseLines(input: {
   const expenses = input.transportExpenses ?? [];
 
   const byType = (type: string) =>
-    expenses
-      .filter((row) => String(row.expenseType) === type)
-      .filter((row) => String(row.status).toUpperCase() !== TransportExpenseStatus.CANCELLED)
-      .filter((row) => String(row.status).toUpperCase() !== TransportExpenseStatus.DRAFT)
-      .map((row) => ({
-        amount: Number(row.amount || 0),
-        currency: row.currency,
-        exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
-        amountKgs: row.amountKgs != null ? Number(row.amountKgs) : null,
-        paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
-        status: row.status,
-      }));
+    dedupeSectionExpensesById(
+      expenses
+        .filter((row) => String(row.expenseType) === type)
+        .filter((row) => String(row.status).toUpperCase() !== TransportExpenseStatus.CANCELLED)
+        .filter((row) => String(row.status).toUpperCase() !== TransportExpenseStatus.DRAFT)
+        .map((row) => ({
+          id: row.id,
+          amount: Number(row.amount || 0),
+          currency: row.currency,
+          exchangeRate: row.exchangeRate != null ? Number(row.exchangeRate) : null,
+          amountKgs: row.amountKgs != null ? Number(row.amountKgs) : null,
+          paidAmountKgs: row.paidAmountKgs != null ? Number(row.paidAmountKgs) : null,
+          status: row.status,
+        })),
+    );
 
   function transportLine(
     requestType: ProcurementImportExpenseLine['requestType'],
@@ -497,7 +540,7 @@ export function buildProcurementImportExpenseLines(input: {
           : rows.some((row) => isExpenseApprovedForLandedCost(row.status))
             ? 'APPROVED'
             : 'WAITING_FOR_ACCOUNTANT';
-    const paidAmountKgs = roundMoney(
+    const paidAmountKgs = roundMoneyDecimal(
       rows.reduce((sum, row) => sum + Math.max(0, Number(row.paidAmountKgs ?? 0)), 0),
     );
     const paymentStatus = dominant
