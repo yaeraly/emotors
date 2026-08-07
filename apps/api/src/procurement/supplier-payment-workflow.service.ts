@@ -18,6 +18,7 @@ import {
   ProcurementPaymentInfoMethod,
   ProcurementSupplierPaymentMethod,
   ProcurementSupplierPaymentStatus,
+  ProcurementSupplierPaymentLedgerStatus,
   Role,
 } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
@@ -69,6 +70,11 @@ import {
   roundMoney,
   summarizeSupplierPayments,
 } from './supplier-payment.util';
+import {
+  SUPPLIER_ACCOUNTANT_PAYABLE,
+  SUPPLIER_RETURN_BLOCKED_MESSAGE,
+} from './supplier-bill-actions.util';
+import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -1001,6 +1007,440 @@ export class SupplierPaymentWorkflowService {
         payment: this.toPaymentResponse(updatedPayment),
         order: synced,
       };
+    });
+  }
+
+  payByAccountant(
+    user: AuthUser,
+    orderId: string,
+    dto: {
+      paymentAmountKgs: number;
+      financeAccountId: string;
+      accountantComment?: string;
+      idempotencyKey?: string;
+    },
+  ) {
+    if (!canProcessHqCargoPayment(user)) {
+      throw new ForbiddenException('Only HQ Accountant can approve supplier payment instructions');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOrder(tx, orderId);
+      if (!order.invoiceSentToAccountantAt) {
+        throw new NotFoundException('Supplier invoice request not found');
+      }
+
+      const review = String(order.invoiceReviewStatus ?? '').toUpperCase();
+      if (review === 'RETURNED') {
+        throw new BadRequestException('Счет возвращён на исправление.');
+      }
+      if (review === 'REJECTED') {
+        throw new BadRequestException('Rejected supplier invoice cannot be paid');
+      }
+
+      const pendingCashier = await tx.procurementSupplierPayment.findFirst({
+        where: {
+          procurementOrderId: order.id,
+          status: ProcurementSupplierPaymentStatus.PENDING_CASHIER,
+        },
+      });
+      if (pendingCashier) {
+        throw new BadRequestException('Счет уже отправлен HQ Cashier.');
+      }
+
+      if (dto.idempotencyKey) {
+        const prior = await tx.auditLog.findMany({
+          where: {
+            entity: 'ProcurementOrder',
+            entityId: order.id,
+            action: {
+              in: [
+                'SUPPLIER_PAYMENT_SENT_TO_CASHIER',
+                'SUPPLIER_PARTIAL_PAYMENT_CREATED',
+                'SUPPLIER_PAYMENT_FULLY_PAID',
+              ],
+            },
+          },
+          orderBy: { timestamp: 'desc' },
+          take: 30,
+        });
+        const duplicate = prior.find((row) => {
+          const meta = row.metadata as { newValue?: { idempotencyKey?: string } } | null;
+          return meta?.newValue?.idempotencyKey === dto.idempotencyKey;
+        });
+        if (duplicate) {
+          const existing = await tx.procurementSupplierPayment.findFirst({
+            where: { procurementOrderId: order.id },
+            orderBy: { createdAt: 'desc' },
+            include: PAYMENT_INCLUDE,
+          });
+          return {
+            payment: existing ? this.toPaymentResponse(existing) : null,
+            order: await this.getOrderSummary(tx, order.id),
+          };
+        }
+      }
+
+      const payments = await tx.procurementSupplierPayment.findMany({
+        where: { procurementOrderId: order.id },
+        select: {
+          id: true,
+          amountYuan: true,
+          exchangeRate: true,
+          amountKgs: true,
+          actualPaidKgs: true,
+          approvedAmountKgs: true,
+          status: true,
+        },
+      });
+      const summary = summarizeSupplierPayments(
+        payments.map((payment) => ({
+          amountYuan: Number(payment.amountYuan),
+          exchangeRate: Number(payment.exchangeRate),
+          amountKgs: Number(payment.amountKgs),
+          actualPaidKgs: payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+          approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+          status: payment.status,
+        })),
+        Number(order.totalYuan),
+        {
+          invoiceSentToAccountantAt: order.invoiceSentToAccountantAt,
+          previousStatus: order.supplierPaymentStatus,
+        },
+      );
+
+      const ledgerStatus = String(summary.supplierPaymentStatus).toUpperCase();
+      if (ledgerStatus === 'PAID' || ledgerStatus === 'OVERPAID') {
+        throw new BadRequestException('Этот счёт уже полностью оплачен.');
+      }
+      if (
+        !SUPPLIER_ACCOUNTANT_PAYABLE.has(ledgerStatus) &&
+        ledgerStatus !== ProcurementSupplierPaymentLedgerStatus.AWAITING_CASHIER
+      ) {
+        throw new BadRequestException('Счет ещё не одобрен для обработки.');
+      }
+
+      const latestRate =
+        payments
+          .filter((payment) => isConfirmedSupplierPayment(payment.status))
+          .map((payment) => Number(payment.exchangeRate || 0))
+          .filter((rate) => rate > 0)
+          .at(-1) ??
+        Number(order.weightedAverageYuanRate || order.defaultYuanRate || 0);
+      if (!(latestRate > 0)) {
+        throw new BadRequestException('Exchange rate is required before processing supplier payment');
+      }
+
+      const approvedYuan = resolveApprovedSupplierCostBaseYuan({
+        totalYuan: Number(order.totalYuan),
+        requestedPaymentYuan:
+          order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
+      });
+      const approvedAmountKgs = roundMoney(approvedYuan * latestRate);
+      const alreadyPaidKgs = summary.totalPaidKgs;
+      const remainingKgs = roundMoney(Math.max(approvedAmountKgs - alreadyPaidKgs, 0));
+      if (!(remainingKgs > 0)) {
+        throw new BadRequestException('Этот счёт уже полностью оплачен.');
+      }
+
+      const instructionAmountKgs = roundMoney(dto.paymentAmountKgs);
+      if (!(instructionAmountKgs > 0)) {
+        throw new BadRequestException('Сумма платежа должна быть больше нуля.');
+      }
+      if (instructionAmountKgs > remainingKgs + 0.009) {
+        throw new BadRequestException('Сумма частичного платежа превышает остаток.');
+      }
+
+      const amountYuan = roundMoney(instructionAmountKgs / latestRate);
+      if (!(amountYuan > 0)) {
+        throw new BadRequestException('Payment CNY amount must be greater than zero');
+      }
+
+      const account = await this.assertHqFinanceAccount(tx, dto.financeAccountId);
+      const paymentMethod = resolveSupplierPaymentMethodFromAccountType(account.typeCode);
+
+      const paymentInfo = await tx.procurementPaymentInfoVersion.findFirst({
+        where: { procurementOrderId: order.id, isActive: true },
+      });
+      const supplier = order.supplierId
+        ? await tx.supplier.findFirst({
+            where: { id: order.supplierId },
+            select: { name: true },
+          })
+        : null;
+      const recipientFields = this.validateAndBuildRecipientFields(paymentMethod, {
+        recipientName: paymentInfo?.accountHolder ?? supplier?.name ?? undefined,
+        bankName: paymentInfo?.bankName ?? undefined,
+        beneficiaryName: paymentInfo?.accountHolder ?? undefined,
+        accountNumber: paymentInfo?.accountNumber ?? undefined,
+        swiftCode: paymentInfo?.swiftCode ?? undefined,
+        paymentInstructions:
+          paymentInfo?.comment ??
+          (paymentInfo?.bankAddress ? `Bank address: ${paymentInfo.bankAddress}` : undefined),
+      }, true);
+      if (!recipientFields.recipientName) {
+        throw new BadRequestException('Recipient name is required before sending to cashier');
+      }
+
+      await this.assertYuanAllocationAllowed(tx, user, order, amountYuan, false);
+
+      const isFirstApproval =
+        ledgerStatus === ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT ||
+        review === 'UNDER_REVIEW' ||
+        review === 'SUBMITTED' ||
+        ledgerStatus === ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED;
+
+      if (isFirstApproval) {
+        await this.ensureSupplierInvoiceApprovedForCosting(tx, user, order.id);
+      }
+
+      const sequenceNumber = await this.nextSequenceNumber(tx, order.id);
+      const payment = await tx.procurementSupplierPayment.create({
+        data: {
+          procurementOrderId: order.id,
+          supplierId: order.supplierId,
+          paymentInfoVersionId: paymentInfo?.id ?? null,
+          sequenceNumber,
+          paymentDate: new Date(),
+          amountYuan,
+          exchangeRate: latestRate,
+          calculatedAmountKgs: instructionAmountKgs,
+          approvedAmountKgs: instructionAmountKgs,
+          amountKgs: instructionAmountKgs,
+          paymentMethod,
+          ...recipientFields,
+          intendedFinanceAccountId: account.id,
+          accountantComment: dto.accountantComment?.trim() || null,
+          status: ProcurementSupplierPaymentStatus.PENDING_CASHIER,
+          sentToCashierAt: new Date(),
+          executionStatus: 'PENDING_EXECUTION',
+          executionStartedAt: null,
+          failureReason: null,
+          accountantId: user.id,
+          createdById: user.id,
+          idempotencyKey: dto.idempotencyKey?.trim() || null,
+        },
+        include: PAYMENT_INCLUDE,
+      });
+
+      const synced = await this.syncOrderPaymentState(tx, user, order.id, 'Supplier payment sent to HQ Cashier');
+      const isPartialInstruction = instructionAmountKgs + 0.009 < remainingKgs;
+      const auditPayload = {
+        supplierPaymentId: payment.id,
+        invoiceId: order.id,
+        procurementOrderId: order.id,
+        action: isPartialInstruction ? 'PARTIAL' : 'FULL',
+        approvedAmount: approvedAmountKgs,
+        paymentAmount: instructionAmountKgs,
+        paidAmount: alreadyPaidKgs,
+        remainingAmount: remainingKgs,
+        previousStatus: order.supplierPaymentStatus,
+        newStatus: synced.supplierPaymentStatus,
+        accountId: account.id,
+        paymentMethod,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+        idempotencyKey: dto.idempotencyKey ?? null,
+      };
+
+      if (isPartialInstruction) {
+        await this.audit(tx, user, 'SUPPLIER_PARTIAL_PAYMENT_CREATED', order.id, {
+          supplierPaymentStatus: order.supplierPaymentStatus,
+          paidAmountKgs: alreadyPaidKgs,
+        }, auditPayload);
+      } else {
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_FULLY_PAID', order.id, {
+          supplierPaymentStatus: order.supplierPaymentStatus,
+          paidAmountKgs: alreadyPaidKgs,
+        }, auditPayload);
+      }
+
+      await this.audit(tx, user, 'SUPPLIER_PAYMENT_SENT_TO_CASHIER', order.id, {
+        supplierPaymentStatus: order.supplierPaymentStatus,
+      }, {
+        paymentId: payment.id,
+        sequenceNumber,
+        approvedAmountKgs: instructionAmountKgs,
+        ...auditPayload,
+      });
+
+      if (paymentMethod) {
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_METHOD_DERIVED', order.id, null, {
+          invoiceId: order.id,
+          paymentId: payment.id,
+          accountId: account.id,
+          accountType: account.typeCode,
+          derivedPaymentMethod: paymentMethod,
+          amount: amountYuan,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      await this.notifyPaymentSentToCashier(tx, user, synced.orderNumber, order.id, payment.id);
+
+      return {
+        payment: this.toPaymentResponse(payment),
+        order: synced,
+      };
+    });
+  }
+
+  returnForCorrectionByAccountant(
+    user: AuthUser,
+    orderId: string,
+    dto: { reason: string; comment?: string; idempotencyKey?: string },
+  ) {
+    if (!canProcessHqCargoPayment(user)) {
+      throw new ForbiddenException('Only HQ Accountant can return supplier invoices for correction');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOrder(tx, orderId);
+      if (!order.invoiceSentToAccountantAt) {
+        throw new NotFoundException('Supplier invoice request not found');
+      }
+
+      const payments = await tx.procurementSupplierPayment.findMany({
+        where: { procurementOrderId: order.id },
+        select: { id: true, status: true, amountKgs: true, actualPaidKgs: true, approvedAmountKgs: true },
+      });
+      const paidKgs = roundMoney(
+        payments
+          .filter((payment) => isConfirmedSupplierPayment(payment.status))
+          .reduce(
+            (sum, payment) =>
+              sum +
+              resolveSupplierPaymentKgs({
+                amountKgs: Number(payment.amountKgs),
+                actualPaidKgs:
+                  payment.actualPaidKgs != null ? Number(payment.actualPaidKgs) : null,
+                approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+              }),
+            0,
+          ),
+      );
+      if (paidKgs > 0.009) {
+        throw new BadRequestException(SUPPLIER_RETURN_BLOCKED_MESSAGE);
+      }
+
+      const ledgerCount = await tx.financeLedgerEntry.count({
+        where: {
+          referenceType: 'ProcurementSupplierPayment',
+          referenceId: { in: payments.map((payment) => payment.id) },
+          entryType: FinanceLedgerEntryType.EXPENSE,
+        },
+      });
+      if (ledgerCount > 0) {
+        throw new BadRequestException(SUPPLIER_RETURN_BLOCKED_MESSAGE);
+      }
+
+      if (dto.idempotencyKey) {
+        const prior = await tx.auditLog.findMany({
+          where: {
+            entity: 'ProcurementOrder',
+            entityId: order.id,
+            action: 'SUPPLIER_PAYMENT_RETURNED_FOR_CORRECTION',
+          },
+          orderBy: { timestamp: 'desc' },
+          take: 20,
+        });
+        const duplicate = prior.find((row) => {
+          const meta = row.metadata as { newValue?: { idempotencyKey?: string } } | null;
+          return meta?.newValue?.idempotencyKey === dto.idempotencyKey;
+        });
+        if (duplicate) {
+          return { id: order.id, source: 'SUPPLIER_INVOICE', status: 'RETURNED', reason: dto.reason };
+        }
+      }
+
+      const review = String(order.invoiceReviewStatus ?? '').toUpperCase();
+      if (review === 'RETURNED') {
+        return { id: order.id, source: 'SUPPLIER_INVOICE', status: 'RETURNED', reason: dto.reason };
+      }
+
+      const reason = dto.reason.trim();
+      const comment = dto.comment?.trim() || '';
+      const combinedReason = comment ? `${reason}\n${comment}` : reason;
+
+      await tx.procurementSupplierPayment.updateMany({
+        where: {
+          procurementOrderId: order.id,
+          status: {
+            in: [
+              ProcurementSupplierPaymentStatus.PENDING_CASHIER,
+              ProcurementSupplierPaymentStatus.DRAFT,
+            ],
+          },
+        },
+        data: {
+          status: ProcurementSupplierPaymentStatus.CANCELLED,
+          executionStatus: null,
+          sentToCashierAt: null,
+        },
+      });
+
+      const updated = await tx.procurementOrder.update({
+        where: { id: order.id },
+        data: {
+          invoiceReviewStatus: 'RETURNED',
+          invoiceReturnReason: combinedReason,
+          invoiceRejectReason: null,
+          invoiceReviewedAt: new Date(),
+          invoiceReviewedById: user.id,
+          supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT,
+          expectedPaymentDate: null,
+          paymentPostponeComment: null,
+        },
+      });
+
+      await this.audit(tx, user, 'PAYABLE_REQUEST_RETURNED', order.id, {
+        invoiceReviewStatus: order.invoiceReviewStatus,
+      }, { invoiceReviewStatus: 'RETURNED', reason: combinedReason });
+
+      const approvedYuan = resolveApprovedSupplierCostBaseYuan({
+        totalYuan: Number(order.totalYuan),
+        requestedPaymentYuan:
+          order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
+      });
+      await this.audit(tx, user, 'SUPPLIER_PAYMENT_RETURNED_FOR_CORRECTION', order.id, {
+        invoiceReviewStatus: order.invoiceReviewStatus,
+        supplierPaymentStatus: order.supplierPaymentStatus,
+      }, {
+        supplierPaymentId: null,
+        invoiceId: order.id,
+        procurementOrderId: order.id,
+        action: 'RETURN',
+        approvedAmount: approvedYuan,
+        paymentAmount: 0,
+        paidAmount: paidKgs,
+        remainingAmount: approvedYuan,
+        previousStatus: order.supplierPaymentStatus,
+        newStatus: ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT,
+        correctionReason: reason,
+        actorUserId: user.id,
+        timestamp: new Date().toISOString(),
+        idempotencyKey: dto.idempotencyKey ?? null,
+      });
+
+      try {
+        await this.landedCostService.recalculateProcurementOrder(
+          order.id,
+          { user, reason: combinedReason, triggerReason: 'supplier-returned-for-correction' },
+          tx,
+        );
+      } catch {
+        // Weight/finalized gates may block recalculation.
+      }
+
+      await this.notificationsService.notifyInTx(tx, user, {
+        type: AlertType.TRANSPORT_EXPENSE_RETURNED,
+        entityType: 'ProcurementOrder',
+        entityId: order.id,
+        referenceNumber: order.orderNumber,
+        message: `Supplier invoice for ${order.orderNumber} returned for correction: ${reason}`,
+        recipientRoles: [Role.SUPPLY_CHAIN_MANAGER, Role.PROCUREMENT_MANAGER],
+      });
+
+      return { id: updated.id, source: 'SUPPLIER_INVOICE', status: 'RETURNED', reason: combinedReason };
     });
   }
 

@@ -364,7 +364,7 @@ export class ProcurementController {
     @Param('id') id: string,
     @Body() dto: PayBillCargoDto,
   ) {
-    return this.accountantBillsService.payCargoPayment(user, source, id, dto);
+    return this.accountantBillsService.payBill(user, source, id, dto);
   }
 
   @Post('bills-to-pay/:source/:id/permanent-delete')

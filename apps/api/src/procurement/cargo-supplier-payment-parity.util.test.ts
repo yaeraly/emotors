@@ -134,12 +134,13 @@ const returnedGate = evaluateHqReceivingInvoiceSection(
 assertEqual(returnedGate.accountantProcessed, false, '24. returned blocks readiness');
 assert(isTransportExpenseAccountantProcessed(TransportExpenseStatus.PAYMENT_POSTPONED), '25. postponed ready');
 
-// 26. Supplier workflow untouched — no cargo hooks in supplier send path
-const supplierSend = supplierService.slice(
-  supplierService.indexOf('sendPaymentToCashier'),
-  supplierService.indexOf('confirmPayment(user: AuthUser'),
+// 26. Supplier uses same accountant pay instruction model as cargo
+const supplierPay = supplierService.slice(
+  supplierService.indexOf('payByAccountant'),
+  supplierService.indexOf('returnForCorrectionByAccountant'),
 );
-assert(!supplierSend.includes('payCargoByAccountant'), '26. supplier unchanged');
+assert(supplierPay.includes('PENDING_CASHIER'), '26. supplier cashier instruction');
+assert(!supplierPay.includes('postLedgerEntry'), '26. supplier no ledger at accountant');
 
 // 27. HQ/Branch isolation — cargo auth does not grant branch roles
 assert(!authSource.includes('BRANCH_MANAGER: canProcessHqCargoPayment'), '27. no branch role in cargo auth');

@@ -427,12 +427,14 @@ function BillsToPayPageContent() {
 
   async function submitPostponePayment() {
     if (!postponeModal || saving) return;
-    const isCargo = postponeModal.requestType === 'CARGO_PAYMENT';
-    if (isCargo && postponeForm.reason.trim().length < 2) {
+    const usesReasonField =
+      postponeModal.requestType === 'CARGO_PAYMENT' ||
+      postponeModal.requestType === 'SUPPLIER_PAYMENT';
+    if (usesReasonField && postponeForm.reason.trim().length < 2) {
       setPostponeError(t('finance.billsToPay.postponeReasonRequired'));
       return;
     }
-    if (!isCargo && postponeForm.comment.trim().length < 2) {
+    if (!usesReasonField && postponeForm.comment.trim().length < 2) {
       setPostponeError(t('finance.billsToPay.commentRequired'));
       return;
     }
@@ -444,7 +446,7 @@ function BillsToPayPageContent() {
         nextPaymentDate: postponeForm.nextPaymentDate,
         comment: postponeForm.comment.trim() || undefined,
       };
-      if (isCargo) {
+      if (usesReasonField) {
         body.reason = postponeForm.reason.trim();
       }
       await apiFetch(
@@ -921,7 +923,10 @@ function BillsToPayPageContent() {
             void runAction('approve', { sendToCashier: true });
           }}
           onReturn={() => {
-            if (selected.requestType === 'CARGO_PAYMENT') {
+            if (
+              selected.requestType === 'CARGO_PAYMENT' ||
+              selected.requestType === 'SUPPLIER_PAYMENT'
+            ) {
               setCargoReturnError('');
               setCargoReturnForm({ reason: '', comment: '' });
               setCargoReturnModal(selected);
@@ -931,7 +936,10 @@ function BillsToPayPageContent() {
           }}
           onReject={() => setReasonModal({ mode: 'reject', bill: selected })}
           onCreatePayment={() => {
-            if (selected.requestType === 'CARGO_PAYMENT') {
+            if (
+              selected.requestType === 'CARGO_PAYMENT' ||
+              selected.requestType === 'SUPPLIER_PAYMENT'
+            ) {
               void openCargoPaymentModal(selected, 'partial');
               return;
             }
@@ -962,7 +970,8 @@ function BillsToPayPageContent() {
       {postponeModal ? (
         <Modal
           title={
-            postponeModal.requestType === 'CARGO_PAYMENT' &&
+            (postponeModal.requestType === 'CARGO_PAYMENT' ||
+              postponeModal.requestType === 'SUPPLIER_PAYMENT') &&
             postponeModal.status === 'PAYMENT_POSTPONED'
               ? t('finance.billsToPay.changePostponeDate')
               : t('finance.billsToPay.postponePayment')
@@ -990,7 +999,8 @@ function BillsToPayPageContent() {
               }
             />
           </label>
-          {postponeModal.requestType === 'CARGO_PAYMENT' ? (
+          {(postponeModal.requestType === 'CARGO_PAYMENT' ||
+            postponeModal.requestType === 'SUPPLIER_PAYMENT') ? (
             <label className="mt-2 block text-xs font-semibold">
               {t('finance.billsToPay.postponeReason')}
               <textarea
@@ -1016,15 +1026,18 @@ function BillsToPayPageContent() {
             disabled={
               saving ||
               !postponeForm.nextPaymentDate ||
-              (postponeModal.requestType !== 'CARGO_PAYMENT' &&
+              ((postponeModal.requestType !== 'CARGO_PAYMENT' &&
+                postponeModal.requestType !== 'SUPPLIER_PAYMENT' &&
                 postponeForm.comment.trim().length < 2) ||
-              (postponeModal.requestType === 'CARGO_PAYMENT' &&
-                postponeForm.reason.trim().length < 2)
+                ((postponeModal.requestType === 'CARGO_PAYMENT' ||
+                  postponeModal.requestType === 'SUPPLIER_PAYMENT') &&
+                  postponeForm.reason.trim().length < 2))
             }
             onClick={() => void submitPostponePayment()}
             className="mt-3 rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
           >
-            {postponeModal.requestType === 'CARGO_PAYMENT'
+            {postponeModal.requestType === 'CARGO_PAYMENT' ||
+            postponeModal.requestType === 'SUPPLIER_PAYMENT'
               ? t('finance.billsToPay.postponeShort')
               : postponeModal.status === 'PAYMENT_POSTPONED'
                 ? t('finance.billsToPay.changePostponeDate')
@@ -1493,7 +1506,9 @@ function DetailDrawer({
     bill.requestType === 'CARGO_PAYMENT' ||
     bill.requestType === 'SUPPLIER_PAYMENT';
   const isCargoPayment = bill.requestType === 'CARGO_PAYMENT';
-  const cargoActions = isCargoPayment
+  const isSupplierPayment = bill.requestType === 'SUPPLIER_PAYMENT';
+  const usesAccountantPaymentFlow = isCargoPayment || isSupplierPayment;
+  const billActions = usesAccountantPaymentFlow
     ? getCargoBillActionVisibility({
         uiStatus: bill.status,
         paidAmount: Number(bill.paidAmountKgs ?? bill.paidAmount ?? 0),
@@ -1503,12 +1518,12 @@ function DetailDrawer({
   const canTakeReview =
     !isFinance &&
     !isTerminal &&
-    !isCargoPayment &&
+    !usesAccountantPaymentFlow &&
     (bill.status === 'AWAITING_ACCOUNTANT' || bill.status === 'UNDER_REVIEW');
   const canApprove =
     !isFinance &&
     !isTerminal &&
-    !isCargoPayment &&
+    !usesAccountantPaymentFlow &&
     (isTransport
       ? ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'PAYMENT_POSTPONED'].includes(bill.status)
       : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'PAYMENT_POSTPONED'].includes(
@@ -1523,32 +1538,22 @@ function DetailDrawer({
   const canReturnOrReject =
     !isFinance &&
     !isTerminal &&
-    !isCargoPayment &&
+    !usesAccountantPaymentFlow &&
     (isKyrgyzstanTransport
       ? canReturnKyrgyzstanTransport
       : ['AWAITING_ACCOUNTANT', 'UNDER_REVIEW', 'RETURNED', 'APPROVED'].includes(bill.status));
-  const cargoPayableStatuses = new Set([
-    'AWAITING_ACCOUNTANT',
-    'UNDER_REVIEW',
-    'APPROVED',
-    'PARTIALLY_PAID',
-    'PAYMENT_POSTPONED',
-  ]);
-  const canCreatePartial =
-    !isCargoPayment &&
-    bill.source === 'SUPPLIER_INVOICE' &&
-    !isTerminal &&
-    Number(bill.remainingAmount) > 0.009;
   const canPayFull =
-    isCargoPayment &&
-    cargoActions &&
-    (cargoActions.showPayFull || cargoActions.showPayRemainder);
-  const canCreateCargoPartial = isCargoPayment && Boolean(cargoActions?.showPartial);
-  const canPostponeCargo =
-    isCargoPayment && Boolean(cargoActions?.showPostpone || cargoActions?.showChangePostponeDate);
-  const canReturnForCorrection = isCargoPayment && Boolean(cargoActions?.showReturnForCorrection);
+    usesAccountantPaymentFlow &&
+    billActions &&
+    (billActions.showPayFull || billActions.showPayRemainder);
+  const canCreateBillPartial = usesAccountantPaymentFlow && Boolean(billActions?.showPartial);
+  const canPostponeBill =
+    usesAccountantPaymentFlow &&
+    Boolean(billActions?.showPostpone || billActions?.showChangePostponeDate);
+  const canReturnForCorrection =
+    usesAccountantPaymentFlow && Boolean(billActions?.showReturnForCorrection);
   const canPostpone =
-    !isCargoPayment &&
+    !usesAccountantPaymentFlow &&
     isSupplierOrCargo &&
     !isTerminal &&
     Number(bill.remainingAmount) > 0.009 &&
@@ -1593,19 +1598,19 @@ function DetailDrawer({
                 label={t('finance.billsToPay.statusLabel')}
                 value={t(`finance.billsToPay.status.${bill.status}`)}
               />
-              {isCargoPayment && approvalStatus ? (
+              {usesAccountantPaymentFlow && approvalStatus ? (
                 <Field
                   label={t('finance.billsToPay.processingStatus')}
                   value={t(`finance.billsToPay.approvalStatus.${approvalStatus}`)}
                 />
               ) : null}
-              {isCargoPayment && paymentStatus ? (
+              {usesAccountantPaymentFlow && paymentStatus ? (
                 <Field
                   label={t('finance.billsToPay.paymentStatusLabel')}
                   value={t(`finance.billsToPay.cargoPaymentStatus.${paymentStatus}`)}
                 />
               ) : null}
-              {isCargoPayment && returnReason ? (
+              {usesAccountantPaymentFlow && returnReason ? (
                 <Field
                   label={t('finance.billsToPay.returnReason')}
                   value={returnReason}
@@ -1870,7 +1875,7 @@ function DetailDrawer({
             </div>
           ) : null}
 
-          {isCargoPayment && auditHistory.length ? (
+          {(usesAccountantPaymentFlow || bill.source === 'SUPPLIER_INVOICE') && auditHistory.length ? (
             <section className="mt-4">
               <h4 className="text-sm font-semibold text-slate-900">
                 {t('finance.billsToPay.actionHistory')}
@@ -1893,17 +1898,17 @@ function DetailDrawer({
         </div>
 
         <div className="flex flex-col gap-2 border-t border-slate-200 px-5 py-4">
-          {cargoActions?.showPaidBanner ? (
+          {billActions?.showPaidBanner ? (
             <p className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900">
               {t('finance.billsToPay.fullyPaidBanner')}
             </p>
           ) : null}
-          {cargoActions?.showAwaitingCorrectionBanner ? (
+          {billActions?.showAwaitingCorrectionBanner ? (
             <p className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
               {t('finance.billsToPay.awaitingCorrectionBanner')}
             </p>
           ) : null}
-          {cargoActions?.showCannotReturnMessage ? (
+          {billActions?.showCannotReturnMessage ? (
             <p className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
               {t('finance.billsToPay.cannotReturnWithPayments')}
             </p>
@@ -1956,22 +1961,12 @@ function DetailDrawer({
               onClick={onPayFullCargo}
               className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
             >
-              {cargoActions?.payFullUsesRemainderLabel
+              {billActions?.payFullUsesRemainderLabel
                 ? t('finance.billsToPay.payRemainder')
                 : t('finance.billsToPay.payInFull')}
             </button>
           ) : null}
-          {canCreatePartial ? (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={onCreatePayment}
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
-            >
-              {t('finance.billsToPay.createPartialPayment')}
-            </button>
-          ) : null}
-          {canCreateCargoPartial ? (
+          {canCreateBillPartial ? (
             <button
               type="button"
               disabled={saving}
@@ -1991,14 +1986,14 @@ function DetailDrawer({
               {t('finance.billsToPay.postponePayment')}
             </button>
           ) : null}
-          {canPostponeCargo ? (
+          {canPostponeBill ? (
             <button
               type="button"
               disabled={saving}
               onClick={onPostpone}
               className="rounded-lg border border-amber-400 bg-amber-50 px-3 py-1.5 text-sm font-semibold text-amber-900 disabled:opacity-40"
             >
-              {cargoActions?.postponeUsesChangeDateLabel
+              {billActions?.postponeUsesChangeDateLabel
                 ? t('finance.billsToPay.changePostponeDate')
                 : t('finance.billsToPay.postponePayment')}
             </button>

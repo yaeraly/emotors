@@ -38,6 +38,12 @@ import {
   resolveCargoApprovalStatus,
   resolveCargoPaymentStatusLabel,
 } from './cargo-bill-actions.util';
+import {
+  resolveSupplierApprovalStatus,
+  resolveSupplierPaymentStatusLabel,
+} from './supplier-bill-actions.util';
+import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
+import { roundMoney } from './supplier-payment.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { LandedCostService } from './landed-cost.service';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
@@ -192,32 +198,10 @@ export class AccountantBillsService {
     }
 
     if (source === 'SUPPLIER_INVOICE') {
-      return this.prisma.$transaction(async (tx) => {
-        const order = await tx.procurementOrder.findFirst({ where: { id, deletedAt: null } });
-        if (!order?.invoiceSentToAccountantAt) {
-          throw new NotFoundException('Supplier invoice request not found');
-        }
-        const updated = await tx.procurementOrder.update({
-          where: { id },
-          data: {
-            invoiceReviewStatus: 'RETURNED',
-            invoiceReturnReason: trimmed,
-            invoiceRejectReason: null,
-            invoiceReviewedAt: new Date(),
-            invoiceReviewedById: user.id,
-          },
-        });
-        await this.audit(tx, user, 'PAYABLE_REQUEST_RETURNED', id, {
-          invoiceReviewStatus: order.invoiceReviewStatus,
-        }, { invoiceReviewStatus: 'RETURNED', reason: trimmed });
-        await this.notifySenderRoles(tx, user, {
-          type: AlertType.TRANSPORT_EXPENSE_RETURNED,
-          entityType: 'ProcurementOrder',
-          entityId: id,
-          referenceNumber: order.orderNumber,
-          message: `Supplier invoice for ${order.orderNumber} returned for correction: ${trimmed}`,
-        });
-        return { id: updated.id, source, status: 'RETURNED', reason: trimmed };
+      return this.supplierPayments.returnForCorrectionByAccountant(user, id, {
+        reason: trimmed,
+        comment: body.comment?.trim() || undefined,
+        idempotencyKey: body.idempotencyKey,
       });
     }
 
@@ -401,6 +385,43 @@ export class AccountantBillsService {
     throw new BadRequestException('Approve is not supported for this request type');
   }
 
+  async payBill(
+    user: AuthUser,
+    source: AccountantBillSource,
+    id: string,
+    body: {
+      paymentAmountKgs?: number;
+      financeAccountId?: string;
+      accountantComment?: string;
+      paidAt?: string;
+      idempotencyKey?: string;
+    },
+  ) {
+    this.assertAccountant(user);
+    if (source === 'TRANSPORT_EXPENSE') {
+      return this.payCargoPayment(user, source, id, body);
+    }
+    if (source === 'SUPPLIER_INVOICE') {
+      const result = await this.supplierPayments.payByAccountant(user, id, {
+        paymentAmountKgs: Number(body.paymentAmountKgs),
+        financeAccountId: String(body.financeAccountId || ''),
+        accountantComment: body.accountantComment,
+        idempotencyKey: body.idempotencyKey,
+      });
+      await this.prisma.$transaction(async (tx) => {
+        const order = await tx.procurementOrder.findFirst({
+          where: { id, deletedAt: null },
+          select: { orderNumber: true },
+        });
+        if (order) {
+          await this.notifyWarehouseWhenExpensesProcessed(tx, user, id, order.orderNumber);
+        }
+      });
+      return result;
+    }
+    throw new BadRequestException('Payment is not supported for this request type');
+  }
+
   async payCargoPayment(
     user: AuthUser,
     source: AccountantBillSource,
@@ -467,8 +488,8 @@ export class AccountantBillsService {
     const comment = String(body.comment || '').trim();
 
     if (source === 'SUPPLIER_INVOICE') {
-      if (!comment) {
-        throw new BadRequestException('comment is required');
+      if (reason.length < 2) {
+        throw new BadRequestException('Postpone reason is required');
       }
       return this.prisma.$transaction(async (tx) => {
         const order = await tx.procurementOrder.findFirst({
@@ -485,6 +506,28 @@ export class AccountantBillsService {
         if (order.invoiceReviewStatus === 'REJECTED') {
           throw new BadRequestException('Rejected invoice cannot be postponed');
         }
+        const review = String(order.invoiceReviewStatus ?? '').toUpperCase();
+        if (review === 'RETURNED') {
+          throw new BadRequestException('Returned invoice cannot be postponed');
+        }
+
+        const pendingCashier = order.supplierPayments.some(
+          (payment) => payment.status === ProcurementSupplierPaymentStatus.PENDING_CASHIER,
+        );
+        if (pendingCashier) {
+          await tx.procurementSupplierPayment.updateMany({
+            where: {
+              procurementOrderId: order.id,
+              status: ProcurementSupplierPaymentStatus.PENDING_CASHIER,
+            },
+            data: {
+              status: ProcurementSupplierPaymentStatus.CANCELLED,
+              sentToCashierAt: null,
+              executionStatus: null,
+            },
+          });
+        }
+
         const paidYuan = order.supplierPayments
           .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
           .reduce((sum, p) => sum + Number(p.amountYuan || 0), 0);
@@ -493,13 +536,20 @@ export class AccountantBillsService {
           throw new BadRequestException('Fully paid supplier invoice cannot be postponed');
         }
 
+        const storedComment = comment
+          ? `${reason}${comment ? `\n${comment}` : ''}`
+          : reason;
+
         const updated = await tx.procurementOrder.update({
           where: { id },
           data: {
             supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED,
             expectedPaymentDate: nextPaymentDate,
-            paymentPostponeComment: comment,
-            invoiceReviewStatus: order.invoiceReviewStatus === 'UNDER_REVIEW' ? 'APPROVED' : order.invoiceReviewStatus,
+            paymentPostponeComment: storedComment,
+            invoiceReviewStatus:
+              order.invoiceReviewStatus === 'UNDER_REVIEW' || order.invoiceReviewStatus === 'SUBMITTED'
+                ? 'APPROVED'
+                : order.invoiceReviewStatus,
             invoiceReviewedAt: order.invoiceReviewedAt ?? new Date(),
             invoiceReviewedById: order.invoiceReviewedById ?? user.id,
           },
@@ -511,11 +561,32 @@ export class AccountantBillsService {
         }, {
           supplierPaymentStatus: ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED,
           expectedPaymentDate: nextPaymentDate.toISOString(),
-          paymentPostponeComment: comment,
+          paymentPostponeComment: storedComment,
+          postponeReason: reason,
           paidAmount: paidYuan,
           remainingAmount: remainingYuan,
           procurementOrderId: order.id,
           supplierInvoiceId: order.id,
+        });
+
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_POSTPONED', id, {
+          supplierPaymentStatus: order.supplierPaymentStatus,
+          paidAmount: paidYuan,
+          remainingAmount: remainingYuan,
+        }, {
+          supplierPaymentId: null,
+          invoiceId: order.id,
+          procurementOrderId: order.id,
+          paymentAmount: 0,
+          approvedAmount: Number(order.totalYuan),
+          paidAmount: paidYuan,
+          remainingAmount: remainingYuan,
+          previousStatus: order.supplierPaymentStatus,
+          newStatus: ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED,
+          nextPaymentDate: nextPaymentDate.toISOString(),
+          correctionReason: reason,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
         });
 
         const isOverdue = nextPaymentDate.getTime() < Date.now();
@@ -550,7 +621,8 @@ export class AccountantBillsService {
           source,
           status: 'PAYMENT_POSTPONED',
           nextPaymentDate: nextPaymentDate.toISOString(),
-          comment,
+          comment: storedComment,
+          reason,
           remainingAmount: remainingYuan,
         };
       });
@@ -1024,6 +1096,24 @@ export class AccountantBillsService {
       take: 50,
     });
 
+    const approvedYuan = resolveApprovedSupplierCostBaseYuan({
+      totalYuan: Number(order.totalYuan),
+      requestedPaymentYuan:
+        order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
+    });
+    const exchangeRate =
+      Number(order.weightedAverageYuanRate || order.defaultYuanRate || 0) > 0
+        ? Number(order.weightedAverageYuanRate || order.defaultYuanRate)
+        : order.supplierPayments
+            .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
+            .map((p) => Number(p.exchangeRate || 0))
+            .filter((rate) => rate > 0)
+            .at(-1) ?? 0;
+    const approvedAmountKgs = exchangeRate > 0 ? roundMoney(approvedYuan * exchangeRate) : 0;
+    const paidKgs = order.supplierPayments
+      .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
+      .reduce((sum, p) => sum + Number(p.actualPaidKgs ?? p.amountKgs ?? 0), 0);
+
     return {
       ...listItem,
       detail: {
@@ -1046,6 +1136,16 @@ export class AccountantBillsService {
         invoiceReviewStatus: order.invoiceReviewStatus,
         invoiceReturnReason: order.invoiceReturnReason,
         invoiceRejectReason: order.invoiceRejectReason,
+        approvalStatus: resolveSupplierApprovalStatus({
+          invoiceReviewStatus: order.invoiceReviewStatus,
+          supplierPaymentStatus: order.supplierPaymentStatus,
+        }),
+        paymentStatus: resolveSupplierPaymentStatusLabel(
+          order.supplierPaymentStatus,
+          paidKgs,
+          approvedAmountKgs,
+        ),
+        returnReason: order.invoiceReturnReason ?? null,
         supplier: order.supplier,
         payments: order.supplierPayments.map((payment) =>
           this.supplierPayments.toPaymentResponse(payment),
