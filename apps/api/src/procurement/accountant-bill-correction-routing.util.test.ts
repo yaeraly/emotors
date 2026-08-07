@@ -50,16 +50,33 @@ assertEqual(
   '1. supplier payment returned to Supply Manager',
 );
 
-// 5. Specific Supply Manager name when available
+// 5. Login preferred over full name when both available
 assertEqual(
   resolveTransportExpenseCorrectionRouting({
     requestType: 'CARGO_PAYMENT',
     status: TransportExpenseStatus.RETURNED,
     executionStatus: null,
     supplyManager: { id: 'sm-2', fullName: 'Азамат', username: 'azamat01' },
-  })?.employeeName,
-  'Азамат',
-  '5. full name preferred',
+  }),
+  {
+    direction: 'TO_SUPPLY_MANAGER',
+    employeeName: 'Азамат',
+    employeeLogin: 'azamat01',
+  },
+  '5. both login and name stored',
+);
+
+assertEqual(
+  formatCorrectionRoutingAssignee(
+    {
+      direction: 'TO_SUPPLY_MANAGER',
+      employeeName: 'Азамат',
+      employeeLogin: 'azamat01',
+    },
+    'Supply Manager',
+  ),
+  'Supply Manager — azamat01',
+  '5b. login displayed when available',
 );
 
 // 6. Login fallback when name unavailable

@@ -113,6 +113,6 @@ export function formatCorrectionRoutingAssignee(
   routing: AccountantBillCorrectionRouting,
   roleLabel: string,
 ): string {
-  const identity = routing.employeeName?.trim() || routing.employeeLogin?.trim();
+  const identity = routing.employeeLogin?.trim() || routing.employeeName?.trim();
   return identity ? `${roleLabel} — ${identity}` : roleLabel;
 }

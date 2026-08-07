@@ -8,11 +8,20 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
 
 assertEqual(
   formatBillCorrectionRoutingAssignee(
+    { direction: 'FROM_HQ_CASHIER', employeeName: 'Айбек', employeeLogin: 'cashier01' },
+    'HQ Cashier',
+  ),
+  'HQ Cashier — cashier01',
+  'cashier assignee prefers login',
+);
+
+assertEqual(
+  formatBillCorrectionRoutingAssignee(
     { direction: 'FROM_HQ_CASHIER', employeeName: 'Айбек' },
     'HQ Cashier',
   ),
   'HQ Cashier — Айбек',
-  'cashier assignee with name',
+  'cashier assignee falls back to name',
 );
 
 assertEqual(
