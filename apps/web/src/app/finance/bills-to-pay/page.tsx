@@ -1834,14 +1834,6 @@ function DetailDrawer({
                   value={returnReason}
                 />
               ) : null}
-              {isTransport &&
-              executionStatus === 'RETURNED_TO_ACCOUNTANT' &&
-              returnReason ? (
-                <Field
-                  label={t('finance.billsToPay.returnReason')}
-                  value={returnReason}
-                />
-              ) : null}
               <Field label={t('finance.billsToPay.sender')} value={bill.sender?.fullName || '—'} />
               <Field label={t('finance.billsToPay.department')} value={bill.departmentOrBranch || '—'} />
               {!isSupplierPayment && !isChinaDomesticTransport ? (
