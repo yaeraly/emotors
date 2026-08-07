@@ -404,12 +404,21 @@ function BillsToPayPageContent() {
       await openSupplierPaymentModal(bill, mode);
       return;
     }
+    const detail = bill.detail || {};
     const remaining = resolveBillRemainingForActions(bill);
+    const previousRequestedAmount = Number(
+      detail.cashierReturnedPaymentRequest?.requestedAmountKgs ?? 0,
+    );
     setCargoPaymentModal({ bill, mode });
     setCargoPaymentError('');
     setCargoPaymentForm({
-      amount: mode === 'full' && remaining > 0 ? String(remaining) : '',
-      financeAccountId: bill.detail?.financeAccountId || bill.detail?.financeAccount?.id || '',
+      amount:
+        mode === 'partial' && previousRequestedAmount > 0
+          ? String(previousRequestedAmount)
+          : mode === 'full' && remaining > 0
+            ? String(remaining)
+            : '',
+      financeAccountId: detail.financeAccountId || detail.financeAccount?.id || '',
       accountantComment: '',
     });
     await loadAccounts();
@@ -417,6 +426,7 @@ function BillsToPayPageContent() {
 
   async function openSupplierPaymentModal(bill: BillDetail, mode: 'full' | 'partial') {
     const detail = bill.detail || {};
+    const hasCashierReturnedRequest = Boolean(detail.cashierReturnedPaymentRequest);
     const defaultRate =
       (typeof detail.defaultExchangeRateCnyKgs === 'string' &&
         detail.defaultExchangeRateCnyKgs.trim()) ||
@@ -427,17 +437,23 @@ function BillsToPayPageContent() {
       paidAmount: Number(bill.paidAmount ?? detail.totalPaidYuan ?? 0),
       remainingAmount: resolveBillRemainingForActions(bill),
       executionStatus: detail.executionStatus,
+      hasCashierReturnedRequest,
     });
     const payRemainder = mode === 'full' && billActions.payFullUsesRemainderLabel;
+    const previousRequestedKgs = Number(
+      detail.cashierReturnedPaymentRequest?.requestedAmountKgs ?? 0,
+    );
     const remainingKgs = Number(
       detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? resolveBillRemainingForActions(bill),
     );
     const initialPaymentKgs =
-      mode === 'full' && remainingCny > 0 && defaultRate
-        ? previewCnyToKgs(remainingCny, defaultRate)
-        : mode === 'full' && remainingKgs > 0
-          ? remainingKgs
-          : null;
+      mode === 'partial' && previousRequestedKgs > 0
+        ? previousRequestedKgs
+        : mode === 'full' && remainingCny > 0 && defaultRate
+          ? previewCnyToKgs(remainingCny, defaultRate)
+          : mode === 'full' && remainingKgs > 0
+            ? remainingKgs
+            : null;
     setSupplierPaymentModal({ bill, mode, payRemainder });
     setSupplierPaymentError('');
     setSupplierPaymentForm({
@@ -1465,6 +1481,15 @@ function BillsToPayPageContent() {
             {Number(cargoPaymentModal.bill.remainingAmountKgs ?? cargoPaymentModal.bill.remainingAmount).toFixed(2)}{' '}
             KGS
           </p>
+          {cargoPaymentModal.bill.detail?.cashierReturnedPaymentRequest?.requestedAmountKgs ? (
+            <p className="mt-1 text-xs text-slate-600">
+              {t('finance.billsToPay.previousRequestedAmount')}:{' '}
+              {Number(
+                cargoPaymentModal.bill.detail.cashierReturnedPaymentRequest.requestedAmountKgs,
+              ).toFixed(2)}{' '}
+              KGS
+            </p>
+          ) : null}
           {cargoPaymentError ? (
             <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{cargoPaymentError}</p>
           ) : null}
@@ -1661,12 +1686,14 @@ function DetailDrawer({
   const isSupplierPayment =
     bill.source === 'SUPPLIER_INVOICE' || requestType === 'SUPPLIER_PAYMENT';
   const usesAccountantPaymentFlow = isCargoPayment || isSupplierPayment;
+  const hasCashierReturnedRequest = Boolean(detail.cashierReturnedPaymentRequest);
   const billActions = usesAccountantPaymentFlow
     ? getCargoBillActionVisibility({
         uiStatus: bill.status,
         paidAmount: Number(bill.paidAmountKgs ?? bill.paidAmount ?? 0),
         remainingAmount: resolveBillRemainingForActions(bill),
         executionStatus: detail.executionStatus,
+        hasCashierReturnedRequest,
       })
     : null;
   const canTakeReview =
@@ -2128,6 +2155,14 @@ function DetailDrawer({
               {t('finance.billsToPay.fullyPaidBanner')}
             </p>
           ) : null}
+          {billActions?.showCashierReturnedBanner ? (
+            <p className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
+              {t('finance.billsToPay.cashierReturnedBanner')}
+              {detail.cashierReturnReason || detail.cashierReturnedPaymentRequest?.returnReason
+                ? `: ${detail.cashierReturnReason || detail.cashierReturnedPaymentRequest?.returnReason}`
+                : ''}
+            </p>
+          ) : null}
           {billActions?.showAwaitingCorrectionBanner ? (
             <p className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">
               {t('finance.billsToPay.awaitingCorrectionBanner')}
@@ -2428,6 +2463,8 @@ function SupplierPaymentModal({
   const fullPaymentCny = modal.payRemainder ? remainingCny : totalCny;
   const payableKgsPreview = isCny ? previewCnyToKgs(fullPaymentCny, form.exchangeRateCnyKgs) : null;
   const totalKgsPreview = isCny ? previewCnyToKgs(totalCny, form.exchangeRateCnyKgs) : null;
+  const previousRequestedKgs = Number(detail.cashierReturnedPaymentRequest?.requestedAmountKgs ?? 0);
+  const previousRequestedCny = Number(detail.cashierReturnedPaymentRequest?.requestedAmountCny ?? 0);
   const remainingKgsPreview =
     totalKgsPreview != null ? Math.max(totalKgsPreview - paidKgs, 0) : null;
 
@@ -2469,6 +2506,14 @@ function SupplierPaymentModal({
       )}
       {error ? (
         <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+      {previousRequestedKgs > 0 ? (
+        <p className="mt-2 text-xs text-slate-600">
+          {t('finance.billsToPay.previousRequestedAmount')}:{' '}
+          {isCny && previousRequestedCny > 0
+            ? `${previousRequestedCny.toFixed(2)} CNY (${previousRequestedKgs.toFixed(2)} KGS)`
+            : `${previousRequestedKgs.toFixed(2)} KGS`}
+        </p>
       ) : null}
       {isCny ? (
         <>

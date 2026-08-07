@@ -10,6 +10,7 @@ export type CargoBillActionVisibility = {
   showReturnForCorrection: boolean;
   showPaidBanner: boolean;
   showAwaitingCorrectionBanner: boolean;
+  showCashierReturnedBanner: boolean;
   showCannotReturnMessage: boolean;
   payFullUsesRemainderLabel: boolean;
   postponeUsesChangeDateLabel: boolean;
@@ -32,12 +33,33 @@ export function getCargoBillActionVisibility(input: {
   paidAmount: number;
   remainingAmount: number;
   executionStatus?: string | null;
+  hasCashierReturnedRequest?: boolean;
 }): CargoBillActionVisibility {
   const status = String(input.uiStatus || '').toUpperCase();
   const paidAmount = Math.max(0, Number(input.paidAmount || 0));
   const remainingAmount = Math.max(0, Number(input.remainingAmount || 0));
   const hasRemaining = remainingAmount > 0.009;
   const hasPaid = paidAmount > 0.009;
+  const isCashierReturned =
+    input.hasCashierReturnedRequest === true ||
+    input.executionStatus === 'RETURNED_TO_ACCOUNTANT';
+
+  if (isCashierReturned && hasRemaining) {
+    return {
+      showPayFull: !hasPaid,
+      showPayRemainder: hasPaid,
+      showPartial: true,
+      showPostpone: false,
+      showChangePostponeDate: false,
+      showReturnForCorrection: !hasPaid,
+      showPaidBanner: false,
+      showAwaitingCorrectionBanner: false,
+      showCashierReturnedBanner: true,
+      showCannotReturnMessage: hasPaid,
+      payFullUsesRemainderLabel: hasPaid,
+      postponeUsesChangeDateLabel: false,
+    };
+  }
 
   if (status === 'FULLY_PAID' || status === 'REJECTED' || status === 'CANCELLED') {
     return {
@@ -49,6 +71,7 @@ export function getCargoBillActionVisibility(input: {
       showReturnForCorrection: false,
       showPaidBanner: status === 'FULLY_PAID',
       showAwaitingCorrectionBanner: false,
+      showCashierReturnedBanner: false,
       showCannotReturnMessage: false,
       payFullUsesRemainderLabel: false,
       postponeUsesChangeDateLabel: false,
@@ -56,7 +79,6 @@ export function getCargoBillActionVisibility(input: {
   }
 
   if (status === 'RETURNED') {
-    const isCashierReturned = input.executionStatus === 'RETURNED_TO_ACCOUNTANT';
     const canForwardToSupplyManager = isCashierReturned && !hasPaid;
     return {
       showPayFull: false,
@@ -67,6 +89,7 @@ export function getCargoBillActionVisibility(input: {
       showReturnForCorrection: canForwardToSupplyManager,
       showPaidBanner: false,
       showAwaitingCorrectionBanner: !canForwardToSupplyManager,
+      showCashierReturnedBanner: false,
       showCannotReturnMessage: false,
       payFullUsesRemainderLabel: false,
       postponeUsesChangeDateLabel: false,
@@ -83,6 +106,7 @@ export function getCargoBillActionVisibility(input: {
       showReturnForCorrection: false,
       showPaidBanner: false,
       showAwaitingCorrectionBanner: false,
+      showCashierReturnedBanner: false,
       showCannotReturnMessage: hasPaid,
       payFullUsesRemainderLabel: true,
       postponeUsesChangeDateLabel: false,
@@ -99,13 +123,13 @@ export function getCargoBillActionVisibility(input: {
       showReturnForCorrection: !hasPaid,
       showPaidBanner: false,
       showAwaitingCorrectionBanner: false,
+      showCashierReturnedBanner: false,
       showCannotReturnMessage: hasPaid,
       payFullUsesRemainderLabel: false,
       postponeUsesChangeDateLabel: true,
     };
   }
 
-  // APPROVED = already sent to HQ Cashier (cargo PENDING_CASHIER / supplier AWAITING_CASHIER).
   if (status === 'APPROVED') {
     return {
       showPayFull: false,
@@ -116,13 +140,13 @@ export function getCargoBillActionVisibility(input: {
       showReturnForCorrection: false,
       showPaidBanner: false,
       showAwaitingCorrectionBanner: false,
+      showCashierReturnedBanner: false,
       showCannotReturnMessage: false,
       payFullUsesRemainderLabel: false,
       postponeUsesChangeDateLabel: false,
     };
   }
 
-  // AWAITING_ACCOUNTANT, UNDER_REVIEW
   return {
     showPayFull: hasRemaining,
     showPayRemainder: false,
@@ -132,6 +156,7 @@ export function getCargoBillActionVisibility(input: {
     showReturnForCorrection: !hasPaid,
     showPaidBanner: false,
     showAwaitingCorrectionBanner: false,
+    showCashierReturnedBanner: false,
     showCannotReturnMessage: hasPaid,
     payFullUsesRemainderLabel: false,
     postponeUsesChangeDateLabel: false,

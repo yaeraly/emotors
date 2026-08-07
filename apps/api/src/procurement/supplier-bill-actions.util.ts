@@ -72,6 +72,8 @@ export function getSupplierBillActionVisibility(input: {
   uiStatus: string;
   paidAmount: number;
   remainingAmount: number;
+  executionStatus?: string | null;
+  hasCashierReturnedRequest?: boolean;
 }): SupplierBillActionVisibility {
   return getCargoBillActionVisibility(input);
 }

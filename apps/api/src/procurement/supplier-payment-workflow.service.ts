@@ -83,6 +83,9 @@ import {
   SUPPLIER_CNY_RATE_REQUIRED_MESSAGE,
 } from './supplier-payment-exchange-rate.util';
 import {
+  PAYMENT_REQUEST_ALREADY_POSTED_MESSAGE,
+} from './payment-request-correction.util';
+import {
   assertCorrectedSupplierTotalCoversPaid,
   assertSupplierPaymentWithinRemaining,
   resolveSupplierInvoiceBalanceSnapshot,
@@ -1088,6 +1091,33 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Rejected supplier invoice cannot be paid');
       }
 
+      const returnedCashierRequest = await tx.procurementSupplierPayment.findFirst({
+        where: {
+          procurementOrderId: order.id,
+          status: ProcurementSupplierPaymentStatus.RETURNED,
+          executionStatus: 'RETURNED_TO_ACCOUNTANT',
+        },
+        orderBy: [{ returnedAt: 'desc' }, { createdAt: 'desc' }],
+      });
+      if (returnedCashierRequest) {
+        const ledgerCount = await tx.financeLedgerEntry.count({
+          where: {
+            referenceType: 'ProcurementSupplierPayment',
+            referenceId: returnedCashierRequest.id,
+            entryType: FinanceLedgerEntryType.EXPENSE,
+          },
+        });
+        if (ledgerCount > 0) {
+          throw new BadRequestException(PAYMENT_REQUEST_ALREADY_POSTED_MESSAGE);
+        }
+      }
+      const previousRequestAmountKgs = returnedCashierRequest
+        ? Number(returnedCashierRequest.approvedAmountKgs ?? returnedCashierRequest.amountKgs ?? 0)
+        : 0;
+      const previousRequestAmountCny = returnedCashierRequest
+        ? Number(returnedCashierRequest.amountYuan || 0)
+        : 0;
+
       await this.refreshSupplierInvoiceTotalsInTx(
         tx,
         user,
@@ -1450,6 +1480,37 @@ export class SupplierPaymentWorkflowService {
         approvedAmountKgs: instructionAmountKgs,
         ...auditPayload,
       });
+
+      if (returnedCashierRequest) {
+        const resendPayload = {
+          invoiceId: order.id,
+          invoiceType: 'SUPPLIER_PAYMENT',
+          procurementOrderId: order.id,
+          supplierPaymentId: payment.id,
+          oldRequestAmount: previousRequestAmountKgs,
+          oldRequestAmountCny: previousRequestAmountCny,
+          newRequestAmount: instructionAmountKgs,
+          newRequestAmountCny: amountYuan,
+          remainingAmount: remainingKgs,
+          remainingAmountCny: remainingCny,
+          exchangeRate: authoritativeRate,
+          oldRequestStatus: ProcurementSupplierPaymentStatus.RETURNED,
+          newRequestStatus: ProcurementSupplierPaymentStatus.PENDING_CASHIER,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        };
+        if (
+          Math.abs(previousRequestAmountKgs - instructionAmountKgs) > 0.009 ||
+          Math.abs(previousRequestAmountCny - amountYuan) > 0.009
+        ) {
+          await this.audit(tx, user, 'SUPPLIER_PAYMENT_REQUEST_AMOUNT_CHANGED', order.id, {
+            paymentId: returnedCashierRequest.id,
+          }, resendPayload);
+        }
+        await this.audit(tx, user, 'SUPPLIER_PAYMENT_REQUEST_RESENT_TO_CASHIER', order.id, {
+          paymentId: payment.id,
+        }, resendPayload);
+      }
 
       if (paymentMethod) {
         await this.audit(tx, user, 'SUPPLIER_PAYMENT_METHOD_DERIVED', order.id, null, {

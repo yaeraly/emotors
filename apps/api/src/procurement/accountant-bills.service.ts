@@ -50,6 +50,10 @@ import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import { roundMoney } from './supplier-payment.util';
 import { isSupplierPaymentExchangeRateRevisionAllowed, resolveSupplierPaymentDialogDefaultExchangeRate, resolveSupplierPaymentDetailDisplayExchangeRate } from './supplier-payment-exchange-rate.util';
 import { resolveSupplierPaymentMonetaryBalance } from './supplier-payment-balance.util';
+import {
+  resolveCargoCashierReturnedPaymentRequest,
+  resolveLatestCashierReturnedSupplierPaymentRequest,
+} from './payment-request-correction.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { LandedCostService } from './landed-cost.service';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
@@ -1212,6 +1216,20 @@ export class AccountantBillsService {
       payments: paymentRateInputs,
       ...invoiceRateInput,
     });
+    const cashierReturnedPaymentRequest = resolveLatestCashierReturnedSupplierPaymentRequest(
+      order.supplierPayments.map((payment) => ({
+        id: payment.id,
+        status: payment.status,
+        executionStatus: payment.executionStatus,
+        returnReason: payment.returnReason,
+        amountYuan: Number(payment.amountYuan),
+        amountKgs: Number(payment.amountKgs),
+        approvedAmountKgs: Number(payment.approvedAmountKgs ?? payment.amountKgs),
+        exchangeRate: Number(payment.exchangeRate),
+        returnedAt: payment.returnedAt,
+        createdAt: payment.createdAt,
+      })),
+    );
     const monetaryBalance =
       exchangeRate > 0
         ? resolveSupplierPaymentMonetaryBalance({
@@ -1293,6 +1311,9 @@ export class AccountantBillsService {
         lastPaidExchangeRateCnyKgs: exchangeRateDefaults.lastPaidExchangeRateCnyKgs,
         defaultExchangeRateCnyKgs: exchangeRateDefaults.defaultExchangeRateCnyKgs,
         displayExchangeRateCnyKgs,
+        cashierReturnedPaymentRequest,
+        executionStatus: cashierReturnedPaymentRequest?.executionStatus ?? null,
+        cashierReturnReason: cashierReturnedPaymentRequest?.returnReason ?? null,
         approvedAmountKgs,
         supplierAmountCny,
         paidAmountKgs: paidKgs,
@@ -1343,10 +1364,20 @@ export class AccountantBillsService {
     const approvedAmountKgs = Number(
       detail.calculatedAmountKgs ?? detail.amountKgs ?? detail.amount ?? 0,
     );
+    const cashierReturnedPaymentRequest = isCargo
+      ? resolveCargoCashierReturnedPaymentRequest({
+          status: detail.status,
+          executionStatus: detail.executionStatus,
+          returnReason: detail.returnReason,
+          cashierInstructionAmountKgs: detail.cashierInstructionAmountKgs,
+          returnedAt: detail.returnedAt,
+        })
+      : null;
     return {
       ...listItem,
       detail: {
         ...detail,
+        cashierReturnedPaymentRequest,
         approvalStatus: isCargo ? resolveCargoApprovalStatus(detail.status) : undefined,
         paymentStatus: isCargo
           ? resolveCargoPaymentStatusLabel(

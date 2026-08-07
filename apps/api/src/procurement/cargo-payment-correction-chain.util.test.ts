@@ -83,7 +83,9 @@ const cashierReturnedVisibility = getCargoBillActionVisibility({
   executionStatus: 'RETURNED_TO_ACCOUNTANT',
 });
 assert(cashierReturnedVisibility.showReturnForCorrection, '4. HQ Accountant sees return action');
-assert(!cashierReturnedVisibility.showAwaitingCorrectionBanner, '4. no awaiting banner when return available');
+assert(cashierReturnedVisibility.showPartial, '4b. cashier returned cargo allows partial resend');
+assert(cashierReturnedVisibility.showCashierReturnedBanner, '4c. cashier returned banner');
+assert(!cashierReturnedVisibility.showAwaitingCorrectionBanner, '4d. no SM awaiting banner');
 
 const smCorrectionVisibility = getCargoBillActionVisibility({
   uiStatus: 'RETURNED',

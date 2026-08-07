@@ -92,6 +92,10 @@ import {
   isCargoPaymentCashierReturned,
 } from './cargo-payment-correction.util';
 import {
+  PAYMENT_REQUEST_AMOUNT_REQUIRED_MESSAGE,
+  PAYMENT_REQUEST_EXCEEDS_REMAINING_MESSAGE,
+} from './payment-request-correction.util';
+import {
   isCargoPaymentExpenseType,
   resolveCargoPaymentMethod,
   resolveCargoRecipientPaymentMethod,
@@ -1633,7 +1637,11 @@ export class TransportExpenseService {
       if (expense.status === TransportExpenseStatus.PENDING_CASHIER) {
         throw new BadRequestException('Счет уже отправлен HQ Cashier.');
       }
-      if (!CARGO_ACCOUNTANT_PAYABLE.has(expense.status)) {
+      const isCashierResend = isCargoPaymentCashierReturned({
+        status: expense.status,
+        executionStatus: expense.executionStatus,
+      });
+      if (!CARGO_ACCOUNTANT_PAYABLE.has(expense.status) && !isCashierResend) {
         if (expense.status === TransportExpenseStatus.RETURNED) {
           throw new BadRequestException('Счет возвращён на исправление.');
         }
@@ -1642,6 +1650,10 @@ export class TransportExpenseService {
         }
         throw new BadRequestException('Счет ещё не одобрен для обработки.');
       }
+
+      const previousInstructionAmount = isCashierResend
+        ? Number(expense.cashierInstructionAmountKgs || 0)
+        : 0;
 
       if (dto.idempotencyKey) {
         const prior = await tx.auditLog.findMany({
@@ -1695,16 +1707,17 @@ export class TransportExpenseService {
 
       const instructionAmount = roundMoney(dto.paymentAmountKgs);
       if (!(instructionAmount > 0)) {
-        throw new BadRequestException('Сумма платежа должна быть больше нуля.');
+        throw new BadRequestException(PAYMENT_REQUEST_AMOUNT_REQUIRED_MESSAGE);
       }
       if (instructionAmount > remaining + 0.009) {
-        throw new BadRequestException('Сумма частичного платежа превышает остаток.');
+        throw new BadRequestException(PAYMENT_REQUEST_EXCEEDS_REMAINING_MESSAGE);
       }
 
       const isFirstApproval =
-        expense.status === TransportExpenseStatus.WAITING_ACCOUNTANT ||
-        expense.status === TransportExpenseStatus.UNDER_REVIEW ||
-        expense.status === TransportExpenseStatus.PAYMENT_POSTPONED;
+        !isCashierResend &&
+        (expense.status === TransportExpenseStatus.WAITING_ACCOUNTANT ||
+          expense.status === TransportExpenseStatus.UNDER_REVIEW ||
+          expense.status === TransportExpenseStatus.PAYMENT_POSTPONED);
 
       if (isFirstApproval) {
         expense = await tx.procurementTransportExpense.update({
@@ -1748,9 +1761,59 @@ export class TransportExpenseService {
           executionStartedAt: null,
           failureReason: null,
           cashierId: null,
+          returnReason: null,
+          returnedAt: null,
+          returnedById: null,
         },
         include: INCLUDE,
       });
+
+      if (isCashierResend) {
+        await this.audit(tx, user, 'CARGO_PAYMENT_CASHIER_REQUEST_SUPERSEDED', id, {
+          status: expense.status,
+          cashierInstructionAmountKgs: previousInstructionAmount,
+        }, {
+          cargoPaymentId: id,
+          invoiceId: id,
+          invoiceType: 'CARGO_PAYMENT',
+          procurementOrderId: expense.procurementOrderId,
+          oldRequestAmount: previousInstructionAmount,
+          newRequestAmount: instructionAmount,
+          remainingAmount: remaining,
+          oldRequestStatus: TransportExpenseStatus.RETURNED,
+          newRequestStatus: updated.status,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+        if (Math.abs(previousInstructionAmount - instructionAmount) > 0.009) {
+          await this.audit(tx, user, 'CARGO_PAYMENT_REQUEST_AMOUNT_CHANGED', id, {
+            cashierInstructionAmountKgs: previousInstructionAmount,
+          }, {
+            cargoPaymentId: id,
+            invoiceId: id,
+            invoiceType: 'CARGO_PAYMENT',
+            procurementOrderId: expense.procurementOrderId,
+            oldRequestAmount: previousInstructionAmount,
+            newRequestAmount: instructionAmount,
+            remainingAmount: remaining,
+            actorUserId: user.id,
+            timestamp: new Date().toISOString(),
+          });
+        }
+        await this.audit(tx, user, 'CARGO_PAYMENT_REQUEST_RESENT_TO_CASHIER', id, {
+          status: expense.status,
+        }, {
+          cargoPaymentId: id,
+          invoiceId: id,
+          invoiceType: 'CARGO_PAYMENT',
+          procurementOrderId: expense.procurementOrderId,
+          oldRequestAmount: previousInstructionAmount,
+          newRequestAmount: instructionAmount,
+          remainingAmount: remaining,
+          actorUserId: user.id,
+          timestamp: new Date().toISOString(),
+        });
+      }
 
       const instructionAudit = {
         cargoPaymentId: id,

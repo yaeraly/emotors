@@ -93,7 +93,9 @@ const cashierReturned = getCargoBillActionVisibility({
   executionStatus: 'RETURNED_TO_ACCOUNTANT',
 });
 assert(cashierReturned.showReturnForCorrection, '7b. cashier-returned shows return to SM');
-assert(!cashierReturned.showAwaitingCorrectionBanner, '7b. no banner when return available');
+assert(cashierReturned.showPartial, '7c. cashier-returned allows partial resend');
+assert(cashierReturned.showCashierReturnedBanner, '7d. cashier-returned banner');
+assert(!cashierReturned.showAwaitingCorrectionBanner, '7b. no SM banner when resend available');
 
 // 8. Backend full payment audit
 assert(service.includes('CARGO_PAYMENT_FULLY_PAID'), '8. full payment audit');
