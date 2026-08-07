@@ -1,5 +1,7 @@
 import {
   calculateApprovedSupplierKgsFromRate,
+  countSupplierExchangeRateRevisions,
+  isSupplierPaymentExchangeRateRevisionAllowed,
   resolveLockedSupplierExchangeRate,
   resolveSupplierPaymentExchangeRate,
   SUPPLIER_CNY_RATE_REQUIRED_MESSAGE,
@@ -34,11 +36,48 @@ assertEqual(
   '14. locked rate reused',
 );
 
-const approvedKgs = calculateApprovedSupplierKgsFromRate(
-  resolveApprovedSupplierCostBaseYuan({ totalYuan: 60000, requestedPaymentYuan: 60000 }),
-  13,
+const revised = resolveSupplierPaymentExchangeRate({
+  defaultYuanRate: 13,
+  submittedRate: 13.2,
+  allowRateRevision: true,
+});
+assertEqual(revised.rate, 13.2, '9. revised rate accepted after correction');
+assertEqual(revised.shouldPersist, true, '11. revised rate persists');
+assertEqual(revised.previousRate, 13, '12. previous rate preserved');
+assertEqual(revised.rateRevised, true, '12b. revision flagged');
+
+assertEqual(
+  isSupplierPaymentExchangeRateRevisionAllowed([
+    { action: 'SUPPLIER_PAYMENT_SENT_TO_CASHIER', timestamp: '2026-01-01T10:00:00Z' },
+    { action: 'SUPPLIER_PAYMENT_RESUBMITTED', timestamp: '2026-01-02T10:00:00Z' },
+  ]),
+  true,
+  '7. resubmit after cashier request unlocks rate',
 );
-assertEqual(approvedKgs, 780000, '16. decimal approved kgs for costing');
+
+assertEqual(
+  isSupplierPaymentExchangeRateRevisionAllowed([
+    { action: 'SUPPLIER_PAYMENT_RESUBMITTED', timestamp: '2026-01-01T10:00:00Z' },
+    { action: 'SUPPLIER_PAYMENT_SENT_TO_CASHIER', timestamp: '2026-01-02T10:00:00Z' },
+  ]),
+  false,
+  '14. new cashier request re-locks rate',
+);
+
+assertEqual(
+  countSupplierExchangeRateRevisions([
+    { action: 'SUPPLIER_EXCHANGE_RATE_REVISED' },
+    { action: 'SUPPLIER_EXCHANGE_RATE_REVISED' },
+  ]),
+  2,
+  '12c. revision counter',
+);
+
+const approvedKgs = calculateApprovedSupplierKgsFromRate(
+  resolveApprovedSupplierCostBaseYuan({ totalYuan: 50000, requestedPaymentYuan: 50000 }),
+  13.2,
+);
+assertEqual(approvedKgs, 660000, '10. decimal approved kgs for corrected costing');
 
 let threw = false;
 try {

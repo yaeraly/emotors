@@ -77,6 +77,8 @@ import {
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import {
   calculateApprovedSupplierKgsFromRate,
+  countSupplierExchangeRateRevisions,
+  isSupplierPaymentExchangeRateRevisionAllowed,
   resolveSupplierPaymentExchangeRate,
   SUPPLIER_CNY_RATE_REQUIRED_MESSAGE,
 } from './supplier-payment-exchange-rate.util';
@@ -1169,8 +1171,33 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Счет ещё не одобрен для обработки.');
       }
 
+      const rateRevisionAudits = await tx.auditLog.findMany({
+        where: {
+          entity: 'ProcurementOrder',
+          entityId: order.id,
+          action: {
+            in: [
+              'SUPPLIER_PAYMENT_RESUBMITTED',
+              'SUPPLIER_PAYMENT_SENT_TO_CASHIER',
+              'SUPPLIER_PARTIAL_PAYMENT_CREATED',
+              'SUPPLIER_PAYMENT_FULLY_PAID',
+              'SUPPLIER_EXCHANGE_RATE_REVISED',
+            ],
+          },
+        },
+        select: { action: true, timestamp: true },
+        orderBy: { timestamp: 'desc' },
+        take: 50,
+      });
+      const allowRateRevision = isSupplierPaymentExchangeRateRevisionAllowed(rateRevisionAudits);
+
       let authoritativeRate: number;
       let shouldPersistRate = false;
+      let rateRevisionPayload: {
+        previousExchangeRate: number | null;
+        newExchangeRate: number;
+        revision: number;
+      } | null = null;
       try {
         const resolved = resolveSupplierPaymentExchangeRate({
           defaultYuanRate: Number(order.defaultYuanRate || 0) || null,
@@ -1179,9 +1206,17 @@ export class SupplierPaymentWorkflowService {
             exchangeRate: Number(payment.exchangeRate || 0) || null,
             status: payment.status,
           })),
+          allowRateRevision,
         });
         authoritativeRate = resolved.rate;
         shouldPersistRate = resolved.shouldPersist;
+        if (resolved.rateRevised) {
+          rateRevisionPayload = {
+            previousExchangeRate: resolved.previousRate,
+            newExchangeRate: resolved.rate,
+            revision: countSupplierExchangeRateRevisions(rateRevisionAudits) + 1,
+          };
+        }
       } catch {
         throw new BadRequestException(SUPPLIER_CNY_RATE_REQUIRED_MESSAGE);
       }
@@ -1281,14 +1316,32 @@ export class SupplierPaymentWorkflowService {
             order.id,
             {
               user,
-              reason: 'Supplier payment exchange rate locked by HQ Accountant',
-              triggerReason: 'supplier-payment-rate-locked',
+              reason: rateRevisionPayload
+                ? 'Supplier payment exchange rate revised after correction'
+                : 'Supplier payment exchange rate locked by HQ Accountant',
+              triggerReason: rateRevisionPayload
+                ? 'supplier-payment-rate-revised'
+                : 'supplier-payment-rate-locked',
             },
             tx,
           );
         } catch {
           // Weight/finalized gates may block recalculation.
         }
+      }
+
+      if (rateRevisionPayload) {
+        await this.audit(tx, user, 'SUPPLIER_EXCHANGE_RATE_REVISED', order.id, {
+          previousExchangeRate: rateRevisionPayload.previousExchangeRate,
+          defaultYuanRate: Number(order.defaultYuanRate || 0) || null,
+        }, {
+          previousExchangeRate: rateRevisionPayload.previousExchangeRate,
+          newExchangeRate: rateRevisionPayload.newExchangeRate,
+          changedByUserId: user.id,
+          changedAt: new Date().toISOString(),
+          revision: rateRevisionPayload.revision,
+          procurementOrderId: order.id,
+        });
       }
 
       const sequenceNumber = await this.nextSequenceNumber(tx, order.id);

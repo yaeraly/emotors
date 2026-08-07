@@ -210,7 +210,6 @@ function BillsToPayPageContent() {
   } | null>(null);
   const [supplierPaymentForm, setSupplierPaymentForm] = useState({
     exchangeRateCnyKgs: '',
-    exchangeRateLocked: false,
     paymentAmountKgs: '',
     financeAccountId: '',
     accountantComment: '',
@@ -422,7 +421,6 @@ function BillsToPayPageContent() {
     setSupplierPaymentError('');
     setSupplierPaymentForm({
       exchangeRateCnyKgs: savedRate > 0 ? String(savedRate) : '',
-      exchangeRateLocked: savedRate > 0,
       paymentAmountKgs:
         mode === 'full' && remainingKgs > 0 ? String(remainingKgs) : '',
       financeAccountId: detail.financeAccountId || detail.financeAccount?.id || '',
@@ -442,17 +440,7 @@ function BillsToPayPageContent() {
 
     let exchangeRate: number | undefined;
     if (isCny) {
-      const parsedRate =
-        parseExchangeRateInput(supplierPaymentForm.exchangeRateCnyKgs) ?? undefined;
-      if (supplierPaymentForm.exchangeRateLocked) {
-        exchangeRate = parsedRate;
-      } else {
-        exchangeRate = parsedRate;
-        if (!(exchangeRate != null && exchangeRate > 0)) {
-          setSupplierPaymentError(t('finance.billsToPay.cnyRateRequired'));
-          return null;
-        }
-      }
+      exchangeRate = parseExchangeRateInput(supplierPaymentForm.exchangeRateCnyKgs) ?? undefined;
       if (!(exchangeRate != null && exchangeRate > 0)) {
         setSupplierPaymentError(t('finance.billsToPay.cnyRateRequired'));
         return null;
@@ -465,7 +453,7 @@ function BillsToPayPageContent() {
         : remainingKgs;
     const debtRemainingKgs = Math.max(approvedKgs - paidKgs, 0);
 
-    let paymentAmountKgs = remainingKgs;
+    let paymentAmountKgs = isCny ? debtRemainingKgs : remainingKgs;
     if (supplierPaymentModal?.mode === 'partial') {
       paymentAmountKgs = Number(supplierPaymentForm.paymentAmountKgs);
       if (!(paymentAmountKgs > 0)) {
@@ -476,11 +464,11 @@ function BillsToPayPageContent() {
         setSupplierPaymentError(t('finance.billsToPay.amountExceedsRemaining'));
         return null;
       }
-    } else if (!(remainingKgs > 0)) {
+    } else if (!(debtRemainingKgs > 0)) {
       setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
       return null;
     } else {
-      paymentAmountKgs = remainingKgs;
+      paymentAmountKgs = debtRemainingKgs;
     }
 
     if (!supplierPaymentForm.financeAccountId) {
@@ -497,8 +485,7 @@ function BillsToPayPageContent() {
       paymentAmountKgs,
       financeAccountId: supplierPaymentForm.financeAccountId,
       accountantComment: supplierPaymentForm.accountantComment.trim() || undefined,
-      exchangeRateCnyKgs:
-        isCny && !supplierPaymentForm.exchangeRateLocked ? exchangeRate : undefined,
+      exchangeRateCnyKgs: isCny ? exchangeRate : undefined,
       idempotencyKey: crypto.randomUUID(),
     };
   }
@@ -2386,7 +2373,6 @@ function SupplierPaymentModal({
   modal: { bill: BillDetail; mode: 'full' | 'partial' };
   form: {
     exchangeRateCnyKgs: string;
-    exchangeRateLocked: boolean;
     paymentAmountKgs: string;
     financeAccountId: string;
     accountantComment: string;
@@ -2399,7 +2385,6 @@ function SupplierPaymentModal({
   onFormChange: Dispatch<
     SetStateAction<{
       exchangeRateCnyKgs: string;
-      exchangeRateLocked: boolean;
       paymentAmountKgs: string;
       financeAccountId: string;
       accountantComment: string;
@@ -2447,8 +2432,7 @@ function SupplierPaymentModal({
             <input
               type="text"
               inputMode="decimal"
-              disabled={form.exchangeRateLocked}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:bg-slate-100"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
               value={form.exchangeRateCnyKgs}
               onChange={(e) =>
                 onFormChange((prev) => ({

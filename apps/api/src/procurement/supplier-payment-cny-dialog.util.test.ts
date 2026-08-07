@@ -14,10 +14,16 @@ const exchangeUtil = readFileSync(
   'utf8',
 );
 const service = readFileSync(join(__dirname, './supplier-payment-workflow.service.ts'), 'utf8');
+const accountantBills = readFileSync(join(__dirname, './accountant-bills.service.ts'), 'utf8');
 
 assert(!page.includes('processingStatus') || page.includes('!isSupplierPayment'), '1. processing status hidden for supplier');
 assert(page.includes('!isSupplierPayment') && page.includes('finance.billsToPay.basis'), '2. basis hidden for supplier');
-assert(page.includes('!isSupplierPayment && auditHistory.length'), '3. action history hidden for supplier');
+assert(
+  page.includes('!isSupplierPayment') &&
+    page.includes('auditHistory.length') &&
+    page.includes('!isCargoPayment'),
+  '3. action history hidden for supplier',
+);
 assert(page.includes('SupplierPaymentModal'), '4. supplier payment modal exists');
 assert(page.includes('finance.billsToPay.supplierAmountCny'), '4b. full dialog shows CNY amount');
 assert(page.includes('finance.billsToPay.cnyToKgsRate'), '5. exchange rate field');
@@ -27,8 +33,14 @@ assert(page.includes('finance.billsToPay.paidPreviously'), '9. partial paid prev
 assert(page.includes('finance.billsToPay.currentPaymentAmount'), '11. partial current payment KGS');
 assert(page.includes('finance.billsToPay.cnyRateRequired'), '12. Russian rate validation key');
 assert(page.includes('exchangeRateCnyKgs'), 'payload includes exchange rate');
+assert(accountantBills.includes('exchangeRateEditable'), '7. editable rate flag from detail');
+assert(!page.includes('disabled={form.exchangeRateLocked}'), '7b. rate input not hard-disabled');
+assert(exchangeUtil.includes('isSupplierPaymentExchangeRateRevisionAllowed'), 'revision detection util');
+assert(exchangeUtil.includes('SUPPLIER_EXCHANGE_RATE_REVISED'), '12. rate revision audit action');
+assert(service.includes('SUPPLIER_EXCHANGE_RATE_REVISED'), '12b. workflow writes rate revision audit');
+assert(service.includes('allowRateRevision'), 'backend accepts revised rate after correction');
 assert(exchangeUtil.includes('calculateApprovedSupplierKgsFromRate'), '15. decimal backend calc');
-assert(service.includes('SUPPLIER_CNY_RATE_REQUIRED_MESSAGE'), '12b. backend Russian rate message');
+assert(service.includes('SUPPLIER_CNY_RATE_REQUIRED_MESSAGE'), '12c. backend Russian rate message');
 assert(service.includes('defaultYuanRate: authoritativeRate'), '13. rate persisted on order');
 
 console.log('supplier-payment-cny-dialog.util.test.ts passed');

@@ -48,6 +48,7 @@ import {
 } from './accountant-bill-correction-routing.util';
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import { roundMoney } from './supplier-payment.util';
+import { isSupplierPaymentExchangeRateRevisionAllowed } from './supplier-payment-exchange-rate.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { LandedCostService } from './landed-cost.service';
 import { SupplierPaymentWorkflowService } from './supplier-payment-workflow.service';
@@ -1157,6 +1158,9 @@ export class AccountantBillsService {
             .map((p) => Number(p.exchangeRate || 0))
             .filter((rate) => rate > 0)
             .at(-1) ?? 0;
+    const exchangeRateEditable = isSupplierPaymentExchangeRateRevisionAllowed(
+      audits.map((row) => ({ action: row.action, timestamp: row.timestamp })),
+    );
     const approvedAmountKgs = exchangeRate > 0 ? roundMoney(approvedYuan * exchangeRate) : 0;
     const requested = Number(order.requestedPaymentYuan ?? order.remainingYuan ?? order.totalYuan ?? 0);
     const remainingYuan = Math.max(Number(order.totalYuan) - paidYuan, 0);
@@ -1226,6 +1230,7 @@ export class AccountantBillsService {
         totalPaidYuan: Number(order.totalPaidYuan),
         remainingYuan,
         exchangeRate,
+        exchangeRateEditable,
         approvedAmountKgs,
         supplierAmountCny: approvedYuan,
         paidAmountKgs: paidKgs,
