@@ -23,6 +23,10 @@ const page = readFileSync(
   join(__dirname, '../app/finance/accounts/page.tsx'),
   'utf8',
 );
+const dialog = readFileSync(
+  join(__dirname, '../components/CenteredDialog.tsx'),
+  'utf8',
+);
 const service = readFileSync(
   join(__dirname, '../../../api/src/finance/finance-reconciliation.service.ts'),
   'utf8',
@@ -42,21 +46,20 @@ assert(page.includes('previewReconciliationDifference'), '11. difference preview
 
 const openBlock = page.slice(
   page.indexOf('function openReconciliation(account: CashierAccountRow)'),
-  page.indexOf('  const reconOpen = Boolean(reconTarget);'),
+  page.indexOf('  const closeReconciliation = useCallback'),
 );
 assert(openBlock.includes('setReconTarget'), '3. open sets selected account');
-assert(!openBlock.includes('setActualBalanceInput'), '4. open does not overwrite input each click');
+assert(openBlock.includes('setActualBalanceInput'), '3. open initializes editable actual balance once');
+assert(!page.includes('reconOpen'), '9. no secondary open effect resets input while typing');
 
-const initEffect = page.slice(
-  page.indexOf('const reconOpen = Boolean(reconTarget);'),
-  page.indexOf('  async function submitReconciliation'),
-);
-assert(initEffect.includes('setActualBalanceInput'), '3. initial actual balance populated on open');
-assert(initEffect.includes('reconOpen'), '9. initialize when dialog opens');
-assert(initEffect.includes('reconAccountId'), '3. initialize when selected account changes');
-assert(!initEffect.includes('actualBalanceInput'), '9. init effect does not depend on live input');
+assert(page.includes('useCallback'), '9. stable dialog close handler');
+assert(dialog.includes('onCloseRef'), '8. dialog does not refocus on every parent render');
+assert(!dialog.includes('[open, onClose]'), '8. dialog focus effect does not depend on onClose');
 
 assertEqual(normalizeMoneyInput('0'), '0', '1. zero can be entered');
+assertEqual(normalizeMoneyInput('15'), '15', '2. continuous typing 1 then 5');
+assertEqual(normalizeMoneyInput('150'), '150', '4. continuous typing builds 150');
+assertEqual(normalizeMoneyInput('15000'), '15000', '4. continuous typing builds 15000');
 assertEqual(normalizeMoneyInput('1'), '1', '2. one can be entered');
 assertEqual(normalizeMoneyInput('25'), '25', '3. twenty-five can be entered');
 assertEqual(normalizeMoneyInput('1500'), '1500', '4. fifteen hundred can be entered');

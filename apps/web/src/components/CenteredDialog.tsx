@@ -24,6 +24,9 @@ export function CenteredDialog({
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -38,7 +41,7 @@ export function CenteredDialog({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -66,7 +69,7 @@ export function CenteredDialog({
       document.removeEventListener('keydown', onKeyDown);
       lastFocusedRef.current?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

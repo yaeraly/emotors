@@ -62,6 +62,11 @@ describe('finance-decimal-input.util', () => {
     assert.equal(toEditableMoney(Number.NaN), '');
   });
 
+  it('supports middle-of-string edits without reformatting', () => {
+    assert.equal(normalizeMoneyInput('18000'), '18000');
+    assert.equal(normalizeMoneyInput('15000'), '15000');
+  });
+
   it('parses submit values including zero', () => {
     assert.equal(parseMoneyDecimal('0'), 0);
     assert.equal(parseMoneyDecimal('1'), 1);

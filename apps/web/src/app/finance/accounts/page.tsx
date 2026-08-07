@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, Suspense, useEffect, useMemo, useState } from 'react';
+import { FormEvent, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   FinanceEmptyState,
@@ -98,29 +98,23 @@ function FinanceAccountsPageContent() {
   const branchCashierView = Boolean(user && isBranchCashierUser(user));
 
   function openReconciliation(account: CashierAccountRow) {
+    const systemBalance = Number(
+      account.expectedClosingBalance ?? account.availableBalance ?? 0,
+    );
     setReconTarget(account);
+    setActualBalanceInput(toEditableMoney(systemBalance));
     setReconComment('');
     setReconError('');
     setReconSuccess('');
   }
 
-  const reconOpen = Boolean(reconTarget);
-  const reconAccountId = reconTarget?.id;
-
-  useEffect(() => {
-    if (!reconOpen || !reconAccountId || !reconTarget) {
-      if (!reconOpen) {
-        setActualBalanceInput('');
-      }
-      return;
-    }
-    const systemBalance = Number(
-      reconTarget.expectedClosingBalance ?? reconTarget.availableBalance ?? 0,
-    );
-    setActualBalanceInput(toEditableMoney(systemBalance));
+  const closeReconciliation = useCallback(() => {
+    if (reconSaving) return;
+    setReconTarget(null);
+    setActualBalanceInput('');
     setReconComment('');
     setReconError('');
-  }, [reconOpen, reconAccountId]);
+  }, [reconSaving]);
 
   async function submitReconciliation(event: FormEvent) {
     event.preventDefault();
@@ -328,10 +322,7 @@ function FinanceAccountsPageContent() {
       <CenteredDialog
         open={Boolean(reconTarget)}
         title={t('finance.reconciliation')}
-        onClose={() => {
-          if (reconSaving) return;
-          setReconTarget(null);
-        }}
+        onClose={closeReconciliation}
       >
         {reconTarget ? (
           <form className="space-y-3" onSubmit={(e) => void submitReconciliation(e)}>
@@ -381,7 +372,7 @@ function FinanceAccountsPageContent() {
               <button
                 type="button"
                 disabled={reconSaving}
-                onClick={() => setReconTarget(null)}
+                onClick={closeReconciliation}
                 className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold"
               >
                 {t('common.close')}
