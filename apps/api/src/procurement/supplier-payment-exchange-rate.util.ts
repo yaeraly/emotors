@@ -223,3 +223,15 @@ export function resolveSupplierPaymentDialogDefaultExchangeRate(input: {
       fallbackRate != null ? formatSupplierExchangeRateString(fallbackRate) : null,
   };
 }
+
+/** Read-only invoice detail: latest paid rate, then saved approved rate, never in-flight. */
+export function resolveSupplierPaymentDetailDisplayExchangeRate(input: {
+  payments: SupplierPaymentExchangeRateHistoryInput[];
+  defaultYuanRate?: number | string | null;
+  weightedAverageYuanRate?: number | string | null;
+}): string | null {
+  const lastPaidRate = resolveLatestConfirmedSupplierPaymentExchangeRate(input.payments);
+  if (lastPaidRate != null) return formatSupplierExchangeRateString(lastPaidRate);
+  const approvedRate = resolveApprovedSupplierInvoiceExchangeRate(input);
+  return approvedRate != null ? formatSupplierExchangeRateString(approvedRate) : null;
+}

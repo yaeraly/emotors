@@ -28,6 +28,7 @@ import {
 } from '@/lib/bill-correction-routing';
 import {
   formatKgsPreview,
+  formatSupplierDetailExchangeRate,
   normalizeExchangeRateInput,
   parseExchangeRateInput,
   previewCnyToKgs,
@@ -1778,25 +1779,23 @@ function DetailDrawer({
                     label={t('finance.billsToPay.amount')}
                     value={`${Number(detail.supplierAmountCny ?? detail.totalYuan ?? bill.amount).toFixed(2)} CNY`}
                   />
-                  {Number(detail.exchangeRate || 0) > 0 ? (
-                    <Field
-                      label={t('finance.billsToPay.cnyToKgsRate')}
-                      value={Number(detail.exchangeRate).toFixed(2)}
-                    />
-                  ) : null}
-                  {Number(detail.approvedAmountKgs || 0) > 0 ? (
-                    <Field
-                      label={t('finance.billsToPay.amountInKgs')}
-                      value={`${Number(detail.approvedAmountKgs).toFixed(2)} KGS`}
-                    />
-                  ) : null}
+                  <Field
+                    label={t('finance.billsToPay.cnyToKgsRate')}
+                    value={
+                      detail.displayExchangeRateCnyKgs ??
+                      formatSupplierDetailExchangeRate({
+                        lastPaidExchangeRateCnyKgs: detail.lastPaidExchangeRateCnyKgs,
+                        exchangeRate: detail.exchangeRate,
+                      })
+                    }
+                  />
                   <Field
                     label={t('finance.billsToPay.paidPreviously')}
-                    value={`${Number(detail.paidAmountKgs ?? bill.paidAmountKgs ?? 0).toFixed(2)} KGS`}
+                    value={`${Number(detail.totalPaidYuan ?? bill.paidAmount ?? 0).toFixed(2)} CNY`}
                   />
                   <Field
                     label={t('finance.billsToPay.remaining')}
-                    value={`${Number(detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? 0).toFixed(2)} KGS`}
+                    value={`${Number(detail.remainingYuan ?? bill.remainingAmount ?? 0).toFixed(2)} CNY`}
                   />
                 </>
               ) : isChinaDomesticTransport ? (

@@ -43,6 +43,10 @@ assert(exchangeUtil.includes('calculateApprovedSupplierKgsFromRate'), '15. decim
 assert(service.includes('SUPPLIER_CNY_RATE_REQUIRED_MESSAGE'), '12c. backend Russian rate message');
 assert(accountantBills.includes('lastPaidExchangeRateCnyKgs'), 'last paid rate exposed in detail');
 assert(accountantBills.includes('defaultExchangeRateCnyKgs'), 'default dialog rate exposed in detail');
+assert(accountantBills.includes('displayExchangeRateCnyKgs'), 'read-only detail display rate exposed');
+assert(accountantBills.includes('resolveSupplierPaymentDetailDisplayExchangeRate'), 'detail display rate resolver');
+assert(page.includes('displayExchangeRateCnyKgs'), 'detail page shows display exchange rate');
+assert(page.includes('formatSupplierDetailExchangeRate'), 'detail page rate formatter');
 assert(page.includes('defaultExchangeRateCnyKgs'), 'frontend prefills dialog rate on open');
 assert(exchangeUtil.includes('resolveLatestConfirmedSupplierPaymentExchangeRate'), 'latest paid rate resolver');
 assert(service.includes('resolveSupplierPayRemainderInstruction'), 'pay remainder uses remaining cny × rate');

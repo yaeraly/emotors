@@ -48,7 +48,7 @@ import {
 } from './accountant-bill-correction-routing.util';
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
 import { roundMoney } from './supplier-payment.util';
-import { isSupplierPaymentExchangeRateRevisionAllowed, resolveSupplierPaymentDialogDefaultExchangeRate } from './supplier-payment-exchange-rate.util';
+import { isSupplierPaymentExchangeRateRevisionAllowed, resolveSupplierPaymentDialogDefaultExchangeRate, resolveSupplierPaymentDetailDisplayExchangeRate } from './supplier-payment-exchange-rate.util';
 import { resolveSupplierPaymentMonetaryBalance } from './supplier-payment-balance.util';
 import { validateHqReceivingInvoicePrerequisites } from './hq-receiving-validation.util';
 import { LandedCostService } from './landed-cost.service';
@@ -1191,18 +1191,26 @@ export class AccountantBillsService {
     const exchangeRateEditable = isSupplierPaymentExchangeRateRevisionAllowed(
       audits.map((row) => ({ action: row.action, timestamp: row.timestamp })),
     );
-    const exchangeRateDefaults = resolveSupplierPaymentDialogDefaultExchangeRate({
-      payments: order.supplierPayments.map((payment) => ({
-        exchangeRate: Number(payment.exchangeRate),
-        status: payment.status,
-        paidAt: payment.paidAt,
-        paymentDate: payment.paymentDate,
-        createdAt: payment.createdAt,
-        sentToCashierAt: payment.sentToCashierAt,
-      })),
+    const paymentRateInputs = order.supplierPayments.map((payment) => ({
+      exchangeRate: Number(payment.exchangeRate),
+      status: payment.status,
+      paidAt: payment.paidAt,
+      paymentDate: payment.paymentDate,
+      createdAt: payment.createdAt,
+      sentToCashierAt: payment.sentToCashierAt,
+    }));
+    const invoiceRateInput = {
       defaultYuanRate: Number(order.defaultYuanRate || 0) || null,
       weightedAverageYuanRate:
         order.weightedAverageYuanRate != null ? Number(order.weightedAverageYuanRate) : null,
+    };
+    const exchangeRateDefaults = resolveSupplierPaymentDialogDefaultExchangeRate({
+      payments: paymentRateInputs,
+      ...invoiceRateInput,
+    });
+    const displayExchangeRateCnyKgs = resolveSupplierPaymentDetailDisplayExchangeRate({
+      payments: paymentRateInputs,
+      ...invoiceRateInput,
     });
     const monetaryBalance =
       exchangeRate > 0
@@ -1284,6 +1292,7 @@ export class AccountantBillsService {
         exchangeRateEditable,
         lastPaidExchangeRateCnyKgs: exchangeRateDefaults.lastPaidExchangeRateCnyKgs,
         defaultExchangeRateCnyKgs: exchangeRateDefaults.defaultExchangeRateCnyKgs,
+        displayExchangeRateCnyKgs,
         approvedAmountKgs,
         supplierAmountCny,
         paidAmountKgs: paidKgs,

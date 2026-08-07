@@ -49,3 +49,20 @@ export function formatKgsPreview(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
   return `${value.toFixed(2)} сом`;
 }
+
+/** Read-only detail: last paid rate, then saved approved invoice rate, else em dash. */
+export function formatSupplierDetailExchangeRate(detail: {
+  lastPaidExchangeRateCnyKgs?: string | null;
+  exchangeRate?: number | string | null;
+}): string {
+  if (
+    typeof detail.lastPaidExchangeRateCnyKgs === 'string' &&
+    detail.lastPaidExchangeRateCnyKgs.trim()
+  ) {
+    return detail.lastPaidExchangeRateCnyKgs.trim();
+  }
+  const approved = Number(detail.exchangeRate || 0);
+  if (!(approved > 0)) return '—';
+  if (Number.isInteger(approved)) return String(approved);
+  return approved.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+}
