@@ -12,6 +12,7 @@ import {
   hasFullAccess,
 } from '@/lib/rbac';
 import { translateStatus } from '@/lib/translate-status';
+import { shouldShowSubmissionSummary } from '@/lib/procurement-section-payable-correction.util';
 
 type QrCode = {
   id: string;
@@ -226,9 +227,10 @@ export function ProcurementSectionPayablePanel({
   const isReturned = isAwaitingSupplyManagerCorrection;
   /** Accountant/cashier keep actionable expense rows; SM uses Sent Invoice summary only. */
   const showExpenseList = canApprove || canConfirm;
-  const showSubmissionSummary = Boolean(
-    primaryExpense &&
-      (primaryExpense.submittedAt || primaryExpense.status !== 'DRAFT'),
+  const showSubmissionSummary = shouldShowSubmissionSummary(
+    primaryExpense,
+    requestType,
+    isAwaitingSupplyManagerCorrection,
   );
   const showPaymentRequestTitle = !(isCreatorOnlyView && isFormLocked);
 
