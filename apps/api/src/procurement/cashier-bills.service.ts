@@ -649,7 +649,31 @@ export class CashierBillsService {
   }
 
   private async getTransportDetail(user: AuthUser, id: string) {
-    const expense = await this.prisma.procurementTransportExpense.findUnique({
+    let expense = await this.prisma.procurementTransportExpense.findUnique({
+      where: { id },
+      include: {
+        accountant: { select: { id: true, fullName: true, role: true } },
+        cashier: { select: { id: true, fullName: true, role: true } },
+        createdBy: { select: { id: true, fullName: true, role: true } },
+        financeAccount: {
+          select: {
+            id: true,
+            name: true,
+            currency: true,
+            typeCode: true,
+            availableBalance: true,
+            currentBalance: true,
+            scope: true,
+          },
+        },
+        transportCompany: true,
+        procurementOrder: { select: { id: true, orderNumber: true, totalYuan: true } },
+      },
+    });
+    if (!expense) throw new NotFoundException('Transport payment task not found');
+
+    await this.transportExpenses.syncCargoRecipientPaymentMethod(id);
+    expense = await this.prisma.procurementTransportExpense.findUnique({
       where: { id },
       include: {
         accountant: { select: { id: true, fullName: true, role: true } },
@@ -919,10 +943,13 @@ export class CashierBillsService {
         );
       }
 
+      const isCargo = expense.expenseType === TransportExpenseType.INTERNATIONAL_FREIGHT;
       const nextPaymentMethod =
-        dto.paymentMethod === 'BANK_ACCOUNT' || dto.paymentMethod === 'QR_CODE'
-          ? (dto.paymentMethod as ProcurementPaymentInfoMethod)
-          : undefined;
+        isCargo
+          ? undefined
+          : dto.paymentMethod === 'BANK_ACCOUNT' || dto.paymentMethod === 'QR_CODE'
+            ? (dto.paymentMethod as ProcurementPaymentInfoMethod)
+            : undefined;
 
       const updated = await tx.procurementTransportExpense.update({
         where: { id },

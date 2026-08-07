@@ -91,7 +91,12 @@ import {
   isCargoPaymentAwaitingSupplyManagerCorrection,
   isCargoPaymentCashierReturned,
 } from './cargo-payment-correction.util';
-import { resolveCargoPaymentMethod } from './cargo-payment-form.util';
+import {
+  isCargoPaymentExpenseType,
+  resolveCargoPaymentMethod,
+  resolveCargoRecipientPaymentMethod,
+  shouldRepairCargoPaymentMethod,
+} from './cargo-payment-form.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -221,12 +226,21 @@ export class TransportExpenseService {
 
   getOne(user: AuthUser, id: string) {
     this.assertCanView(user);
-    return this.prisma.procurementTransportExpense
-      .findUnique({ where: { id }, include: INCLUDE })
-      .then(async (row) => {
-        if (!row) throw new NotFoundException('Transport expense not found');
-        return this.toResponse(row);
-      });
+    return this.prisma.$transaction(async (tx) => {
+      let row = await tx.procurementTransportExpense.findUnique({ where: { id }, include: INCLUDE });
+      if (!row) throw new NotFoundException('Transport expense not found');
+      row = await this.repairCargoPaymentMethodIfNeededInTx(tx, row);
+      return this.toResponse(row, tx);
+    });
+  }
+
+  /** Idempotently align stored cargo recipient payment method with QR attachments. */
+  syncCargoRecipientPaymentMethod(id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.procurementTransportExpense.findUnique({ where: { id }, include: INCLUDE });
+      if (!row) throw new NotFoundException('Transport expense not found');
+      return this.repairCargoPaymentMethodIfNeededInTx(tx, row);
+    });
   }
 
   create(user: AuthUser, dto: CreateTransportExpenseDto) {
@@ -1655,11 +1669,19 @@ export class TransportExpenseService {
       }
 
       const account = await this.assertHqAccountForPayment(tx, dto.financeAccountId);
-      const derivedPaymentMethod = resolveSupplierPaymentMethodFromAccountType(account.typeCode);
-      const procurementPaymentMethod =
-        derivedPaymentMethod === 'QR_CODE'
-          ? ProcurementPaymentInfoMethod.QR_CODE
-          : ProcurementPaymentInfoMethod.BANK_ACCOUNT;
+      const derivedFundingMethod = resolveSupplierPaymentMethodFromAccountType(account.typeCode);
+      const qrAttachmentCount = await tx.fileAttachment.count({
+        where: {
+          entityId: id,
+          entityType: FileAttachmentEntityType.PAYMENT_QR,
+          deletedAt: null,
+        },
+      });
+      const recipientPaymentMethod = resolveCargoRecipientPaymentMethod({
+        expenseType: expense.expenseType,
+        paymentMethod: expense.paymentMethod,
+        qrAttachmentCount,
+      });
 
       const approvedAmountKgs =
         Number(expense.amountKgs) > 0
@@ -1703,7 +1725,8 @@ export class TransportExpenseService {
           procurementOrderId: expense.procurementOrderId,
           approvedPaymentAmount: approvedAmountKgs,
           accountId: account.id,
-          derivedPaymentMethod,
+          derivedFundingMethod,
+          recipientPaymentMethod,
           accountantUserId: user.id,
           oldStatus: expense.status,
           newStatus: TransportExpenseStatus.PENDING_CASHIER,
@@ -1717,7 +1740,7 @@ export class TransportExpenseService {
           status: TransportExpenseStatus.PENDING_CASHIER,
           cashierInstructionAmountKgs: instructionAmount,
           financeAccountId: account.id,
-          paymentMethod: procurementPaymentMethod,
+          paymentMethod: recipientPaymentMethod,
           accountantId: user.id,
           accountantComment: dto.accountantComment?.trim() || expense.accountantComment,
           sentToCashierAt: new Date(),
@@ -1736,7 +1759,8 @@ export class TransportExpenseService {
         instructionId: id,
         approvedPaymentAmount: instructionAmount,
         accountId: account.id,
-        derivedPaymentMethod,
+        derivedFundingMethod,
+        recipientPaymentMethod,
         accountantUserId: user.id,
         oldStatus: expense.status,
         newStatus: updated.status,
@@ -2343,6 +2367,38 @@ export class TransportExpenseService {
       throw new BadRequestException('Выбранный счёт недоступен.');
     }
     return account;
+  }
+
+  private async repairCargoPaymentMethodIfNeededInTx<T extends {
+    id: string;
+    expenseType: TransportExpenseType | string;
+    paymentMethod: ProcurementPaymentInfoMethod | string | null;
+  }>(tx: Tx, expense: T): Promise<T> {
+    if (!isCargoPaymentExpenseType(expense.expenseType)) {
+      return expense;
+    }
+    const qrAttachmentCount = await tx.fileAttachment.count({
+      where: {
+        entityId: expense.id,
+        entityType: FileAttachmentEntityType.PAYMENT_QR,
+        deletedAt: null,
+      },
+    });
+    if (
+      !shouldRepairCargoPaymentMethod({
+        expenseType: expense.expenseType,
+        paymentMethod: expense.paymentMethod,
+        qrAttachmentCount,
+      })
+    ) {
+      return expense;
+    }
+    const updated = await tx.procurementTransportExpense.update({
+      where: { id: expense.id },
+      data: { paymentMethod: ProcurementPaymentInfoMethod.QR_CODE },
+      include: INCLUDE,
+    });
+    return updated as unknown as T;
   }
 
   private assertSupplyManagerMayEditReturned(expense: {

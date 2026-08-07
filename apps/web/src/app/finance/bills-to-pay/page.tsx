@@ -1837,7 +1837,7 @@ function DetailDrawer({
               ) : null}
               <Field label={t('finance.billsToPay.sender')} value={bill.sender?.fullName || '—'} />
               <Field label={t('finance.billsToPay.department')} value={bill.departmentOrBranch || '—'} />
-              {!isSupplierPayment && !isChinaDomesticTransport ? (
+              {!isSupplierPayment && !isChinaDomesticTransport && !isCargoPayment ? (
                 <Field label={t('finance.billsToPay.basis')} value={bill.basis || '—'} />
               ) : null}
               {!isChinaDomesticTransport ? (

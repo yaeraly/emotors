@@ -464,7 +464,11 @@ function CashierBillsPageContent() {
           setSelected(detail);
         }
         setPaymentAmount(String(remainingPayableKgs(detail, row) || ''));
-        setPaymentMethod(detail.paymentMethod || 'BANK_ACCOUNT');
+        setPaymentMethod(
+          detail.requestType === 'CARGO_PAYMENT'
+            ? detail.paymentMethod || 'QR_CODE'
+            : detail.paymentMethod || 'BANK_ACCOUNT',
+        );
         const intendedId = detail.debitAccount?.id || '';
         // Only preselect accountant debit account when it is assigned to this HQ Cashier.
         setFinanceAccountId(
@@ -849,7 +853,14 @@ function CashierBillsPageContent() {
                     value={`${formatMoney(Number(selected.debitAccount.availableBalance))} ${selected.debitAccount.currency || 'KGS'}`}
                   />
                 ) : null}
-                <DetailRow label={t('finance.cashierBills.paymentMethod')} value={selected.paymentMethod} />
+                <DetailRow
+                  label={t('finance.cashierBills.paymentMethod')}
+                  value={
+                    selected.paymentMethod
+                      ? t(`procurement.payments.method.${selected.paymentMethod}`)
+                      : '—'
+                  }
+                />
                 <DetailRow
                   label={t('procurement.sectionPayable.sentAt')}
                   value={selected.submittedAt ? new Date(selected.submittedAt).toLocaleString() : selected.sentToCashierAt ? new Date(selected.sentToCashierAt).toLocaleString() : '—'}
