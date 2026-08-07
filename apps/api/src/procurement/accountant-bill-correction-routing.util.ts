@@ -18,15 +18,14 @@ export type CorrectionRoutingUser = {
 };
 
 export type AccountantBillCorrectionRouting = {
-  direction: 'FROM_CASHIER' | 'TO_SUPPLY_MANAGER';
-  userId?: string;
-  userName?: string;
-  userLogin?: string;
+  direction: 'FROM_HQ_CASHIER' | 'TO_SUPPLY_MANAGER';
+  employeeName?: string;
+  employeeLogin?: string;
 };
 
-export function resolveCorrectionRoutingUser(
+export function resolveCorrectionRoutingEmployee(
   user?: CorrectionRoutingUser | null,
-): Pick<AccountantBillCorrectionRouting, 'userId' | 'userName' | 'userLogin'> {
+): Pick<AccountantBillCorrectionRouting, 'employeeName' | 'employeeLogin'> {
   if (!user?.id) {
     return {};
   }
@@ -34,9 +33,8 @@ export function resolveCorrectionRoutingUser(
   const username = String(user.username ?? '').trim();
   const email = String(user.email ?? '').trim();
   return {
-    userId: user.id,
-    ...(fullName ? { userName: fullName } : {}),
-    ...(username || email ? { userLogin: username || email } : {}),
+    ...(fullName ? { employeeName: fullName } : {}),
+    ...(username || email ? { employeeLogin: username || email } : {}),
   };
 }
 
@@ -55,14 +53,14 @@ export function resolveTransportExpenseCorrectionRouting(input: {
   }
   if (input.executionStatus === EXECUTION_RETURNED_TO_ACCOUNTANT) {
     return {
-      direction: 'FROM_CASHIER',
-      ...resolveCorrectionRoutingUser(input.returnedBy),
+      direction: 'FROM_HQ_CASHIER',
+      ...resolveCorrectionRoutingEmployee(input.returnedBy),
     };
   }
   if (!input.executionStatus) {
     return {
       direction: 'TO_SUPPLY_MANAGER',
-      ...resolveCorrectionRoutingUser(input.supplyManager),
+      ...resolveCorrectionRoutingEmployee(input.supplyManager),
     };
   }
   return undefined;
@@ -83,7 +81,7 @@ export function resolveSupplierInvoiceCorrectionRouting(input: {
   if (review === 'RETURNED') {
     return {
       direction: 'TO_SUPPLY_MANAGER',
-      ...resolveCorrectionRoutingUser(input.invoiceSentBy),
+      ...resolveCorrectionRoutingEmployee(input.invoiceSentBy),
     };
   }
 
@@ -106,8 +104,8 @@ export function resolveSupplierInvoiceCorrectionRouting(input: {
   }
 
   return {
-    direction: 'FROM_CASHIER',
-    ...resolveCorrectionRoutingUser(latestCashierReturn.returnedBy),
+    direction: 'FROM_HQ_CASHIER',
+    ...resolveCorrectionRoutingEmployee(latestCashierReturn.returnedBy),
   };
 }
 
@@ -115,6 +113,6 @@ export function formatCorrectionRoutingAssignee(
   routing: AccountantBillCorrectionRouting,
   roleLabel: string,
 ): string {
-  const identity = routing.userName?.trim() || routing.userLogin?.trim();
+  const identity = routing.employeeName?.trim() || routing.employeeLogin?.trim();
   return identity ? `${roleLabel} — ${identity}` : roleLabel;
 }

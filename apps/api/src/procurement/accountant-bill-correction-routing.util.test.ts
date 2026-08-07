@@ -1,7 +1,7 @@
 import { TransportExpenseStatus } from '@prisma/client';
 import {
   formatCorrectionRoutingAssignee,
-  resolveCorrectionRoutingUser,
+  resolveCorrectionRoutingEmployee,
   resolveSupplierInvoiceCorrectionRouting,
   resolveTransportExpenseCorrectionRouting,
 } from './accountant-bill-correction-routing.util';
@@ -32,8 +32,7 @@ for (const requestType of [
     }),
     {
       direction: 'TO_SUPPLY_MANAGER',
-      userId: 'sm-1',
-      userName: 'Азамат',
+      employeeName: 'Азамат',
     },
     `${requestType} returned to Supply Manager`,
   );
@@ -46,8 +45,7 @@ assertEqual(
   }),
   {
     direction: 'TO_SUPPLY_MANAGER',
-    userId: 'sm-1',
-    userName: 'Азамат',
+    employeeName: 'Азамат',
   },
   '1. supplier payment returned to Supply Manager',
 );
@@ -59,33 +57,30 @@ assertEqual(
     status: TransportExpenseStatus.RETURNED,
     executionStatus: null,
     supplyManager: { id: 'sm-2', fullName: 'Азамат', username: 'azamat01' },
-  })?.userName,
+  })?.employeeName,
   'Азамат',
   '5. full name preferred',
 );
 
 // 6. Login fallback when name unavailable
 assertEqual(
-  resolveCorrectionRoutingUser({ id: 'sm-3', username: 'azamat01' }),
-  { userId: 'sm-3', userLogin: 'azamat01' },
+  resolveCorrectionRoutingEmployee({ id: 'sm-3', username: 'azamat01' }),
+  { employeeLogin: 'azamat01' },
   '6. login fallback',
 );
 
 assertEqual(
-  resolveCorrectionRoutingUser({ id: 'sm-4', email: 'azamat01@example.com' }),
-  { userId: 'sm-4', userLogin: 'azamat01@example.com' },
+  resolveCorrectionRoutingEmployee({ id: 'sm-4', email: 'azamat01@example.com' }),
+  { employeeLogin: 'azamat01@example.com' },
   '6b. email login fallback',
 );
 
 // 7. Raw user ID is never displayed in formatted assignee
-const formatted = formatCorrectionRoutingAssignee(
-  { direction: 'TO_SUPPLY_MANAGER', userId: 'raw-id-should-not-appear' },
-  'Supply Manager',
-);
-assert(!formatted.includes('raw-id-should-not-appear'), '7. raw user ID not shown');
+const formatted = formatCorrectionRoutingAssignee({ direction: 'TO_SUPPLY_MANAGER' }, 'Supply Manager');
+assert(!formatted.includes('sm-'), '7. raw user ID not shown');
 assertEqual(formatted, 'Supply Manager', '7b. role-only when no identity');
 
-// 8–9. Cashier return shows FROM_CASHIER with cashier identity
+// 8–9. Cashier return shows FROM_HQ_CASHIER with cashier identity
 assertEqual(
   resolveTransportExpenseCorrectionRouting({
     requestType: 'CHINA_DOMESTIC_TRANSPORT',
@@ -94,9 +89,8 @@ assertEqual(
     returnedBy: { id: 'cash-1', fullName: 'Айбек' },
   }),
   {
-    direction: 'FROM_CASHIER',
-    userId: 'cash-1',
-    userName: 'Айбек',
+    direction: 'FROM_HQ_CASHIER',
+    employeeName: 'Айбек',
   },
   '8. cashier-returned transport',
 );
@@ -115,9 +109,8 @@ assertEqual(
     ],
   }),
   {
-    direction: 'FROM_CASHIER',
-    userId: 'cash-1',
-    userName: 'Айбек',
+    direction: 'FROM_HQ_CASHIER',
+    employeeName: 'Айбек',
   },
   '8b. cashier-returned supplier payment',
 );
@@ -138,8 +131,7 @@ assertEqual(
   }),
   {
     direction: 'TO_SUPPLY_MANAGER',
-    userId: 'sm-1',
-    userName: 'Азамат',
+    employeeName: 'Азамат',
   },
   '10. invoiceReviewStatus RETURNED overrides prior cashier return',
 );
@@ -186,7 +178,7 @@ assertEqual(
 
 assertEqual(
   formatCorrectionRoutingAssignee(
-    { direction: 'TO_SUPPLY_MANAGER', userName: 'Азамат' },
+    { direction: 'TO_SUPPLY_MANAGER', employeeName: 'Азамат' },
     'Supply Manager',
   ),
   'Supply Manager — Азамат',

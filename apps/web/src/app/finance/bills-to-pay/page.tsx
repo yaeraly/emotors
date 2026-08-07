@@ -886,7 +886,7 @@ function BillsToPayPageContent() {
                       {row.correctionRouting ? (
                         <p className="text-[10px] leading-snug text-amber-800">
                           {t(
-                            row.correctionRouting.direction === 'FROM_CASHIER'
+                            row.correctionRouting.direction === 'FROM_HQ_CASHIER'
                               ? 'finance.billsToPay.correctionRouting.fromCashier'
                               : 'finance.billsToPay.correctionRouting.toSupplyManager',
                           )}
@@ -894,7 +894,7 @@ function BillsToPayPageContent() {
                           {formatBillCorrectionRoutingAssignee(
                             row.correctionRouting,
                             t(
-                              row.correctionRouting.direction === 'FROM_CASHIER'
+                              row.correctionRouting.direction === 'FROM_HQ_CASHIER'
                                 ? 'finance.billsToPay.correctionRouting.roleHqCashier'
                                 : 'finance.billsToPay.correctionRouting.roleSupplyManager',
                             ),

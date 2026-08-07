@@ -34,10 +34,9 @@ export type AccountantBillUiStatus = (typeof ACCOUNTANT_BILL_UI_STATUSES)[number
 export type AccountantBillSource = 'SUPPLIER_INVOICE' | 'TRANSPORT_EXPENSE' | 'FINANCE_EXPENSE';
 
 export type AccountantBillCorrectionRouting = {
-  direction: 'FROM_CASHIER' | 'TO_SUPPLY_MANAGER';
-  userId?: string;
-  userName?: string;
-  userLogin?: string;
+  direction: 'FROM_HQ_CASHIER' | 'TO_SUPPLY_MANAGER';
+  employeeName?: string;
+  employeeLogin?: string;
 };
 
 export type AccountantBillListItem = {
