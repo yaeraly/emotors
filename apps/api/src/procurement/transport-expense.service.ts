@@ -91,6 +91,7 @@ import {
   isCargoPaymentAwaitingSupplyManagerCorrection,
   isCargoPaymentCashierReturned,
 } from './cargo-payment-correction.util';
+import { resolveCargoPaymentMethod } from './cargo-payment-form.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -297,7 +298,7 @@ export class TransportExpenseService {
         throw new BadRequestException('Amount must be greater than zero');
       }
 
-      const paymentMethod = dto.paymentMethod ?? ProcurementPaymentInfoMethod.QR_CODE;
+      const paymentMethod = resolveCargoPaymentMethod(dto.expenseType, dto.paymentMethod);
       const requestType =
         dto.requestType?.trim() || requestTypeForExpenseType(dto.expenseType) || null;
       const carrierName =
@@ -309,7 +310,11 @@ export class TransportExpenseService {
         throw new BadRequestException('Transport company / recipient is required');
       }
 
-      if (paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT && !dto.accountNumber?.trim()) {
+      if (
+        !isCargo &&
+        paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT &&
+        !dto.accountNumber?.trim()
+      ) {
         throw new BadRequestException('Account number is required for bank account payment method');
       }
 
@@ -373,9 +378,15 @@ export class TransportExpenseService {
           vehicleInfo: dto.vehicleInfo?.trim() || null,
           shipmentReference: dto.shipmentReference?.trim() || null,
           paymentMethod,
-          bankName: dto.bankName?.trim() || transportCompany?.bankName || null,
-          accountHolder: dto.accountHolder?.trim() || transportCompany?.accountHolder || null,
-          accountNumber: dto.accountNumber?.trim() || transportCompany?.bankAccount || null,
+          bankName: isCargo
+            ? null
+            : dto.bankName?.trim() || transportCompany?.bankName || null,
+          accountHolder: isCargo
+            ? null
+            : dto.accountHolder?.trim() || transportCompany?.accountHolder || null,
+          accountNumber: isCargo
+            ? null
+            : dto.accountNumber?.trim() || transportCompany?.bankAccount || null,
           swiftCode: dto.swiftCode?.trim() || null,
           invoiceNumber: dto.invoiceNumber?.trim() || null,
           invoiceDate: dto.invoiceDate ? new Date(dto.invoiceDate) : null,
@@ -503,8 +514,9 @@ export class TransportExpenseService {
         currency = 'KGS';
       }
 
-      const paymentMethod = dto.paymentMethod ?? existing.paymentMethod;
+      const paymentMethod = resolveCargoPaymentMethod(existing.expenseType, dto.paymentMethod);
       if (
+        !isCargo &&
         paymentMethod === ProcurementPaymentInfoMethod.BANK_ACCOUNT &&
         !(dto.accountNumber !== undefined ? dto.accountNumber?.trim() : existing.accountNumber?.trim())
       ) {
@@ -547,13 +559,19 @@ export class TransportExpenseService {
               ? dto.shipmentReference?.trim() || null
               : existing.shipmentReference,
           paymentMethod,
-          bankName: dto.bankName !== undefined ? dto.bankName?.trim() || null : existing.bankName,
-          accountHolder:
-            dto.accountHolder !== undefined
+          bankName: isCargo
+            ? null
+            : dto.bankName !== undefined
+              ? dto.bankName?.trim() || null
+              : existing.bankName,
+          accountHolder: isCargo
+            ? null
+            : dto.accountHolder !== undefined
               ? dto.accountHolder?.trim() || null
               : existing.accountHolder,
-          accountNumber:
-            dto.accountNumber !== undefined
+          accountNumber: isCargo
+            ? null
+            : dto.accountNumber !== undefined
               ? dto.accountNumber?.trim() || null
               : existing.accountNumber,
           swiftCode: dto.swiftCode !== undefined ? dto.swiftCode?.trim() || null : existing.swiftCode,

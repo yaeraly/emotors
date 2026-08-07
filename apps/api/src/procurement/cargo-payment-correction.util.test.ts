@@ -35,9 +35,13 @@ assert(dtoSource.includes('totalWeightKg?: number'), '2. totalWeightKg on update
 assert(dtoSource.includes('cargoRateUsdPerKg?: number'), '3. cargoRateUsdPerKg on update DTO');
 assert(dtoSource.includes('usdExchangeRate?: number'), '4. usdExchangeRate on update DTO');
 
-// 5-6. Frontend update payload omits procurementOrderId and calculated totals.
-assert(panel.includes('const updatePayload: Record<string, unknown>'), 'explicit update payload');
-assert(panel.includes('updatePayload.totalWeightKg = Number(form.totalWeightKg)'), '5. update sends weight');
+// 5-6. Frontend update payload omits procurementOrderId, calculated totals, and bank fields.
+assert(panel.includes('buildCargoSectionUpdatePayload'), 'explicit cargo update payload helper');
+assert(panel.includes('updatePayload.totalWeightKg = Number(form.totalWeightKg)') || panel.includes('buildCargoSectionUpdatePayload({'), '5. update sends weight');
+assert(
+  !panel.includes('updatePayload.accountNumber'),
+  '5. update does not send accountNumber for cargo',
+);
 assert(
   !panel.includes('updatePayload.procurementOrderId'),
   '5. update does not send procurementOrderId',

@@ -13,6 +13,11 @@ import {
 } from '@/lib/rbac';
 import { translateStatus } from '@/lib/translate-status';
 import { shouldShowSubmissionSummary } from '@/lib/procurement-section-payable-correction.util';
+import {
+  buildCargoSectionCreatePayload,
+  buildCargoSectionUpdatePayload,
+  usesCargoQrPaymentForm,
+} from '@/lib/cargo-payment-form.util';
 
 type QrCode = {
   id: string;
@@ -158,6 +163,7 @@ export function ProcurementSectionPayablePanel({
   /** Create-only Supply Manager: hide duplicate post-send cards; keep Sent Invoice summary. */
   const isCreatorOnlyView = canCreate && !canApprove && !canConfirm;
   const isCargo = expenseType === 'INTERNATIONAL_FREIGHT';
+  const usesCargoQrForm = usesCargoQrPaymentForm(expenseType);
   const usesTransportCompany = expenseType !== 'OTHER_LOGISTICS';
   const [rows, setRows] = useState<SectionExpense[]>([]);
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([]);
@@ -257,16 +263,15 @@ export function ProcurementSectionPayablePanel({
     } else if (!(Number(form.amount) > 0)) {
       return false;
     }
-    if (form.paymentMethod === 'BANK_ACCOUNT' && !form.accountNumber.trim()) {
-      return false;
-    }
-    if (form.paymentMethod === 'QR_CODE') {
+    if (usesCargoQrForm || form.paymentMethod === 'QR_CODE') {
       const companyQrCount = selectedCompany?.qrAttachments?.length ?? 0;
       const hasQr =
         pendingQrFiles.length > 0 ||
         Boolean(primaryExpense?.qrCodes?.length) ||
         companyQrCount > 0;
       if (!hasQr) return false;
+    } else if (form.paymentMethod === 'BANK_ACCOUNT' && !form.accountNumber.trim()) {
+      return false;
     }
     return true;
   }, [
@@ -277,6 +282,7 @@ export function ProcurementSectionPayablePanel({
     primaryExpense,
     selectedCompany,
     usesTransportCompany,
+    usesCargoQrForm,
   ]);
 
   function load() {
@@ -322,7 +328,11 @@ export function ProcurementSectionPayablePanel({
       expenseName: primaryExpense.expenseName || primaryExpense.recipientName || '',
       amount: String(primaryExpense.amount || ''),
       currency: primaryExpense.currency || defaultCurrency,
-      paymentMethod: primaryExpense.paymentMethod === 'BANK_ACCOUNT' ? 'BANK_ACCOUNT' : 'QR_CODE',
+      paymentMethod: usesCargoQrForm
+        ? 'QR_CODE'
+        : primaryExpense.paymentMethod === 'BANK_ACCOUNT'
+          ? 'BANK_ACCOUNT'
+          : 'QR_CODE',
       bankName: primaryExpense.bankName || '',
       accountHolder: primaryExpense.accountHolder || '',
       accountNumber: primaryExpense.accountNumber || '',
@@ -368,6 +378,13 @@ export function ProcurementSectionPayablePanel({
             ? current.accountNumber
             : company.bankAccount || '',
     }));
+  }
+
+  async function removeQrFromExpense(expenseId: string, attachmentId: string) {
+    await apiFetch(
+      `/procurement/transport-expenses/${expenseId}/attachments/qr/${attachmentId}`,
+      { method: 'DELETE' },
+    );
   }
 
   async function uploadQrToExpense(expenseId: string, file: File) {
@@ -460,13 +477,13 @@ export function ProcurementSectionPayablePanel({
       setError(t('procurement.sectionPayable.amountRequired'));
       return;
     }
-    if (form.paymentMethod === 'BANK_ACCOUNT' && !form.accountNumber.trim()) {
+    if (!usesCargoQrForm && form.paymentMethod === 'BANK_ACCOUNT' && !form.accountNumber.trim()) {
       setError(t('procurement.paymentInfo.accountNumberRequired'));
       return;
     }
     const companyQrCount = selectedCompany?.qrAttachments?.length ?? 0;
     if (
-      form.paymentMethod === 'QR_CODE' &&
+      (usesCargoQrForm || form.paymentMethod === 'QR_CODE') &&
       pendingQrFiles.length === 0 &&
       companyQrCount === 0 &&
       !(primaryExpense?.qrCodes?.length)
@@ -486,30 +503,65 @@ export function ProcurementSectionPayablePanel({
         Boolean(primaryExpense) && EDITABLE_STATUSES.has(primaryExpense!.status);
 
       if (editingExisting && expenseId) {
-        const updatePayload: Record<string, unknown> = {
-          transportCompanyId: selectedCompany?.id,
-          supplierCarrier: carrierName,
-          expenseName: form.expenseName || undefined,
-          recipientName: selectedCompany?.name || form.expenseName || undefined,
-          paymentMethod: form.paymentMethod,
-          bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
-          accountHolder:
-            form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
-          accountNumber:
-            form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
-        };
-        if (isCargo) {
-          updatePayload.totalWeightKg = Number(form.totalWeightKg);
-          updatePayload.cargoRateUsdPerKg = Number(form.cargoRateUsdPerKg);
-          updatePayload.usdExchangeRate = Number(form.usdExchangeRate);
-        } else {
-          updatePayload.amount = Number(form.amount);
-          updatePayload.currency = form.currency;
-        }
+        const updatePayload: Record<string, unknown> = isCargo
+          ? buildCargoSectionUpdatePayload({
+              transportCompanyId: selectedCompany?.id,
+              supplierCarrier: carrierName,
+              expenseName: form.expenseName || undefined,
+              recipientName: selectedCompany?.name || form.expenseName || undefined,
+              totalWeightKg: Number(form.totalWeightKg),
+              cargoRateUsdPerKg: Number(form.cargoRateUsdPerKg),
+              usdExchangeRate: Number(form.usdExchangeRate),
+            })
+          : {
+              transportCompanyId: selectedCompany?.id,
+              supplierCarrier: carrierName,
+              expenseName: form.expenseName || undefined,
+              recipientName: selectedCompany?.name || form.expenseName || undefined,
+              paymentMethod: form.paymentMethod,
+              bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
+              accountHolder:
+                form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
+              accountNumber:
+                form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
+              amount: Number(form.amount),
+              currency: form.currency,
+            };
         await apiFetch(`/procurement/transport-expenses/${expenseId}`, {
           method: 'PUT',
           body: JSON.stringify(updatePayload),
         });
+      } else if (isCargo) {
+        const payload = buildCargoSectionCreatePayload({
+          procurementOrderId: orderId,
+          expenseType,
+          requestType,
+          transportCompanyId: selectedCompany?.id,
+          supplierCarrier: carrierName,
+          expenseName: form.expenseName || undefined,
+          recipientName: selectedCompany?.name || form.expenseName || undefined,
+          totalWeightKg: Number(form.totalWeightKg),
+          cargoRateUsdPerKg: Number(form.cargoRateUsdPerKg),
+          usdExchangeRate: Number(form.usdExchangeRate),
+          calculatedAmountUsd: Number(cargoTotals.calculatedAmountUsd),
+          calculatedAmountKgs: Number(cargoTotals.calculatedAmountKgs),
+        });
+
+        const created = await apiFetch<SectionExpense>('/procurement/transport-expenses', {
+          method: 'POST',
+          body: JSON.stringify({
+            ...payload,
+            sendToAccountant: false,
+          }),
+        });
+        expenseId = created.id;
+        if (created.status === 'WAITING_ACCOUNTANT' || created.status === 'UNDER_REVIEW') {
+          setPendingQrFiles([]);
+          setPendingInvoice(null);
+          setPendingCargoReceipt(null);
+          load();
+          return;
+        }
       } else {
         const payload: Record<string, unknown> = {
           procurementOrderId: orderId,
@@ -519,32 +571,21 @@ export function ProcurementSectionPayablePanel({
           supplierCarrier: carrierName,
           expenseName: form.expenseName || undefined,
           recipientName: selectedCompany?.name || form.expenseName || undefined,
-          currency: isCargo ? 'KGS' : form.currency,
+          currency: form.currency,
           paymentMethod: form.paymentMethod,
           bankName: form.paymentMethod === 'BANK_ACCOUNT' ? form.bankName || undefined : undefined,
           accountHolder:
             form.paymentMethod === 'BANK_ACCOUNT' ? form.accountHolder || undefined : undefined,
           accountNumber:
             form.paymentMethod === 'BANK_ACCOUNT' ? form.accountNumber || undefined : undefined,
+          amount: Number(form.amount),
         };
-
-        if (isCargo) {
-          payload.totalWeightKg = Number(form.totalWeightKg);
-          payload.cargoRateUsdPerKg = Number(form.cargoRateUsdPerKg);
-          payload.usdExchangeRate = Number(form.usdExchangeRate);
-          payload.calculatedAmountUsd = Number(cargoTotals.calculatedAmountUsd);
-          payload.calculatedAmountKgs = Number(cargoTotals.calculatedAmountKgs);
-          payload.amount = Number(cargoTotals.calculatedAmountKgs);
-          payload.currency = 'KGS';
-        } else {
-          payload.amount = Number(form.amount);
-        }
 
         const created = await apiFetch<SectionExpense>('/procurement/transport-expenses', {
           method: 'POST',
           body: JSON.stringify({
             ...payload,
-            sendToAccountant: form.paymentMethod === 'BANK_ACCOUNT' && !pendingInvoice && !isCargo,
+            sendToAccountant: form.paymentMethod === 'BANK_ACCOUNT' && !pendingInvoice,
           }),
         });
         expenseId = created.id;
@@ -564,7 +605,7 @@ export function ProcurementSectionPayablePanel({
       }
       if (
         pendingQrFiles.length === 0 &&
-        form.paymentMethod === 'QR_CODE' &&
+        (usesCargoQrForm || form.paymentMethod === 'QR_CODE') &&
         selectedCompany?.id &&
         companyQrCount > 0 &&
         !(primaryExpense?.qrCodes?.length)
@@ -814,21 +855,23 @@ export function ProcurementSectionPayablePanel({
             </>
           )}
 
-          <label className="block">
-            <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.paymentMethod')}</span>
-            <select
-              value={form.paymentMethod}
-              onChange={(e) =>
-                setForm({ ...form, paymentMethod: e.target.value as 'BANK_ACCOUNT' | 'QR_CODE' })
-              }
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-            >
-              <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
-              <option value="BANK_ACCOUNT">{t('procurement.paymentInfo.method.BANK_ACCOUNT')}</option>
-            </select>
-          </label>
+          {!usesCargoQrForm ? (
+            <label className="block">
+              <span className="text-xs font-semibold text-slate-700">{t('procurement.paymentInfo.paymentMethod')}</span>
+              <select
+                value={form.paymentMethod}
+                onChange={(e) =>
+                  setForm({ ...form, paymentMethod: e.target.value as 'BANK_ACCOUNT' | 'QR_CODE' })
+                }
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              >
+                <option value="QR_CODE">{t('procurement.paymentInfo.method.QR_CODE')}</option>
+                <option value="BANK_ACCOUNT">{t('procurement.paymentInfo.method.BANK_ACCOUNT')}</option>
+              </select>
+            </label>
+          ) : null}
 
-          {form.paymentMethod === 'BANK_ACCOUNT' ? (
+          {!usesCargoQrForm && form.paymentMethod === 'BANK_ACCOUNT' ? (
             <>
               <CompactField
                 label={t('procurement.paymentInfo.accountNumber')}
@@ -855,8 +898,13 @@ export function ProcurementSectionPayablePanel({
                 }}
               />
             </>
-          ) : (
+          ) : null}
+
+          {usesCargoQrForm || form.paymentMethod === 'QR_CODE' ? (
             <div className="md:col-span-2 lg:col-span-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-700">
+                {t('procurement.paymentInfo.method.QR_CODE')}
+              </p>
               <label className="inline-flex cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold">
                 {t('procurement.paymentInfo.uploadQr')}
                 <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" multiple className="hidden" onChange={onPickQr} />
@@ -864,7 +912,31 @@ export function ProcurementSectionPayablePanel({
               {primaryExpense?.qrCodes?.length ? (
                 <ul className="space-y-1 text-xs text-slate-600">
                   {primaryExpense.qrCodes.map((qr) => (
-                    <li key={qr.id}>{qr.fileName}</li>
+                    <li key={qr.id} className="flex items-center gap-2">
+                      <a
+                        href={`${API_URL}${qr.fileUrl}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-blue-700"
+                      >
+                        {qr.fileName}
+                      </a>
+                      {primaryExpense?.id && isFormEditable ? (
+                        <button
+                          type="button"
+                          className="font-semibold text-red-700"
+                          onClick={() => {
+                            void removeQrFromExpense(primaryExpense.id, qr.id)
+                              .then(load)
+                              .catch((err) =>
+                                setError(err instanceof Error ? err.message : t('common.error')),
+                              );
+                          }}
+                        >
+                          {t('common.delete')}
+                        </button>
+                      ) : null}
+                    </li>
                   ))}
                 </ul>
               ) : null}
@@ -892,7 +964,7 @@ export function ProcurementSectionPayablePanel({
                 </p>
               ) : null}
             </div>
-          )}
+          ) : null}
 
           {isCargo ? (
             <div className="md:col-span-2 lg:col-span-3">
