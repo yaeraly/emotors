@@ -404,6 +404,7 @@ export class AccountantBillsService {
       paymentAmountKgs?: number;
       financeAccountId?: string;
       accountantComment?: string;
+      exchangeRateCnyKgs?: number;
       paidAt?: string;
       idempotencyKey?: string;
     },
@@ -417,6 +418,8 @@ export class AccountantBillsService {
         paymentAmountKgs: Number(body.paymentAmountKgs),
         financeAccountId: String(body.financeAccountId || ''),
         accountantComment: body.accountantComment,
+        exchangeRateCnyKgs:
+          body.exchangeRateCnyKgs != null ? Number(body.exchangeRateCnyKgs) : undefined,
         idempotencyKey: body.idempotencyKey,
       });
       await this.prisma.$transaction(async (tx) => {
@@ -1223,6 +1226,9 @@ export class AccountantBillsService {
         remainingYuan,
         exchangeRate,
         approvedAmountKgs,
+        supplierAmountCny: approvedYuan,
+        paidAmountKgs: paidKgs,
+        remainingAmountKgs: remainingKgs,
         paymentMethod: activeInfo?.paymentMethod ?? null,
         bankName: activeInfo?.bankName ?? null,
         accountHolder: activeInfo?.accountHolder ?? null,

@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   FinanceEmptyState,
@@ -26,6 +26,12 @@ import {
   formatBillCorrectionRoutingAssignee,
   type BillCorrectionRouting,
 } from '@/lib/bill-correction-routing';
+import {
+  formatKgsPreview,
+  normalizeExchangeRateInput,
+  parseExchangeRateInput,
+  previewCnyToKgs,
+} from '@/lib/supplier-payment-cny-preview.util';
 import type { User } from '@/lib/types';
 
 type BillSource = 'SUPPLIER_INVOICE' | 'TRANSPORT_EXPENSE' | 'FINANCE_EXPENSE';
@@ -111,6 +117,15 @@ const emptyFilters = {
   dateTo: '',
 };
 
+function isSupplierAccountantBill(bill: {
+  source?: string | null;
+  requestType?: string | null;
+  detail?: { requestType?: string | null } | null;
+}): boolean {
+  const requestType = String(bill.requestType || bill.detail?.requestType || '');
+  return bill.source === 'SUPPLIER_INVOICE' || requestType === 'SUPPLIER_PAYMENT';
+}
+
 function isCargoOrSupplierAccountantBill(bill: {
   source?: string | null;
   requestType?: string | null;
@@ -189,6 +204,18 @@ function BillsToPayPageContent() {
     accountantComment: '',
   });
   const [cargoPaymentError, setCargoPaymentError] = useState('');
+  const [supplierPaymentModal, setSupplierPaymentModal] = useState<{
+    bill: BillDetail;
+    mode: 'full' | 'partial';
+  } | null>(null);
+  const [supplierPaymentForm, setSupplierPaymentForm] = useState({
+    exchangeRateCnyKgs: '',
+    exchangeRateLocked: false,
+    paymentAmountKgs: '',
+    financeAccountId: '',
+    accountantComment: '',
+  });
+  const [supplierPaymentError, setSupplierPaymentError] = useState('');
 
   const canAccess = canCreateSupplierPayment(user);
   const canPermanentDelete = canPermanentDeleteBusinessData(user);
@@ -372,6 +399,10 @@ function BillsToPayPageContent() {
   );
 
   async function openCargoPaymentModal(bill: BillDetail, mode: 'full' | 'partial') {
+    if (isSupplierAccountantBill(bill)) {
+      await openSupplierPaymentModal(bill, mode);
+      return;
+    }
     const remaining = resolveBillRemainingForActions(bill);
     setCargoPaymentModal({ bill, mode });
     setCargoPaymentError('');
@@ -381,6 +412,123 @@ function BillsToPayPageContent() {
       accountantComment: '',
     });
     await loadAccounts();
+  }
+
+  async function openSupplierPaymentModal(bill: BillDetail, mode: 'full' | 'partial') {
+    const detail = bill.detail || {};
+    const savedRate = Number(detail.exchangeRate || 0);
+    const remainingKgs = resolveBillRemainingForActions(bill);
+    setSupplierPaymentModal({ bill, mode });
+    setSupplierPaymentError('');
+    setSupplierPaymentForm({
+      exchangeRateCnyKgs: savedRate > 0 ? String(savedRate) : '',
+      exchangeRateLocked: savedRate > 0,
+      paymentAmountKgs:
+        mode === 'full' && remainingKgs > 0 ? String(remainingKgs) : '',
+      financeAccountId: detail.financeAccountId || detail.financeAccount?.id || '',
+      accountantComment: '',
+    });
+    await loadAccounts();
+  }
+
+  function validateSupplierPaymentForm(bill: BillDetail) {
+    const detail = bill.detail || {};
+    const isCny = String(bill.currency || 'CNY').toUpperCase() === 'CNY';
+    const remainingKgs = resolveBillRemainingForActions(bill);
+    const supplierAmountCny = Number(
+      detail.supplierAmountCny ?? detail.totalYuan ?? bill.amount ?? 0,
+    );
+    const paidKgs = Number(detail.paidAmountKgs ?? bill.paidAmountKgs ?? 0);
+
+    let exchangeRate: number | undefined;
+    if (isCny) {
+      const parsedRate =
+        parseExchangeRateInput(supplierPaymentForm.exchangeRateCnyKgs) ?? undefined;
+      if (supplierPaymentForm.exchangeRateLocked) {
+        exchangeRate = parsedRate;
+      } else {
+        exchangeRate = parsedRate;
+        if (!(exchangeRate != null && exchangeRate > 0)) {
+          setSupplierPaymentError(t('finance.billsToPay.cnyRateRequired'));
+          return null;
+        }
+      }
+      if (!(exchangeRate != null && exchangeRate > 0)) {
+        setSupplierPaymentError(t('finance.billsToPay.cnyRateRequired'));
+        return null;
+      }
+    }
+
+    const approvedKgs =
+      isCny && exchangeRate != null
+        ? previewCnyToKgs(supplierAmountCny, String(exchangeRate)) ?? 0
+        : remainingKgs;
+    const debtRemainingKgs = Math.max(approvedKgs - paidKgs, 0);
+
+    let paymentAmountKgs = remainingKgs;
+    if (supplierPaymentModal?.mode === 'partial') {
+      paymentAmountKgs = Number(supplierPaymentForm.paymentAmountKgs);
+      if (!(paymentAmountKgs > 0)) {
+        setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
+        return null;
+      }
+      if (paymentAmountKgs > debtRemainingKgs + 0.009) {
+        setSupplierPaymentError(t('finance.billsToPay.amountExceedsRemaining'));
+        return null;
+      }
+    } else if (!(remainingKgs > 0)) {
+      setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
+      return null;
+    } else {
+      paymentAmountKgs = remainingKgs;
+    }
+
+    if (!supplierPaymentForm.financeAccountId) {
+      setSupplierPaymentError(t('finance.billsToPay.accountRequired'));
+      return null;
+    }
+    const account = accounts.find((item) => item.id === supplierPaymentForm.financeAccountId);
+    if (!account || !deriveSupplierPaymentMethodFromAccountType(account.typeCode)) {
+      setSupplierPaymentError(t('finance.billsToPay.accountUnavailable'));
+      return null;
+    }
+
+    return {
+      paymentAmountKgs,
+      financeAccountId: supplierPaymentForm.financeAccountId,
+      accountantComment: supplierPaymentForm.accountantComment.trim() || undefined,
+      exchangeRateCnyKgs:
+        isCny && !supplierPaymentForm.exchangeRateLocked ? exchangeRate : undefined,
+      idempotencyKey: crypto.randomUUID(),
+    };
+  }
+
+  async function submitSupplierPayment() {
+    if (!supplierPaymentModal || saving) return;
+    const payload = validateSupplierPaymentForm(supplierPaymentModal.bill);
+    if (!payload) return;
+
+    setSaving(true);
+    setSupplierPaymentError('');
+    setActionError('');
+    try {
+      await apiFetch(
+        `/procurement/bills-to-pay/${supplierPaymentModal.bill.source}/${supplierPaymentModal.bill.id}/pay`,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      );
+      const source = supplierPaymentModal.bill.source;
+      const id = supplierPaymentModal.bill.id;
+      setSupplierPaymentModal(null);
+      await load();
+      await refreshSelected(source, id);
+    } catch (err) {
+      setSupplierPaymentError(err instanceof Error ? err.message : t('common.error'));
+    } finally {
+      setSaving(false);
+    }
   }
 
   function validateCargoPaymentForm(bill: BillDetail) {
@@ -1359,6 +1507,23 @@ function BillsToPayPageContent() {
         </Modal>
       ) : null}
 
+      {supplierPaymentModal ? (
+        <SupplierPaymentModal
+          t={t}
+          modal={supplierPaymentModal}
+          form={supplierPaymentForm}
+          error={supplierPaymentError}
+          saving={saving}
+          accounts={accounts}
+          onClose={() => {
+            setSupplierPaymentModal(null);
+            setSupplierPaymentError('');
+          }}
+          onSubmit={() => void submitSupplierPayment()}
+          onFormChange={setSupplierPaymentForm}
+        />
+      ) : null}
+
       {transportApproveModal ? (
         <Modal
           title={t('finance.billsToPay.approve')}
@@ -1636,7 +1801,7 @@ function DetailDrawer({
                 label={t('finance.billsToPay.statusLabel')}
                 value={t(`finance.billsToPay.status.${bill.status}`)}
               />
-              {usesAccountantPaymentFlow && approvalStatus ? (
+              {usesAccountantPaymentFlow && approvalStatus && !isSupplierPayment ? (
                 <Field
                   label={t('finance.billsToPay.processingStatus')}
                   value={t(`finance.billsToPay.approvalStatus.${approvalStatus}`)}
@@ -1648,7 +1813,50 @@ function DetailDrawer({
                   value={t(`finance.billsToPay.cargoPaymentStatus.${paymentStatus}`)}
                 />
               ) : null}
-              {usesAccountantPaymentFlow && returnReason ? (
+              {isSupplierPayment ? (
+                <>
+                  <Field
+                    label={t('finance.billsToPay.amount')}
+                    value={`${Number(detail.supplierAmountCny ?? detail.totalYuan ?? bill.amount).toFixed(2)} CNY`}
+                  />
+                  {Number(detail.exchangeRate || 0) > 0 ? (
+                    <Field
+                      label={t('finance.billsToPay.cnyToKgsRate')}
+                      value={Number(detail.exchangeRate).toFixed(2)}
+                    />
+                  ) : null}
+                  {Number(detail.approvedAmountKgs || 0) > 0 ? (
+                    <Field
+                      label={t('finance.billsToPay.amountInKgs')}
+                      value={`${Number(detail.approvedAmountKgs).toFixed(2)} KGS`}
+                    />
+                  ) : null}
+                  <Field
+                    label={t('finance.billsToPay.paidPreviously')}
+                    value={`${Number(detail.paidAmountKgs ?? bill.paidAmountKgs ?? 0).toFixed(2)} KGS`}
+                  />
+                  <Field
+                    label={t('finance.billsToPay.remaining')}
+                    value={`${Number(detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? 0).toFixed(2)} KGS`}
+                  />
+                </>
+              ) : (
+                <>
+                  <Field
+                    label={t('finance.billsToPay.amount')}
+                    value={`${Number(bill.amount).toFixed(2)} ${bill.currency}`}
+                  />
+                  <Field
+                    label={t('finance.billsToPay.paid')}
+                    value={`${Number(bill.paidAmount).toFixed(2)} ${bill.currency}`}
+                  />
+                  <Field
+                    label={t('finance.billsToPay.remaining')}
+                    value={`${Number(bill.remainingAmount).toFixed(2)} ${bill.currency}`}
+                  />
+                </>
+              )}
+              {returnReason ? (
                 <Field
                   label={t('finance.billsToPay.returnReason')}
                   value={returnReason}
@@ -1664,19 +1872,9 @@ function DetailDrawer({
               ) : null}
               <Field label={t('finance.billsToPay.sender')} value={bill.sender?.fullName || '—'} />
               <Field label={t('finance.billsToPay.department')} value={bill.departmentOrBranch || '—'} />
-              <Field label={t('finance.billsToPay.basis')} value={bill.basis || '—'} />
-              <Field
-                label={t('finance.billsToPay.amount')}
-                value={`${Number(bill.amount).toFixed(2)} ${bill.currency}`}
-              />
-              <Field
-                label={t('finance.billsToPay.paid')}
-                value={`${Number(bill.paidAmount).toFixed(2)} ${bill.currency}`}
-              />
-              <Field
-                label={t('finance.billsToPay.remaining')}
-                value={`${Number(bill.remainingAmount).toFixed(2)} ${bill.currency}`}
-              />
+              {!isSupplierPayment ? (
+                <Field label={t('finance.billsToPay.basis')} value={bill.basis || '—'} />
+              ) : null}
               <Field
                 label={t('finance.billsToPay.nextPaymentDate')}
                 value={
@@ -1921,7 +2119,7 @@ function DetailDrawer({
             </div>
           ) : null}
 
-          {(usesAccountantPaymentFlow || bill.source === 'SUPPLIER_INVOICE') && auditHistory.length ? (
+          {!isSupplierPayment && auditHistory.length ? (
             <section className="mt-4">
               <h4 className="text-sm font-semibold text-slate-900">
                 {t('finance.billsToPay.actionHistory')}
@@ -2068,6 +2266,180 @@ function DetailDrawer({
         </div>
       </div>
     </div>
+  );
+}
+
+function SupplierPaymentModal({
+  t,
+  modal,
+  form,
+  error,
+  saving,
+  accounts,
+  onClose,
+  onSubmit,
+  onFormChange,
+}: {
+  t: (key: string) => string;
+  modal: { bill: BillDetail; mode: 'full' | 'partial' };
+  form: {
+    exchangeRateCnyKgs: string;
+    exchangeRateLocked: boolean;
+    paymentAmountKgs: string;
+    financeAccountId: string;
+    accountantComment: string;
+  };
+  error: string;
+  saving: boolean;
+  accounts: Array<{ id: string; name: string; availableBalance: number; typeCode?: string }>;
+  onClose: () => void;
+  onSubmit: () => void;
+  onFormChange: Dispatch<
+    SetStateAction<{
+      exchangeRateCnyKgs: string;
+      exchangeRateLocked: boolean;
+      paymentAmountKgs: string;
+      financeAccountId: string;
+      accountantComment: string;
+    }>
+  >;
+}) {
+  const bill = modal.bill;
+  const detail = bill.detail || {};
+  const isCny = String(bill.currency || 'CNY').toUpperCase() === 'CNY';
+  const supplierAmountCny = Number(detail.supplierAmountCny ?? detail.totalYuan ?? bill.amount ?? 0);
+  const paidKgs = Number(detail.paidAmountKgs ?? bill.paidAmountKgs ?? 0);
+  const approvedKgsPreview = isCny ? previewCnyToKgs(supplierAmountCny, form.exchangeRateCnyKgs) : null;
+  const remainingPreview =
+    approvedKgsPreview != null ? Math.max(approvedKgsPreview - paidKgs, 0) : null;
+
+  return (
+    <Modal
+      title={
+        modal.mode === 'full'
+          ? t('finance.billsToPay.payInFull')
+          : t('finance.billsToPay.createPartialPayment')
+      }
+      onClose={onClose}
+    >
+      {isCny ? (
+        <p className="text-xs text-slate-600">
+          {modal.mode === 'partial'
+            ? t('finance.billsToPay.supplierTotalAmountCny')
+            : t('finance.billsToPay.supplierAmountCny')}
+          : {supplierAmountCny.toFixed(2)} CNY
+        </p>
+      ) : (
+        <p className="text-xs text-slate-600">
+          {bill.requestNumber} · {t('finance.billsToPay.remaining')}:{' '}
+          {Number(bill.remainingAmountKgs ?? bill.remainingAmount).toFixed(2)} KGS
+        </p>
+      )}
+      {error ? (
+        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+      {isCny ? (
+        <>
+          <label className="mt-2 block text-xs font-semibold">
+            {t('finance.billsToPay.cnyToKgsRate')}
+            <input
+              type="text"
+              inputMode="decimal"
+              disabled={form.exchangeRateLocked}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm disabled:bg-slate-100"
+              value={form.exchangeRateCnyKgs}
+              onChange={(e) =>
+                onFormChange((prev) => ({
+                  ...prev,
+                  exchangeRateCnyKgs: normalizeExchangeRateInput(e.target.value),
+                }))
+              }
+            />
+          </label>
+          <p className="mt-2 text-xs text-slate-700">
+            {modal.mode === 'partial'
+              ? t('finance.billsToPay.totalAmountInKgs')
+              : t('finance.billsToPay.amountInKgs')}
+            : {formatKgsPreview(approvedKgsPreview)}
+          </p>
+          {modal.mode === 'partial' ? (
+            <>
+              <p className="mt-1 text-xs text-slate-600">
+                {t('finance.billsToPay.paidPreviously')}:{' '}
+                {paidKgs.toFixed(2)} KGS
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                {t('finance.billsToPay.remaining')}:{' '}
+                {remainingPreview != null ? `${remainingPreview.toFixed(2)} KGS` : '—'}
+              </p>
+              <label className="mt-2 block text-xs font-semibold">
+                {t('finance.billsToPay.currentPaymentAmount')} (KGS)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                  value={form.paymentAmountKgs}
+                  onChange={(e) =>
+                    onFormChange((prev) => ({
+                      ...prev,
+                      paymentAmountKgs: e.target.value.replace(/[^\d.,]/g, ''),
+                    }))
+                  }
+                />
+              </label>
+            </>
+          ) : null}
+        </>
+      ) : modal.mode === 'partial' ? (
+        <label className="mt-2 block text-xs font-semibold">
+          {t('finance.billsToPay.paymentAmount')} (KGS)
+          <input
+            type="number"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            value={form.paymentAmountKgs}
+            onChange={(e) =>
+              onFormChange((prev) => ({ ...prev, paymentAmountKgs: e.target.value ?? '' }))
+            }
+          />
+        </label>
+      ) : null}
+      <label className="mt-2 block text-xs font-semibold">
+        {t('finance.billsToPay.accountOrCashbox')}
+        <select
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          value={form.financeAccountId}
+          onChange={(e) =>
+            onFormChange((prev) => ({ ...prev, financeAccountId: e.target.value ?? '' }))
+          }
+        >
+          <option value="">{t('common.select')}</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.name} ({Number(account.availableBalance).toFixed(2)} KGS)
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="mt-2 block text-xs font-semibold">
+        {t('finance.billsToPay.commentOptional')}
+        <textarea
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+          rows={2}
+          value={form.accountantComment}
+          onChange={(e) =>
+            onFormChange((prev) => ({ ...prev, accountantComment: e.target.value ?? '' }))
+          }
+        />
+      </label>
+      <button
+        type="button"
+        disabled={saving}
+        onClick={onSubmit}
+        className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+      >
+        {t('finance.billsToPay.sendToCashier')}
+      </button>
+    </Modal>
   );
 }
 

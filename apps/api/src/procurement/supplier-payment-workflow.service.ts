@@ -75,6 +75,11 @@ import {
   SUPPLIER_RETURN_BLOCKED_MESSAGE,
 } from './supplier-bill-actions.util';
 import { resolveApprovedSupplierCostBaseYuan } from './procurement-cost.util';
+import {
+  calculateApprovedSupplierKgsFromRate,
+  resolveSupplierPaymentExchangeRate,
+  SUPPLIER_CNY_RATE_REQUIRED_MESSAGE,
+} from './supplier-payment-exchange-rate.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -1017,6 +1022,7 @@ export class SupplierPaymentWorkflowService {
       paymentAmountKgs: number;
       financeAccountId: string;
       accountantComment?: string;
+      exchangeRateCnyKgs?: number;
       idempotencyKey?: string;
     },
   ) {
@@ -1119,15 +1125,21 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Счет ещё не одобрен для обработки.');
       }
 
-      const latestRate =
-        payments
-          .filter((payment) => isConfirmedSupplierPayment(payment.status))
-          .map((payment) => Number(payment.exchangeRate || 0))
-          .filter((rate) => rate > 0)
-          .at(-1) ??
-        Number(order.weightedAverageYuanRate || order.defaultYuanRate || 0);
-      if (!(latestRate > 0)) {
-        throw new BadRequestException('Exchange rate is required before processing supplier payment');
+      let authoritativeRate: number;
+      let shouldPersistRate = false;
+      try {
+        const resolved = resolveSupplierPaymentExchangeRate({
+          defaultYuanRate: Number(order.defaultYuanRate || 0) || null,
+          submittedRate: dto.exchangeRateCnyKgs,
+          payments: payments.map((payment) => ({
+            exchangeRate: Number(payment.exchangeRate || 0) || null,
+            status: payment.status,
+          })),
+        });
+        authoritativeRate = resolved.rate;
+        shouldPersistRate = resolved.shouldPersist;
+      } catch {
+        throw new BadRequestException(SUPPLIER_CNY_RATE_REQUIRED_MESSAGE);
       }
 
       const approvedYuan = resolveApprovedSupplierCostBaseYuan({
@@ -1135,7 +1147,7 @@ export class SupplierPaymentWorkflowService {
         requestedPaymentYuan:
           order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
       });
-      const approvedAmountKgs = roundMoney(approvedYuan * latestRate);
+      const approvedAmountKgs = calculateApprovedSupplierKgsFromRate(approvedYuan, authoritativeRate);
       const alreadyPaidKgs = summary.totalPaidKgs;
       const remainingKgs = roundMoney(Math.max(approvedAmountKgs - alreadyPaidKgs, 0));
       if (!(remainingKgs > 0)) {
@@ -1150,7 +1162,7 @@ export class SupplierPaymentWorkflowService {
         throw new BadRequestException('Сумма частичного платежа превышает остаток.');
       }
 
-      const amountYuan = roundMoney(instructionAmountKgs / latestRate);
+      const amountYuan = roundMoney(instructionAmountKgs / authoritativeRate);
       if (!(amountYuan > 0)) {
         throw new BadRequestException('Payment CNY amount must be greater than zero');
       }
@@ -1195,6 +1207,26 @@ export class SupplierPaymentWorkflowService {
         await this.ensureSupplierInvoiceApprovedForCosting(tx, user, order.id);
       }
 
+      if (shouldPersistRate) {
+        await tx.procurementOrder.update({
+          where: { id: order.id },
+          data: { defaultYuanRate: authoritativeRate },
+        });
+        try {
+          await this.landedCostService.recalculateProcurementOrder(
+            order.id,
+            {
+              user,
+              reason: 'Supplier payment exchange rate locked by HQ Accountant',
+              triggerReason: 'supplier-payment-rate-locked',
+            },
+            tx,
+          );
+        } catch {
+          // Weight/finalized gates may block recalculation.
+        }
+      }
+
       const sequenceNumber = await this.nextSequenceNumber(tx, order.id);
       const payment = await tx.procurementSupplierPayment.create({
         data: {
@@ -1204,7 +1236,7 @@ export class SupplierPaymentWorkflowService {
           sequenceNumber,
           paymentDate: new Date(),
           amountYuan,
-          exchangeRate: latestRate,
+          exchangeRate: authoritativeRate,
           calculatedAmountKgs: instructionAmountKgs,
           approvedAmountKgs: instructionAmountKgs,
           amountKgs: instructionAmountKgs,

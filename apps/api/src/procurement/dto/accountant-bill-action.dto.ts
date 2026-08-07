@@ -24,6 +24,12 @@ export class PayBillCargoDto {
   financeAccountId!: string;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.0001)
+  exchangeRateCnyKgs?: number;
+
+  @IsOptional()
   @IsString()
   accountantComment?: string;
 
