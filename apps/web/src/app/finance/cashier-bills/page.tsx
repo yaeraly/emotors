@@ -813,10 +813,12 @@ function CashierBillsPageContent() {
                 <DetailRow label={t('finance.cashierBills.sender')} value={selected.sender?.fullName} />
                 <DetailRow label={t('finance.cashierBills.accountant')} value={selected.accountant?.fullName} />
                 <DetailRow label={t('finance.cashierBills.recipient')} value={selected.recipient?.name} onCopy={() => copyText(selected.recipient?.name)} />
-                <DetailRow
-                  label={t('procurement.sectionPayable.expenseName')}
-                  value={selected.expenseName || selected.basis || '—'}
-                />
+                {selected.requestType !== 'CHINA_DOMESTIC_TRANSPORT' ? (
+                  <DetailRow
+                    label={t('procurement.sectionPayable.expenseName')}
+                    value={selected.expenseName || selected.basis || '—'}
+                  />
+                ) : null}
                 <DetailRow label={t('finance.cashierBills.amount')} value={`${formatMoney(selected.amount)} ${selected.currency}`} />
                 <DetailRow label={t('finance.cashierBills.exchangeRate')} value={selected.exchangeRate != null ? String(selected.exchangeRate) : '—'} />
                 <DetailRow label="KGS" value={formatMoney(selected.amountKgs || selected.approvedAmountKgs)} />
@@ -856,13 +858,19 @@ function CashierBillsPageContent() {
                 />
                 <DetailRow label={t('finance.cashierBills.bankName')} value={selected.recipient?.bankName} onCopy={() => copyText(selected.recipient?.bankName)} />
                 <DetailRow label={t('finance.cashierBills.accountNumber')} value={selected.recipient?.accountNumber} onCopy={() => copyText(selected.recipient?.accountNumber)} />
-                <DetailRow label={t('finance.cashierBills.accountHolder')} value={selected.recipient?.beneficiaryName || selected.recipient?.company} onCopy={() => copyText(selected.recipient?.beneficiaryName || selected.recipient?.company)} />
+                {selected.requestType !== 'CHINA_DOMESTIC_TRANSPORT' ? (
+                  <DetailRow
+                    label={t('finance.cashierBills.accountHolder')}
+                    value={selected.recipient?.beneficiaryName || selected.recipient?.company}
+                    onCopy={() => copyText(selected.recipient?.beneficiaryName || selected.recipient?.company)}
+                  />
+                ) : null}
                 <DetailRow label={t('finance.cashierBills.instructions')} value={selected.paymentInstructions || selected.accountantComment} />
                 {selected.returnReason ? <DetailRow label={t('finance.cashierBills.returnReason')} value={selected.returnReason} /> : null}
                 {selected.failureReason ? <DetailRow label={t('finance.cashierBills.failureReason')} value={selected.failureReason} /> : null}
               </dl>
 
-              {selected.cargo ? (
+              {selected.requestType === 'CARGO_PAYMENT' && selected.cargo ? (
                 <section className="mt-4 rounded-lg border border-slate-200 p-3 text-sm">
                   <h3 className="mb-2 font-semibold">{t('finance.cashierBills.cargoDetails')}</h3>
                   <DetailRow label={t('finance.cashierBills.transportCompany')} value={selected.cargo.transportCompany} />
