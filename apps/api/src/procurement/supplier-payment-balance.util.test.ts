@@ -1,15 +1,18 @@
 import { ProcurementSupplierPaymentLedgerStatus } from '@prisma/client';
 import {
   assertSupplierPartialPaymentWithinRemainingCny,
+  assertSupplierPartialPaymentWithinRemainingKgs,
   assertSupplierPaymentHasRemainingBalance,
   deriveSupplierPaymentYuanFromKgs,
   isSupplierCashierRequestKgsPrecisionDrift,
   resolveReconciledSupplierPaymentLedgerStatus,
+  resolveSupplierCurrentRemainingKgs,
   resolveSupplierPartialPaymentInstruction,
   resolveSupplierPayRemainderInstruction,
   resolveSupplierPaymentInstructionAmountKgs,
   resolveSupplierPaymentMonetaryBalance,
   SUPPLIER_ALREADY_FULLY_PAID_MESSAGE,
+  SUPPLIER_PARTIAL_PAYMENT_EXCEEDS_CURRENT_REMAINING_KGS_MESSAGE,
 } from './supplier-payment-balance.util';
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
@@ -192,16 +195,87 @@ const partialInstruction = resolveSupplierPartialPaymentInstruction({
   exchangeRate: 13,
 });
 assertClose(partialInstruction.amountYuan, 7692.31, '18. partial derives cny from kgs');
+assertClose(partialInstruction.amountKgs, 100000, '18b. partial keeps requested kgs');
+
+const remaining20kAt13 = resolveSupplierCurrentRemainingKgs({
+  remainingCny: 20000,
+  exchangeRate: 13,
+});
+assertClose(remaining20kAt13, 260000, '1. remaining 20k cny × rate 13 = 260k kgs');
+
+const partial100k = resolveSupplierPartialPaymentInstruction({
+  requestedAmountKgs: 100000,
+  remainingCny: 20000,
+  exchangeRate: 13,
+});
+assertClose(partial100k.amountKgs, 100000, '2. partial 100k kgs accepted');
+assertClose(partial100k.amountYuan, 7692.31, '8. partial kgs converts back to cny');
+
+const partial250k = resolveSupplierPartialPaymentInstruction({
+  requestedAmountKgs: 250000,
+  remainingCny: 20000,
+  exchangeRate: 13,
+});
+assertClose(partial250k.amountKgs, 250000, '3. partial 250k kgs accepted');
+
+const partialFull = resolveSupplierPartialPaymentInstruction({
+  requestedAmountKgs: 260000,
+  remainingCny: 20000,
+  exchangeRate: 13,
+});
+assertClose(partialFull.amountKgs, 260000, '4. partial 260k kgs closes remaining');
+assertClose(partialFull.amountYuan, 20000, '9. exact full kgs settles remaining cny exactly');
+
+assertSupplierPartialPaymentWithinRemainingKgs({
+  paymentAmountKgs: 260000,
+  remainingCny: 20000,
+  exchangeRate: 13,
+});
+
 let threwPartialOverLimit = false;
+try {
+  assertSupplierPartialPaymentWithinRemainingKgs({
+    paymentAmountKgs: 260001,
+    remainingCny: 20000,
+    exchangeRate: 13,
+  });
+} catch (error) {
+  threwPartialOverLimit =
+    error instanceof Error &&
+    error.message === SUPPLIER_PARTIAL_PAYMENT_EXCEEDS_CURRENT_REMAINING_KGS_MESSAGE;
+}
+if (!threwPartialOverLimit) throw new Error('5. partial 260001 kgs rejected at current rate');
+
+let threwCnyCompare = false;
+try {
+  assertSupplierPartialPaymentWithinRemainingKgs({
+    paymentAmountKgs: 100000,
+    remainingCny: 5000,
+    exchangeRate: 13,
+  });
+} catch (error) {
+  threwCnyCompare =
+    error instanceof Error &&
+    error.message === SUPPLIER_PARTIAL_PAYMENT_EXCEEDS_CURRENT_REMAINING_KGS_MESSAGE;
+}
+if (!threwCnyCompare) throw new Error('6. kgs is not compared directly to cny remaining');
+
+assertClose(
+  resolveSupplierCurrentRemainingKgs({ remainingCny: 20000, exchangeRate: 13.1 }),
+  262000,
+  '7. changing rate updates remaining kgs immediately',
+);
+
+let threwLegacyCnyValidation = false;
 try {
   assertSupplierPartialPaymentWithinRemainingCny({
     amountYuan: partialInstruction.amountYuan,
     remainingCny: 5000,
   });
 } catch (error) {
-  threwPartialOverLimit =
+  threwLegacyCnyValidation =
     error instanceof Error && error.message === 'Сумма частичного платежа превышает остаток.';
 }
-if (!threwPartialOverLimit) throw new Error('19. partial over-limit uses cny validation');
+if (!threwLegacyCnyValidation) throw new Error('19. legacy cny validation still available separately');
 
 console.log('supplier-payment-balance.util.test.ts passed');

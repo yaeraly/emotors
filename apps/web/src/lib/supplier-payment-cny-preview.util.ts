@@ -45,6 +45,23 @@ export function previewCnyToKgs(cny: number, rateInput: string): number | null {
   return Math.round(cny * rate * 100) / 100;
 }
 
+/** Remaining CNY obligation at the accountant-entered exchange rate (KGS vs KGS validation). */
+export function resolveSupplierCurrentRemainingKgs(
+  remainingCny: number,
+  rateInput: string,
+): number | null {
+  return previewCnyToKgs(remainingCny, rateInput);
+}
+
+export function parsePaymentAmountKgsInput(input: string): number | null {
+  const normalized = input.replace(/\s/g, '').replace(',', '.');
+  if (!normalized) return null;
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.round(parsed * 100) / 100;
+}
+
 export function formatKgsPreview(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return '—';
   return `${value.toFixed(2)} сом`;

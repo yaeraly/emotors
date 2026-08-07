@@ -28,10 +28,11 @@ assert(page.includes('SupplierPaymentModal'), '4. supplier payment modal exists'
 assert(page.includes('finance.billsToPay.supplierAmountCny'), '4b. full dialog shows CNY amount');
 assert(page.includes('finance.billsToPay.cnyToKgsRate'), '5. exchange rate field');
 assert(page.includes('previewCnyToKgs'), '6. live KGS preview');
-assert(page.includes('finance.billsToPay.totalAmountInKgs'), '8. partial total KGS');
-assert(page.includes('finance.billsToPay.paidPreviously'), '9. partial paid previously');
-assert(page.includes('finance.billsToPay.currentPaymentAmount'), '11. partial current payment KGS');
-assert(page.includes('finance.billsToPay.cnyRateRequired'), '12. Russian rate validation key');
+assert(page.includes('resolveSupplierCurrentRemainingKgs'), '7. partial validates kgs against current-rate remaining');
+assert(page.includes('finance.billsToPay.remainingAtCurrentRate'), '8. partial shows remaining at current rate');
+assert(page.includes('finance.billsToPay.partialPaymentAmountKgs'), '11. partial payment amount kgs label');
+assert(page.includes('finance.billsToPay.amountExceedsCurrentRateRemaining'), '12. current-rate over-limit message');
+assert(page.includes('finance.billsToPay.cnyRateRequired'), '12b. Russian rate validation key');
 assert(page.includes('exchangeRateCnyKgs'), 'payload includes exchange rate');
 assert(accountantBills.includes('exchangeRateEditable'), '7. editable rate flag from detail');
 assert(!page.includes('disabled={form.exchangeRateLocked}'), '7b. rate input not hard-disabled');
@@ -50,7 +51,7 @@ assert(page.includes('formatSupplierDetailExchangeRate'), 'detail page rate form
 assert(page.includes('defaultExchangeRateCnyKgs'), 'frontend prefills dialog rate on open');
 assert(exchangeUtil.includes('resolveLatestConfirmedSupplierPaymentExchangeRate'), 'latest paid rate resolver');
 assert(service.includes('resolveSupplierPayRemainderInstruction'), 'pay remainder uses remaining cny × rate');
-assert(service.includes('assertSupplierPartialPaymentWithinRemainingCny'), 'partial validates cny against cny');
+assert(service.includes('assertSupplierPartialPaymentWithinRemainingKgs'), 'partial validates kgs against current-rate remaining');
 assert(page.includes('payRemainder'), 'frontend sends pay remainder flag');
 assert(page.includes('remainingCny'), 'pay remainder dialog shows remaining cny');
 assert(page.includes('finance.billsToPay.payRemainder'), 'pay remainder dialog title');

@@ -13,6 +13,8 @@ import {
 } from './supplier-payment.util';
 
 export const SUPPLIER_ALREADY_FULLY_PAID_MESSAGE = 'Этот счёт уже полностью оплачен.';
+export const SUPPLIER_PARTIAL_PAYMENT_EXCEEDS_CURRENT_REMAINING_KGS_MESSAGE =
+  'Сумма платежа превышает остаток по текущему курсу.';
 
 export type SupplierPaymentMonetaryBalance = {
   obligationYuan: number;
@@ -136,6 +138,19 @@ export function resolveSupplierPayRemainderInstruction(input: {
   return { amountYuan: remainingCny, amountKgs };
 }
 
+/** Remaining CNY obligation converted at the accountant-entered current exchange rate. */
+export function resolveSupplierCurrentRemainingKgs(input: {
+  remainingCny: number;
+  exchangeRate: number;
+}): number {
+  const remainingCny = roundMoneyDecimal(Math.max(0, Number(input.remainingCny || 0)));
+  const rate = Number(input.exchangeRate || 0);
+  if (!(remainingCny > 0) || !(rate > 0)) {
+    return 0;
+  }
+  return roundMoneyDecimal(toMoneyDecimal(remainingCny).times(toMoneyDecimal(rate)));
+}
+
 export function resolveSupplierPartialPaymentInstruction(input: {
   requestedAmountKgs: number;
   remainingCny: number;
@@ -144,8 +159,15 @@ export function resolveSupplierPartialPaymentInstruction(input: {
   const requestedKgs = roundMoneyDecimal(Number(input.requestedAmountKgs || 0));
   const remainingCny = roundMoneyDecimal(Math.max(0, Number(input.remainingCny || 0)));
   const rate = Number(input.exchangeRate || 0);
-  if (!(requestedKgs > 0) || !(rate > 0)) {
+  if (!(requestedKgs > 0) || !(rate > 0) || !(remainingCny > 0)) {
     return { amountYuan: 0, amountKgs: 0 };
+  }
+  const currentRemainingKgs = resolveSupplierCurrentRemainingKgs({
+    remainingCny,
+    exchangeRate: rate,
+  });
+  if (requestedKgs + 0.009 >= currentRemainingKgs) {
+    return { amountYuan: remainingCny, amountKgs: currentRemainingKgs };
   }
   const amountYuan = deriveSupplierPaymentYuanFromKgs({
     amountKgs: requestedKgs,
@@ -154,6 +176,22 @@ export function resolveSupplierPartialPaymentInstruction(input: {
   return { amountYuan, amountKgs: requestedKgs };
 }
 
+export function assertSupplierPartialPaymentWithinRemainingKgs(input: {
+  paymentAmountKgs: number;
+  remainingCny: number;
+  exchangeRate: number;
+}): void {
+  const paymentKgs = roundMoneyDecimal(Number(input.paymentAmountKgs || 0));
+  const currentRemainingKgs = resolveSupplierCurrentRemainingKgs({
+    remainingCny: input.remainingCny,
+    exchangeRate: input.exchangeRate,
+  });
+  if (paymentKgs > currentRemainingKgs + 0.009) {
+    throw new Error(SUPPLIER_PARTIAL_PAYMENT_EXCEEDS_CURRENT_REMAINING_KGS_MESSAGE);
+  }
+}
+
+/** @deprecated Prefer assertSupplierPartialPaymentWithinRemainingKgs (KGS vs KGS at current rate). */
 export function assertSupplierPartialPaymentWithinRemainingCny(input: {
   amountYuan: number;
   remainingCny: number;

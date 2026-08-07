@@ -2996,6 +2996,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'finance.billsToPay.noPaymentHistory': 'Төлөм тарыхы жок',
     'finance.billsToPay.amountMustBePositive': 'Төлөм суммасы 0дон чоң болушу керек',
     'finance.billsToPay.amountExceedsRemaining': 'Төлөм суммасы калган суммадан ашпашы керек',
+    'finance.billsToPay.amountExceedsCurrentRateRemaining':
+      'Төлөм суммасы учурдагы курс боюнча калган суммадан ашпашы керек',
+    'finance.billsToPay.remainingAtCurrentRate': 'Учурдагы курс боюнча калган сумма',
+    'finance.billsToPay.partialPaymentAmountKgs': 'Жарым-жартылай төлөм суммасы (KGS)',
     'finance.billsToPay.pay': 'Төлөө',
     'finance.billsToPay.editPayment': 'Өзгөртүү',
     'finance.billsToPay.recipientRequired': 'Алуучуну көрсөтүңүз',
@@ -6696,6 +6700,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'finance.billsToPay.noPaymentHistory': 'История платежей пуста',
     'finance.billsToPay.amountMustBePositive': 'Сумма платежа должна быть больше нуля',
     'finance.billsToPay.amountExceedsRemaining': 'Сумма платежа превышает остаток по счету.',
+    'finance.billsToPay.amountExceedsCurrentRateRemaining':
+      'Сумма платежа превышает остаток по текущему курсу.',
+    'finance.billsToPay.remainingAtCurrentRate': 'Остаток по текущему курсу',
+    'finance.billsToPay.partialPaymentAmountKgs': 'Сумма частичного платежа (KGS)',
     'finance.billsToPay.pay': 'Оплатить',
     'finance.billsToPay.editPayment': 'Изменить',
     'finance.billsToPay.recipientRequired': 'Укажите получателя',
@@ -10328,6 +10336,10 @@ export const translations: Record<Language, Record<string, string>> = {
     'finance.billsToPay.noPaymentHistory': 'No payments yet',
     'finance.billsToPay.amountMustBePositive': 'Payment amount must be greater than zero',
     'finance.billsToPay.amountExceedsRemaining': 'Payment amount must not exceed the remaining amount',
+    'finance.billsToPay.amountExceedsCurrentRateRemaining':
+      'Payment amount exceeds the remaining balance at the current exchange rate',
+    'finance.billsToPay.remainingAtCurrentRate': 'Remaining at current rate',
+    'finance.billsToPay.partialPaymentAmountKgs': 'Partial payment amount (KGS)',
     'finance.billsToPay.pay': 'Pay',
     'finance.billsToPay.editPayment': 'Edit',
     'finance.billsToPay.recipientRequired': 'Recipient is required',

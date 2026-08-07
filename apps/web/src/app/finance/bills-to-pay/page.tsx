@@ -39,7 +39,9 @@ import {
   formatSupplierDetailExchangeRate,
   normalizeExchangeRateInput,
   parseExchangeRateInput,
+  parsePaymentAmountKgsInput,
   previewCnyToKgs,
+  resolveSupplierCurrentRemainingKgs,
 } from '@/lib/supplier-payment-cny-preview.util';
 import type { User } from '@/lib/types';
 
@@ -480,9 +482,6 @@ function BillsToPayPageContent() {
     const totalCny = Number(detail.supplierAmountCny ?? detail.totalYuan ?? bill.amount ?? 0);
     const paidCny = Number(detail.totalPaidYuan ?? bill.paidAmount ?? 0);
     const remainingCny = Number(detail.remainingYuan ?? bill.remainingAmount ?? Math.max(totalCny - paidCny, 0));
-    const authoritativeRemainingKgs = Number(
-      detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? resolveBillRemainingForActions(bill),
-    );
     const isPartial = supplierPaymentModal?.mode === 'partial';
     const payRemainder = supplierPaymentModal?.payRemainder === true;
 
@@ -495,15 +494,29 @@ function BillsToPayPageContent() {
       }
     }
 
+    const currentRemainingKgs =
+      isCny && exchangeRate != null
+        ? resolveSupplierCurrentRemainingKgs(remainingCny, supplierPaymentForm.exchangeRateCnyKgs)
+        : null;
+
     let paymentAmountKgs = 0;
     if (isPartial) {
-      paymentAmountKgs = Number(supplierPaymentForm.paymentAmountKgs);
+      paymentAmountKgs = parsePaymentAmountKgsInput(supplierPaymentForm.paymentAmountKgs) ?? 0;
       if (!(paymentAmountKgs > 0)) {
         setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
         return null;
       }
-      if (paymentAmountKgs > authoritativeRemainingKgs + 0.009) {
-        setSupplierPaymentError(t('finance.billsToPay.amountExceedsRemaining'));
+      if (isCny) {
+        if (currentRemainingKgs == null || !(currentRemainingKgs > 0)) {
+          setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
+          return null;
+        }
+        if (paymentAmountKgs > currentRemainingKgs + 0.009) {
+          setSupplierPaymentError(t('finance.billsToPay.amountExceedsCurrentRateRemaining'));
+          return null;
+        }
+      } else if (paymentAmountKgs > Number(detail.remainingAmountKgs ?? bill.remainingAmountKgs ?? 0) + 0.009) {
+        setSupplierPaymentError(t('finance.billsToPay.amountExceedsCurrentRateRemaining'));
         return null;
       }
     } else {
@@ -513,7 +526,7 @@ function BillsToPayPageContent() {
       }
       paymentAmountKgs = isCny
         ? previewCnyToKgs(remainingCny, supplierPaymentForm.exchangeRateCnyKgs) ?? 0
-        : authoritativeRemainingKgs;
+        : resolveBillRemainingForActions(bill);
       if (!(paymentAmountKgs > 0)) {
         setSupplierPaymentError(t('finance.billsToPay.amountMustBePositive'));
         return null;
@@ -2536,14 +2549,13 @@ function SupplierPaymentModal({
   const remainingCny = Number(
     detail.remainingYuan ?? bill.remainingAmount ?? Math.max(totalCny - paidCny, 0),
   );
-  const paidKgs = Number(detail.paidAmountKgs ?? bill.paidAmountKgs ?? 0);
   const fullPaymentCny = modal.payRemainder ? remainingCny : totalCny;
   const payableKgsPreview = isCny ? previewCnyToKgs(fullPaymentCny, form.exchangeRateCnyKgs) : null;
-  const totalKgsPreview = isCny ? previewCnyToKgs(totalCny, form.exchangeRateCnyKgs) : null;
+  const currentRemainingKgsPreview = isCny
+    ? resolveSupplierCurrentRemainingKgs(remainingCny, form.exchangeRateCnyKgs)
+    : null;
   const previousRequestedKgs = Number(detail.cashierReturnedPaymentRequest?.requestedAmountKgs ?? 0);
   const previousRequestedCny = Number(detail.cashierReturnedPaymentRequest?.requestedAmountCny ?? 0);
-  const remainingKgsPreview =
-    totalKgsPreview != null ? Math.max(totalKgsPreview - paidKgs, 0) : null;
 
   return (
     <Modal
@@ -2568,12 +2580,21 @@ function SupplierPaymentModal({
             {t('finance.billsToPay.remaining')}: {remainingCny.toFixed(2)} CNY
           </p>
         </div>
+      ) : isCny && modal.mode === 'partial' ? (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+          <p className="text-xs text-slate-700">
+            {t('finance.billsToPay.supplierTotalAmountCny')}: {totalCny.toFixed(2)} CNY
+          </p>
+          <p className="mt-1 text-xs text-slate-700">
+            {t('finance.billsToPay.paidPreviously')}: {paidCny.toFixed(2)} CNY
+          </p>
+          <p className="mt-1 text-xs font-semibold text-slate-900">
+            {t('finance.billsToPay.remaining')}: {remainingCny.toFixed(2)} CNY
+          </p>
+        </div>
       ) : isCny ? (
         <p className="text-xs text-slate-600">
-          {modal.mode === 'partial'
-            ? t('finance.billsToPay.supplierTotalAmountCny')
-            : t('finance.billsToPay.supplierAmountCny')}
-          : {totalCny.toFixed(2)} CNY
+          {t('finance.billsToPay.supplierAmountCny')}: {totalCny.toFixed(2)} CNY
         </p>
       ) : (
         <p className="text-xs text-slate-600">
@@ -2609,38 +2630,32 @@ function SupplierPaymentModal({
               }
             />
           </label>
-          <p className="mt-2 text-xs text-slate-700">
-            {modal.mode === 'partial'
-              ? t('finance.billsToPay.totalAmountInKgs')
-              : t('finance.billsToPay.amountInKgs')}
-            : {formatKgsPreview(modal.mode === 'partial' ? totalKgsPreview : payableKgsPreview)}
-          </p>
           {modal.mode === 'partial' ? (
-            <>
-              <p className="mt-1 text-xs text-slate-600">
-                {t('finance.billsToPay.paidPreviously')}:{' '}
-                {paidKgs.toFixed(2)} KGS
-              </p>
-              <p className="mt-1 text-xs text-slate-600">
-                {t('finance.billsToPay.remaining')}:{' '}
-                {remainingKgsPreview != null ? `${remainingKgsPreview.toFixed(2)} KGS` : '—'}
-              </p>
-              <label className="mt-2 block text-xs font-semibold">
-                {t('finance.billsToPay.currentPaymentAmount')} (KGS)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
-                  value={form.paymentAmountKgs}
-                  onChange={(e) =>
-                    onFormChange((prev) => ({
-                      ...prev,
-                      paymentAmountKgs: e.target.value.replace(/[^\d.,]/g, ''),
-                    }))
-                  }
-                />
-              </label>
-            </>
+            <p className="mt-2 text-xs font-semibold text-slate-900">
+              {t('finance.billsToPay.remainingAtCurrentRate')}:{' '}
+              {formatKgsPreview(currentRemainingKgsPreview)}
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-slate-700">
+              {t('finance.billsToPay.amountInKgs')}: {formatKgsPreview(payableKgsPreview)}
+            </p>
+          )}
+          {modal.mode === 'partial' ? (
+            <label className="mt-2 block text-xs font-semibold">
+              {t('finance.billsToPay.partialPaymentAmountKgs')}
+              <input
+                type="text"
+                inputMode="decimal"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                value={form.paymentAmountKgs}
+                onChange={(e) =>
+                  onFormChange((prev) => ({
+                    ...prev,
+                    paymentAmountKgs: e.target.value.replace(/[^\d.,]/g, ''),
+                  }))
+                }
+              />
+            </label>
           ) : null}
         </>
       ) : modal.mode === 'partial' ? (

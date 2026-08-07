@@ -95,7 +95,7 @@ import {
   SUPPLIER_PAYMENT_EXCEEDS_REMAINING_MESSAGE,
 } from './supplier-payment-correction.util';
 import {
-  assertSupplierPartialPaymentWithinRemainingCny,
+  assertSupplierPartialPaymentWithinRemainingKgs,
   assertSupplierPaymentHasRemainingBalance,
   resolveReconciledSupplierPaymentLedgerStatus,
   resolveSupplierPartialPaymentInstruction,
@@ -1293,10 +1293,16 @@ export class SupplierPaymentWorkflowService {
           throw new BadRequestException('Сумма платежа должна быть больше нуля.');
         }
         try {
-          assertSupplierPartialPaymentWithinRemainingCny({ amountYuan, remainingCny });
+          assertSupplierPartialPaymentWithinRemainingKgs({
+            paymentAmountKgs: instructionAmountKgs,
+            remainingCny,
+            exchangeRate: authoritativeRate,
+          });
         } catch (error) {
           throw new BadRequestException(
-            error instanceof Error ? error.message : 'Сумма частичного платежа превышает остаток.',
+            error instanceof Error
+              ? error.message
+              : 'Сумма платежа превышает остаток по текущему курсу.',
           );
         }
       } else {
