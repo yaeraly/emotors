@@ -79,13 +79,21 @@ const paid = getCargoBillActionVisibility({
 assert(paid.showPaidBanner, '6. paid banner');
 assert(!paid.showPayFull, '6. no pay actions');
 
-// 7. Returned — awaiting correction banner
+// 7. Returned — awaiting correction banner unless cashier returned to accountant
 const returned = getCargoBillActionVisibility({
   uiStatus: 'RETURNED',
   paidAmount: 0,
   remainingAmount: 100000,
 });
-assert(returned.showAwaitingCorrectionBanner, '7. awaiting correction');
+assert(returned.showAwaitingCorrectionBanner, '7. awaiting correction at SM');
+const cashierReturned = getCargoBillActionVisibility({
+  uiStatus: 'RETURNED',
+  paidAmount: 0,
+  remainingAmount: 100000,
+  executionStatus: 'RETURNED_TO_ACCOUNTANT',
+});
+assert(cashierReturned.showReturnForCorrection, '7b. cashier-returned shows return to SM');
+assert(!cashierReturned.showAwaitingCorrectionBanner, '7b. no banner when return available');
 
 // 8. Backend full payment audit
 assert(service.includes('CARGO_PAYMENT_FULLY_PAID'), '8. full payment audit');

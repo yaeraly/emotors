@@ -85,6 +85,12 @@ import {
   isKyrgyzstanDomesticTransport,
   isKyrgyzstanTransportAwaitingSupplyManagerCorrection,
 } from './kyrgyzstan-transport-correction.util';
+import {
+  buildCargoPaymentReturnError,
+  canAccountantReturnCargoToSupplyManager,
+  isCargoPaymentAwaitingSupplyManagerCorrection,
+  isCargoPaymentCashierReturned,
+} from './cargo-payment-correction.util';
 
 type Tx = Prisma.TransactionClient;
 
@@ -1458,7 +1464,9 @@ export class TransportExpenseService {
         where: {
           entity: 'ProcurementTransportExpense',
           entityId: expense.id,
-          action: 'CARGO_PAYMENT_RETURNED_FOR_CORRECTION',
+          action: {
+            in: ['CARGO_PAYMENT_RETURNED_FOR_CORRECTION', 'CARGO_PAYMENT_RETURNED_TO_SUPPLY_MANAGER'],
+          },
         },
         orderBy: { timestamp: 'desc' },
         take: 20,
@@ -1476,7 +1484,7 @@ export class TransportExpenseService {
       }
     }
 
-    if (expense.status === TransportExpenseStatus.RETURNED) {
+    if (isCargoPaymentAwaitingSupplyManagerCorrection(expense)) {
       const current = await tx.procurementTransportExpense.findUnique({
         where: { id: expense.id },
         include: INCLUDE,
@@ -1485,16 +1493,27 @@ export class TransportExpenseService {
     }
 
     if (
-      !CARGO_ACCOUNTANT_PAYABLE.has(expense.status) &&
-      expense.status !== TransportExpenseStatus.PAYMENT_POSTPONED &&
-      expense.status !== TransportExpenseStatus.PENDING_CASHIER
+      !canAccountantReturnCargoToSupplyManager({
+        status: expense.status,
+        executionStatus: expense.executionStatus,
+        paidAmountKgs,
+      })
     ) {
-      throw new BadRequestException('Expense cannot be returned in current status');
+      throw new BadRequestException(
+        buildCargoPaymentReturnError({
+          status: expense.status,
+          executionStatus: expense.executionStatus,
+          paidAmountKgs,
+        }),
+      );
     }
 
     const reason = dto.reason.trim();
     const comment = dto.comment?.trim() || '';
     const combinedReason = comment ? `${reason}\n${comment}` : reason;
+    const previousStatus = expense.status;
+    const previousExecutionStatus = expense.executionStatus;
+    const forwardFromCashier = isCargoPaymentCashierReturned(expense);
 
     const updated = await tx.procurementTransportExpense.update({
       where: { id: expense.id },
@@ -1511,15 +1530,23 @@ export class TransportExpenseService {
       include: INCLUDE,
     });
 
-    await this.audit(tx, user, 'TRANSPORT_EXPENSE_RETURNED', expense.id, { status: expense.status }, {
+    await this.audit(tx, user, 'TRANSPORT_EXPENSE_RETURNED', expense.id, {
+      status: previousStatus,
+      executionStatus: previousExecutionStatus,
+    }, {
       status: updated.status,
+      executionStatus: updated.executionStatus,
       returnReason: updated.returnReason,
     });
 
     const approvedAmount = Number(expense.calculatedAmountKgs ?? updated.amountKgs ?? updated.amount ?? 0);
-    await this.audit(tx, user, 'CARGO_PAYMENT_RETURNED_FOR_CORRECTION', expense.id, {
+    const returnAuditAction = forwardFromCashier
+      ? 'CARGO_PAYMENT_RETURNED_TO_SUPPLY_MANAGER'
+      : 'CARGO_PAYMENT_RETURNED_FOR_CORRECTION';
+    await this.audit(tx, user, returnAuditAction, expense.id, {
       action: 'RETURN',
-      oldStatus: expense.status,
+      oldStatus: previousStatus,
+      previousExecutionStatus,
       approvalStatus: 'RETURNED_FOR_CORRECTION',
       paymentStatus: 'UNPAID',
       approvedAmount,

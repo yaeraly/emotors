@@ -64,6 +64,7 @@ export function getCargoBillActionVisibility(input: {
   uiStatus: string;
   paidAmount: number;
   remainingAmount: number;
+  executionStatus?: string | null;
 }): CargoBillActionVisibility {
   const status = String(input.uiStatus || '').toUpperCase() as CargoBillUiStatus;
   const paidAmount = Math.max(0, Number(input.paidAmount || 0));
@@ -88,15 +89,17 @@ export function getCargoBillActionVisibility(input: {
   }
 
   if (status === 'RETURNED') {
+    const isCashierReturned = input.executionStatus === 'RETURNED_TO_ACCOUNTANT';
+    const canForwardToSupplyManager = isCashierReturned && !hasPaid;
     return {
       showPayFull: false,
       showPayRemainder: false,
       showPartial: false,
       showPostpone: false,
       showChangePostponeDate: false,
-      showReturnForCorrection: false,
+      showReturnForCorrection: canForwardToSupplyManager,
       showPaidBanner: false,
-      showAwaitingCorrectionBanner: true,
+      showAwaitingCorrectionBanner: !canForwardToSupplyManager,
       showCannotReturnMessage: false,
       payFullUsesRemainderLabel: false,
       postponeUsesChangeDateLabel: false,

@@ -48,4 +48,15 @@ describe('cargo-bill-actions supplier parity', () => {
     assert.equal(visibility.showPostpone, true);
     assert.equal(visibility.showReturnForCorrection, false);
   });
+
+  it('cashier-returned cargo shows return to supply manager', () => {
+    const visibility = getCargoBillActionVisibility({
+      uiStatus: 'RETURNED',
+      paidAmount: 0,
+      remainingAmount: 800000,
+      executionStatus: 'RETURNED_TO_ACCOUNTANT',
+    });
+    assert.equal(visibility.showReturnForCorrection, true);
+    assert.equal(visibility.showAwaitingCorrectionBanner, false);
+  });
 });

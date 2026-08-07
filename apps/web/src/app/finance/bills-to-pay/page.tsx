@@ -1652,6 +1652,7 @@ function DetailDrawer({
         uiStatus: bill.status,
         paidAmount: Number(bill.paidAmountKgs ?? bill.paidAmount ?? 0),
         remainingAmount: resolveBillRemainingForActions(bill),
+        executionStatus: detail.executionStatus,
       })
     : null;
   const canTakeReview =
