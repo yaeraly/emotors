@@ -814,7 +814,8 @@ function CashierBillsPageContent() {
                 <DetailRow label={t('finance.cashierBills.accountant')} value={selected.accountant?.fullName} />
                 <DetailRow label={t('finance.cashierBills.recipient')} value={selected.recipient?.name} onCopy={() => copyText(selected.recipient?.name)} />
                 {selected.requestType !== 'CHINA_DOMESTIC_TRANSPORT' &&
-                selected.requestType !== 'SUPPLIER_PAYMENT' ? (
+                selected.requestType !== 'SUPPLIER_PAYMENT' &&
+                selected.requestType !== 'CARGO_PAYMENT' ? (
                   <DetailRow
                     label={t('procurement.sectionPayable.expenseName')}
                     value={selected.expenseName || selected.basis || '—'}

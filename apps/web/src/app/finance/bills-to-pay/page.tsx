@@ -2087,7 +2087,7 @@ function DetailDrawer({
             </div>
           ) : null}
 
-          {!isSupplierPayment && !isChinaDomesticTransport && auditHistory.length ? (
+          {!isSupplierPayment && !isChinaDomesticTransport && !isCargoPayment && auditHistory.length ? (
             <section className="mt-4">
               <h4 className="text-sm font-semibold text-slate-900">
                 {t('finance.billsToPay.actionHistory')}
