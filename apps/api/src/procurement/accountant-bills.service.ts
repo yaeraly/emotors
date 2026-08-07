@@ -1264,7 +1264,8 @@ export class AccountantBillsService {
       (item) => item.source === 'TRANSPORT_EXPENSE' && item.id === id,
     );
     const isChinaDomestic = detail.expenseType === TransportExpenseType.DOMESTIC_CHINA_TRANSPORT;
-    const audits = isChinaDomestic
+    const isKyrgyzstanDomestic = detail.expenseType === TransportExpenseType.LOCAL_DELIVERY;
+    const audits = isChinaDomestic || isKyrgyzstanDomestic
       ? []
       : await this.prisma.auditLog.findMany({
           where: { entity: 'ProcurementTransportExpense', entityId: id },

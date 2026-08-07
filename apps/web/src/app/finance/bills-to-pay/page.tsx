@@ -1837,10 +1837,10 @@ function DetailDrawer({
               ) : null}
               <Field label={t('finance.billsToPay.sender')} value={bill.sender?.fullName || '—'} />
               <Field label={t('finance.billsToPay.department')} value={bill.departmentOrBranch || '—'} />
-              {!isSupplierPayment && !isChinaDomesticTransport && !isCargoPayment ? (
+              {!isSupplierPayment && !isChinaDomesticTransport && !isCargoPayment && !isKyrgyzstanTransport ? (
                 <Field label={t('finance.billsToPay.basis')} value={bill.basis || '—'} />
               ) : null}
-              {!isChinaDomesticTransport ? (
+              {!isChinaDomesticTransport && !isKyrgyzstanTransport ? (
                 <Field
                   label={t('finance.billsToPay.nextPaymentDate')}
                   value={
@@ -2088,7 +2088,7 @@ function DetailDrawer({
             </div>
           ) : null}
 
-          {!isSupplierPayment && !isChinaDomesticTransport && !isCargoPayment && auditHistory.length ? (
+          {!isSupplierPayment && !isChinaDomesticTransport && !isCargoPayment && !isKyrgyzstanTransport && auditHistory.length ? (
             <section className="mt-4">
               <h4 className="text-sm font-semibold text-slate-900">
                 {t('finance.billsToPay.actionHistory')}
