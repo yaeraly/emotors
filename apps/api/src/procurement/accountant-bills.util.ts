@@ -127,11 +127,31 @@ export function mapSupplierInvoiceToUi(input: {
   if (ledger === 'PAID' || ledger === 'OVERPAID') return 'FULLY_PAID';
   if (ledger === 'PARTIALLY_PAID') return 'PARTIALLY_PAID';
   if (ledger === 'PAYMENT_POSTPONED') return 'PAYMENT_POSTPONED';
+  // Sent to HQ Cashier — same UI bucket as cargo PENDING_CASHIER → APPROVED.
   if (ledger === 'AWAITING_CASHIER') return 'APPROVED';
-  if (review === 'APPROVED') return 'APPROVED';
-  if (ledger === 'AWAITING_ACCOUNTANT' || review === 'SUBMITTED') return 'AWAITING_ACCOUNTANT';
-  if ((input.remainingYuan ?? 0) > 0.009) return 'AWAITING_ACCOUNTANT';
+  // Costing/review "APPROVED" without cashier handoff still needs the four accountant actions.
+  if (
+    ledger === 'AWAITING_ACCOUNTANT' ||
+    ledger === 'UNPAID' ||
+    review === 'SUBMITTED' ||
+    review === 'APPROVED' ||
+    (input.remainingYuan ?? 0) > 0.009
+  ) {
+    return 'AWAITING_ACCOUNTANT';
+  }
   return 'AWAITING_ACCOUNTANT';
+}
+
+/** Positive remaining for action visibility — prefer KGS, fall back to source currency amount. */
+export function resolveAccountantBillRemainingForActions(input: {
+  remainingAmountKgs?: number | null;
+  remainingAmount?: number | null;
+}): number {
+  const kgs = Number(input.remainingAmountKgs);
+  if (Number.isFinite(kgs) && kgs > 0.009) return kgs;
+  const amount = Number(input.remainingAmount);
+  if (Number.isFinite(amount) && amount > 0.009) return amount;
+  return Math.max(0, Number.isFinite(kgs) ? kgs : 0);
 }
 
 export function mapFinanceExpenseStatusToUi(status: string): AccountantBillUiStatus {

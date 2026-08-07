@@ -85,6 +85,43 @@ assertEqual(
   'UNDER_REVIEW',
   'supplier under review',
 );
+assertEqual(
+  mapSupplierInvoiceToUi({
+    invoiceReviewStatus: 'APPROVED',
+    supplierPaymentStatus: 'AWAITING_ACCOUNTANT',
+    remainingYuan: 80000,
+  }),
+  'AWAITING_ACCOUNTANT',
+  'supplier review-approved unpaid still awaiting accountant actions',
+);
+assertEqual(
+  mapSupplierInvoiceToUi({
+    invoiceReviewStatus: 'APPROVED',
+    supplierPaymentStatus: 'AWAITING_CASHIER',
+    remainingYuan: 80000,
+  }),
+  'APPROVED',
+  'supplier awaiting cashier maps to APPROVED (no duplicate pay actions)',
+);
+assertEqual(
+  mapSupplierInvoiceToUi({
+    invoiceReviewStatus: 'SUBMITTED',
+    supplierPaymentStatus: 'UNPAID',
+    remainingYuan: 80000,
+  }),
+  'AWAITING_ACCOUNTANT',
+  'supplier submitted unpaid awaits accountant',
+);
+assert(
+  billsPage.includes('isCargoOrSupplierAccountantBill') ||
+    billsPage.includes("source === 'SUPPLIER_INVOICE'"),
+  'supplier detail uses source-aware accountant payment flow',
+);
+assert(billsPage.includes('resolveBillRemainingForActions'), 'supplier remaining falls back when KGS is 0');
+assert(
+  billsPage.includes('usesAccountantPaymentFlow = isCargoPayment || isSupplierPayment'),
+  'supplier shares cargo accountant action flow',
+);
 
 const sample: AccountantBillListItem[] = [
   {

@@ -1185,8 +1185,10 @@ export class SupplierPaymentWorkflowService {
 
       const isFirstApproval =
         ledgerStatus === ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT ||
+        ledgerStatus === ProcurementSupplierPaymentLedgerStatus.UNPAID ||
         review === 'UNDER_REVIEW' ||
         review === 'SUBMITTED' ||
+        review === 'APPROVED' ||
         ledgerStatus === ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED;
 
       if (isFirstApproval) {

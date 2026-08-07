@@ -28,6 +28,7 @@ export const SUPPLIER_RETURN_BLOCKED_MESSAGE =
   'По счету уже есть платежи. Для изменения суммы используйте корректировку финансового документа.';
 
 export const SUPPLIER_ACCOUNTANT_PAYABLE = new Set<string>([
+  ProcurementSupplierPaymentLedgerStatus.UNPAID,
   ProcurementSupplierPaymentLedgerStatus.AWAITING_ACCOUNTANT,
   ProcurementSupplierPaymentLedgerStatus.PARTIALLY_PAID,
   ProcurementSupplierPaymentLedgerStatus.PAYMENT_POSTPONED,

@@ -15,6 +15,18 @@ export type CargoBillActionVisibility = {
   postponeUsesChangeDateLabel: boolean;
 };
 
+/** Prefer KGS remaining; fall back to source-currency remaining when KGS is 0/missing. */
+export function resolveBillRemainingForActions(input: {
+  remainingAmountKgs?: number | null;
+  remainingAmount?: number | null;
+}): number {
+  const kgs = Number(input.remainingAmountKgs);
+  if (Number.isFinite(kgs) && kgs > 0.009) return kgs;
+  const amount = Number(input.remainingAmount);
+  if (Number.isFinite(amount) && amount > 0.009) return amount;
+  return Math.max(0, Number.isFinite(kgs) ? kgs : 0);
+}
+
 export function getCargoBillActionVisibility(input: {
   uiStatus: string;
   paidAmount: number;
@@ -90,6 +102,24 @@ export function getCargoBillActionVisibility(input: {
     };
   }
 
+  // APPROVED = already sent to HQ Cashier (cargo PENDING_CASHIER / supplier AWAITING_CASHIER).
+  if (status === 'APPROVED') {
+    return {
+      showPayFull: false,
+      showPayRemainder: false,
+      showPartial: false,
+      showPostpone: false,
+      showChangePostponeDate: false,
+      showReturnForCorrection: false,
+      showPaidBanner: false,
+      showAwaitingCorrectionBanner: false,
+      showCannotReturnMessage: false,
+      payFullUsesRemainderLabel: false,
+      postponeUsesChangeDateLabel: false,
+    };
+  }
+
+  // AWAITING_ACCOUNTANT, UNDER_REVIEW
   return {
     showPayFull: hasRemaining,
     showPayRemainder: false,

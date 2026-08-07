@@ -1088,10 +1088,6 @@ export class AccountantBillsService {
         })
       : [];
 
-    const listItem = (await this.collectBills(user)).find(
-      (item) => item.source === 'SUPPLIER_INVOICE' && item.id === id,
-    );
-
     const audits = await this.prisma.auditLog.findMany({
       where: {
         OR: [
@@ -1103,6 +1099,15 @@ export class AccountantBillsService {
       take: 50,
     });
 
+    const paidYuan = order.supplierPayments
+      .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
+      .reduce((sum, p) => sum + Number(p.amountYuan || 0), 0);
+    const paidKgs = order.supplierPayments
+      .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
+      .reduce(
+        (sum, p) => sum + Number(p.actualPaidKgs != null ? p.actualPaidKgs : p.amountKgs || 0),
+        0,
+      );
     const approvedYuan = resolveApprovedSupplierCostBaseYuan({
       totalYuan: Number(order.totalYuan),
       requestedPaymentYuan:
@@ -1112,14 +1117,62 @@ export class AccountantBillsService {
       Number(order.weightedAverageYuanRate || order.defaultYuanRate || 0) > 0
         ? Number(order.weightedAverageYuanRate || order.defaultYuanRate)
         : order.supplierPayments
-            .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
             .map((p) => Number(p.exchangeRate || 0))
             .filter((rate) => rate > 0)
             .at(-1) ?? 0;
     const approvedAmountKgs = exchangeRate > 0 ? roundMoney(approvedYuan * exchangeRate) : 0;
-    const paidKgs = order.supplierPayments
-      .filter((p) => p.status === ProcurementSupplierPaymentStatus.ACTIVE)
-      .reduce((sum, p) => sum + Number(p.actualPaidKgs ?? p.amountKgs ?? 0), 0);
+    const requested = Number(order.requestedPaymentYuan ?? order.remainingYuan ?? order.totalYuan ?? 0);
+    const remainingYuan = Math.max(Number(order.totalYuan) - paidYuan, 0);
+    const remainingKgs =
+      approvedAmountKgs > 0
+        ? roundMoney(Math.max(approvedAmountKgs - paidKgs, 0))
+        : estimateKgsAmount(remainingYuan, 'CNY', exchangeRate);
+    const estimatedKgs =
+      approvedAmountKgs > 0
+        ? approvedAmountKgs
+        : estimateKgsAmount(requested, 'CNY', exchangeRate);
+    const status = mapSupplierInvoiceToUi({
+      invoiceReviewStatus: order.invoiceReviewStatus,
+      supplierPaymentStatus: order.supplierPaymentStatus,
+      remainingYuan,
+    });
+    const due = order.expectedPaymentDate ? new Date(order.expectedPaymentDate) : null;
+
+    // Always emit top-level bill fields so the UI can detect SUPPLIER_PAYMENT actions
+    // without depending on collectBills() pagination/find.
+    const listItem = {
+      id: order.id,
+      source: 'SUPPLIER_INVOICE' as const,
+      requestNumber: order.orderNumber,
+      requestType: 'SUPPLIER_PAYMENT' as AccountantBillRequestType,
+      submittedAt: order.invoiceSentToAccountantAt?.toISOString() ?? null,
+      sender: order.invoiceSentBy
+        ? {
+            id: order.invoiceSentBy.id,
+            fullName: order.invoiceSentBy.fullName,
+            role: order.invoiceSentBy.role,
+          }
+        : null,
+      departmentOrBranch: 'Supply / Procurement',
+      recipientName: order.supplier?.name || 'Supplier',
+      basis: `${order.orderNumber} · ${order.supplier?.name || 'Supplier'}`,
+      amount: requested,
+      currency: 'CNY',
+      estimatedAmountKgs: estimatedKgs,
+      paidAmount: paidYuan,
+      paidAmountKgs: paidKgs,
+      remainingAmount: remainingYuan,
+      remainingAmountKgs: remainingKgs,
+      status,
+      isOverdue: Boolean(due && due.getTime() < Date.now() && remainingYuan > 0.009),
+      nextPaymentDate: order.expectedPaymentDate?.toISOString?.() ?? null,
+      paymentPostponeComment:
+        (order as { paymentPostponeComment?: string | null }).paymentPostponeComment ?? null,
+      relatedEntityType: 'ProcurementOrder',
+      relatedEntityId: order.id,
+      relatedOrderNumber: order.orderNumber,
+      href: `/procurement/orders/${order.id}?tab=payments`,
+    };
 
     return {
       ...listItem,
@@ -1134,7 +1187,9 @@ export class AccountantBillsService {
         totalYuan: Number(order.totalYuan),
         requestedPaymentYuan: order.requestedPaymentYuan != null ? Number(order.requestedPaymentYuan) : null,
         totalPaidYuan: Number(order.totalPaidYuan),
-        remainingYuan: Number(order.remainingYuan),
+        remainingYuan,
+        exchangeRate,
+        approvedAmountKgs,
         paymentMethod: activeInfo?.paymentMethod ?? null,
         bankName: activeInfo?.bankName ?? null,
         accountHolder: activeInfo?.accountHolder ?? null,
