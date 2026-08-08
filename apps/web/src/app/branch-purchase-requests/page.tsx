@@ -959,14 +959,14 @@ function BranchPurchaseRequestsPageInner() {
               ) : (
                 <table className={`${hqSalesListTableClass} w-full table-fixed`}>
                   <colgroup>
-                    <col className="w-[6.75rem]" />
+                    <col className="w-[10.5rem]" />
                     {showBranchColumn ? <col /> : null}
-                    <col className="w-[8.25rem]" />
-                    <col className="w-[3.25rem]" />
-                    <col className="w-[4.25rem]" />
+                    <col className="w-[7.75rem]" />
+                    <col className="w-[3rem]" />
+                    <col className="w-[3.75rem]" />
+                    <col className="w-[5.25rem]" />
+                    <col className="w-[5.25rem]" />
                     <col className="w-[5.5rem]" />
-                    <col className="w-[5.75rem]" />
-                    <col className="w-[5.75rem]" />
                   </colgroup>
                   <thead className={hqSalesListTableHeadClass}>
                     <tr>

@@ -95,6 +95,8 @@ assertEqual(
 assert.match(branchPage, /table-fixed/);
 assert.match(branchPage, /detailHref\(request\.id\)/);
 assert.match(branchPage, /common\.open/);
+assert.match(branchPage, /<col className="w-\[10\.5rem\]" \/>/);
+assert.match(branchPage, /request\.requestNumber[\s\S]*whitespace-nowrap/);
 
 const layout = readFileSync(join(__dirname, '../components/HqSalesListLayout.tsx'), 'utf8');
 assertEqual(layout.includes('HqSalesBranchOrdersTabContent'), true, 'tab content helper exists');
