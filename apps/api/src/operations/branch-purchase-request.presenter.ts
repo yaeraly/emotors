@@ -135,12 +135,28 @@ export function toBranchPurchaseRequestResponse<T extends {
       unitPriceKgs: item.resolvedBranchPriceKgs ?? item.wholesalePriceKgs,
       hasPricingPolicy: true,
     });
-    if (payable <= 0) return item;
+    if (payable <= 0 && !(transferAtCost && Number(item.estimatedLineProductCostKgs ?? 0) > 0)) {
+      return item;
+    }
+    const linePayable =
+      payable > 0
+        ? payable
+        : transferAtCost
+          ? resolveBranchPurchaseLinePayableAmount({
+              branchType,
+              quantity: lineQuantity,
+              estimatedLineProductCostKgs: item.estimatedLineProductCostKgs,
+              unitPriceKgs: null,
+              hasPricingPolicy: true,
+            })
+          : payable;
     return {
       ...item,
-      totalAmount: payable,
+      totalAmount: linePayable,
       approvedLineTotalKgs:
-        item.approvedQuantity != null && Number(item.approvedQuantity) > 0 ? payable : item.approvedLineTotalKgs,
+        item.approvedQuantity != null && Number(item.approvedQuantity) > 0
+          ? linePayable
+          : item.approvedLineTotalKgs,
     };
   });
   const storedProductCostKgs = sumStoredBranchPurchaseProductCostKgs(items);

@@ -489,6 +489,9 @@ export class OperationsService {
                 pricingRevision: this.branchOrderPricingRevision.current(),
                 quantity: quantity > 0 ? quantity : undefined,
                 lineTotalKgs,
+                transferLineCostKgs: shouldTransferBranchPurchaseAtCost(branch?.branchType)
+                  ? lineTotalKgs
+                  : undefined,
               }
             : {
                 branchPriceKgs: pricing.branchPurchasePriceKgs,
@@ -503,6 +506,9 @@ export class OperationsService {
                 pricingRevision: this.branchOrderPricingRevision.current(),
                 quantity: quantity > 0 ? quantity : undefined,
                 lineTotalKgs,
+                transferLineCostKgs: shouldTransferBranchPurchaseAtCost(branch?.branchType)
+                  ? lineTotalKgs
+                  : undefined,
               },
         ] as const;
       }),

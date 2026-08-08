@@ -4,6 +4,7 @@ import {
   roundDisplayMoney,
   sumDisplayMoneyTotals,
 } from '../pricing/product-cost-precision.util';
+import { resolveHqBranchTransferLineCostKgs, sumHqBranchTransferLineCosts } from './hq-branch-transfer-cost.util';
 
 export const BRANCH_ESTIMATED_AMOUNT_MISMATCH_MESSAGE =
   'Ориентировочная сумма не совпадает с себестоимостью товаров. Обновите расчет заказа.';
@@ -27,13 +28,16 @@ export function resolveBranchPurchaseLinePayableAmount(input: {
   hasPricingPolicy?: boolean;
 }): number {
   const quantity = Math.max(0, Number(input.quantity ?? 0));
-  const fifoLineCost = roundDisplayMoney(Number(input.estimatedLineProductCostKgs ?? 0));
 
   // HQ_BRANCH internal transfer: payable is exact FIFO/landed line cost only.
   // Never reconstruct from rounded display unit × quantity (causes 0.72-style drift).
   if (shouldTransferBranchPurchaseAtCost(input.branchType)) {
-    return fifoLineCost > 0 ? fifoLineCost : 0;
+    return resolveHqBranchTransferLineCostKgs({
+      fifoLineCostKgs: input.estimatedLineProductCostKgs,
+    });
   }
+
+  const fifoLineCost = roundDisplayMoney(Number(input.estimatedLineProductCostKgs ?? 0));
 
   const unitPrice = Number(input.unitPriceKgs ?? 0);
   if (input.hasPricingPolicy !== false && unitPrice > 0 && quantity > 0) {
@@ -94,9 +98,9 @@ export function reconcileHqBranchTransferCostParity(input: {
   payableLineTotals: number[];
   orderTotalKgs: number;
 }): { ok: boolean; expectedKgs: number; actualKgs: number; differenceKgs: number } {
-  const expectedKgs = sumDisplayMoneyTotals(input.fifoLineCosts.map((value) => Number(value ?? 0)));
-  const payableSum = sumDisplayMoneyTotals(input.payableLineTotals.map((value) => Number(value ?? 0)));
-  const actualKgs = roundDisplayMoney(Number(input.orderTotalKgs ?? 0));
+  const expectedKgs = sumHqBranchTransferLineCosts(input.fifoLineCosts);
+  const payableSum = sumHqBranchTransferLineCosts(input.payableLineTotals);
+  const actualKgs = resolveHqBranchTransferLineCostKgs({ fifoLineCostKgs: input.orderTotalKgs });
   const differenceKgs = roundDisplayMoney(actualKgs - expectedKgs);
   return {
     ok: expectedKgs === payableSum && payableSum === actualKgs && Math.abs(differenceKgs) <= 0,
