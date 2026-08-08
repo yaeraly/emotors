@@ -111,4 +111,20 @@ assertEqual(
   'requests redirect targets receive goods',
 );
 
+const warehousePage = readFileSync(join(__dirname, '../app/branch-warehouse/warehouse/page.tsx'), 'utf8');
+const ordersPage = readFileSync(join(__dirname, '../app/distribution/orders/page.tsx'), 'utf8');
+const shortageReportsPage = readFileSync(join(__dirname, '../app/distribution/shortage-reports/page.tsx'), 'utf8');
+
+assertEqual(warehousePage.includes('showHeading={false}'), true, 'warehouse page hides duplicate heading');
+assertEqual(
+  ordersPage.includes('!operatorView ?') && ordersPage.includes('distributionModuleTitleKey(currentUser)'),
+  true,
+  'receive goods page hides distribution module subtitle for operator',
+);
+assertEqual(
+  shortageReportsPage.includes('isBranchWarehouseOperator') && shortageReportsPage.includes('!operatorView ?'),
+  true,
+  'shortage reports page hides distribution module subtitle for operator',
+);
+
 console.log('branch-warehouse-nav.test.ts: all assertions passed');

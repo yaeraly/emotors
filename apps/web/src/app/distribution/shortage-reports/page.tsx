@@ -15,7 +15,7 @@ import {
   hqSalesListTableThClass,
 } from '@/components/HqSalesListLayout';
 import { apiFetch } from '@/lib/api';
-import { isHqSalesManagerUser, shouldShowBranchColumnForBranchScopedTables } from '@/lib/rbac';
+import { isBranchWarehouseOperator, isHqSalesManagerUser, shouldShowBranchColumnForBranchScopedTables } from '@/lib/rbac';
 import type { ShortageReport, User } from '@/lib/types';
 import { distributionModuleTitleKey } from '@/lib/distribution-labels';
 import { useTranslation } from '@/i18n/useTranslation';
@@ -29,6 +29,7 @@ export default function ShortageReportsPage() {
   const [error, setError] = useState('');
   const showBranchColumn = shouldShowBranchColumnForBranchScopedTables(user);
   const hqSalesView = isHqSalesManagerUser(user);
+  const operatorView = isBranchWarehouseOperator(user);
 
   useEffect(() => {
     setLoading(true);
@@ -97,7 +98,9 @@ export default function ShortageReportsPage() {
   ) : (
     <>
       <div>
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(null))}</p>
+        {!operatorView ? (
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t(distributionModuleTitleKey(user))}</p>
+        ) : null}
         <h2 className="text-3xl font-bold text-slate-950">{t('distribution.shortageReports')}</h2>
       </div>
       <HqSalesBranchOrdersTabContent error={error}>{table}</HqSalesBranchOrdersTabContent>

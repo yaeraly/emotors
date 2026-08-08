@@ -104,9 +104,11 @@ export default function DistributionOrdersPage() {
       {!hqSalesView ? (
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
-              {t(distributionModuleTitleKey(currentUser))}
-            </p>
+            {!operatorView ? (
+              <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">
+                {t(distributionModuleTitleKey(currentUser))}
+              </p>
+            ) : null}
             <h2 className="text-3xl font-bold text-slate-950">
               {operatorView ? t('distribution.receiveGoods') : t('distribution.orders')}
             </h2>

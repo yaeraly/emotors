@@ -8,7 +8,7 @@ export default function BranchWarehousePage() {
   return (
     <ProtectedShell>
       <section className="space-y-6">
-        <BranchWarehouseSection activeTab="warehouse" />
+        <BranchWarehouseSection activeTab="warehouse" showHeading={false} />
         <BranchWarehouseStockContent />
       </section>
     </ProtectedShell>
