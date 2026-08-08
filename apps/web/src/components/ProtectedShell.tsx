@@ -415,9 +415,6 @@ export function ProtectedShell({ children }: ProtectedShellProps) {
                     {t('branchCashier.accountTransfers')}
                   </Link>
                 ) : null}
-                <Link href="/finance/transfers?status=PENDING_CASHIER" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('finance.transfersCashierQueue')}</Link>
-                <Link href="/distribution/invoices" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.invoices')}</Link>
-                <Link href="/distribution/branch-balances" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.branchBalances')}</Link>
                 <Link href="/distribution/orders" className="block rounded-xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">{t('distribution.orders')}</Link>
               </>
             ) : hqAccountantView ? (

@@ -75,7 +75,38 @@ describe('HQ cashier transfer menu visibility', () => {
     assert.match(hqSidebar, /hqCashierTransferMenuVisible \? \(/);
     assert.match(hqSidebar, /href="\/finance\/transfers"/);
     assert.match(hqSidebar, /branchCashier\.accountTransfers/);
-    assert.match(hqSidebar, /finance\.transfersCashierQueue/);
+  });
+});
+
+describe('HQ cashier sidebar menu cleanup', () => {
+  it('removes distribution invoices, cashier transfer queue, and branch balances links', () => {
+    const shell = readFileSync(join(root, 'components/ProtectedShell.tsx'), 'utf8');
+    const hqSidebar = shell.slice(shell.indexOf('hqCashierView ?'), shell.indexOf(') : hqAccountantView ?'));
+
+    assert.doesNotMatch(hqSidebar, /distribution\.invoices/);
+    assert.doesNotMatch(hqSidebar, /finance\.transfersCashierQueue/);
+    assert.doesNotMatch(hqSidebar, /distribution\.branchBalances/);
+    assert.doesNotMatch(hqSidebar, /href="\/distribution\/invoices"/);
+    assert.doesNotMatch(hqSidebar, /href="\/finance\/transfers\?status=PENDING_CASHIER"/);
+    assert.doesNotMatch(hqSidebar, /href="\/distribution\/branch-balances"/);
+  });
+
+  it('keeps other HQ cashier menu items', () => {
+    const shell = readFileSync(join(root, 'components/ProtectedShell.tsx'), 'utf8');
+    const hqSidebar = shell.slice(shell.indexOf('hqCashierView ?'), shell.indexOf(') : hqAccountantView ?'));
+
+    assert.match(hqSidebar, /finance\.cashierBills/);
+    assert.match(hqSidebar, /finance\.myAccounts/);
+    assert.match(hqSidebar, /branchCashier\.accountTransfers/);
+    assert.match(hqSidebar, /distribution\.orders/);
+  });
+
+  it('keeps removed links available for other roles', () => {
+    const shell = readFileSync(join(root, 'components/ProtectedShell.tsx'), 'utf8');
+    const afterHqCashier = shell.slice(shell.indexOf(') : hqAccountantView ?'));
+
+    assert.match(afterHqCashier, /distribution\.invoices/);
+    assert.match(afterHqCashier, /distribution\.branchBalances/);
   });
 });
 
