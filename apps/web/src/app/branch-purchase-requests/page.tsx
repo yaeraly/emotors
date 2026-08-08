@@ -1036,7 +1036,9 @@ function BranchPurchaseRequestsPageInner() {
                 <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="px-3 py-2">{t('sales.product')}</th>
-                    {branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.productSearch.sku')}</th> : null}
+                    {branchOnlyView && !branchSalesManagerView ? (
+                      <th className="px-3 py-2">{t('branchProductRequest.productSearch.sku')}</th>
+                    ) : null}
                     <th className="px-3 py-2">{t('distribution.quantity')}</th>
                     {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.unit')}</th> : null}
                     {!branchOnlyView ? <th className="px-3 py-2">{t('branchProductRequest.branchStock')}</th> : null}
@@ -1067,7 +1069,9 @@ function BranchPurchaseRequestsPageInner() {
                           <span className="text-slate-400">{t('branchProductRequest.selectProductHint')}</span>
                         )}
                       </td>
-                      {branchOnlyView ? <td className="px-3 py-2 text-slate-700">{line.sku || '—'}</td> : null}
+                      {branchOnlyView && !branchSalesManagerView ? (
+                        <td className="px-3 py-2 text-slate-700">{line.sku || '—'}</td>
+                      ) : null}
                       <td className="px-3 py-2">
                         <input
                           type="number"

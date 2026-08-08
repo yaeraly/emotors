@@ -78,4 +78,18 @@ describe('branch sales manager ui cleanup', () => {
   it('list page still supports branch column toggle via rbac helper', () => {
     assert.match(listPage, /shouldShowBranchColumnForBranchScopedTables/);
   });
+
+  it('create and draft product table hides sku column for branch sales manager', () => {
+    assert.match(listPage, /branchOnlyView && !branchSalesManagerView/);
+    assert.match(listPage, /branchSalesManagerView && \(isCreateMode \|\| Boolean\(draftIdFromUrl\)\)/);
+
+    const formTableStart = listPage.indexOf('<table className="min-w-full divide-y divide-slate-200 text-sm">');
+    const formTableEnd = listPage.indexOf('</table>', formTableStart);
+    assert.ok(formTableStart >= 0 && formTableEnd > formTableStart);
+    const formTable = listPage.slice(formTableStart, formTableEnd);
+    assert.match(formTable, /branchOnlyView && !branchSalesManagerView[\s\S]*productSearch\.sku/);
+    assert.match(formTable, /line\.quantity/);
+    assert.match(formTable, /lineTotal\(line\)/);
+    assert.match(formTable, /formatBranchPrice\(line, t\)/);
+  });
 });
